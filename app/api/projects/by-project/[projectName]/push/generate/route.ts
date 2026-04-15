@@ -47,7 +47,7 @@ Return ONLY ${numOptions} commit messages, one per line, numbered 1-${numOptions
     const options = result.stdout
       .trim()
       .split('\n')
-      .map((l) => l.replace(/^\d+[\.\)]\s*/, '').trim())
+      .map((l) => l.replace(/^\d+[.)]\s*/, '').trim())
       .filter((l) => l.length > 0)
       .slice(0, numOptions);
 

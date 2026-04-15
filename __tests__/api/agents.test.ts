@@ -270,14 +270,7 @@ describe('agents API', () => {
       const data = await response.json();
       const agentId = data.agent.id;
 
-      // Verify in database
-      const db = testDb.db;
-      const stored = db
-        .select()
-        .from(schema.agents)
-        .where(vi.fn())
-        .all();
-      // We can't use eq() without proper mocking, so just check the response is valid
+      // Verify response is valid
       expect(agentId).toBeTruthy();
       expect(data.agent).toBeTruthy();
     });
