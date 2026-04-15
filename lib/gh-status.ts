@@ -1,0 +1,343 @@
+import { eq } from 'drizzle-orm';
+import { db, schema } from './db';
+import { exec } from './shell';
+import { homedir } from 'os';
+
+const GH_CACHE_TTL = 3600;
+const GH_CACHE_TTL_PENDING = 30;
+
+interface GhStatusEntry {
+  release: string | null;
+  ci: string | null;
+  ciFailedUrl: string | null;
+  headSha: string | null;
+  localHeadSha: string | null;
+  fetchedAt: string;
+}
+
+function nowUtc(): string {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+function getEntry(project: string): GhStatusEntry | null {
+  const row = db
+    .select()
+    .from(schema.ghStatus)
+    .where(eq(schema.ghStatus.project, project))
+    .get();
+  if (!row) return null;
+  return {
+    release: row.releaseTag,
+    ci: row.ci,
+    ciFailedUrl: row.ciFailedUrl,
+    headSha: row.headSha,
+    localHeadSha: row.localHeadSha,
+    fetchedAt: row.fetchedAt,
+  };
+}
+
+function setEntry(project: string, data: GhStatusEntry): void {
+  db.insert(schema.ghStatus)
+    .values({
+      project,
+      releaseTag: data.release,
+      ci: data.ci,
+      ciFailedUrl: data.ciFailedUrl,
+      headSha: data.headSha,
+      localHeadSha: data.localHeadSha,
+      fetchedAt: data.fetchedAt || nowUtc(),
+    })
+    .onConflictDoUpdate({
+      target: schema.ghStatus.project,
+      set: {
+        releaseTag: data.release,
+        ci: data.ci,
+        ciFailedUrl: data.ciFailedUrl,
+        headSha: data.headSha,
+        localHeadSha: data.localHeadSha,
+        fetchedAt: data.fetchedAt || nowUtc(),
+      },
+    })
+    .run();
+}
+
+function getAllEntries(): Record<string, GhStatusEntry> {
+  const rows = db.select().from(schema.ghStatus).all();
+  const result: Record<string, GhStatusEntry> = {};
+  for (const row of rows) {
+    result[row.project] = {
+      release: row.releaseTag,
+      ci: row.ci,
+      ciFailedUrl: row.ciFailedUrl,
+      headSha: row.headSha,
+      localHeadSha: row.localHeadSha,
+      fetchedAt: row.fetchedAt,
+    };
+  }
+  return result;
+}
+
+export function invalidateProject(project: string): void {
+  const entry = getEntry(project) || {
+    release: null,
+    ci: null,
+    ciFailedUrl: null,
+    headSha: null,
+    localHeadSha: null,
+    fetchedAt: nowUtc(),
+  };
+  entry.ci = 'in_progress';
+  entry.ciFailedUrl = null;
+  entry.fetchedAt = '1970-01-01T00:00:00Z';
+  setEntry(project, entry);
+}
+
+function ghRepo(projName: string, cfg: { github?: string | null }): string {
+  const owner = process.env.GITHUB_OWNER || projName;
+  return cfg.github || `${owner}/${projName}`;
+}
+
+function verKey(t: string): [number, number, number] {
+  const m = t.match(/v?(\d+)\.(\d+)\.?(\d*)/);
+  if (m) return [parseInt(m[1]), parseInt(m[2]), parseInt(m[3] || '0')];
+  return [-1, -1, -1];
+}
+
+function compareSemver(a: [number, number, number], b: [number, number, number]): number {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
+}
+
+async function latestTagWithSha(path: string): Promise<[string | null, string | null]> {
+  const expanded = path.startsWith('~') ? path.replace('~', homedir()) : path;
+  try {
+    const result = await exec('git', ['ls-remote', '--tags', 'origin'], {
+      cwd: expanded,
+      timeout: 10000,
+    });
+    if (result.exitCode !== 0 || !result.stdout.trim()) return [null, null];
+
+    const tags: Record<string, string> = {};
+    const deref: Record<string, string> = {};
+    for (const line of result.stdout.split('\n')) {
+      const parts = line.split('\t');
+      if (parts.length !== 2) continue;
+      const sha = parts[0].trim();
+      const ref = parts[1].trim();
+      if (!ref.startsWith('refs/tags/')) continue;
+      const name = ref.slice('refs/tags/'.length);
+      if (name.endsWith('^{}')) {
+        deref[name.slice(0, -3)] = sha;
+      } else {
+        tags[name] = sha;
+      }
+    }
+
+    const semverTags = Object.keys(tags).filter(
+      (t) => compareSemver(verKey(t), [-1, -1, -1]) !== 0
+    );
+    if (semverTags.length === 0) return [null, null];
+
+    const best = semverTags.reduce((a, b) =>
+      compareSemver(verKey(a), verKey(b)) >= 0 ? a : b
+    );
+    const sha = deref[best] || tags[best];
+    return [best, sha];
+  } catch {
+    return [null, null];
+  }
+}
+
+async function localHead(path: string): Promise<string | null> {
+  const expanded = path.startsWith('~') ? path.replace('~', homedir()) : path;
+  try {
+    const result = await exec('git', ['rev-parse', 'HEAD'], { cwd: expanded, timeout: 5000 });
+    return result.exitCode === 0 ? result.stdout.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+const NARROW_FILTER = '^release$|^create release$|^dependency[\\w -]*$|^label$';
+const EVAL_JQ = [
+  '| sort_by(.createdAt) | reverse',
+  '| unique_by(.workflowName) as $runs',
+  '| {',
+  '  ci: (if ($runs | any(.conclusion == "failure" or .conclusion == "timed_out")) then "failure"',
+  '       elif ($runs | any(.status == "in_progress" or .status == "queued")) then "in_progress"',
+  '       elif (($runs | length) > 0) and ($runs | all(.conclusion == "success" or .conclusion == "skipped" or .conclusion == "neutral")) then "success"',
+  '       else "" end),',
+  '  failed_url: ($runs | map(select(.conclusion == "failure" or .conclusion == "timed_out")) | first | .url // null)',
+  '}',
+].join('');
+
+async function ciForSha(
+  repo: string,
+  sha: string,
+  nameFilter: string | null = NARROW_FILTER
+): Promise<[string | null, string | null]> {
+  const filterExpr = nameFilter
+    ? `select(.workflowName | ascii_downcase | test("${nameFilter}") | not)`
+    : '.';
+  try {
+    const result = await exec(
+      'gh',
+      [
+        'run',
+        'list',
+        '--repo',
+        repo,
+        '--commit',
+        sha,
+        '--json',
+        'conclusion,status,url,workflowName,createdAt',
+        '-q',
+        `[.[] | ${filterExpr}]${EVAL_JQ}`,
+      ],
+      { timeout: 10000 }
+    );
+    if (result.exitCode === 0 && result.stdout.trim()) {
+      const data = JSON.parse(result.stdout.trim());
+      return [data.ci || null, data.failed_url || null];
+    }
+  } catch {}
+  return [null, null];
+}
+
+async function fetchOneGhStatus(
+  repo: string,
+  path?: string
+): Promise<GhStatusEntry> {
+  const result: GhStatusEntry = {
+    release: null,
+    ci: null,
+    ciFailedUrl: null,
+    headSha: null,
+    localHeadSha: null,
+    fetchedAt: nowUtc(),
+  };
+
+  let tagCommitSha: string | null = null;
+  if (path) {
+    const [tag, sha] = await latestTagWithSha(path);
+    result.release = tag;
+    tagCommitSha = sha;
+  }
+
+  try {
+    const shaResult = await exec(
+      'gh',
+      ['api', `repos/${repo}/commits/HEAD`, '--jq', '.sha'],
+      { timeout: 10000 }
+    );
+    const headSha = shaResult.exitCode === 0 ? shaResult.stdout.trim() : null;
+
+    if (headSha) {
+      let [ci, failedUrl] = await ciForSha(repo, headSha);
+      if (ci === null) {
+        [ci, failedUrl] = await ciForSha(repo, headSha, null);
+      }
+      if (ci === null && tagCommitSha && tagCommitSha !== headSha) {
+        [ci, failedUrl] = await ciForSha(repo, tagCommitSha);
+        if (ci === null) {
+          [ci, failedUrl] = await ciForSha(repo, tagCommitSha, null);
+        }
+      }
+      if (ci) result.ci = ci;
+      if (failedUrl) result.ciFailedUrl = failedUrl;
+      result.headSha = headSha;
+    }
+  } catch {}
+
+  return result;
+}
+
+export async function ghStatusLookup(
+  projects: Record<string, { project: string; github?: string | null; path?: string }>
+): Promise<Record<string, GhStatusEntry>> {
+  const now = Date.now();
+  const cache: Record<string, GhStatusEntry> = {};
+
+  for (const [proj, entry] of Object.entries(getAllEntries())) {
+    cache[proj] = entry;
+  }
+
+  // Deduplicate: one entry per project name
+  const unique: Record<string, { repo: string; path: string }> = {};
+  for (const [, cfg] of Object.entries(projects)) {
+    const projName = cfg.project;
+    if (!(projName in unique)) {
+      unique[projName] = {
+        repo: ghRepo(projName, cfg),
+        path: cfg.path ?? '',
+      };
+    }
+  }
+
+  const stale: [string, string][] = [];
+  for (const [projName, { repo, path }] of Object.entries(unique)) {
+    const entry = cache[projName];
+    if (!entry) {
+      stale.push([projName, repo]);
+      continue;
+    }
+
+    const lastLocalSha = entry.localHeadSha;
+    const localSha = await localHead(path);
+
+    if (lastLocalSha && localSha && !localSha.startsWith(lastLocalSha.slice(0, 12))) {
+      cache[projName] = {
+        ...entry,
+        ci: 'in_progress',
+        ciFailedUrl: null,
+        fetchedAt: '1970-01-01T00:00:00Z',
+        localHeadSha: localSha,
+      };
+      setEntry(projName, cache[projName]);
+      stale.push([projName, repo]);
+      continue;
+    }
+
+    if (!lastLocalSha && localSha) {
+      stale.push([projName, repo]);
+      continue;
+    }
+
+    try {
+      const fetchedAt = new Date(entry.fetchedAt.replace('Z', '+00:00')).getTime();
+      const ttl = entry.ci === 'in_progress' ? GH_CACHE_TTL_PENDING : GH_CACHE_TTL;
+      if ((now - fetchedAt) / 1000 > ttl) {
+        stale.push([projName, repo]);
+      }
+    } catch {
+      stale.push([projName, repo]);
+    }
+  }
+
+  if (stale.length > 0) {
+    const results = await Promise.all(
+      stale.map(async ([projName, repo]) => {
+        const { path } = unique[projName];
+        try {
+          const data = await fetchOneGhStatus(repo, path || undefined);
+          data.localHeadSha = await localHead(path);
+          return [projName, data] as const;
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    for (const result of results) {
+      if (result) {
+        const [projName, data] = result;
+        cache[projName] = data;
+        setEntry(projName, data);
+      }
+    }
+  }
+
+  return cache;
+}

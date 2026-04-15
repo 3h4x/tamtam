@@ -1,0 +1,16 @@
+dependencies:
+  - "**/package.json"
+  - "**/pnpm-lock.yaml"
+
+documentation:
+  - "**/*.md"
+
+nextjs:
+  - "app/**"
+  - "components/**"
+  - "lib/**"
+  - "next.config.ts"
+
+tests:
+  - "__tests__/**"
+
