@@ -3,6 +3,7 @@ import { existsSync, readFileSync, watch } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { getJob } from '@/lib/job-storage';
+import { parseStreamLines } from '@/lib/claude-stream-parser';
 
 function getLogPath(jobId: string): string {
   const job = getJob(jobId);
@@ -17,21 +18,48 @@ export async function GET(
   const { jobId } = await params;
   const logPath = getLogPath(jobId);
   const encoder = new TextEncoder();
+  const raw = request.nextUrl.searchParams.get('raw') === '1';
 
   const stream = new ReadableStream({
     start(controller) {
       let offset = 0;
+
+      function sendRawLines(text: string) {
+        for (const line of text.split('\n')) {
+          if (line.trim()) {
+            controller.enqueue(encoder.encode(`data: ${line}\n\n`));
+          }
+        }
+      }
+
+      function sendParsedEvents(text: string) {
+        const events = parseStreamLines(text);
+        for (const event of events) {
+          if (event.type === 'text') {
+            controller.enqueue(encoder.encode(`data: ${event.text}\n\n`));
+          } else if (event.type === 'tool_use') {
+            controller.enqueue(encoder.encode(`data: \n\n> Tool: ${event.name}\n\n`));
+          } else if (event.type === 'tool_result') {
+            const truncated = event.content.length > 500
+              ? event.content.slice(0, 500) + '...'
+              : event.content;
+            controller.enqueue(encoder.encode(`data: ${truncated}\n\n`));
+          } else if (event.type === 'done') {
+            controller.enqueue(
+              encoder.encode(`event: done\ndata: ${JSON.stringify(event.result)}\n\n`)
+            );
+          }
+        }
+      }
+
+      const sendContent = raw ? sendRawLines : sendParsedEvents;
 
       // Replay existing content
       if (existsSync(logPath)) {
         try {
           const content = readFileSync(logPath, 'utf-8');
           offset = Buffer.byteLength(content);
-          for (const line of content.split('\n')) {
-            if (line.trim()) {
-              controller.enqueue(encoder.encode(`data: ${line}\n\n`));
-            }
-          }
+          sendContent(content);
         } catch {}
       }
 
@@ -45,11 +73,7 @@ export async function GET(
             if (currentSize > offset) {
               const newContent = Buffer.from(content).slice(offset).toString('utf-8');
               offset = currentSize;
-              for (const line of newContent.split('\n')) {
-                if (line.trim()) {
-                  controller.enqueue(encoder.encode(`data: ${line}\n\n`));
-                }
-              }
+              sendContent(newContent);
             }
           } catch {}
         });

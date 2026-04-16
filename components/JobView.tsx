@@ -23,6 +23,10 @@ export function JobView() {
       try {
         const data = await fetchJob(jobId)
         if (active) {
+          if (data.kind === 'run' && data.session_id) {
+            router.replace(`/project/${data.project}/experimental/${data.session_id}`)
+            return
+          }
           setJob(data)
           setError(null)
         }
@@ -120,6 +124,13 @@ export function JobView() {
 
       {error && <div className="text-status-error mb-4">{error}</div>}
 
+      {job?.prompt && (
+        <div className="mt-6">
+          <h3 className="mb-3 text-text-primary font-semibold">Prompt</h3>
+          <pre className="font-mono text-sm text-text-primary whitespace-pre-wrap bg-bg-secondary rounded-lg p-4 overflow-x-auto max-h-[300px] overflow-y-auto border border-border">{job.prompt}</pre>
+        </div>
+      )}
+
       <div className="mt-6">
         <h3 className="mb-3 text-text-primary font-semibold">
           Output
@@ -148,6 +159,28 @@ export function JobView() {
               <>
                 <strong className="text-text-secondary">Finished:</strong>
                 <span className="text-text-primary">{new Date(job.finished_at * 1000).toLocaleString()}</span>
+              </>
+            )}
+            {job.duration_ms != null && (
+              <>
+                <strong className="text-text-secondary">Duration:</strong>
+                <span className="text-text-primary">{(job.duration_ms / 1000).toFixed(1)}s</span>
+              </>
+            )}
+            {job.input_tokens != null && (
+              <>
+                <strong className="text-text-secondary">Tokens:</strong>
+                <span className="text-text-primary font-mono">
+                  {job.input_tokens.toLocaleString()} in / {job.output_tokens?.toLocaleString() ?? 0} out
+                  {(job.cache_read_tokens ?? 0) > 0 && ` / ${job.cache_read_tokens!.toLocaleString()} cache read`}
+                  {(job.cache_create_tokens ?? 0) > 0 && ` / ${job.cache_create_tokens!.toLocaleString()} cache write`}
+                </span>
+              </>
+            )}
+            {job.session_id && (
+              <>
+                <strong className="text-text-secondary">Session:</strong>
+                <span className="text-text-primary font-mono text-xs">{job.session_id}</span>
               </>
             )}
           </div>

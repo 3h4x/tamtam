@@ -14,6 +14,8 @@ export interface TamTamConfig {
   daytime: boolean;
   weekends: boolean;
   launchagent_prefix: string;
+  base_prompt: string;
+  default_model: string;
 }
 
 const DEFAULTS: TamTamConfig = {
@@ -25,6 +27,8 @@ const DEFAULTS: TamTamConfig = {
   daytime: false,
   weekends: false,
   launchagent_prefix: 'com.tamtam',
+  base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
+  default_model: 'haiku',
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
@@ -47,6 +51,8 @@ export function getSettings(): TamTamConfig {
     daytime: map.daytime === 'true',
     weekends: map.weekends === 'on',
     launchagent_prefix: map.launchagent_prefix ?? DEFAULTS.launchagent_prefix,
+    base_prompt: map.base_prompt ?? DEFAULTS.base_prompt,
+    default_model: map.default_model ?? DEFAULTS.default_model,
   };
 
   _cache = { config, time: now };
@@ -55,4 +61,11 @@ export function getSettings(): TamTamConfig {
 
 export function reloadConfig(): void {
   _cache = null;
+}
+
+/** Prepend the base prompt (if configured) to a user/task prompt. */
+export function withBasePrompt(prompt: string): string {
+  const { base_prompt } = getSettings();
+  if (!base_prompt) return prompt;
+  return `${base_prompt}\n\n---\n\n${prompt}`;
 }

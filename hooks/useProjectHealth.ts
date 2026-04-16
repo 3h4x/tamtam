@@ -57,11 +57,6 @@ function getTaskHealth(task: Task): TaskHealth {
     status = 'error'
     parts.push('CI failed')
   }
-  if (task.launchctl === 'missing') {
-    status = 'error'
-    parts.push('missing')
-  }
-
   // Warning conditions (only if not already error)
   if (status !== 'error') {
     if (task.launchctl === 'paused') {

@@ -8,6 +8,7 @@ import { createJob, listJobs, probeJobStatus, updateJob, type JobData } from '@/
 import { startJob } from '@/lib/pm2-jobs';
 import { exec } from '@/lib/shell';
 import { CODE_REVIEWER_SKILL } from '@/lib/skills';
+import { withBasePrompt } from '@/lib/config';
 
 function loadReviewPrompt(): string {
   let content = '';
@@ -61,9 +62,11 @@ export async function POST(
     return NextResponse.json({ detail: 'No uncommitted changes to review' }, { status: 400 });
   }
 
-  const prompt = loadReviewPrompt()
-    .replace('{project}', projectName)
-    .replace('{path}', projPath);
+  const prompt = withBasePrompt(
+    loadReviewPrompt()
+      .replace('{project}', projectName)
+      .replace('{path}', projPath)
+  );
 
   const job = createJob(projectName, 'review', 0, '');
   const logPath = join(logDir, `${job.id}.log`);

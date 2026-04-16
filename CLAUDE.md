@@ -14,7 +14,7 @@ Next.js monolith (App Router) for managing Claude CLI agents across multiple pro
 - **Streaming**: SSE via route handlers for real-time run output
 - **Styling**: Tailwind CSS v4
 - **Skills**: `skills/` submodule (claude-skills) — engineering skills scanned from `skills/docs/skills/`
-- **Testing**: vitest
+- **Testing**: vitest + Playwright (e2e)
 - **Package Manager**: pnpm
 - **Release**: semantic-release on push to master (GitHub releases only, no npm)
 
@@ -25,7 +25,8 @@ Next.js monolith (App Router) for managing Claude CLI agents across multiple pro
 - `pnpm logs` — view PM2 logs
 - `pnpm build` — production build
 - `pnpm start` — start production server via PM2
-- `pnpm test` — run tests
+- `pnpm test` — run unit tests
+- `pnpm test:e2e` — run Playwright e2e tests (requires dev server running)
 - `pnpm type-check` — TypeScript check
 
 **Never run `next dev` directly — always use PM2 via the scripts above.**
@@ -38,14 +39,16 @@ Next.js monolith (App Router) for managing Claude CLI agents across multiple pro
 - `lib/db/` — Drizzle schema and connection (tables: settings, projects, jobs, ghStatus, skills, agents)
 - `skills/` — claude-skills submodule
 - `data/` — SQLite database (gitignored)
-- `__tests__/` — vitest tests
+- `__tests__/` — vitest unit tests
+- `e2e/` — Playwright integration tests
+- `docs/` — architecture docs (see `docs/streaming.md` for experimental page streaming)
 
 ## Pages
 - `/` — Projects list with status, changes, CI
 - `/project/[name]` — Project overview with agents, status bar (changes/review/tests)
 - `/project/[name]/config` — Test command + custom actions editor (name, command, color)
 - `/project/[name]/logs` — Project runs with filter tabs (all/running/failed/done)
-- `/project/[name]/experimental` — Interactive Claude runner with skill picker and SSE streaming
+- `/project/[name]/experimental` — Interactive Claude runner with model selector (haiku/sonnet/opus), skill picker, and real-time token streaming via SSE (see `docs/streaming.md`)
 - `/jobs` — All runs across projects
 - `/skills` — Skill editor (CRUD for DB-backed skills)
 - `/settings` — Workspace path, frequency, claude binary, DB backup
@@ -58,16 +61,23 @@ Next.js monolith (App Router) for managing Claude CLI agents across multiple pro
 - `/api/skills/[skillId]` — Skill detail (GET, PATCH, DELETE)
 - `/api/projects/personas` — File-based skills from `skills/docs/skills/` (GET)
 - `/api/projects/by-project/[name]/action` — Custom actions (GET, PUT, POST)
-- `/api/projects/by-project/[name]/run` — Run Claude on project (POST)
-- `/api/streaming/[jobId]` — SSE log stream (reads log path from DB)
+- `/api/projects/by-project/[name]/run` — Run Claude on project (POST, accepts `model` param)
+- `/api/streaming/[jobId]` — SSE stream of parsed text deltas from NDJSON log (`?raw=1` for raw lines)
+- `/api/settings` — Settings CRUD (GET, PATCH) — includes `base_prompt` for global agent instructions
 - `/api/settings/backup` — SQLite hot backup (POST)
+
+## Testing Requirements
+- **All new API routes must have vitest tests** in `__tests__/`
+- Follow existing test patterns (in-memory SQLite, mocked shell/PM2 calls)
+- Run `pnpm test` after writing tests to verify they pass
 
 ## Key Patterns
 - All config stored in DB (`settings`, `projects`, `skills`, `agents` tables)
 - Workspace path configured in Settings UI, projects discovered by scanning for git repos
 - All CLI calls (git, gh, launchctl, pm2) go through `lib/shell.ts`
 - `lib/project-data.ts` assembles project data with 10s TTL cache
-- SSE at `/api/streaming/[jobId]` for real-time run output (reads log path from jobs DB)
+- Experimental runs use `claude --output-format stream-json` for token-by-token streaming via PM2 + log file + fs.watch + NDJSON parser (see `docs/streaming.md`)
+- SSE at `/api/streaming/[jobId]` parses NDJSON and sends text deltas + `done` event (`?raw=1` for raw mode)
 - Agent runs compose skill content into the prompt before sending to Claude CLI
 - File-based skills scanned from `skills/docs/skills/` (all categories, SKILL.md files with frontmatter)
 - DB-backed skills created via `/skills` page or API

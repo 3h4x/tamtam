@@ -3,17 +3,26 @@ import { existsSync, readFileSync } from 'fs';
 import { db, schema } from './db';
 import { getJobStatus } from './pm2-jobs';
 import { markReviewed } from './git-utils';
+import { parseStreamLines } from './claude-stream-parser';
 
 export interface JobData {
   id: string;
   project: string;
   kind: string;
+  prompt: string | null;
   pid: number;
   logPath: string | null;
   startedAt: number;
   finishedAt: number | null;
   exitCode: number | null;
   seen: boolean;
+  durationMs?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  cacheReadTokens?: number | null;
+  cacheCreateTokens?: number | null;
+  sessionId?: string | null;
+  contextMeta?: string | null;
 }
 
 const jobsCache = new Map<string, JobData>();
@@ -28,12 +37,20 @@ function loadFromDb(): void {
         id: row.id,
         project: row.project,
         kind: row.kind,
+        prompt: row.prompt ?? null,
         pid: row.pid,
         logPath: row.logPath,
         startedAt: row.startedAt,
         finishedAt: row.finishedAt ?? null,
         exitCode: row.exitCode ?? null,
         seen: row.seen ?? false,
+        durationMs: row.durationMs ?? null,
+        inputTokens: row.inputTokens ?? null,
+        outputTokens: row.outputTokens ?? null,
+        cacheReadTokens: row.cacheReadTokens ?? null,
+        cacheCreateTokens: row.cacheCreateTokens ?? null,
+        sessionId: row.sessionId ?? null,
+        contextMeta: row.contextMeta ?? null,
       });
     }
     loaded = true;
@@ -49,12 +66,20 @@ function saveToDb(job: JobData): void {
         id: job.id,
         project: job.project,
         kind: job.kind,
+        prompt: job.prompt,
         pid: job.pid,
         logPath: job.logPath,
         startedAt: job.startedAt,
         finishedAt: job.finishedAt,
         exitCode: job.exitCode,
         seen: job.seen,
+        durationMs: job.durationMs,
+        inputTokens: job.inputTokens,
+        outputTokens: job.outputTokens,
+        cacheReadTokens: job.cacheReadTokens,
+        cacheCreateTokens: job.cacheCreateTokens,
+        sessionId: job.sessionId,
+        contextMeta: job.contextMeta,
       })
       .onConflictDoUpdate({
         target: schema.jobs.id,
@@ -64,6 +89,13 @@ function saveToDb(job: JobData): void {
           finishedAt: job.finishedAt,
           exitCode: job.exitCode,
           seen: job.seen,
+          durationMs: job.durationMs,
+          inputTokens: job.inputTokens,
+          outputTokens: job.outputTokens,
+          cacheReadTokens: job.cacheReadTokens,
+          cacheCreateTokens: job.cacheCreateTokens,
+          sessionId: job.sessionId,
+          contextMeta: job.contextMeta,
         },
       })
       .run();
@@ -75,8 +107,25 @@ function saveToDb(job: JobData): void {
 async function markDone(job: JobData, exitCode: number): Promise<void> {
   job.finishedAt = Date.now() / 1000;
   job.exitCode = exitCode;
+  // Extract result metadata (tokens, duration, session) from log
+  const rawLog = readLog(job, 50_000);
+  const events = parseStreamLines(rawLog);
+  const doneEvent = events.find(e => e.type === 'done');
+  if (doneEvent && doneEvent.type === 'done') {
+    job.durationMs = doneEvent.result.duration;
+    job.inputTokens = doneEvent.result.inputTokens;
+    job.outputTokens = doneEvent.result.outputTokens;
+    job.cacheReadTokens = doneEvent.result.cacheReadTokens;
+    job.cacheCreateTokens = doneEvent.result.cacheCreateTokens;
+    job.sessionId = doneEvent.result.sessionId;
+  }
   saveToDb(job);
   await runCompletionHooks(job);
+  // Clean up PM2 process now that it's saved to DB
+  try {
+    const { deleteJob } = await import('./pm2-jobs');
+    await deleteJob(job.id);
+  } catch {}
 }
 
 async function runCompletionHooks(job: JobData): Promise<void> {
@@ -104,6 +153,37 @@ export function readLog(job: JobData, tailBytes = 100_000): string {
   }
 }
 
+export function readParsedLog(job: JobData, tailBytes = 100_000): string {
+  const rawLog = readLog(job, tailBytes);
+  if (!rawLog) return '';
+
+  // Try to parse as stream events and extract text
+  const events = parseStreamLines(rawLog);
+  const textParts: string[] = [];
+
+  for (const event of events) {
+    if (event.type === 'text') {
+      textParts.push(event.text);
+    } else if (event.type === 'tool_use') {
+      textParts.push(`\n\n> Tool: ${event.name}\n`);
+    } else if (event.type === 'tool_result') {
+      const truncated = event.content.length > 500
+        ? event.content.slice(0, 500) + '...'
+        : event.content;
+      textParts.push(`${truncated}\n`);
+    } else if (event.type === 'done') {
+      // Cost/duration stored in DB, not shown inline
+    }
+  }
+
+  // If we extracted text, return it; otherwise return raw log
+  if (textParts.length > 0) {
+    return textParts.join('');
+  }
+
+  return rawLog;
+}
+
 export function updateJob(job: JobData): void {
   saveToDb(job);
 }
@@ -121,6 +201,7 @@ export function jobToDict(job: JobData): Record<string, any> {
     id: job.id,
     project: job.project,
     kind: job.kind,
+    prompt: job.prompt,
     pid: job.pid,
     log_path: job.logPath,
     status: job.finishedAt !== null ? 'done' : 'running',
@@ -128,6 +209,13 @@ export function jobToDict(job: JobData): Record<string, any> {
     started_at: job.startedAt,
     finished_at: job.finishedAt,
     seen: job.seen,
+    duration_ms: job.durationMs,
+    input_tokens: job.inputTokens,
+    output_tokens: job.outputTokens,
+    cache_read_tokens: job.cacheReadTokens,
+    cache_create_tokens: job.cacheCreateTokens,
+    session_id: job.sessionId,
+    context_meta: job.contextMeta ?? null,
   };
   const verdict = getVerdict(job);
   if (verdict !== null) d.verdict = verdict;
@@ -160,7 +248,9 @@ export function createJob(
   project: string,
   kind: string,
   pid: number,
-  logPath: string
+  logPath: string,
+  prompt?: string,
+  contextMeta?: string
 ): JobData {
   loadFromDb();
   let timestamp = Math.floor(Date.now() * 1000);
@@ -173,12 +263,20 @@ export function createJob(
     id: jobId,
     project,
     kind,
+    prompt: prompt || null,
     pid,
     logPath,
     startedAt: Date.now() / 1000,
     finishedAt: null,
     exitCode: null,
     seen: false,
+    durationMs: null,
+    inputTokens: null,
+    outputTokens: null,
+    cacheReadTokens: null,
+    cacheCreateTokens: null,
+    sessionId: null,
+    contextMeta: contextMeta ?? null,
   };
   jobsCache.set(jobId, job);
   saveToDb(job);
@@ -199,12 +297,19 @@ export function getJob(jobId: string): JobData | null {
     id: row.id,
     project: row.project,
     kind: row.kind,
+    prompt: row.prompt ?? null,
     pid: row.pid,
     logPath: row.logPath,
     startedAt: row.startedAt,
     finishedAt: row.finishedAt ?? null,
     exitCode: row.exitCode ?? null,
     seen: row.seen ?? false,
+    durationMs: row.durationMs ?? null,
+    inputTokens: row.inputTokens ?? null,
+    outputTokens: row.outputTokens ?? null,
+    cacheReadTokens: row.cacheReadTokens ?? null,
+    cacheCreateTokens: row.cacheCreateTokens ?? null,
+    sessionId: row.sessionId ?? null,
   };
   jobsCache.set(jobId, job);
   return job;

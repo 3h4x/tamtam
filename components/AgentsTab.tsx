@@ -55,6 +55,17 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
     } catch {}
   }
 
+  const handleToggleEnabled = async (agent: Agent) => {
+    try {
+      const result = await updateAgent(agent.id, { enabled: !agent.enabled } as any)
+      const updated = { ...result.agent, skillIds: typeof result.agent.skillIds === 'string' ? JSON.parse(result.agent.skillIds as any) : result.agent.skillIds }
+      setAgents(prev => prev.map(a => a.id === agent.id ? updated : a))
+      toast(`Agent ${agent.name} ${!agent.enabled ? 'enabled' : 'disabled'}`, 'success')
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to toggle agent', 'error')
+    }
+  }
+
   const handleRun = async (agent: Agent, customPrompt?: string) => {
     if (runSubmitting) return
     const prompt = customPrompt || agent.prompt || `Run agent ${agent.name}`
@@ -125,7 +136,7 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
                 editing?.id === agent.id
                   ? 'border-accent bg-accent-light'
                   : 'border-border bg-bg-secondary'
-              }`}
+              } ${!agent.enabled ? 'opacity-50' : ''}`}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -133,13 +144,26 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
                   <span className="text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-secondary">{agent.model}</span>
                   <span className="text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-secondary">{agent.runner}</span>
                   {agent.schedule && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-status-success/10 text-status-success">every {agent.schedule}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${agent.enabled ? 'bg-status-success/10 text-status-success' : 'bg-bg-tertiary text-text-tertiary line-through'}`}>every {agent.schedule}</span>
                   )}
                   {agentSkills.map(s => (
                     <span key={s.id} className="text-xs px-2 py-0.5 rounded-full bg-accent/10 text-accent">{s.name}</span>
                   ))}
                 </div>
                 <div className="flex items-center gap-2">
+                  {agent.schedule && (
+                    <button
+                      className={`px-3 py-1.5 text-sm border rounded-md cursor-pointer ${
+                        agent.enabled
+                          ? 'border-status-success/30 text-status-success hover:bg-status-success/10'
+                          : 'border-status-error/30 text-status-error hover:bg-status-error/10'
+                      }`}
+                      onClick={() => handleToggleEnabled(agent)}
+                      title={agent.enabled ? 'Disable scheduled runs' : 'Enable scheduled runs'}
+                    >
+                      {agent.enabled ? 'On' : 'Off'}
+                    </button>
+                  )}
                   <button
                     className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
                     onClick={() => { setEditing(agent); setCreating(false) }}

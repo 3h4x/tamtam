@@ -73,8 +73,6 @@ describe('skills API', () => {
   });
 
   afterEach(() => {
-    vi.unmock('@/lib/db');
-    vi.unmock('@/lib/auth');
     vi.resetModules();
   });
 

@@ -149,7 +149,7 @@ export function RunModal({ projectName, onClose }: RunModalProps) {
                   className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer"
                   onClick={() => {
                     onClose()
-                    router.push(`/project/${projectName}/jobs/${result.job_id}`)
+                    router.push(`/project/${projectName}/experimental`)
                   }}
                 >
                   View logs

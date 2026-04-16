@@ -5,8 +5,9 @@ import { db, schema } from '@/lib/db';
 import { checkAuth } from '@/lib/auth';
 import { resolveProjectPath } from '@/lib/project-data';
 import { getImproveConfig } from '@/lib/scheduling';
-import { createJob, updateJob } from '@/lib/job-storage';
+import { createJob, updateJob, listJobs, probeJobStatus } from '@/lib/job-storage';
 import { startJob } from '@/lib/pm2-jobs';
+import { withBasePrompt } from '@/lib/config';
 
 export async function POST(
   request: NextRequest,
@@ -18,6 +19,20 @@ export async function POST(
 
   const agent = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
   if (!agent) return NextResponse.json({ detail: 'agent not found' }, { status: 404 });
+
+  // Prevent duplicate runs: check if this agent is already running
+  const kindKey = `agent:${agent.name}`;
+  const candidates = listJobs().filter(
+    (j) => j.project === agent.project && j.kind === kindKey && j.finishedAt === null
+  );
+  for (const j of candidates) {
+    if ((await probeJobStatus(j)) === 'running') {
+      return NextResponse.json(
+        { detail: `Agent '${agent.name}' is already running (job ${j.id})` },
+        { status: 409 }
+      );
+    }
+  }
 
   const body = await request.json();
   const taskPrompt = body.prompt?.trim();
@@ -48,12 +63,12 @@ export async function POST(
     cmd += ` --append-system-prompt`;
   }
 
-  // Combine system prompt with task prompt
-  const fullPrompt = systemPrompt
-    ? `${systemPrompt}\n\n---\n\n${taskPrompt}`
-    : taskPrompt;
+  // Combine base prompt + system prompt + task prompt
+  const fullPrompt = withBasePrompt(
+    systemPrompt ? `${systemPrompt}\n\n---\n\n${taskPrompt}` : taskPrompt
+  );
 
-  const job = createJob(agent.project, `agent:${agent.name}`, 0, '');
+  const job = createJob(agent.project, `agent:${agent.name}`, 0, '', taskPrompt);
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
 

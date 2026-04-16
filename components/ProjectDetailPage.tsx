@@ -34,12 +34,14 @@ export function ProjectDetailPage({
   onRefresh,
   onPush,
 }: ProjectDetailPageProps) {
-  const params = useParams<{ name: string; tab?: string }>()
+  const params = useParams<{ name: string; tab?: string; sessionId?: string }>()
   const name = params.name
   const router = useRouter()
   const { toast } = useToast()
   const VALID_TABS: Tab[] = ['overview', 'config', 'logs', 'experimental']
-  const activeTab: Tab = VALID_TABS.includes(params.tab as Tab) ? (params.tab as Tab) : 'overview'
+  const activeTab: Tab = params.sessionId
+    ? 'experimental'
+    : VALID_TABS.includes(params.tab as Tab) ? (params.tab as Tab) : 'overview'
   const setActiveTab = (tab: Tab) => {
     router.push(tab === 'overview' ? `/project/${name}` : `/project/${name}/${tab}`)
   }
@@ -272,12 +274,11 @@ export function ProjectDetailPage({
 
   return (
     <div className="p-6">
-      <button className="text-accent hover:underline text-sm mb-4 inline-block" onClick={() => router.push('/')}>
-        &larr; Back to projects
-      </button>
-
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <h2 className="text-xl font-semibold text-text-primary">{project.project}</h2>
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <h2 className="text-xl font-semibold text-text-primary">{project.project}</h2>
+          {releaseTag && <span className="text-text-secondary text-sm">{releaseTag}</span>}
+        </div>
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1.5">
             <span className="inline-block w-2 h-2 rounded-full" style={{ background: dot.color }} />
@@ -288,7 +289,6 @@ export function ProjectDetailPage({
               {highestPriority}
             </span>
           )}
-          {releaseTag && <span className="text-text-secondary text-sm">{releaseTag}</span>}
           {aggregateCi === 'success' && <span className="text-status-success text-sm">CI ✓</span>}
           {aggregateCi === 'failure' && (
             ciFailedUrl ? (
@@ -400,10 +400,22 @@ export function ProjectDetailPage({
           Overview
         </button>
         <button
-          className={`px-3 py-1.5 text-sm cursor-pointer ${activeTab === 'config' ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`}
-          onClick={() => setActiveTab('config')}
+          className={`px-3 py-1.5 text-sm cursor-pointer ${activeTab === 'experimental' ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`}
+          onClick={async () => {
+            try {
+              const data = await fetchJobs(name)
+              const lastSession = data.jobs
+                .filter(j => j.kind === 'run' && j.session_id)
+                .sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0))[0]
+              if (lastSession?.session_id) {
+                router.push(`/project/${name}/experimental/${lastSession.session_id}`)
+                return
+              }
+            } catch { /* ignore */ }
+            setActiveTab('experimental')
+          }}
         >
-          Config
+          Experimental
         </button>
         <button
           className={`px-3 py-1.5 text-sm cursor-pointer ${activeTab === 'logs' ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`}
@@ -412,10 +424,10 @@ export function ProjectDetailPage({
           Runs
         </button>
         <button
-          className={`px-3 py-1.5 text-sm cursor-pointer ${activeTab === 'experimental' ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`}
-          onClick={() => setActiveTab('experimental')}
+          className={`px-3 py-1.5 text-sm cursor-pointer ${activeTab === 'config' ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`}
+          onClick={() => setActiveTab('config')}
         >
-          Experimental
+          Config
         </button>
       </nav>
 
@@ -624,7 +636,7 @@ export function ProjectDetailPage({
 
       {/* Experimental Tab */}
       {activeTab === 'experimental' && name && (
-        <ExperimentalTab projectName={name} />
+        <ExperimentalTab projectName={name} initialSessionId={params.sessionId} />
       )}
 
       {showPushModal && name && (

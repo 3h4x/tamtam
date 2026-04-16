@@ -9,6 +9,7 @@ import { SKILLS_DIR } from '@/lib/skills';
 import { resolveProjectPath } from '@/lib/project-data';
 import { createJob, updateJob } from '@/lib/job-storage';
 import { startJob } from '@/lib/pm2-jobs';
+import { withBasePrompt } from '@/lib/config';
 
 export async function POST(
   request: NextRequest,
@@ -23,14 +24,27 @@ export async function POST(
   const { claudeBin, logDir } = getImproveConfig();
 
   let prompt = '';
-  let personaPath = '';
+  let personaPaths: string[] = [];
   const attachmentPaths: string[] = [];
+  let model = 'haiku';
+  let resumeSessionId = '';
+  let contextMeta = '';
+  const ALLOWED_MODELS = ['haiku', 'sonnet', 'opus'];
 
   const contentType = request.headers.get('content-type') ?? '';
   if (contentType.includes('multipart/form-data')) {
     const form = await request.formData();
     prompt = (form.get('prompt') as string) ?? '';
-    personaPath = (form.get('persona') as string) ?? '';
+    const persona = form.get('persona') as string;
+    if (persona) personaPaths = [persona];
+    const personasJson = form.get('personas') as string;
+    if (personasJson) { try { personaPaths = JSON.parse(personasJson) } catch {} }
+    const formModel = (form.get('model') as string) ?? '';
+    if (formModel && ALLOWED_MODELS.includes(formModel)) model = formModel;
+    const formResumeId = form.get('resumeSessionId') as string;
+    if (formResumeId) resumeSessionId = formResumeId;
+    const formContextMeta = form.get('contextMeta') as string;
+    if (formContextMeta) contextMeta = formContextMeta;
 
     const attachDir = join(logDir, 'attachments');
     mkdirSync(attachDir, { recursive: true });
@@ -48,36 +62,56 @@ export async function POST(
   } else {
     const body = await request.json();
     prompt = body.prompt ?? '';
-    personaPath = body.persona ?? '';
+    if (body.persona) personaPaths = [body.persona];
+    if (body.personas) personaPaths = body.personas;
+    const bodyModel = body.model ?? '';
+    if (bodyModel && ALLOWED_MODELS.includes(bodyModel)) model = bodyModel;
+    if (body.resumeSessionId) resumeSessionId = body.resumeSessionId;
+    if (body.contextMeta) contextMeta = body.contextMeta;
   }
 
-  if (!prompt.trim()) {
+  if (!prompt.trim() && attachmentPaths.length === 0) {
     return NextResponse.json({ detail: 'Prompt is required' }, { status: 400 });
   }
+  if (!prompt.trim() && attachmentPaths.length > 0) {
+    prompt = 'See the attached files.';
+  }
 
-  if (personaPath) {
-    const personaFile = join(SKILLS_DIR, personaPath);
-    if (existsSync(personaFile)) {
-      try {
-        const personaContent = readFileSync(personaFile, 'utf-8');
-        prompt = personaContent + '\n\n---\n\n' + prompt;
-      } catch {}
+  // For follow-ups (--resume), skip persona/base prompt injection — context is already in the session
+  if (!resumeSessionId) {
+    // Resolve persona file paths and prepend content
+    const docsBase = join(SKILLS_DIR, 'docs', 'skills');
+    for (const pPath of personaPaths) {
+      const personaFile = join(docsBase, `${pPath}.md`);
+      if (existsSync(personaFile)) {
+        try {
+          const personaContent = readFileSync(personaFile, 'utf-8');
+          prompt = personaContent + '\n\n---\n\n' + prompt;
+        } catch {}
+      }
     }
+
+    if (attachmentPaths.length > 0) {
+      prompt += '\n\nAttached files (read them to see their content):\n';
+      for (const p of attachmentPaths) prompt += `- ${p}\n`;
+    }
+
+    prompt = withBasePrompt(prompt);
   }
 
-  if (attachmentPaths.length > 0) {
-    prompt += '\n\nAttached files (read them to see their content):\n';
-    for (const p of attachmentPaths) prompt += `- ${p}\n`;
-  }
-
-  const job = createJob(projectName, 'run', 0, '');
+  const job = createJob(projectName, 'run', 0, '', prompt, contextMeta || undefined);
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
+
+  let cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${model} --dangerously-skip-permissions`;
+  if (resumeSessionId) {
+    cmd += ` --resume ${resumeSessionId}`;
+  }
 
   try {
     const pid = await startJob(
       job.id,
-      `${claudeBin} --print --dangerously-skip-permissions`,
+      cmd,
       prompt,
       projPath
     );

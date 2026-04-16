@@ -12,6 +12,8 @@ const SETTING_KEYS = [
   'weekends',
   'launchagent_prefix',
   'workspace_path',
+  'base_prompt',
+  'default_model',
 ] as const;
 
 export async function GET() {

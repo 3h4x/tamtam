@@ -1,0 +1,168 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { NextRequest } from 'next/server';
+import { writeFileSync, mkdtempSync, rmSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import type { JobData } from '@/lib/job-storage';
+
+async function collectSSEStream(
+  response: Response,
+  abortController: AbortController,
+  timeoutMs = 500
+): Promise<string[]> {
+  const events: string[] = [];
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+
+  const timeout = setTimeout(() => abortController.abort(), timeoutMs);
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      events.push(chunk);
+    }
+  } catch {
+    // AbortError is expected
+  } finally {
+    clearTimeout(timeout);
+    reader.releaseLock();
+  }
+  return events;
+}
+
+describe('GET /api/streaming/[jobId]', () => {
+  let tempDir: string;
+  let GET: any;
+  let getJobMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-streaming-test-'));
+    vi.resetModules();
+
+    getJobMock = vi.fn().mockReturnValue(null);
+
+    vi.doMock('@/lib/job-storage', () => ({
+      getJob: getJobMock,
+    }));
+
+    // Mock claude-stream-parser to use the real implementation
+    const { parseStreamLines } = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
+      '@/lib/claude-stream-parser'
+    );
+    vi.doMock('@/lib/claude-stream-parser', () => ({ parseStreamLines }));
+
+    const mod = await import('@/app/api/streaming/[jobId]/route');
+    GET = mod.GET;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('returns SSE content-type header', async () => {
+    const logFile = join(tempDir, 'empty.log');
+    writeFileSync(logFile, '');
+    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-1', {
+      signal: ac.signal,
+    });
+
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
+    expect(response.headers.get('content-type')).toBe('text/event-stream');
+    expect(response.headers.get('cache-control')).toBe('no-cache');
+    ac.abort();
+  });
+
+  it('replays existing raw log content when raw=1', async () => {
+    const logFile = join(tempDir, 'test.log');
+    writeFileSync(logFile, 'line one\nline two\nline three\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-1?raw=1', {
+      signal: ac.signal,
+    });
+
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    expect(combined).toContain('data: line one');
+    expect(combined).toContain('data: line two');
+    expect(combined).toContain('data: line three');
+  });
+
+  it('sends empty stream when log file does not exist', async () => {
+    getJobMock.mockReturnValue({ logPath: '/nonexistent/path/job.log' } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-1', {
+      signal: ac.signal,
+    });
+
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
+    expect(response.status).toBe(200);
+    // Abort quickly — no content expected
+    const events = await collectSSEStream(response, ac, 100);
+    const combined = events.join('');
+    // No data events for missing file
+    expect(combined).toBe('');
+  });
+
+  it('replays parsed stream events as text when raw not set', async () => {
+    const logFile = join(tempDir, 'parsed.log');
+    const textLine =
+      '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello world"}}}';
+    writeFileSync(logFile, textLine + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-1', {
+      signal: ac.signal,
+    });
+
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    expect(combined).toContain('data: Hello world');
+  });
+
+  it('sends done event for result lines', async () => {
+    const logFile = join(tempDir, 'done.log');
+    const doneLine =
+      '{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"total_cost_usd":0.01,"session_id":"s1","result":"Output"}';
+    writeFileSync(logFile, doneLine + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-1', {
+      signal: ac.signal,
+    });
+
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    expect(combined).toContain('event: done');
+    expect(combined).toContain('"duration":1234');
+  });
+
+  it('uses fallback path from homedir when job has no logPath', async () => {
+    getJobMock.mockReturnValue(null);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/unknown-job', {
+      signal: ac.signal,
+    });
+
+    // Just verify it doesn't throw — the fallback path won't exist so stream is empty
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'unknown-job' }) });
+    expect(response.status).toBe(200);
+    ac.abort();
+  });
+});

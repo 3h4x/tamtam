@@ -1,0 +1,91 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+
+describe('GET /api/projects/personas', () => {
+  let GET: any;
+  let tempDir: string;
+  let skillsDir: string;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-personas-test-'));
+    skillsDir = tempDir;
+
+    vi.doMock('@/lib/skills', () => ({
+      SKILLS_DIR: skillsDir,
+    }));
+
+    const mod = await import('@/app/api/projects/personas/route');
+    GET = mod.GET;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('returns empty personas when docs/skills dir does not exist', async () => {
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.personas).toEqual([]);
+  });
+
+  it('returns personas from skill files', async () => {
+    const docsSkills = join(skillsDir, 'docs', 'skills', 'engineering');
+    mkdirSync(docsSkills, { recursive: true });
+    writeFileSync(
+      join(docsSkills, 'code-reviewer.md'),
+      '---\ntitle: "Code Reviewer"\ndescription: "Reviews code changes"\n---\n\n# Content'
+    );
+
+    const res = await GET();
+    const data = await res.json();
+    expect(data.personas.length).toBe(1);
+    expect(data.personas[0].name).toBe('Code Reviewer');
+    expect(data.personas[0].description).toBe('Reviews code changes');
+    expect(data.personas[0].category).toBe('engineering');
+    expect(data.personas[0].path).toBe('engineering/code-reviewer');
+  });
+
+  it('returns personas from multiple categories', async () => {
+    const cat1 = join(skillsDir, 'docs', 'skills', 'engineering');
+    const cat2 = join(skillsDir, 'docs', 'skills', 'devops');
+    mkdirSync(cat1, { recursive: true });
+    mkdirSync(cat2, { recursive: true });
+
+    writeFileSync(join(cat1, 'reviewer.md'), '# Reviewer content');
+    writeFileSync(join(cat2, 'deployer.md'), '# Deployer content');
+
+    const res = await GET();
+    const data = await res.json();
+    expect(data.personas.length).toBe(2);
+    const categories = data.personas.map((p: any) => p.category);
+    expect(categories).toContain('engineering');
+    expect(categories).toContain('devops');
+  });
+
+  it('skips index.md files', async () => {
+    const cat = join(skillsDir, 'docs', 'skills', 'engineering');
+    mkdirSync(cat, { recursive: true });
+    writeFileSync(join(cat, 'index.md'), '# Index');
+    writeFileSync(join(cat, 'skill.md'), '# Skill');
+
+    const res = await GET();
+    const data = await res.json();
+    expect(data.personas.length).toBe(1);
+    expect(data.personas[0].path).toBe('engineering/skill');
+  });
+
+  it('falls back to slug-based name when no frontmatter title', async () => {
+    const cat = join(skillsDir, 'docs', 'skills', 'tools');
+    mkdirSync(cat, { recursive: true });
+    writeFileSync(join(cat, 'my-cool-tool.md'), '# Just plain content, no frontmatter');
+
+    const res = await GET();
+    const data = await res.json();
+    expect(data.personas[0].name).toBe('My Cool Tool');
+  });
+});

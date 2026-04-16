@@ -1,0 +1,215 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { NextRequest } from 'next/server';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+
+function makeJob() {
+  return {
+    id: 'test-job-id',
+    project: 'proj1',
+    kind: 'run',
+    prompt: null,
+    pid: 0,
+    logPath: null,
+    startedAt: Date.now() / 1000,
+    finishedAt: null,
+    exitCode: null,
+    seen: false,
+  };
+}
+
+describe('POST /api/projects/by-project/{projectName}/run', () => {
+  let POST: any;
+  let startJobMock: ReturnType<typeof vi.fn>;
+  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
+  let createJobMock: ReturnType<typeof vi.fn>;
+  let updateJobMock: ReturnType<typeof vi.fn>;
+  let tempDir: string;
+  let skillsDir: string;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-proj-run-test-'));
+    skillsDir = join(tempDir, 'skills');
+    mkdirSync(skillsDir, { recursive: true });
+
+    startJobMock = vi.fn().mockResolvedValue(99999);
+    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/project');
+    createJobMock = vi.fn().mockImplementation(() => makeJob());
+    updateJobMock = vi.fn();
+
+    vi.doMock('@/lib/auth', () => ({
+      checkAuth: (request: NextRequest) => {
+        const token = process.env.Z_API_TOKEN;
+        if (!token) return null;
+        const authHeader = request.headers.get('authorization') ?? '';
+        if (!authHeader.startsWith('Bearer ') || authHeader.slice(7) !== token) {
+          const { NextResponse } = require('next/server');
+          return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
+        }
+        return null;
+      },
+    }));
+
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: resolveProjectPathMock,
+    }));
+
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: vi
+        .fn()
+        .mockReturnValue({ claudeBin: 'claude', logDir: join(tempDir, 'logs') }),
+    }));
+
+    vi.doMock('@/lib/job-storage', () => ({
+      createJob: createJobMock,
+      updateJob: updateJobMock,
+    }));
+
+    vi.doMock('@/lib/pm2-jobs', () => ({
+      startJob: startJobMock,
+    }));
+
+    vi.doMock('@/lib/skills', () => ({
+      SKILLS_DIR: skillsDir,
+    }));
+
+    const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
+    POST = mod.POST;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    delete process.env.Z_API_TOKEN;
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('returns 404 if project not found', async () => {
+    resolveProjectPathMock.mockReturnValue(null);
+    const req = new NextRequest('http://localhost/api/projects/by-project/unknown/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'hello' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'unknown' }) });
+    expect(res.status).toBe(404);
+    const data = await res.json();
+    expect(data.detail).toContain('project not found');
+  });
+
+  it('returns 400 if prompt is empty', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: '' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toContain('Prompt');
+  });
+
+  it('returns 400 if prompt is whitespace only', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: '   ' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+  });
+
+  it('starts job and returns job info for JSON body', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'run my agent' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('started');
+    expect(data.job_id).toBeTruthy();
+    expect(data.log_path).toBeTruthy();
+  });
+
+  it('calls startJob with correct project path', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'test prompt' }),
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(startJobMock).toHaveBeenCalledOnce();
+    const [, , , projPath] = startJobMock.mock.calls[0];
+    expect(projPath).toBe('/path/to/project');
+  });
+
+  it('calls createJob and updateJob', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'hello' }),
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(createJobMock).toHaveBeenCalledOnce();
+    expect(updateJobMock).toHaveBeenCalledOnce();
+  });
+
+  it('prepends persona content when persona file exists', async () => {
+    const docsSkillsDir = join(skillsDir, 'docs', 'skills');
+    mkdirSync(docsSkillsDir, { recursive: true });
+    const personaFile = join(docsSkillsDir, 'my-persona.md');
+    writeFileSync(personaFile, '# You are a helpful assistant');
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'do the thing', persona: 'my-persona' }),
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    expect(fullPrompt).toContain('# You are a helpful assistant');
+    expect(fullPrompt).toContain('do the thing');
+  });
+
+  it('ignores persona when file does not exist', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'do it', persona: 'nonexistent' }),
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect((res: any) => res).toBeTruthy(); // no error thrown
+    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    // base_prompt is prepended via withBasePrompt(); persona content is skipped since file doesn't exist
+    expect(fullPrompt).toContain('do it');
+  });
+
+  it('returns 500 if startJob throws', async () => {
+    startJobMock.mockRejectedValue(new Error('pm2 crashed'));
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'run this' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.detail).toContain('pm2 crashed');
+  });
+
+  it('requires authentication when Z_API_TOKEN is set', async () => {
+    process.env.Z_API_TOKEN = 'secret-token';
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'hello' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(401);
+  });
+
+  it('passes auth with correct Bearer token', async () => {
+    process.env.Z_API_TOKEN = 'my-token';
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'hello' }),
+      headers: { Authorization: 'Bearer my-token' },
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+  });
+});

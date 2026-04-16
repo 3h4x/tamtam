@@ -11,6 +11,8 @@ interface SettingsMap {
   daytime: string
   weekends: string
   launchagent_prefix: string
+  base_prompt: string
+  default_model: string
 }
 
 const DEFAULTS: SettingsMap = {
@@ -22,12 +24,14 @@ const DEFAULTS: SettingsMap = {
   daytime: 'false',
   weekends: 'off',
   launchagent_prefix: 'com.tamtam',
+  base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
+  default_model: 'haiku',
 }
 
 interface FieldDef {
   label: string
   help: string
-  group: 'workspace' | 'scheduling' | 'system'
+  group: 'workspace' | 'scheduling' | 'system' | 'behavior'
 }
 
 const FIELDS: Record<keyof SettingsMap, FieldDef> = {
@@ -71,9 +75,20 @@ const FIELDS: Record<keyof SettingsMap, FieldDef> = {
     help: 'macOS LaunchAgent label prefix',
     group: 'system',
   },
+  base_prompt: {
+    label: 'Base Prompt',
+    help: 'Prepended to every Claude invocation (runs, agents, reviews)',
+    group: 'behavior',
+  },
+  default_model: {
+    label: 'Default Model',
+    help: 'Model used in the experimental runner (remembered per-use)',
+    group: 'behavior',
+  },
 }
 
 const GROUPS = [
+  { id: 'behavior' as const, title: 'Agent Behavior', description: 'Base instructions prepended to every Claude invocation' },
   { id: 'workspace' as const, title: 'Workspace', description: 'Where your projects live and how they connect to GitHub' },
   { id: 'scheduling' as const, title: 'Scheduling', description: 'Control when and how often agents run' },
   { id: 'system' as const, title: 'System', description: 'Paths and platform-specific configuration' },
@@ -105,7 +120,15 @@ function SettingsField({
         </label>
         <span className="text-xs text-text-tertiary">{field.help}</span>
       </div>
-      {fieldKey === 'daytime' ? (
+      {fieldKey === 'base_prompt' ? (
+        <textarea
+          value={value}
+          onChange={(e) => onChange(fieldKey, e.target.value)}
+          placeholder={DEFAULTS[fieldKey]}
+          rows={4}
+          className="w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary resize-y"
+        />
+      ) : fieldKey === 'daytime' ? (
         <select
           value={value}
           onChange={(e) => onChange(fieldKey, e.target.value)}
@@ -122,6 +145,16 @@ function SettingsField({
         >
           <option value="off">Skip weekends</option>
           <option value="on">Include weekends</option>
+        </select>
+      ) : fieldKey === 'default_model' ? (
+        <select
+          value={value}
+          onChange={(e) => onChange(fieldKey, e.target.value)}
+          className="w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+        >
+          <option value="haiku">haiku</option>
+          <option value="sonnet">sonnet</option>
+          <option value="opus">opus</option>
         </select>
       ) : (
         <input

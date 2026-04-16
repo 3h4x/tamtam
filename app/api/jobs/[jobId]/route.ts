@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getJob, jobToDict, readLog, probeJobStatus } from '@/lib/job-storage';
+import { getJob, jobToDict, readParsedLog, probeJobStatus } from '@/lib/job-storage';
 
 export async function GET(
   _request: NextRequest,
@@ -12,6 +12,6 @@ export async function GET(
   }
   await probeJobStatus(job);
   const data = jobToDict(job);
-  data.log = readLog(job);
+  data.log = readParsedLog(job);
   return NextResponse.json(data);
 }

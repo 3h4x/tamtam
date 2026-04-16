@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { checkAuth } from '@/lib/auth';
+import { installAgentSchedule } from '@/lib/agent-scheduler';
 
 export async function GET(request: NextRequest) {
   const project = request.nextUrl.searchParams.get('project');
@@ -44,5 +45,15 @@ export async function POST(request: NextRequest) {
   };
 
   db.insert(schema.agents).values(agent).run();
+
+  // Install schedule if configured (uses pm2 or launchctl based on runner)
+  if (agent.schedule && agent.prompt) {
+    try {
+      await installAgentSchedule(id, agent.schedule, agent.prompt, agent.runner, agent.project, agent.name);
+    } catch (e: any) {
+      console.error(`Failed to install schedule for agent ${id}:`, e.message);
+    }
+  }
+
   return NextResponse.json({ agent }, { status: 201 });
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { checkAuth } from '@/lib/auth';
+import { installAgentSchedule, uninstallAgentSchedule } from '@/lib/agent-scheduler';
 
 export async function GET(
   _request: NextRequest,
@@ -32,9 +33,24 @@ export async function PATCH(
   if (body.prompt !== undefined) updates.prompt = body.prompt;
   if (body.schedule !== undefined) updates.schedule = body.schedule || null;
   if (body.runner !== undefined) updates.runner = body.runner;
+  if (body.enabled !== undefined) updates.enabled = body.enabled;
 
   db.update(schema.agents).set(updates).where(eq(schema.agents.id, agentId)).run();
   const agent = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
+
+  // Update schedule (uses pm2 or launchctl based on runner)
+  if (agent) {
+    try {
+      if (agent.schedule && agent.prompt && agent.enabled) {
+        await installAgentSchedule(agentId, agent.schedule, agent.prompt, agent.runner, agent.project, agent.name);
+      } else {
+        await uninstallAgentSchedule(agentId, agent.runner, agent.project, agent.name);
+      }
+    } catch (e: any) {
+      console.error(`Failed to update schedule for agent ${agentId}:`, e.message);
+    }
+  }
+
   return NextResponse.json({ agent });
 }
 
@@ -45,6 +61,14 @@ export async function DELETE(
   const authError = checkAuth(request);
   if (authError) return authError;
   const { agentId } = await params;
+  // Uninstall schedule before deleting
+  const agent = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
+  try {
+    await uninstallAgentSchedule(agentId, agent?.runner || 'pm2', agent?.project, agent?.name);
+  } catch (e: any) {
+    console.error(`Failed to uninstall schedule for agent ${agentId}:`, e.message);
+  }
+
   db.delete(schema.agents).where(eq(schema.agents.id, agentId)).run();
   return NextResponse.json({ status: 'deleted' });
 }

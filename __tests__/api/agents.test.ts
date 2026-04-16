@@ -19,6 +19,7 @@ function createTestDb() {
       prompt TEXT NOT NULL DEFAULT '',
       schedule TEXT,
       runner TEXT NOT NULL DEFAULT 'pm2',
+      enabled INTEGER NOT NULL DEFAULT 1,
       created_at REAL NOT NULL,
       updated_at REAL NOT NULL
     );
@@ -33,10 +34,15 @@ describe('agents API', () => {
   let POST: any;
   let PATCH: any;
   let DELETE: any;
+  let installAgentScheduleMock: ReturnType<typeof vi.fn>;
+  let uninstallAgentScheduleMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
     testDb = createTestDb();
+
+    installAgentScheduleMock = vi.fn().mockResolvedValue(undefined);
+    uninstallAgentScheduleMock = vi.fn().mockResolvedValue(undefined);
 
     vi.doMock('@/lib/db', () => ({
       db: testDb.db,
@@ -65,14 +71,21 @@ describe('agents API', () => {
       },
     }));
 
+    vi.doMock('@/lib/agent-scheduler', () => ({
+      installAgentSchedule: installAgentScheduleMock,
+      uninstallAgentSchedule: uninstallAgentScheduleMock,
+    }));
+
     const agentsRoute = await import('@/app/api/agents/route');
     GET = agentsRoute.GET;
     POST = agentsRoute.POST;
+
+    const agentDetailRoute = await import('@/app/api/agents/[agentId]/route');
+    PATCH = agentDetailRoute.PATCH;
+    DELETE = agentDetailRoute.DELETE;
   });
 
   afterEach(() => {
-    vi.unmock('@/lib/db');
-    vi.unmock('@/lib/auth');
     vi.resetModules();
   });
 
@@ -273,6 +286,580 @@ describe('agents API', () => {
       // Verify response is valid
       expect(agentId).toBeTruthy();
       expect(data.agent).toBeTruthy();
+    });
+  });
+
+  describe('GET /agents/{agentId}', () => {
+    it('returns 404 for nonexistent agent', async () => {
+      const agentDetailRoute = await import('@/app/api/agents/[agentId]/route');
+      const agentGET = agentDetailRoute.GET;
+
+      const response = await agentGET(
+        new NextRequest('http://localhost/api/agents/nonexistent'),
+        { params: Promise.resolve({ agentId: 'nonexistent' }) }
+      );
+
+      expect(response.status).toBe(404);
+      const data = await response.json();
+      expect(data.detail).toBe('not found');
+    });
+
+    it('returns agent by ID', async () => {
+      const agentDetailRoute = await import('@/app/api/agents/[agentId]/route');
+      const agentGET = agentDetailRoute.GET;
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Test Agent',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: 'Do stuff',
+          schedule: '1h',
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const response = await agentGET(
+        new NextRequest('http://localhost/api/agents/agent-123'),
+        { params: Promise.resolve({ agentId: 'agent-123' }) }
+      );
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.agent.id).toBe('agent-123');
+      expect(data.agent.name).toBe('Test Agent');
+      expect(data.agent.project).toBe('proj1');
+    });
+  });
+
+  describe('PATCH /agents/{agentId}', () => {
+    it('returns 404 for nonexistent agent', async () => {
+      const request = new NextRequest('http://localhost/api/agents/nonexistent', {
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'Updated' }),
+      });
+
+      const response = await PATCH(request, {
+        params: Promise.resolve({ agentId: 'nonexistent' }),
+      });
+
+      expect(response.status).toBe(404);
+      const data = await response.json();
+      expect(data.detail).toBe('not found');
+    });
+
+    it('requires authentication when Z_API_TOKEN is set', async () => {
+      process.env.Z_API_TOKEN = 'secret-token';
+
+      const request = new NextRequest('http://localhost/api/agents/agent-1', {
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'Updated' }),
+      });
+
+      const response = await PATCH(request, {
+        params: Promise.resolve({ agentId: 'agent-1' }),
+      });
+
+      expect(response.status).toBe(401);
+      delete process.env.Z_API_TOKEN;
+    });
+
+    it('updates agent name', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Old Name',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: '',
+          schedule: null,
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const request = new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'New Name' }),
+      });
+
+      const response = await PATCH(request, {
+        params: Promise.resolve({ agentId: 'agent-123' }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.agent.name).toBe('New Name');
+    });
+
+    it('updates agent model and prompt', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Agent',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: 'old prompt',
+          schedule: null,
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const request = new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ model: 'opus', prompt: 'new prompt' }),
+      });
+
+      const response = await PATCH(request, {
+        params: Promise.resolve({ agentId: 'agent-123' }),
+      });
+
+      const data = await response.json();
+      expect(data.agent.model).toBe('opus');
+      expect(data.agent.prompt).toBe('new prompt');
+    });
+
+    it('updates skillIds as JSON array', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Agent',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: '',
+          schedule: null,
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const request = new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ skillIds: ['skill1', 'skill2'] }),
+      });
+
+      const response = await PATCH(request, {
+        params: Promise.resolve({ agentId: 'agent-123' }),
+      });
+
+      const data = await response.json();
+      expect(JSON.parse(data.agent.skillIds)).toEqual(['skill1', 'skill2']);
+    });
+
+    it('clears schedule when empty string provided', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Agent',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: 'do things',
+          schedule: '1h',
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const request = new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ schedule: '' }),
+      });
+
+      const response = await PATCH(request, {
+        params: Promise.resolve({ agentId: 'agent-123' }),
+      });
+
+      const data = await response.json();
+      expect(data.agent.schedule).toBeNull();
+    });
+
+    it('updates updatedAt timestamp', async () => {
+      const db = testDb.db;
+      const oldTime = Date.now() / 1000 - 100;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Agent',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: '',
+          schedule: null,
+          runner: 'pm2',
+          createdAt: oldTime,
+          updatedAt: oldTime,
+        })
+        .run();
+
+      const before = Date.now() / 1000;
+
+      const request = new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'Updated' }),
+      });
+
+      const response = await PATCH(request, {
+        params: Promise.resolve({ agentId: 'agent-123' }),
+      });
+
+      const data = await response.json();
+      expect(data.agent.updatedAt).toBeGreaterThanOrEqual(before);
+    });
+  });
+
+  describe('DELETE /agents/{agentId}', () => {
+    it('requires authentication when Z_API_TOKEN is set', async () => {
+      process.env.Z_API_TOKEN = 'secret-token';
+
+      const request = new NextRequest('http://localhost/api/agents/agent-1', {
+        method: 'DELETE',
+      });
+
+      const response = await DELETE(request, {
+        params: Promise.resolve({ agentId: 'agent-1' }),
+      });
+
+      expect(response.status).toBe(401);
+      delete process.env.Z_API_TOKEN;
+    });
+
+    it('deletes agent by ID', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Agent',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: '',
+          schedule: null,
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const request = new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'DELETE',
+      });
+
+      const response = await DELETE(request, {
+        params: Promise.resolve({ agentId: 'agent-123' }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.status).toBe('deleted');
+    });
+
+    it('returns success even if agent does not exist', async () => {
+      const request = new NextRequest('http://localhost/api/agents/nonexistent', {
+        method: 'DELETE',
+      });
+
+      const response = await DELETE(request, {
+        params: Promise.resolve({ agentId: 'nonexistent' }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.status).toBe('deleted');
+    });
+
+    it('agent is gone after delete', async () => {
+      const agentDetailRoute = await import('@/app/api/agents/[agentId]/route');
+      const agentGET = agentDetailRoute.GET;
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-del',
+          name: 'To Delete',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: '',
+          schedule: null,
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const deleteReq = new NextRequest('http://localhost/api/agents/agent-del', {
+        method: 'DELETE',
+      });
+      await DELETE(deleteReq, { params: Promise.resolve({ agentId: 'agent-del' }) });
+
+      const getResp = await agentGET(
+        new NextRequest('http://localhost/api/agents/agent-del'),
+        { params: Promise.resolve({ agentId: 'agent-del' }) }
+      );
+      expect(getResp.status).toBe(404);
+    });
+
+    it('calls uninstallAgentSchedule when deleting', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Agent',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: 'do work',
+          schedule: '1h',
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const request = new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'DELETE',
+      });
+      await DELETE(request, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+      expect(uninstallAgentScheduleMock).toHaveBeenCalledOnce();
+      expect(uninstallAgentScheduleMock).toHaveBeenCalledWith('agent-123', 'pm2', 'proj1', 'Agent');
+    });
+  });
+
+  describe('schedule installation', () => {
+    it('calls installAgentSchedule when creating agent with schedule and prompt', async () => {
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Scheduled Agent',
+          project: 'proj1',
+          schedule: '1h',
+          prompt: 'Do some work',
+        }),
+      });
+
+      const response = await POST(request);
+      expect(response.status).toBe(201);
+      const data = await response.json();
+
+      expect(installAgentScheduleMock).toHaveBeenCalledOnce();
+      expect(installAgentScheduleMock).toHaveBeenCalledWith(
+        data.agent.id,
+        '1h',
+        'Do some work',
+        'pm2',
+        'proj1',
+        'Scheduled Agent'
+      );
+    });
+
+    it('does not call installAgentSchedule when creating agent with schedule but no prompt', async () => {
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Agent', project: 'proj1', schedule: '1h' }),
+      });
+
+      await POST(request);
+      expect(installAgentScheduleMock).not.toHaveBeenCalled();
+    });
+
+    it('does not call installAgentSchedule when creating agent without schedule', async () => {
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Agent', project: 'proj1', prompt: 'Do work' }),
+      });
+
+      await POST(request);
+      expect(installAgentScheduleMock).not.toHaveBeenCalled();
+    });
+
+    it('calls installAgentSchedule when patching schedule on agent with prompt', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Agent',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: 'existing prompt',
+          schedule: null,
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const request = new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ schedule: '2h' }),
+      });
+
+      await PATCH(request, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+      expect(installAgentScheduleMock).toHaveBeenCalledOnce();
+      expect(installAgentScheduleMock).toHaveBeenCalledWith(
+        'agent-123',
+        '2h',
+        'existing prompt',
+        'pm2',
+        'proj1',
+        'Agent'
+      );
+    });
+
+    it('calls uninstallAgentSchedule when patching schedule to empty', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Agent',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: 'do work',
+          schedule: '1h',
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const request = new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ schedule: '' }),
+      });
+
+      await PATCH(request, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+      expect(uninstallAgentScheduleMock).toHaveBeenCalledOnce();
+      expect(uninstallAgentScheduleMock).toHaveBeenCalledWith('agent-123', 'pm2', 'proj1', 'Agent');
+    });
+
+    it('calls uninstallAgentSchedule when patching enabled to false', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Agent',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: 'do work',
+          schedule: '1h',
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const request = new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled: false }),
+      });
+
+      await PATCH(request, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+      expect(uninstallAgentScheduleMock).toHaveBeenCalledOnce();
+    });
+
+    it('calls installAgentSchedule when patching enabled to true on agent with schedule and prompt', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Agent',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: 'do work',
+          schedule: '1h',
+          runner: 'pm2',
+          enabled: false,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const request = new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled: true }),
+      });
+
+      await PATCH(request, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+      expect(installAgentScheduleMock).toHaveBeenCalledOnce();
+      expect(installAgentScheduleMock).toHaveBeenCalledWith(
+        'agent-123',
+        '1h',
+        'do work',
+        'pm2',
+        'proj1',
+        'Agent'
+      );
+    });
+
+    it('persists enabled field change in database', async () => {
+      const agentDetailRoute = await import('@/app/api/agents/[agentId]/route');
+      const agentGET = agentDetailRoute.GET;
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Agent',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: '',
+          schedule: null,
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const request = new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled: false }),
+      });
+
+      await PATCH(request, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+      const getResp = await agentGET(
+        new NextRequest('http://localhost/api/agents/agent-123'),
+        { params: Promise.resolve({ agentId: 'agent-123' }) }
+      );
+      const data = await getResp.json();
+      expect(data.agent.enabled).toBe(false);
     });
   });
 });

@@ -123,12 +123,16 @@ export async function fetchPersonas(): Promise<{ personas: Persona[] }> {
   return response.json()
 }
 
-export async function runProject(projectName: string, prompt: string, files?: File[], persona?: string): Promise<{ status: string; job_id: string; pid: number }> {
+export async function runProject(projectName: string, prompt: string, files?: File[], persona?: string, personas?: string[], model?: string, resumeSessionId?: string, contextMeta?: string): Promise<{ status: string; job_id: string; pid: number }> {
   let response: Response
   if ((files && files.length > 0) || persona) {
     const formData = new FormData()
     formData.append('prompt', prompt)
     if (persona) formData.append('persona', persona)
+    if (personas?.length) formData.append('personas', JSON.stringify(personas))
+    if (model) formData.append('model', model)
+    if (resumeSessionId) formData.append('resumeSessionId', resumeSessionId)
+    if (contextMeta) formData.append('contextMeta', contextMeta)
     if (files) {
       for (const file of files) {
         formData.append('files', file, file.name)
@@ -142,7 +146,7 @@ export async function runProject(projectName: string, prompt: string, files?: Fi
     response = await fetch(`${API_BASE}/by-project/${projectName}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, ...(personas?.length ? { personas } : {}), ...(model ? { model } : {}), ...(resumeSessionId ? { resumeSessionId } : {}), ...(contextMeta ? { contextMeta } : {}) }),
     })
   }
   if (!response.ok) {
@@ -272,6 +276,7 @@ export interface JobInfo {
   id: string
   project: string
   kind: string
+  prompt: string | null
   pid: number
   log_path: string
   status: 'running' | 'done'
@@ -281,6 +286,12 @@ export interface JobInfo {
   seen: boolean
   log?: string
   verdict?: 'LGTM' | 'NEEDS ATTENTION' | 'DO NOT SHIP'
+  duration_ms?: number | null
+  input_tokens?: number | null
+  output_tokens?: number | null
+  cache_read_tokens?: number | null
+  cache_create_tokens?: number | null
+  session_id?: string | null
 }
 
 export async function fetchJobs(project?: string): Promise<{ jobs: JobInfo[] }> {
@@ -446,6 +457,7 @@ export interface Agent {
   prompt: string
   schedule: string | null
   runner: string
+  enabled: boolean
   createdAt: number
   updatedAt: number
 }
@@ -476,7 +488,7 @@ export async function createAgent(agent: { name: string; project: string; skillI
   return response.json()
 }
 
-export async function updateAgent(agentId: string, updates: Partial<{ name: string; skillIds: string[]; model: string; prompt: string; schedule: string | null; runner: string }>): Promise<{ agent: Agent }> {
+export async function updateAgent(agentId: string, updates: Partial<{ name: string; skillIds: string[]; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean }>): Promise<{ agent: Agent }> {
   const response = await fetch(`/api/agents/${agentId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },

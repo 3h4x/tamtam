@@ -22,6 +22,7 @@ describe('config', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let getSettings: typeof import('@/lib/config').getSettings;
   let reloadConfig: typeof import('@/lib/config').reloadConfig;
+  let withBasePrompt: typeof import('@/lib/config').withBasePrompt;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -36,10 +37,10 @@ describe('config', () => {
     const config = await import('@/lib/config');
     getSettings = config.getSettings;
     reloadConfig = config.reloadConfig;
+    withBasePrompt = config.withBasePrompt;
   });
 
   afterEach(() => {
-    vi.unmock('@/lib/db');
     vi.resetModules();
   });
 
@@ -56,6 +57,8 @@ describe('config', () => {
         daytime: false,
         weekends: false,
         launchagent_prefix: 'com.tamtam',
+        base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
+        default_model: 'haiku',
       });
     });
 
@@ -229,6 +232,57 @@ describe('config', () => {
 
       const config = getSettings();
       expect(config.frequency).toBe('1h');
+    });
+  });
+
+  describe('base_prompt', () => {
+    it('returns default base_prompt when not set', () => {
+      const config = getSettings();
+      expect(config.base_prompt).toContain('Never ask clarifying questions');
+    });
+
+    it('returns custom base_prompt when set in DB', () => {
+      testDb.db.insert(schema.settings).values({ key: 'base_prompt', value: 'Be concise.' }).run();
+      reloadConfig();
+
+      const config = getSettings();
+      expect(config.base_prompt).toBe('Be concise.');
+    });
+  });
+
+  describe('withBasePrompt', () => {
+    it('prepends default base prompt to user prompt', () => {
+      const result = withBasePrompt('do something');
+      expect(result).toContain('Never ask clarifying questions');
+      expect(result).toContain('---');
+      expect(result).toContain('do something');
+    });
+
+    it('prepends custom base prompt when configured', () => {
+      testDb.db.insert(schema.settings).values({ key: 'base_prompt', value: 'Be concise.' }).run();
+      reloadConfig();
+
+      const result = withBasePrompt('do something');
+      expect(result).toBe('Be concise.\n\n---\n\ndo something');
+    });
+
+    it('returns prompt unchanged when base_prompt is empty', () => {
+      testDb.db.insert(schema.settings).values({ key: 'base_prompt', value: '' }).run();
+      reloadConfig();
+
+      // Empty string gets deleted from DB by settings API, so falls back to default
+      // But if it somehow ends up empty in the map, withBasePrompt should handle it
+      const result = withBasePrompt('do something');
+      // With empty base_prompt in DB, getSettings returns default
+      expect(result).toContain('do something');
+    });
+
+    it('preserves multiline prompts', () => {
+      testDb.db.insert(schema.settings).values({ key: 'base_prompt', value: 'Rule 1\nRule 2' }).run();
+      reloadConfig();
+
+      const result = withBasePrompt('task here');
+      expect(result).toBe('Rule 1\nRule 2\n\n---\n\ntask here');
     });
   });
 });

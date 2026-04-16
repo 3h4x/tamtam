@@ -19,6 +19,7 @@ sqlite.exec(`
     id TEXT PRIMARY KEY,
     project TEXT NOT NULL,
     kind TEXT NOT NULL,
+    prompt TEXT,
     pid INTEGER NOT NULL,
     log_path TEXT,
     started_at REAL NOT NULL,
@@ -76,6 +77,11 @@ try {
   // column already exists
 }
 
+// Migrate: add prompt column to jobs if missing
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN prompt TEXT');
+} catch {}
+
 // Migrate: add schedule, runner, prompt columns to agents if missing
 try {
   sqlite.exec('ALTER TABLE agents ADD COLUMN schedule TEXT');
@@ -85,6 +91,14 @@ try {
 } catch {}
 try {
   sqlite.exec("ALTER TABLE agents ADD COLUMN prompt TEXT NOT NULL DEFAULT ''");
+} catch {}
+
+// Migrate: add user_prompt and context_meta columns to jobs if missing
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN user_prompt TEXT');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN context_meta TEXT');
 } catch {}
 
 

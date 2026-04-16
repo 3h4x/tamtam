@@ -18,12 +18,21 @@ export const jobs = sqliteTable('jobs', {
   id: text('id').primaryKey(),
   project: text('project').notNull(),
   kind: text('kind').notNull(),
+  prompt: text('prompt'),
   pid: integer('pid').notNull(),
   logPath: text('log_path'),
   startedAt: real('started_at').notNull(),
   finishedAt: real('finished_at'),
   exitCode: integer('exit_code'),
   seen: integer('seen', { mode: 'boolean' }).default(false),
+  durationMs: integer('duration_ms'),
+  inputTokens: integer('input_tokens'),
+  outputTokens: integer('output_tokens'),
+  cacheReadTokens: integer('cache_read_tokens'),
+  cacheCreateTokens: integer('cache_create_tokens'),
+  sessionId: text('session_id'),
+  userPrompt: text('user_prompt'),
+  contextMeta: text('context_meta'),
 });
 
 export const skills = sqliteTable('skills', {
@@ -44,6 +53,7 @@ export const agents = sqliteTable('agents', {
   prompt: text('prompt').notNull().default(''),  // default task prompt for scheduled runs
   schedule: text('schedule'),  // e.g. "1h", "30m", "8h", null = manual only
   runner: text('runner').notNull().default('pm2'),  // "launchctl" or "pm2"
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
   createdAt: real('created_at').notNull(),
   updatedAt: real('updated_at').notNull(),
 });

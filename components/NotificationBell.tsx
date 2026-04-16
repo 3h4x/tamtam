@@ -38,7 +38,14 @@ export function NotificationBell() {
         ])
         setCount(notifs.count)
         const sorted = [...notifs.jobs].sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))
-        setFinishedJobs(sorted)
+        const seen = new Set<string>()
+        const deduped = sorted.filter(j => {
+          const key = `${j.project}:${j.kind}`
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+        setFinishedJobs(deduped)
         setRunningJobs(allJobs.jobs.filter(j => j.status === 'running'))
       } catch {
         // ignore
@@ -68,7 +75,11 @@ export function NotificationBell() {
     if (job.status === 'done') {
       markJobSeen(job.id).catch(() => {})
     }
-    router.push(`/project/${job.project}/jobs/${job.id}`)
+    if (job.kind === 'run') {
+      router.push(job.session_id ? `/project/${job.project}/experimental/${job.session_id}` : `/project/${job.project}/experimental`)
+    } else {
+      router.push(`/project/${job.project}/logs`)
+    }
   }
 
   const handleDismiss = async () => {

@@ -1,11 +1,37 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   parseFrequency,
   effectiveFreqMin,
   computeSchedule,
   parseCronTime,
   cronFiresStr,
+  resolveTargets,
+  writePriorityYaml,
+  writeProjectFieldYaml,
 } from '@/lib/scheduling';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import * as schema from '@/lib/db/schema';
+
+function createTestDb() {
+  const sqlite = new Database(':memory:');
+  sqlite.pragma('journal_mode = WAL');
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS projects (
+      name TEXT PRIMARY KEY,
+      path TEXT NOT NULL,
+      enabled INTEGER DEFAULT 0,
+      github TEXT,
+      priority TEXT,
+      custom_actions TEXT
+    );
+  `);
+  return { sqlite, db: drizzle(sqlite, { schema }) };
+}
 
 describe('parseFrequency', () => {
   it('parses minutes', () => {
@@ -96,5 +122,135 @@ describe('cronFiresStr', () => {
 
   it('shows Sunday schedule', () => {
     expect(cronFiresStr('30 10 * * 0')).toBe('Sun 10:30');
+  });
+});
+
+describe('resolveTargets', () => {
+  it('returns array with key if projectArg matches a key', () => {
+    const projects = {
+      'sched-1': { project: 'myproj', path: '/p', prompt: '', validate: false, persona: [], scheduler: null, github: null, priority: null, test_command: null },
+    };
+    expect(resolveTargets('sched-1', projects)).toEqual(['sched-1']);
+  });
+
+  it('returns matching keys by project name', () => {
+    const projects = {
+      'a': { project: 'shared', path: '/a', prompt: '', validate: false, persona: [], scheduler: null, github: null, priority: null, test_command: null },
+      'b': { project: 'shared', path: '/b', prompt: '', validate: false, persona: [], scheduler: null, github: null, priority: null, test_command: null },
+      'c': { project: 'other', path: '/c', prompt: '', validate: false, persona: [], scheduler: null, github: null, priority: null, test_command: null },
+    };
+    const result = resolveTargets('shared', projects);
+    expect(result).toEqual(['a', 'b']);
+  });
+
+  it('returns null when no match found', () => {
+    const projects = {
+      'a': { project: 'myproj', path: '/a', prompt: '', validate: false, persona: [], scheduler: null, github: null, priority: null, test_command: null },
+    };
+    expect(resolveTargets('nonexistent', projects)).toBeNull();
+  });
+
+  it('returns empty projects as null', () => {
+    expect(resolveTargets('anything', {})).toBeNull();
+  });
+});
+
+describe('writePriorityYaml', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/config', () => ({
+      getSettings: vi.fn().mockReturnValue({
+        workspace_path: '/workspace',
+        github_owner: '',
+        claude_bin: '~/.local/bin/claude',
+        log_dir: '~/logs',
+        frequency: '1h',
+        daytime: false,
+        weekends: false,
+        launchagent_prefix: 'com.tamtam',
+      }),
+    }));
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('returns false when project does not exist', async () => {
+    const { writePriorityYaml: fn } = await import('@/lib/scheduling');
+    expect(fn('nonexistent', null, 'high')).toBe(false);
+  });
+
+  it('updates priority for existing project', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { writePriorityYaml: fn } = await import('@/lib/scheduling');
+    expect(fn('proj1', null, 'high')).toBe(true);
+    const row = testDb.db.select().from(schema.projects).get();
+    expect(row?.priority).toBe('high');
+  });
+
+  it('clears priority when null is passed', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, priority: 'critical' }).run();
+    const { writePriorityYaml: fn } = await import('@/lib/scheduling');
+    fn('proj1', null, null);
+    const row = testDb.db.select().from(schema.projects).get();
+    expect(row?.priority).toBeNull();
+  });
+});
+
+describe('writeProjectFieldYaml', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/config', () => ({
+      getSettings: vi.fn().mockReturnValue({
+        workspace_path: '/workspace',
+        github_owner: '',
+        claude_bin: '~/.local/bin/claude',
+        log_dir: '~/logs',
+        frequency: '1h',
+        daytime: false,
+        weekends: false,
+        launchagent_prefix: 'com.tamtam',
+      }),
+    }));
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('returns false when project does not exist', async () => {
+    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling');
+    expect(fn('nonexistent', 'github', 'owner/repo')).toBe(false);
+  });
+
+  it('updates github field', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling');
+    expect(fn('proj1', 'github', 'owner/proj1')).toBe(true);
+    const row = testDb.db.select().from(schema.projects).get();
+    expect(row?.github).toBe('owner/proj1');
+  });
+
+  it('updates priority field', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling');
+    expect(fn('proj1', 'priority', 'critical')).toBe(true);
+    const row = testDb.db.select().from(schema.projects).get();
+    expect(row?.priority).toBe('critical');
+  });
+
+  it('returns true for unknown field (no-op)', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling');
+    expect(fn('proj1', 'unknown_field', 'value')).toBe(true);
   });
 });

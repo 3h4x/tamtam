@@ -53,8 +53,6 @@ describe('git-utils', () => {
   });
 
   afterEach(() => {
-    vi.unmock('os');
-    vi.unmock('@/lib/shell');
     vi.resetModules();
     rmSync(tempDir, { recursive: true, force: true });
     rmSync(cacheDir, { recursive: true, force: true });
