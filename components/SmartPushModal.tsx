@@ -196,8 +196,8 @@ export function SmartPushModal({ projectName, onClose, onSuccess }: SmartPushMod
                   </div>
                 )}
                 <div className="flex justify-end gap-2 pt-3 border-t border-border">
-                  <button className="action-btn" onClick={onClose}>Cancel</button>
-                  <button className="action-btn action-btn--primary" onClick={handleGenerate}>
+                  <button className="px-4 py-2 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer" onClick={onClose}>Cancel</button>
+                  <button className="px-4 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer" onClick={handleGenerate}>
                     Generate Commit Messages
                   </button>
                 </div>

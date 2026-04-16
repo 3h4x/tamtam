@@ -16,7 +16,7 @@ export interface CustomAction {
   color?: string;
 }
 
-export function getCustomActions(projectName: string): CustomAction[] {
+function getCustomActions(projectName: string): CustomAction[] {
   const row = db
     .select()
     .from(schema.projects)

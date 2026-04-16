@@ -181,7 +181,7 @@ export function RunModal({ projectName, onClose }: RunModalProps) {
                   </div>
                 ) : (
                   <button
-                    className="action-btn text-xs"
+                    className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
                     onClick={() => setShowPersonaPicker(!showPersonaPicker)}
                   >
                     {'\u{1F916}'} Pick persona

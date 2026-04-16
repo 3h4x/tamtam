@@ -38,8 +38,10 @@ Return ONLY ${numOptions} commit messages, one per line, numbered 1-${numOptions
 
     const { getImproveConfig } = await import('@/lib/scheduling');
     const { claudeBin } = getImproveConfig();
+    const { getSettings } = await import('@/lib/config');
+    const model = getSettings().default_model || 'sonnet';
 
-    const result = await exec(claudeBin, ['--print', '-p', commitPrompt], {
+    const result = await exec(claudeBin, ['--print', '--model', model, '-p', commitPrompt], {
       cwd: projPath,
       timeout: 60000,
     });
@@ -51,7 +53,7 @@ Return ONLY ${numOptions} commit messages, one per line, numbered 1-${numOptions
       .filter((l) => l.length > 0)
       .slice(0, numOptions);
 
-    return NextResponse.json({ options, model: 'claude', error: null });
+    return NextResponse.json({ options, model, error: null });
   } catch (e: any) {
     return NextResponse.json({ options: [], model: 'unknown', error: e.message });
   }

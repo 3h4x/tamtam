@@ -53,6 +53,7 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
   const termRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
   const esRef = useRef<EventSource | null>(null)
+  const currentJobIdRef = useRef<string | null>(null)
   const animFrameRef = useRef<number | null>(null)
   const lastTimeRef = useRef(0)
 
@@ -132,13 +133,19 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
         const data = await res.json()
         const entries: TermEntry[] = []
         const kind = data.kind || jobParam.split('-').slice(1, -1).join('-')
-        entries.push({ role: 'status', text: `${kind} — ${data.status || 'done'}` })
+        const isClaudeRun = data.kind === 'run'
+        entries.push({ role: 'status', text: kind })
         if (data.status === 'running' || data.finished_at === null) {
           setStreaming(true)
           setHistory(entries)
-          startStreaming(jobParam)
+          startStreaming(jobParam, !isClaudeRun)
         } else {
           if (data.log) entries.push({ role: 'assistant', text: data.log })
+          const exitCode = data.exit_code
+          if (exitCode !== undefined && exitCode !== null) {
+            const ok = exitCode === 0
+            entries.push({ role: ok ? 'status' : 'error', text: ok ? 'exit 0 — ok' : `exit ${exitCode}` })
+          }
           setHistory(entries)
         }
       } catch {}
@@ -288,8 +295,10 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
     return () => { esRef.current?.close() }
   }, [])
 
-  const startStreaming = useCallback((jobId: string) => {
-    const es = new EventSource(`/api/streaming/${jobId}`)
+  const startStreaming = useCallback((jobId: string, raw = false) => {
+    currentJobIdRef.current = jobId
+    const url = raw ? `/api/streaming/${jobId}?raw=1` : `/api/streaming/${jobId}`
+    const es = new EventSource(url)
     esRef.current = es
 
     es.onmessage = (event) => {
@@ -318,7 +327,12 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
       const newEntries: TermEntry[] = []
       if (thinking) newEntries.push({ role: 'thinking', text: thinking })
       if (buf) newEntries.push({ role: 'assistant', text: buf })
+      if (metadata.exitCode !== undefined && metadata.exitCode !== null) {
+        const ok = metadata.exitCode === 0
+        newEntries.push({ role: ok ? 'status' : 'error', text: ok ? 'exit 0 — ok' : `exit ${metadata.exitCode}` })
+      }
       setHistory(prev => [...prev, ...newEntries])
+      currentJobIdRef.current = null
       setStreamBuffer('')
       setThinkingBuffer('')
       setDisplayedLength(0)
@@ -339,6 +353,7 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
     es.onerror = () => {
       es.close()
       esRef.current = null
+      currentJobIdRef.current = null
       const buf = streamBufferRef.current
       const thinking = thinkingBufferRef.current
       streamBufferRef.current = ''
@@ -516,6 +531,32 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
     inputRef.current?.focus()
   }
 
+  const handleCancel = async () => {
+    const jobId = currentJobIdRef.current
+    if (!jobId) return
+    esRef.current?.close()
+    esRef.current = null
+    currentJobIdRef.current = null
+    try {
+      await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+    } catch {}
+    const buf = streamBufferRef.current
+    streamBufferRef.current = ''
+    thinkingBufferRef.current = ''
+    const entries: TermEntry[] = []
+    if (buf) entries.push({ role: 'assistant', text: buf })
+    entries.push({ role: 'error', text: 'cancelled' })
+    setHistory(prev => [...prev, ...entries])
+    setStreamBuffer('')
+    setThinkingBuffer('')
+    setDisplayedLength(0)
+    setStreaming(false)
+    messageQueueRef.current = []
+    setMessageQueue([])
+    pendingAutoSubmitRef.current = null
+    setTimeout(() => inputRef.current?.focus(), 50)
+  }
+
   const visibleStream = streamBuffer.slice(0, displayedLength)
 
   return (
@@ -552,6 +593,15 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
               {showSessions ? 'close' : 'sessions'}
             </button>
             {streaming && <span className="text-[11px] text-status-warning animate-pulse font-mono">streaming</span>}
+            {streaming && (
+              <button
+                className="text-[11px] px-2 py-1 h-[26px] rounded bg-status-error/20 text-status-error hover:bg-status-error/40 cursor-pointer border-none font-mono leading-none"
+                onClick={handleCancel}
+                title="Cancel execution"
+              >
+                cancel
+              </button>
+            )}
           </div>
 
           <div className="flex-1" />
