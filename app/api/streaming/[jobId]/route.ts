@@ -37,6 +37,8 @@ export async function GET(
         for (const event of events) {
           if (event.type === 'text') {
             controller.enqueue(encoder.encode(`data: ${event.text}\n\n`));
+          } else if (event.type === 'thinking') {
+            controller.enqueue(encoder.encode(`event: thinking\ndata: ${event.text}\n\n`));
           } else if (event.type === 'tool_use') {
             controller.enqueue(encoder.encode(`data: \n\n> Tool: ${event.name}\n\n`));
           } else if (event.type === 'tool_result') {

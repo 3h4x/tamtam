@@ -75,10 +75,10 @@ export function NotificationBell() {
     if (job.status === 'done') {
       markJobSeen(job.id).catch(() => {})
     }
-    if (job.kind === 'run') {
-      router.push(job.session_id ? `/project/${job.project}/experimental/${job.session_id}` : `/project/${job.project}/experimental`)
+    if (job.kind === 'run' && job.session_id) {
+      router.push(`/project/${job.project}/experimental/${job.session_id}`)
     } else {
-      router.push(`/project/${job.project}/logs`)
+      router.push(`/project/${job.project}/experimental?job=${encodeURIComponent(job.id)}`)
     }
   }
 
@@ -128,31 +128,24 @@ export function NotificationBell() {
           ) : (
             <div className="max-h-80 overflow-y-auto">
               {runningJobs.map((job) => (
-                <div
+                <button
                   key={job.id}
-                  className="flex items-center justify-between px-4 py-3 border-b border-border hover:bg-bg-secondary transition-colors"
+                  className="w-full flex items-center gap-3 px-4 py-3 border-b border-border hover:bg-bg-secondary transition-colors bg-transparent cursor-pointer text-left"
+                  onClick={() => handleJobClick(job)}
                 >
-                  <div className="flex items-center gap-3">
-                    <span className="text-accent">
-                      <span className="spinner-sm" />
-                    </span>
-                    <div className="flex flex-col gap-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-text-primary">{job.kind}</span>
-                        <span className="text-xs text-text-tertiary">{job.project}</span>
-                      </div>
-                      <div className="text-xs text-text-tertiary">
-                        <span>{formatElapsed(job.started_at)}</span>
-                      </div>
+                  <span className="text-accent">
+                    <span className="spinner-sm" />
+                  </span>
+                  <div className="flex flex-col gap-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-text-primary">{job.kind}</span>
+                      <span className="text-xs text-text-tertiary">{job.project}</span>
+                    </div>
+                    <div className="text-xs text-text-tertiary">
+                      <span>{formatElapsed(job.started_at)}</span>
                     </div>
                   </div>
-                  <button
-                    className="text-xs text-accent hover:text-accent-hover bg-transparent border-none cursor-pointer px-2 py-1"
-                    onClick={() => handleJobClick(job)}
-                  >
-                    View
-                  </button>
-                </div>
+                </button>
               ))}
               {finishedJobs.map((job) => {
                 const elapsed = job.finished_at && job.started_at
@@ -171,38 +164,31 @@ export function NotificationBell() {
                 const verdictClass = verdict === 'LGTM' ? 'text-status-success' : verdict === 'NEEDS ATTENTION' ? 'text-status-warning' : verdict === 'DO NOT SHIP' ? 'text-status-error' : ''
 
                 return (
-                  <div
+                  <button
                     key={job.id}
-                    className={`flex items-center justify-between px-4 py-3 border-b border-border hover:bg-bg-secondary transition-colors ${isSuccess ? 'border-l-2 border-l-status-success' : 'border-l-2 border-l-status-error'}`}
+                    className={`w-full flex items-center gap-3 px-4 py-3 border-b border-border hover:bg-bg-secondary transition-colors bg-transparent cursor-pointer text-left ${isSuccess ? 'border-l-2 border-l-status-success' : 'border-l-2 border-l-status-error'}`}
+                    onClick={() => handleJobClick(job)}
                   >
-                    <div className="flex items-center gap-3">
-                      <span className={`text-sm font-bold ${isSuccess ? 'text-status-success' : 'text-status-error'}`}>
-                        {isSuccess ? '\u2713' : '\u2717'}
-                      </span>
-                      <div className="flex flex-col gap-0.5">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-medium text-text-primary">{job.kind}</span>
-                          <span className="text-xs text-text-tertiary">{job.project}</span>
-                          {verdict && (
-                            <span className={`text-xs font-medium ${verdictClass}`}>
-                              {verdictIcon} {verdict}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-text-tertiary">
-                          {elapsedStr && <span>{elapsedStr}</span>}
-                          {!isSuccess && !verdict && <span className="text-status-error">exit {job.exit_code}</span>}
-                          {timeAgo && <span>{timeAgo}</span>}
-                        </div>
+                    <span className={`text-sm font-bold shrink-0 ${isSuccess ? 'text-status-success' : 'text-status-error'}`}>
+                      {isSuccess ? '\u2713' : '\u2717'}
+                    </span>
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium text-text-primary">{job.kind}</span>
+                        <span className="text-xs text-text-tertiary">{job.project}</span>
+                        {verdict && (
+                          <span className={`text-xs font-medium ${verdictClass}`}>
+                            {verdictIcon} {verdict}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-text-tertiary">
+                        {elapsedStr && <span>{elapsedStr}</span>}
+                        {!isSuccess && !verdict && <span className="text-status-error">exit {job.exit_code}</span>}
+                        {timeAgo && <span>{timeAgo}</span>}
                       </div>
                     </div>
-                    <button
-                      className="text-xs text-accent hover:text-accent-hover bg-transparent border-none cursor-pointer px-2 py-1"
-                      onClick={() => handleJobClick(job)}
-                    >
-                      View logs
-                    </button>
-                  </div>
+                  </button>
                 )
               })}
             </div>

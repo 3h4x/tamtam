@@ -29,6 +29,7 @@ export async function POST(
   let model = 'haiku';
   let resumeSessionId = '';
   let contextMeta = '';
+  let userPrompt = '';
   const ALLOWED_MODELS = ['haiku', 'sonnet', 'opus'];
 
   const contentType = request.headers.get('content-type') ?? '';
@@ -45,6 +46,8 @@ export async function POST(
     if (formResumeId) resumeSessionId = formResumeId;
     const formContextMeta = form.get('contextMeta') as string;
     if (formContextMeta) contextMeta = formContextMeta;
+    const formUserPrompt = form.get('userPrompt') as string;
+    if (formUserPrompt) userPrompt = formUserPrompt;
 
     const attachDir = join(logDir, 'attachments');
     mkdirSync(attachDir, { recursive: true });
@@ -68,6 +71,7 @@ export async function POST(
     if (bodyModel && ALLOWED_MODELS.includes(bodyModel)) model = bodyModel;
     if (body.resumeSessionId) resumeSessionId = body.resumeSessionId;
     if (body.contextMeta) contextMeta = body.contextMeta;
+    if (body.userPrompt) userPrompt = body.userPrompt;
   }
 
   if (!prompt.trim() && attachmentPaths.length === 0) {
@@ -99,7 +103,7 @@ export async function POST(
     prompt = withBasePrompt(prompt);
   }
 
-  const job = createJob(projectName, 'run', 0, '', prompt, contextMeta || undefined);
+  const job = createJob(projectName, 'run', 0, '', prompt, contextMeta || undefined, userPrompt || undefined);
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
 

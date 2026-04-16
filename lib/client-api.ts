@@ -123,7 +123,7 @@ export async function fetchPersonas(): Promise<{ personas: Persona[] }> {
   return response.json()
 }
 
-export async function runProject(projectName: string, prompt: string, files?: File[], persona?: string, personas?: string[], model?: string, resumeSessionId?: string, contextMeta?: string): Promise<{ status: string; job_id: string; pid: number }> {
+export async function runProject(projectName: string, prompt: string, files?: File[], persona?: string, personas?: string[], model?: string, resumeSessionId?: string, contextMeta?: string, userPrompt?: string): Promise<{ status: string; job_id: string; pid: number }> {
   let response: Response
   if ((files && files.length > 0) || persona) {
     const formData = new FormData()
@@ -133,6 +133,7 @@ export async function runProject(projectName: string, prompt: string, files?: Fi
     if (model) formData.append('model', model)
     if (resumeSessionId) formData.append('resumeSessionId', resumeSessionId)
     if (contextMeta) formData.append('contextMeta', contextMeta)
+    if (userPrompt) formData.append('userPrompt', userPrompt)
     if (files) {
       for (const file of files) {
         formData.append('files', file, file.name)
@@ -146,7 +147,7 @@ export async function runProject(projectName: string, prompt: string, files?: Fi
     response = await fetch(`${API_BASE}/by-project/${projectName}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, ...(personas?.length ? { personas } : {}), ...(model ? { model } : {}), ...(resumeSessionId ? { resumeSessionId } : {}), ...(contextMeta ? { contextMeta } : {}) }),
+      body: JSON.stringify({ prompt, ...(personas?.length ? { personas } : {}), ...(model ? { model } : {}), ...(resumeSessionId ? { resumeSessionId } : {}), ...(contextMeta ? { contextMeta } : {}), ...(userPrompt ? { userPrompt } : {}) }),
     })
   }
   if (!response.ok) {

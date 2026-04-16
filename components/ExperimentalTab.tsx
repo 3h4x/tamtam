@@ -1,12 +1,12 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { runProject, fetchSkills, fetchPersonas } from '@/lib/client-api'
 import type { Skill, Persona } from '@/lib/client-api'
 
 interface TermEntry {
-  role: 'user' | 'assistant' | 'status' | 'error'
+  role: 'user' | 'assistant' | 'status' | 'error' | 'thinking'
   text: string
   imageUrls?: string[]
 }
@@ -27,6 +27,8 @@ interface ExperimentalTabProps {
 
 export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalTabProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const jobParam = searchParams.get('job')
   const [input, setInput] = useState('')
   const [model, setModel] = useState<'haiku' | 'sonnet' | 'opus'>('haiku')
   const [history, setHistory] = useState<TermEntry[]>([])
@@ -34,6 +36,9 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
   const [streamBuffer, setStreamBuffer] = useState('')
   const streamBufferRef = useRef('')
   const [displayedLength, setDisplayedLength] = useState(0)
+  const [thinkingBuffer, setThinkingBuffer] = useState('')
+  const thinkingBufferRef = useRef('')
+  const [showThinking, setShowThinking] = useState(false)
   const [claudeSessionId, setClaudeSessionId] = useState<string | null>(initialSessionId ?? null)
   const [pendingImages, setPendingImages] = useState<File[]>([])
   const [pendingImageUrls, setPendingImageUrls] = useState<string[]>([])
@@ -103,17 +108,43 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
           const res = await fetch(`/api/jobs/${encodeURIComponent(match.id)}`)
           const jobData = await res.json()
           const entries: TermEntry[] = []
-          if (match.prompt) entries.push({ role: 'user', text: match.prompt })
+          const displayPrompt = match.user_prompt || match.prompt
+          if (displayPrompt) entries.push({ role: 'user', text: displayPrompt })
           if (jobData.log) entries.push({ role: 'assistant', text: jobData.log })
           setHistory(entries)
         } else {
           setStreaming(true)
-          if (match.prompt) setHistory([{ role: 'user', text: match.prompt }])
+          const displayPrompt = match.user_prompt || match.prompt
+          if (displayPrompt) setHistory([{ role: 'user', text: displayPrompt }])
           startStreaming(match.id)
         }
       })
       .catch(() => {})
   }, [initialSessionId])
+
+  // Load job output by job ID (e.g. from notification click for review/test jobs)
+  useEffect(() => {
+    if (!jobParam || initialSessionId) return
+    const loadJob = async () => {
+      try {
+        const res = await fetch(`/api/jobs/${encodeURIComponent(jobParam)}`)
+        if (!res.ok) return
+        const data = await res.json()
+        const entries: TermEntry[] = []
+        const kind = data.kind || jobParam.split('-').slice(1, -1).join('-')
+        entries.push({ role: 'status', text: `${kind} — ${data.status || 'done'}` })
+        if (data.status === 'running' || data.finished_at === null) {
+          setStreaming(true)
+          setHistory(entries)
+          startStreaming(jobParam)
+        } else {
+          if (data.log) entries.push({ role: 'assistant', text: data.log })
+          setHistory(entries)
+        }
+      } catch {}
+    }
+    loadJob()
+  }, [jobParam, initialSessionId])
 
   useEffect(() => {
     Promise.all([fetchSkills(), fetchPersonas()]).then(([skillsData, personasData]) => {
@@ -266,19 +297,30 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
       setStreamBuffer(streamBufferRef.current)
     }
 
+    es.addEventListener('thinking', (event) => {
+      thinkingBufferRef.current += (event as MessageEvent).data
+      setThinkingBuffer(thinkingBufferRef.current)
+    })
+
     es.addEventListener('done', (event) => {
       const metadata = JSON.parse((event as MessageEvent).data)
       es.close()
       esRef.current = null
       const buf = streamBufferRef.current
+      const thinking = thinkingBufferRef.current
       streamBufferRef.current = ''
+      thinkingBufferRef.current = ''
       const sid = metadata.sessionId || null
       setClaudeSessionId(sid)
       if (sid && !initialSessionId) {
         router.replace(`/project/${projectName}/experimental/${sid}`)
       }
-      setHistory(prev => [...prev, { role: 'assistant', text: buf }])
+      const newEntries: TermEntry[] = []
+      if (thinking) newEntries.push({ role: 'thinking', text: thinking })
+      if (buf) newEntries.push({ role: 'assistant', text: buf })
+      setHistory(prev => [...prev, ...newEntries])
       setStreamBuffer('')
+      setThinkingBuffer('')
       setDisplayedLength(0)
       setStreaming(false)
 
@@ -297,8 +339,17 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
     es.onerror = () => {
       es.close()
       esRef.current = null
-      setHistory(prev => [...prev, { role: 'error', text: 'Connection error' }])
+      const buf = streamBufferRef.current
+      const thinking = thinkingBufferRef.current
+      streamBufferRef.current = ''
+      thinkingBufferRef.current = ''
+      const newEntries: TermEntry[] = []
+      if (thinking) newEntries.push({ role: 'thinking', text: thinking })
+      if (buf) newEntries.push({ role: 'assistant', text: buf })
+      if (newEntries.length === 0) newEntries.push({ role: 'error', text: 'Connection error' })
+      setHistory(prev => [...prev, ...newEntries])
       setStreamBuffer('')
+      setThinkingBuffer('')
       setDisplayedLength(0)
       setStreaming(false)
       // Drop queue on error — don't auto-submit after a failed run
@@ -340,7 +391,9 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
     setHistory(prev => [...prev, { role: 'user', text, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }])
     setStreaming(true)
     streamBufferRef.current = ''
+    thinkingBufferRef.current = ''
     setStreamBuffer('')
+    setThinkingBuffer('')
     setDisplayedLength(0)
 
     try {
@@ -377,7 +430,8 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
         personaPaths.length > 0 ? personaPaths : undefined,
         model,
         claudeSessionId || undefined,
-        contextMetaStr
+        contextMetaStr,
+        text
       )
       startStreaming(result.job_id)
     } catch (err) {
@@ -397,7 +451,7 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
         .slice(0, 100)
       setSessions(jobs.map((j: any) => ({
         id: j.id,
-        prompt: j.prompt,
+        prompt: j.user_prompt || j.prompt,
         startedAt: j.started_at,
         finishedAt: j.finished_at,
         sessionId: j.session_id,
@@ -449,7 +503,9 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
     setClaudeSessionId(null)
     setHistory([])
     streamBufferRef.current = ''
+    thinkingBufferRef.current = ''
     setStreamBuffer('')
+    setThinkingBuffer('')
     setDisplayedLength(0)
     setStreaming(false)
     setSelectedDocs([])
@@ -479,24 +535,35 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
 
         {/* Terminal header */}
         <div className="flex items-center gap-2 px-3 py-2 bg-[#1a1a1a] border-b border-[#2a2a2a] shrink-0">
+          {/* Left: session controls */}
           <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-[#ff5f57] cursor-pointer" title="New session" onClick={handleNewSession} />
-            <span className="w-3 h-3 rounded-full bg-[#febc2e]" />
-            <span className="w-3 h-3 rounded-full bg-[#28c840]" />
-          </div>
-          <span className="flex-1 text-center text-xs text-[#888] font-mono">
-            claude — {projectName} — {model}
-            {streaming && <span className="ml-2 text-status-warning animate-pulse">streaming</span>}
-          </span>
-
-          {/* Controls */}
-          <div className="flex items-center gap-1.5">
+            <button
+              className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-[#888] hover:text-[#ccc] cursor-pointer border-none font-mono leading-none"
+              onClick={handleNewSession}
+              title="New session"
+            >
+              new
+            </button>
             <button
               className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-[#888] hover:text-[#ccc] cursor-pointer border-none font-mono leading-none"
               onClick={() => { if (!showSessions) loadSessions(); setShowSessions(s => !s) }}
               title="Previous sessions"
             >
               {showSessions ? 'close' : 'sessions'}
+            </button>
+            {streaming && <span className="text-[11px] text-status-warning animate-pulse font-mono">streaming</span>}
+          </div>
+
+          <div className="flex-1" />
+
+          {/* Right: context & config */}
+          <div className="flex items-center gap-1.5">
+            <button
+              className={`text-[11px] px-2 py-1 h-[26px] rounded cursor-pointer border-none font-mono leading-none ${showThinking ? 'bg-accent/20 text-accent' : 'bg-[#252525] text-[#888] hover:text-[#ccc]'}`}
+              onClick={() => setShowThinking(s => !s)}
+              title="Toggle thinking blocks"
+            >
+              thinking
             </button>
             {selectedItems.map(item => (
               <span key={item.id} className="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent font-mono">
@@ -658,6 +725,14 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
           className="flex-1 overflow-y-auto font-mono text-sm flex flex-col"
         >
           {history.map((entry, i) => (
+            entry.role === 'thinking' ? (
+              showThinking && (
+                <div key={i} className="px-4 py-2 border-l-2 border-[#444] ml-4 mr-4 my-1">
+                  <div className="text-[10px] text-[#666] mb-1 uppercase tracking-wider">thinking</div>
+                  <div className="text-[#888] text-xs whitespace-pre-wrap">{entry.text}</div>
+                </div>
+              )
+            ) : (
             <div
               key={i}
               className={`px-4 py-2 whitespace-pre-wrap ${
@@ -677,7 +752,16 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
                 </div>
               )}
             </div>
+            )
           ))}
+
+          {/* Live thinking block during streaming */}
+          {streaming && showThinking && thinkingBuffer && (
+            <div className="px-4 py-2 border-l-2 border-[#444] ml-4 mr-4 my-1">
+              <div className="text-[10px] text-[#666] mb-1 uppercase tracking-wider">thinking</div>
+              <div className="text-[#888] text-xs whitespace-pre-wrap">{thinkingBuffer}</div>
+            </div>
+          )}
 
           {streaming && visibleStream && (
             <div className="px-4 py-2 text-[#e0e0e0] whitespace-pre-wrap">

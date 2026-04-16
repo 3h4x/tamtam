@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { reviewProject, testProject, fixCi, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
@@ -13,7 +13,7 @@ import { AgentsTab } from '@/components/AgentsTab'
 import { ProjectRunsTab } from '@/components/ProjectRunsTab'
 import { useToast } from '@/components/Toast'
 
-type Tab = 'overview' | 'config' | 'logs' | 'experimental'
+type Tab = 'overview' | 'config' | 'history' | 'experimental'
 
 interface ProjectDetailPageProps {
   fleet: FleetHealth
@@ -38,7 +38,7 @@ export function ProjectDetailPage({
   const name = params.name
   const router = useRouter()
   const { toast } = useToast()
-  const VALID_TABS: Tab[] = ['overview', 'config', 'logs', 'experimental']
+  const VALID_TABS: Tab[] = ['overview', 'config', 'history', 'experimental']
   const activeTab: Tab = params.sessionId
     ? 'experimental'
     : VALID_TABS.includes(params.tab as Tab) ? (params.tab as Tab) : 'overview'
@@ -94,7 +94,7 @@ export function ProjectDetailPage({
     try {
       const result = await runCustomAction(name, actionName)
       toast(`${actionName} started for ${name}`, 'success')
-      router.push(`/project/${name}/jobs/${result.job_id}`)
+      router.push(`/project/${name}/experimental?job=${encodeURIComponent(result.job_id)}`)
     } catch (err) {
       toast(err instanceof Error ? err.message : `Failed to run ${actionName}`, 'error')
     } finally {
@@ -190,7 +190,7 @@ export function ProjectDetailPage({
     setTestError(null)
     try {
       const result = await testProject(name)
-      router.push(`/project/${name}/jobs/${result.job_id}`)
+      router.push(`/project/${name}/experimental?job=${encodeURIComponent(result.job_id)}`)
     } catch (err) {
       setTestError(err instanceof Error ? err.message : 'Failed to start tests')
     }
@@ -203,7 +203,7 @@ export function ProjectDetailPage({
     setFixCiResult(null)
     try {
       const result = await fixCi(name)
-      router.push(`/project/${name}/jobs/${result.job_id}`)
+      router.push(`/project/${name}/experimental?job=${encodeURIComponent(result.job_id)}`)
     } catch (err) {
       setFixCiResult(err instanceof Error ? err.message : 'Failed to start CI fix')
       setFixingCi(false)
@@ -418,10 +418,10 @@ export function ProjectDetailPage({
           Experimental
         </button>
         <button
-          className={`px-3 py-1.5 text-sm cursor-pointer ${activeTab === 'logs' ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`}
-          onClick={() => setActiveTab('logs')}
+          className={`px-3 py-1.5 text-sm cursor-pointer ${activeTab === 'history' ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`}
+          onClick={() => setActiveTab('history')}
         >
-          Runs
+          History
         </button>
         <button
           className={`px-3 py-1.5 text-sm cursor-pointer ${activeTab === 'config' ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`}
@@ -463,7 +463,7 @@ export function ProjectDetailPage({
                   {latestReview && (
                     <button
                       className="px-2 py-0.5 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
-                      onClick={() => router.push(`/project/${name}/jobs/${latestReview.id}`)}
+                      onClick={() => router.push(`/project/${name}/experimental?job=${encodeURIComponent(latestReview.id)}`)}
                     >
                       View
                     </button>
@@ -485,7 +485,7 @@ export function ProjectDetailPage({
                   {latestTest && (
                     <button
                       className="px-2 py-0.5 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
-                      onClick={() => router.push(`/project/${name}/jobs/${latestTest.id}`)}
+                      onClick={() => router.push(`/project/${name}/experimental?job=${encodeURIComponent(latestTest.id)}`)}
                     >
                       View
                     </button>
@@ -630,13 +630,15 @@ export function ProjectDetailPage({
       )}
 
       {/* Runs Tab */}
-      {activeTab === 'logs' && name && (
+      {activeTab === 'history' && name && (
         <ProjectRunsTab projectName={name} />
       )}
 
       {/* Experimental Tab */}
       {activeTab === 'experimental' && name && (
-        <ExperimentalTab projectName={name} initialSessionId={params.sessionId} />
+        <Suspense fallback={null}>
+          <ExperimentalTab projectName={name} initialSessionId={params.sessionId} />
+        </Suspense>
       )}
 
       {showPushModal && name && (

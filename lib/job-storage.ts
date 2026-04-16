@@ -23,6 +23,7 @@ export interface JobData {
   cacheCreateTokens?: number | null;
   sessionId?: string | null;
   contextMeta?: string | null;
+  userPrompt?: string | null;
 }
 
 const jobsCache = new Map<string, JobData>();
@@ -51,6 +52,7 @@ function loadFromDb(): void {
         cacheCreateTokens: row.cacheCreateTokens ?? null,
         sessionId: row.sessionId ?? null,
         contextMeta: row.contextMeta ?? null,
+        userPrompt: row.userPrompt ?? null,
       });
     }
     loaded = true;
@@ -80,6 +82,7 @@ function saveToDb(job: JobData): void {
         cacheCreateTokens: job.cacheCreateTokens,
         sessionId: job.sessionId,
         contextMeta: job.contextMeta,
+        userPrompt: job.userPrompt,
       })
       .onConflictDoUpdate({
         target: schema.jobs.id,
@@ -96,6 +99,7 @@ function saveToDb(job: JobData): void {
           cacheCreateTokens: job.cacheCreateTokens,
           sessionId: job.sessionId,
           contextMeta: job.contextMeta,
+          userPrompt: job.userPrompt,
         },
       })
       .run();
@@ -216,6 +220,7 @@ export function jobToDict(job: JobData): Record<string, any> {
     cache_create_tokens: job.cacheCreateTokens,
     session_id: job.sessionId,
     context_meta: job.contextMeta ?? null,
+    user_prompt: job.userPrompt ?? null,
   };
   const verdict = getVerdict(job);
   if (verdict !== null) d.verdict = verdict;
@@ -250,7 +255,8 @@ export function createJob(
   pid: number,
   logPath: string,
   prompt?: string,
-  contextMeta?: string
+  contextMeta?: string,
+  userPrompt?: string
 ): JobData {
   loadFromDb();
   let timestamp = Math.floor(Date.now() * 1000);
@@ -277,6 +283,7 @@ export function createJob(
     cacheCreateTokens: null,
     sessionId: null,
     contextMeta: contextMeta ?? null,
+    userPrompt: userPrompt ?? null,
   };
   jobsCache.set(jobId, job);
   saveToDb(job);
@@ -310,6 +317,8 @@ export function getJob(jobId: string): JobData | null {
     cacheReadTokens: row.cacheReadTokens ?? null,
     cacheCreateTokens: row.cacheCreateTokens ?? null,
     sessionId: row.sessionId ?? null,
+    contextMeta: row.contextMeta ?? null,
+    userPrompt: row.userPrompt ?? null,
   };
   jobsCache.set(jobId, job);
   return job;

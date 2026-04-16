@@ -101,7 +101,7 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
                 <tr
                   key={job.id}
                   className="border-t border-border hover:bg-bg-secondary/50 cursor-pointer"
-                  onClick={() => router.push(job.kind === 'run' ? (job.session_id ? `/project/${projectName}/experimental/${job.session_id}` : `/project/${projectName}/experimental`) : `/project/${projectName}/jobs/${job.id}`)}
+                  onClick={() => router.push(job.kind === 'run' ? (job.session_id ? `/project/${projectName}/experimental/${job.session_id}` : `/project/${projectName}/experimental`) : `/project/${projectName}/experimental?job=${encodeURIComponent(job.id)}`)}
                 >
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${isRunning ? 'bg-status-warning/15 text-status-warning' : isFailed ? 'bg-status-error/15 text-status-error' : 'bg-status-success/15 text-status-success'}`}>

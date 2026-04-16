@@ -1,5 +1,6 @@
 export type ParsedEvent =
   | { type: 'text'; text: string }
+  | { type: 'thinking'; text: string }
   | { type: 'tool_use'; name: string; input: string }
   | { type: 'tool_result'; content: string }
   | { type: 'done'; result: { duration: number; sessionId: string; error: boolean; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreateTokens: number } };
@@ -23,6 +24,14 @@ export function parseStreamLines(content: string): ParsedEvent[] {
 
     if (parsed.type === 'stream_event') {
       const evt = parsed.event;
+
+      // Thinking deltas
+      if (
+        evt?.type === 'content_block_delta' &&
+        evt?.delta?.type === 'thinking_delta'
+      ) {
+        events.push({ type: 'thinking', text: evt.delta.thinking });
+      }
 
       // Text deltas from assistant
       if (

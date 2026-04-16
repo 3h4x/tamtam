@@ -8,6 +8,24 @@ describe('claude-stream-parser', () => {
     expect(events).toEqual([{ type: 'text', text: 'Hello' }]);
   });
 
+  it('extracts thinking from thinking_delta', () => {
+    const line = '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think about this"}},"session_id":"abc"}';
+    const events = parseStreamLines(line);
+    expect(events).toEqual([{ type: 'thinking', text: 'Let me think about this' }]);
+  });
+
+  it('separates thinking and text events', () => {
+    const lines = [
+      '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hmm"}}}',
+      '{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hello"}}}',
+    ].join('\n');
+    const events = parseStreamLines(lines);
+    expect(events).toEqual([
+      { type: 'thinking', text: 'hmm' },
+      { type: 'text', text: 'Hello' },
+    ]);
+  });
+
   it('extracts done from result event with token usage', () => {
     const line = '{"type":"result","subtype":"success","is_error":false,"duration_ms":2393,"total_cost_usd":0.156,"session_id":"abc-123","result":"Hello world","modelUsage":{"claude-sonnet-4-6":{"inputTokens":100,"outputTokens":500,"cacheReadInputTokens":1000,"cacheCreationInputTokens":200}}}';
     const events = parseStreamLines(line);
@@ -93,10 +111,10 @@ describe('claude-stream-parser', () => {
     expect(texts).toEqual(['First', '\n', 'Second']);
   });
 
-  it('ignores thinking deltas', () => {
+  it('parses thinking deltas', () => {
     const line = '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hmm"}}}';
     const events = parseStreamLines(line);
-    expect(events).toEqual([]);
+    expect(events).toEqual([{ type: 'thinking', text: 'hmm' }]);
   });
 
   it('ignores assistant message events', () => {

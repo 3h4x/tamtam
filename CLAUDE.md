@@ -47,7 +47,7 @@ Next.js monolith (App Router) for managing Claude CLI agents across multiple pro
 - `/` — Projects list with status, changes, CI
 - `/project/[name]` — Project overview with agents, status bar (changes/review/tests)
 - `/project/[name]/config` — Test command + custom actions editor (name, command, color)
-- `/project/[name]/logs` — Project runs with filter tabs (all/running/failed/done)
+- `/project/[name]/history` — Project runs with filter tabs (all/running/failed/done)
 - `/project/[name]/experimental` — Interactive Claude runner with model selector (haiku/sonnet/opus), skill picker, and real-time token streaming via SSE (see `docs/streaming.md`)
 - `/jobs` — All runs across projects
 - `/skills` — Skill editor (CRUD for DB-backed skills)
