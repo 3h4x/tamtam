@@ -30,6 +30,9 @@ const STATUS_COLOR: Record<string, string> = {
   R: 'text-status-info',
 }
 
+const BTN_SECONDARY = 'px-4 py-2 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer'
+const BTN_PRIMARY = 'px-4 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer'
+
 const COMMIT_EMOJI: Record<string, string> = {
   'feat:': '\u{2728}',
   'fix:': '\u{1F41B}',
@@ -171,7 +174,7 @@ export function SmartPushModal({ projectName, onClose, onSuccess }: SmartPushMod
             ) : files.length === 0 ? (
               <div className="text-center py-6">
                 <p>No changes to push.</p>
-                <button className="action-btn" onClick={onClose}>Close</button>
+                <button className={BTN_SECONDARY} onClick={onClose}>Close</button>
               </div>
             ) : (
               <>
@@ -196,8 +199,8 @@ export function SmartPushModal({ projectName, onClose, onSuccess }: SmartPushMod
                   </div>
                 )}
                 <div className="flex justify-end gap-2 pt-3 border-t border-border">
-                  <button className="px-4 py-2 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer" onClick={onClose}>Cancel</button>
-                  <button className="px-4 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer" onClick={handleGenerate}>
+                  <button className={BTN_SECONDARY} onClick={onClose}>Cancel</button>
+                  <button className={BTN_PRIMARY} onClick={handleGenerate}>
                     Generate Commit Messages
                   </button>
                 </div>
@@ -270,11 +273,11 @@ export function SmartPushModal({ projectName, onClose, onSuccess }: SmartPushMod
                 />
               </label>
               <div className="flex justify-end gap-2 pt-3 border-t border-border">
-                <button className="action-btn" onClick={() => { setStep('preview'); setError(null) }}>
+                <button className={BTN_SECONDARY} onClick={() => { setStep('preview'); setError(null) }}>
                   Back
                 </button>
                 <button
-                  className="action-btn action-btn--primary"
+                  className={BTN_PRIMARY}
                   onClick={handleExecute}
                   disabled={!selectedMessage}
                 >
@@ -310,9 +313,9 @@ export function SmartPushModal({ projectName, onClose, onSuccess }: SmartPushMod
             <div className="text-center py-6">
               <p className="text-status-error">{error}</p>
               <div className="flex justify-end gap-2 pt-3 border-t border-border">
-                <button className="action-btn" onClick={onClose}>Close</button>
+                <button className={BTN_SECONDARY} onClick={onClose}>Close</button>
                 <button
-                  className="action-btn"
+                  className={BTN_SECONDARY}
                   onClick={() => { setStep('preview'); setError(null) }}
                 >
                   Retry

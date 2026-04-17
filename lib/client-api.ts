@@ -238,6 +238,50 @@ export async function executeSmartPush(projectName: string, message: string): Pr
   return response.json()
 }
 
+// Changes API
+export type ChangeStatus = 'M' | 'A' | 'D' | 'R' | 'C' | 'U' | 'T'
+
+export interface ChangeFile {
+  status: ChangeStatus
+  filename: string
+  additions: number
+  deletions: number
+  binary: boolean
+}
+
+export interface ChangesResponse {
+  files: ChangeFile[]
+  totalFiles: number
+  totalAdditions: number
+  totalDeletions: number
+  branch: string | null
+}
+
+export async function fetchChanges(projectName: string): Promise<ChangesResponse> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/changes`)
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || `Failed to fetch changes: ${response.statusText}`)
+  }
+  return response.json()
+}
+
+export interface ChangeDiffResponse {
+  diff: string
+  untracked: boolean
+}
+
+export async function fetchChangeDiff(projectName: string, filename: string): Promise<ChangeDiffResponse> {
+  const response = await fetch(
+    `${API_BASE}/by-project/${projectName}/changes/diff?file=${encodeURIComponent(filename)}`
+  )
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || `Failed to fetch diff: ${response.statusText}`)
+  }
+  return response.json()
+}
+
 // Project Config API
 export interface ProjectConfig {
   project: string

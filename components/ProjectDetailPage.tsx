@@ -11,9 +11,10 @@ import { RunModal } from '@/components/RunModal'
 import { TerminalTab } from '@/components/TerminalTab'
 import { AgentsTab } from '@/components/AgentsTab'
 import { ProjectRunsTab } from '@/components/ProjectRunsTab'
+import { ChangesTab } from '@/components/ChangesTab'
 import { useToast } from '@/components/Toast'
 
-type Tab = 'overview' | 'config' | 'history' | 'terminal'
+type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes'
 
 interface ProjectDetailPageProps {
   fleet: FleetHealth
@@ -38,7 +39,7 @@ export function ProjectDetailPage({
   const name = params.name
   const router = useRouter()
   const { toast } = useToast()
-  const VALID_TABS: Tab[] = ['overview', 'config', 'history', 'terminal']
+  const VALID_TABS: Tab[] = ['overview', 'config', 'history', 'terminal', 'changes']
   const activeTab: Tab = params.sessionId
     ? 'terminal'
     : VALID_TABS.includes(params.tab as Tab) ? (params.tab as Tab) : 'overview'
@@ -418,6 +419,17 @@ export function ProjectDetailPage({
           Terminal
         </button>
         <button
+          className={`px-3 py-1.5 text-sm cursor-pointer ${activeTab === 'changes' ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`}
+          onClick={() => setActiveTab('changes')}
+        >
+          Changes
+          {project.totalChanges > 0 && (
+            <span className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full bg-accent-light text-accent font-medium">
+              {project.totalChanges}
+            </span>
+          )}
+        </button>
+        <button
           className={`px-3 py-1.5 text-sm cursor-pointer ${activeTab === 'history' ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`}
           onClick={() => setActiveTab('history')}
         >
@@ -627,6 +639,10 @@ export function ProjectDetailPage({
             <div className="text-text-secondary text-sm">Failed to load configuration</div>
           )}
         </div>
+      )}
+
+      {activeTab === 'changes' && name && (
+        <ChangesTab projectName={name} />
       )}
 
       {/* Runs Tab */}
