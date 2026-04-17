@@ -123,6 +123,12 @@ export async function GET(
         return;
       }
 
+      // If log file doesn't exist yet and no job record, nothing to watch — close.
+      if (!existsSync(logPath) && !jobRecord) {
+        try { controller.close(); } catch {}
+        return;
+      }
+
       // Watch for new content
       let watcher: ReturnType<typeof watch> | null = null;
       try {

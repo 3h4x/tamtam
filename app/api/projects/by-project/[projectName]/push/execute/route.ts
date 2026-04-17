@@ -20,13 +20,20 @@ export async function POST(
   await exec('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
 
   const statusR = await exec('git', ['-C', projPath, 'diff', '--cached', '--name-status'], { timeout: 10000 });
-  if (!statusR.stdout.trim()) {
-    return NextResponse.json({ status: 'success', message: 'No changes to push', commit_sha: '' });
-  }
+  const hasStaged = !!statusR.stdout.trim();
 
-  const commitR = await exec('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 });
-  if (commitR.exitCode !== 0 && !commitR.stdout.includes('nothing to commit')) {
-    return NextResponse.json({ detail: `Commit failed: ${commitR.stderr.trim()}` }, { status: 400 });
+  if (hasStaged) {
+    const commitR = await exec('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 });
+    if (commitR.exitCode !== 0 && !commitR.stdout.includes('nothing to commit')) {
+      return NextResponse.json({ detail: `Commit failed: ${commitR.stderr.trim()}` }, { status: 400 });
+    }
+  } else {
+    // Nothing staged — but maybe there are unpushed local commits. Check ahead-count.
+    const aheadR = await exec('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
+    const ahead = parseInt(aheadR.stdout.trim(), 10);
+    if (!aheadR.stdout.trim() || aheadR.exitCode !== 0 || isNaN(ahead) || ahead === 0) {
+      return NextResponse.json({ status: 'success', message: 'No changes to push', commit_sha: '' });
+    }
   }
 
   let pushR = await exec('git', ['-C', projPath, 'push'], { timeout: 30000 });
