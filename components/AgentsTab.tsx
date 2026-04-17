@@ -73,7 +73,7 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
     try {
       const result = await runAgent(agent.id, prompt)
       toast(`Agent ${agent.name} started`, 'success')
-      router.push(`/project/${projectName}/experimental?job=${encodeURIComponent(result.job_id)}`)
+      router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(result.job_id)}`)
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to run agent', 'error')
     } finally {

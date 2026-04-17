@@ -82,7 +82,7 @@ const FIELDS: Record<keyof SettingsMap, FieldDef> = {
   },
   default_model: {
     label: 'Default Model',
-    help: 'Model used in the experimental runner (remembered per-use)',
+    help: 'Model used in the terminal runner (remembered per-use)',
     group: 'behavior',
   },
 }

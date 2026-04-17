@@ -152,6 +152,65 @@ describe('GET /api/streaming/[jobId]', () => {
     expect(combined).toContain('"duration":1234');
   });
 
+  it('sends thinking events as named SSE event', async () => {
+    const logFile = join(tempDir, 'thinking.log');
+    const thinkingLine =
+      '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me consider this"}}}';
+    writeFileSync(logFile, thinkingLine + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-1', {
+      signal: ac.signal,
+    });
+
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    expect(combined).toContain('event: thinking');
+    expect(combined).toContain('data: Let me consider this');
+  });
+
+  it('preserves newlines in text via multi-line SSE data encoding', async () => {
+    const logFile = join(tempDir, 'multiline.log');
+    const line1 = '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"line1\\nline2\\nline3"}}}';
+    writeFileSync(logFile, line1 + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-1', {
+      signal: ac.signal,
+    });
+
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    // Multi-line SSE: each line gets its own "data:" prefix
+    expect(combined).toContain('data: line1\ndata: line2\ndata: line3');
+  });
+
+  it('sends tool_use events with newlines preserved', async () => {
+    const logFile = join(tempDir, 'tool.log');
+    const toolStart = '{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"t1","name":"Read","input":{}}}}';
+    const toolStop = '{"type":"stream_event","event":{"type":"content_block_stop","index":1}}';
+    writeFileSync(logFile, toolStart + '\n' + toolStop + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-1', {
+      signal: ac.signal,
+    });
+
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    expect(combined).toContain('event: tool_use');
+    expect(combined).toContain('"name":"Read"');
+  });
+
   it('uses fallback path from homedir when job has no logPath', async () => {
     getJobMock.mockReturnValue(null);
 

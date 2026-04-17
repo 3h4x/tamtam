@@ -88,6 +88,15 @@ export function parseStreamLines(content: string): ParsedEvent[] {
       }
     }
 
+    // Tool results from user message events (Write, Edit, Bash, etc.)
+    if (parsed.type === 'user' && parsed.message?.content) {
+      for (const block of Array.isArray(parsed.message.content) ? parsed.message.content : []) {
+        if (block.type === 'tool_result' && block.content) {
+          events.push({ type: 'tool_result', content: typeof block.content === 'string' ? block.content : JSON.stringify(block.content) });
+        }
+      }
+    }
+
     // Final result — extract token usage from modelUsage
     if (parsed.type === 'result') {
       let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheCreateTokens = 0;

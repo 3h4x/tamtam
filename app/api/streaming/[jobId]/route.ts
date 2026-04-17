@@ -45,12 +45,9 @@ export async function GET(
           } else if (event.type === 'thinking') {
             controller.enqueue(encoder.encode(sseEncode(event.text, 'thinking')));
           } else if (event.type === 'tool_use') {
-            controller.enqueue(encoder.encode(sseEncode(`\n> Tool: ${event.name}\n`)));
+            controller.enqueue(encoder.encode(sseEncode(JSON.stringify({ name: event.name, input: event.input }), 'tool_use')));
           } else if (event.type === 'tool_result') {
-            const truncated = event.content.length > 500
-              ? event.content.slice(0, 500) + '...'
-              : event.content;
-            controller.enqueue(encoder.encode(sseEncode(truncated)));
+            controller.enqueue(encoder.encode(sseEncode(JSON.stringify({ content: event.content }), 'tool_result')));
           } else if (event.type === 'done') {
             controller.enqueue(
               encoder.encode(sseEncode(JSON.stringify(event.result), 'done'))

@@ -1,6 +1,6 @@
-# Experimental Tab — How It Works
+# Terminal Tab — How It Works
 
-The experimental tab is an interactive Claude terminal. It runs Claude CLI on the project and streams output back in real time, supporting multi-turn conversations via session resumption. Each session gets a persistent URL (`/project/[name]/experimental/[sessionId]`) that restores the conversation and its skill/doc selections.
+The terminal tab is an interactive Claude terminal. It runs Claude CLI on the project and streams output back in real time, supporting multi-turn conversations via session resumption. Each session gets a persistent URL (`/project/[name]/terminal/[sessionId]`) that restores the conversation and its skill/doc selections.
 
 ## Request flow
 
@@ -17,7 +17,7 @@ User types → handleSubmit()
           → parseStreamLines() → text/tool_use/tool_result/done events
           → SSE to browser
   → on 'done' SSE event → metadata.sessionId saved to claudeSessionId state
-                        → URL updated to /project/[name]/experimental/[sessionId] via router.replace()
+                        → URL updated to /project/[name]/terminal/[sessionId] via router.replace()
 ```
 
 ## Claude CLI stream-json format
@@ -47,12 +47,12 @@ Takes one or more NDJSON lines as a string. Silently skips malformed or irreleva
 
 ## Session URLs
 
-Each session gets a stable URL: `/project/[name]/experimental/[sessionId]` where `sessionId` is the Claude session ID returned in the `done` event.
+Each session gets a stable URL: `/project/[name]/terminal/[sessionId]` where `sessionId` is the Claude session ID returned in the `done` event.
 
-- New session: starts at `/project/[name]/experimental`, URL updates automatically after the first response
+- New session: starts at `/project/[name]/terminal`, URL updates automatically after the first response
 - Returning to a session: navigate to the URL — skill/doc selections and terminal history are restored from DB
 - `contextMeta`: JSON blob `{ skills: SkillItem[], docs: DocItem[] }` stored on the job row at creation time; read back on restore
-- Route: `app/project/[name]/experimental/[sessionId]/page.tsx` → same `ProjectDetailPage`, `initialSessionId` prop threaded to `ExperimentalTab`
+- Route: `app/project/[name]/terminal/[sessionId]/page.tsx` → same `ProjectDetailPage`, `initialSessionId` prop threaded to `TerminalTab`
 
 ## Session continuity (multi-turn)
 
@@ -95,8 +95,8 @@ PM2 survives Next.js restarts. Log at `~/logs/{jobId}.log` is a durable buffer �
 
 | File | Role |
 |------|------|
-| `components/ExperimentalTab.tsx` | UI, session state, SSE client, skill/docs/persona picker, session URL nav |
-| `app/project/[name]/experimental/[sessionId]/page.tsx` | Session-specific route, delegates to `ProjectDetailPage` |
+| `components/TerminalTab.tsx` | UI, session state, SSE client, skill/docs/persona picker, session URL nav |
+| `app/project/[name]/terminal/[sessionId]/page.tsx` | Session-specific route, delegates to `ProjectDetailPage` |
 | `app/api/projects/by-project/[name]/run/route.ts` | Starts Claude CLI via PM2, creates job, stores `contextMeta` |
 | `app/api/projects/by-project/[name]/docs/route.ts` | Lists `docs/*.md` files for docs picker |
 | `app/api/streaming/[jobId]/route.ts` | SSE endpoint, tails log file |
@@ -108,5 +108,5 @@ PM2 survives Next.js restarts. Log at `~/logs/{jobId}.log` is a durable buffer �
 
 - Unit: `__tests__/lib/claude-stream-parser.test.ts` — parser tests
 - Unit: `__tests__/api/project-docs.test.ts` — docs route tests
-- E2E: `e2e/experimental-streaming.spec.ts` — Playwright tests (requires dev server on `localhost:1337`)
+- E2E: `e2e/terminal-streaming.spec.ts` — Playwright tests (requires dev server on `localhost:1337`)
 - `pnpm test` — unit tests; `pnpm test:e2e` — e2e

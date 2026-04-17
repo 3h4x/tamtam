@@ -36,20 +36,23 @@ Next.js monolith (App Router) for managing Claude CLI agents across multiple pro
 - `components/` — React client components
 - `hooks/` — Custom React hooks
 - `lib/` — Server-side business logic
-- `lib/db/` — Drizzle schema and connection (tables: settings, projects, jobs, ghStatus, skills, agents)
+- `lib/db/` — Drizzle schema and connection (tables: settings, projects, jobs, gh_status, skills, agents)
 - `skills/` — claude-skills submodule
 - `data/` — SQLite database (gitignored)
 - `__tests__/` — vitest unit tests
 - `e2e/` — Playwright integration tests
-- `docs/` — architecture docs (see `docs/streaming.md` for experimental page streaming)
+- `docs/` — architecture docs (see `docs/TERMINAL.md` for terminal page streaming)
 
 ## Pages
 - `/` — Projects list with status, changes, CI
 - `/project/[name]` — Project overview with agents, status bar (changes/review/tests)
 - `/project/[name]/config` — Test command + custom actions editor (name, command, color)
 - `/project/[name]/history` — Project runs with filter tabs (all/running/failed/done)
-- `/project/[name]/experimental` — Interactive Claude runner with model selector (haiku/sonnet/opus), skill picker, and real-time token streaming via SSE (see `docs/streaming.md`)
+- `/project/[name]/terminal/[sessionId]` — Interactive Claude runner with model selector (haiku/sonnet/opus), skill picker, and real-time token streaming via SSE (see `docs/TERMINAL.md`)
+- `/project/[name]/task/[task]` — Task detail view
+- `/agents` — Agents management page
 - `/jobs` — All runs across projects
+- `/logs` — Log viewer
 - `/skills` — Skill editor (CRUD for DB-backed skills)
 - `/settings` — Workspace path, frequency, claude binary, DB backup
 
@@ -76,7 +79,7 @@ Next.js monolith (App Router) for managing Claude CLI agents across multiple pro
 - Workspace path configured in Settings UI, projects discovered by scanning for git repos
 - All CLI calls (git, gh, launchctl, pm2) go through `lib/shell.ts`
 - `lib/project-data.ts` assembles project data with 10s TTL cache
-- Experimental runs use `claude --output-format stream-json` for token-by-token streaming via PM2 + log file + fs.watch + NDJSON parser (see `docs/streaming.md`)
+- Terminal runs use `claude --output-format stream-json` for token-by-token streaming via PM2 + log file + fs.watch + NDJSON parser (see `docs/TERMINAL.md`)
 - SSE at `/api/streaming/[jobId]` parses NDJSON and sends text deltas + `done` event (`?raw=1` for raw mode)
 - Agent runs compose skill content into the prompt before sending to Claude CLI
 - File-based skills scanned from `skills/docs/skills/` (all categories, SKILL.md files with frontmatter)

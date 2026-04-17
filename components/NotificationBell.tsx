@@ -76,9 +76,9 @@ export function NotificationBell() {
       markJobSeen(job.id).catch(() => {})
     }
     if (job.kind === 'run' && job.session_id) {
-      router.push(`/project/${job.project}/experimental/${job.session_id}`)
+      router.push(`/project/${job.project}/terminal/${job.session_id}`)
     } else {
-      router.push(`/project/${job.project}/experimental?job=${encodeURIComponent(job.id)}`)
+      router.push(`/project/${job.project}/terminal?job=${encodeURIComponent(job.id)}`)
     }
   }
 

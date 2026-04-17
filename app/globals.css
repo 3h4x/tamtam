@@ -92,3 +92,26 @@ body {
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
 }
+
+/* Terminal markdown rendering */
+.terminal-markdown h1 { font-size: 1.25em; font-weight: 700; margin: 0.75em 0 0.25em; color: #fff; }
+.terminal-markdown h2 { font-size: 1.1em; font-weight: 700; margin: 0.75em 0 0.25em; color: #e0e0e0; }
+.terminal-markdown h3 { font-size: 1em; font-weight: 600; margin: 0.5em 0 0.25em; color: #ccc; }
+.terminal-markdown h4, .terminal-markdown h5, .terminal-markdown h6 { font-weight: 600; margin: 0.5em 0 0.25em; }
+.terminal-markdown p { margin: 0.4em 0; }
+.terminal-markdown strong { color: #fff; }
+.terminal-markdown em { color: #bbb; font-style: italic; }
+.terminal-markdown code { background: #1a1a1a; padding: 0.1em 0.4em; border-radius: 3px; color: #7dd3fc; font-size: 0.9em; }
+.terminal-markdown pre { background: #111; border: 1px solid #333; border-radius: 6px; padding: 0.75em 1em; margin: 0.5em 0; overflow-x: auto; }
+.terminal-markdown pre code { background: transparent; padding: 0; color: #e0e0e0; }
+.terminal-markdown ul, .terminal-markdown ol { padding-left: 1.5em; margin: 0.4em 0; }
+.terminal-markdown li { margin: 0.2em 0; }
+.terminal-markdown ul { list-style-type: disc; }
+.terminal-markdown ol { list-style-type: decimal; }
+.terminal-markdown blockquote { border-left: 3px solid #444; padding-left: 0.75em; margin: 0.5em 0; color: #999; }
+.terminal-markdown table { border-collapse: collapse; margin: 0.5em 0; width: 100%; }
+.terminal-markdown th, .terminal-markdown td { border: 1px solid #333; padding: 0.3em 0.6em; text-align: left; }
+.terminal-markdown th { background: #1a1a1a; font-weight: 600; }
+.terminal-markdown hr { border: none; border-top: 1px solid #333; margin: 0.75em 0; }
+.terminal-markdown a { color: #3b82f6; text-decoration: none; }
+.terminal-markdown a:hover { text-decoration: underline; }

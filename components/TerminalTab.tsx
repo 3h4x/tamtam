@@ -4,11 +4,20 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { runProject, fetchSkills, fetchPersonas } from '@/lib/client-api'
 import type { Skill, Persona } from '@/lib/client-api'
+import Markdown from 'react-markdown'
+
+interface ToolEntry {
+  name: string
+  input?: string
+  result?: string
+  collapsed?: boolean
+}
 
 interface TermEntry {
-  role: 'user' | 'assistant' | 'status' | 'error' | 'thinking'
+  role: 'user' | 'assistant' | 'status' | 'error' | 'thinking' | 'tool'
   text: string
   imageUrls?: string[]
+  tool?: ToolEntry
 }
 
 interface SessionItem {
@@ -20,12 +29,49 @@ interface SessionItem {
   exitCode: number | null
 }
 
-interface ExperimentalTabProps {
+interface TerminalTabProps {
   projectName: string
   initialSessionId?: string
 }
 
-export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalTabProps) {
+function ToolBlock({ tool }: { tool: ToolEntry }) {
+  const [collapsed, setCollapsed] = useState(true)
+
+  // Parse input to extract meaningful info (file_path, command, etc.)
+  let summary = ''
+  try {
+    const input = JSON.parse(tool.input || '{}')
+    summary = input.file_path || input.command || input.pattern || input.query || ''
+  } catch {
+    summary = tool.input?.slice(0, 60) || ''
+  }
+
+  const hasResult = !!tool.result
+  const resultPreview = tool.result
+    ? tool.result.length > 200 ? tool.result.slice(0, 200) + '...' : tool.result
+    : null
+
+  return (
+    <div className="mx-4 my-1 border border-[#2a2a2a] rounded-md overflow-hidden">
+      <div
+        className="flex items-center gap-2 px-3 py-1.5 bg-[#151515] cursor-pointer hover:bg-[#1a1a1a]"
+        onClick={() => setCollapsed(!collapsed)}
+      >
+        <span className="text-status-success text-xs">●</span>
+        <span className="text-[#7dd3fc] text-xs font-semibold">{tool.name}</span>
+        {summary && <span className="text-[#888] text-xs truncate">({summary})</span>}
+        <span className="ml-auto text-[10px] text-[#555]">{collapsed ? '▶' : '▼'}</span>
+      </div>
+      {!collapsed && hasResult && (
+        <pre className="px-3 py-2 text-xs text-[#999] bg-[#0d0d0d] m-0 overflow-x-auto whitespace-pre-wrap max-h-60 overflow-y-auto border-t border-[#2a2a2a]">
+          {resultPreview}
+        </pre>
+      )}
+    </div>
+  )
+}
+
+export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const jobParam = searchParams.get('job')
@@ -39,6 +85,8 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
   const [thinkingBuffer, setThinkingBuffer] = useState('')
   const thinkingBufferRef = useRef('')
   const [showThinking, setShowThinking] = useState(false)
+  const [streamTools, setStreamTools] = useState<ToolEntry[]>([])
+  const streamToolsRef = useRef<ToolEntry[]>([])
   const [claudeSessionId, setClaudeSessionId] = useState<string | null>(initialSessionId ?? null)
   const [pendingImages, setPendingImages] = useState<File[]>([])
   const [pendingImageUrls, setPendingImageUrls] = useState<string[]>([])
@@ -124,8 +172,11 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
   }, [initialSessionId])
 
   // Load job output by job ID (e.g. from notification click for review/test jobs)
+  const jobLoadedRef = useRef<string | null>(null)
   useEffect(() => {
     if (!jobParam || initialSessionId) return
+    if (jobLoadedRef.current === jobParam) return
+    jobLoadedRef.current = jobParam
     const loadJob = async () => {
       try {
         const res = await fetch(`/api/jobs/${encodeURIComponent(jobParam)}`)
@@ -135,10 +186,15 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
         const kind = data.kind || jobParam.split('-').slice(1, -1).join('-')
         const isClaudeRun = data.kind === 'run'
         entries.push({ role: 'status', text: kind })
-        if (data.status === 'running' || data.finished_at === null) {
+        if (isClaudeRun) {
+          // Claude runs: always stream via SSE to get tool blocks
           setStreaming(true)
           setHistory(entries)
-          startStreaming(jobParam, !isClaudeRun)
+          startStreaming(jobParam)
+        } else if (data.status === 'running' || data.finished_at === null) {
+          setStreaming(true)
+          setHistory(entries)
+          startStreaming(jobParam, true)
         } else {
           if (data.log) entries.push({ role: 'assistant', text: data.log })
           const exitCode = data.exit_code
@@ -311,21 +367,56 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
       setThinkingBuffer(thinkingBufferRef.current)
     })
 
+    es.addEventListener('tool_use', (event) => {
+      // Flush any pending text buffer as an assistant entry before tool
+      const buf = streamBufferRef.current
+      if (buf) {
+        setHistory(prev => [...prev, { role: 'assistant', text: buf }])
+        streamBufferRef.current = ''
+        setStreamBuffer('')
+        setDisplayedLength(0)
+      }
+      try {
+        const data = JSON.parse((event as MessageEvent).data)
+        const tool: ToolEntry = { name: data.name, input: data.input }
+        streamToolsRef.current = [...streamToolsRef.current, tool]
+        setStreamTools([...streamToolsRef.current])
+      } catch {}
+    })
+
+    es.addEventListener('tool_result', (event) => {
+      try {
+        const data = JSON.parse((event as MessageEvent).data)
+        const tools = streamToolsRef.current
+        if (tools.length > 0) {
+          const last = { ...tools[tools.length - 1], result: data.content }
+          const updated = [...tools.slice(0, -1), last]
+          streamToolsRef.current = updated
+          setStreamTools(updated)
+        }
+      } catch {}
+    })
+
     es.addEventListener('done', (event) => {
       const metadata = JSON.parse((event as MessageEvent).data)
       es.close()
       esRef.current = null
       const buf = streamBufferRef.current
       const thinking = thinkingBufferRef.current
+      const tools = streamToolsRef.current
       streamBufferRef.current = ''
       thinkingBufferRef.current = ''
+      streamToolsRef.current = []
       const sid = metadata.sessionId || null
       setClaudeSessionId(sid)
       if (sid && !initialSessionId) {
-        router.replace(`/project/${projectName}/experimental/${sid}`)
+        window.history.replaceState(null, '', `/project/${projectName}/terminal/${sid}`)
       }
       const newEntries: TermEntry[] = []
       if (thinking) newEntries.push({ role: 'thinking', text: thinking })
+      for (const t of tools) {
+        newEntries.push({ role: 'tool', text: '', tool: t })
+      }
       if (buf) newEntries.push({ role: 'assistant', text: buf })
       if (metadata.exitCode !== undefined && metadata.exitCode !== null) {
         const ok = metadata.exitCode === 0
@@ -335,6 +426,7 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
       currentJobIdRef.current = null
       setStreamBuffer('')
       setThinkingBuffer('')
+      setStreamTools([])
       setDisplayedLength(0)
       setStreaming(false)
 
@@ -356,15 +448,19 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
       currentJobIdRef.current = null
       const buf = streamBufferRef.current
       const thinking = thinkingBufferRef.current
+      const tools = streamToolsRef.current
       streamBufferRef.current = ''
       thinkingBufferRef.current = ''
+      streamToolsRef.current = []
       const newEntries: TermEntry[] = []
       if (thinking) newEntries.push({ role: 'thinking', text: thinking })
+      for (const t of tools) newEntries.push({ role: 'tool', text: '', tool: t })
       if (buf) newEntries.push({ role: 'assistant', text: buf })
       if (newEntries.length === 0) newEntries.push({ role: 'error', text: 'Connection error' })
       setHistory(prev => [...prev, ...newEntries])
       setStreamBuffer('')
       setThinkingBuffer('')
+      setStreamTools([])
       setDisplayedLength(0)
       setStreaming(false)
       // Drop queue on error — don't auto-submit after a failed run
@@ -407,8 +503,10 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
     setStreaming(true)
     streamBufferRef.current = ''
     thinkingBufferRef.current = ''
+    streamToolsRef.current = []
     setStreamBuffer('')
     setThinkingBuffer('')
+    setStreamTools([])
     setDisplayedLength(0)
 
     try {
@@ -484,7 +582,7 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
       setHistory(session.prompt ? [{ role: 'user', text: session.prompt }] : [])
       setStreaming(true)
       if (session.sessionId) {
-        router.replace(`/project/${projectName}/experimental/${session.sessionId}`)
+        router.replace(`/project/${projectName}/terminal/${session.sessionId}`)
       }
       startStreaming(session.id)
       return
@@ -508,7 +606,7 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
         } catch {}
       }
       if (session.sessionId) {
-        router.replace(`/project/${projectName}/experimental/${session.sessionId}`)
+        router.replace(`/project/${projectName}/terminal/${session.sessionId}`)
       }
     } catch {}
   }, [startStreaming, router, projectName])
@@ -519,15 +617,17 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
     setHistory([])
     streamBufferRef.current = ''
     thinkingBufferRef.current = ''
+    streamToolsRef.current = []
     setStreamBuffer('')
     setThinkingBuffer('')
+    setStreamTools([])
     setDisplayedLength(0)
     setStreaming(false)
     setSelectedDocs([])
     messageQueueRef.current = []
     setMessageQueue([])
     pendingAutoSubmitRef.current = null
-    router.replace(`/project/${projectName}/experimental`)
+    router.replace(`/project/${projectName}/terminal`)
     inputRef.current?.focus()
   }
 
@@ -782,18 +882,20 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
                   <div className="text-[#888] text-xs whitespace-pre-wrap">{entry.text}</div>
                 </div>
               )
+            ) : entry.role === 'tool' && entry.tool ? (
+              <ToolBlock key={i} tool={entry.tool} />
             ) : (
             <div
               key={i}
-              className={`px-4 py-2 whitespace-pre-wrap ${
-                entry.role === 'user' ? 'text-accent' :
-                entry.role === 'error' ? 'text-status-error' :
-                entry.role === 'status' ? 'text-[#555]' :
-                'text-[#e0e0e0]'
+              className={`px-4 py-2 ${
+                entry.role === 'user' ? 'text-accent whitespace-pre-wrap' :
+                entry.role === 'error' ? 'text-status-error whitespace-pre-wrap' :
+                entry.role === 'status' ? 'text-[#555] whitespace-pre-wrap' :
+                'text-[#e0e0e0] terminal-markdown'
               }`}
             >
               {entry.role === 'user' && <span className="text-accent mr-2">#</span>}
-              {entry.text}
+              {entry.role === 'assistant' ? <Markdown>{entry.text}</Markdown> : entry.text}
               {entry.imageUrls && entry.imageUrls.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2">
                   {entry.imageUrls.map((url, j) => (
@@ -814,13 +916,18 @@ export function ExperimentalTab({ projectName, initialSessionId }: ExperimentalT
           )}
 
           {streaming && visibleStream && (
-            <div className="px-4 py-2 text-[#e0e0e0] whitespace-pre-wrap">
-              {visibleStream}
+            <div className="px-4 py-2 text-[#e0e0e0] terminal-markdown">
+              <Markdown>{visibleStream}</Markdown>
               {displayedLength >= streamBuffer.length && (
                 <span className="text-accent animate-pulse">_</span>
               )}
             </div>
           )}
+          {/* Live tool blocks during streaming */}
+          {streaming && streamTools.length > 0 && streamTools.map((tool, i) => (
+            <ToolBlock key={`stream-tool-${i}`} tool={tool} />
+          ))}
+
           {streaming && !visibleStream && (
             <div className="px-4 py-2 text-[#555] animate-pulse">thinking...</div>
           )}

@@ -95,6 +95,7 @@ export async function POST(
   proc.on('exit', (code) => {
     job.exitCode = code ?? -1;
     job.finishedAt = Date.now() / 1000;
+    updateJob(job);
     const { closeSync } = require('fs');
     try { closeSync(logFd); } catch {}
   });
