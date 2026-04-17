@@ -28,6 +28,18 @@ interface TerminalTabProps {
   initialSessionId?: string
 }
 
+const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|tiff?|svg|heic|heif|avif)$/i
+
+// Collapse carriage-return progress updates (e.g. docker pull) by keeping
+// only the content after the last `\r` on each logical line. Without this,
+// every intermediate progress frame shows up as separate text.
+function collapseCarriageReturns(text: string): string {
+  return text.split('\n').map(line => {
+    const idx = line.lastIndexOf('\r')
+    return idx >= 0 ? line.slice(idx + 1) : line
+  }).join('\n')
+}
+
 const TOOL_COLORS: Record<string, string> = {
   Bash: 'text-[#f0b070]',
   Read: 'text-[#8fcfff]',
@@ -99,6 +111,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     thinkingBuffer,
     streamTools,
     streaming,
+    streamIsRaw,
     streamStartedAt,
     claudeSessionId,
     currentJobId,
@@ -399,7 +412,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   }, [streaming, streamStartedAt])
 
   const addImages = useCallback((files: File[]) => {
-    const imageFiles = files.filter(f => f.type.startsWith('image/'))
+    const imageFiles = files.filter(f => f.type.startsWith('image/') || IMG_EXT.test(f.name))
     if (!imageFiles.length) return
     setPendingImages(prev => [...prev, ...imageFiles])
     imageFiles.forEach(file => {
@@ -423,7 +436,20 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     setDragOver(false)
-    addImages(Array.from(e.dataTransfer.files))
+    const files = Array.from(e.dataTransfer.files)
+    if (files.length > 0) {
+      addImages(files)
+      return
+    }
+    // Fallback for drags from apps (e.g. macOS Preview) that put entries in `items`
+    const itemFiles: File[] = []
+    for (const item of Array.from(e.dataTransfer.items)) {
+      if (item.kind === 'file') {
+        const f = item.getAsFile()
+        if (f) itemFiles.push(f)
+      }
+    }
+    if (itemFiles.length > 0) addImages(itemFiles)
   }, [addImages])
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
@@ -970,7 +996,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
             <div
               key={i}
               className={`group relative px-4 py-2 ${
-                entry.role === 'user' ? 'text-accent whitespace-pre-wrap' :
+                entry.role === 'user' ? 'text-[#f0f0f0] whitespace-pre-wrap' :
                 entry.role === 'error' ? 'text-status-error whitespace-pre-wrap' :
                 entry.role === 'status' ? 'text-[#555] whitespace-pre-wrap' :
                 entry.role === 'raw' ? 'text-[#c0c0c0] font-mono text-xs whitespace-pre-wrap' :
@@ -982,6 +1008,10 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
                 ? (hasAnsi(entry.text)
                     ? <pre className="whitespace-pre-wrap font-mono text-xs m-0">{renderAnsi(entry.text)}</pre>
                     : <Markdown>{entry.text}</Markdown>)
+                : entry.role === 'raw'
+                  ? (hasAnsi(entry.text)
+                      ? <pre className="whitespace-pre-wrap font-mono text-xs m-0 inline">{renderAnsi(collapseCarriageReturns(entry.text))}</pre>
+                      : collapseCarriageReturns(entry.text))
                 : hasAnsi(entry.text)
                   ? <pre className="whitespace-pre-wrap font-mono text-xs m-0 inline">{renderAnsi(entry.text)}</pre>
                   : entry.text}
@@ -1014,10 +1044,14 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
 
           {/* Live streamed assistant text */}
           {streaming && streamBuffer && (
-            <div className="px-4 py-2 text-[#e0e0e0] terminal-markdown">
-              {hasAnsi(streamBuffer)
-                ? <pre className="whitespace-pre-wrap font-mono text-xs m-0">{renderAnsi(streamBuffer)}</pre>
-                : <Markdown>{streamBuffer}</Markdown>}
+            <div className={`px-4 py-2 ${streamIsRaw ? 'text-[#c0c0c0] font-mono text-xs whitespace-pre-wrap' : 'text-[#e0e0e0] terminal-markdown'}`}>
+              {streamIsRaw
+                ? (hasAnsi(streamBuffer)
+                    ? <pre className="whitespace-pre-wrap font-mono text-xs m-0 inline">{renderAnsi(collapseCarriageReturns(streamBuffer))}</pre>
+                    : collapseCarriageReturns(streamBuffer))
+                : hasAnsi(streamBuffer)
+                  ? <pre className="whitespace-pre-wrap font-mono text-xs m-0">{renderAnsi(streamBuffer)}</pre>
+                  : <Markdown>{streamBuffer}</Markdown>}
             </div>
           )}
 
@@ -1063,16 +1097,40 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           )}
 
           {!streaming && pendingImageUrls.length > 0 && (
-            <div className="flex flex-wrap gap-2 px-4 pt-2">
-              {pendingImageUrls.map((url, i) => (
-                <div key={i} className="relative group">
-                  <img src={url} alt="pending" className="max-h-20 max-w-[140px] rounded border border-[#333] object-contain bg-[#1a1a1a]" />
-                  <button
-                    className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-[#1a1a1a] text-[#888] hover:text-[#fff] text-[10px] leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer border-none"
-                    onClick={(e) => { e.stopPropagation(); removeImage(i) }}
-                  >x</button>
-                </div>
-              ))}
+            <div className="mx-4 mt-2 px-3 py-2 bg-[#161616] border border-[#2a2a2a] rounded-md">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] text-[#666] uppercase tracking-wider font-mono">
+                  {pendingImageUrls.length} attachment{pendingImageUrls.length === 1 ? '' : 's'}
+                </span>
+                <button
+                  className="text-[10px] text-[#666] hover:text-[#aaa] font-mono cursor-pointer border-none bg-transparent"
+                  onClick={() => { setPendingImages([]); setPendingImageUrls([]) }}
+                  title="Remove all attachments"
+                >clear all</button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {pendingImageUrls.map((url, i) => {
+                  const f = pendingImages[i]
+                  const sizeKb = f ? Math.max(1, Math.round(f.size / 1024)) : null
+                  return (
+                    <div key={i} className="relative group">
+                      <a href={url} target="_blank" rel="noopener noreferrer" title="open full-size">
+                        <img src={url} alt={f?.name ?? 'pending'} className="h-24 max-w-[200px] rounded border border-[#333] object-contain bg-[#0d0d0d] block" />
+                      </a>
+                      <button
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#2a2a2a] hover:bg-status-error text-[#ccc] hover:text-white text-[11px] leading-none flex items-center justify-center cursor-pointer border border-[#444] shadow"
+                        onClick={(e) => { e.stopPropagation(); removeImage(i) }}
+                        title="Remove"
+                      >×</button>
+                      {f && (
+                        <div className="mt-1 text-[10px] text-[#666] font-mono max-w-[200px] truncate" title={f.name}>
+                          {f.name} · {sizeKb}kb
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           )}
 

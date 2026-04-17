@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { fetchJobs } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
+import { formatAgo } from '@/lib/format'
 
 function formatDuration(startedAt: number, finishedAt: number | null): string {
   const end = finishedAt || Date.now() / 1000
@@ -13,13 +14,6 @@ function formatDuration(startedAt: number, finishedAt: number | null): string {
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
 }
 
-function formatAgo(ts: number): string {
-  const s = Math.floor(Date.now() / 1000 - ts)
-  if (s < 60) return 'just now'
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`
-  return `${Math.floor(s / 86400)}d ago`
-}
 
 function dayKey(ts: number): string {
   const d = new Date(ts * 1000)

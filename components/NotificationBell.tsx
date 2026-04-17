@@ -1,29 +1,80 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { fetchNotifications, markNotificationsSeen, markJobSeen, fetchJobs } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 
-function formatTimeAgo(date: Date): string {
-  const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
-  if (seconds < 60) return 'just now'
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
+function timeAgo(date: Date): string {
+  const s = Math.floor((Date.now() - date.getTime()) / 1000)
+  if (s < 60) return 'just now'
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.floor(h / 24)}d ago`
 }
 
-function formatElapsed(startedAt: number): string {
-  const seconds = Math.floor(Date.now() / 1000 - startedAt)
-  if (seconds < 60) return `${seconds}s`
-  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+function elapsed(startedAt: number, finishedAt?: number | null): string {
+  const s = Math.floor((finishedAt ?? Date.now() / 1000) - startedAt)
+  if (s < 60) return `${s}s`
+  return `${Math.floor(s / 60)}m ${s % 60}s`
+}
+
+function KindBadge({ kind }: { kind: string }) {
+  const labels: Record<string, string> = {
+    run: 'run',
+    review: 'review',
+    'fix-ci': 'fix ci',
+    fix: 'fix',
+    test: 'test',
+  }
+  return (
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-bg-tertiary text-text-tertiary">
+      {labels[kind] ?? kind}
+    </span>
+  )
+}
+
+function VerdictBadge({ verdict }: { verdict: string }) {
+  if (verdict === 'LGTM') {
+    return <span className="text-xs font-medium text-status-success">LGTM</span>
+  }
+  if (verdict === 'NEEDS ATTENTION') {
+    return <span className="text-xs font-medium text-status-warning">needs attention</span>
+  }
+  if (verdict === 'DO NOT SHIP') {
+    return <span className="text-xs font-medium text-status-error">do not ship</span>
+  }
+  return null
+}
+
+function StatusIcon({ success }: { success: boolean }) {
+  return success ? (
+    <svg className="w-4 h-4 text-status-success shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="8" cy="8" r="6.5" />
+      <path d="M5 8l2 2 4-4" />
+    </svg>
+  ) : (
+    <svg className="w-4 h-4 text-status-error shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="8" cy="8" r="6.5" />
+      <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" />
+    </svg>
+  )
+}
+
+function RunningIcon() {
+  return (
+    <svg className="w-4 h-4 text-accent shrink-0 animate-spin" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M8 2a6 6 0 1 1-4.243 1.757" />
+    </svg>
+  )
 }
 
 export function NotificationBell() {
   const router = useRouter()
-  const [count, setCount] = useState(0)
+  const [unseenCount, setUnseenCount] = useState(0)
   const [finishedJobs, setFinishedJobs] = useState<JobInfo[]>([])
   const [runningJobs, setRunningJobs] = useState<JobInfo[]>([])
   const [open, setOpen] = useState(false)
@@ -32,49 +83,41 @@ export function NotificationBell() {
   useEffect(() => {
     const poll = async () => {
       try {
-        const [notifs, allJobs] = await Promise.all([
-          fetchNotifications(),
-          fetchJobs(),
-        ])
-        setCount(notifs.count)
+        const [notifs, allJobs] = await Promise.all([fetchNotifications(), fetchJobs()])
+        setUnseenCount(notifs.count)
+
         const sorted = [...notifs.jobs].sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))
         const seen = new Set<string>()
-        const deduped = sorted.filter(j => {
+        setFinishedJobs(sorted.filter(j => {
           const key = `${j.project}:${j.kind}`
           if (seen.has(key)) return false
           seen.add(key)
           return true
-        })
-        setFinishedJobs(deduped)
+        }))
         setRunningJobs(allJobs.jobs.filter(j => j.status === 'running'))
       } catch {
         // ignore
       }
     }
     poll()
-    const interval = setInterval(poll, 5000)
-    return () => clearInterval(interval)
+    const id = setInterval(poll, 5000)
+    return () => clearInterval(id)
   }, [])
 
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setOpen(false)
       }
     }
-    if (open) document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
   }, [open])
-
-  const handleBellClick = () => {
-    setOpen(!open)
-  }
 
   const handleJobClick = (job: JobInfo) => {
     setOpen(false)
-    if (job.status === 'done') {
-      markJobSeen(job.id).catch(() => {})
-    }
+    if (job.status === 'done') markJobSeen(job.id).catch(() => {})
     if (job.kind === 'run' && job.session_id) {
       router.push(`/project/${job.project}/terminal/${job.session_id}`)
     } else {
@@ -82,117 +125,160 @@ export function NotificationBell() {
     }
   }
 
-  const handleDismiss = async () => {
+  const handleClearAll = async () => {
     await markNotificationsSeen()
-    setCount(0)
+    setUnseenCount(0)
     setFinishedJobs([])
-    setOpen(false)
   }
 
-  const totalBadge = count + runningJobs.length
   const hasItems = runningJobs.length > 0 || finishedJobs.length > 0
+  const isRunning = runningJobs.length > 0
 
   return (
     <div className="relative" ref={dropdownRef}>
+      {/* Bell button */}
       <button
-        className={`relative p-2 bg-transparent border border-border rounded-md cursor-pointer text-text-secondary hover:text-text-primary hover:border-text-tertiary transition-colors ${runningJobs.length > 0 ? 'text-accent border-accent' : ''}`}
-        onClick={handleBellClick}
-        title={totalBadge > 0 ? `${runningJobs.length} running, ${count} finished` : 'No notifications'}
+        onClick={() => setOpen(v => !v)}
+        title={[
+          isRunning ? `${runningJobs.length} running` : '',
+          unseenCount > 0 ? `${unseenCount} unread` : '',
+        ].filter(Boolean).join(', ') || 'No notifications'}
+        className={`relative p-2 bg-transparent border rounded-md cursor-pointer transition-colors ${
+          open
+            ? 'border-accent text-accent'
+            : 'border-border text-text-secondary hover:text-text-primary hover:border-text-tertiary'
+        }`}
       >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M8 1.5a4 4 0 0 0-4 4v2.5L2.5 10.5h11L12 8V5.5a4 4 0 0 0-4-4Z" />
           <path d="M6.5 12a1.5 1.5 0 0 0 3 0" />
         </svg>
-        {totalBadge > 0 && (
-          <span className={`absolute -top-1 -right-1 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium ${runningJobs.length > 0 ? 'bg-accent animate-pulse' : 'bg-status-error'}`}>
-            {totalBadge}
+
+        {/* Unread badge */}
+        {unseenCount > 0 && (
+          <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-status-error text-white text-[10px] font-semibold rounded-full flex items-center justify-center leading-none">
+            {unseenCount > 99 ? '99+' : unseenCount}
           </span>
+        )}
+
+        {/* Running indicator dot (only when no unread badge) */}
+        {isRunning && unseenCount === 0 && (
+          <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-accent rounded-full animate-pulse" />
         )}
       </button>
 
+      {/* Dropdown */}
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-80 bg-bg-primary border border-border rounded-lg shadow-lg z-50 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <div className="absolute right-0 top-full mt-2 w-88 bg-bg-primary border border-border rounded-lg shadow-xl z-50 overflow-hidden"
+          style={{ width: '22rem' }}>
+
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
             <span className="text-sm font-semibold text-text-primary">Notifications</span>
             {finishedJobs.length > 0 && (
               <button
-                className="text-xs text-accent hover:text-accent-hover bg-transparent border-none cursor-pointer"
-                onClick={handleDismiss}
+                onClick={handleClearAll}
+                className="text-xs text-text-tertiary hover:text-text-primary bg-transparent border-none cursor-pointer transition-colors"
               >
                 Clear all
               </button>
             )}
           </div>
-          {!hasItems ? (
-            <div className="px-4 py-6 text-center text-sm text-text-tertiary">No notifications</div>
-          ) : (
-            <div className="max-h-80 overflow-y-auto">
-              {runningJobs.map((job) => (
-                <button
-                  key={job.id}
-                  className="w-full flex items-center gap-3 px-4 py-3 border-b border-border hover:bg-bg-secondary transition-colors bg-transparent cursor-pointer text-left"
-                  onClick={() => handleJobClick(job)}
-                >
-                  <span className="text-accent">
-                    <span className="spinner-sm" />
-                  </span>
-                  <div className="flex flex-col gap-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-text-primary">{job.kind}</span>
-                      <span className="text-xs text-text-tertiary">{job.project}</span>
-                    </div>
-                    <div className="text-xs text-text-tertiary">
-                      <span>{formatElapsed(job.started_at)}</span>
-                    </div>
-                  </div>
-                </button>
-              ))}
-              {finishedJobs.map((job) => {
-                const elapsed = job.finished_at && job.started_at
-                  ? Math.floor(job.finished_at - job.started_at)
-                  : null
-                const elapsedStr = elapsed !== null
-                  ? elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
-                  : null
-                const finishedAt = job.finished_at
-                  ? new Date(job.finished_at * 1000)
-                  : null
-                const timeAgo = finishedAt ? formatTimeAgo(finishedAt) : null
-                const isSuccess = job.exit_code === 0
-                const verdict = job.verdict
-                const verdictIcon = verdict === 'LGTM' ? '\u2705' : verdict === 'NEEDS ATTENTION' ? '\u26A0\uFE0F' : verdict === 'DO NOT SHIP' ? '\u274C' : null
-                const verdictClass = verdict === 'LGTM' ? 'text-status-success' : verdict === 'NEEDS ATTENTION' ? 'text-status-warning' : verdict === 'DO NOT SHIP' ? 'text-status-error' : ''
 
-                return (
-                  <button
-                    key={job.id}
-                    className={`w-full flex items-center gap-3 px-4 py-3 border-b border-border hover:bg-bg-secondary transition-colors bg-transparent cursor-pointer text-left ${isSuccess ? 'border-l-2 border-l-status-success' : 'border-l-2 border-l-status-error'}`}
-                    onClick={() => handleJobClick(job)}
-                  >
-                    <span className={`text-sm font-bold shrink-0 ${isSuccess ? 'text-status-success' : 'text-status-error'}`}>
-                      {isSuccess ? '\u2713' : '\u2717'}
+          {!hasItems ? (
+            <div className="px-4 py-8 text-center">
+              <svg className="w-8 h-8 text-text-tertiary mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              </svg>
+              <p className="text-sm text-text-tertiary">All caught up</p>
+            </div>
+          ) : (
+            <div className="max-h-[420px] overflow-y-auto">
+
+              {/* Running section */}
+              {runningJobs.length > 0 && (
+                <div>
+                  <div className="px-4 py-1.5 bg-bg-secondary border-b border-border">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">
+                      Running · {runningJobs.length}
                     </span>
-                    <div className="flex flex-col gap-0.5 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-medium text-text-primary">{job.kind}</span>
-                        <span className="text-xs text-text-tertiary">{job.project}</span>
-                        {verdict && (
-                          <span className={`text-xs font-medium ${verdictClass}`}>
-                            {verdictIcon} {verdict}
-                          </span>
-                        )}
+                  </div>
+                  {runningJobs.map(job => (
+                    <button
+                      key={job.id}
+                      onClick={() => handleJobClick(job)}
+                      className="w-full flex items-center gap-3 px-4 py-3 border-b border-border/50 hover:bg-bg-secondary transition-colors bg-transparent cursor-pointer text-left"
+                    >
+                      <RunningIcon />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-text-primary truncate">{job.project}</span>
+                          <KindBadge kind={job.kind} />
+                        </div>
+                        <p className="text-xs text-text-tertiary mt-0.5">{elapsed(job.started_at)}</p>
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-text-tertiary">
-                        {elapsedStr && <span>{elapsedStr}</span>}
-                        {!isSuccess && !verdict && <span className="text-status-error">exit {job.exit_code}</span>}
-                        {timeAgo && <span>{timeAgo}</span>}
-                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Finished section */}
+              {finishedJobs.length > 0 && (
+                <div>
+                  {runningJobs.length > 0 && (
+                    <div className="px-4 py-1.5 bg-bg-secondary border-b border-border">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">
+                        Recent
+                      </span>
                     </div>
-                  </button>
-                )
-              })}
+                  )}
+                  {finishedJobs.map(job => {
+                    const success = job.exit_code === 0
+                    const dur = elapsed(job.started_at, job.finished_at)
+                    const ago = job.finished_at ? timeAgo(new Date(job.finished_at * 1000)) : null
+
+                    return (
+                      <button
+                        key={job.id}
+                        onClick={() => handleJobClick(job)}
+                        className="w-full flex items-center gap-3 px-4 py-3 border-b border-border/50 last:border-0 hover:bg-bg-secondary transition-colors bg-transparent cursor-pointer text-left"
+                      >
+                        <StatusIcon success={success} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium text-text-primary truncate">{job.project}</span>
+                            <KindBadge kind={job.kind} />
+                            {job.verdict && <VerdictBadge verdict={job.verdict} />}
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-xs text-text-tertiary">{dur}</span>
+                            {ago && <span className="text-xs text-text-tertiary">· {ago}</span>}
+                            {!success && !job.verdict && (
+                              <span className="text-xs text-status-error">exit {job.exit_code}</span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
+
+          {/* Footer */}
+          <div className="px-4 py-2.5 border-t border-border">
+            <Link
+              href="/jobs"
+              onClick={() => setOpen(false)}
+              className="text-xs text-text-tertiary hover:text-text-primary transition-colors no-underline flex items-center gap-1"
+            >
+              View all runs
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 6 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 1l4 4-4 4" />
+              </svg>
+            </Link>
+          </div>
         </div>
       )}
     </div>

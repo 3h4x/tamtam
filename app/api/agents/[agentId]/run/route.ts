@@ -7,7 +7,7 @@ import { resolveProjectPath } from '@/lib/project-data';
 import { getImproveConfig } from '@/lib/scheduling';
 import { createJob, updateJob, listJobs, probeJobStatus } from '@/lib/job-storage';
 import { startJob } from '@/lib/pm2-jobs';
-import { withBasePrompt } from '@/lib/config';
+import { withBasePrompt, getPermissionModeFlag } from '@/lib/config';
 
 export async function POST(
   request: NextRequest,
@@ -58,7 +58,7 @@ export async function POST(
 
   // Build command with model and system prompt
   const modelFlag = agent.model ? `--model ${agent.model}` : '';
-  let cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions ${modelFlag}`;
+  let cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()} ${modelFlag}`;
   if (systemPrompt) {
     cmd += ` --append-system-prompt`;
   }

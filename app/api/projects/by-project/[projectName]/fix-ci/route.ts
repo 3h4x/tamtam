@@ -6,6 +6,7 @@ import { resolveProjectPath } from '@/lib/project-data';
 import { createJob, listJobs, probeJobStatus, updateJob } from '@/lib/job-storage';
 import { startJob } from '@/lib/pm2-jobs';
 import { exec } from '@/lib/shell';
+import { getPermissionModeFlag } from '@/lib/config';
 
 export async function POST(
   request: NextRequest,
@@ -85,7 +86,7 @@ Do not commit — just make the code changes.
   try {
     const pid = await startJob(
       job.id,
-      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions`,
+      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()}`,
       prompt,
       projPath
     );

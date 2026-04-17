@@ -8,7 +8,7 @@ import { createJob, listJobs, probeJobStatus, updateJob, type JobData } from '@/
 import { startJob } from '@/lib/pm2-jobs';
 import { exec } from '@/lib/shell';
 import { CODE_REVIEWER_SKILL } from '@/lib/skills';
-import { withBasePrompt } from '@/lib/config';
+import { withBasePrompt, getPermissionModeFlag } from '@/lib/config';
 
 function loadReviewPrompt(): string {
   let content = '';
@@ -75,7 +75,7 @@ export async function POST(
   try {
     const pid = await startJob(
       job.id,
-      `${claudeBin} --print --output-format stream-json --verbose --include-partial-messages --dangerously-skip-permissions`,
+      `${claudeBin} --print --output-format stream-json --verbose --include-partial-messages ${getPermissionModeFlag()}`,
       prompt,
       projPath
     );

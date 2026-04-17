@@ -58,9 +58,11 @@ export async function startJob(
 
 export async function getJobStatus(
   jobId: string
-): Promise<{ status: 'running' | 'done'; exitCode: number | null }> {
+): Promise<{ status: 'running' | 'done' | 'unknown'; exitCode: number | null }> {
   const info = await getPm2Info(jobId);
-  if (!info) return { status: 'done', exitCode: -1 };
+  // PM2 doesn't know about this job — could be a non-PM2 spawn (e.g. custom action).
+  // Caller should fall back to process.kill(pid, 0) to verify liveness.
+  if (!info) return { status: 'unknown', exitCode: null };
 
   const pm2Status = info.pm2_env?.status ?? '';
   if (pm2Status === 'online') return { status: 'running', exitCode: null };

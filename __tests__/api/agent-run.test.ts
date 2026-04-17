@@ -123,9 +123,11 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     vi.doMock('@/lib/config', () => ({
       withBasePrompt: (p: string) => p,
+      getPermissionModeFlag: () => '--dangerously-skip-permissions',
       getSettings: () => ({
         workspace_path: '', github_owner: '', claude_bin: 'claude', log_dir: '/tmp/logs',
         frequency: '1h', daytime: false, weekends: false, launchagent_prefix: 'com.tamtam', base_prompt: '',
+        permission_mode: 'bypassPermissions',
       }),
     }));
 

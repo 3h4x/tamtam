@@ -59,6 +59,7 @@ describe('config', () => {
         launchagent_prefix: 'com.tamtam',
         base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
         default_model: 'haiku',
+        permission_mode: 'bypassPermissions',
       });
     });
 

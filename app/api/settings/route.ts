@@ -14,6 +14,7 @@ const SETTING_KEYS = [
   'workspace_path',
   'base_prompt',
   'default_model',
+  'permission_mode',
 ] as const;
 
 export async function GET() {

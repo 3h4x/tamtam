@@ -9,7 +9,7 @@ import { SKILLS_DIR } from '@/lib/skills';
 import { resolveProjectPath } from '@/lib/project-data';
 import { createJob, updateJob } from '@/lib/job-storage';
 import { startJob } from '@/lib/pm2-jobs';
-import { withBasePrompt } from '@/lib/config';
+import { withBasePrompt, getPermissionModeFlag } from '@/lib/config';
 
 export async function POST(
   request: NextRequest,
@@ -81,9 +81,9 @@ export async function POST(
     prompt = 'See the attached files.';
   }
 
-  // For follow-ups (--resume), skip persona/base prompt injection — context is already in the session
+  // For follow-ups (--resume), skip persona/base prompt injection — context is already in the session.
+  // Attachments, however, MUST always be referenced in the prompt so Claude knows to open them.
   if (!resumeSessionId) {
-    // Resolve persona file paths and prepend content
     const docsBase = join(SKILLS_DIR, 'docs', 'skills');
     for (const pPath of personaPaths) {
       const personaFile = join(docsBase, `${pPath}.md`);
@@ -94,20 +94,19 @@ export async function POST(
         } catch {}
       }
     }
-
-    if (attachmentPaths.length > 0) {
-      prompt += '\n\nAttached files (read them to see their content):\n';
-      for (const p of attachmentPaths) prompt += `- ${p}\n`;
-    }
-
     prompt = withBasePrompt(prompt);
+  }
+
+  if (attachmentPaths.length > 0) {
+    prompt += '\n\nAttached files (read them to see their content):\n';
+    for (const p of attachmentPaths) prompt += `- ${p}\n`;
   }
 
   const job = createJob(projectName, 'run', 0, '', prompt, contextMeta || undefined, userPrompt || undefined);
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
 
-  let cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${model} --dangerously-skip-permissions`;
+  let cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${model} ${getPermissionModeFlag()}`;
   if (resumeSessionId) {
     cmd += ` --resume ${resumeSessionId}`;
   }

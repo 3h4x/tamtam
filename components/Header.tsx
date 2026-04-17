@@ -17,10 +17,8 @@ const NAV_ITEMS = [
   { to: '/settings', label: 'Settings' },
 ]
 
-export function Header({ loading, lastRefresh }: HeaderProps) {
+export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
   const pathname = usePathname()
-  const secondsSinceRefresh = Math.floor((Date.now() - lastRefresh) / 1000)
-  const displaySeconds = Math.min(secondsSinceRefresh, 30)
 
   return (
     <header className="sticky top-0 z-50 flex items-center justify-between px-6 py-3 border-b border-border bg-bg-primary">
@@ -48,9 +46,7 @@ export function Header({ loading, lastRefresh }: HeaderProps) {
         </nav>
       </div>
       <div className="flex items-center gap-3">
-        <span className={`text-xs text-text-tertiary ${loading ? 'animate-spin' : ''}`}>
-          {loading ? '\u27F3' : `\u21BB ${displaySeconds}s`}
-        </span>
+        {loading && <span className="text-xs text-text-tertiary animate-spin">{'\u27F3'}</span>}
         <NotificationBell />
         <ThemeToggle />
       </div>

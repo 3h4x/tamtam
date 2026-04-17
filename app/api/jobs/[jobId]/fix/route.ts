@@ -6,6 +6,7 @@ import { checkAuth } from '@/lib/auth';
 import { getImproveConfig } from '@/lib/scheduling';
 import { resolveProjectPath } from '@/lib/project-data';
 import { getJob, createJob, readLog, probeJobStatus, updateJob } from '@/lib/job-storage';
+import { getPermissionModeFlag } from '@/lib/config';
 
 export async function POST(
   request: NextRequest,
@@ -55,7 +56,7 @@ Do not commit — just make the code changes.
   job.logPath = logPath;
 
   const logFd = openSync(logPath, 'w');
-  const proc = spawn(claudeBin, ['--print', '--output-format', 'stream-json', '--include-partial-messages', '--verbose', '--dangerously-skip-permissions'], {
+  const proc = spawn(claudeBin, ['--print', '--output-format', 'stream-json', '--include-partial-messages', '--verbose', ...getPermissionModeFlag().split(' ')], {
     cwd: projPath,
     stdio: ['pipe', logFd, logFd],
     env: {

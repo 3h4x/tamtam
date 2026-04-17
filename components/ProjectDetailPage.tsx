@@ -6,6 +6,7 @@ import { reviewProject, testProject, fixCi, fetchJobs, fetchProjectConfig, updat
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
 import { statusDot, priorityColor, getHighestPriority, getAggregateCi, formatDuration } from '@/lib/statusConstants'
+import { formatAgo } from '@/lib/format'
 import { SmartPushModal } from '@/components/SmartPushModal'
 import { RunModal } from '@/components/RunModal'
 import { TerminalTab } from '@/components/TerminalTab'
@@ -18,13 +19,6 @@ type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes'
 
 type Verdict = 'LGTM' | 'NEEDS ATTENTION' | 'DO NOT SHIP'
 
-function formatAgo(ts: number): string {
-  const s = Math.floor(Date.now() / 1000 - ts)
-  if (s < 60) return 'just now'
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`
-  return `${Math.floor(s / 86400)}d ago`
-}
 
 function runLabel(j: JobInfo): string {
   if (j.kind === 'run') return 'chat'
@@ -521,10 +515,7 @@ export function ProjectDetailPage({
           {releaseTag && <span className="text-text-secondary text-sm">{releaseTag}</span>}
         </div>
         <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-2 h-2 rounded-full" style={{ background: dot.color }} />
-            <span className="text-sm">{dot.label}</span>
-          </span>
+          <span className="inline-block w-2 h-2 rounded-full" title={dot.label} style={{ background: dot.color }} />
           {highestPriority && (
             <span style={{ color: priorityColor[highestPriority] }} className="text-sm">
               {highestPriority}

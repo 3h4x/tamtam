@@ -48,6 +48,7 @@ export interface SessionState {
   thinkingBuffer: string
   streamTools: ToolEntry[]
   streaming: boolean
+  streamIsRaw: boolean
   streamStartedAt: number | null
   // meta
   lastStats: RunStats | null
@@ -68,6 +69,7 @@ const emptyState = (): SessionState => ({
   thinkingBuffer: '',
   streamTools: [],
   streaming: false,
+  streamIsRaw: false,
   streamStartedAt: null,
   lastStats: null,
   messageQueue: [],
@@ -153,6 +155,7 @@ class TerminalStore {
     this.update(projectName, () => ({
       currentJobId: jobId,
       streaming: true,
+      streamIsRaw: raw,
       streamStartedAt: Date.now(),
       streamBuffer: '',
       thinkingBuffer: '',

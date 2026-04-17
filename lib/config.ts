@@ -16,6 +16,7 @@ export interface TamTamConfig {
   launchagent_prefix: string;
   base_prompt: string;
   default_model: string;
+  permission_mode: string;
 }
 
 const DEFAULTS: TamTamConfig = {
@@ -29,6 +30,7 @@ const DEFAULTS: TamTamConfig = {
   launchagent_prefix: 'com.tamtam',
   base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
   default_model: 'haiku',
+  permission_mode: 'bypassPermissions',
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
@@ -53,6 +55,7 @@ export function getSettings(): TamTamConfig {
     launchagent_prefix: map.launchagent_prefix ?? DEFAULTS.launchagent_prefix,
     base_prompt: map.base_prompt ?? DEFAULTS.base_prompt,
     default_model: map.default_model ?? DEFAULTS.default_model,
+    permission_mode: map.permission_mode ?? DEFAULTS.permission_mode,
   };
 
   _cache = { config, time: now };
@@ -61,6 +64,15 @@ export function getSettings(): TamTamConfig {
 
 export function reloadConfig(): void {
   _cache = null;
+}
+
+const VALID_PERMISSION_MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'default', 'dontAsk', 'plan'] as const;
+
+/** Returns the --permission-mode flag string for the Claude CLI. */
+export function getPermissionModeFlag(): string {
+  const { permission_mode } = getSettings();
+  const mode = VALID_PERMISSION_MODES.includes(permission_mode as any) ? permission_mode : 'bypassPermissions';
+  return `--permission-mode ${mode}`;
 }
 
 /** Prepend the base prompt (if configured) to a user/task prompt. */

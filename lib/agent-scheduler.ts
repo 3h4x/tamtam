@@ -91,8 +91,6 @@ function buildPlist(agentId: string, schedule: string): string {
   <string>${logPath}</string>
   <key>StandardErrorPath</key>
   <string>${logPath}</string>
-  <key>RunAtLoad</key>
-  <true/>
 </dict>
 </plist>`;
 }
