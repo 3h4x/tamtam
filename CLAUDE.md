@@ -48,6 +48,7 @@ Next.js monolith (App Router) for managing Claude CLI agents across multiple pro
 - `/project/[name]` — Project overview with agents, status bar (changes/review/tests)
 - `/project/[name]/config` — Test command + custom actions editor (name, command, color)
 - `/project/[name]/history` — Project runs with filter tabs (all/running/failed/done)
+- `/project/[name]/changes` — Git diff viewer for uncommitted changes
 - `/project/[name]/terminal/[sessionId]` — Interactive Claude runner with model selector (haiku/sonnet/opus), skill picker, and real-time token streaming via SSE (see `docs/TERMINAL.md`)
 - `/project/[name]/task/[task]` — Task detail view
 - `/agents` — Agents management page
@@ -64,7 +65,16 @@ Next.js monolith (App Router) for managing Claude CLI agents across multiple pro
 - `/api/skills/[skillId]` — Skill detail (GET, PATCH, DELETE)
 - `/api/projects/personas` — File-based skills from `skills/docs/skills/` (GET)
 - `/api/projects/by-project/[name]/action` — Custom actions (GET, PUT, POST)
+- `/api/projects/by-project/[name]/config` — Project test command config (GET, PATCH)
 - `/api/projects/by-project/[name]/run` — Run Claude on project (POST, accepts `model` param)
+- `/api/projects/by-project/[name]/review` — Start AI code review (POST)
+- `/api/projects/by-project/[name]/test` — Run project test command (POST)
+- `/api/projects/by-project/[name]/changes` — Uncommitted changes summary (GET)
+- `/api/projects/by-project/[name]/push` — Push changes to git (POST); sub-routes: `/preview`, `/execute`, `/generate`
+- `/api/jobs` — All runs across projects (GET)
+- `/api/jobs/[jobId]` — Job detail (GET, DELETE)
+- `/api/jobs/[jobId]/logs` — Job log content (GET)
+- `/api/jobs/[jobId]/rerun` — Re-run a job (POST)
 - `/api/streaming/[jobId]` — SSE stream of parsed text deltas from NDJSON log (`?raw=1` for raw lines)
 - `/api/settings` — Settings CRUD (GET, PATCH) — includes `base_prompt` for global agent instructions
 - `/api/settings/backup` — SQLite hot backup (POST)
