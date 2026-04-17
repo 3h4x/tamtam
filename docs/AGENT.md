@@ -1,0 +1,348 @@
+# Agents — How They Work
+
+Agents are reusable automation units that combine skills, a model, a prompt template, and optional scheduling. Each agent runs Claude CLI with a composed system prompt (skills) and a task prompt, either on-demand or on a recurring schedule.
+
+## Concepts
+
+- **Agent** — A configuration combining skills, model, and prompt template
+- **Scheduled run** — Automatic executions via PM2 or launchctl on an interval (e.g., "1h", "30m")
+- **On-demand run** — Manual execution triggered via API or UI
+- **Skill composition** — Skills are prepended as a system prompt before the task prompt
+
+## Agent Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `id` | string | `agent-{timestamp}` | Unique identifier |
+| `name` | string | required | Display name (e.g., "Daily Tests") |
+| `project` | string | required | Project name (must exist in workspace) |
+| `skillIds` | string (JSON array) | `[]` | Array of skill IDs to compose as system prompt |
+| `model` | string | `sonnet` | Claude model: `haiku`, `sonnet`, or `opus` |
+| `prompt` | string | `''` | Default task prompt for scheduled runs |
+| `schedule` | string | `null` | Run interval for scheduling: `"30m"`, `"1h"`, `"8h"`, etc. or `null` for manual only |
+| `runner` | string | `pm2` | Scheduler: `"pm2"` or `"launchctl"` (macOS only) |
+| `enabled` | boolean | `true` | Enable/disable without deletion |
+| `createdAt` | number | — | Unix timestamp (seconds) |
+| `updatedAt` | number | — | Unix timestamp (seconds) |
+
+## Creating an Agent
+
+### Via UI
+
+1. Navigate to `/agents`
+2. Click "New Agent"
+3. Fill in name, project, skills, model, prompt, schedule
+4. Click "Create"
+
+### Via API
+
+**POST /api/agents**
+
+```bash
+curl -X POST http://localhost:1337/api/agents \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $Z_API_TOKEN" \
+  -d '{
+    "name": "Weekly Code Review",
+    "project": "myapp",
+    "skillIds": ["skill-123", "skill-456"],
+    "model": "sonnet",
+    "prompt": "Review uncommitted changes in the project and suggest improvements",
+    "schedule": "1w",
+    "runner": "pm2",
+    "enabled": true
+  }'
+```
+
+**Response:**
+```json
+{
+  "agent": {
+    "id": "agent-1705276800000",
+    "name": "Weekly Code Review",
+    "project": "myapp",
+    "skillIds": "[\"skill-123\", \"skill-456\"]",
+    "model": "sonnet",
+    "prompt": "Review uncommitted changes...",
+    "schedule": "1w",
+    "runner": "pm2",
+    "enabled": true,
+    "createdAt": 1705276800.5,
+    "updatedAt": 1705276800.5
+  }
+}
+```
+
+**Required fields:** `name`, `project`  
+**Optional fields:** `skillIds` (default `[]`), `model`, `prompt`, `schedule`, `runner`, `enabled`
+
+If you provide both `schedule` and `prompt`, the agent's schedule is automatically installed.
+
+## Running an Agent
+
+### On-Demand Run
+
+**POST /api/agents/{agentId}/run**
+
+```bash
+curl -X POST http://localhost:1337/api/agents/agent-1705276800000/run \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $Z_API_TOKEN" \
+  -d '{
+    "prompt": "Check if all tests pass and report any failures"
+  }'
+```
+
+The `prompt` field is required for each run — it overrides the agent's default prompt.
+
+**Response:**
+```json
+{
+  "status": "started",
+  "job_id": "job-1705276900123",
+  "pid": 45678,
+  "agent": "Weekly Code Review"
+}
+```
+
+The agent starts immediately as a PM2 process. Output is streamed to a log file and can be watched via SSE at `/api/streaming/{job_id}`.
+
+### Scheduled Runs
+
+If an agent has both `schedule` and `prompt`, the schedule is installed automatically on creation/update:
+
+- **runner: "pm2"** — PM2 cron job (works on any OS)
+- **runner: "launchctl"** — macOS LaunchAgent (requires macOS)
+
+On each scheduled trigger, the agent runs with its stored `prompt`.
+
+## Skill Composition
+
+Skills are combined into a system prompt before the task prompt:
+
+```
+## Skill 1 Name
+Skill 1 content...
+
+---
+
+## Skill 2 Name
+Skill 2 content...
+
+---
+
+[Task prompt provided at run time]
+```
+
+The final prompt sent to Claude is:
+```
+[Base prompt from settings] + [Composed skills] + [Task prompt]
+```
+
+This allows agents to be reusable — the same agent can run with different task prompts while keeping the skill composition consistent.
+
+## Request Flow
+
+```
+User/scheduler triggers
+  → POST /api/agents/{agentId}/run
+      → Fetch agent from DB
+      → Fetch skills from DB (by skillIds)
+      → Compose system prompt: `## SkillName\nContent` + `---` separators
+      → Build command:
+          claude --print --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions --model {agent.model}
+      → Create job record
+      → Start via PM2 with composed prompt as stdin
+      → Return job ID and PID
+  → Process runs → writes NDJSON log
+  → Client polls /api/streaming/{job_id} to watch output
+```
+
+## Querying Agents
+
+**GET /api/agents** — List all agents
+
+```bash
+curl http://localhost:1337/api/agents
+```
+
+**GET /api/agents?project=myapp** — Filter by project
+
+```bash
+curl http://localhost:1337/api/agents?project=myapp
+```
+
+**GET /api/agents/{agentId}** — Get a single agent
+
+```bash
+curl http://localhost:1337/api/agents/agent-1705276800000
+```
+
+## Updating an Agent
+
+**PATCH /api/agents/{agentId}**
+
+```bash
+curl -X PATCH http://localhost:1337/api/agents/agent-1705276800000 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $Z_API_TOKEN" \
+  -d '{
+    "skillIds": ["skill-789"],
+    "model": "opus",
+    "schedule": "2h"
+  }'
+```
+
+Only provided fields are updated. If you change `schedule`, `prompt`, or `enabled`, the schedule is automatically reinstalled or uninstalled.
+
+## Deleting an Agent
+
+**DELETE /api/agents/{agentId}**
+
+```bash
+curl -X DELETE http://localhost:1337/api/agents/agent-1705276800000 \
+  -H "Authorization: Bearer $Z_API_TOKEN"
+```
+
+This also uninstalls any active schedule (PM2 cron or LaunchAgent).
+
+## Scheduled Execution Details
+
+### PM2 Cron
+
+When `runner: "pm2"`, a PM2 cron job is created:
+
+```bash
+pm2 cron "0 */1 * * *" --name tamtam-{project}-agent-{agentName} \
+  "curl -s -X POST http://localhost:1337/api/agents/{agentId}/run -H 'Content-Type: application/json' -d @{promptFile}"
+```
+
+The prompt is stored in `~/logs/agent-scripts/{agentId}.prompt.json` and passed to the run endpoint.
+
+Log output goes to `~/logs/agent-scheduler-{agentId}.log`.
+
+### LaunchAgent (macOS)
+
+When `runner: "launchctl"`, a `.plist` file is created in `~/Library/LaunchAgents/`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.tamtam.agent.{agentId}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/...logs/agent-scripts/{agentId}.sh</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>{intervalInSeconds}</integer>
+  <key>StandardOutPath</key>
+  <string>~/logs/agent-scheduler-{agentId}.log</string>
+  <key>StandardErrorPath</key>
+  <string>~/logs/agent-scheduler-{agentId}.log</string>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
+```
+
+Schedule string format:
+- `"30m"` → every 30 minutes
+- `"1h"` → every hour
+- `"8h"` → every 8 hours
+
+The agent loads on startup and runs at the configured interval.
+
+## Preventing Duplicate Runs
+
+To prevent an agent from running multiple times simultaneously, the run endpoint checks if an agent with the same name is already running on the same project:
+
+```typescript
+const kindKey = `agent:${agent.name}`;
+const running = listJobs()
+  .filter(j => j.project === agent.project && j.kind === kindKey && j.finishedAt === null)
+  .filter(j => probeJobStatus(j) === 'running');
+
+if (running.length > 0) {
+  return 409 "Agent is already running";
+}
+```
+
+This prevents concurrent runs if a schedule fires faster than the agent completes.
+
+## Authentication
+
+If `Z_API_TOKEN` is set in environment, the API requires:
+
+```bash
+-H "Authorization: Bearer $Z_API_TOKEN"
+```
+
+Scheduled runs (PM2/LaunchAgent) automatically include this header when available.
+
+## Example: Set Up a Weekly Review Agent
+
+1. **Create a skill** that provides code review instructions:
+   ```bash
+   curl -X POST http://localhost:1337/api/skills \
+     -H "Content-Type: application/json" \
+     -d '{
+       "name": "Code Review Instructions",
+       "description": "Guidelines for reviewing code changes",
+       "content": "Focus on: correctness, performance, security, readability. Flag TODOs and FIXMEs..."
+     }'
+   ```
+
+2. **Create the agent**:
+   ```bash
+   curl -X POST http://localhost:1337/api/agents \
+     -H "Content-Type: application/json" \
+     -d '{
+       "name": "Weekly Code Review",
+       "project": "myapp",
+       "skillIds": ["skill-abc123"],
+       "model": "sonnet",
+       "prompt": "Review all uncommitted changes and provide feedback",
+       "schedule": "1w",
+       "runner": "pm2",
+       "enabled": true
+     }'
+   ```
+
+3. **Verify the schedule**:
+   ```bash
+   pm2 cron list
+   ```
+
+4. **Manually trigger** (to test):
+   ```bash
+   curl -X POST http://localhost:1337/api/agents/{agentId}/run \
+     -H "Content-Type: application/json" \
+     -d '{"prompt": "Review uncommitted changes"}'
+   ```
+
+5. **Watch output**:
+   ```bash
+   curl http://localhost:1337/api/streaming/{job_id}
+   ```
+
+## Key Files
+
+| File | Role |
+|------|------|
+| `lib/db/schema.ts` | `agents` table definition |
+| `app/api/agents/route.ts` | Create, list agents |
+| `app/api/agents/[agentId]/route.ts` | Get, update, delete agents |
+| `app/api/agents/[agentId]/run/route.ts` | Run agent on-demand (skill composition happens here) |
+| `lib/agent-scheduler.ts` | Install/uninstall PM2 cron and LaunchAgent |
+| `lib/pm2-jobs.ts` | PM2 process lifecycle |
+| `components/AgentsTab.tsx` | UI for agent management |
+
+## Tests
+
+- Unit: `__tests__/api/agents.test.ts` — agent CRUD and run tests
+- E2E: `e2e/agents.spec.ts` — Playwright tests (requires dev server)
+- `pnpm test` — run unit tests
+- `pnpm test:e2e` — run e2e tests

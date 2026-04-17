@@ -139,7 +139,7 @@ function buildEntries(jobs: JobInfo[]): Entry[] {
 
   for (const j of sorted) {
     const bucket = bucketOf(j.kind)
-    if (bucket === 'run' && j.session_id) {
+    if (j.session_id) {
       const existing = sessionGroup.get(j.session_id)
       if (existing) {
         existing.turns += 1
@@ -157,7 +157,7 @@ function buildEntries(jobs: JobInfo[]): Entry[] {
     }
 
     const entry: Entry = {
-      key: bucket === 'run' && j.session_id ? `sess:${j.session_id}` : `job:${j.id}`,
+      key: j.session_id ? `sess:${j.session_id}` : `job:${j.id}`,
       kind: j.kind,
       bucket,
       title: titleForJob(j, bucket),
@@ -171,13 +171,13 @@ function buildEntries(jobs: JobInfo[]): Entry[] {
       inputTokens: j.input_tokens ?? 0,
       outputTokens: j.output_tokens ?? 0,
       cacheReadTokens: j.cache_read_tokens ?? 0,
-      turns: bucket === 'run' ? 1 : 0,
+      turns: 1,
       model: modelFromContext(j.context_meta),
       navJobId: j.id,
       navSessionId: j.session_id ?? null,
       verdict: j.verdict,
     }
-    if (bucket === 'run' && j.session_id) sessionGroup.set(j.session_id, entry)
+    if (j.session_id) sessionGroup.set(j.session_id, entry)
     entries.push(entry)
   }
 

@@ -211,6 +211,30 @@ describe('GET /api/streaming/[jobId]', () => {
     expect(combined).toContain('"name":"Read"');
   });
 
+  it('emits done via poll when job finishes after last log write (fs.watch miss)', async () => {
+    const logFile = join(tempDir, 'polled.log');
+    writeFileSync(logFile, 'test output line\n');
+    // Start with job not finished — stream must poll, then finish.
+    let finished = false;
+    getJobMock.mockImplementation(() => ({
+      logPath: logFile,
+      finishedAt: finished ? Date.now() / 1000 : null,
+      exitCode: finished ? 0 : null,
+    } as any));
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-poll?raw=1', { signal: ac.signal });
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-poll' }) });
+
+    // Flip the job to finished AFTER the stream has already started and replayed initial content.
+    setTimeout(() => { finished = true; }, 50);
+
+    const events = await collectSSEStream(response, ac, 2000);
+    const combined = events.join('');
+    expect(combined).toContain('event: done');
+    expect(combined).toContain('"exitCode":0');
+  });
+
   it('uses fallback path from homedir when job has no logPath', async () => {
     getJobMock.mockReturnValue(null);
 

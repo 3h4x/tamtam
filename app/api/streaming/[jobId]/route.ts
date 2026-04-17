@@ -131,39 +131,66 @@ export async function GET(
 
       // Watch for new content
       let watcher: ReturnType<typeof watch> | null = null;
+      let pollTimer: ReturnType<typeof setInterval> | null = null;
+      let closed = false;
+
+      function cleanup() {
+        if (closed) return;
+        closed = true;
+        watcher?.close();
+        if (pollTimer) clearInterval(pollTimer);
+        try { controller.close(); } catch {}
+      }
+
+      function checkFinished(): boolean {
+        try {
+          const content = existsSync(logPath) ? readFileSync(logPath, 'utf-8') : '';
+          const currentSize = Buffer.byteLength(content);
+          if (currentSize > offset) {
+            const newContent = Buffer.from(content).slice(offset).toString('utf-8');
+            offset = currentSize;
+            sendContent(newContent);
+          }
+          const job = getJob(jobId);
+          if (!job?.finishedAt) return false;
+          if (raw) {
+            emitDoneAndCleanup(job.exitCode);
+          } else {
+            const fullContent = existsSync(logPath) ? readFileSync(logPath, 'utf-8') : '';
+            if (!fullContent.includes('"type":"result"')) {
+              emitDoneAndCleanup(job.exitCode);
+            } else {
+              cleanup();
+            }
+          }
+          return true;
+        } catch {
+          return false;
+        }
+      }
+
+      function emitDoneAndCleanup(exitCode?: number | null) {
+        try {
+          const payload: Record<string, unknown> = { exitCode: exitCode ?? null };
+          if ((exitCode ?? 0) !== 0) {
+            const detail = extractLogDetail();
+            if (detail) payload.detail = detail;
+          }
+          controller.enqueue(encoder.encode(sseEncode(JSON.stringify(payload), 'done')));
+        } catch {}
+        cleanup();
+      }
+
       try {
-        watcher = watch(logPath, () => {
-          try {
-            const content = readFileSync(logPath, 'utf-8');
-            const currentSize = Buffer.byteLength(content);
-            if (currentSize > offset) {
-              const newContent = Buffer.from(content).slice(offset).toString('utf-8');
-              offset = currentSize;
-              sendContent(newContent);
-            }
-            // Job finished — emit done and close
-            const job = getJob(jobId);
-            if (job?.finishedAt) {
-              if (raw) {
-                emitDone(watcher, job.exitCode);
-              } else {
-                const fullContent = readFileSync(logPath, 'utf-8');
-                if (!fullContent.includes('"type":"result"')) {
-                  emitDone(watcher, job.exitCode);
-                } else {
-                  closeStream(watcher);
-                }
-              }
-            }
-          } catch {}
-        });
+        watcher = watch(logPath, () => { checkFinished(); });
       } catch {}
 
+      // Poll every 1s as a safety net — fs.watch can miss the finishedAt
+      // transition if the last log write happens before the job's exit handler runs.
+      pollTimer = setInterval(() => { checkFinished(); }, 1000);
+
       // Clean up on abort
-      request.signal.addEventListener('abort', () => {
-        watcher?.close();
-        try { controller.close(); } catch {}
-      });
+      request.signal.addEventListener('abort', () => { cleanup(); });
     },
   });
 
