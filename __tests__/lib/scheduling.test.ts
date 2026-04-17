@@ -27,7 +27,10 @@ function createTestDb() {
       enabled INTEGER DEFAULT 0,
       github TEXT,
       priority TEXT,
-      custom_actions TEXT
+      custom_actions TEXT,
+      test_command TEXT,
+      test_cron_enabled INTEGER DEFAULT 0,
+      test_cron_schedule TEXT
     );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };

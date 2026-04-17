@@ -75,7 +75,7 @@ export async function POST(
   try {
     const pid = await startJob(
       job.id,
-      `${claudeBin} --print --dangerously-skip-permissions`,
+      `${claudeBin} --print --output-format stream-json --verbose --include-partial-messages --dangerously-skip-permissions`,
       prompt,
       projPath
     );

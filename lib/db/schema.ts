@@ -12,6 +12,9 @@ export const projects = sqliteTable('projects', {
   github: text('github'),
   priority: text('priority'),
   customActions: text('custom_actions'),
+  testCommand: text('test_command'),
+  testCronEnabled: integer('test_cron_enabled', { mode: 'boolean' }).default(false),
+  testCronSchedule: text('test_cron_schedule'),
 });
 
 export const jobs = sqliteTable('jobs', {

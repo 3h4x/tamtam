@@ -288,6 +288,8 @@ export interface ProjectConfig {
   test_command: string
   detected_test_command: string
   effective_test_command: string
+  test_cron_enabled: boolean
+  test_cron_schedule: string
 }
 
 export async function fetchProjectConfig(projectName: string): Promise<ProjectConfig> {
@@ -300,7 +302,11 @@ export async function fetchProjectConfig(projectName: string): Promise<ProjectCo
 
 export async function updateProjectConfig(
   projectName: string,
-  config: { test_command?: string }
+  config: {
+    test_command?: string
+    test_cron_enabled?: boolean
+    test_cron_schedule?: string
+  }
 ): Promise<{ status: string }> {
   const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/config`, {
     method: 'PATCH',
@@ -337,6 +343,8 @@ export interface JobInfo {
   cache_read_tokens?: number | null
   cache_create_tokens?: number | null
   session_id?: string | null
+  user_prompt?: string | null
+  context_meta?: string | null
 }
 
 export async function fetchJobs(project?: string): Promise<{ jobs: JobInfo[] }> {

@@ -94,7 +94,7 @@ export function getImproveConfig(): ImproveConfig {
       scheduler: null,
       github: p.github ?? null,
       priority: p.priority ?? null,
-      test_command: null,
+      test_command: p.testCommand ?? null,
     };
   }
 
@@ -162,8 +162,32 @@ export function writeProjectFieldYaml(
     db.update(schema.projects).set({ github: value }).where(eq(schema.projects.name, projName)).run();
   } else if (fieldName === 'priority') {
     db.update(schema.projects).set({ priority: value }).where(eq(schema.projects.name, projName)).run();
+  } else if (fieldName === 'test_command') {
+    db.update(schema.projects).set({ testCommand: value }).where(eq(schema.projects.name, projName)).run();
+  } else if (fieldName === 'test_cron_schedule') {
+    db.update(schema.projects).set({ testCronSchedule: value }).where(eq(schema.projects.name, projName)).run();
+  } else if (fieldName === 'test_cron_enabled') {
+    db.update(schema.projects).set({ testCronEnabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
   }
   return true;
+}
+
+export function getProjectTestConfig(projName: string): {
+  testCommand: string | null;
+  testCronEnabled: boolean;
+  testCronSchedule: string | null;
+} | null {
+  const row = db
+    .select()
+    .from(schema.projects)
+    .where(eq(schema.projects.name, projName))
+    .get();
+  if (!row) return null;
+  return {
+    testCommand: row.testCommand ?? null,
+    testCronEnabled: !!row.testCronEnabled,
+    testCronSchedule: row.testCronSchedule ?? null,
+  };
 }
 
 export function parseCronTime(cron: string): {

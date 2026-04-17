@@ -16,6 +16,172 @@ import { useToast } from '@/components/Toast'
 
 type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes'
 
+type Verdict = 'LGTM' | 'NEEDS ATTENTION' | 'DO NOT SHIP'
+
+function formatAgo(ts: number): string {
+  const s = Math.floor(Date.now() / 1000 - ts)
+  if (s < 60) return 'just now'
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`
+  return `${Math.floor(s / 86400)}d ago`
+}
+
+interface StatusStripProps {
+  projectName: string
+  totalChanges: number
+  hasUnreviewed: boolean
+  verdict: Verdict | undefined
+  isReviewRunning: boolean
+  latestReview: JobInfo | undefined
+  isTestRunning: boolean
+  latestTest: JobInfo | undefined
+  onOpenChanges: () => void
+  onOpenJob: (jobId: string) => void
+}
+
+interface StatusCardProps {
+  label: string
+  primary: React.ReactNode
+  detail?: React.ReactNode
+  tone: 'neutral' | 'success' | 'warning' | 'error' | 'info'
+  onClick?: () => void
+  disabled?: boolean
+  running?: boolean
+}
+
+const TONE_RING: Record<StatusCardProps['tone'], string> = {
+  neutral: 'border-border',
+  success: 'border-status-success/40',
+  warning: 'border-status-warning/40',
+  error: 'border-status-error/40',
+  info: 'border-status-info/40',
+}
+
+const TONE_DOT: Record<StatusCardProps['tone'], string> = {
+  neutral: 'bg-text-tertiary',
+  success: 'bg-status-success',
+  warning: 'bg-status-warning',
+  error: 'bg-status-error',
+  info: 'bg-status-info',
+}
+
+function StatusCard({ label, primary, detail, tone, onClick, disabled, running }: StatusCardProps) {
+  const clickable = !!onClick && !disabled
+  return (
+    <button
+      type="button"
+      className={`flex-1 min-w-0 text-left border rounded-lg p-3 flex flex-col gap-1 transition-colors ${TONE_RING[tone]} ${
+        clickable ? 'bg-bg-secondary hover:bg-bg-tertiary cursor-pointer' : 'bg-bg-secondary cursor-default'
+      } ${disabled ? 'opacity-60' : ''}`}
+      onClick={clickable ? onClick : undefined}
+      disabled={!clickable}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] uppercase tracking-wider text-text-tertiary font-semibold">{label}</span>
+        <span className={`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]} ${running ? 'animate-pulse' : ''}`} />
+      </div>
+      <div className="text-sm font-medium text-text-primary truncate">{primary}</div>
+      {detail && <div className="text-xs text-text-tertiary truncate">{detail}</div>}
+    </button>
+  )
+}
+
+function StatusStrip({
+  projectName: _projectName,
+  totalChanges,
+  hasUnreviewed,
+  verdict,
+  isReviewRunning,
+  latestReview,
+  isTestRunning,
+  latestTest,
+  onOpenChanges,
+  onOpenJob,
+}: StatusStripProps) {
+  // Skip the whole strip if there's nothing to show
+  if (totalChanges === 0 && !verdict && !isReviewRunning && !latestTest && !isTestRunning) {
+    return null
+  }
+
+  // CHANGES card
+  const changesCard = totalChanges > 0 ? (
+    <StatusCard
+      label="Changes"
+      primary={`${totalChanges} file${totalChanges !== 1 ? 's' : ''}`}
+      detail={hasUnreviewed ? 'unreviewed — open diff' : 'reviewed — open diff'}
+      tone={hasUnreviewed ? 'warning' : 'success'}
+      onClick={onOpenChanges}
+    />
+  ) : (
+    <StatusCard label="Changes" primary="clean" detail="no uncommitted edits" tone="success" />
+  )
+
+  // REVIEW card
+  let reviewCard: React.ReactNode
+  if (isReviewRunning) {
+    reviewCard = (
+      <StatusCard
+        label="Review"
+        primary="In progress"
+        detail={latestReview ? `started ${formatAgo(latestReview.started_at)} — follow output` : 'starting...'}
+        tone="warning"
+        running
+        onClick={latestReview ? () => onOpenJob(latestReview.id) : undefined}
+      />
+    )
+  } else if (verdict && latestReview) {
+    const tone: StatusCardProps['tone'] =
+      verdict === 'LGTM' ? 'success' : verdict === 'NEEDS ATTENTION' ? 'warning' : 'error'
+    reviewCard = (
+      <StatusCard
+        label="Review"
+        primary={verdict}
+        detail={`${formatAgo(latestReview.finished_at ?? latestReview.started_at)} — view log`}
+        tone={tone}
+        onClick={() => onOpenJob(latestReview.id)}
+      />
+    )
+  } else {
+    reviewCard = <StatusCard label="Review" primary="not run yet" tone="neutral" />
+  }
+
+  // TESTS card
+  let testsCard: React.ReactNode
+  if (isTestRunning) {
+    testsCard = (
+      <StatusCard
+        label="Tests"
+        primary="Running"
+        detail={latestTest ? `started ${formatAgo(latestTest.started_at)} — follow output` : 'starting...'}
+        tone="warning"
+        running
+        onClick={latestTest ? () => onOpenJob(latestTest.id) : undefined}
+      />
+    )
+  } else if (latestTest) {
+    const passed = latestTest.exit_code === 0
+    testsCard = (
+      <StatusCard
+        label="Tests"
+        primary={passed ? 'Passed' : `Failed (exit ${latestTest.exit_code})`}
+        detail={`${formatAgo(latestTest.finished_at ?? latestTest.started_at)} — view log`}
+        tone={passed ? 'success' : 'error'}
+        onClick={() => onOpenJob(latestTest.id)}
+      />
+    )
+  } else {
+    testsCard = <StatusCard label="Tests" primary="not run yet" tone="neutral" />
+  }
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
+      {changesCard}
+      {reviewCard}
+      {testsCard}
+    </div>
+  )
+}
+
 interface ProjectDetailPageProps {
   fleet: FleetHealth
   priorities: string[]
@@ -60,6 +226,8 @@ export function ProjectDetailPage({
   const [config, setConfig] = useState<ProjectConfig | null>(null)
   const [configLoading, setConfigLoading] = useState(false)
   const [testCommandInput, setTestCommandInput] = useState('')
+  const [testCronEnabledInput, setTestCronEnabledInput] = useState(false)
+  const [testCronScheduleInput, setTestCronScheduleInput] = useState('')
   const [configSaving, setConfigSaving] = useState(false)
   const [configSaved, setConfigSaved] = useState(false)
 
@@ -120,6 +288,8 @@ export function ProjectDetailPage({
         if (active) {
           setConfig(configData)
           setTestCommandInput(configData.test_command)
+          setTestCronEnabledInput(configData.test_cron_enabled)
+          setTestCronScheduleInput(configData.test_cron_schedule)
           if (actionsData) {
             setEditActions(actionsData.actions)
             setActionsLoaded(true)
@@ -177,8 +347,8 @@ export function ProjectDetailPage({
     if (!name) return
     setReviewError(null)
     try {
-      await reviewProject(name)
-      toast(`Review started for ${name}`, 'success')
+      const result = await reviewProject(name)
+      router.push(`/project/${name}/terminal?job=${encodeURIComponent(result.job_id)}`)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to start review'
       toast(msg, 'error')
@@ -235,12 +405,18 @@ export function ProjectDetailPage({
     setConfigSaving(true)
     setConfigSaved(false)
     try {
-      await updateProjectConfig(name, { test_command: testCommandInput })
+      await updateProjectConfig(name, {
+        test_command: testCommandInput,
+        test_cron_enabled: testCronEnabledInput,
+        test_cron_schedule: testCronScheduleInput,
+      })
       setConfigSaved(true)
       // Reload config to show effective command
       const data = await fetchProjectConfig(name)
       setConfig(data)
       setTestCommandInput(data.test_command)
+      setTestCronEnabledInput(data.test_cron_enabled)
+      setTestCronScheduleInput(data.test_cron_schedule)
       setTimeout(() => setConfigSaved(false), 3000)
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to save config', 'error')
@@ -271,7 +447,11 @@ export function ProjectDetailPage({
     }, 3000)
   }
 
-  const configDirty = config !== null && testCommandInput !== config.test_command
+  const configDirty =
+    config !== null &&
+    (testCommandInput !== config.test_command ||
+      testCronEnabledInput !== config.test_cron_enabled ||
+      testCronScheduleInput !== config.test_cron_schedule)
 
   return (
     <div className="p-6">
@@ -446,66 +626,19 @@ export function ProjectDetailPage({
       {/* Overview Tab — Agents */}
       {activeTab === 'overview' && name && (
         <>
-          {/* Review & Test status */}
-          {(project.totalChanges > 0 || verdict || latestTest) && (
-            <div className="bg-bg-secondary rounded-lg p-4 mb-4 flex flex-col gap-2">
-              {project.totalChanges > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="text-text-secondary text-sm font-medium">Changes:</span>
-                  <span className={hasUnreviewed ? 'text-status-error' : 'text-status-success'}>
-                    {project.totalChanges} file{project.totalChanges !== 1 ? 's' : ''}
-                  </span>
-                  {hasUnreviewed ? (
-                    <span className="px-2 py-0.5 text-xs rounded-full font-medium bg-status-warning/15 text-status-warning">unreviewed</span>
-                  ) : (
-                    <span className="px-2 py-0.5 text-xs rounded-full font-medium bg-status-success/15 text-status-success">reviewed</span>
-                  )}
-                </div>
-              )}
-              {(verdict || isReviewRunning) && (
-                <div className="flex items-center gap-2">
-                  <span className="text-text-secondary text-sm font-medium">Review:</span>
-                  {isReviewRunning ? (
-                    <span className="text-status-warning">in progress...</span>
-                  ) : verdict ? (
-                    <span className={`text-xs font-medium ${verdict === 'LGTM' ? 'text-status-success' : verdict === 'NEEDS ATTENTION' ? 'text-status-warning' : 'text-status-error'}`}>
-                      {verdict === 'LGTM' ? '✅' : verdict === 'NEEDS ATTENTION' ? '⚠️' : '❌'} {verdict}
-                    </span>
-                  ) : null}
-                  {latestReview && (
-                    <button
-                      className="px-2 py-0.5 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
-                      onClick={() => router.push(`/project/${name}/terminal?job=${encodeURIComponent(latestReview.id)}`)}
-                    >
-                      View
-                    </button>
-                  )}
-                </div>
-              )}
-              {(latestTest || isTestRunning) && (
-                <div className="flex items-center gap-2">
-                  <span className="text-text-secondary text-sm font-medium">Tests:</span>
-                  {isTestRunning ? (
-                    <span className="text-status-warning">running...</span>
-                  ) : latestTest ? (
-                    latestTest.exit_code === 0 ? (
-                      <span className="text-status-success">passed</span>
-                    ) : (
-                      <span className="text-status-error">failed (exit {latestTest.exit_code})</span>
-                    )
-                  ) : null}
-                  {latestTest && (
-                    <button
-                      className="px-2 py-0.5 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
-                      onClick={() => router.push(`/project/${name}/terminal?job=${encodeURIComponent(latestTest.id)}`)}
-                    >
-                      View
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+          {/* Changes / Review / Tests status strip */}
+          <StatusStrip
+            projectName={name}
+            totalChanges={project.totalChanges}
+            hasUnreviewed={hasUnreviewed}
+            verdict={verdict}
+            isReviewRunning={isReviewRunning}
+            latestReview={latestReview}
+            isTestRunning={isTestRunning}
+            latestTest={latestTest}
+            onOpenChanges={() => setActiveTab('changes')}
+            onOpenJob={(jobId) => router.push(`/project/${name}/terminal?job=${encodeURIComponent(jobId)}`)}
+          />
 
           <AgentsTab projectName={name} />
         </>
@@ -561,6 +694,32 @@ export function ProjectDetailPage({
                       {config.effective_test_command || 'none'}
                     </code>
                   </div>
+                </div>
+
+                <div className="mt-5 pt-4 border-t border-border">
+                  <div className="flex items-center gap-2 mb-2">
+                    <input
+                      id="test-cron-enabled"
+                      type="checkbox"
+                      className="w-4 h-4 cursor-pointer accent-accent"
+                      checked={testCronEnabledInput}
+                      onChange={(e) => setTestCronEnabledInput(e.target.checked)}
+                    />
+                    <label htmlFor="test-cron-enabled" className="font-medium text-sm text-text-primary cursor-pointer">
+                      Run tests on schedule
+                    </label>
+                  </div>
+                  <p className="text-text-secondary text-xs mb-3">
+                    When enabled, the effective test command runs on the schedule below. Examples: <code className="font-mono">30m</code>, <code className="font-mono">1h</code>, <code className="font-mono">6h</code>, <code className="font-mono">1d</code>, or a raw cron expression.
+                  </p>
+                  <input
+                    type="text"
+                    className="w-48 px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary font-mono disabled:opacity-50"
+                    value={testCronScheduleInput}
+                    onChange={(e) => setTestCronScheduleInput(e.target.value)}
+                    placeholder="1h"
+                    disabled={!testCronEnabledInput}
+                  />
                 </div>
               </div>
 

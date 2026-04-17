@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { checkAuth } from '@/lib/auth';
-import { getImproveConfig, writeProjectFieldYaml } from '@/lib/scheduling';
+import { getImproveConfig, writeProjectFieldYaml, getProjectTestConfig } from '@/lib/scheduling';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/project-data';
 import { reloadConfig } from '@/lib/config';
+import { installTestSchedule, uninstallTestSchedule, parseTestScheduleToCron } from '@/lib/test-scheduler';
 
 function detectTestCommand(projPath: string, projectName?: string): string | null {
   if (projectName) {
@@ -46,12 +47,15 @@ export async function GET(
     }
   }
   const detectedTestCmd = detectTestCommand(projPath);
+  const testCfg = getProjectTestConfig(projectName);
 
   return NextResponse.json({
     project: projectName,
     test_command: configuredTestCmd ?? '',
     detected_test_command: detectedTestCmd ?? '',
     effective_test_command: configuredTestCmd || detectedTestCmd || '',
+    test_cron_enabled: testCfg?.testCronEnabled ?? false,
+    test_cron_schedule: testCfg?.testCronSchedule ?? '',
   });
 }
 
@@ -63,13 +67,63 @@ export async function PATCH(
   if (authError) return authError;
   const { projectName } = await params;
   const body = await request.json();
+  let touched = false;
 
   if (body.test_command !== undefined) {
+    touched = true;
     const value = body.test_command?.trim() || null;
     const ok = writeProjectFieldYaml(projectName, 'test_command', value);
     if (!ok) {
       return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
     }
+  }
+
+  if (body.test_cron_schedule !== undefined) {
+    touched = true;
+    const value = body.test_cron_schedule?.trim() || null;
+    if (value) {
+      try {
+        parseTestScheduleToCron(value);
+      } catch (err) {
+        return NextResponse.json(
+          { detail: err instanceof Error ? err.message : 'invalid schedule' },
+          { status: 400 }
+        );
+      }
+    }
+    const ok = writeProjectFieldYaml(projectName, 'test_cron_schedule', value);
+    if (!ok) {
+      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
+    }
+  }
+
+  if (body.test_cron_enabled !== undefined) {
+    touched = true;
+    const value = body.test_cron_enabled ? '1' : '0';
+    const ok = writeProjectFieldYaml(projectName, 'test_cron_enabled', value);
+    if (!ok) {
+      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
+    }
+  }
+
+  // If any cron field changed, reconcile the PM2 cron entry.
+  if (body.test_cron_schedule !== undefined || body.test_cron_enabled !== undefined) {
+    const cfg = getProjectTestConfig(projectName);
+    if (cfg && cfg.testCronEnabled && cfg.testCronSchedule) {
+      try {
+        await installTestSchedule(projectName, cfg.testCronSchedule);
+      } catch (err) {
+        return NextResponse.json(
+          { detail: err instanceof Error ? err.message : 'failed to install schedule' },
+          { status: 500 }
+        );
+      }
+    } else {
+      await uninstallTestSchedule(projectName);
+    }
+  }
+
+  if (touched) {
     reloadConfig();
     clearProjectDataCache();
   }

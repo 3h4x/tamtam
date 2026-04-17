@@ -101,6 +101,17 @@ try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN context_meta TEXT');
 } catch {}
 
+// Migrate: add test_command and cron columns to projects if missing
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN test_command TEXT');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN test_cron_enabled INTEGER DEFAULT 0');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN test_cron_schedule TEXT');
+} catch {}
+
 
 export const db = drizzle(sqlite, { schema });
 export { schema };

@@ -97,9 +97,24 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const [messageQueue, setMessageQueue] = useState<string[]>([])
   const messageQueueRef = useRef<string[]>([])
   const pendingAutoSubmitRef = useRef<string | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const termRef = useRef<HTMLDivElement>(null)
+  const [lastStats, setLastStats] = useState<{
+    duration: number
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens: number
+    cacheCreateTokens: number
+  } | null>(null)
+  const [promptHistory, setPromptHistory] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('tamtam-prompt-history') || '[]') } catch { return [] }
+  })
+  const [historyIdx, setHistoryIdx] = useState<number | null>(null)
+  const draftBeforeHistoryRef = useRef<string>('')
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const [autoScroll, setAutoScroll] = useState(true)
+  const [elapsedMs, setElapsedMs] = useState(0)
+  const streamStartRef = useRef<number | null>(null)
   const esRef = useRef<EventSource | null>(null)
   const currentJobIdRef = useRef<string | null>(null)
   const animFrameRef = useRef<number | null>(null)
@@ -134,38 +149,63 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
       .catch(() => {})
   }, [])
 
-  // Restore session from URL param
+  // Preload sessions on fresh terminal landing (no session/job param) so the
+  // welcome strip and sessions panel are instant.
+  useEffect(() => {
+    if (initialSessionId || jobParam) return
+    loadSessions()
+  }, [])
+
+  // Restore session from URL param — load ALL turns for the session_id, not
+  // just the earliest job. Each follow-up creates a new job sharing the same
+  // session_id, so we concatenate them chronologically.
   useEffect(() => {
     if (!initialSessionId) return
     fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
       .then(r => r.json())
       .then(async (data) => {
         const jobs: any[] = data.jobs ?? []
-        const match = jobs
-          .filter(j => j.session_id === initialSessionId)
-          .sort((a, b) => a.started_at - b.started_at)[0]
-        if (!match) return
-        if (match.context_meta) {
+        const matches = jobs
+          .filter(j => j.session_id === initialSessionId && j.kind === 'run')
+          .sort((a, b) => a.started_at - b.started_at)
+        if (matches.length === 0) return
+
+        // Context meta (skills/docs) is captured on the first turn
+        const firstMatch = matches[0]
+        if (firstMatch.context_meta) {
           try {
-            const meta = JSON.parse(match.context_meta)
+            const meta = JSON.parse(firstMatch.context_meta)
             if (meta.skills && Array.isArray(meta.skills)) setSelectedItems(meta.skills)
             if (meta.docs && Array.isArray(meta.docs)) setSelectedDocs(meta.docs)
           } catch {}
         }
         setClaudeSessionId(initialSessionId)
-        if (match.status === 'done' || match.finished_at !== null) {
-          const res = await fetch(`/api/jobs/${encodeURIComponent(match.id)}`)
-          const jobData = await res.json()
-          const entries: TermEntry[] = []
-          const displayPrompt = match.user_prompt || match.prompt
-          if (displayPrompt) entries.push({ role: 'user', text: displayPrompt })
-          if (jobData.log) entries.push({ role: 'assistant', text: jobData.log })
+
+        const lastMatch = matches[matches.length - 1]
+        const lastIsRunning = lastMatch.status !== 'done' && lastMatch.finished_at === null
+        const completedMatches = lastIsRunning ? matches.slice(0, -1) : matches
+
+        const logData = await Promise.all(
+          completedMatches.map(m =>
+            fetch(`/api/jobs/${encodeURIComponent(m.id)}`).then(r => r.json()).catch(() => null)
+          )
+        )
+        const entries: TermEntry[] = []
+        completedMatches.forEach((m, i) => {
+          const prompt = m.user_prompt || m.prompt
+          if (prompt) entries.push({ role: 'user', text: prompt })
+          const log = logData[i]?.log
+          if (log) entries.push({ role: 'assistant', text: log })
+        })
+
+        if (lastIsRunning) {
+          const prompt = lastMatch.user_prompt || lastMatch.prompt
+          if (prompt) entries.push({ role: 'user', text: prompt })
           setHistory(entries)
-        } else {
           setStreaming(true)
-          const displayPrompt = match.user_prompt || match.prompt
-          if (displayPrompt) setHistory([{ role: 'user', text: displayPrompt }])
-          startStreaming(match.id)
+          startStreaming(lastMatch.id)
+        } else {
+          setHistory(entries)
         }
       })
       .catch(() => {})
@@ -184,10 +224,10 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         const data = await res.json()
         const entries: TermEntry[] = []
         const kind = data.kind || jobParam.split('-').slice(1, -1).join('-')
-        const isClaudeRun = data.kind === 'run'
+        const isClaudeJob = ['run', 'review'].includes(data.kind)
         entries.push({ role: 'status', text: kind })
-        if (isClaudeRun) {
-          // Claude runs: always stream via SSE to get tool blocks
+        if (isClaudeJob) {
+          // Claude jobs (run/review): stream via SSE to get tool blocks + markdown
           setStreaming(true)
           setHistory(entries)
           startStreaming(jobParam)
@@ -306,6 +346,28 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     setAutoScroll(scrollHeight - scrollTop - clientHeight < 50)
   }
 
+  const scrollToBottom = () => {
+    if (!termRef.current) return
+    termRef.current.scrollTop = termRef.current.scrollHeight
+    setAutoScroll(true)
+  }
+
+  // Live elapsed timer during streaming
+  useEffect(() => {
+    if (!streaming) {
+      streamStartRef.current = null
+      setElapsedMs(0)
+      return
+    }
+    if (streamStartRef.current === null) streamStartRef.current = Date.now()
+    const id = setInterval(() => {
+      if (streamStartRef.current !== null) {
+        setElapsedMs(Date.now() - streamStartRef.current)
+      }
+    }, 100)
+    return () => clearInterval(id)
+  }, [streaming])
+
   const addImages = useCallback((files: File[]) => {
     const imageFiles = files.filter(f => f.type.startsWith('image/'))
     if (!imageFiles.length) return
@@ -409,8 +471,23 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
       streamToolsRef.current = []
       const sid = metadata.sessionId || null
       setClaudeSessionId(sid)
-      if (sid && !initialSessionId) {
-        window.history.replaceState(null, '', `/project/${projectName}/terminal/${sid}`)
+      // Always keep URL in sync with the latest session ID. Claude may rotate
+      // the session ID on follow-ups, and if we don't update the URL the next
+      // HMR reload will restore the stale one.
+      if (sid) {
+        const target = `/project/${projectName}/terminal/${sid}`
+        if (typeof window !== 'undefined' && window.location.pathname !== target) {
+          window.history.replaceState(null, '', target)
+        }
+      }
+      if (typeof metadata.duration === 'number' || typeof metadata.inputTokens === 'number') {
+        setLastStats({
+          duration: metadata.duration ?? 0,
+          inputTokens: metadata.inputTokens ?? 0,
+          outputTokens: metadata.outputTokens ?? 0,
+          cacheReadTokens: metadata.cacheReadTokens ?? 0,
+          cacheCreateTokens: metadata.cacheCreateTokens ?? 0,
+        })
       }
       const newEntries: TermEntry[] = []
       if (thinking) newEntries.push({ role: 'thinking', text: thinking })
@@ -496,11 +573,21 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
 
     const imageUrls = [...pendingImageUrls]
     const imageFiles = [...pendingImages]
+    if (text) {
+      setPromptHistory(prev => {
+        const updated = [text, ...prev.filter(p => p !== text)].slice(0, 50)
+        try { localStorage.setItem('tamtam-prompt-history', JSON.stringify(updated)) } catch {}
+        return updated
+      })
+    }
+    setHistoryIdx(null)
+    draftBeforeHistoryRef.current = ''
     setInput('')
     setPendingImages([])
     setPendingImageUrls([])
     setHistory(prev => [...prev, { role: 'user', text, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }])
     setStreaming(true)
+    setLastStats(null)
     streamBufferRef.current = ''
     thinkingBufferRef.current = ''
     streamToolsRef.current = []
@@ -558,32 +645,101 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     try {
       const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
       const data = await res.json()
-      const jobs = (data.jobs ?? [])
+      const jobs: any[] = (data.jobs ?? [])
         .filter((j: any) => j.kind === 'run')
         .sort((a: any, b: any) => b.started_at - a.started_at)
-        .slice(0, 100)
-      setSessions(jobs.map((j: any) => ({
-        id: j.id,
-        prompt: j.user_prompt || j.prompt,
-        startedAt: j.started_at,
-        finishedAt: j.finished_at,
-        sessionId: j.session_id,
-        exitCode: j.exit_code,
-      })))
+
+      // Group by session_id: one row per conversation. Show the original
+      // prompt (earliest job) but with the latest status + most recent
+      // activity time, so multi-turn sessions collapse into a single entry.
+      const seen = new Set<string>()
+      const grouped: SessionItem[] = []
+      for (const j of jobs) {
+        const key = j.session_id || `job:${j.id}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        const sameSession = j.session_id
+          ? jobs.filter(o => o.session_id === j.session_id)
+          : [j]
+        const earliest = sameSession[sameSession.length - 1]
+        const latest = sameSession[0]
+        grouped.push({
+          id: latest.id,
+          prompt: earliest.user_prompt || earliest.prompt,
+          startedAt: latest.started_at,
+          finishedAt: latest.finished_at,
+          sessionId: latest.session_id,
+          exitCode: latest.exit_code,
+        })
+        if (grouped.length >= 100) break
+      }
+      setSessions(grouped)
     } catch {}
     setLoadingSessions(false)
   }
 
   const restoreSession = useCallback(async (session: SessionItem) => {
     setShowSessions(false)
+    streamBufferRef.current = ''
+    setStreamBuffer('')
+    setDisplayedLength(0)
+
+    // If we have a session ID, load the full multi-turn history for it.
+    // Otherwise fall back to restoring just the single job (old behaviour).
+    if (session.sessionId) {
+      try {
+        const listRes = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
+        const listData = await listRes.json()
+        const jobs: any[] = listData.jobs ?? []
+        const matches = jobs
+          .filter(j => j.session_id === session.sessionId && j.kind === 'run')
+          .sort((a, b) => a.started_at - b.started_at)
+        if (matches.length > 0) {
+          const firstMatch = matches[0]
+          if (firstMatch.context_meta) {
+            try {
+              const meta = JSON.parse(firstMatch.context_meta)
+              if (meta.skills && Array.isArray(meta.skills)) setSelectedItems(meta.skills)
+              if (meta.docs && Array.isArray(meta.docs)) setSelectedDocs(meta.docs)
+            } catch {}
+          }
+          const lastMatch = matches[matches.length - 1]
+          const lastIsRunning = lastMatch.status !== 'done' && lastMatch.finished_at === null
+          const completedMatches = lastIsRunning ? matches.slice(0, -1) : matches
+          const logData = await Promise.all(
+            completedMatches.map(m =>
+              fetch(`/api/jobs/${encodeURIComponent(m.id)}`).then(r => r.json()).catch(() => null)
+            )
+          )
+          const entries: TermEntry[] = []
+          completedMatches.forEach((m, i) => {
+            const prompt = m.user_prompt || m.prompt
+            if (prompt) entries.push({ role: 'user', text: prompt })
+            const log = logData[i]?.log
+            if (log) entries.push({ role: 'assistant', text: log })
+          })
+          setClaudeSessionId(session.sessionId)
+          router.replace(`/project/${projectName}/terminal/${session.sessionId}`)
+          if (lastIsRunning) {
+            const prompt = lastMatch.user_prompt || lastMatch.prompt
+            if (prompt) entries.push({ role: 'user', text: prompt })
+            setHistory(entries)
+            setStreaming(true)
+            startStreaming(lastMatch.id)
+          } else {
+            setHistory(entries)
+          }
+          return
+        }
+      } catch {}
+    }
+
+    // Fallback: single-job restore for jobs without a session_id
     const isStillRunning = session.finishedAt === null && session.exitCode === null
     if (isStillRunning) {
       setClaudeSessionId(session.sessionId)
       setHistory(session.prompt ? [{ role: 'user', text: session.prompt }] : [])
       setStreaming(true)
-      if (session.sessionId) {
-        router.replace(`/project/${projectName}/terminal/${session.sessionId}`)
-      }
       startStreaming(session.id)
       return
     }
@@ -593,9 +749,6 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
       const entries: TermEntry[] = []
       if (session.prompt) entries.push({ role: 'user', text: session.prompt })
       if (data.log) entries.push({ role: 'assistant', text: data.log })
-      streamBufferRef.current = ''
-      setStreamBuffer('')
-      setDisplayedLength(0)
       setHistory(entries)
       setClaudeSessionId(session.sessionId || null)
       if (data.context_meta) {
@@ -604,9 +757,6 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           if (meta.skills && Array.isArray(meta.skills)) setSelectedItems(meta.skills)
           if (meta.docs && Array.isArray(meta.docs)) setSelectedDocs(meta.docs)
         } catch {}
-      }
-      if (session.sessionId) {
-        router.replace(`/project/${projectName}/terminal/${session.sessionId}`)
       }
     } catch {}
   }, [startStreaming, router, projectName])
@@ -624,6 +774,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     setDisplayedLength(0)
     setStreaming(false)
     setSelectedDocs([])
+    setLastStats(null)
     messageQueueRef.current = []
     setMessageQueue([])
     pendingAutoSubmitRef.current = null
@@ -668,6 +819,15 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
       onDrop={handleDrop}
     >
       <div className={`flex-1 bg-[#111] rounded-lg border ${dragOver ? 'border-accent' : 'border-[#2a2a2a]'} flex flex-col overflow-hidden relative`}>
+        {!autoScroll && (
+          <button
+            className="absolute right-4 bottom-24 z-40 px-2.5 py-1 text-[11px] rounded-full bg-accent/90 text-white hover:bg-accent cursor-pointer border-none font-mono shadow-lg"
+            onClick={scrollToBottom}
+            title="Jump to bottom"
+          >
+            ↓ latest
+          </button>
+        )}
         {dragOver && (
           <div className="absolute inset-0 bg-accent/10 z-50 flex items-center justify-center pointer-events-none rounded-lg">
             <span className="text-accent text-sm font-mono">drop image</span>
@@ -675,7 +835,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         )}
 
         {/* Terminal header */}
-        <div className="flex items-center gap-2 px-3 py-2 bg-[#1a1a1a] border-b border-[#2a2a2a] shrink-0">
+        <div className="flex items-center justify-between gap-2 px-3 py-2 bg-[#1a1a1a] border-b border-[#2a2a2a] shrink-0">
           {/* Left: session controls */}
           <div className="flex items-center gap-1.5">
             <button
@@ -686,13 +846,25 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
               new
             </button>
             <button
-              className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-[#888] hover:text-[#ccc] cursor-pointer border-none font-mono leading-none"
+              className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-[#888] hover:text-[#ccc] cursor-pointer border-none font-mono leading-none flex items-center gap-1"
               onClick={() => { if (!showSessions) loadSessions(); setShowSessions(s => !s) }}
               title="Previous sessions"
             >
               {showSessions ? 'close' : 'sessions'}
+              {!showSessions && sessions.length > 0 && (
+                <span className="text-[10px] text-[#555]">
+                  {sessions.length}
+                  {sessions.some(s => s.finishedAt === null && s.exitCode === null) && (
+                    <span className="ml-0.5 text-status-warning">●</span>
+                  )}
+                </span>
+              )}
             </button>
-            {streaming && <span className="text-[11px] text-status-warning animate-pulse font-mono">streaming</span>}
+            {streaming && (
+              <span className="text-[11px] text-status-warning animate-pulse font-mono">
+                streaming {(elapsedMs / 1000).toFixed(1)}s
+              </span>
+            )}
             {streaming && (
               <button
                 className="text-[11px] px-2 py-1 h-[26px] rounded bg-status-error/20 text-status-error hover:bg-status-error/40 cursor-pointer border-none font-mono leading-none"
@@ -703,8 +875,6 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
               </button>
             )}
           </div>
-
-          <div className="flex-1" />
 
           {/* Right: context & config */}
           <div className="flex items-center gap-1.5">
@@ -874,6 +1044,46 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           onScroll={handleScroll}
           className="flex-1 overflow-y-auto font-mono text-sm flex flex-col"
         >
+          {/* Welcome strip: resume recent sessions on fresh terminal */}
+          {!streaming && history.length === 0 && !claudeSessionId && sessions.length > 0 && (
+            <div className="px-4 py-3 border-b border-[#1e1e1e]">
+              <div className="text-[10px] text-[#555] uppercase tracking-wider mb-2 font-mono">
+                resume recent
+              </div>
+              <div className="flex flex-col gap-1">
+                {sessions.slice(0, 5).map(session => {
+                  const isRunning = session.finishedAt === null && session.exitCode === null
+                  const isSuccess = session.exitCode === 0
+                  const prompt = session.prompt
+                    ? session.prompt.length > 90 ? session.prompt.slice(0, 90) + '...' : session.prompt
+                    : '(no prompt)'
+                  const secs = Math.floor(Date.now() / 1000 - session.startedAt)
+                  const timeAgo = secs < 60 ? `${secs}s ago` : secs < 3600 ? `${Math.floor(secs / 60)}m ago` : secs < 86400 ? `${Math.floor(secs / 3600)}h ago` : `${Math.floor(secs / 86400)}d ago`
+                  return (
+                    <button
+                      key={session.id}
+                      className="flex items-center gap-3 w-full px-3 py-1.5 text-left hover:bg-[#1a1a1a] rounded cursor-pointer border-none bg-transparent group"
+                      onClick={() => restoreSession(session)}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRunning ? 'bg-status-warning animate-pulse' : isSuccess ? 'bg-status-success' : 'bg-status-error'}`} />
+                      <span className="text-xs text-[#ccc] font-mono truncate flex-1 group-hover:text-[#fff]">{prompt}</span>
+                      {isRunning && <span className="text-[10px] text-status-warning font-mono shrink-0">running</span>}
+                      <span className="text-[10px] text-[#555] font-mono shrink-0">{timeAgo}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              {sessions.length > 5 && (
+                <button
+                  className="mt-2 text-[10px] text-[#555] hover:text-[#888] cursor-pointer border-none bg-transparent font-mono"
+                  onClick={() => { if (!showSessions) loadSessions(); setShowSessions(true) }}
+                >
+                  show all {sessions.length} →
+                </button>
+              )}
+            </div>
+          )}
+
           {history.map((entry, i) => (
             entry.role === 'thinking' ? (
               showThinking && (
@@ -887,7 +1097,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
             ) : (
             <div
               key={i}
-              className={`px-4 py-2 ${
+              className={`group relative px-4 py-2 ${
                 entry.role === 'user' ? 'text-accent whitespace-pre-wrap' :
                 entry.role === 'error' ? 'text-status-error whitespace-pre-wrap' :
                 entry.role === 'status' ? 'text-[#555] whitespace-pre-wrap' :
@@ -902,6 +1112,22 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
                     <img key={j} src={url} alt="attachment" className="max-h-40 max-w-[240px] rounded border border-[#333] object-contain bg-[#1a1a1a]" />
                   ))}
                 </div>
+              )}
+              {(entry.role === 'assistant' || entry.role === 'user') && entry.text && (
+                <button
+                  className="absolute top-1.5 right-2 px-1.5 py-0.5 text-[10px] rounded bg-[#1f1f1f] text-[#666] hover:text-[#ccc] border border-[#2a2a2a] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer font-mono"
+                  onClick={async (e) => {
+                    e.stopPropagation()
+                    try {
+                      await navigator.clipboard.writeText(entry.text)
+                      setCopiedIdx(i)
+                      setTimeout(() => setCopiedIdx(prev => prev === i ? null : prev), 1500)
+                    } catch { /* ignore */ }
+                  }}
+                  title="Copy message"
+                >
+                  {copiedIdx === i ? 'copied' : 'copy'}
+                </button>
               )}
             </div>
             )
@@ -968,23 +1194,86 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           )}
 
           {/* Input line — always visible; queues when streaming */}
-          <div className="flex items-center px-4 py-1.5">
-            <span className={`shrink-0 mr-1 ${streaming ? 'text-[#555]' : 'text-accent'}`}>{streaming ? '>' : '#'}</span>
-            <input
+          <div className="flex items-start px-4 py-1.5">
+            <span className={`shrink-0 mr-1 mt-0.5 ${streaming ? 'text-[#555]' : 'text-accent'}`}>{streaming ? '>' : '#'}</span>
+            <textarea
               ref={inputRef}
-              type="text"
-              className="flex-1 bg-transparent border-none outline-none text-[#e0e0e0] font-mono text-sm placeholder:text-[#444]"
+              rows={1}
+              className="flex-1 bg-transparent border-none outline-none text-[#e0e0e0] font-mono text-sm placeholder:text-[#444] resize-none overflow-y-auto leading-relaxed"
+              style={{ maxHeight: '200px' }}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value
+                setInput(v)
+                if (historyIdx !== null && v !== promptHistory[historyIdx]) {
+                  setHistoryIdx(null)
+                }
+                const el = e.currentTarget
+                el.style.height = 'auto'
+                el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+              }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') { e.preventDefault(); handleSubmit() }
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault()
+                  handleSubmit()
+                  if (inputRef.current) inputRef.current.style.height = 'auto'
+                } else if (e.key === 'Escape') {
+                  if (streaming) {
+                    e.preventDefault()
+                    handleCancel()
+                  } else if (input) {
+                    e.preventDefault()
+                    setInput('')
+                    if (inputRef.current) inputRef.current.style.height = 'auto'
+                  }
+                } else if (e.key === 'ArrowUp' && promptHistory.length > 0) {
+                  const el = inputRef.current
+                  const beforeCaret = el ? el.value.slice(0, el.selectionStart) : ''
+                  const onFirstLine = !beforeCaret.includes('\n')
+                  if (!onFirstLine) return
+                  e.preventDefault()
+                  if (historyIdx === null) draftBeforeHistoryRef.current = input
+                  const nextIdx = historyIdx === null ? 0 : Math.min(historyIdx + 1, promptHistory.length - 1)
+                  setHistoryIdx(nextIdx)
+                  setInput(promptHistory[nextIdx])
+                  requestAnimationFrame(() => {
+                    const el2 = inputRef.current
+                    if (el2) {
+                      el2.style.height = 'auto'
+                      el2.style.height = `${Math.min(el2.scrollHeight, 200)}px`
+                      el2.setSelectionRange(el2.value.length, el2.value.length)
+                    }
+                  })
+                } else if (e.key === 'ArrowDown' && historyIdx !== null) {
+                  const el = inputRef.current
+                  const afterCaret = el ? el.value.slice(el.selectionStart) : ''
+                  const onLastLine = !afterCaret.includes('\n')
+                  if (!onLastLine) return
+                  e.preventDefault()
+                  if (historyIdx === 0) {
+                    setHistoryIdx(null)
+                    setInput(draftBeforeHistoryRef.current)
+                  } else {
+                    const nextIdx = historyIdx - 1
+                    setHistoryIdx(nextIdx)
+                    setInput(promptHistory[nextIdx])
+                  }
+                  requestAnimationFrame(() => {
+                    const el2 = inputRef.current
+                    if (el2) {
+                      el2.style.height = 'auto'
+                      el2.style.height = `${Math.min(el2.scrollHeight, 200)}px`
+                      el2.setSelectionRange(el2.value.length, el2.value.length)
+                    }
+                  })
+                }
               }}
               onPaste={handlePaste}
-              placeholder={streaming ? 'queue a message...' : claudeSessionId ? '' : 'type a message...'}
+              placeholder={streaming ? 'queue a message... (Esc cancels)' : claudeSessionId ? 'follow-up... (↑/↓ history, Shift+Enter newline)' : 'type a message... (↑/↓ history, Shift+Enter newline)'}
               autoFocus
             />
             {messageQueue.length > 0 && (
-              <div className="flex items-center gap-1 ml-2 shrink-0">
+              <div className="flex items-center gap-1 ml-2 shrink-0 mt-0.5">
                 <span className="text-[10px] text-[#555] font-mono">{messageQueue.length} queued</span>
                 <button
                   className="text-[10px] text-[#555] hover:text-[#888] cursor-pointer border-none bg-transparent font-mono"
@@ -1004,6 +1293,23 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
               </>
             ) : (
               <span>no session</span>
+            )}
+            {lastStats && (
+              <>
+                <span className="text-[#333]">•</span>
+                <span className="text-[#666]" title="Duration">{(lastStats.duration / 1000).toFixed(1)}s</span>
+                <span className="text-[#666]" title="Input / output tokens">
+                  <span className="text-status-success">↑{lastStats.inputTokens}</span>
+                  {' / '}
+                  <span className="text-accent">↓{lastStats.outputTokens}</span>
+                </span>
+                {(lastStats.cacheReadTokens > 0 || lastStats.cacheCreateTokens > 0) && (
+                  <span className="text-[#555]" title="Cache read / create tokens">
+                    cache {lastStats.cacheReadTokens}r
+                    {lastStats.cacheCreateTokens > 0 ? ` / ${lastStats.cacheCreateTokens}w` : ''}
+                  </span>
+                )}
+              </>
             )}
           </div>
         </div>
