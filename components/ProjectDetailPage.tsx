@@ -26,6 +26,13 @@ function formatAgo(ts: number): string {
   return `${Math.floor(s / 86400)}d ago`
 }
 
+function runLabel(j: JobInfo): string {
+  if (j.kind === 'run') return 'chat'
+  if (j.kind.startsWith('agent:')) return 'agent'
+  if (j.kind === 'fix-ci') return 'fix-ci'
+  return j.kind
+}
+
 interface StatusStripProps {
   projectName: string
   totalChanges: number
@@ -35,6 +42,10 @@ interface StatusStripProps {
   latestReview: JobInfo | undefined
   isTestRunning: boolean
   latestTest: JobInfo | undefined
+  testCronSchedule: string | null
+  ciStatus: 'success' | 'failure' | 'in_progress' | null
+  ciFailedUrl: string | null
+  releaseTag: string | null
   onOpenChanges: () => void
   onOpenJob: (jobId: string) => void
 }
@@ -95,14 +106,13 @@ function StatusStrip({
   latestReview,
   isTestRunning,
   latestTest,
+  testCronSchedule,
+  ciStatus,
+  ciFailedUrl,
+  releaseTag,
   onOpenChanges,
   onOpenJob,
 }: StatusStripProps) {
-  // Skip the whole strip if there's nothing to show
-  if (totalChanges === 0 && !verdict && !isReviewRunning && !latestTest && !isTestRunning) {
-    return null
-  }
-
   // CHANGES card
   const changesCard = totalChanges > 0 ? (
     <StatusCard
@@ -146,13 +156,14 @@ function StatusStrip({
   }
 
   // TESTS card
+  const cronSuffix = testCronSchedule ? ` · auto every ${testCronSchedule}` : ''
   let testsCard: React.ReactNode
   if (isTestRunning) {
     testsCard = (
       <StatusCard
         label="Tests"
         primary="Running"
-        detail={latestTest ? `started ${formatAgo(latestTest.started_at)} — follow output` : 'starting...'}
+        detail={(latestTest ? `started ${formatAgo(latestTest.started_at)} — follow output` : 'starting...') + cronSuffix}
         tone="warning"
         running
         onClick={latestTest ? () => onOpenJob(latestTest.id) : undefined}
@@ -164,20 +175,65 @@ function StatusStrip({
       <StatusCard
         label="Tests"
         primary={passed ? 'Passed' : `Failed (exit ${latestTest.exit_code})`}
-        detail={`${formatAgo(latestTest.finished_at ?? latestTest.started_at)} — view log`}
+        detail={`${formatAgo(latestTest.finished_at ?? latestTest.started_at)} — view log${cronSuffix}`}
         tone={passed ? 'success' : 'error'}
         onClick={() => onOpenJob(latestTest.id)}
       />
     )
   } else {
-    testsCard = <StatusCard label="Tests" primary="not run yet" tone="neutral" />
+    testsCard = (
+      <StatusCard
+        label="Tests"
+        primary="not run yet"
+        detail={testCronSchedule ? `scheduled every ${testCronSchedule}` : undefined}
+        tone="neutral"
+      />
+    )
+  }
+
+  // CI card
+  let ciCard: React.ReactNode
+  if (ciStatus === 'success') {
+    ciCard = (
+      <StatusCard
+        label="CI"
+        primary="Passing"
+        detail={releaseTag ? `release ${releaseTag}` : 'latest commit'}
+        tone="success"
+        onClick={ciFailedUrl ? () => window.open(ciFailedUrl, '_blank') : undefined}
+      />
+    )
+  } else if (ciStatus === 'failure') {
+    ciCard = (
+      <StatusCard
+        label="CI"
+        primary="Failing"
+        detail={ciFailedUrl ? 'open run on GitHub' : 'no run url'}
+        tone="error"
+        onClick={ciFailedUrl ? () => window.open(ciFailedUrl, '_blank') : undefined}
+      />
+    )
+  } else if (ciStatus === 'in_progress') {
+    ciCard = (
+      <StatusCard
+        label="CI"
+        primary="In progress"
+        detail={ciFailedUrl ? 'open run on GitHub' : undefined}
+        tone="warning"
+        running
+        onClick={ciFailedUrl ? () => window.open(ciFailedUrl, '_blank') : undefined}
+      />
+    )
+  } else {
+    ciCard = <StatusCard label="CI" primary="no status" tone="neutral" />
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-4">
       {changesCard}
       {reviewCard}
       {testsCard}
+      {ciCard}
     </div>
   )
 }
@@ -275,9 +331,9 @@ export function ProjectDetailPage({
     }
   }
 
-  // Load config when config tab is active
+  // Load config when the overview or config tab is active (overview uses it for cron schedule hint).
   useEffect(() => {
-    if (activeTab !== 'config' || !name) return
+    if ((activeTab !== 'config' && activeTab !== 'overview') || !name) return
     let active = true
     setConfigLoading(true)
     Promise.all([
@@ -339,6 +395,10 @@ export function ProjectDetailPage({
   const latestTest = projectJobs
     .filter(j => j.kind === 'test' && j.status === 'done')
     .sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))[0]
+
+  const runningJobs = projectJobs
+    .filter(j => j.status === 'running')
+    .sort((a, b) => (b.started_at || 0) - (a.started_at || 0))
 
   const [reviewError, setReviewError] = useState<string | null>(null)
   const [testError, setTestError] = useState<string | null>(null)
@@ -470,15 +530,6 @@ export function ProjectDetailPage({
               {highestPriority}
             </span>
           )}
-          {aggregateCi === 'success' && <span className="text-status-success text-sm">CI ✓</span>}
-          {aggregateCi === 'failure' && (
-            ciFailedUrl ? (
-              <a href={ciFailedUrl} target="_blank" rel="noopener noreferrer" className="text-status-error hover:underline text-sm">CI ✗</a>
-            ) : (
-              <span className="text-status-error text-sm">CI ✗</span>
-            )
-          )}
-          {aggregateCi === 'in_progress' && <span className="text-status-warning text-sm">CI ⋯</span>}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {aggregateCi === 'failure' && ciFailedUrl && (
@@ -626,7 +677,32 @@ export function ProjectDetailPage({
       {/* Overview Tab — Agents */}
       {activeTab === 'overview' && name && (
         <>
-          {/* Changes / Review / Tests status strip */}
+          {/* Running-now banner: surfaces any in-progress work without requiring a tab switch. */}
+          {runningJobs.length > 0 && (
+            <div className="mb-4 border border-status-warning/40 bg-status-warning/5 rounded-lg px-3 py-2 flex items-center gap-3 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 text-sm text-status-warning font-medium">
+                <span className="inline-block w-2 h-2 rounded-full bg-status-warning animate-pulse" />
+                {runningJobs.length} running
+              </span>
+              <div className="flex items-center gap-2 flex-wrap text-xs">
+                {runningJobs.slice(0, 5).map((j) => (
+                  <button
+                    key={j.id}
+                    onClick={() => router.push(`/project/${name}/terminal?job=${encodeURIComponent(j.id)}`)}
+                    className="px-2 py-0.5 border border-border rounded-full bg-bg-secondary hover:bg-bg-tertiary cursor-pointer font-mono"
+                    title={`Open ${j.kind} started ${formatAgo(j.started_at)}`}
+                  >
+                    {runLabel(j)} · {formatAgo(j.started_at)}
+                  </button>
+                ))}
+                {runningJobs.length > 5 && (
+                  <span className="text-text-tertiary">+{runningJobs.length - 5} more</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Changes / Review / Tests / CI status strip */}
           <StatusStrip
             projectName={name}
             totalChanges={project.totalChanges}
@@ -636,6 +712,10 @@ export function ProjectDetailPage({
             latestReview={latestReview}
             isTestRunning={isTestRunning}
             latestTest={latestTest}
+            testCronSchedule={config?.test_cron_enabled ? config.test_cron_schedule : null}
+            ciStatus={aggregateCi === 'success' || aggregateCi === 'failure' || aggregateCi === 'in_progress' ? aggregateCi : null}
+            ciFailedUrl={ciFailedUrl}
+            releaseTag={releaseTag}
             onOpenChanges={() => setActiveTab('changes')}
             onOpenJob={(jobId) => router.push(`/project/${name}/terminal?job=${encodeURIComponent(jobId)}`)}
           />

@@ -21,6 +21,23 @@ function formatAgo(ts: number): string {
   return `${Math.floor(s / 86400)}d ago`
 }
 
+function dayKey(ts: number): string {
+  const d = new Date(ts * 1000)
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+}
+
+function dayLabel(ts: number): string {
+  const now = new Date()
+  const d = new Date(ts * 1000)
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const that = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const diffDays = Math.round((today.getTime() - that.getTime()) / 86400000)
+  if (diffDays === 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  if (diffDays < 7) return d.toLocaleDateString(undefined, { weekday: 'long' })
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' })
+}
+
 function formatTokens(n: number): string {
   if (n < 1000) return `${n}`
   if (n < 1000000) return `${(n / 1000).toFixed(1)}k`
@@ -172,14 +189,23 @@ interface ProjectRunsTabProps {
   projectName: string
 }
 
-type StatusFilter = 'all' | 'running' | 'failed' | 'done'
+// One-axis filter: either a kind bucket, or a status shortcut.
+type Filter =
+  | { kind: 'all' }
+  | { kind: 'running' }
+  | { kind: 'failed' }
+  | { kind: 'bucket'; bucket: KindBucket }
+
+function filterKey(f: Filter): string {
+  return f.kind === 'bucket' ? `b:${f.bucket}` : f.kind
+}
 
 export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
   const router = useRouter()
   const [jobs, setJobs] = useState<JobInfo[]>([])
   const [loading, setLoading] = useState(true)
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
-  const [kindFilter, setKindFilter] = useState<KindBucket | 'all'>('all')
+  const [filter, setFilter] = useState<Filter>({ kind: 'all' })
+  const [search, setSearch] = useState('')
 
   useEffect(() => {
     let active = true
@@ -199,31 +225,57 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
 
   const entries = useMemo(() => buildEntries(jobs), [jobs])
 
-  const kindCounts = useMemo(() => {
-    const c: Record<KindBucket | 'all', number> = {
-      all: entries.length, run: 0, review: 0, test: 0, 'fix-ci': 0, agent: 0, other: 0,
+  const counts = useMemo(() => {
+    const c = {
+      all: entries.length, running: 0, failed: 0,
+      run: 0, review: 0, test: 0, 'fix-ci': 0, agent: 0, other: 0,
+    } as Record<string, number>
+    for (const e of entries) {
+      c[e.bucket] += 1
+      if (e.status === 'running') c.running += 1
+      else if (e.exitCode !== 0) c.failed += 1
     }
-    for (const e of entries) c[e.bucket] += 1
     return c
   }, [entries])
 
-  const statusCounts = useMemo(() => {
-    let running = 0, failed = 0, done = 0
-    for (const e of entries) {
-      if (e.status === 'running') running += 1
-      else if (e.exitCode !== 0) failed += 1
-      else done += 1
-    }
-    return { all: entries.length, running, failed, done }
-  }, [entries])
+  const matches = (e: Entry, f: Filter): boolean => {
+    if (f.kind === 'all') return true
+    if (f.kind === 'running') return e.status === 'running'
+    if (f.kind === 'failed') return e.status === 'done' && e.exitCode !== 0
+    return e.bucket === f.bucket
+  }
 
-  const filtered = entries.filter((e) => {
-    if (kindFilter !== 'all' && e.bucket !== kindFilter) return false
-    if (statusFilter === 'running' && e.status !== 'running') return false
-    if (statusFilter === 'failed' && !(e.status === 'done' && e.exitCode !== 0)) return false
-    if (statusFilter === 'done' && !(e.status === 'done' && e.exitCode === 0)) return false
-    return true
-  })
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return entries.filter((e) => {
+      if (!matches(e, filter)) return false
+      if (!q) return true
+      const hay = `${e.title} ${e.subtitle ?? ''} ${e.model ?? ''} ${e.navSessionId ?? ''} ${e.kind}`.toLowerCase()
+      return hay.includes(q)
+    })
+  }, [entries, filter, search])
+
+  // Group filtered entries by day for scannability.
+  const groups = useMemo(() => {
+    const m = new Map<string, { label: string; items: Entry[]; ts: number }>()
+    for (const e of filtered) {
+      const k = dayKey(e.lastActivityAt)
+      const g = m.get(k)
+      if (g) g.items.push(e)
+      else m.set(k, { label: dayLabel(e.lastActivityAt), items: [e], ts: e.lastActivityAt })
+    }
+    return Array.from(m.values()).sort((a, b) => b.ts - a.ts)
+  }, [filtered])
+
+  const totals = useMemo(() => {
+    let tokens = 0, running = 0, durationMs = 0
+    for (const e of filtered) {
+      tokens += e.inputTokens + e.outputTokens
+      durationMs += e.durationMs ?? 0
+      if (e.status === 'running') running += 1
+    }
+    return { tokens, running, durationMs }
+  }, [filtered])
 
   const navigate = (e: Entry) => {
     if (e.bucket === 'run' && e.navSessionId) {
@@ -235,62 +287,127 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
 
   return (
     <div className="mt-4">
-      {/* Filters */}
-      <div className="flex flex-col gap-2 mb-3">
-        <div className="flex gap-1 border-b border-border">
-          {(['all', 'running', 'failed', 'done'] as const).map((f) => {
-            const count = statusCounts[f]
-            return (
-              <button
-                key={f}
-                className={`px-3 py-1.5 text-sm cursor-pointer ${statusFilter === f ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`}
-                onClick={() => setStatusFilter(f)}
-              >
-                {f === 'all' ? 'All' : f[0].toUpperCase() + f.slice(1)} ({count})
-              </button>
-            )
-          })}
+      {/* Search + summary */}
+      <div className="flex items-center gap-3 mb-3 flex-wrap">
+        <div className="relative flex-1 min-w-[240px]">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search prompts, models, session ids…"
+            className="w-full pl-8 pr-8 py-1.5 text-sm bg-bg-secondary border border-border rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-accent"
+          />
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary text-xs" aria-hidden>⌕</span>
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-primary text-sm cursor-pointer"
+              title="Clear search"
+            >
+              ×
+            </button>
+          )}
         </div>
-        <div className="flex gap-1.5 flex-wrap">
-          {(['all', 'run', 'review', 'test', 'fix-ci', 'agent', 'other'] as const).map((k) => {
-            const count = kindCounts[k as keyof typeof kindCounts]
-            if (k !== 'all' && count === 0) return null
-            const label = k === 'all' ? 'all kinds' : KIND_LABEL[k as KindBucket]
-            return (
-              <button
-                key={k}
-                className={`px-2 py-0.5 text-xs rounded-full font-mono cursor-pointer border ${
-                  kindFilter === k
-                    ? 'border-accent bg-accent/15 text-accent'
-                    : 'border-border bg-bg-secondary text-text-secondary hover:text-text-primary'
-                }`}
-                onClick={() => setKindFilter(k as KindBucket | 'all')}
-              >
-                {label} <span className="text-text-tertiary">{count}</span>
-              </button>
-            )
-          })}
+        <div className="text-xs text-text-tertiary font-mono whitespace-nowrap">
+          {filtered.length} {filtered.length === 1 ? 'entry' : 'entries'}
+          {totals.running > 0 && (
+            <> · <span className="text-status-warning">{totals.running} running</span></>
+          )}
+          {totals.tokens > 0 && <> · {formatTokens(totals.tokens)} tokens</>}
         </div>
+      </div>
+
+      {/* Unified filter row: status shortcuts + kind breakdown, one axis. */}
+      <div className="flex items-center gap-1.5 flex-wrap mb-3">
+        {([
+          { f: { kind: 'all' } as Filter, label: 'all', tone: 'neutral' },
+          { f: { kind: 'running' } as Filter, label: 'running', tone: 'warning' },
+          { f: { kind: 'failed' } as Filter, label: 'failed', tone: 'error' },
+        ] as const).map(({ f, label, tone }) => {
+          const count = counts[f.kind] ?? 0
+          if ((f.kind === 'running' || f.kind === 'failed') && count === 0 && filterKey(filter) !== filterKey(f)) return null
+          const active = filterKey(filter) === filterKey(f)
+          const toneCls =
+            tone === 'warning' ? (active ? 'border-status-warning bg-status-warning/15 text-status-warning' : 'border-border bg-bg-secondary text-text-secondary hover:text-status-warning') :
+            tone === 'error' ? (active ? 'border-status-error bg-status-error/15 text-status-error' : 'border-border bg-bg-secondary text-text-secondary hover:text-status-error') :
+            (active ? 'border-accent bg-accent/15 text-accent' : 'border-border bg-bg-secondary text-text-secondary hover:text-text-primary')
+          return (
+            <button
+              key={label}
+              className={`px-2.5 py-1 text-xs rounded-full font-mono cursor-pointer border ${toneCls}`}
+              onClick={() => setFilter(f)}
+            >
+              {label} <span className="opacity-70">{count}</span>
+            </button>
+          )
+        })}
+        <span className="h-5 w-px bg-border mx-1" aria-hidden />
+        {(['run', 'review', 'test', 'fix-ci', 'agent', 'other'] as const).map((b) => {
+          const count = counts[b] ?? 0
+          const active = filter.kind === 'bucket' && filter.bucket === b
+          if (count === 0 && !active) return null
+          return (
+            <button
+              key={b}
+              className={`px-2.5 py-1 text-xs rounded-full font-mono cursor-pointer border ${
+                active
+                  ? 'border-accent bg-accent/15 text-accent'
+                  : 'border-border bg-bg-secondary text-text-secondary hover:text-text-primary'
+              }`}
+              onClick={() => setFilter({ kind: 'bucket', bucket: b })}
+            >
+              {KIND_LABEL[b]} <span className="opacity-70">{count}</span>
+            </button>
+          )
+        })}
       </div>
 
       {loading ? (
         <div className="text-text-secondary text-sm">Loading runs...</div>
       ) : filtered.length === 0 ? (
-        <div className="text-text-secondary text-sm p-6 text-center">
-          {entries.length === 0 ? 'No runs yet' : 'No runs match the current filters'}
+        <div className="text-text-secondary text-sm p-6 text-center border border-border rounded-lg bg-bg-secondary">
+          {entries.length === 0
+            ? 'No runs yet'
+            : search.trim()
+            ? `No runs match "${search.trim()}"`
+            : 'No runs match the current filter'}
+          {(search.trim() || filter.kind !== 'all') && (
+            <div className="mt-3">
+              <button
+                className="px-3 py-1 text-xs border border-border rounded-md hover:bg-bg-tertiary cursor-pointer"
+                onClick={() => { setSearch(''); setFilter({ kind: 'all' }) }}
+              >
+                Clear filters
+              </button>
+            </div>
+          )}
         </div>
       ) : (
-        <div className="border border-border rounded-lg overflow-hidden bg-bg-secondary">
-          {filtered.map((e) => {
-            const isRunning = e.status === 'running'
-            const isFailed = !isRunning && e.exitCode !== 0
-            const totalTokens = e.inputTokens + e.outputTokens
-            return (
-              <button
-                key={e.key}
-                className="w-full text-left border-b border-border last:border-b-0 hover:bg-bg-tertiary cursor-pointer px-4 py-3 flex items-start gap-3 group"
-                onClick={() => navigate(e)}
-              >
+        <div className="flex flex-col gap-4">
+          {groups.map((g) => (
+            <div key={g.label}>
+              <div className="flex items-center gap-2 mb-1.5 px-1">
+                <span className="text-[11px] uppercase tracking-wider text-text-tertiary font-semibold">{g.label}</span>
+                <span className="text-[11px] text-text-tertiary font-mono">· {g.items.length}</span>
+                <div className="flex-1 h-px bg-border/60" />
+              </div>
+              <div className="border border-border rounded-lg overflow-hidden bg-bg-secondary">
+                {g.items.map((e) => {
+                  const isRunning = e.status === 'running'
+                  const isFailed = !isRunning && e.exitCode !== 0
+                  const totalTokens = e.inputTokens + e.outputTokens
+                  const accentBorder = isRunning
+                    ? 'border-l-2 border-l-status-warning'
+                    : isFailed
+                    ? 'border-l-2 border-l-status-error'
+                    : 'border-l-2 border-l-transparent'
+                  return (
+                    <button
+                      key={e.key}
+                      className={`w-full text-left border-b border-border last:border-b-0 hover:bg-bg-tertiary cursor-pointer px-4 py-3 flex items-start gap-3 group ${accentBorder}`}
+                      onClick={() => navigate(e)}
+                    >
                 {/* Kind badge */}
                 <span className={`shrink-0 mt-0.5 inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded ${KIND_COLOR[e.bucket]}`}>
                   {KIND_LABEL[e.bucket]}
@@ -340,8 +457,11 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
                   </div>
                 </div>
               </button>
-            )
-          })}
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

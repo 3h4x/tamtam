@@ -122,6 +122,13 @@ async function markDone(job: JobData, exitCode: number): Promise<void> {
     job.cacheReadTokens = doneEvent.result.cacheReadTokens;
     job.cacheCreateTokens = doneEvent.result.cacheCreateTokens;
     job.sessionId = doneEvent.result.sessionId;
+    // Claude completed successfully — override pm2's exit code. Claude CLI
+    // sometimes hangs after flushing its final result and gets killed, which
+    // makes pm2 report -1, but the logical outcome was a clean finish.
+    if ((job.kind === 'run' || job.kind === 'review') && !doneEvent.result.error && exitCode !== 0) {
+      console.log(`[job ${job.id}] claude result present (is_error=false) but pm2 reported exit ${exitCode}; overriding to 0`);
+      job.exitCode = 0;
+    }
   }
   saveToDb(job);
   await runCompletionHooks(job);
@@ -130,6 +137,26 @@ async function markDone(job: JobData, exitCode: number): Promise<void> {
     const { deleteJob } = await import('./pm2-jobs');
     await deleteJob(job.id);
   } catch {}
+  // Fallback: explicitly SIGKILL the bash wrapper and any children in case
+  // Claude CLI hung and escaped pm2's tree-kill.
+  if (job.pid > 0) {
+    try {
+      const { exec } = await import('./shell');
+      const { stdout } = await exec('pgrep', ['-P', String(job.pid)], { timeout: 2000 });
+      const children = stdout.split('\n').map(s => s.trim()).filter(Boolean).map(Number);
+      const pids = [job.pid, ...children];
+      const alive: number[] = [];
+      for (const pid of pids) {
+        try {
+          process.kill(pid, 'SIGKILL');
+          alive.push(pid);
+        } catch {}
+      }
+      if (alive.length > 0) {
+        console.log(`[job ${job.id}] force-killed hung process(es) after completion: ${alive.join(', ')}`);
+      }
+    } catch {}
+  }
 }
 
 async function runCompletionHooks(job: JobData): Promise<void> {
@@ -227,11 +254,38 @@ export function jobToDict(job: JobData): Record<string, any> {
   return d;
 }
 
+function logHasClaudeResult(job: JobData): boolean {
+  if (!job.logPath || !existsSync(job.logPath)) return false;
+  try {
+    const content = readFileSync(job.logPath, 'utf-8');
+    return content.includes('"type":"result"');
+  } catch {
+    return false;
+  }
+}
+
 export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> {
   if (job.finishedAt !== null) return 'done';
   if (job.pid <= 0) {
     await markDone(job, -1);
     return 'done';
+  }
+  // Claude CLI sometimes hangs after emitting its final result event. If the log
+  // already contains a result line, treat the job as done regardless of PM2 status.
+  if ((job.kind === 'run' || job.kind === 'review') && logHasClaudeResult(job)) {
+    await markDone(job, 0);
+    return 'done';
+  }
+  // Test/action jobs spawn directly (no PM2) — check liveness via pid only.
+  if (job.kind === 'test' || job.kind === 'action') {
+    try {
+      process.kill(job.pid, 0);
+      return 'running';
+    } catch (e: any) {
+      if (e.code === 'EPERM') return 'running';
+      await markDone(job, -1);
+      return 'done';
+    }
   }
   const { status, exitCode } = await getJobStatus(job.id);
   if (status === 'running') return 'running';

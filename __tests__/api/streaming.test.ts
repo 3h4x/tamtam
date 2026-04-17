@@ -225,3 +225,129 @@ describe('GET /api/streaming/[jobId]', () => {
     ac.abort();
   });
 });
+
+describe('GET /api/streaming/[jobId] – extractLogDetail in done event', () => {
+  let tempDir: string;
+  let GET: any;
+  let getJobMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-streaming-detail-test-'));
+    vi.resetModules();
+
+    getJobMock = vi.fn().mockReturnValue(null);
+    vi.doMock('@/lib/job-storage', () => ({ getJob: getJobMock }));
+
+    const { parseStreamLines } = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
+      '@/lib/claude-stream-parser'
+    );
+    vi.doMock('@/lib/claude-stream-parser', () => ({ parseStreamLines }));
+
+    const mod = await import('@/app/api/streaming/[jobId]/route');
+    GET = mod.GET;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  async function getDonePayload(logContent: string, exitCode: number): Promise<Record<string, unknown>> {
+    const logFile = join(tempDir, `test-${Date.now()}.log`);
+    writeFileSync(logFile, logContent);
+    getJobMock.mockReturnValue({
+      logPath: logFile,
+      finishedAt: Date.now() / 1000,
+      exitCode,
+    } as any);
+
+    const ac = new AbortController();
+    const request = new NextRequest(`http://localhost/api/streaming/job-detail?raw=1`, {
+      signal: ac.signal,
+    });
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-detail' }) });
+    const events = await collectSSEStream(response, ac, 300);
+    const combined = events.join('');
+
+    const match = combined.match(/event: done\ndata: (.+)/);
+    if (!match) throw new Error(`No done event found in: ${combined}`);
+    return JSON.parse(match[1]);
+  }
+
+  it('done event with exitCode=0 has no detail field', async () => {
+    const logFile = join(tempDir, 'ok.log');
+    writeFileSync(logFile, 'some output\n');
+    getJobMock.mockReturnValue({
+      logPath: logFile,
+      finishedAt: Date.now() / 1000,
+      exitCode: 0,
+    } as any);
+
+    const ac = new AbortController();
+    const request = new NextRequest(`http://localhost/api/streaming/job-ok?raw=1`, { signal: ac.signal });
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-ok' }) });
+    const events = await collectSSEStream(response, ac, 300);
+    const combined = events.join('');
+
+    const match = combined.match(/event: done\ndata: (.+)/);
+    expect(match).not.toBeNull();
+    const payload = JSON.parse(match![1]);
+    expect(payload).not.toHaveProperty('detail');
+    expect(payload.exitCode).toBe(0);
+  });
+
+  it('done event with exitCode=1 and missing log has detail "log file missing"', async () => {
+    getJobMock.mockReturnValue({
+      logPath: join(tempDir, 'nonexistent.log'),
+      finishedAt: Date.now() / 1000,
+      exitCode: 1,
+    } as any);
+
+    const ac = new AbortController();
+    const request = new NextRequest(`http://localhost/api/streaming/job-missing?raw=1`, { signal: ac.signal });
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-missing' }) });
+    const events = await collectSSEStream(response, ac, 300);
+    const combined = events.join('');
+
+    const match = combined.match(/event: done\ndata: (.+)/);
+    expect(match).not.toBeNull();
+    const payload = JSON.parse(match![1]);
+    expect(payload.detail).toBe('log file missing');
+  });
+
+  it('done event with empty log has detail about empty output', async () => {
+    const payload = await getDonePayload('', 1);
+    expect(payload.detail).toMatch(/empty/i);
+    expect(payload.exitCode).toBe(1);
+  });
+
+  it('done event with non-JSON lines returns last non-JSON lines as detail', async () => {
+    const content = 'some error output\nanother error line\n';
+    const payload = await getDonePayload(content, 2);
+    expect(payload.detail).toContain('some error output');
+    expect(payload.detail).toContain('another error line');
+  });
+
+  it('done event with only stream_event JSON has partial-output detail', async () => {
+    const streamLine = '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}}';
+    const payload = await getDonePayload(streamLine + '\n', 137);
+    expect(typeof payload.detail).toBe('string');
+    expect(payload.detail as string).toContain('partial output');
+    expect(payload.exitCode).toBe(137);
+  });
+
+  it('done event with only non-stream JSON (no stream_event) has never-emitted-result detail', async () => {
+    const jsonLine = '{"type":"system","subtype":"init","session_id":"abc123"}';
+    const payload = await getDonePayload(jsonLine + '\n', 1);
+    expect(typeof payload.detail).toBe('string');
+    expect(payload.detail as string).toMatch(/never emitted a final result|no.*result/i);
+  });
+
+  it('done event detail respects last 20 non-JSON lines limit', async () => {
+    const lines = Array.from({ length: 25 }, (_, i) => `error line ${i + 1}`).join('\n');
+    const payload = await getDonePayload(lines + '\n', 1);
+    expect(payload.detail as string).toContain('error line 25');
+    expect(payload.detail as string).toContain('error line 6');
+    expect(payload.detail as string).not.toContain('error line 5');
+  });
+});

@@ -58,7 +58,7 @@ export async function POST(
 
   // Build command with model and system prompt
   const modelFlag = agent.model ? `--model ${agent.model}` : '';
-  let cmd = `${claudeBin} --print --dangerously-skip-permissions ${modelFlag}`;
+  let cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions ${modelFlag}`;
   if (systemPrompt) {
     cmd += ` --append-system-prompt`;
   }

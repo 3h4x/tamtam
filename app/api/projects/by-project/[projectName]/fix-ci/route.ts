@@ -85,7 +85,7 @@ Do not commit — just make the code changes.
   try {
     const pid = await startJob(
       job.id,
-      `${claudeBin} --print --dangerously-skip-permissions`,
+      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions`,
       prompt,
       projPath
     );

@@ -92,9 +92,26 @@ export function invalidateProject(project: string): void {
   setEntry(project, entry);
 }
 
-function ghRepo(projName: string, cfg: { github?: string | null }): string {
+async function ghRepo(
+  projName: string,
+  cfg: { github?: string | null; path?: string }
+): Promise<string> {
+  if (cfg.github) return cfg.github;
+  if (cfg.path) {
+    const expanded = cfg.path.startsWith('~') ? cfg.path.replace('~', homedir()) : cfg.path;
+    try {
+      const r = await exec('git', ['-C', expanded, 'remote', 'get-url', 'origin'], { timeout: 5000 });
+      if (r.exitCode === 0) {
+        let url = r.stdout.trim();
+        if (url.startsWith('git@github.com:')) url = url.slice('git@github.com:'.length);
+        else if (url.startsWith('https://github.com/')) url = url.slice('https://github.com/'.length);
+        url = url.replace(/\.git$/, '');
+        if (url && url.includes('/')) return url;
+      }
+    } catch {}
+  }
   const owner = process.env.GITHUB_OWNER || projName;
-  return cfg.github || `${owner}/${projName}`;
+  return `${owner}/${projName}`;
 }
 
 function verKey(t: string): [number, number, number] {
@@ -160,7 +177,7 @@ async function localHead(path: string): Promise<string | null> {
   }
 }
 
-const NARROW_FILTER = '^release$|^create release$|^dependency[\\w -]*$|^label$';
+const NARROW_FILTER = '^release$|^create release$|^dependency[\\\\w -]*$|^label$';
 const EVAL_JQ = [
   '| sort_by(.createdAt) | reverse',
   '| unique_by(.workflowName) as $runs',
@@ -270,7 +287,7 @@ export async function ghStatusLookup(
     const projName = cfg.project;
     if (!(projName in unique)) {
       unique[projName] = {
-        repo: ghRepo(projName, cfg),
+        repo: await ghRepo(projName, cfg),
         path: cfg.path ?? '',
       };
     }

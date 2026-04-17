@@ -25,11 +25,11 @@ export async function GET(
       let offset = 0;
 
       function sendRawLines(text: string) {
-        for (const line of text.split('\n')) {
-          if (line.trim()) {
-            controller.enqueue(encoder.encode(`data: ${line}\n\n`));
-          }
-        }
+        if (!text) return;
+        // Use SSE multi-`data:` field syntax so embedded newlines are preserved
+        // in the single reconstructed event.data on the browser side.
+        const payload = text.split('\n').map(l => `data: ${l}`).join('\n');
+        controller.enqueue(encoder.encode(`${payload}\n\n`));
       }
 
       function sseEncode(data: string, event?: string): string {
@@ -63,9 +63,36 @@ export async function GET(
         try { controller.close(); } catch {}
       }
 
+      function extractLogDetail(): string | null {
+        try {
+          if (!existsSync(logPath)) return 'log file missing';
+          const content = readFileSync(logPath, 'utf-8');
+          if (!content.trim()) return 'log file empty (claude produced no output)';
+          const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
+          const nonJson: string[] = [];
+          for (const line of lines) {
+            try { JSON.parse(line); } catch { nonJson.push(line); }
+          }
+          if (nonJson.length > 0) return nonJson.slice(-20).join('\n');
+          // Only JSON in log, no `"type":"result"` — Claude was streaming tokens then died mid-response
+          const hasAnyStream = content.includes('"stream_event"');
+          if (hasAnyStream) {
+            return 'claude streamed partial output but never emitted a final result — likely killed/crashed mid-response';
+          }
+          return 'claude wrote JSON to log but never emitted a final result line';
+        } catch (e: any) {
+          return `could not read log: ${e?.message ?? 'unknown'}`;
+        }
+      }
+
       function emitDone(watcher: ReturnType<typeof watch> | null, exitCode?: number | null) {
         try {
-          controller.enqueue(encoder.encode(sseEncode(JSON.stringify({ exitCode: exitCode ?? null }), 'done')));
+          const payload: Record<string, unknown> = { exitCode: exitCode ?? null };
+          if ((exitCode ?? 0) !== 0) {
+            const detail = extractLogDetail();
+            if (detail) payload.detail = detail;
+          }
+          controller.enqueue(encoder.encode(sseEncode(JSON.stringify(payload), 'done')));
         } catch {}
         closeStream(watcher);
       }

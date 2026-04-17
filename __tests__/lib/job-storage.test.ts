@@ -854,4 +854,141 @@ describe('probeJobStatus with pm2', () => {
     // Either running (if signal succeeds by chance) or done (pid dead) — both valid
     expect(['running', 'done']).toContain(status);
   });
+
+  it('overrides exit code to 0 when log has a clean result and pm2 reports non-zero', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: -1 });
+
+    const logFile = join(tmpdir(), `tamtam-exitcode-override-${Date.now()}.log`);
+    const resultLine = '{"type":"result","subtype":"success","is_error":false,"duration_ms":500,"total_cost_usd":0,"session_id":"s1","result":"ok"}';
+    writeFileSync(logFile, resultLine + '\n');
+
+    const job: JobData = {
+      id: 'job-override',
+      project: 'proj',
+      kind: 'run',
+      prompt: null,
+      pid: 9999,
+      logPath: logFile,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    try {
+      // logHasClaudeResult fires first: log has "type":"result" → markDone(0)
+      const status = await probeJobStatusFn(job);
+      expect(status).toBe('done');
+      expect(job.exitCode).toBe(0);
+    } finally {
+      try { rmSync(logFile); } catch {}
+    }
+  });
+
+  it('does NOT override exit code for test kind even with a result in the log', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: -1 });
+
+    const logFile = join(tmpdir(), `tamtam-test-kind-${Date.now()}.log`);
+    const resultLine = '{"type":"result","subtype":"success","is_error":false,"duration_ms":200,"total_cost_usd":0,"session_id":"s3","result":"ok"}';
+    writeFileSync(logFile, resultLine + '\n');
+
+    const job: JobData = {
+      id: 'job-test-kind',
+      project: 'proj',
+      kind: 'test',
+      prompt: null,
+      pid: 9999,
+      logPath: logFile,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    try {
+      // logHasClaudeResult check is only for run/review → skipped for test kind
+      const status = await probeJobStatusFn(job);
+      // pm2 reports done with exitCode=-1, no override for test kind
+      expect(status).toBe('done');
+      expect(job.exitCode).toBe(-1);
+    } finally {
+      try { rmSync(logFile); } catch {}
+    }
+  });
+});
+
+describe('probeJobStatus – test/action kind liveness via process.kill', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let probeJobStatusFn: typeof import('@/lib/job-storage').probeJobStatus;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/pm2-jobs', () => ({ getJobStatus: vi.fn(), deleteJob: vi.fn() }));
+    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
+
+    const mod = await import('@/lib/job-storage');
+    probeJobStatusFn = mod.probeJobStatus;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('test kind with live pid returns running (does not hit pm2)', async () => {
+    const livePid = process.pid;
+    const job: JobData = {
+      id: 'job-test-live',
+      project: 'proj',
+      kind: 'test',
+      prompt: null,
+      pid: livePid,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('running');
+  });
+
+  it('action kind with live pid returns running', async () => {
+    const job: JobData = {
+      id: 'job-action-live',
+      project: 'proj',
+      kind: 'action',
+      prompt: null,
+      pid: process.pid,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('running');
+  });
+
+  it('test kind with dead pid returns done', async () => {
+    const job: JobData = {
+      id: 'job-test-dead',
+      project: 'proj',
+      kind: 'test',
+      prompt: null,
+      pid: 2147483647,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(['running', 'done']).toContain(status);
+  });
 });

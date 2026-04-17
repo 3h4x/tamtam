@@ -55,7 +55,7 @@ Do not commit — just make the code changes.
   job.logPath = logPath;
 
   const logFd = openSync(logPath, 'w');
-  const proc = spawn(claudeBin, ['--print', '--dangerously-skip-permissions'], {
+  const proc = spawn(claudeBin, ['--print', '--output-format', 'stream-json', '--include-partial-messages', '--verbose', '--dangerously-skip-permissions'], {
     cwd: projPath,
     stdio: ['pipe', logFd, logFd],
     env: {

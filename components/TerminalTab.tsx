@@ -1,24 +1,18 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { runProject, fetchSkills, fetchPersonas } from '@/lib/client-api'
 import type { Skill, Persona } from '@/lib/client-api'
 import Markdown from 'react-markdown'
-
-interface ToolEntry {
-  name: string
-  input?: string
-  result?: string
-  collapsed?: boolean
-}
-
-interface TermEntry {
-  role: 'user' | 'assistant' | 'status' | 'error' | 'thinking' | 'tool'
-  text: string
-  imageUrls?: string[]
-  tool?: ToolEntry
-}
+import { renderAnsi, hasAnsi } from '@/lib/ansi-render'
+import {
+  terminalStore,
+  type ToolEntry,
+  type TermEntry,
+  type SkillItem,
+  type DocItem,
+} from '@/lib/terminal-session-store'
 
 interface SessionItem {
   id: string
@@ -34,10 +28,21 @@ interface TerminalTabProps {
   initialSessionId?: string
 }
 
+const TOOL_COLORS: Record<string, string> = {
+  Bash: 'text-[#f0b070]',
+  Read: 'text-[#8fcfff]',
+  Edit: 'text-[#c9b4ff]',
+  Write: 'text-[#c9b4ff]',
+  Glob: 'text-[#8fdfb0]',
+  Grep: 'text-[#8fdfb0]',
+  Task: 'text-[#ffb0c0]',
+  WebFetch: 'text-[#ffd080]',
+  WebSearch: 'text-[#ffd080]',
+}
+
 function ToolBlock({ tool }: { tool: ToolEntry }) {
   const [collapsed, setCollapsed] = useState(true)
 
-  // Parse input to extract meaningful info (file_path, command, etc.)
   let summary = ''
   try {
     const input = JSON.parse(tool.input || '{}')
@@ -48,22 +53,28 @@ function ToolBlock({ tool }: { tool: ToolEntry }) {
 
   const hasResult = !!tool.result
   const resultPreview = tool.result
-    ? tool.result.length > 200 ? tool.result.slice(0, 200) + '...' : tool.result
+    ? tool.result.length > 600 ? tool.result.slice(0, 600) + '...' : tool.result
     : null
 
+  const nameColor = TOOL_COLORS[tool.name] ?? 'text-[#9cc7ff]'
+  const clickable = hasResult
+
   return (
-    <div className="mx-4 my-1 border border-[#2a2a2a] rounded-md overflow-hidden">
+    <div className="mx-4 group/tool">
       <div
-        className="flex items-center gap-2 px-3 py-1.5 bg-[#151515] cursor-pointer hover:bg-[#1a1a1a]"
-        onClick={() => setCollapsed(!collapsed)}
+        className={`flex items-baseline gap-2 px-2 py-0.5 rounded-sm leading-tight ${clickable ? 'cursor-pointer hover:bg-[#181818]' : ''}`}
+        onClick={() => clickable && setCollapsed(!collapsed)}
       >
-        <span className="text-status-success text-xs">●</span>
-        <span className="text-[#7dd3fc] text-xs font-semibold">{tool.name}</span>
-        {summary && <span className="text-[#888] text-xs truncate">({summary})</span>}
-        <span className="ml-auto text-[10px] text-[#555]">{collapsed ? '▶' : '▼'}</span>
+        <span className={`${nameColor} text-xs font-mono shrink-0`}>{tool.name}</span>
+        {summary && (
+          <span className="text-[#888] text-xs font-mono truncate min-w-0 flex-1">{summary}</span>
+        )}
+        {hasResult && (
+          <span className="text-[10px] text-[#555] shrink-0 transition-transform" style={{ transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)' }}>›</span>
+        )}
       </div>
       {!collapsed && hasResult && (
-        <pre className="px-3 py-2 text-xs text-[#999] bg-[#0d0d0d] m-0 overflow-x-auto whitespace-pre-wrap max-h-60 overflow-y-auto border-t border-[#2a2a2a]">
+        <pre className="ml-2 mt-1 mb-1 px-3 py-2 text-xs text-[#999] bg-[#0d0d0d] border-l-2 border-[#2a2a2a] m-0 overflow-x-auto whitespace-pre-wrap max-h-60 overflow-y-auto font-mono">
           {resultPreview}
         </pre>
       )}
@@ -75,37 +86,55 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const router = useRouter()
   const searchParams = useSearchParams()
   const jobParam = searchParams.get('job')
+
+  // Subscribe to the module-level session store. Survives component unmounts.
+  const state = useSyncExternalStore(
+    (l) => terminalStore.subscribe(projectName, l),
+    () => terminalStore.get(projectName),
+    () => terminalStore.get(projectName),
+  )
+  const {
+    history,
+    streamBuffer,
+    thinkingBuffer,
+    streamTools,
+    streaming,
+    streamStartedAt,
+    claudeSessionId,
+    currentJobId,
+    lastStats,
+    messageQueue,
+    selectedItems,
+    selectedDocs,
+    pendingAutoSubmit,
+  } = state
+
+  const setSelectedItems = (v: SkillItem[] | ((prev: SkillItem[]) => SkillItem[])) =>
+    terminalStore.update(projectName, (s) => ({
+      selectedItems: typeof v === 'function' ? (v as (p: SkillItem[]) => SkillItem[])(s.selectedItems) : v,
+    }))
+  const setSelectedDocs = (v: DocItem[] | ((prev: DocItem[]) => DocItem[])) =>
+    terminalStore.update(projectName, (s) => ({
+      selectedDocs: typeof v === 'function' ? (v as (p: DocItem[]) => DocItem[])(s.selectedDocs) : v,
+    }))
+  const setMessageQueue = (v: string[] | ((prev: string[]) => string[])) =>
+    terminalStore.update(projectName, (s) => ({
+      messageQueue: typeof v === 'function' ? (v as (p: string[]) => string[])(s.messageQueue) : v,
+    }))
+
+  // Purely local UI state
   const [input, setInput] = useState('')
   const [model, setModel] = useState<'haiku' | 'sonnet' | 'opus'>('haiku')
-  const [history, setHistory] = useState<TermEntry[]>([])
-  const [streaming, setStreaming] = useState(false)
-  const [streamBuffer, setStreamBuffer] = useState('')
-  const streamBufferRef = useRef('')
-  const [displayedLength, setDisplayedLength] = useState(0)
-  const [thinkingBuffer, setThinkingBuffer] = useState('')
-  const thinkingBufferRef = useRef('')
+  const [spinnerFrame, setSpinnerFrame] = useState(0)
   const [showThinking, setShowThinking] = useState(false)
-  const [streamTools, setStreamTools] = useState<ToolEntry[]>([])
-  const streamToolsRef = useRef<ToolEntry[]>([])
-  const [claudeSessionId, setClaudeSessionId] = useState<string | null>(initialSessionId ?? null)
   const [pendingImages, setPendingImages] = useState<File[]>([])
   const [pendingImageUrls, setPendingImageUrls] = useState<string[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [showSessions, setShowSessions] = useState(false)
   const [sessions, setSessions] = useState<SessionItem[]>([])
   const [loadingSessions, setLoadingSessions] = useState(false)
-  const [messageQueue, setMessageQueue] = useState<string[]>([])
-  const messageQueueRef = useRef<string[]>([])
-  const pendingAutoSubmitRef = useRef<string | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const termRef = useRef<HTMLDivElement>(null)
-  const [lastStats, setLastStats] = useState<{
-    duration: number
-    inputTokens: number
-    outputTokens: number
-    cacheReadTokens: number
-    cacheCreateTokens: number
-  } | null>(null)
   const [promptHistory, setPromptHistory] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('tamtam-prompt-history') || '[]') } catch { return [] }
   })
@@ -114,16 +143,10 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const [autoScroll, setAutoScroll] = useState(true)
   const [elapsedMs, setElapsedMs] = useState(0)
-  const streamStartRef = useRef<number | null>(null)
-  const esRef = useRef<EventSource | null>(null)
-  const currentJobIdRef = useRef<string | null>(null)
-  const animFrameRef = useRef<number | null>(null)
-  const lastTimeRef = useRef(0)
+  const spinnerChars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
-  // Skills
-  interface SkillItem { id: string; name: string; description: string; content?: string; source: 'db' | 'file' }
+  // Skills catalog
   const [allItems, setAllItems] = useState<SkillItem[]>([])
-  const [selectedItems, setSelectedItems] = useState<SkillItem[]>([])
   const [skillSearch, setSkillSearch] = useState('')
   const [showSkillPicker, setShowSkillPicker] = useState(false)
   const skillSearchRef = useRef<HTMLInputElement>(null)
@@ -131,10 +154,8 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     try { return JSON.parse(localStorage.getItem('tamtam-skill-usage') || '{}') } catch { return {} }
   })
 
-  // Docs
-  interface DocItem { name: string; content: string }
+  // Docs catalog
   const [allDocs, setAllDocs] = useState<DocItem[]>([])
-  const [selectedDocs, setSelectedDocs] = useState<DocItem[]>([])
   const [showDocsPicker, setShowDocsPicker] = useState(false)
   const [docsSearch, setDocsSearch] = useState('')
   const docsSearchRef = useRef<HTMLInputElement>(null)
@@ -149,18 +170,26 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
       .catch(() => {})
   }, [])
 
-  // Preload sessions on fresh terminal landing (no session/job param) so the
-  // welcome strip and sessions panel are instant.
+  // Preload sessions on fresh terminal landing (no session/job param)
   useEffect(() => {
     if (initialSessionId || jobParam) return
     loadSessions()
   }, [])
 
-  // Restore session from URL param — load ALL turns for the session_id, not
-  // just the earliest job. Each follow-up creates a new job sharing the same
-  // session_id, so we concatenate them chronologically.
+  // Restore session from URL param. Skipped if store already holds state for
+  // this sessionId — preserves live streams and in-memory outputs across
+  // unmounts / tab navigations.
   useEffect(() => {
     if (!initialSessionId) return
+    const cur = terminalStore.get(projectName)
+    // Already hydrated or streaming for this session → don't refetch; store wins.
+    if (cur.restoredFor === initialSessionId) return
+    if (cur.streaming) return
+    if (cur.claudeSessionId === initialSessionId && cur.history.length > 0) {
+      terminalStore.update(projectName, () => ({ restoredFor: initialSessionId }))
+      return
+    }
+
     fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
       .then(r => r.json())
       .then(async (data) => {
@@ -170,16 +199,16 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           .sort((a, b) => a.started_at - b.started_at)
         if (matches.length === 0) return
 
-        // Context meta (skills/docs) is captured on the first turn
         const firstMatch = matches[0]
+        let loadedSkills: SkillItem[] = []
+        let loadedDocs: DocItem[] = []
         if (firstMatch.context_meta) {
           try {
             const meta = JSON.parse(firstMatch.context_meta)
-            if (meta.skills && Array.isArray(meta.skills)) setSelectedItems(meta.skills)
-            if (meta.docs && Array.isArray(meta.docs)) setSelectedDocs(meta.docs)
+            if (meta.skills && Array.isArray(meta.skills)) loadedSkills = meta.skills
+            if (meta.docs && Array.isArray(meta.docs)) loadedDocs = meta.docs
           } catch {}
         }
-        setClaudeSessionId(initialSessionId)
 
         const lastMatch = matches[matches.length - 1]
         const lastIsRunning = lastMatch.status !== 'done' && lastMatch.finished_at === null
@@ -201,21 +230,40 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         if (lastIsRunning) {
           const prompt = lastMatch.user_prompt || lastMatch.prompt
           if (prompt) entries.push({ role: 'user', text: prompt })
-          setHistory(entries)
-          setStreaming(true)
-          startStreaming(lastMatch.id)
+          terminalStore.update(projectName, () => ({
+            history: entries,
+            claudeSessionId: initialSessionId,
+            sessionKey: initialSessionId,
+            selectedItems: loadedSkills,
+            selectedDocs: loadedDocs,
+            restoredFor: initialSessionId,
+          }))
+          terminalStore.startStream(projectName, lastMatch.id)
         } else {
-          setHistory(entries)
+          terminalStore.update(projectName, () => ({
+            history: entries,
+            claudeSessionId: initialSessionId,
+            sessionKey: initialSessionId,
+            selectedItems: loadedSkills,
+            selectedDocs: loadedDocs,
+            restoredFor: initialSessionId,
+          }))
         }
       })
       .catch(() => {})
-  }, [initialSessionId])
+  }, [initialSessionId, projectName])
 
-  // Load job output by job ID (e.g. from notification click for review/test jobs)
+  // Load job output by job ID (e.g. from notification click)
   const jobLoadedRef = useRef<string | null>(null)
   useEffect(() => {
     if (!jobParam || initialSessionId) return
     if (jobLoadedRef.current === jobParam) return
+    // If store already tracks this job, skip.
+    const cur = terminalStore.get(projectName)
+    if (cur.currentJobId === jobParam) {
+      jobLoadedRef.current = jobParam
+      return
+    }
     jobLoadedRef.current = jobParam
     const loadJob = async () => {
       try {
@@ -224,30 +272,27 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         const data = await res.json()
         const entries: TermEntry[] = []
         const kind = data.kind || jobParam.split('-').slice(1, -1).join('-')
-        const isClaudeJob = ['run', 'review'].includes(data.kind)
+        const isClaudeJob = ['run', 'review', 'fix', 'fix-ci'].includes(data.kind) || (typeof data.kind === 'string' && data.kind.startsWith('agent:'))
         entries.push({ role: 'status', text: kind })
         if (isClaudeJob) {
-          // Claude jobs (run/review): stream via SSE to get tool blocks + markdown
-          setStreaming(true)
-          setHistory(entries)
-          startStreaming(jobParam)
+          terminalStore.update(projectName, () => ({ history: entries }))
+          terminalStore.startStream(projectName, jobParam)
         } else if (data.status === 'running' || data.finished_at === null) {
-          setStreaming(true)
-          setHistory(entries)
-          startStreaming(jobParam, true)
+          terminalStore.update(projectName, () => ({ history: entries }))
+          terminalStore.startStream(projectName, jobParam, true)
         } else {
-          if (data.log) entries.push({ role: 'assistant', text: data.log })
+          if (data.log) entries.push({ role: 'raw', text: data.log })
           const exitCode = data.exit_code
           if (exitCode !== undefined && exitCode !== null) {
             const ok = exitCode === 0
             entries.push({ role: ok ? 'status' : 'error', text: ok ? 'exit 0 — ok' : `exit ${exitCode}` })
           }
-          setHistory(entries)
+          terminalStore.update(projectName, () => ({ history: entries }))
         }
       } catch {}
     }
     loadJob()
-  }, [jobParam, initialSessionId])
+  }, [jobParam, initialSessionId, projectName])
 
   useEffect(() => {
     Promise.all([fetchSkills(), fetchPersonas()]).then(([skillsData, personasData]) => {
@@ -313,32 +358,19 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     }
   }
 
-  // Typewriter animation
+  // Spinner animation during streaming
   useEffect(() => {
-    if (displayedLength >= streamBuffer.length) return
-    const animate = (now: number) => {
-      if (!lastTimeRef.current) lastTimeRef.current = now
-      const elapsed = now - lastTimeRef.current
-      const charsToAdd = Math.max(1, Math.floor(elapsed / 1.25))
-      if (charsToAdd > 0) {
-        setDisplayedLength(prev => Math.min(prev + charsToAdd, streamBuffer.length))
-        lastTimeRef.current = now
-      }
-      animFrameRef.current = requestAnimationFrame(animate)
-    }
-    animFrameRef.current = requestAnimationFrame(animate)
-    return () => {
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
-      lastTimeRef.current = 0
-    }
-  }, [streamBuffer.length, displayedLength])
+    if (!streaming) return
+    const id = setInterval(() => setSpinnerFrame(f => f + 1), 80)
+    return () => clearInterval(id)
+  }, [streaming])
 
   // Auto-scroll
   useEffect(() => {
     if (autoScroll && termRef.current) {
       termRef.current.scrollTop = termRef.current.scrollHeight
     }
-  }, [history, streamBuffer, displayedLength, autoScroll])
+  }, [history, streamBuffer, autoScroll])
 
   const handleScroll = () => {
     if (!termRef.current) return
@@ -352,21 +384,19 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     setAutoScroll(true)
   }
 
-  // Live elapsed timer during streaming
+  // Live elapsed timer during streaming, anchored to store's streamStartedAt
+  // so it survives unmount/remount.
   useEffect(() => {
-    if (!streaming) {
-      streamStartRef.current = null
+    if (!streaming || !streamStartedAt) {
       setElapsedMs(0)
       return
     }
-    if (streamStartRef.current === null) streamStartRef.current = Date.now()
+    setElapsedMs(Date.now() - streamStartedAt)
     const id = setInterval(() => {
-      if (streamStartRef.current !== null) {
-        setElapsedMs(Date.now() - streamStartRef.current)
-      }
+      setElapsedMs(Date.now() - streamStartedAt)
     }, 100)
     return () => clearInterval(id)
-  }, [streaming])
+  }, [streaming, streamStartedAt])
 
   const addImages = useCallback((files: File[]) => {
     const imageFiles = files.filter(f => f.type.startsWith('image/'))
@@ -409,152 +439,13 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     setPendingImageUrls(prev => prev.filter((_, i) => i !== idx))
   }, [])
 
-  useEffect(() => {
-    return () => { esRef.current?.close() }
-  }, [])
-
-  const startStreaming = useCallback((jobId: string, raw = false) => {
-    currentJobIdRef.current = jobId
-    const url = raw ? `/api/streaming/${jobId}?raw=1` : `/api/streaming/${jobId}`
-    const es = new EventSource(url)
-    esRef.current = es
-
-    es.onmessage = (event) => {
-      streamBufferRef.current += event.data
-      setStreamBuffer(streamBufferRef.current)
-    }
-
-    es.addEventListener('thinking', (event) => {
-      thinkingBufferRef.current += (event as MessageEvent).data
-      setThinkingBuffer(thinkingBufferRef.current)
-    })
-
-    es.addEventListener('tool_use', (event) => {
-      // Flush any pending text buffer as an assistant entry before tool
-      const buf = streamBufferRef.current
-      if (buf) {
-        setHistory(prev => [...prev, { role: 'assistant', text: buf }])
-        streamBufferRef.current = ''
-        setStreamBuffer('')
-        setDisplayedLength(0)
-      }
-      try {
-        const data = JSON.parse((event as MessageEvent).data)
-        const tool: ToolEntry = { name: data.name, input: data.input }
-        streamToolsRef.current = [...streamToolsRef.current, tool]
-        setStreamTools([...streamToolsRef.current])
-      } catch {}
-    })
-
-    es.addEventListener('tool_result', (event) => {
-      try {
-        const data = JSON.parse((event as MessageEvent).data)
-        const tools = streamToolsRef.current
-        if (tools.length > 0) {
-          const last = { ...tools[tools.length - 1], result: data.content }
-          const updated = [...tools.slice(0, -1), last]
-          streamToolsRef.current = updated
-          setStreamTools(updated)
-        }
-      } catch {}
-    })
-
-    es.addEventListener('done', (event) => {
-      const metadata = JSON.parse((event as MessageEvent).data)
-      es.close()
-      esRef.current = null
-      const buf = streamBufferRef.current
-      const thinking = thinkingBufferRef.current
-      const tools = streamToolsRef.current
-      streamBufferRef.current = ''
-      thinkingBufferRef.current = ''
-      streamToolsRef.current = []
-      const sid = metadata.sessionId || null
-      setClaudeSessionId(sid)
-      // Always keep URL in sync with the latest session ID. Claude may rotate
-      // the session ID on follow-ups, and if we don't update the URL the next
-      // HMR reload will restore the stale one.
-      if (sid) {
-        const target = `/project/${projectName}/terminal/${sid}`
-        if (typeof window !== 'undefined' && window.location.pathname !== target) {
-          window.history.replaceState(null, '', target)
-        }
-      }
-      if (typeof metadata.duration === 'number' || typeof metadata.inputTokens === 'number') {
-        setLastStats({
-          duration: metadata.duration ?? 0,
-          inputTokens: metadata.inputTokens ?? 0,
-          outputTokens: metadata.outputTokens ?? 0,
-          cacheReadTokens: metadata.cacheReadTokens ?? 0,
-          cacheCreateTokens: metadata.cacheCreateTokens ?? 0,
-        })
-      }
-      const newEntries: TermEntry[] = []
-      if (thinking) newEntries.push({ role: 'thinking', text: thinking })
-      for (const t of tools) {
-        newEntries.push({ role: 'tool', text: '', tool: t })
-      }
-      if (buf) newEntries.push({ role: 'assistant', text: buf })
-      if (metadata.exitCode !== undefined && metadata.exitCode !== null) {
-        const ok = metadata.exitCode === 0
-        newEntries.push({ role: ok ? 'status' : 'error', text: ok ? 'exit 0 — ok' : `exit ${metadata.exitCode}` })
-      }
-      setHistory(prev => [...prev, ...newEntries])
-      currentJobIdRef.current = null
-      setStreamBuffer('')
-      setThinkingBuffer('')
-      setStreamTools([])
-      setDisplayedLength(0)
-      setStreaming(false)
-
-      // Dequeue next message if any
-      const queue = messageQueueRef.current
-      if (queue.length > 0) {
-        const [next, ...rest] = queue
-        messageQueueRef.current = rest
-        setMessageQueue(rest)
-        pendingAutoSubmitRef.current = next
-      } else {
-        setTimeout(() => inputRef.current?.focus(), 50)
-      }
-    })
-
-    es.onerror = () => {
-      es.close()
-      esRef.current = null
-      currentJobIdRef.current = null
-      const buf = streamBufferRef.current
-      const thinking = thinkingBufferRef.current
-      const tools = streamToolsRef.current
-      streamBufferRef.current = ''
-      thinkingBufferRef.current = ''
-      streamToolsRef.current = []
-      const newEntries: TermEntry[] = []
-      if (thinking) newEntries.push({ role: 'thinking', text: thinking })
-      for (const t of tools) newEntries.push({ role: 'tool', text: '', tool: t })
-      if (buf) newEntries.push({ role: 'assistant', text: buf })
-      if (newEntries.length === 0) newEntries.push({ role: 'error', text: 'Connection error' })
-      setHistory(prev => [...prev, ...newEntries])
-      setStreamBuffer('')
-      setThinkingBuffer('')
-      setStreamTools([])
-      setDisplayedLength(0)
-      setStreaming(false)
-      // Drop queue on error — don't auto-submit after a failed run
-      messageQueueRef.current = []
-      setMessageQueue([])
-      pendingAutoSubmitRef.current = null
-      setTimeout(() => inputRef.current?.focus(), 50)
-    }
-  }, [])
-
   // Auto-submit dequeued message after streaming ends
   useEffect(() => {
-    if (streaming || !pendingAutoSubmitRef.current) return
-    const text = pendingAutoSubmitRef.current
-    pendingAutoSubmitRef.current = null
+    if (streaming || !pendingAutoSubmit) return
+    const text = pendingAutoSubmit
+    terminalStore.clearPendingAutoSubmit(projectName)
     handleSubmit(text)
-  }, [streaming])
+  }, [streaming, pendingAutoSubmit])
 
   const handleSubmit = async (autoText?: string) => {
     const text = (autoText !== undefined ? autoText : input).trim()
@@ -563,9 +454,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     // Queue message if already streaming
     if (streaming) {
       if (text) {
-        const updated = [...messageQueueRef.current, text]
-        messageQueueRef.current = updated
-        setMessageQueue(updated)
+        setMessageQueue(prev => [...prev, text])
         setInput('')
       }
       return
@@ -585,19 +474,16 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     setInput('')
     setPendingImages([])
     setPendingImageUrls([])
-    setHistory(prev => [...prev, { role: 'user', text, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }])
-    setStreaming(true)
-    setLastStats(null)
-    streamBufferRef.current = ''
-    thinkingBufferRef.current = ''
-    streamToolsRef.current = []
-    setStreamBuffer('')
-    setThinkingBuffer('')
-    setStreamTools([])
-    setDisplayedLength(0)
+
+    terminalStore.update(projectName, (s) => ({
+      history: [...s.history, { role: 'user', text, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }],
+      lastStats: null,
+    }))
 
     try {
-      const isFollowUp = !!claudeSessionId
+      const cur = terminalStore.get(projectName)
+      const sessionId = cur.claudeSessionId
+      const isFollowUp = !!sessionId
       let fullPrompt = text
 
       if (!isFollowUp) {
@@ -629,14 +515,16 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         undefined,
         personaPaths.length > 0 ? personaPaths : undefined,
         model,
-        claudeSessionId || undefined,
+        sessionId || undefined,
         contextMetaStr,
         text
       )
-      startStreaming(result.job_id)
+      terminalStore.startStream(projectName, result.job_id)
     } catch (err) {
-      setHistory(prev => [...prev, { role: 'error', text: err instanceof Error ? err.message : 'Failed to start' }])
-      setStreaming(false)
+      terminalStore.update(projectName, (s) => ({
+        history: [...s.history, { role: 'error', text: err instanceof Error ? err.message : 'Failed to start' }],
+        streaming: false,
+      }))
     }
   }
 
@@ -649,9 +537,6 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         .filter((j: any) => j.kind === 'run')
         .sort((a: any, b: any) => b.started_at - a.started_at)
 
-      // Group by session_id: one row per conversation. Show the original
-      // prompt (earliest job) but with the latest status + most recent
-      // activity time, so multi-turn sessions collapse into a single entry.
       const seen = new Set<string>()
       const grouped: SessionItem[] = []
       for (const j of jobs) {
@@ -680,13 +565,14 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
 
   const restoreSession = useCallback(async (session: SessionItem) => {
     setShowSessions(false)
-    streamBufferRef.current = ''
-    setStreamBuffer('')
-    setDisplayedLength(0)
 
-    // If we have a session ID, load the full multi-turn history for it.
-    // Otherwise fall back to restoring just the single job (old behaviour).
+    // If switching to a different session, close any active stream so state
+    // for the new session is clean. Don't wipe current session unless user
+    // confirms — navigation replaces.
     if (session.sessionId) {
+      if (terminalStore.get(projectName).claudeSessionId !== session.sessionId) {
+        terminalStore.reset(projectName)
+      }
       try {
         const listRes = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
         const listData = await listRes.json()
@@ -696,11 +582,13 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           .sort((a, b) => a.started_at - b.started_at)
         if (matches.length > 0) {
           const firstMatch = matches[0]
+          let loadedSkills: SkillItem[] = []
+          let loadedDocs: DocItem[] = []
           if (firstMatch.context_meta) {
             try {
               const meta = JSON.parse(firstMatch.context_meta)
-              if (meta.skills && Array.isArray(meta.skills)) setSelectedItems(meta.skills)
-              if (meta.docs && Array.isArray(meta.docs)) setSelectedDocs(meta.docs)
+              if (meta.skills && Array.isArray(meta.skills)) loadedSkills = meta.skills
+              if (meta.docs && Array.isArray(meta.docs)) loadedDocs = meta.docs
             } catch {}
           }
           const lastMatch = matches[matches.length - 1]
@@ -718,16 +606,28 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
             const log = logData[i]?.log
             if (log) entries.push({ role: 'assistant', text: log })
           })
-          setClaudeSessionId(session.sessionId)
           router.replace(`/project/${projectName}/terminal/${session.sessionId}`)
           if (lastIsRunning) {
             const prompt = lastMatch.user_prompt || lastMatch.prompt
             if (prompt) entries.push({ role: 'user', text: prompt })
-            setHistory(entries)
-            setStreaming(true)
-            startStreaming(lastMatch.id)
+            terminalStore.update(projectName, () => ({
+              history: entries,
+              claudeSessionId: session.sessionId,
+              sessionKey: session.sessionId!,
+              selectedItems: loadedSkills,
+              selectedDocs: loadedDocs,
+              restoredFor: session.sessionId,
+            }))
+            terminalStore.startStream(projectName, lastMatch.id)
           } else {
-            setHistory(entries)
+            terminalStore.update(projectName, () => ({
+              history: entries,
+              claudeSessionId: session.sessionId,
+              sessionKey: session.sessionId!,
+              selectedItems: loadedSkills,
+              selectedDocs: loadedDocs,
+              restoredFor: session.sessionId,
+            }))
           }
           return
         }
@@ -737,10 +637,12 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     // Fallback: single-job restore for jobs without a session_id
     const isStillRunning = session.finishedAt === null && session.exitCode === null
     if (isStillRunning) {
-      setClaudeSessionId(session.sessionId)
-      setHistory(session.prompt ? [{ role: 'user', text: session.prompt }] : [])
-      setStreaming(true)
-      startStreaming(session.id)
+      terminalStore.reset(projectName)
+      terminalStore.update(projectName, () => ({
+        claudeSessionId: session.sessionId,
+        history: session.prompt ? [{ role: 'user', text: session.prompt }] : [],
+      }))
+      terminalStore.startStream(projectName, session.id)
       return
     }
     try {
@@ -749,66 +651,47 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
       const entries: TermEntry[] = []
       if (session.prompt) entries.push({ role: 'user', text: session.prompt })
       if (data.log) entries.push({ role: 'assistant', text: data.log })
-      setHistory(entries)
-      setClaudeSessionId(session.sessionId || null)
+      let loadedSkills: SkillItem[] = []
+      let loadedDocs: DocItem[] = []
       if (data.context_meta) {
         try {
           const meta = JSON.parse(data.context_meta)
-          if (meta.skills && Array.isArray(meta.skills)) setSelectedItems(meta.skills)
-          if (meta.docs && Array.isArray(meta.docs)) setSelectedDocs(meta.docs)
+          if (meta.skills && Array.isArray(meta.skills)) loadedSkills = meta.skills
+          if (meta.docs && Array.isArray(meta.docs)) loadedDocs = meta.docs
         } catch {}
       }
+      terminalStore.reset(projectName)
+      terminalStore.update(projectName, () => ({
+        history: entries,
+        claudeSessionId: session.sessionId || null,
+        sessionKey: session.sessionId || 'new',
+        selectedItems: loadedSkills,
+        selectedDocs: loadedDocs,
+      }))
     } catch {}
-  }, [startStreaming, router, projectName])
+  }, [router, projectName])
 
   const handleNewSession = () => {
-    esRef.current?.close()
-    setClaudeSessionId(null)
-    setHistory([])
-    streamBufferRef.current = ''
-    thinkingBufferRef.current = ''
-    streamToolsRef.current = []
-    setStreamBuffer('')
-    setThinkingBuffer('')
-    setStreamTools([])
-    setDisplayedLength(0)
-    setStreaming(false)
-    setSelectedDocs([])
-    setLastStats(null)
-    messageQueueRef.current = []
-    setMessageQueue([])
-    pendingAutoSubmitRef.current = null
+    terminalStore.reset(projectName)
     router.replace(`/project/${projectName}/terminal`)
     inputRef.current?.focus()
   }
 
   const handleCancel = async () => {
-    const jobId = currentJobIdRef.current
+    const jobId = terminalStore.cancelStream(projectName)
     if (!jobId) return
-    esRef.current?.close()
-    esRef.current = null
-    currentJobIdRef.current = null
     try {
       await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
     } catch {}
-    const buf = streamBufferRef.current
-    streamBufferRef.current = ''
-    thinkingBufferRef.current = ''
-    const entries: TermEntry[] = []
-    if (buf) entries.push({ role: 'assistant', text: buf })
-    entries.push({ role: 'error', text: 'cancelled' })
-    setHistory(prev => [...prev, ...entries])
-    setStreamBuffer('')
-    setThinkingBuffer('')
-    setDisplayedLength(0)
-    setStreaming(false)
-    messageQueueRef.current = []
-    setMessageQueue([])
-    pendingAutoSubmitRef.current = null
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
-  const visibleStream = streamBuffer.slice(0, displayedLength)
+  const lastStreamLine = (() => {
+    const trimmed = streamBuffer.trimEnd()
+    const lastNl = trimmed.lastIndexOf('\n')
+    const line = lastNl === -1 ? trimmed : trimmed.slice(lastNl + 1)
+    return line.trim().slice(0, 120) || ''
+  })()
 
   return (
     <div
@@ -836,7 +719,6 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
 
         {/* Terminal header */}
         <div className="flex items-center justify-between gap-2 px-3 py-2 bg-[#1a1a1a] border-b border-[#2a2a2a] shrink-0">
-          {/* Left: session controls */}
           <div className="flex items-center gap-1.5">
             <button
               className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-[#888] hover:text-[#ccc] cursor-pointer border-none font-mono leading-none"
@@ -861,22 +743,13 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
               )}
             </button>
             {streaming && (
-              <span className="text-[11px] text-status-warning animate-pulse font-mono">
-                streaming {(elapsedMs / 1000).toFixed(1)}s
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-warning/20 text-status-warning font-mono leading-none flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-status-warning animate-pulse" />
+                live
               </span>
-            )}
-            {streaming && (
-              <button
-                className="text-[11px] px-2 py-1 h-[26px] rounded bg-status-error/20 text-status-error hover:bg-status-error/40 cursor-pointer border-none font-mono leading-none"
-                onClick={handleCancel}
-                title="Cancel execution"
-              >
-                cancel
-              </button>
             )}
           </div>
 
-          {/* Right: context & config */}
           <div className="flex items-center gap-1.5">
             <button
               className={`text-[11px] px-2 py-1 h-[26px] rounded cursor-pointer border-none font-mono leading-none ${showThinking ? 'bg-accent/20 text-accent' : 'bg-[#252525] text-[#888] hover:text-[#ccc]'}`}
@@ -1044,7 +917,6 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           onScroll={handleScroll}
           className="flex-1 overflow-y-auto font-mono text-sm flex flex-col"
         >
-          {/* Welcome strip: resume recent sessions on fresh terminal */}
           {!streaming && history.length === 0 && !claudeSessionId && sessions.length > 0 && (
             <div className="px-4 py-3 border-b border-[#1e1e1e]">
               <div className="text-[10px] text-[#555] uppercase tracking-wider mb-2 font-mono">
@@ -1101,11 +973,18 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
                 entry.role === 'user' ? 'text-accent whitespace-pre-wrap' :
                 entry.role === 'error' ? 'text-status-error whitespace-pre-wrap' :
                 entry.role === 'status' ? 'text-[#555] whitespace-pre-wrap' :
+                entry.role === 'raw' ? 'text-[#c0c0c0] font-mono text-xs whitespace-pre-wrap' :
                 'text-[#e0e0e0] terminal-markdown'
               }`}
             >
               {entry.role === 'user' && <span className="text-accent mr-2">#</span>}
-              {entry.role === 'assistant' ? <Markdown>{entry.text}</Markdown> : entry.text}
+              {entry.role === 'assistant'
+                ? (hasAnsi(entry.text)
+                    ? <pre className="whitespace-pre-wrap font-mono text-xs m-0">{renderAnsi(entry.text)}</pre>
+                    : <Markdown>{entry.text}</Markdown>)
+                : hasAnsi(entry.text)
+                  ? <pre className="whitespace-pre-wrap font-mono text-xs m-0 inline">{renderAnsi(entry.text)}</pre>
+                  : entry.text}
               {entry.imageUrls && entry.imageUrls.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2">
                   {entry.imageUrls.map((url, j) => (
@@ -1133,7 +1012,15 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
             )
           ))}
 
-          {/* Live thinking block during streaming */}
+          {/* Live streamed assistant text */}
+          {streaming && streamBuffer && (
+            <div className="px-4 py-2 text-[#e0e0e0] terminal-markdown">
+              {hasAnsi(streamBuffer)
+                ? <pre className="whitespace-pre-wrap font-mono text-xs m-0">{renderAnsi(streamBuffer)}</pre>
+                : <Markdown>{streamBuffer}</Markdown>}
+            </div>
+          )}
+
           {streaming && showThinking && thinkingBuffer && (
             <div className="px-4 py-2 border-l-2 border-[#444] ml-4 mr-4 my-1">
               <div className="text-[10px] text-[#666] mb-1 uppercase tracking-wider">thinking</div>
@@ -1141,24 +1028,25 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
             </div>
           )}
 
-          {streaming && visibleStream && (
-            <div className="px-4 py-2 text-[#e0e0e0] terminal-markdown">
-              <Markdown>{visibleStream}</Markdown>
-              {displayedLength >= streamBuffer.length && (
-                <span className="text-accent animate-pulse">_</span>
-              )}
-            </div>
-          )}
-          {/* Live tool blocks during streaming */}
           {streaming && streamTools.length > 0 && streamTools.map((tool, i) => (
             <ToolBlock key={`stream-tool-${i}`} tool={tool} />
           ))}
 
-          {streaming && !visibleStream && (
-            <div className="px-4 py-2 text-[#555] animate-pulse">thinking...</div>
+          {streaming && (
+            <div className="px-4 py-2 flex items-center gap-2">
+              <span className="text-accent font-mono text-sm">{spinnerChars[spinnerFrame % spinnerChars.length]}</span>
+              <span className="text-status-warning text-xs font-mono shrink-0">{(elapsedMs / 1000).toFixed(1)}s</span>
+              <span className="text-[#666] text-xs font-mono truncate flex-1">{lastStreamLine || 'thinking...'}</span>
+              <button
+                className="text-[10px] px-1.5 py-0.5 rounded bg-status-error/20 text-status-error hover:bg-status-error/40 cursor-pointer border-none font-mono leading-none shrink-0"
+                onClick={handleCancel}
+                title="Cancel execution"
+              >
+                cancel
+              </button>
+            </div>
           )}
 
-          {/* Queued messages */}
           {messageQueue.length > 0 && (
             <div className="px-4 pb-1">
               {messageQueue.map((msg, i) => (
@@ -1167,18 +1055,13 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
                   <span className="truncate flex-1">{msg}</span>
                   <button
                     className="text-[#666] hover:text-[#aaa] cursor-pointer border-none bg-transparent font-mono shrink-0"
-                    onClick={() => {
-                      const updated = messageQueue.filter((_, j) => j !== i)
-                      messageQueueRef.current = updated
-                      setMessageQueue(updated)
-                    }}
+                    onClick={() => setMessageQueue(prev => prev.filter((_, j) => j !== i))}
                   >✕</button>
                 </div>
               ))}
             </div>
           )}
 
-          {/* Pending images */}
           {!streaming && pendingImageUrls.length > 0 && (
             <div className="flex flex-wrap gap-2 px-4 pt-2">
               {pendingImageUrls.map((url, i) => (
@@ -1193,7 +1076,6 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
             </div>
           )}
 
-          {/* Input line — always visible; queues when streaming */}
           <div className="flex items-start px-4 py-1.5">
             <span className={`shrink-0 mr-1 mt-0.5 ${streaming ? 'text-[#555]' : 'text-accent'}`}>{streaming ? '>' : '#'}</span>
             <textarea
@@ -1277,19 +1159,24 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
                 <span className="text-[10px] text-[#555] font-mono">{messageQueue.length} queued</span>
                 <button
                   className="text-[10px] text-[#555] hover:text-[#888] cursor-pointer border-none bg-transparent font-mono"
-                  onClick={() => { messageQueueRef.current = []; setMessageQueue([]) }}
+                  onClick={() => setMessageQueue([])}
                   title="Clear queue"
                 >✕</button>
               </div>
             )}
           </div>
 
-          {/* Status line */}
           <div className="flex items-center gap-3 px-4 py-1 border-t border-[#1e1e1e] shrink-0 text-[10px] text-[#444] font-mono">
             {claudeSessionId ? (
               <>
                 <span className="text-[#555]">session</span>
                 <span className="text-[#666]">{claudeSessionId.slice(0, 16)}…</span>
+                {currentJobId && streaming && (
+                  <>
+                    <span className="text-[#333]">•</span>
+                    <span className="text-status-warning">streaming</span>
+                  </>
+                )}
               </>
             ) : (
               <span>no session</span>
