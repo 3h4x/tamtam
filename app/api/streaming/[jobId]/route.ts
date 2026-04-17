@@ -123,8 +123,8 @@ export async function GET(
         return;
       }
 
-      // If log file doesn't exist yet and no job record, nothing to watch — close.
-      if (!existsSync(logPath) && !jobRecord) {
+      // If log file doesn't exist, there's nothing to watch (fs.watch would throw).
+      if (!existsSync(logPath)) {
         try { controller.close(); } catch {}
         return;
       }
