@@ -256,7 +256,6 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
       withBasePrompt: (p: string) => `BASE-PROMPT-SENTINEL\n\n---\n\n${p}`,
       getPermissionModeFlag: () => '--permission-mode bypassPermissions',
     }));
-    vi.doMock('@/lib/auth', () => ({ checkAuth: () => null }));
     vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: join(tempDir, 'logs') }),

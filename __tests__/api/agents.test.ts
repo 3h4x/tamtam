@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/lib/db/schema';
@@ -47,28 +47,6 @@ describe('agents API', () => {
     vi.doMock('@/lib/db', () => ({
       db: testDb.db,
       schema,
-    }));
-
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: (request: NextRequest) => {
-        const token = process.env.Z_API_TOKEN;
-        if (!token) return null;
-        const authHeader = request.headers.get('authorization') ?? '';
-        if (!authHeader.startsWith('Bearer ')) {
-          const response = new Response(
-            JSON.stringify({ detail: 'Missing or invalid Authorization header' }),
-            { status: 401 }
-          );
-          return new NextResponse(response.body, { status: 401 });
-        }
-        if (authHeader.slice(7) !== token) {
-          const response = new Response(JSON.stringify({ detail: 'Invalid API token' }), {
-            status: 401,
-          });
-          return new NextResponse(response.body, { status: 401 });
-        }
-        return null;
-      },
     }));
 
     vi.doMock('@/lib/agent-scheduler', () => ({
@@ -181,21 +159,7 @@ describe('agents API', () => {
   });
 
   describe('POST /agents', () => {
-    it('requires authentication when Z_API_TOKEN is set', async () => {
-      process.env.Z_API_TOKEN = 'secret-token';
-
-      const request = new NextRequest('http://localhost/api/agents', {
-        method: 'POST',
-        body: JSON.stringify({ name: 'New Agent', project: 'proj1' }),
-      });
-
-      const response = await POST(request);
-      expect(response.status).toBe(401);
-
-      delete process.env.Z_API_TOKEN;
-    });
-
-    it('creates agent without authentication when Z_API_TOKEN not set', async () => {
+    it('creates agent successfully', async () => {
       const request = new NextRequest('http://localhost/api/agents', {
         method: 'POST',
         body: JSON.stringify({ name: 'New Agent', project: 'proj1' }),
@@ -351,22 +315,6 @@ describe('agents API', () => {
       expect(response.status).toBe(404);
       const data = await response.json();
       expect(data.detail).toBe('not found');
-    });
-
-    it('requires authentication when Z_API_TOKEN is set', async () => {
-      process.env.Z_API_TOKEN = 'secret-token';
-
-      const request = new NextRequest('http://localhost/api/agents/agent-1', {
-        method: 'PATCH',
-        body: JSON.stringify({ name: 'Updated' }),
-      });
-
-      const response = await PATCH(request, {
-        params: Promise.resolve({ agentId: 'agent-1' }),
-      });
-
-      expect(response.status).toBe(401);
-      delete process.env.Z_API_TOKEN;
     });
 
     it('updates agent name', async () => {
@@ -530,21 +478,6 @@ describe('agents API', () => {
   });
 
   describe('DELETE /agents/{agentId}', () => {
-    it('requires authentication when Z_API_TOKEN is set', async () => {
-      process.env.Z_API_TOKEN = 'secret-token';
-
-      const request = new NextRequest('http://localhost/api/agents/agent-1', {
-        method: 'DELETE',
-      });
-
-      const response = await DELETE(request, {
-        params: Promise.resolve({ agentId: 'agent-1' }),
-      });
-
-      expect(response.status).toBe(401);
-      delete process.env.Z_API_TOKEN;
-    });
-
     it('deletes agent by ID', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;

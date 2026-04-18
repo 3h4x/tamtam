@@ -33,19 +33,6 @@ describe('settings API', () => {
       schema,
     }));
 
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: (request: NextRequest) => {
-        const token = process.env.Z_API_TOKEN;
-        if (!token) return null;
-        const authHeader = request.headers.get('authorization') ?? '';
-        if (!authHeader.startsWith('Bearer ') || authHeader.slice(7) !== token) {
-          const { NextResponse } = require('next/server');
-          return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-        }
-        return null;
-      },
-    }));
-
     const mod = await import('@/app/api/settings/route');
     GET = mod.GET;
     PATCH = mod.PATCH;
@@ -53,7 +40,6 @@ describe('settings API', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
   });
 
   describe('GET /settings', () => {
@@ -75,24 +61,9 @@ describe('settings API', () => {
       expect(data.settings.github_owner).toBe('octocat');
     });
 
-    it('does not require authentication', async () => {
-      process.env.Z_API_TOKEN = 'secret';
-      const response = await GET();
-      expect(response.status).toBe(200);
-    });
   });
 
   describe('PATCH /settings', () => {
-    it('requires authentication when Z_API_TOKEN is set', async () => {
-      process.env.Z_API_TOKEN = 'secret';
-      const request = new NextRequest('http://localhost/api/settings', {
-        method: 'PATCH',
-        body: JSON.stringify({ workspace_path: '/new' }),
-      });
-      const response = await PATCH(request);
-      expect(response.status).toBe(401);
-    });
-
     it('updates a setting', async () => {
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',

@@ -44,19 +44,6 @@ describe('POST /api/jobs/[jobId]/fix', () => {
     updateJobMock = vi.fn();
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
 
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: (req: NextRequest) => {
-        const token = process.env.Z_API_TOKEN;
-        if (!token) return null;
-        const auth = req.headers.get('authorization') ?? '';
-        if (!auth.startsWith('Bearer ') || auth.slice(7) !== token) {
-          const { NextResponse } = require('next/server');
-          return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-        }
-        return null;
-      },
-    }));
-
     vi.doMock('@/lib/job-storage', () => ({
       getJob: getJobMock,
       probeJobStatus: probeJobStatusMock,
@@ -94,15 +81,7 @@ describe('POST /api/jobs/[jobId]/fix', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
     rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-    const req = new NextRequest('http://localhost/api/jobs/job-1/fix', { method: 'POST' });
-    const res = await POST(req, { params: Promise.resolve({ jobId: 'job-1' }) });
-    expect(res.status).toBe(401);
   });
 
   it('returns 404 for nonexistent job', async () => {

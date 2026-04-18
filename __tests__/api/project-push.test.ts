@@ -1,21 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
-function makeAuthMock() {
-  return {
-    checkAuth: (req: NextRequest) => {
-      const token = process.env.Z_API_TOKEN;
-      if (!token) return null;
-      const auth = req.headers.get('authorization') ?? '';
-      if (!auth.startsWith('Bearer ') || auth.slice(7) !== token) {
-        const { NextResponse } = require('next/server');
-        return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-      }
-      return null;
-    },
-  };
-}
-
 // ─── GET /api/projects/by-project/[name]/push/preview ─────────────────────────
 
 describe('GET /api/projects/by-project/[name]/push/preview', () => {
@@ -29,7 +14,7 @@ describe('GET /api/projects/by-project/[name]/push/preview', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
 
-    vi.doMock('@/lib/auth', () => makeAuthMock());
+
     vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
 
@@ -39,14 +24,7 @@ describe('GET /api/projects/by-project/[name]/push/preview', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
-  });
 
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push/preview');
-    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(401);
   });
 
   it('returns 404 if project not found', async () => {
@@ -116,7 +94,7 @@ describe('POST /api/projects/by-project/[name]/push', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
 
-    vi.doMock('@/lib/auth', () => makeAuthMock());
+
     vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
 
@@ -126,14 +104,7 @@ describe('POST /api/projects/by-project/[name]/push', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
-  });
 
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push', { method: 'POST' });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(401);
   });
 
   it('returns 404 if project not found', async () => {
@@ -232,7 +203,7 @@ describe('POST /api/projects/by-project/[name]/push/execute', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
 
-    vi.doMock('@/lib/auth', () => makeAuthMock());
+
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: vi.fn(),
@@ -246,17 +217,7 @@ describe('POST /api/projects/by-project/[name]/push/execute', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
-  });
 
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push/execute', {
-      method: 'POST',
-      body: JSON.stringify({ message: 'chore: update' }),
-    });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(401);
   });
 
   it('returns 404 if project not found', async () => {
@@ -351,7 +312,7 @@ describe('POST /api/projects/by-project/[name]/push/generate', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
 
-    vi.doMock('@/lib/auth', () => makeAuthMock());
+
     vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/scheduling', () => ({
@@ -364,16 +325,7 @@ describe('POST /api/projects/by-project/[name]/push/generate', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
-  });
 
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push/generate', {
-      method: 'POST',
-    });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(401);
   });
 
   it('returns 404 if project not found', async () => {

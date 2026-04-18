@@ -18,7 +18,6 @@ describe('POST /api/projects/[schedId]/pause', () => {
     getImproveConfigMock = vi.fn().mockReturnValue({ projects: mockProjects });
     pauseAllMock = vi.fn().mockResolvedValue(undefined);
 
-    vi.doMock('@/lib/auth', () => ({ checkAuth: () => null }));
     vi.doMock('@/lib/scheduling', () => ({ getImproveConfig: getImproveConfigMock }));
     vi.doMock('@/lib/launchagent', () => ({ pauseAll: pauseAllMock }));
 
@@ -51,20 +50,6 @@ describe('POST /api/projects/[schedId]/pause', () => {
     const data = await res.json();
     expect(data.status).toBe('ok');
   });
-
-  it('returns 401 when auth fails', async () => {
-    vi.resetModules();
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: () => new Response(JSON.stringify({ detail: 'Unauthorized' }), { status: 401 }),
-    }));
-    vi.doMock('@/lib/scheduling', () => ({ getImproveConfig: vi.fn().mockReturnValue({ projects: mockProjects }) }));
-    vi.doMock('@/lib/launchagent', () => ({ pauseAll: vi.fn() }));
-
-    const mod = await import('@/app/api/projects/[schedId]/pause/route');
-    const req = new NextRequest('http://localhost/api/projects/proj-crit/pause', { method: 'POST' });
-    const res = await mod.POST(req, { params: Promise.resolve({ schedId: 'proj-crit' }) });
-    expect(res.status).toBe(401);
-  });
 });
 
 describe('POST /api/projects/[schedId]/resume', () => {
@@ -78,7 +63,6 @@ describe('POST /api/projects/[schedId]/resume', () => {
     getImproveConfigMock = vi.fn().mockReturnValue({ projects: mockProjects });
     resumeAllMock = vi.fn().mockResolvedValue(undefined);
 
-    vi.doMock('@/lib/auth', () => ({ checkAuth: () => null }));
     vi.doMock('@/lib/scheduling', () => ({ getImproveConfig: getImproveConfigMock }));
     vi.doMock('@/lib/launchagent', () => ({ resumeAll: resumeAllMock }));
 
@@ -124,7 +108,6 @@ describe('PATCH /api/projects/[schedId]/priority', () => {
     getImproveConfigMock = vi.fn().mockReturnValue({ projects: mockProjects });
     writePriorityYamlMock = vi.fn();
 
-    vi.doMock('@/lib/auth', () => ({ checkAuth: () => null }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: getImproveConfigMock,
       writePriorityYaml: writePriorityYamlMock,
@@ -183,7 +166,6 @@ describe('PATCH /api/projects/[schedId]/priority', () => {
     for (const priority of ['critical', 'high', 'medium', 'low']) {
       vi.resetModules();
       writePriorityYamlMock = vi.fn();
-      vi.doMock('@/lib/auth', () => ({ checkAuth: () => null }));
       vi.doMock('@/lib/scheduling', () => ({
         getImproveConfig: vi.fn().mockReturnValue({ projects: mockProjects }),
         writePriorityYaml: writePriorityYamlMock,

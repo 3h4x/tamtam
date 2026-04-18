@@ -23,7 +23,6 @@ describe('GET /api/projects/by-project/[projectName]/changes', () => {
     execMock = vi.fn().mockResolvedValue(makeExecResult());
     statSyncMock = vi.fn().mockReturnValue({ size: 1024 });
 
-    vi.doMock('@/lib/auth', () => ({ checkAuth: () => null }));
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
@@ -144,7 +143,6 @@ describe('GET /api/projects/by-project/[projectName]/changes/diff', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn().mockResolvedValue(makeExecResult());
 
-    vi.doMock('@/lib/auth', () => ({ checkAuth: () => null }));
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));

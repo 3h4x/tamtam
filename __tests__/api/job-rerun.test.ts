@@ -37,19 +37,6 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
     startJobMock = vi.fn().mockResolvedValue(9999);
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
 
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: (request: NextRequest) => {
-        const token = process.env.Z_API_TOKEN;
-        if (!token) return null;
-        const authHeader = request.headers.get('authorization') ?? '';
-        if (!authHeader.startsWith('Bearer ') || authHeader.slice(7) !== token) {
-          const { NextResponse } = require('next/server');
-          return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-        }
-        return null;
-      },
-    }));
-
     vi.doMock('@/lib/job-storage', () => ({
       getJob: getJobMock,
       createJob: createJobMock,
@@ -77,7 +64,6 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
   });
 
   it('returns 404 when source job does not exist', async () => {
@@ -145,24 +131,4 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
     expect(data.detail).toContain('pm2 failed');
   });
 
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-    getJobMock.mockReturnValue(makeJob());
-    const req = new NextRequest('http://localhost/api/jobs/job-source/rerun', {
-      method: 'POST',
-    });
-    const res = await POST(req, { params: Promise.resolve({ jobId: 'job-source' }) });
-    expect(res.status).toBe(401);
-  });
-
-  it('passes auth with correct Bearer token', async () => {
-    process.env.Z_API_TOKEN = 'my-token';
-    getJobMock.mockReturnValue(makeJob());
-    const req = new NextRequest('http://localhost/api/jobs/job-source/rerun', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer my-token' },
-    });
-    const res = await POST(req, { params: Promise.resolve({ jobId: 'job-source' }) });
-    expect(res.status).toBe(200);
-  });
 });

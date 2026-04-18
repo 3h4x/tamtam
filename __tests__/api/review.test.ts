@@ -39,19 +39,6 @@ describe('POST /api/projects/by-project/{projectName}/review', () => {
     startJobMock = vi.fn().mockResolvedValue(12345);
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: 'M file.ts\n', stderr: '' });
 
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: (request: NextRequest) => {
-        const token = process.env.Z_API_TOKEN;
-        if (!token) return null;
-        const authHeader = request.headers.get('authorization') ?? '';
-        if (!authHeader.startsWith('Bearer ') || authHeader.slice(7) !== token) {
-          const { NextResponse } = require('next/server');
-          return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-        }
-        return null;
-      },
-    }));
-
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
@@ -89,7 +76,6 @@ describe('POST /api/projects/by-project/{projectName}/review', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
   });
 
   it('returns 404 when project not found', async () => {
@@ -157,25 +143,6 @@ describe('POST /api/projects/by-project/{projectName}/review', () => {
     expect(res.status).toBe(500);
     const data = await res.json();
     expect(data.detail).toContain('pm2 start failed');
-  });
-
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/review', {
-      method: 'POST',
-    });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(401);
-  });
-
-  it('passes auth with correct Bearer token', async () => {
-    process.env.Z_API_TOKEN = 'my-token';
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/review', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer my-token' },
-    });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(200);
   });
 
   it('skips finished jobs when checking for running reviews', async () => {

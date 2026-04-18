@@ -92,15 +92,6 @@ describe('agent-scheduler', () => {
       expect(script).toContain('/api/agents/agent-url-test/run');
     });
 
-    it('uses auth header in script when Z_API_TOKEN is set', async () => {
-      process.env.Z_API_TOKEN = 'test-token-123';
-      await installAgentSchedule('agent-auth', '1h', 'prompt', 'pm2');
-      const scriptPath = join(tempDir, 'logs', 'agent-scripts', 'agent-auth.sh');
-      const script = readFileSync(scriptPath, 'utf-8');
-      expect(script).toContain('Authorization: Bearer test-token-123');
-      delete process.env.Z_API_TOKEN;
-    });
-
     it('uses cron expression for pm2', async () => {
       await installAgentSchedule('agent-cron', '30m', 'prompt', 'pm2');
       const startCall = execMock.mock.calls.find(

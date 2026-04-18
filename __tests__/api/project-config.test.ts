@@ -15,7 +15,6 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
 
     resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
 
-    vi.doMock('@/lib/auth', () => ({ checkAuth: () => null }));
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: vi.fn(),
@@ -117,7 +116,6 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     vi.resetModules();
     // Mock with a configured test command
     resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
-    vi.doMock('@/lib/auth', () => ({ checkAuth: () => null }));
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: vi.fn(),
@@ -170,18 +168,6 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     installTestScheduleMock = vi.fn();
     uninstallTestScheduleMock = vi.fn();
 
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: (request: NextRequest) => {
-        const token = process.env.Z_API_TOKEN;
-        if (!token) return null;
-        const authHeader = request.headers.get('authorization') ?? '';
-        if (!authHeader.startsWith('Bearer ') || authHeader.slice(7) !== token) {
-          const { NextResponse } = require('next/server');
-          return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-        }
-        return null;
-      },
-    }));
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: clearProjectDataCacheMock,
@@ -207,17 +193,6 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
-  });
-
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
-      method: 'PATCH',
-      body: JSON.stringify({ test_command: 'npm test' }),
-    });
-    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(401);
   });
 
   it('returns 404 when project not found', async () => {

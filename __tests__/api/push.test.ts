@@ -21,7 +21,6 @@ describe('POST /api/projects/by-project/[projectName]/push', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn();
 
-    vi.doMock('@/lib/auth', () => ({ checkAuth: () => null }));
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
@@ -130,7 +129,6 @@ describe('GET /api/projects/by-project/[projectName]/push/preview', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn().mockResolvedValue(makeExecResult());
 
-    vi.doMock('@/lib/auth', () => ({ checkAuth: () => null }));
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
@@ -207,7 +205,6 @@ describe('POST /api/projects/by-project/[projectName]/push/execute', () => {
     invalidateProjectMock = vi.fn();
     clearProjectDataCacheMock = vi.fn();
 
-    vi.doMock('@/lib/auth', () => ({ checkAuth: () => null }));
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: clearProjectDataCacheMock,

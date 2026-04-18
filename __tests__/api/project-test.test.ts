@@ -67,19 +67,6 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
     const mockProc = makeMockProcess();
     spawnMock = vi.fn().mockReturnValue(mockProc);
 
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: (request: NextRequest) => {
-        const token = process.env.Z_API_TOKEN;
-        if (!token) return null;
-        const authHeader = request.headers.get('authorization') ?? '';
-        if (!authHeader.startsWith('Bearer ') || authHeader.slice(7) !== token) {
-          const { NextResponse } = require('next/server');
-          return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-        }
-        return null;
-      },
-    }));
-
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
@@ -113,7 +100,6 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
     rmSync(tempDir, { recursive: true, force: true });
     rmSync(projDir, { recursive: true, force: true });
   });
@@ -172,25 +158,6 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
     expect(data.job_id).toBeTruthy();
     expect(data.log_path).toBeTruthy();
     expect(data.test_cmd).toBeTruthy();
-  });
-
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/test', {
-      method: 'POST',
-    });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(401);
-  });
-
-  it('passes auth with correct Bearer token', async () => {
-    process.env.Z_API_TOKEN = 'my-token';
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/test', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer my-token' },
-    });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(200);
   });
 
   it('detects pnpm test when pnpm-lock.yaml exists', async () => {
