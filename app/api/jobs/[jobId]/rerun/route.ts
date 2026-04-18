@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { checkAuth } from '@/lib/auth';
 import { getImproveConfig } from '@/lib/scheduling';
 import { resolveProjectPath } from '@/lib/project-data';
 import { getJob, createJob, updateJob } from '@/lib/job-storage';
@@ -13,8 +12,6 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { jobId } = await params;
 
   const sourceJob = getJob(jobId);

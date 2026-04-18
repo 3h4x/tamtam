@@ -3,7 +3,6 @@ import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
-import { checkAuth } from '@/lib/auth';
 import { getImproveConfig } from '@/lib/scheduling';
 import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills';
 import { resolveProjectPath } from '@/lib/project-data';
@@ -16,8 +15,6 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectName: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { projectName } = await params;
 
   const projPath = resolveProjectPath(projectName);

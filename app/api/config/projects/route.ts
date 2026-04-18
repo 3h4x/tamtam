@@ -4,8 +4,6 @@ import { readdirSync, statSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { db, schema } from '@/lib/db';
-import { checkAuth } from '@/lib/auth';
-
 function expandHome(p: string): string {
   if (p.startsWith('~/') || p === '~') return join(homedir(), p.slice(2));
   return p;
@@ -74,9 +72,6 @@ export async function GET() {
 }
 
 export async function PATCH(request: NextRequest) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
-
   const body = await request.json();
   const { projects } = body as {
     projects: { name: string; path: string; enabled: boolean; github?: string; priority?: string; custom_actions?: { name: string; command: string; color?: string }[] }[];

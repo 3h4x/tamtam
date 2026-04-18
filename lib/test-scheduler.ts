@@ -39,12 +39,10 @@ function scriptPath(projectName: string): string {
 }
 
 function buildScript(projectName: string): string {
-  const token = process.env.Z_API_TOKEN || '';
-  const authFlag = token ? `-H "Authorization: Bearer ${token}"` : '';
   const port = process.env.PORT || '1337';
   const url = `http://localhost:${port}/api/projects/by-project/${encodeURIComponent(projectName)}/test`;
   return `#!/bin/bash
-/usr/bin/curl -s -X POST ${authFlag} -H "Content-Type: application/json" "${url}"
+/usr/bin/curl -s -X POST -H "Content-Type: application/json" "${url}"
 `;
 }
 

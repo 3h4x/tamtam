@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { checkAuth } from '@/lib/auth';
-
 const SETTING_KEYS = [
   'github_owner',
   'claude_bin',
@@ -27,9 +25,6 @@ export async function GET() {
 }
 
 export async function PATCH(request: NextRequest) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
-
   const body = await request.json();
 
   for (const [key, value] of Object.entries(body)) {

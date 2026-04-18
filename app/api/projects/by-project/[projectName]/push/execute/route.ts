@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { checkAuth } from '@/lib/auth';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/project-data';
 import { invalidateProject } from '@/lib/gh-status';
 import { exec } from '@/lib/shell';
@@ -8,8 +7,6 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectName: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { projectName } = await params;
   const body = await request.json();
   const message = body.message;

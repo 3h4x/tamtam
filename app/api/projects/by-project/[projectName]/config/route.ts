@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { checkAuth } from '@/lib/auth';
 import { getImproveConfig, writeProjectFieldYaml, getProjectTestConfig } from '@/lib/scheduling';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/project-data';
 import { reloadConfig } from '@/lib/config';
@@ -63,8 +62,6 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ projectName: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { projectName } = await params;
   const body = await request.json();
   let touched = false;

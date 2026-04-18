@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { checkAuth } from '@/lib/auth';
 import { installAgentSchedule, uninstallAgentSchedule } from '@/lib/agent-scheduler';
 import { errMsg } from '@/lib/types';
 
@@ -19,8 +18,6 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ agentId: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { agentId } = await params;
 
   const existing = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
@@ -59,8 +56,6 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ agentId: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { agentId } = await params;
   // Uninstall schedule before deleting
   const agent = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();

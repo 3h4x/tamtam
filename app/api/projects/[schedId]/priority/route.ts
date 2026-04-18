@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { checkAuth } from '@/lib/auth';
 import { getImproveConfig, writePriorityYaml, PRIORITY_ORDER } from '@/lib/scheduling';
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ schedId: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { schedId } = await params;
   const body = await request.json();
   const priority = body.priority;

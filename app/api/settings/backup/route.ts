@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Database from 'better-sqlite3';
 import { join } from 'path';
-import { checkAuth } from '@/lib/auth';
 import { errMsg } from '@/lib/types';
 
 export async function POST(request: NextRequest) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
-
   const dbDir = join(process.cwd(), 'data', 'db');
   const dbPath = join(dbDir, 'tamtam.db');
 

@@ -1050,7 +1050,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
               {entry.imageUrls && entry.imageUrls.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2">
                   {entry.imageUrls.map((url, j) => (
-                    <img key={j} src={url} alt="attachment" className="max-h-40 max-w-[240px] rounded border border-[#333] object-contain bg-[#1a1a1a]" />
+                    <img key={j} src={url} alt="attachment" className="max-h-40 max-w-[240px] rounded border border-[#333] block" />
                   ))}
                 </div>
               )}
@@ -1147,7 +1147,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
                   return (
                     <div key={i} className="relative group">
                       <a href={url} target="_blank" rel="noopener noreferrer" title="open full-size">
-                        <img src={url} alt={f?.name ?? 'pending'} className="h-24 max-w-[200px] rounded border border-[#333] object-contain bg-[#0d0d0d] block" />
+                        <img src={url} alt={f?.name ?? 'pending'} className="max-h-24 max-w-[200px] rounded border border-[#333] block" />
                       </a>
                       <button
                         className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#2a2a2a] hover:bg-status-error text-[#ccc] hover:text-white text-[11px] leading-none flex items-center justify-center cursor-pointer border border-[#444] shadow"

@@ -64,14 +64,12 @@ function agentPromptPath(agentId: string): string {
 }
 
 function buildScript(agentId: string): string {
-  const token = process.env.Z_API_TOKEN || '';
-  const authFlag = token ? `-H "Authorization: Bearer ${token}"` : '';
   const port = process.env.PORT || '1337';
   const url = `http://localhost:${port}/api/agents/${agentId}/run`;
   const promptFile = agentPromptPath(agentId);
 
   return `#!/bin/bash
-/usr/bin/curl -s -X POST ${authFlag} -H "Content-Type: application/json" -d @"${promptFile}" "${url}"
+/usr/bin/curl -s -X POST -H "Content-Type: application/json" -d @"${promptFile}" "${url}"
 `;
 }
 

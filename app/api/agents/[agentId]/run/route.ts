@@ -3,7 +3,6 @@ import { eq, inArray } from 'drizzle-orm';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { db, schema } from '@/lib/db';
-import { checkAuth } from '@/lib/auth';
 import { resolveProjectPath } from '@/lib/project-data';
 import { getImproveConfig } from '@/lib/scheduling';
 import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills';
@@ -16,8 +15,6 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ agentId: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { agentId } = await params;
 
   const agent = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();

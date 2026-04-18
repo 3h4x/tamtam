@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { checkAuth } from '@/lib/auth';
-
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ skillId: string }> }
@@ -17,8 +15,6 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ skillId: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { skillId } = await params;
 
   const existing = db.select().from(schema.skills).where(eq(schema.skills.id, skillId)).get();
@@ -39,8 +35,6 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ skillId: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { skillId } = await params;
   db.delete(schema.skills).where(eq(schema.skills.id, skillId)).run();
   return NextResponse.json({ status: 'deleted' });

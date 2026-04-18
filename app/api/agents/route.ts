@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { checkAuth } from '@/lib/auth';
 import { installAgentSchedule } from '@/lib/agent-scheduler';
 import { errMsg } from '@/lib/types';
 
@@ -17,9 +16,6 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
-
   const body = await request.json();
   const { name, project, skillIds, model, prompt, schedule, runner } = body;
 

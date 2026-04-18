@@ -3,7 +3,6 @@ import { existsSync, readFileSync, writeFileSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
-import { checkAuth } from '@/lib/auth';
 import { getImproveConfig } from '@/lib/scheduling';
 import { resolveProjectPath } from '@/lib/project-data';
 import { createJob, listJobs, probeJobStatus, updateJob } from '@/lib/job-storage';
@@ -35,8 +34,6 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectName: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { projectName } = await params;
 
   const jobs = listJobs();

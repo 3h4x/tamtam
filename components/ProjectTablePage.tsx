@@ -165,7 +165,20 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
           </tr>
         </thead>
         <tbody>
-          {fleet.projects.map((project) => {
+          {[...fleet.projects]
+            .sort((a, b) => {
+              const recentTs = (name: string) => {
+                let max = 0
+                for (const j of allJobs) {
+                  if (j.project !== name) continue
+                  const t = Math.max(j.started_at || 0, j.finished_at || 0)
+                  if (t > max) max = t
+                }
+                return max
+              }
+              return recentTs(b.project) - recentTs(a.project)
+            })
+            .map((project) => {
             const ci = getAggregateCi(project)
             const ciUrl = getCiFailedUrl(project)
             const release = getReleaseTag(project)

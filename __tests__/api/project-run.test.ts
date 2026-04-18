@@ -39,19 +39,6 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     createJobMock = vi.fn().mockImplementation(() => makeJob());
     updateJobMock = vi.fn();
 
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: (request: NextRequest) => {
-        const token = process.env.Z_API_TOKEN;
-        if (!token) return null;
-        const authHeader = request.headers.get('authorization') ?? '';
-        if (!authHeader.startsWith('Bearer ') || authHeader.slice(7) !== token) {
-          const { NextResponse } = require('next/server');
-          return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-        }
-        return null;
-      },
-    }));
-
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
@@ -82,7 +69,6 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
     rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -193,27 +179,6 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     expect(data.detail).toContain('pm2 crashed');
   });
 
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret-token';
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
-      method: 'POST',
-      body: JSON.stringify({ prompt: 'hello' }),
-    });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(401);
-  });
-
-  it('passes auth with correct Bearer token', async () => {
-    process.env.Z_API_TOKEN = 'my-token';
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
-      method: 'POST',
-      body: JSON.stringify({ prompt: 'hello' }),
-      headers: { Authorization: 'Bearer my-token' },
-    });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(200);
-  });
-
   it('prepends persona content on follow-up turns (resumeSessionId set)', async () => {
     const docsSkillsDir = join(skillsDir, 'docs', 'skills');
     mkdirSync(docsSkillsDir, { recursive: true });
@@ -264,7 +229,6 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
       getPermissionModeFlag: () => '--permission-mode bypassPermissions',
     }));
     // Re-apply other mocks that resetModules cleared
-    vi.doMock('@/lib/auth', () => ({ checkAuth: () => null }));
     vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: join(tempDir, 'logs') }),

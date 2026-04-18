@@ -94,19 +94,6 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
 
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: (request: NextRequest) => {
-        const token = process.env.Z_API_TOKEN;
-        if (!token) return null;
-        const authHeader = request.headers.get('authorization') ?? '';
-        if (!authHeader.startsWith('Bearer ') || authHeader.slice(7) !== token) {
-          const { NextResponse } = require('next/server');
-          return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-        }
-        return null;
-      },
-    }));
-
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
@@ -144,7 +131,6 @@ describe('POST /api/agents/{agentId}/run', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
     rmSync(tempSkillsDir, { recursive: true, force: true });
   });
 
@@ -282,29 +268,6 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(res.status).toBe(500);
     const data = await res.json();
     expect(data.detail).toContain('pm2 not available');
-  });
-
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-    insertAgent();
-    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
-      method: 'POST',
-      body: JSON.stringify({ prompt: 'hello' }),
-    });
-    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
-    expect(res.status).toBe(401);
-  });
-
-  it('passes auth with correct Bearer token', async () => {
-    process.env.Z_API_TOKEN = 'my-token';
-    insertAgent();
-    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
-      method: 'POST',
-      body: JSON.stringify({ prompt: 'hello' }),
-      headers: { Authorization: 'Bearer my-token' },
-    });
-    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
-    expect(res.status).toBe(200);
   });
 
   it('prepends file-based persona content when skillIds contains persona:<path>', async () => {
