@@ -221,7 +221,7 @@ export function updateJob(job: JobData): void {
 
 export function getVerdict(job: JobData): string | null {
   if (job.kind !== 'review' || job.finishedAt === null) return null;
-  const log = readLog(job, 2000);
+  const log = readLog(job, 10_000);
   if (!log) return null;
   const match = log.match(/[Vv]erdict.*?(LGTM|NEEDS ATTENTION|DO NOT SHIP)/);
   return match ? match[1] : null;

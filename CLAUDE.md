@@ -108,6 +108,5 @@ Next.js monolith (App Router) for managing Claude CLI agents across multiple pro
 - Agent runs compose skill content into the prompt before sending to Claude CLI
 - File-based skills scanned from `skills/docs/skills/` and `data/skills/` (category subdirs, `.md` files with optional frontmatter)
 - DB-backed skills created via `/skills` page or API
-- Optional auth via `Z_API_TOKEN` env var (Bearer token)
 - GitHub owner fallback configurable via `GITHUB_OWNER` env var or Settings UI
 - Dependabot with grouped PRs (production deps, dev deps, actions)

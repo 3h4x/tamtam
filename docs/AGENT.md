@@ -41,7 +41,6 @@ Agents are reusable automation units that combine skills, a model, a prompt temp
 ```bash
 curl -X POST http://localhost:1337/api/agents \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $Z_API_TOKEN" \
   -d '{
     "name": "Weekly Code Review",
     "project": "myapp",
@@ -87,7 +86,6 @@ If you provide both `schedule` and `prompt`, the agent's schedule is automatical
 ```bash
 curl -X POST http://localhost:1337/api/agents/agent-1705276800000/run \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $Z_API_TOKEN" \
   -d '{
     "prompt": "Check if all tests pass and report any failures"
   }'
@@ -185,7 +183,6 @@ curl http://localhost:1337/api/agents/agent-1705276800000
 ```bash
 curl -X PATCH http://localhost:1337/api/agents/agent-1705276800000 \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $Z_API_TOKEN" \
   -d '{
     "skillIds": ["skill-789"],
     "model": "opus",
@@ -200,8 +197,7 @@ Only provided fields are updated. If you change `schedule`, `prompt`, or `enable
 **DELETE /api/agents/{agentId}**
 
 ```bash
-curl -X DELETE http://localhost:1337/api/agents/agent-1705276800000 \
-  -H "Authorization: Bearer $Z_API_TOKEN"
+curl -X DELETE http://localhost:1337/api/agents/agent-1705276800000
 ```
 
 This also uninstalls any active schedule (PM2 cron or LaunchAgent).
@@ -271,16 +267,6 @@ if (running.length > 0) {
 ```
 
 This prevents concurrent runs if a schedule fires faster than the agent completes.
-
-## Authentication
-
-If `Z_API_TOKEN` is set in environment, the API requires:
-
-```bash
--H "Authorization: Bearer $Z_API_TOKEN"
-```
-
-Scheduled runs (PM2/LaunchAgent) automatically include this header when available.
 
 ## Example: Set Up a Weekly Review Agent
 

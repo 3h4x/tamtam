@@ -112,6 +112,25 @@ try {
   sqlite.exec('ALTER TABLE projects ADD COLUMN test_cron_schedule TEXT');
 } catch {}
 
+// Migrate: add token/duration/session columns to jobs if missing
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN duration_ms INTEGER');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN input_tokens INTEGER');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN output_tokens INTEGER');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN cache_read_tokens INTEGER');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN cache_create_tokens INTEGER');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN session_id TEXT');
+} catch {}
 
 export const db = drizzle(sqlite, { schema });
 export { schema };
