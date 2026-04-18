@@ -1,17 +1,17 @@
 import { HealthStatus, ProjectHealth } from '@/hooks/useProjectHealth'
 
 export const statusDot: Record<HealthStatus, { color: string; label: string }> = {
-  healthy: { color: 'var(--status-success)', label: 'healthy' },
-  warning: { color: 'var(--status-warning)', label: 'warning' },
-  error: { color: 'var(--status-error)', label: 'error' },
-  unknown: { color: 'var(--text-tertiary)', label: 'unknown' },
+  healthy: { color: 'var(--color-status-success)', label: 'healthy' },
+  warning: { color: 'var(--color-status-warning)', label: 'warning' },
+  error: { color: 'var(--color-status-error)', label: 'error' },
+  unknown: { color: 'var(--color-text-tertiary)', label: 'unknown' },
 }
 
 export const priorityColor: Record<string, string> = {
-  critical: 'var(--status-error)',
-  high: 'var(--status-warning)',
-  medium: 'var(--accent-color)',
-  low: 'var(--text-tertiary)',
+  critical: 'var(--color-status-error)',
+  high: 'var(--color-status-warning)',
+  medium: 'var(--color-accent)',
+  low: 'var(--color-text-tertiary)',
 }
 
 export function getHighestPriority(project: ProjectHealth): string | null {

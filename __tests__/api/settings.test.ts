@@ -178,6 +178,10 @@ describe('settings API', () => {
         'launchagent_prefix',
         'workspace_path',
         'base_prompt',
+        'default_model',
+        'permission_mode',
+        'commit_style',
+        'review_verdict_rules',
       ];
 
       const body = Object.fromEntries(validKeys.map((k) => [k, 'test-value']));
@@ -189,6 +193,60 @@ describe('settings API', () => {
 
       const rows = testDb.db.select().from(schema.settings).all();
       expect(rows).toHaveLength(validKeys.length);
+    });
+
+    it('saves commit_style setting', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ commit_style: 'squash everything into one commit' }),
+      });
+      await PATCH(request);
+
+      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'commit_style');
+      expect(row?.value).toBe('squash everything into one commit');
+    });
+
+    it('saves review_verdict_rules setting', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ review_verdict_rules: 'Always LGTM unless broken' }),
+      });
+      await PATCH(request);
+
+      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'review_verdict_rules');
+      expect(row?.value).toBe('Always LGTM unless broken');
+    });
+  });
+
+  describe('reloadConfig on PATCH', () => {
+    let reloadConfigMock: ReturnType<typeof vi.fn>;
+    let PATCHWithSpy: any;
+
+    beforeEach(async () => {
+      vi.resetModules();
+      testDb.sqlite.close();
+      testDb = createTestDb();
+
+      reloadConfigMock = vi.fn();
+      vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+      vi.doMock('@/lib/config', () => ({ reloadConfig: reloadConfigMock }));
+
+      const mod = await import('@/app/api/settings/route');
+      PATCHWithSpy = mod.PATCH;
+    });
+
+    afterEach(() => {
+      testDb.sqlite.close();
+    });
+
+    it('calls reloadConfig after saving settings', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ workspace_path: '/new/path' }),
+      });
+      await PATCHWithSpy(request);
+
+      expect(reloadConfigMock).toHaveBeenCalledOnce();
     });
   });
 });

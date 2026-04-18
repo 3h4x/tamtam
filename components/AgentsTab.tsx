@@ -103,9 +103,16 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
   }
 
   if (loading) return (
-    <div className="mt-4 flex items-center gap-2 text-text-secondary text-sm">
-      <div className="spinner-sm" />
-      Loading agents…
+    <div className="mt-4 flex flex-col gap-2">
+      {Array.from({ length: 3 }).map((_, i) => (
+        <div key={i} className="p-4 rounded-lg border border-border bg-bg-secondary flex items-center justify-between" style={{ opacity: 1 - i * 0.25 }}>
+          <div className="flex flex-col gap-2">
+            <div className="skeleton h-4 w-32" />
+            <div className="skeleton h-3 w-48" />
+          </div>
+          <div className="skeleton h-7 w-16 rounded-md" />
+        </div>
+      ))}
     </div>
   )
 
@@ -126,8 +133,12 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
 
       {/* Agent list */}
       {agents.length === 0 && !creating && (
-        <div className="text-text-secondary text-sm p-4 bg-bg-secondary rounded-lg border border-border">
-          No agents defined for this project. Create one to get started.
+        <div className="flex flex-col items-center gap-2 py-10 text-center bg-bg-secondary rounded-lg border border-border">
+          <svg className="w-8 h-8 text-text-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714a2.25 2.25 0 001.357 2.059l.177.073a2.25 2.25 0 012.148 0l.177-.073a2.25 2.25 0 001.357-2.059V3.104m-7.5 0A24.26 24.26 0 0112 3c.83 0 1.643.038 2.438.104" />
+          </svg>
+          <p className="text-sm text-text-secondary font-medium">No agents yet</p>
+          <p className="text-xs text-text-tertiary max-w-xs">Create an agent to automate tasks for this project — compose skills, pick a model, and set a schedule.</p>
         </div>
       )}
 

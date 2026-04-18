@@ -220,8 +220,11 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
       .then(r => r.json())
       .then(async (data) => {
         const jobs: JobDict[] = data.jobs ?? []
+        // Sessions can be created by 'run', 'review', 'fix', 'fix-ci', or agent kinds
+        const isSessionKind = (k: string) =>
+          ['run', 'review', 'fix', 'fix-ci'].includes(k) || k.startsWith('agent:')
         const matches = jobs
-          .filter(j => j.session_id === initialSessionId && j.kind === 'run')
+          .filter(j => j.session_id === initialSessionId && isSessionKind(j.kind))
           .sort((a, b) => a.started_at - b.started_at)
         if (matches.length === 0) return
 

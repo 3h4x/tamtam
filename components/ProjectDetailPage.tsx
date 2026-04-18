@@ -2,13 +2,13 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { reviewProject, testProject, fixCi, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions } from '@/lib/client-api'
+import { reviewProject, testProject, fixCi, fixFromJob, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
-import { statusDot, priorityColor, getHighestPriority, getAggregateCi, formatDuration } from '@/lib/statusConstants'
+import { priorityColor, getHighestPriority, getAggregateCi, formatDuration } from '@/lib/statusConstants'
 import { formatAgo } from '@/lib/format'
-import { SmartPushModal } from '@/components/SmartPushModal'
-import { RunModal } from '@/components/RunModal'
+import { computePushBlockReason } from '@/lib/push-utils'
+import { InlinePushPanel } from '@/components/InlinePushPanel'
 import { TerminalTab } from '@/components/TerminalTab'
 import { AgentsTab } from '@/components/AgentsTab'
 import { ProjectRunsTab } from '@/components/ProjectRunsTab'
@@ -131,6 +131,16 @@ function StatusStrip({
         tone="warning"
         running
         onClick={latestReview ? () => onOpenJob(latestReview.id) : undefined}
+      />
+    )
+  } else if (hasUnreviewed) {
+    reviewCard = (
+      <StatusCard
+        label="Review"
+        primary="unreviewed"
+        detail={verdict ? `last: ${verdict} — open diff` : 'not yet reviewed'}
+        tone="warning"
+        onClick={onOpenChanges}
       />
     )
   } else if (verdict && latestReview) {
@@ -263,10 +273,10 @@ export function ProjectDetailPage({
     router.push(tab === 'overview' ? `/project/${name}` : `/project/${name}/${tab}`)
   }
   const [fixingCi, setFixingCi] = useState(false)
+  const [fixingReview, setFixingReview] = useState(false)
   const [fixCiResult, setFixCiResult] = useState<string | null>(null)
   const [projectJobs, setProjectJobs] = useState<JobInfo[]>([])
-  const [showPushModal, setShowPushModal] = useState(false)
-  const [showRunModal, setShowRunModal] = useState(false)
+  const [showPushPanel, setShowPushPanel] = useState(false)
 
   // Custom actions
   const [customActions, setCustomActions] = useState<CustomAction[]>([])
@@ -286,6 +296,10 @@ export function ProjectDetailPage({
   const [actionsSaving, setActionsSaving] = useState(false)
   const [actionsSaved, setActionsSaved] = useState(false)
   const [actionsLoaded, setActionsLoaded] = useState(false)
+
+  useEffect(() => {
+    if (activeTab !== 'terminal') setShowPushPanel(false)
+  }, [activeTab])
 
   useEffect(() => {
     if (!name) return
@@ -367,7 +381,6 @@ export function ProjectDetailPage({
     )
   }
 
-  const dot = statusDot[project.status]
   const highestPriority = getHighestPriority(project)
   const aggregateCi = getAggregateCi(project)
 
@@ -384,6 +397,8 @@ export function ProjectDetailPage({
     .filter(j => j.kind === 'review' && j.status === 'done' && j.verdict)
     .sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))[0]
   const verdict = latestReview?.verdict
+
+  const pushBlockReason = computePushBlockReason(project.totalChanges, hasUnreviewed, verdict)
 
   // Get latest test result
   const latestTest = projectJobs
@@ -435,6 +450,18 @@ export function ProjectDetailPage({
     }
   }
 
+  const handleFixReview = async (reviewJobId: string) => {
+    if (!name || fixingReview) return
+    setFixingReview(true)
+    try {
+      const result = await fixFromJob(reviewJobId)
+      router.push(`/project/${name}/terminal?job=${encodeURIComponent(result.job_id)}`)
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to start fix', 'error')
+      setFixingReview(false)
+    }
+  }
+
   const handleSaveActions = async () => {
     if (!name || actionsSaving) return
     // Filter out empty rows
@@ -473,32 +500,10 @@ export function ProjectDetailPage({
       setTestCronScheduleInput(data.test_cron_schedule)
       setTimeout(() => setConfigSaved(false), 3000)
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Failed to save config', 'error')
+      toast(err instanceof Error ? err.message : 'Failed to save config', 'error')
     } finally {
       setConfigSaving(false)
     }
-  }
-
-  const showToast = (message: string, type: 'success' | 'error') => {
-    const toast = document.createElement('div')
-    toast.textContent = message
-    toast.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      padding: 12px 20px;
-      border-radius: 6px;
-      font-size: 14px;
-      background: ${type === 'success' ? '#22c55e' : '#ef4444'};
-      color: white;
-      z-index: 1000;
-      animation: slideInUp 0.3s ease-out;
-    `
-    document.body.appendChild(toast)
-    setTimeout(() => {
-      toast.style.animation = 'slideOutDown 0.3s ease-out'
-      setTimeout(() => toast.remove(), 300)
-    }, 3000)
   }
 
   const configDirty =
@@ -514,18 +519,17 @@ export function ProjectDetailPage({
           <h2 className="text-xl font-semibold text-text-primary">{project.project}</h2>
           {releaseTag && <span className="text-text-secondary text-sm">{releaseTag}</span>}
         </div>
-        <div className="flex items-center gap-3">
-          <span className="inline-block w-2 h-2 rounded-full" title={dot.label} style={{ background: dot.color }} />
-          {highestPriority && (
+        {highestPriority && (
+          <div className="flex items-center gap-3">
             <span style={{ color: priorityColor[highestPriority] }} className="text-sm">
               {highestPriority}
             </span>
-          )}
-        </div>
+          </div>
+        )}
         <div className="flex items-center gap-2 flex-wrap">
           {aggregateCi === 'failure' && ciFailedUrl && (
             <button
-              className="px-3 py-1.5 text-sm border border-status-error text-status-error rounded-md hover:bg-status-error/10 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-3 py-1.5 text-sm border border-status-error text-status-error rounded-md hover:bg-status-error/10 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={handleFixCi}
               disabled={fixingCi || isCiFixRunning}
               title={isCiFixRunning ? 'CI fix already in progress' : 'Start CI fix'}
@@ -538,14 +542,32 @@ export function ProjectDetailPage({
               {fixCiResult}
             </span>
           )}
-          <button
-            className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={handleReview}
-            disabled={isReviewRunning || project.totalChanges === 0}
-            title={isReviewRunning ? 'Review already in progress' : project.totalChanges === 0 ? 'No changes to review' : 'Start review'}
-          >
-            {isReviewRunning ? 'Reviewing...' : 'Review'}
-          </button>
+          {(() => {
+            const showFix = !!latestReview && !isReviewRunning &&
+              (verdict === 'NEEDS ATTENTION' || verdict === 'DO NOT SHIP')
+            if (showFix) {
+              return (
+                <button
+                  className="px-3 py-1.5 text-sm border border-status-warning text-status-warning rounded-md hover:bg-status-warning/10 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => handleFixReview(latestReview!.id)}
+                  disabled={fixingReview}
+                  title={`Run Claude to fix review findings (${verdict}) in the same session — will auto-re-review on success`}
+                >
+                  {fixingReview ? 'Starting fix...' : 'Fix Review'}
+                </button>
+              )
+            }
+            return (
+              <button
+                className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleReview}
+                disabled={isReviewRunning || project.totalChanges === 0}
+                title={isReviewRunning ? 'Review already in progress' : project.totalChanges === 0 ? 'No changes to review' : 'Start review'}
+              >
+                {isReviewRunning ? 'Reviewing...' : 'Review'}
+              </button>
+            )
+          })()}
           <button
             className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleTest}
@@ -566,34 +588,25 @@ export function ProjectDetailPage({
           )}
           <button
             className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={() => setShowPushModal(true)}
-            disabled={project.totalChanges === 0}
-            title={project.totalChanges === 0 ? 'No changes to push' : 'Push changes to git'}
+            onClick={() => {
+              setShowPushPanel(p => {
+                const next = !p
+                // When opening the push flow, jump to Terminal so the inline
+                // panel renders beside the terminal context instead of on top.
+                if (next) setActiveTab('terminal')
+                return next
+              })
+            }}
+            disabled={!showPushPanel && pushBlockReason !== null}
+            title={!showPushPanel && pushBlockReason ? pushBlockReason : 'Push changes to git'}
           >
-            Push
-          </button>
-          <button
-            className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer"
-            onClick={() => setShowRunModal(true)}
-            title="Run a custom Claude prompt"
-          >
-            Run
+            {showPushPanel ? 'Cancel Push' : 'Push'}
           </button>
           {customActions.map((action) => (
             <button
               key={action.name}
-              className="px-3 py-1.5 text-sm border rounded-md cursor-pointer font-medium"
-              style={{
-                borderColor: action.color || 'var(--color-accent)',
-                color: action.color || 'var(--color-accent)',
-              }}
-              onMouseEnter={(e) => {
-                const c = action.color || 'var(--color-accent)'
-                ;(e.currentTarget as HTMLElement).style.backgroundColor = `${action.color ? action.color + '1a' : 'var(--color-accent-light)'}`
-              }}
-              onMouseLeave={(e) => {
-                ;(e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'
-              }}
+              className="btn-custom"
+              style={{ '--btn-color': action.color || 'var(--color-accent)' } as React.CSSProperties}
               onClick={() => handleCustomAction(action.name)}
               disabled={runningActions.has(action.name)}
               title={`Run: ${action.command}`}
@@ -746,7 +759,7 @@ export function ProjectDetailPage({
                       placeholder={config.detected_test_command || 'e.g. npm test, pytest, forge test'}
                     />
                     <button
-                      className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover"
+                      className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={handleSaveConfig}
                       disabled={configSaving || !configDirty}
                     >
@@ -859,7 +872,7 @@ export function ProjectDetailPage({
                     + Add Action
                   </button>
                   <button
-                    className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover"
+                    className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={handleSaveActions}
                     disabled={actionsSaving}
                   >
@@ -885,30 +898,27 @@ export function ProjectDetailPage({
 
       {/* Terminal Tab */}
       {activeTab === 'terminal' && name && (
-        <Suspense fallback={null}>
-          <TerminalTab projectName={name} initialSessionId={params.sessionId} />
-        </Suspense>
+        <>
+          {showPushPanel && (
+            <div className="mb-3">
+              <InlinePushPanel
+                projectName={name}
+                onClose={() => setShowPushPanel(false)}
+                onSuccess={() => {
+                  setShowPushPanel(false)
+                  toast('Changes pushed successfully', 'success')
+                  if (onPush) onPush()
+                  onRefresh()
+                }}
+              />
+            </div>
+          )}
+          <Suspense fallback={null}>
+            <TerminalTab projectName={name} initialSessionId={params.sessionId} />
+          </Suspense>
+        </>
       )}
 
-      {showPushModal && name && (
-        <SmartPushModal
-          projectName={name}
-          onClose={() => setShowPushModal(false)}
-          onSuccess={() => {
-            setShowPushModal(false)
-            showToast('Changes pushed successfully', 'success')
-            if (onPush) onPush()
-            onRefresh()
-          }}
-        />
-      )}
-
-      {showRunModal && name && (
-        <RunModal
-          projectName={name}
-          onClose={() => setShowRunModal(false)}
-        />
-      )}
     </div>
   )
 }

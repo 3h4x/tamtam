@@ -17,6 +17,8 @@ export interface TamTamConfig {
   base_prompt: string;
   default_model: string;
   permission_mode: string;
+  commit_style: string;
+  review_verdict_rules: string;
 }
 
 const DEFAULTS: TamTamConfig = {
@@ -31,6 +33,12 @@ const DEFAULTS: TamTamConfig = {
   base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
   default_model: 'haiku',
   permission_mode: 'bypassPermissions',
+  commit_style: 'Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Types: feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert.',
+  review_verdict_rules: `STRICT verdict rules — the user cares about code quality, not speed:
+- LGTM ONLY when there are zero findings at any severity. Not "LGTM with minor notes", not "LGTM aside from a nit". If you list any "minor" / "non-blocking" / "cosmetic" / "consider..." / "nice-to-have" issue, that is NEEDS ATTENTION, not LGTM.
+- NEEDS ATTENTION when you have at least one finding but nothing that risks data loss, security regressions, or breakage in production. Orphaned code, dead imports, missing imports that happen to compile, hardcoded strings that should use env vars, non-ideal UX state leaks, stylistic inconsistencies — all NEEDS ATTENTION.
+- DO NOT SHIP when there is a real risk of breakage, data loss, security regression, or a test that hides behavior.
+- If LGTM, just confirm the changes look good and add nothing else.`,
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
@@ -56,6 +64,8 @@ export function getSettings(): TamTamConfig {
     base_prompt: map.base_prompt ?? DEFAULTS.base_prompt,
     default_model: map.default_model ?? DEFAULTS.default_model,
     permission_mode: map.permission_mode ?? DEFAULTS.permission_mode,
+    commit_style: map.commit_style ?? DEFAULTS.commit_style,
+    review_verdict_rules: map.review_verdict_rules ?? DEFAULTS.review_verdict_rules,
   };
 
   _cache = { config, time: now };

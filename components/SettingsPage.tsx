@@ -15,6 +15,8 @@ interface SettingsMap {
   base_prompt: string
   default_model: string
   permission_mode: string
+  commit_style: string
+  review_verdict_rules: string
 }
 
 const DEFAULTS: SettingsMap = {
@@ -29,6 +31,12 @@ const DEFAULTS: SettingsMap = {
   base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
   default_model: 'haiku',
   permission_mode: 'bypassPermissions',
+  commit_style: 'Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Types: feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert.',
+  review_verdict_rules: `STRICT verdict rules — the user cares about code quality, not speed:
+- LGTM ONLY when there are zero findings at any severity. Not "LGTM with minor notes", not "LGTM aside from a nit". If you list any "minor" / "non-blocking" / "cosmetic" / "consider..." / "nice-to-have" issue, that is NEEDS ATTENTION, not LGTM.
+- NEEDS ATTENTION when you have at least one finding but nothing that risks data loss, security regressions, or breakage in production. Orphaned code, dead imports, missing imports that happen to compile, hardcoded strings that should use env vars, non-ideal UX state leaks, stylistic inconsistencies — all NEEDS ATTENTION.
+- DO NOT SHIP when there is a real risk of breakage, data loss, security regression, or a test that hides behavior.
+- If LGTM, just confirm the changes look good and add nothing else.`,
 }
 
 interface FieldDef {
@@ -107,10 +115,24 @@ const FIELDS: Record<keyof SettingsMap, FieldDef> = {
     group: 'behavior',
     span: 1,
   },
+  commit_style: {
+    label: 'Commit Message Style',
+    help: 'Style guide injected into the prompt when generating commit titles in the Push panel',
+    group: 'behavior',
+    span: 2,
+  },
+  review_verdict_rules: {
+    label: 'Review Verdict Rules',
+    help: 'Rules that drive LGTM / NEEDS ATTENTION / DO NOT SHIP decisions in code reviews',
+    group: 'behavior',
+    span: 2,
+  },
 }
 
+type TabId = 'behavior' | 'workspace' | 'scheduling' | 'system' | 'projects' | 'database'
+
 const GROUPS: {
-  id: 'behavior' | 'workspace' | 'scheduling' | 'system'
+  id: TabId
   title: string
   description: string
   cols: number
@@ -119,6 +141,15 @@ const GROUPS: {
   { id: 'workspace',  title: 'Workspace',       description: 'Where your projects live and how they connect to GitHub',        cols: 2 },
   { id: 'scheduling', title: 'Scheduling',      description: 'When and how often agents are allowed to run',                  cols: 3 },
   { id: 'system',     title: 'System',          description: 'Paths and platform-specific configuration',                     cols: 2 },
+]
+
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'behavior',   label: 'Behavior' },
+  { id: 'workspace',  label: 'Workspace' },
+  { id: 'scheduling', label: 'Scheduling' },
+  { id: 'system',     label: 'System' },
+  { id: 'projects',   label: 'Projects' },
+  { id: 'database',   label: 'Database' },
 ]
 
 const COL_SPAN: Record<number, string> = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-3' }
@@ -150,13 +181,13 @@ function SettingsField({
   return (
     <div className={colSpanClass}>
       <label className="block font-medium text-sm text-text-primary mb-1.5">{field.label}</label>
-      {fieldKey === 'base_prompt' ? (
+      {fieldKey === 'base_prompt' || fieldKey === 'commit_style' || fieldKey === 'review_verdict_rules' ? (
         <textarea
           value={value}
           onChange={(e) => onChange(fieldKey, e.target.value)}
           placeholder={DEFAULTS[fieldKey]}
-          rows={3}
-          className="w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary resize-y"
+          rows={fieldKey === 'review_verdict_rules' ? 8 : 3}
+          className="w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary resize-y"
         />
       ) : fieldKey === 'daytime' ? (
         <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
@@ -205,6 +236,15 @@ export function SettingsPage() {
   const [saved, setSaved]                 = useState(false)
   const [error, setError]                 = useState<string | null>(null)
   const [showAdvanced, setShowAdvanced]   = useState(false)
+  const [activeTab, setActiveTab]         = useState<TabId>(() => {
+    if (typeof window === 'undefined') return 'behavior'
+    const stored = localStorage.getItem('tamtam-settings-tab') as TabId | null
+    return stored && TABS.some(t => t.id === stored) ? stored : 'behavior'
+  })
+  const switchTab = (id: TabId) => {
+    setActiveTab(id)
+    try { localStorage.setItem('tamtam-settings-tab', id) } catch {}
+  }
 
   const [projects, setProjects]               = useState<ProjectEntry[]>([])
   const [projectsLoading, setProjectsLoading] = useState(false)
@@ -378,7 +418,24 @@ export function SettingsPage() {
             </div>
           )}
 
-          {GROUPS.map((group) => {
+          {/* Tabs */}
+          <nav className="flex gap-1 border-b border-border">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => switchTab(tab.id)}
+                className={`px-3 py-1.5 text-sm cursor-pointer transition-colors ${
+                  activeTab === tab.id
+                    ? 'border-b-2 border-accent text-accent -mb-px'
+                    : 'text-text-secondary hover:text-text-primary border-b-2 border-transparent -mb-px'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+
+          {GROUPS.filter((group) => group.id === activeTab).map((group) => {
             const allGroupFields = (Object.keys(FIELDS) as (keyof SettingsMap)[]).filter(
               (k) => FIELDS[k].group === group.id
             )
@@ -427,7 +484,7 @@ export function SettingsPage() {
           })}
 
           {/* Projects */}
-          {settings.workspace_path && (
+          {activeTab === 'projects' && settings.workspace_path && (
             <section className="bg-bg-secondary rounded-lg border border-border">
               <div className="px-5 py-3 border-b border-border flex items-center justify-between">
                 <div className="flex items-baseline gap-3">
@@ -507,7 +564,14 @@ export function SettingsPage() {
             </section>
           )}
 
+          {activeTab === 'projects' && !settings.workspace_path && (
+            <p className="text-sm text-text-secondary bg-bg-secondary rounded-lg border border-border px-5 py-6 text-center">
+              Set a workspace path in the Workspace tab first to list projects here.
+            </p>
+          )}
+
           {/* Database Backup */}
+          {activeTab === 'database' && (
           <section className="bg-bg-secondary rounded-lg border border-border">
             <div className="px-5 py-3 border-b border-border flex items-baseline gap-3">
               <h3 className="text-sm font-semibold text-text-primary">Database Backup</h3>
@@ -531,6 +595,7 @@ export function SettingsPage() {
               )}
             </div>
           </section>
+          )}
         </div>
       )}
     </div>

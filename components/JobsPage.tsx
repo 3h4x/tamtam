@@ -124,9 +124,16 @@ export function JobsPage() {
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-2 justify-center py-8">
-          <div className="spinner" />
-          <span className="text-text-secondary">Loading runs…</span>
+        <div className="space-y-px">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="flex gap-4 px-4 py-3 border-t border-border" style={{ opacity: 1 - i * 0.1 }}>
+              <div className="skeleton h-5 w-16 rounded-full" />
+              <div className="skeleton h-4 w-28" />
+              <div className="skeleton h-5 w-14 rounded" />
+              <div className="skeleton h-4 w-48" />
+              <div className="skeleton h-4 w-20 ml-auto" />
+            </div>
+          ))}
         </div>
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 gap-2">

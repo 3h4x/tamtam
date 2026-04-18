@@ -41,9 +41,16 @@ export function SkillsPage() {
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-2 py-8 text-text-secondary text-sm">
-          <div className="spinner" />
-          Loading skills…
+        <div className="flex gap-6">
+          <div className="w-72 shrink-0 flex flex-col gap-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="p-3 rounded-lg border border-border bg-bg-secondary flex flex-col gap-2" style={{ opacity: 1 - i * 0.2 }}>
+                <div className="skeleton h-4 w-28" />
+                <div className="skeleton h-3 w-40" />
+              </div>
+            ))}
+          </div>
+          <div className="flex-1 skeleton rounded-lg h-64" />
         </div>
       ) : (
         <div className="flex gap-6">

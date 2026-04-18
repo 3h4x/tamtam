@@ -992,3 +992,111 @@ describe('probeJobStatus – test/action kind liveness via process.kill', () => 
     expect(['running', 'done']).toContain(status);
   });
 });
+
+describe('runCompletionHooks – fix→review auto-trigger', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let startProjectReviewMock: ReturnType<typeof vi.fn>;
+  let getJobStatusMock: ReturnType<typeof vi.fn>;
+  let probeJobStatusFn: typeof import('@/lib/job-storage').probeJobStatus;
+
+  function makeFixJob(overrides: Partial<JobData> = {}): JobData {
+    return {
+      id: 'fix-job-1',
+      project: 'my-proj',
+      kind: 'fix',
+      prompt: null,
+      pid: 12345,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-auto', pid: 999, logPath: '/tmp/rev.log' });
+    getJobStatusMock = vi.fn();
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/pm2-jobs', () => ({
+      getJobStatus: getJobStatusMock,
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/start-review', () => ({
+      startProjectReview: startProjectReviewMock,
+    }));
+
+    const mod = await import('@/lib/job-storage');
+    probeJobStatusFn = mod.probeJobStatus;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('calls startProjectReview after a fix job finishes with exitCode 0', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
+    const job = makeFixJob();
+
+    await probeJobStatusFn(job);
+
+    expect(job.exitCode).toBe(0);
+    expect(startProjectReviewMock).toHaveBeenCalledWith('my-proj');
+  });
+
+  it('does not call startProjectReview when fix job exits non-zero', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 1 });
+    const job = makeFixJob();
+
+    await probeJobStatusFn(job);
+
+    expect(job.exitCode).toBe(1);
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+  });
+
+  it('does not call startProjectReview for a review job (only fix triggers it)', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
+    const job = makeFixJob({ id: 'review-job-x', kind: 'review' });
+
+    await probeJobStatusFn(job);
+
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+  });
+
+  it('does not call startProjectReview for a run job', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
+    const job = makeFixJob({ id: 'run-job-x', kind: 'run' });
+
+    await probeJobStatusFn(job);
+
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+  });
+
+  it('continues gracefully when startProjectReview throws', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
+    startProjectReviewMock.mockRejectedValue(new Error('review service down'));
+    const job = makeFixJob();
+
+    // should not throw even when startProjectReview fails
+    await expect(probeJobStatusFn(job)).resolves.toBe('done');
+  });
+});

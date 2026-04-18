@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveProjectPath } from '@/lib/project-data';
 import { exec } from '@/lib/shell';
+import { getSettings } from '@/lib/config';
 import { errMsg } from '@/lib/types';
 
 export async function POST(
@@ -23,12 +24,13 @@ export async function POST(
     const changesSummary = `\nGIT STATUS:\n${porcelainR.stdout}\nRepository: ${projectName}\n`;
 
     const numOptions = 5;
-    const commitPrompt = `Output exactly ${numOptions} conventional commit titles, one per line, numbered 1-${numOptions}. No prose, no code blocks, no backticks, no quotes.
+    const styleGuide = (getSettings().commit_style ?? '').trim();
+    const commitPrompt = `Output exactly ${numOptions} commit titles, one per line, numbered 1-${numOptions}. No prose, no code blocks, no backticks, no quotes.
 
 ${changesSummary}${fileSummary}
 
-Format: <type>: <description>  (types: feat|fix|docs|style|refactor|test|chore|ci|build)
-Rules: present tense, ≤50 chars, no trailing period, plain text only.`;
+${styleGuide ? `STYLE GUIDE:\n${styleGuide}\n` : ''}
+Return ONLY the ${numOptions} titles — nothing else.`;
 
     const { getImproveConfig } = await import('@/lib/scheduling');
     const { claudeBin } = getImproveConfig();
@@ -43,13 +45,17 @@ Rules: present tense, ≤50 chars, no trailing period, plain text only.`;
 
     const stripWrap = (s: string) =>
       s.replace(/^[`'"*_]+/, '').replace(/[`'"*_]+$/, '').trim();
+    // If the style guide mentions conventional commits, filter to that shape;
+    // otherwise accept any non-empty cleaned line.
+    const wantsConventional = /conventional commits?/i.test(styleGuide);
+    const CONV_RE = /^(feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert)(\(.+\))?:/i;
     const options = result.stdout
       .trim()
       .split('\n')
       .map((l) => l.replace(/^\s*[-*•]\s*/, ''))
       .map((l) => l.replace(/^\d+[.)]\s*/, ''))
       .map(stripWrap)
-      .filter((l) => l.length > 0 && /^(feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert)(\(.+\))?:/i.test(l))
+      .filter((l) => l.length > 0 && (!wantsConventional || CONV_RE.test(l)))
       .slice(0, numOptions);
 
     return NextResponse.json({ options, model, error: null });

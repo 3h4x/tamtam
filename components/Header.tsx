@@ -13,6 +13,7 @@ interface HeaderProps {
 
 const NAV_ITEMS = [
   { to: '/', label: 'Projects' },
+  { to: '/monitoring', label: 'Monitoring' },
   { to: '/runs', label: 'Runs' },
   { to: '/skills', label: 'Skills' },
   { to: '/settings', label: 'Settings' },
@@ -25,11 +26,11 @@ export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
 
   return (
     <header className="sticky top-0 z-50 flex items-center justify-between px-3 sm:px-6 py-3 border-b border-border bg-bg-primary gap-2">
-      <div className="flex items-center gap-1 sm:gap-4 min-w-0">
+      <div className="flex items-center gap-1 sm:gap-4 min-w-0 overflow-hidden">
         <div className="overflow-hidden shrink-0 -my-1" style={{ height: 36 }}>
           <img src={logoSrc} alt="tamtam" style={{ height: 52, width: 'auto', marginTop: -8 }} />
         </div>
-        <nav className="flex items-center gap-0.5">
+        <nav className="flex items-center gap-0.5 overflow-x-auto scrollbar-none">
           {NAV_ITEMS.map((item) => {
             const isActive = item.to === '/'
               ? pathname === '/'

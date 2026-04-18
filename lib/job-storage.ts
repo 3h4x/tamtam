@@ -108,7 +108,9 @@ function saveToDb(job: JobData): void {
   }
 }
 
-async function markDone(job: JobData, exitCode: number): Promise<void> {
+export async function markDone(job: JobData, exitCode: number): Promise<void> {
+  // Idempotent: if already finalized, don't double-fire hooks or rewrite DB.
+  if (job.finishedAt !== null) return;
   job.finishedAt = Date.now() / 1000;
   job.exitCode = exitCode;
   // Extract result metadata (tokens, duration, session) from log
@@ -166,6 +168,19 @@ async function runCompletionHooks(job: JobData): Promise<void> {
       const projPath = resolveProjectPath(job.project);
       if (projPath) await markReviewed(job.project, projPath);
     } catch {}
+  }
+  if (job.kind === 'fix' && job.exitCode === 0) {
+    try {
+      const { startProjectReview } = await import('./start-review');
+      const r = await startProjectReview(job.project);
+      if (!r.ok) {
+        console.log(`[fix→review] skipped auto-review for ${job.project}: ${r.detail}`);
+      } else {
+        console.log(`[fix→review] auto-started review ${r.jobId} for ${job.project}`);
+      }
+    } catch (e) {
+      console.log(`[fix→review] error starting auto-review for ${job.project}:`, e);
+    }
   }
 }
 

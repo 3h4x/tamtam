@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
+import { reloadConfig } from '@/lib/config';
 const SETTING_KEYS = [
   'github_owner',
   'claude_bin',
@@ -13,6 +14,8 @@ const SETTING_KEYS = [
   'base_prompt',
   'default_model',
   'permission_mode',
+  'commit_style',
+  'review_verdict_rules',
 ] as const;
 
 export async function GET() {
@@ -42,5 +45,6 @@ export async function PATCH(request: NextRequest) {
     }
   }
 
+  reloadConfig();
   return NextResponse.json({ status: 'ok' });
 }

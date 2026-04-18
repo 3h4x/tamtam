@@ -52,7 +52,8 @@ Next.js monolith (App Router) for managing Claude CLI agents across multiple pro
 - `/project/[name]/terminal/[sessionId]` — Interactive Claude runner with model selector (haiku/sonnet/opus), skill picker, and real-time token streaming via SSE (see `docs/TERMINAL.md`)
 - `/project/[name]/task/[task]` — Task detail view
 - `/agents` — Agents management page
-- `/jobs` — All runs across projects
+- `/monitoring` — Prometheus + Loki health dashboard (alerts, service up/down, log errors)
+- `/runs` — All runs across projects (replaces `/jobs`, which now redirects here)
 - `/logs` — Log viewer
 - `/skills` — Skill editor (CRUD for DB-backed skills)
 - `/settings` — Workspace path, frequency, claude binary, DB backup
@@ -92,6 +93,8 @@ Next.js monolith (App Router) for managing Claude CLI agents across multiple pro
 - `/api/streaming/[jobId]` — SSE stream of parsed text deltas from NDJSON log (`?raw=1` for raw lines)
 - `/api/settings` — Settings CRUD (GET, PATCH) — includes `base_prompt` for global agent instructions
 - `/api/settings/backup` — SQLite hot backup (POST)
+- `/api/health` — Health check (GET)
+- `/api/monitoring` — Prometheus + Loki status aggregation (GET); env: `PROMETHEUS_URL`, `LOKI_URL`
 
 ## Testing Requirements
 - **All new API routes must have vitest tests** in `__tests__/`
@@ -106,6 +109,7 @@ Next.js monolith (App Router) for managing Claude CLI agents across multiple pro
 - Terminal runs use `claude --output-format stream-json` for token-by-token streaming via PM2 + log file + fs.watch + NDJSON parser (see `docs/TERMINAL.md`)
 - SSE at `/api/streaming/[jobId]` parses NDJSON and sends text deltas + `done` event (`?raw=1` for raw mode)
 - Agent runs compose skill content into the prompt before sending to Claude CLI
+- `commit_style` setting injects a style guide into the commit-message generation prompt; `review_verdict_rules` setting drives LGTM/NEEDS ATTENTION/DO NOT SHIP decisions in code reviews — both configurable in Settings UI (Behavior tab)
 - File-based skills scanned from `skills/docs/skills/` and `data/skills/` (category subdirs, `.md` files with optional frontmatter)
 - DB-backed skills created via `/skills` page or API
 - GitHub owner fallback configurable via `GITHUB_OWNER` env var or Settings UI
