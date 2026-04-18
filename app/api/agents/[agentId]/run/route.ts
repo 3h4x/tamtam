@@ -20,6 +20,18 @@ export async function POST(
   const agent = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
   if (!agent) return NextResponse.json({ detail: 'agent not found' }, { status: 404 });
 
+  // Reject scheduled triggers for disabled agents. PM2 may still hold stale
+  // cron entries (e.g. after a rename or schedule clear) — this is the final
+  // guard so disabled/unscheduled agents don't silently keep running.
+  const triggeredBy = request.headers.get('x-tamtam-trigger') || 'manual';
+  const isScheduled = triggeredBy === 'schedule';
+  if (!agent.enabled && isScheduled) {
+    return NextResponse.json({ detail: `Agent '${agent.name}' is disabled — ignoring scheduled trigger` }, { status: 409 });
+  }
+  if (!agent.schedule && isScheduled) {
+    return NextResponse.json({ detail: `Agent '${agent.name}' has no schedule — ignoring scheduled trigger` }, { status: 409 });
+  }
+
   // Prevent duplicate runs: check if this agent is already running
   const kindKey = `agent:${agent.name}`;
   const candidates = listJobs().filter(

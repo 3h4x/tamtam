@@ -208,13 +208,9 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   useEffect(() => {
     if (!initialSessionId) return
     const cur = terminalStore.get(projectName)
-    // Already hydrated or streaming for this session → don't refetch; store wins.
+    // Already hydrated for THIS session (full restore done) → don't refetch.
     if (cur.restoredFor === initialSessionId) return
     if (cur.streaming) return
-    if (cur.claudeSessionId === initialSessionId && cur.history.length > 0) {
-      terminalStore.update(projectName, () => ({ restoredFor: initialSessionId }))
-      return
-    }
 
     fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
       .then(r => r.json())
@@ -299,6 +295,21 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         const res = await fetch(`/api/jobs/${encodeURIComponent(jobParam)}`)
         if (!res.ok) return
         const data = await res.json()
+        // If this job shares a session_id with other jobs, promote to the
+        // session URL so the full thread (review + fix + etc.) is rendered.
+        if (data.session_id) {
+          try {
+            const listRes = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
+            const listData = await listRes.json()
+            const siblings = (listData.jobs ?? []).filter(
+              (j: JobDict) => j.session_id === data.session_id && j.id !== data.id
+            )
+            if (siblings.length > 0) {
+              router.replace(`/project/${projectName}/terminal/${data.session_id}`)
+              return
+            }
+          } catch {}
+        }
         const entries: TermEntry[] = []
         const kind = data.kind || jobParam.split('-').slice(1, -1).join('-')
         const isClaudeJob = ['run', 'review', 'fix', 'fix-ci'].includes(data.kind) || (typeof data.kind === 'string' && data.kind.startsWith('agent:'))

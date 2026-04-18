@@ -1,107 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { spawn } from 'child_process';
-import { join } from 'path';
-import { homedir } from 'os';
-import { getImproveConfig } from '@/lib/scheduling';
-import { resolveProjectPath } from '@/lib/project-data';
-import { getJob, createJob, readLog, probeJobStatus, updateJob, markDone } from '@/lib/job-storage';
-import { getPermissionModeFlag } from '@/lib/config';
+import { startFixFromJob } from '@/lib/start-fix';
 
 export async function POST(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
 ) {
   const { jobId } = await params;
-
-  const sourceJob = getJob(jobId);
-  if (!sourceJob) {
-    return NextResponse.json({ detail: `job '${jobId}' not found` }, { status: 404 });
-  }
-  if ((await probeJobStatus(sourceJob)) === 'running') {
-    return NextResponse.json({ detail: 'Job is still running' }, { status: 400 });
-  }
-
-  const projectName = sourceJob.project;
-  const { claudeBin, logDir } = getImproveConfig();
-  const projPath = resolveProjectPath(projectName);
-  if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
-
-  // If the source job left a Claude session id, resume it — Claude already
-  // has the full review context so we just tell it to fix. Otherwise, fall
-  // back to pasting the log tail into a fresh session.
-  const resumeSessionId = sourceJob.sessionId ?? null;
-  let prompt: string;
-  if (resumeSessionId) {
-    prompt = 'Please fix ALL the issues identified in your review above. Apply the changes directly to the codebase. After fixing, run the relevant tests or linter locally to confirm the fixes work. Do not commit — just make the code changes.';
-  } else {
-    let logOutput = readLog(sourceJob);
-    if (!logOutput.trim()) {
-      return NextResponse.json({ detail: 'No output to fix from' }, { status: 400 });
-    }
-    if (logOutput.length > 12000) {
-      logOutput = '...(truncated)...\n' + logOutput.slice(-12000);
-    }
-    prompt = `A previous ${sourceJob.kind} job for \`${projectName}\` produced the following output:
-
-\`\`\`
-${logOutput}
-\`\`\`
-
-Please fix ALL the issues identified above. Apply the changes directly to the codebase.
-After fixing, run the relevant tests or linter locally to confirm the fixes work.
-Do not commit — just make the code changes.
-`;
-  }
-
-  const { mkdirSync, openSync } = await import('fs');
-  mkdirSync(logDir, { recursive: true });
-
-  const job = createJob(projectName, 'fix', 0, '');
-  const logPath = join(logDir, `${job.id}.log`);
-  job.logPath = logPath;
-  // Pre-populate sessionId so the terminal can restore the thread even while
-  // the fix is still streaming. markDone will overwrite from the log later.
-  if (resumeSessionId) job.sessionId = resumeSessionId;
-
-  const claudeArgs = [
-    '--print',
-    '--output-format', 'stream-json',
-    '--include-partial-messages',
-    '--verbose',
-    ...getPermissionModeFlag().split(' '),
-  ];
-  if (resumeSessionId) {
-    claudeArgs.push('--resume', resumeSessionId);
-  }
-
-  const logFd = openSync(logPath, 'w');
-  const proc = spawn(claudeBin, claudeArgs, {
-    cwd: projPath,
-    stdio: ['pipe', logFd, logFd],
-    env: {
-      ...process.env,
-      PATH: `${join(homedir(), 'Library', 'pnpm')}:${process.env.PATH ?? ''}`,
-      HOME: homedir(),
-    },
-    detached: true,
-  });
-
-  job.pid = proc.pid ?? 0;
-  proc.unref();
-  updateJob(job);
-
-  try {
-    proc.stdin?.write(prompt);
-    proc.stdin?.end();
-  } catch {}
-
-  proc.on('exit', (code) => {
-    const { closeSync } = require('fs');
-    try { closeSync(logFd); } catch {}
-    markDone(job, code ?? -1).catch((e) => {
-      console.log(`[fix route] markDone failed for ${job.id}:`, e);
-    });
-  });
-
-  return NextResponse.json({ status: 'started', job_id: job.id, pid: job.pid });
+  const r = await startFixFromJob(jobId);
+  if (!r.ok) return NextResponse.json({ detail: r.detail }, { status: r.status });
+  return NextResponse.json({ status: 'started', job_id: r.jobId, pid: r.pid });
 }

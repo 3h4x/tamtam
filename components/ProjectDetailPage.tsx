@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { reviewProject, testProject, fixCi, fixFromJob, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions } from '@/lib/client-api'
+import { reviewProject, testProject, fixCi, fixFromJob, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
 import { priorityColor, getHighestPriority, getAggregateCi, formatDuration } from '@/lib/statusConstants'
@@ -144,13 +144,21 @@ function StatusStrip({
       />
     )
   } else if (verdict && latestReview) {
+    // LGTM with still-uncommitted changes is "approved but not yet pushed",
+    // not a clean green — downgrade tone until changes are pushed.
+    const pendingPush = verdict === 'LGTM' && totalChanges > 0
     const tone: StatusCardProps['tone'] =
-      verdict === 'LGTM' ? 'success' : verdict === 'NEEDS ATTENTION' ? 'warning' : 'error'
+      verdict === 'LGTM' ? (pendingPush ? 'neutral' : 'success')
+        : verdict === 'NEEDS ATTENTION' ? 'warning' : 'error'
     reviewCard = (
       <StatusCard
         label="Review"
         primary={verdict}
-        detail={`${formatAgo(latestReview.finished_at ?? latestReview.started_at)} — view log`}
+        detail={
+          pendingPush
+            ? `${formatAgo(latestReview.finished_at ?? latestReview.started_at)} — awaiting push`
+            : `${formatAgo(latestReview.finished_at ?? latestReview.started_at)} — view log`
+        }
         tone={tone}
         onClick={() => onOpenJob(latestReview.id)}
       />
@@ -288,6 +296,7 @@ export function ProjectDetailPage({
   const [testCommandInput, setTestCommandInput] = useState('')
   const [testCronEnabledInput, setTestCronEnabledInput] = useState(false)
   const [testCronScheduleInput, setTestCronScheduleInput] = useState('')
+  const [autoPushEnabledInput, setAutoPushEnabledInput] = useState(false)
   const [configSaving, setConfigSaving] = useState(false)
   const [configSaved, setConfigSaved] = useState(false)
 
@@ -354,6 +363,7 @@ export function ProjectDetailPage({
           setTestCommandInput(configData.test_command)
           setTestCronEnabledInput(configData.test_cron_enabled)
           setTestCronScheduleInput(configData.test_cron_schedule)
+          setAutoPushEnabledInput(!!configData.auto_push_enabled)
           if (actionsData) {
             setEditActions(actionsData.actions)
             setActionsLoaded(true)
@@ -391,6 +401,7 @@ export function ProjectDetailPage({
   const isReviewRunning = projectJobs.some(j => j.kind === 'review' && j.status === 'running')
   const isCiFixRunning = projectJobs.some(j => j.kind === 'fix-ci' && j.status === 'running')
   const isTestRunning = projectJobs.some(j => j.kind === 'test' && j.status === 'running')
+  const isFixRunning = projectJobs.some(j => j.kind === 'fix' && j.status === 'running')
 
   // Get latest review verdict
   const latestReview = projectJobs
@@ -411,6 +422,23 @@ export function ProjectDetailPage({
 
   const [reviewError, setReviewError] = useState<string | null>(null)
   const [testError, setTestError] = useState<string | null>(null)
+  const [releasing, setReleasing] = useState(false)
+
+  const handleRelease = async () => {
+    if (!name || releasing) return
+    setReleasing(true)
+    try {
+      const result = await releaseProject(name)
+      toast(`${result.step}: ${result.message}`, 'info')
+      if (result.job_id) {
+        router.push(`/project/${name}/terminal?job=${encodeURIComponent(result.job_id)}`)
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to start release', 'error')
+    } finally {
+      setReleasing(false)
+    }
+  }
 
   const handleReview = async () => {
     if (!name) return
@@ -455,7 +483,12 @@ export function ProjectDetailPage({
     setFixingReview(true)
     try {
       const result = await fixFromJob(reviewJobId)
-      router.push(`/project/${name}/terminal?job=${encodeURIComponent(result.job_id)}`)
+      const sessionId = latestReview?.session_id
+      if (sessionId) {
+        router.push(`/project/${name}/terminal/${sessionId}`)
+      } else {
+        router.push(`/project/${name}/terminal?job=${encodeURIComponent(result.job_id)}`)
+      }
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to start fix', 'error')
       setFixingReview(false)
@@ -490,6 +523,7 @@ export function ProjectDetailPage({
         test_command: testCommandInput,
         test_cron_enabled: testCronEnabledInput,
         test_cron_schedule: testCronScheduleInput,
+        auto_push_enabled: autoPushEnabledInput,
       })
       setConfigSaved(true)
       // Reload config to show effective command
@@ -498,6 +532,7 @@ export function ProjectDetailPage({
       setTestCommandInput(data.test_command)
       setTestCronEnabledInput(data.test_cron_enabled)
       setTestCronScheduleInput(data.test_cron_schedule)
+      setAutoPushEnabledInput(!!data.auto_push_enabled)
       setTimeout(() => setConfigSaved(false), 3000)
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to save config', 'error')
@@ -510,7 +545,8 @@ export function ProjectDetailPage({
     config !== null &&
     (testCommandInput !== config.test_command ||
       testCronEnabledInput !== config.test_cron_enabled ||
-      testCronScheduleInput !== config.test_cron_schedule)
+      testCronScheduleInput !== config.test_cron_schedule ||
+      autoPushEnabledInput !== !!config.auto_push_enabled)
 
   return (
     <div className="p-6">
@@ -543,17 +579,50 @@ export function ProjectDetailPage({
             </span>
           )}
           {(() => {
+            const busy = releasing || isReviewRunning || isTestRunning || isFixRunning
+            const nothingToRelease = project.totalChanges === 0 && (project.unpushed ?? 0) === 0
+            const hasTestCommand = !!(config?.effective_test_command || config?.detected_test_command)
+            // Push-only branch (no uncommitted changes) skips test/review entirely.
+            const steps: string[] = []
+            if (project.totalChanges > 0) {
+              if (hasTestCommand) steps.push('test')
+              steps.push('review')
+            }
+            steps.push('push')
+            const multiStep = steps.length > 1
+            const chainSuffix = multiStep && !config?.auto_push_enabled
+              ? ' (enable auto-push in config to auto-chain)'
+              : ''
+            return (
+              <button
+                className="px-3 py-1.5 text-sm border border-accent bg-accent/10 text-accent rounded-md hover:bg-accent/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                onClick={handleRelease}
+                disabled={busy || nothingToRelease}
+                title={
+                  nothingToRelease
+                    ? 'Nothing to release — no changes and no unpushed commits'
+                    : busy
+                      ? 'Release pipeline already running'
+                      : `Release: ${steps.join(' → ')}${chainSuffix}`
+                }
+              >
+                {busy ? 'Releasing…' : '🚀 Release'}
+              </button>
+            )
+          })()}
+          {(() => {
             const showFix = !!latestReview && !isReviewRunning &&
               (verdict === 'NEEDS ATTENTION' || verdict === 'DO NOT SHIP')
             if (showFix) {
+              const busy = fixingReview || isFixRunning
               return (
                 <button
                   className="px-3 py-1.5 text-sm border border-status-warning text-status-warning rounded-md hover:bg-status-warning/10 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   onClick={() => handleFixReview(latestReview!.id)}
-                  disabled={fixingReview}
-                  title={`Run Claude to fix review findings (${verdict}) in the same session — will auto-re-review on success`}
+                  disabled={busy}
+                  title={busy ? 'Fix already running' : `Run Claude to fix review findings (${verdict}) in the same session — will auto-re-review on success`}
                 >
-                  {fixingReview ? 'Starting fix...' : 'Fix Review'}
+                  {busy ? 'Fixing…' : 'Fix Review'}
                 </button>
               )
             }
@@ -568,14 +637,25 @@ export function ProjectDetailPage({
               </button>
             )
           })()}
-          <button
-            className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={handleTest}
-            disabled={isTestRunning}
-            title={isTestRunning ? 'Tests already running' : 'Run test suite'}
-          >
-            {isTestRunning ? 'Testing...' : 'Run Tests'}
-          </button>
+          {(() => {
+            const hasTestCommand = !!(config?.effective_test_command || config?.detected_test_command)
+            return (
+              <button
+                className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleTest}
+                disabled={isTestRunning || !hasTestCommand}
+                title={
+                  isTestRunning
+                    ? 'Tests already running'
+                    : !hasTestCommand
+                      ? 'No test command detected — configure in project settings'
+                      : 'Run test suite'
+                }
+              >
+                {isTestRunning ? 'Testing...' : 'Run Tests'}
+              </button>
+            )
+          })()}
           {reviewError && (
             <span className="text-status-error text-xs">
               {reviewError}
@@ -808,6 +888,24 @@ export function ProjectDetailPage({
                     disabled={!testCronEnabledInput}
                   />
                 </div>
+
+                <div className="mt-5 pt-4 border-t border-border">
+                  <div className="flex items-center gap-2 mb-2">
+                    <input
+                      id="auto-push-enabled"
+                      type="checkbox"
+                      className="w-4 h-4 cursor-pointer accent-accent"
+                      checked={autoPushEnabledInput}
+                      onChange={(e) => setAutoPushEnabledInput(e.target.checked)}
+                    />
+                    <label htmlFor="auto-push-enabled" className="font-medium text-sm text-text-primary cursor-pointer">
+                      Auto-push when review passes
+                    </label>
+                  </div>
+                  <p className="text-text-secondary text-xs">
+                    When enabled, a review with <code className="font-mono">LGTM</code> verdict automatically runs the tests, and on pass, commits and pushes. Disabled by default.
+                  </p>
+                </div>
               </div>
 
               {/* Custom Actions */}
@@ -899,6 +997,67 @@ export function ProjectDetailPage({
       {/* Terminal Tab */}
       {activeTab === 'terminal' && name && (
         <>
+          {(() => {
+            const hasTestCommand = !!(config?.effective_test_command || config?.detected_test_command)
+            type StepState = 'pending' | 'running' | 'done' | 'failed'
+            const pipelineStarted = projectJobs.some(
+              j => ['test', 'review', 'fix'].includes(j.kind) && j.started_at >= (Date.now() / 1000 - 60 * 60)
+            )
+            if (!pipelineStarted) return null
+
+            const hourAgo = Date.now() / 1000 - 60 * 60
+            const latestOfKind = (kind: string) => projectJobs
+              .filter(j => j.kind === kind && j.started_at >= hourAgo)
+              .sort((a, b) => (b.started_at || 0) - (a.started_at || 0))[0]
+
+            const testJob = latestOfKind('test')
+            const reviewJob = latestOfKind('review')
+            const fixJob = latestOfKind('fix')
+
+            const stateOf = (job: JobInfo | undefined): StepState => {
+              if (!job) return 'pending'
+              if (job.status === 'running') return 'running'
+              if (job.exit_code === 0) return 'done'
+              return 'failed'
+            }
+
+            const testState: StepState = hasTestCommand ? stateOf(testJob) : 'pending'
+            const reviewState: StepState = stateOf(reviewJob)
+            // Review fails → fix triggers. Show reviewing state as "running" while fix is in flight.
+            const reviewInFix = reviewState === 'failed' && fixJob && fixJob.status === 'running'
+            const effectiveReviewState: StepState = reviewInFix ? 'running' : reviewState
+            const reviewPassed = reviewState === 'done' && reviewJob?.verdict === 'LGTM'
+            const hasChanges = project.totalChanges > 0 || (project.unpushed ?? 0) > 0
+            const commitState: StepState = !hasChanges ? 'done' : reviewPassed ? 'pending' : 'pending'
+            const pushState: StepState = !hasChanges ? 'done' : 'pending'
+
+            const steps: Array<{ label: string; state: StepState; skipped?: boolean }> = []
+            if (hasTestCommand) steps.push({ label: 'test', state: testState })
+            steps.push({ label: 'review', state: effectiveReviewState })
+            steps.push({ label: 'commit', state: commitState })
+            steps.push({ label: 'push', state: pushState })
+
+            const glyph = (s: StepState) => {
+              if (s === 'done') return <span className="text-status-success">✓</span>
+              if (s === 'failed') return <span className="text-status-error">✗</span>
+              if (s === 'running') return <span className="inline-block w-3 h-3 rounded-full border-2 border-accent border-t-transparent animate-spin align-middle" />
+              return <span className="text-text-tertiary">○</span>
+            }
+
+            return (
+              <div className="mt-3 mb-3 px-3 py-2 rounded-md border border-border bg-bg-secondary text-sm flex items-center gap-2 flex-wrap">
+                {steps.map((s, i) => (
+                  <div key={s.label} className="flex items-center gap-1.5">
+                    <span className="inline-flex items-center justify-center w-5 h-5">{glyph(s.state)}</span>
+                    <span className={`font-mono text-xs ${s.state === 'running' ? 'text-accent font-semibold' : s.state === 'done' ? 'text-text-primary' : s.state === 'failed' ? 'text-status-error' : 'text-text-secondary'}`}>
+                      {s.label}
+                    </span>
+                    {i < steps.length - 1 && <span className="text-text-tertiary mx-1">→</span>}
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
           {showPushPanel && (
             <div className="mb-3">
               <InlinePushPanel

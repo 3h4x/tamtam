@@ -111,6 +111,9 @@ try {
 try {
   sqlite.exec('ALTER TABLE projects ADD COLUMN test_cron_schedule TEXT');
 } catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN auto_push_enabled INTEGER DEFAULT 0');
+} catch {}
 
 // Migrate: add token/duration/session columns to jobs if missing
 try {

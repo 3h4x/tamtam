@@ -69,7 +69,7 @@ function buildScript(agentId: string): string {
   const promptFile = agentPromptPath(agentId);
 
   return `#!/bin/bash
-/usr/bin/curl -s -X POST -H "Content-Type: application/json" -d @"${promptFile}" "${url}"
+/usr/bin/curl -s -X POST -H "Content-Type: application/json" -H "X-Tamtam-Trigger: schedule" -d @"${promptFile}" "${url}"
 `;
 }
 

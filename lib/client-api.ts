@@ -96,6 +96,17 @@ export async function reviewProject(projectName: string): Promise<{ status: stri
   return response.json()
 }
 
+export async function releaseProject(projectName: string): Promise<{ status: string; step: 'test' | 'review' | 'push'; job_id?: string; message: string }> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/release`, {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || `Failed to start release: ${response.statusText}`)
+  }
+  return response.json()
+}
+
 export async function testProject(projectName: string): Promise<{ status: string; job_id: string; pid: number; log_path: string }> {
   const response = await fetch(`${API_BASE}/by-project/${projectName}/test`, {
     method: 'POST',
@@ -290,6 +301,7 @@ export interface ProjectConfig {
   effective_test_command: string
   test_cron_enabled: boolean
   test_cron_schedule: string
+  auto_push_enabled?: boolean
 }
 
 export async function fetchProjectConfig(projectName: string): Promise<ProjectConfig> {
@@ -306,6 +318,7 @@ export async function updateProjectConfig(
     test_command?: string
     test_cron_enabled?: boolean
     test_cron_schedule?: string
+    auto_push_enabled?: boolean
   }
 ): Promise<{ status: string }> {
   const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/config`, {

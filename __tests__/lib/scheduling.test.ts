@@ -30,7 +30,8 @@ function createTestDb() {
       custom_actions TEXT,
       test_command TEXT,
       test_cron_enabled INTEGER DEFAULT 0,
-      test_cron_schedule TEXT
+      test_cron_schedule TEXT,
+      auto_push_enabled INTEGER DEFAULT 0
     );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };

@@ -161,6 +161,28 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
   }
 }
 
+async function isAutoPushEnabled(projectName: string): Promise<boolean> {
+  try {
+    const { getProjectTestConfig } = await import('./scheduling');
+    return !!getProjectTestConfig(projectName)?.autoPushEnabled;
+  } catch {
+    return false;
+  }
+}
+
+// Cap runaway review→fix→review loops when auto-push is on. Override via
+// TAMTAM_MAX_FIX_ITERATIONS / TAMTAM_FIX_WINDOW_SECONDS for debugging or tuning
+// per-environment without a code change.
+const MAX_FIX_ITERATIONS = parseInt(process.env.TAMTAM_MAX_FIX_ITERATIONS ?? '', 10) || 3;
+const FIX_WINDOW_SECONDS = parseInt(process.env.TAMTAM_FIX_WINDOW_SECONDS ?? '', 10) || 30 * 60;
+
+function recentFixCount(projectName: string): number {
+  const cutoff = Date.now() / 1000 - FIX_WINDOW_SECONDS;
+  return listJobs().filter(
+    (j) => j.project === projectName && j.kind === 'fix' && j.startedAt >= cutoff
+  ).length;
+}
+
 async function runCompletionHooks(job: JobData): Promise<void> {
   if (job.kind === 'review' && job.exitCode === 0) {
     try {
@@ -168,9 +190,39 @@ async function runCompletionHooks(job: JobData): Promise<void> {
       const projPath = resolveProjectPath(job.project);
       if (projPath) await markReviewed(job.project, projPath);
     } catch {}
+    // Release pipeline: review LGTM → push; NEEDS ATTENTION/DO NOT SHIP → fix
+    try {
+      if (!(await isAutoPushEnabled(job.project))) return;
+      const verdict = getVerdict(job);
+      if (verdict === 'LGTM') {
+        const { startProjectPush } = await import('./start-push');
+        const r = await startProjectPush(job.project);
+        if (!r.ok) {
+          console.log(`[release] push failed for ${job.project}: ${r.detail}`);
+        } else {
+          console.log(`[release] review LGTM → pushed ${job.project} (${r.commitSha || 'no-op'})`);
+        }
+      } else if (verdict === 'NEEDS ATTENTION' || verdict === 'DO NOT SHIP') {
+        const count = recentFixCount(job.project);
+        if (count >= MAX_FIX_ITERATIONS) {
+          console.log(`[release] fix cap reached for ${job.project} (${count}/${MAX_FIX_ITERATIONS}) — stopping`);
+          return;
+        }
+        const { startFixFromJob } = await import('./start-fix');
+        const r = await startFixFromJob(job.id);
+        if (!r.ok) {
+          console.log(`[release] skipped fix for ${job.project}: ${r.detail}`);
+        } else {
+          console.log(`[release] review ${verdict} → started fix ${r.jobId} (iter ${count + 1})`);
+        }
+      }
+    } catch (e) {
+      console.log(`[release] review hook error for ${job.project}:`, e);
+    }
   }
   if (job.kind === 'fix' && job.exitCode === 0) {
     try {
+      if (!(await isAutoPushEnabled(job.project))) return;
       const { startProjectReview } = await import('./start-review');
       const r = await startProjectReview(job.project);
       if (!r.ok) {
@@ -180,6 +232,21 @@ async function runCompletionHooks(job: JobData): Promise<void> {
       }
     } catch (e) {
       console.log(`[fix→review] error starting auto-review for ${job.project}:`, e);
+    }
+  }
+  if (job.kind === 'test' && job.exitCode === 0) {
+    // Release pipeline: test passes → review
+    try {
+      if (!(await isAutoPushEnabled(job.project))) return;
+      const { startProjectReview } = await import('./start-review');
+      const r = await startProjectReview(job.project);
+      if (!r.ok) {
+        console.log(`[release] test→review skipped for ${job.project}: ${r.detail}`);
+      } else {
+        console.log(`[release] tests passed → started review ${r.jobId} for ${job.project}`);
+      }
+    } catch (e) {
+      console.log(`[release] test hook error for ${job.project}:`, e);
     }
   }
 }
@@ -236,10 +303,19 @@ export function updateJob(job: JobData): void {
 
 export function getVerdict(job: JobData): string | null {
   if (job.kind !== 'review' || job.finishedAt === null) return null;
-  const log = readLog(job, 10_000);
+  // Use parsed log — raw stream-json encodes newlines as literal "\n",
+  // which breaks word boundaries and masks a trailing verdict token.
+  const log = readParsedLog(job, 100_000);
   if (!log) return null;
-  const match = log.match(/[Vv]erdict.*?(LGTM|NEEDS ATTENTION|DO NOT SHIP)/);
-  return match ? match[1] : null;
+  const explicit = log.match(/[Vv]erdict[^\n]*?(LGTM|NEEDS ATTENTION|DO NOT SHIP)/);
+  if (explicit) return explicit[1];
+  // Fallback: only accept a token when it stands alone on the final non-empty
+  // line. Bare tokens anywhere in prose are too easy to mis-classify
+  // (e.g. "not LGTM" → LGTM), and auto-push acts on this.
+  const lines = log.split('\n').map((l) => l.trim()).filter(Boolean);
+  const last = lines[lines.length - 1];
+  if (last && /^(LGTM|NEEDS ATTENTION|DO NOT SHIP)$/.test(last)) return last;
+  return null;
 }
 
 export function jobToDict(job: JobData): Record<string, unknown> {
