@@ -34,11 +34,12 @@ const DEFAULTS: TamTamConfig = {
   default_model: 'haiku',
   permission_mode: 'bypassPermissions',
   commit_style: 'Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Types: feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert.',
-  review_verdict_rules: `STRICT verdict rules — the user cares about code quality, not speed:
-- LGTM ONLY when there are zero findings at any severity. Not "LGTM with minor notes", not "LGTM aside from a nit". If you list any "minor" / "non-blocking" / "cosmetic" / "consider..." / "nice-to-have" issue, that is NEEDS ATTENTION, not LGTM.
-- NEEDS ATTENTION when you have at least one finding but nothing that risks data loss, security regressions, or breakage in production. Orphaned code, dead imports, missing imports that happen to compile, hardcoded strings that should use env vars, non-ideal UX state leaks, stylistic inconsistencies — all NEEDS ATTENTION.
-- DO NOT SHIP when there is a real risk of breakage, data loss, security regression, or a test that hides behavior.
-- If LGTM, just confirm the changes look good and add nothing else.`,
+  review_verdict_rules: `Pragmatic verdict rules — the release pipeline needs to actually reach LGTM sometimes:
+- LGTM when the change is safe to ship. Cosmetic nits, dead imports, orphan state, style inconsistencies, or "consider…" / "nice-to-have" suggestions do NOT block LGTM — mention them as non-blocking notes if you must, but still say LGTM. The bar is: "would you merge this yourself?"
+- NEEDS ATTENTION when there is at least one genuine correctness or UX issue that you'd want fixed before merge, but no risk of breakage. Missing error handling on a path that matters, wrong business logic, broken types, a test that masks behavior — that's NEEDS ATTENTION.
+- DO NOT SHIP for real risk: data loss, security regression, guaranteed production breakage.
+- Prefer LGTM over NEEDS ATTENTION when in doubt. Do not list every stylistic opinion. Aim for fewer than 3 findings — if you have more, the review has drifted into nitpicking.
+- Keep LGTM responses short: one sentence confirmation is enough.`,
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;

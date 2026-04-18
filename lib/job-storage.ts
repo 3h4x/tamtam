@@ -307,14 +307,25 @@ export function getVerdict(job: JobData): string | null {
   // which breaks word boundaries and masks a trailing verdict token.
   const log = readParsedLog(job, 100_000);
   if (!log) return null;
-  const explicit = log.match(/[Vv]erdict[^\n]*?(LGTM|NEEDS ATTENTION|DO NOT SHIP)/);
-  if (explicit) return explicit[1];
-  // Fallback: only accept a token when it stands alone on the final non-empty
-  // line. Bare tokens anywhere in prose are too easy to mis-classify
-  // (e.g. "not LGTM" → LGTM), and auto-push acts on this.
-  const lines = log.split('\n').map((l) => l.trim()).filter(Boolean);
+  // The real verdict is always near the end of the output. Search only the
+  // tail to avoid matching code snippets like `verdict === 'LGTM'` or the
+  // review prompt's own "Verdict: LGTM / NEEDS ATTENTION / DO NOT SHIP"
+  // instructions further up in the log.
+  const tail = log.slice(-2000);
+  // Multi-line "Verdict\n**X**" form: "Verdict" header followed by a token
+  // within a short window of non-alpha characters (whitespace, punctuation,
+  // markdown bold, list markers).
+  // Reject matches where the verdict is immediately followed by "/" — that's
+  // the prompt's own "LGTM / NEEDS ATTENTION / DO NOT SHIP" listing, not a
+  // decision.
+  const multiline = [...tail.matchAll(/[Vv]erdict[^A-Za-z]{1,80}?(LGTM|NEEDS ATTENTION|DO NOT SHIP)(?![*_` ]*\s*\/)/g)];
+  if (multiline.length > 0) return multiline[multiline.length - 1][1];
+  // Fallback: bare token alone on the final non-empty line.
+  const lines = tail.split('\n').map((l) => l.trim()).filter(Boolean);
   const last = lines[lines.length - 1];
-  if (last && /^(LGTM|NEEDS ATTENTION|DO NOT SHIP)$/.test(last)) return last;
+  if (last && /^[*_` ]*(LGTM|NEEDS ATTENTION|DO NOT SHIP)[*_` ]*$/.test(last)) {
+    return last.replace(/[*_` ]/g, '').trim();
+  }
   return null;
 }
 

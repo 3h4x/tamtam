@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { reviewProject, testProject, fixCi, fixFromJob, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions } from '@/lib/client-api'
+import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
 import { priorityColor, getHighestPriority, getAggregateCi, formatDuration } from '@/lib/statusConstants'
@@ -281,7 +281,6 @@ export function ProjectDetailPage({
     router.push(tab === 'overview' ? `/project/${name}` : `/project/${name}/${tab}`)
   }
   const [fixingCi, setFixingCi] = useState(false)
-  const [fixingReview, setFixingReview] = useState(false)
   const [fixCiResult, setFixCiResult] = useState<string | null>(null)
   const [projectJobs, setProjectJobs] = useState<JobInfo[]>([])
   const [showPushPanel, setShowPushPanel] = useState(false)
@@ -420,8 +419,6 @@ export function ProjectDetailPage({
     .filter(j => j.status === 'running')
     .sort((a, b) => (b.started_at || 0) - (a.started_at || 0))
 
-  const [reviewError, setReviewError] = useState<string | null>(null)
-  const [testError, setTestError] = useState<string | null>(null)
   const [releasing, setReleasing] = useState(false)
 
   const handleRelease = async () => {
@@ -440,31 +437,6 @@ export function ProjectDetailPage({
     }
   }
 
-  const handleReview = async () => {
-    if (!name) return
-    setReviewError(null)
-    try {
-      const result = await reviewProject(name)
-      router.push(`/project/${name}/terminal?job=${encodeURIComponent(result.job_id)}`)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to start review'
-      toast(msg, 'error')
-      setReviewError(msg)
-    }
-  }
-
-  const handleTest = async () => {
-    if (!name) return
-    setTestError(null)
-    try {
-      const result = await testProject(name)
-      router.push(`/project/${name}/terminal?job=${encodeURIComponent(result.job_id)}`)
-    } catch (err) {
-      setTestError(err instanceof Error ? err.message : 'Failed to start tests')
-    }
-  }
-
-
   const handleFixCi = async () => {
     if (!name || fixingCi) return
     setFixingCi(true)
@@ -475,23 +447,6 @@ export function ProjectDetailPage({
     } catch (err) {
       setFixCiResult(err instanceof Error ? err.message : 'Failed to start CI fix')
       setFixingCi(false)
-    }
-  }
-
-  const handleFixReview = async (reviewJobId: string) => {
-    if (!name || fixingReview) return
-    setFixingReview(true)
-    try {
-      const result = await fixFromJob(reviewJobId)
-      const sessionId = latestReview?.session_id
-      if (sessionId) {
-        router.push(`/project/${name}/terminal/${sessionId}`)
-      } else {
-        router.push(`/project/${name}/terminal?job=${encodeURIComponent(result.job_id)}`)
-      }
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to start fix', 'error')
-      setFixingReview(false)
     }
   }
 
@@ -610,62 +565,6 @@ export function ProjectDetailPage({
               </button>
             )
           })()}
-          {(() => {
-            const showFix = !!latestReview && !isReviewRunning &&
-              (verdict === 'NEEDS ATTENTION' || verdict === 'DO NOT SHIP')
-            if (showFix) {
-              const busy = fixingReview || isFixRunning
-              return (
-                <button
-                  className="px-3 py-1.5 text-sm border border-status-warning text-status-warning rounded-md hover:bg-status-warning/10 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  onClick={() => handleFixReview(latestReview!.id)}
-                  disabled={busy}
-                  title={busy ? 'Fix already running' : `Run Claude to fix review findings (${verdict}) in the same session — will auto-re-review on success`}
-                >
-                  {busy ? 'Fixing…' : 'Fix Review'}
-                </button>
-              )
-            }
-            return (
-              <button
-                className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={handleReview}
-                disabled={isReviewRunning || project.totalChanges === 0}
-                title={isReviewRunning ? 'Review already in progress' : project.totalChanges === 0 ? 'No changes to review' : 'Start review'}
-              >
-                {isReviewRunning ? 'Reviewing...' : 'Review'}
-              </button>
-            )
-          })()}
-          {(() => {
-            const hasTestCommand = !!(config?.effective_test_command || config?.detected_test_command)
-            return (
-              <button
-                className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={handleTest}
-                disabled={isTestRunning || !hasTestCommand}
-                title={
-                  isTestRunning
-                    ? 'Tests already running'
-                    : !hasTestCommand
-                      ? 'No test command detected — configure in project settings'
-                      : 'Run test suite'
-                }
-              >
-                {isTestRunning ? 'Testing...' : 'Run Tests'}
-              </button>
-            )
-          })()}
-          {reviewError && (
-            <span className="text-status-error text-xs">
-              {reviewError}
-            </span>
-          )}
-          {testError && (
-            <span className="text-status-error text-xs">
-              {testError}
-            </span>
-          )}
           <button
             className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={() => {
@@ -1003,7 +902,7 @@ export function ProjectDetailPage({
               config?.detected_test_command ||
               projectJobs.some(j => j.kind === 'test' && j.started_at >= (Date.now() / 1000 - 60 * 60))
             )
-            type StepState = 'pending' | 'running' | 'done' | 'failed'
+            type StepState = 'pending' | 'running' | 'done' | 'warning' | 'failed'
             const pipelineStarted = projectJobs.some(
               j => ['test', 'review', 'fix'].includes(j.kind) && j.started_at >= (Date.now() / 1000 - 60 * 60)
             )
@@ -1034,63 +933,78 @@ export function ProjectDetailPage({
             let reviewState: StepState
             let reviewHint = ''
             let reviewFixAction: (() => void) | null = null
-            if (reviewRawState === 'running') { reviewState = 'running'; reviewHint = 'review in progress' }
-            else if (!reviewJob) { reviewState = 'pending'; reviewHint = 'not run yet — click 🚀 Release or Review' }
-            else if (reviewRawState === 'failed') { reviewState = 'failed'; reviewHint = `review job failed (exit ${reviewJob.exit_code}) — click to view log`; reviewFixAction = () => router.push(`/project/${name}/terminal?job=${encodeURIComponent(reviewJob.id)}`) }
+            // Clicking any step with a job attached always opens that job's
+            // terminal (session URL if available, else single-job URL) — the
+            // primary job of clicking is to INSPECT. Starting or retrying a
+            // stage belongs to the Release button and to explicit Fix actions,
+            // not to pipeline-step clicks.
+            const openJob = (j: JobInfo) => {
+              const sid = j.session_id
+              return () => router.push(sid ? `/project/${name}/terminal/${sid}` : `/project/${name}/terminal?job=${encodeURIComponent(j.id)}`)
+            }
+            if (reviewRawState === 'running') {
+              reviewState = 'running'
+              reviewHint = 'review in progress — click to open terminal'
+              reviewFixAction = openJob(reviewJob!)
+            }
+            else if (!reviewJob) { reviewState = 'pending'; reviewHint = 'not run yet — click 🚀 Release' }
+            else if (reviewRawState === 'failed') {
+              reviewState = 'failed'
+              reviewHint = `review job failed (exit ${reviewJob.exit_code}) — click to view log`
+              reviewFixAction = openJob(reviewJob)
+            }
             else if (reviewVerdict === 'LGTM') {
               if (hasUnreviewed) {
                 reviewState = 'pending'
-                reviewHint = 'last verdict was LGTM but files changed since — re-run Review to revalidate'
-                reviewFixAction = handleReview
+                reviewHint = 'last verdict was LGTM but files changed since — click to view last review'
+                reviewFixAction = openJob(reviewJob)
               } else {
                 reviewState = 'done'
-                reviewHint = 'LGTM — ready to push'
+                reviewHint = 'LGTM — click to view review log'
+                reviewFixAction = openJob(reviewJob)
               }
+            } else if (reviewVerdict === 'NEEDS ATTENTION') {
+              reviewState = 'warning'
+              reviewHint = 'verdict: NEEDS ATTENTION — click to view findings'
+              reviewFixAction = openJob(reviewJob)
             } else {
-              // NEEDS ATTENTION / DO NOT SHIP / unknown
+              // DO NOT SHIP / unknown
               reviewState = 'failed'
-              reviewHint = `verdict: ${reviewVerdict || 'unknown'} — click Fix Review or address findings`
-              reviewFixAction = () => handleFixReview(reviewJob.id)
+              reviewHint = `verdict: ${reviewVerdict || 'unknown'} — click to view findings`
+              reviewFixAction = openJob(reviewJob)
             }
-            // Review failed → fix triggers. Show as running while fix is in flight.
-            if (reviewState === 'failed' && fixJob && fixJob.status === 'running') {
+            // Fix in progress after a non-LGTM review → show as running, open fix's terminal.
+            if ((reviewState === 'failed' || reviewState === 'warning') && fixJob && fixJob.status === 'running') {
               reviewState = 'running'
-              reviewHint = 'fix in progress — will re-review when done'
-              reviewFixAction = null
+              reviewHint = 'fix in progress — click to open terminal'
+              reviewFixAction = openJob(fixJob)
             }
             const reviewPassed = reviewState === 'done'
             const hasChanges = project.totalChanges > 0
             const unpushed = (project.unpushed ?? 0) > 0
-            // Commit is done when there are no uncommitted changes (either
-            // nothing to commit or already committed). Running when review
-            // LGTM'd and auto-push is chaining. Failed when review blocked it.
-            let commitState: StepState
-            if (!hasChanges) commitState = 'done'
-            else if (reviewPassed) commitState = 'running'
-            else commitState = 'pending'
-            // Push is done when there are no unpushed commits (and no uncommitted changes).
-            let pushState: StepState
-            if (!hasChanges && !unpushed) pushState = 'done'
-            else if (reviewPassed && !hasChanges) pushState = 'running'
-            else pushState = 'pending'
+            const autoPush = !!config?.auto_push_enabled
+            // Commit/push run synchronously inside the review completion hook,
+            // so there's no distinct job to observe. Stay in 'pending' until
+            // state flips to 'done' on refresh — we can't reliably detect a
+            // mid-flight push and don't want to get stuck showing a spinner.
+            const commitState: StepState = hasChanges ? 'pending' : 'done'
+            const pushState: StepState = !hasChanges && !unpushed ? 'done' : 'pending'
 
             const testHint = !hasTestCommand
               ? 'no test command'
               : testState === 'running' ? 'tests running'
-              : testState === 'done' ? `tests passed (${formatAgo(testJob?.finished_at ?? testJob?.started_at ?? 0)})`
+              : testState === 'done' && testJob ? `tests passed (${formatAgo(testJob.finished_at ?? testJob.started_at)})`
               : testState === 'failed' ? `tests failed (exit ${testJob?.exit_code})`
               : 'tests not run yet'
             const pushHint = pushState === 'done'
               ? 'nothing to push'
-              : pushState === 'running'
-                ? 'push in progress'
-                : unpushed
-                  ? `${project.unpushed} unpushed commit${project.unpushed === 1 ? '' : 's'}`
-                  : `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — need review & commit first`
+              : unpushed
+                ? `${project.unpushed} unpushed commit${project.unpushed === 1 ? '' : 's'}${autoPush && reviewPassed ? ' — auto-push pending' : ''}`
+                : `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — need review & commit first`
             const commitHint = commitState === 'done'
               ? 'nothing to commit'
-              : commitState === 'running'
-                ? 'committing…'
+              : reviewPassed
+                ? `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — ${autoPush ? 'auto-commit pending' : 'commit manually'}`
                 : `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — need LGTM review to proceed`
 
             const steps: Array<{ label: string; state: StepState; hint: string; action?: (() => void) | null }> = []
@@ -1102,6 +1016,7 @@ export function ProjectDetailPage({
             const glyph = (s: StepState) => {
               if (s === 'done') return <span className="text-status-success">✓</span>
               if (s === 'failed') return <span className="text-status-error">✗</span>
+              if (s === 'warning') return <span className="text-status-warning">!</span>
               if (s === 'running') return <span className="inline-block w-3 h-3 rounded-full border-2 border-accent border-t-transparent animate-spin align-middle" />
               return <span className="text-text-tertiary">○</span>
             }
@@ -1113,7 +1028,7 @@ export function ProjectDetailPage({
                   const inner = (
                     <>
                       <span className="inline-flex items-center justify-center w-5 h-5">{glyph(s.state)}</span>
-                      <span className={`font-mono text-xs ${s.state === 'running' ? 'text-accent font-semibold' : s.state === 'done' ? 'text-text-primary' : s.state === 'failed' ? 'text-status-error' : 'text-text-secondary'}`}>
+                      <span className={`font-mono text-xs ${s.state === 'running' ? 'text-accent font-semibold' : s.state === 'done' ? 'text-text-primary' : s.state === 'failed' ? 'text-status-error' : s.state === 'warning' ? 'text-status-warning' : 'text-text-secondary'}`}>
                         {s.label}
                       </span>
                     </>

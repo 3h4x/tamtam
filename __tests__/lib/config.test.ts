@@ -63,7 +63,7 @@ describe('config', () => {
         default_model: 'haiku',
         permission_mode: 'bypassPermissions',
         commit_style: 'Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Types: feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert.',
-        review_verdict_rules: expect.stringContaining('LGTM ONLY when there are zero findings'),
+        review_verdict_rules: expect.stringContaining('Pragmatic verdict rules'),
       });
     });
 
@@ -332,7 +332,7 @@ describe('config', () => {
 
     it('returns default review_verdict_rules when not set', () => {
       const config = getSettings();
-      expect(config.review_verdict_rules).toContain('LGTM ONLY when there are zero findings');
+      expect(config.review_verdict_rules).toContain('Pragmatic verdict rules');
     });
 
     it('returns overridden review_verdict_rules from DB', () => {

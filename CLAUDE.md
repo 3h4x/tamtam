@@ -2,11 +2,38 @@
 
 Next.js monolith (App Router) for managing Claude CLI agents across multiple projects. Define skills, compose agents, run them on demand or on a schedule.
 
+## Vision: CI/CD for code, driven by Claude
+
+TamTam's north star is a **quality-gated release pipeline** for each tracked repo:
+
+```
+   test → review → (fix loop) → commit → push
+```
+
+Each step is pluggable per project and coordinated by completion hooks in `lib/job-storage.ts`:
+
+- **test** — runs the project's test command (auto-detected from `package.json`/`pyproject.toml`/`Package.swift`/`Cargo.toml`/`go.mod`/`Makefile:test` or user-configured). Skipped if none.
+- **review** — Claude reads the uncommitted diff and emits a verdict: `LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP` (verdict rules are configurable in Settings).
+- **fix** — on `NEEDS ATTENTION` / `DO NOT SHIP`, Claude resumes the review session and applies fixes. Capped at 3 iterations per 30-minute window to prevent loops. On success it chains back to review.
+- **commit + push** — on `LGTM`, staged changes are committed with a Claude-generated message (respecting the `commit_style` setting) and pushed. Only tracked file modifications are staged automatically (untracked files are left alone to avoid sweeping up secrets).
+
+The **🚀 Release** button triggers the pipeline at the right starting step. When `auto_push_enabled` is on (per-project config, off by default), the chain continues automatically from one step to the next. The pipeline strip in the Terminal tab shows the live state of each step (`○` pending, spinner running, `✓` done, `!` needs attention, `✗` failed); clicking a step re-triggers or opens its log.
+
+**Helpers** (composable building blocks used by both the API routes and the auto-chain):
+- `lib/start-test.ts` → `startProjectTest`
+- `lib/start-review.ts` → `startProjectReview`
+- `lib/start-fix.ts` → `startFixFromJob`
+- `lib/start-push.ts` → `startProjectPush`
+- `lib/start-release.ts` → `startRelease` (pipeline entry point)
+
+Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars** of the parsed Claude log and looks for an explicit "Verdict: X" marker or a bare token on the final line — deliberately lenient across markdown formatting (`## Verdict\n**NEEDS ATTENTION**`) but robust against false positives from code snippets higher up in the log.
+
 ## Concepts
 - **Skills** — reusable prompt/instruction blocks (DB-backed + file-based from `skills/docs/skills/`)
 - **Agents** — composed from skills + model + prompt + schedule + runner (pm2/launchctl)
 - **Runs** — individual executions of an agent (what was previously called "jobs")
 - **Custom Actions** — per-project bash commands (e.g. deploy) with configurable button color
+- **Release Pipeline** — test → review → fix → commit → push, driven by Claude and configurable per project
 
 ## Tech Stack
 - **Framework**: Next.js 16 (App Router) — both frontend and backend
