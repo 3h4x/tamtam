@@ -368,7 +368,7 @@ describe('POST /api/projects/by-project/[name]/push/generate', () => {
       method: 'POST',
     });
     const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(500);
     const data = await res.json();
     expect(data.options).toEqual([]);
     expect(data.error).toContain('exec failed');

@@ -80,7 +80,8 @@ export function pruneRunsFile(keep = 300): void {
 export function readRunHistory(project?: string, limit = 20): RunEntry[] {
   if (!existsSync(RUNS_FILE)) return [];
 
-  const starts = new Map<number, any>();
+  interface StartRec { e: 'start'; p: string; t: string; pid: number; os_pid: number | null }
+  const starts = new Map<number, StartRec>();
   const completed: RunEntry[] = [];
 
   const lines = readFileSync(RUNS_FILE, 'utf-8').split('\n');

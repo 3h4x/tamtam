@@ -1,0 +1,82 @@
+import { resolveProjectPath } from './project-data';
+import { startProjectTest, detectTestCommand } from './start-test';
+import { startProjectReview } from './start-review';
+import { startProjectPush } from './start-push';
+import { listJobs, probeJobStatus } from './job-storage';
+import { exec } from './shell';
+
+const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push']);
+
+async function isReleasePipelineRunning(projectName: string): Promise<boolean> {
+  const candidates = listJobs().filter(
+    (j) => j.project === projectName && j.finishedAt === null && RELEASE_PIPELINE_KINDS.has(j.kind)
+  );
+  for (const j of candidates) {
+    if ((await probeJobStatus(j)) === 'running') return true;
+  }
+  return false;
+}
+
+export type ReleaseResult =
+  | { ok: true; step: 'test' | 'review' | 'push'; jobId?: string; message: string }
+  | { ok: false; status: number; detail: string };
+
+async function hasChanges(projPath: string): Promise<boolean> {
+  const r = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
+  if (r.exitCode !== 0) return false;
+  return r.stdout.split('\n').some((l) => l.trim());
+}
+
+async function hasUnpushedCommits(projPath: string): Promise<boolean> {
+  const r = await exec('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
+  if (!r.stdout.trim() || r.exitCode !== 0) return false;
+  const n = parseInt(r.stdout.trim(), 10);
+  return !isNaN(n) && n > 0;
+}
+
+/**
+ * Pluggable release pipeline entry point.
+ *
+ * Flow: tests (if configured) → review → push. Subsequent steps are chained via
+ * completion hooks in `job-storage.runCompletionHooks` — this helper only
+ * starts the first step. Caller must ensure `auto_push_enabled` is set for the
+ * chaining to continue automatically.
+ *
+ * Decision order:
+ *  1. If no changes and no unpushed commits → nothing to release
+ *  2. If a test command is configured/detected → start tests
+ *  3. If there are changes → start review
+ *  4. If only unpushed commits → push directly
+ */
+export async function startRelease(projectName: string): Promise<ReleaseResult> {
+  const projPath = resolveProjectPath(projectName);
+  if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
+
+  if (await isReleasePipelineRunning(projectName)) {
+    return { ok: false, status: 409, detail: `Release pipeline already running for ${projectName}` };
+  }
+
+  const changes = await hasChanges(projPath);
+  const unpushed = await hasUnpushedCommits(projPath);
+  if (!changes && !unpushed) {
+    return { ok: false, status: 400, detail: 'Nothing to release — no changes and no unpushed commits' };
+  }
+
+  const testCmd = detectTestCommand(projPath, projectName);
+  if (testCmd) {
+    const r = await startProjectTest(projectName);
+    if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+    return { ok: true, step: 'test', jobId: r.jobId, message: `Running tests (${r.testCmd})` };
+  }
+
+  if (changes) {
+    const r = await startProjectReview(projectName);
+    if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+    return { ok: true, step: 'review', jobId: r.jobId, message: 'Running review' };
+  }
+
+  // Only unpushed commits remain — push directly.
+  const r = await startProjectPush(projectName);
+  if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+  return { ok: true, step: 'push', message: r.message };
+}

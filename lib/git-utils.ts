@@ -11,10 +11,7 @@ function reviewStatePath(project: string): string {
 }
 
 export async function gitStatusHash(path: string): Promise<string | null> {
-  // Ignore untracked files: the release pipeline only auto-stages tracked
-  // modifications (`git add -u`), so untracked files shouldn't invalidate a
-  // LGTM verdict. New files must be staged by the user explicitly.
-  const result = await exec('git', ['-C', path, 'status', '--porcelain', '--ignore-submodules', '-uno'], {
+  const result = await exec('git', ['-C', path, 'status', '--porcelain', '--ignore-submodules'], {
     timeout: 5000,
   });
   if (result.exitCode !== 0) return null;
@@ -39,9 +36,7 @@ export async function isReviewed(project: string, path: string): Promise<boolean
 
 export async function gitChanges(path: string): Promise<number | null> {
   try {
-    // Count only tracked modifications (what the release pipeline actually
-    // processes). Untracked files are surfaced separately via gitUntracked.
-    const result = await exec('git', ['-C', path, 'status', '--porcelain', '--ignore-submodules', '-uno'], {
+    const result = await exec('git', ['-C', path, 'status', '--porcelain', '--ignore-submodules'], {
       timeout: 5000,
     });
     if (result.exitCode !== 0) return null;

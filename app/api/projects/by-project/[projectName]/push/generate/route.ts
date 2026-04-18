@@ -60,6 +60,6 @@ Return ONLY the ${numOptions} titles — nothing else.`;
 
     return NextResponse.json({ options, model, error: null });
   } catch (e: unknown) {
-    return NextResponse.json({ options: [], model: 'unknown', error: errMsg(e) });
+    return NextResponse.json({ options: [], model: 'unknown', error: errMsg(e) }, { status: 500 });
   }
 }
