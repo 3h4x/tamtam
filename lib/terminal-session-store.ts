@@ -205,7 +205,18 @@ class TerminalStore {
     })
 
     es.addEventListener('done', (event) => {
-      let metadata: any = {}
+      let metadata: {
+        exitCode?: number | null;
+        sessionId?: string | null;
+        detail?: string;
+        error?: boolean;
+        errorText?: string;
+        duration?: number;
+        inputTokens?: number;
+        outputTokens?: number;
+        cacheReadTokens?: number;
+        cacheCreateTokens?: number;
+      } = {}
       try {
         metadata = JSON.parse((event as MessageEvent).data)
       } catch {}
@@ -215,7 +226,16 @@ class TerminalStore {
         if (s.thinkingBuffer) newEntries.push({ role: 'thinking', text: s.thinkingBuffer })
         for (const t of s.streamTools) newEntries.push({ role: 'tool', text: '', tool: t })
         if (s.streamBuffer) newEntries.push({ role: 'assistant', text: s.streamBuffer })
-        if (metadata.exitCode !== undefined && metadata.exitCode !== null) {
+        // Parser-emitted done events carry `error` (from is_error) and
+        // optionally `errorText` (the result string Claude returned, e.g.
+        // "API Error: Stream idle timeout…"). Server-synthesized done events
+        // carry `exitCode` and `detail` instead. Show whichever is present.
+        if (metadata.error) {
+          newEntries.push({ role: 'error', text: 'claude run failed' })
+          if (metadata.errorText) {
+            newEntries.push({ role: 'error', text: metadata.errorText })
+          }
+        } else if (metadata.exitCode !== undefined && metadata.exitCode !== null) {
           const ok = metadata.exitCode === 0
           newEntries.push({
             role: ok ? 'status' : 'error',

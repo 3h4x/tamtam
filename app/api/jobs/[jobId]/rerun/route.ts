@@ -7,6 +7,7 @@ import { resolveProjectPath } from '@/lib/project-data';
 import { getJob, createJob, updateJob } from '@/lib/job-storage';
 import { startJob } from '@/lib/pm2-jobs';
 import { getPermissionModeFlag } from '@/lib/config';
+import { errMsg } from '@/lib/types';
 
 export async function POST(
   request: NextRequest,
@@ -61,10 +62,10 @@ export async function POST(
       projPath
     );
     job.pid = pid;
-  } catch (e: any) {
+  } catch (e: unknown) {
     job.finishedAt = Date.now() / 1000;
     job.exitCode = -1;
-    return NextResponse.json({ detail: `Failed to start rerun: ${e.message}` }, { status: 500 });
+    return NextResponse.json({ detail: `Failed to start rerun: ${errMsg(e)}` }, { status: 500 });
   }
 
   updateJob(job);

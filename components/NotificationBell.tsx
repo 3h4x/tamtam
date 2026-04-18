@@ -169,8 +169,7 @@ export function NotificationBell() {
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-88 bg-bg-primary border border-border rounded-lg shadow-xl z-50 overflow-hidden"
-          style={{ width: '22rem' }}>
+        <div className="absolute right-0 top-full mt-2 w-[22rem] bg-bg-primary border border-border rounded-lg shadow-xl z-50 overflow-hidden">
 
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
@@ -269,7 +268,7 @@ export function NotificationBell() {
           {/* Footer */}
           <div className="px-4 py-2.5 border-t border-border">
             <Link
-              href="/jobs"
+              href="/runs"
               onClick={() => setOpen(false)}
               className="text-xs text-text-tertiary hover:text-text-primary transition-colors no-underline flex items-center gap-1"
             >

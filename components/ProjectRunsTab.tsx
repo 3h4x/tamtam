@@ -289,7 +289,7 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search prompts, models, session ids…"
-            className="w-full pl-8 pr-8 py-1.5 text-sm bg-bg-secondary border border-border rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-accent"
+            className="w-full pl-8 pr-8 py-1.5 text-sm bg-bg-secondary border border-border rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
           />
           <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary text-xs" aria-hidden>⌕</span>
           {search && (
@@ -358,11 +358,14 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
       </div>
 
       {loading ? (
-        <div className="text-text-secondary text-sm">Loading runs...</div>
+        <div className="flex items-center gap-2 justify-center py-8">
+          <div className="spinner" />
+          <span className="text-text-secondary text-sm">Loading runs…</span>
+        </div>
       ) : filtered.length === 0 ? (
         <div className="text-text-secondary text-sm p-6 text-center border border-border rounded-lg bg-bg-secondary">
           {entries.length === 0
-            ? 'No runs yet'
+            ? 'No runs yet — trigger an agent or use the Run button above'
             : search.trim()
             ? `No runs match "${search.trim()}"`
             : 'No runs match the current filter'}

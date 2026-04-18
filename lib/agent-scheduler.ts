@@ -3,9 +3,16 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { exec } from './shell';
 import { getSettings } from './config';
+import { getImproveConfig } from './scheduling';
 
 const LAUNCH_AGENTS_DIR = join(homedir(), 'Library', 'LaunchAgents');
-const SCRIPTS_DIR = join(homedir(), 'logs', 'agent-scripts');
+
+function getLogDir(): string {
+  try { return getImproveConfig().logDir; } catch { return join(homedir(), 'logs'); }
+}
+function getScriptsDir(): string {
+  return join(getLogDir(), 'agent-scripts');
+}
 
 function parseScheduleToSeconds(schedule: string): number {
   const s = schedule.trim();
@@ -49,11 +56,11 @@ function agentPlistPath(agentId: string): string {
 }
 
 function agentScriptPath(agentId: string): string {
-  return join(SCRIPTS_DIR, `${agentId}.sh`);
+  return join(getScriptsDir(), `${agentId}.sh`);
 }
 
 function agentPromptPath(agentId: string): string {
-  return join(SCRIPTS_DIR, `${agentId}.prompt.json`);
+  return join(getScriptsDir(), `${agentId}.prompt.json`);
 }
 
 function buildScript(agentId: string): string {
@@ -96,7 +103,7 @@ function buildPlist(agentId: string, schedule: string): string {
 }
 
 function ensureDirs(): void {
-  mkdirSync(SCRIPTS_DIR, { recursive: true });
+  mkdirSync(getScriptsDir(), { recursive: true });
   mkdirSync(join(homedir(), 'logs'), { recursive: true });
 }
 

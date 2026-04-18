@@ -257,3 +257,75 @@ describe('writeProjectFieldYaml', () => {
     expect(fn('proj1', 'unknown_field', 'value')).toBe(true);
   });
 });
+
+describe('getImproveConfig — logDir path expansion', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+
+  function setupMocks(log_dir: string) {
+    testDb = createTestDb();
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/config', () => ({
+      getSettings: vi.fn().mockReturnValue({
+        workspace_path: '/workspace',
+        github_owner: '',
+        claude_bin: '/usr/bin/claude',
+        log_dir,
+        frequency: '1h',
+        daytime: false,
+        weekends: false,
+        launchagent_prefix: 'com.tamtam',
+        base_prompt: '',
+        permission_mode: 'bypassPermissions',
+      }),
+    }));
+  }
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('resolves ./relative path against process.cwd()', async () => {
+    vi.resetModules();
+    setupMocks('./data/logs');
+    const { getImproveConfig } = await import('@/lib/scheduling');
+    const { join } = await import('path');
+    const config = getImproveConfig();
+    expect(config.logDir).toBe(join(process.cwd(), 'data/logs'));
+  });
+
+  it('resolves ../relative path against process.cwd()', async () => {
+    vi.resetModules();
+    setupMocks('../other-logs');
+    const { getImproveConfig } = await import('@/lib/scheduling');
+    const { join } = await import('path');
+    const config = getImproveConfig();
+    expect(config.logDir).toBe(join(process.cwd(), '../other-logs'));
+  });
+
+  it('resolves bare relative path (no leading dot) against process.cwd()', async () => {
+    vi.resetModules();
+    setupMocks('logs/tamtam');
+    const { getImproveConfig } = await import('@/lib/scheduling');
+    const { join } = await import('path');
+    const config = getImproveConfig();
+    expect(config.logDir).toBe(join(process.cwd(), 'logs/tamtam'));
+  });
+
+  it('expands ~/path to homedir', async () => {
+    vi.resetModules();
+    setupMocks('~/my-logs');
+    const { getImproveConfig } = await import('@/lib/scheduling');
+    const { join } = await import('path');
+    const { homedir } = await import('os');
+    const config = getImproveConfig();
+    expect(config.logDir).toBe(join(homedir(), 'my-logs'));
+  });
+
+  it('returns absolute path unchanged', async () => {
+    vi.resetModules();
+    setupMocks('/var/log/tamtam');
+    const { getImproveConfig } = await import('@/lib/scheduling');
+    const config = getImproveConfig();
+    expect(config.logDir).toBe('/var/log/tamtam');
+  });
+});

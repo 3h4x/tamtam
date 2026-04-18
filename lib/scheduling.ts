@@ -243,5 +243,11 @@ function expandHome(p: string): string {
   if (p.startsWith('~/') || p === '~') {
     return join(homedir(), p.slice(2));
   }
+  // Resolve relative paths against the tamtam process working directory so
+  // defaults like `./data/logs` land inside the project, not wherever the
+  // command was launched from.
+  if (p.startsWith('./') || p.startsWith('../') || (!p.startsWith('/') && p !== '')) {
+    return join(process.cwd(), p);
+  }
   return p;
 }

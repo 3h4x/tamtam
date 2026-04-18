@@ -8,6 +8,7 @@ import { createJob, listJobs, probeJobStatus, updateJob, type JobData } from '@/
 import { startJob } from '@/lib/pm2-jobs';
 import { exec } from '@/lib/shell';
 import { CODE_REVIEWER_SKILL } from '@/lib/skills';
+import { errMsg } from '@/lib/types';
 import { withBasePrompt, getPermissionModeFlag } from '@/lib/config';
 
 function loadReviewPrompt(): string {
@@ -80,10 +81,10 @@ export async function POST(
       projPath
     );
     job.pid = pid;
-  } catch (e: any) {
+  } catch (e: unknown) {
     job.finishedAt = Date.now() / 1000;
     job.exitCode = -1;
-    return NextResponse.json({ detail: `Failed to start review: ${e.message}` }, { status: 500 });
+    return NextResponse.json({ detail: `Failed to start review: ${errMsg(e)}` }, { status: 500 });
   }
 
   updateJob(job);

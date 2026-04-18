@@ -323,6 +323,53 @@ describe('TerminalStore – startStream EventSource integration', () => {
     expect(errorEntries[1].text).toBe('log file missing');
   });
 
+  it('done event with error=true surfaces claude run failure + errorText', () => {
+    const p = proj();
+    terminalStore.startStream(p, 'job-api-err');
+    const es = esInstances[esInstances.length - 1];
+    es.emit(
+      'done',
+      JSON.stringify({
+        error: true,
+        errorText: 'API Error: Stream idle timeout - partial response received',
+        duration: 9636496,
+        inputTokens: 39,
+        outputTokens: 8460,
+        cacheReadTokens: 0,
+        cacheCreateTokens: 0,
+        sessionId: 'sess-api-err',
+      })
+    );
+    const s = terminalStore.get(p);
+    const errorEntries = s.history.filter((e) => e.role === 'error');
+    expect(errorEntries.length).toBe(2);
+    expect(errorEntries[0].text).toBe('claude run failed');
+    expect(errorEntries[1].text).toBe('API Error: Stream idle timeout - partial response received');
+    // stats still captured
+    expect(s.lastStats?.duration).toBe(9636496);
+    expect(s.lastStats?.outputTokens).toBe(8460);
+  });
+
+  it('done event with error=true but no errorText shows only the generic failure line', () => {
+    const p = proj();
+    terminalStore.startStream(p, 'job-err-no-text');
+    const es = esInstances[esInstances.length - 1];
+    es.emit('done', JSON.stringify({ error: true }));
+    const s = terminalStore.get(p);
+    const errorEntries = s.history.filter((e) => e.role === 'error');
+    expect(errorEntries.length).toBe(1);
+    expect(errorEntries[0].text).toBe('claude run failed');
+  });
+
+  it('done event with error=false does not trigger the error path', () => {
+    const p = proj();
+    terminalStore.startStream(p, 'job-ok');
+    const es = esInstances[esInstances.length - 1];
+    es.emit('done', JSON.stringify({ error: false, sessionId: 'ok' }));
+    const s = terminalStore.get(p);
+    expect(s.history.some((e) => e.role === 'error')).toBe(false);
+  });
+
   it('done event dequeues next message into pendingAutoSubmit', () => {
     const p = proj();
     terminalStore.update(p, () => ({ messageQueue: ['next prompt'] }));

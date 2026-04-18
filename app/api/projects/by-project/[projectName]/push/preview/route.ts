@@ -37,7 +37,7 @@ export async function GET(
     }
   }
 
-  const files: any[] = [];
+  const files: { status: string; filename: string; stats: string }[] = [];
   if (nameStatus.stdout.trim()) {
     for (const line of nameStatus.stdout.trim().split('\n')) {
       if (!line.trim()) continue;

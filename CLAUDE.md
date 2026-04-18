@@ -13,7 +13,7 @@ Next.js monolith (App Router) for managing Claude CLI agents across multiple pro
 - **Database**: Drizzle ORM + better-sqlite3, WAL mode, DB at `data/tamtam.db` (gitignored)
 - **Streaming**: SSE via route handlers for real-time run output
 - **Styling**: Tailwind CSS v4
-- **Skills**: `skills/` submodule (claude-skills) — engineering skills scanned from `skills/docs/skills/`
+- **Skills**: `skills/` submodule (claude-skills) — engineering skills scanned from `skills/docs/skills/`; user-defined skills in `data/skills/`
 - **Testing**: vitest + Playwright (e2e)
 - **Package Manager**: pnpm
 - **Release**: semantic-release on push to master (GitHub releases only, no npm)
@@ -106,7 +106,7 @@ Next.js monolith (App Router) for managing Claude CLI agents across multiple pro
 - Terminal runs use `claude --output-format stream-json` for token-by-token streaming via PM2 + log file + fs.watch + NDJSON parser (see `docs/TERMINAL.md`)
 - SSE at `/api/streaming/[jobId]` parses NDJSON and sends text deltas + `done` event (`?raw=1` for raw mode)
 - Agent runs compose skill content into the prompt before sending to Claude CLI
-- File-based skills scanned from `skills/docs/skills/` (all categories, SKILL.md files with frontmatter)
+- File-based skills scanned from `skills/docs/skills/` and `data/skills/` (category subdirs, `.md` files with optional frontmatter)
 - DB-backed skills created via `/skills` page or API
 - Optional auth via `Z_API_TOKEN` env var (Bearer token)
 - GitHub owner fallback configurable via `GITHUB_OWNER` env var or Settings UI

@@ -521,7 +521,7 @@ export async function fetchAgents(project?: string): Promise<{ agents: Agent[] }
   if (!response.ok) return { agents: [] }
   const data = await response.json()
   return {
-    agents: data.agents.map((a: any) => ({
+    agents: data.agents.map((a: Agent & { skillIds: string | string[] }) => ({
       ...a,
       skillIds: typeof a.skillIds === 'string' ? JSON.parse(a.skillIds) : a.skillIds,
     })),

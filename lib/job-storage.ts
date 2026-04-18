@@ -227,8 +227,8 @@ export function getVerdict(job: JobData): string | null {
   return match ? match[1] : null;
 }
 
-export function jobToDict(job: JobData): Record<string, any> {
-  const d: Record<string, any> = {
+export function jobToDict(job: JobData): Record<string, unknown> {
+  const d: Record<string, unknown> = {
     id: job.id,
     project: job.project,
     kind: job.kind,
@@ -281,8 +281,8 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
     try {
       process.kill(job.pid, 0);
       return 'running';
-    } catch (e: any) {
-      if (e.code === 'EPERM') return 'running';
+    } catch (e: unknown) {
+      if ((e as NodeJS.ErrnoException).code === 'EPERM') return 'running';
       await markDone(job, -1);
       return 'done';
     }
@@ -296,8 +296,8 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
   try {
     process.kill(job.pid, 0);
     return 'running';
-  } catch (e: any) {
-    if (e.code === 'EPERM') return 'running';
+  } catch (e: unknown) {
+    if ((e as NodeJS.ErrnoException).code === 'EPERM') return 'running';
     await markDone(job, -1);
     return 'done';
   }

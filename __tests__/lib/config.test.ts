@@ -52,7 +52,7 @@ describe('config', () => {
         workspace_path: '',
         github_owner: '',
         claude_bin: '~/.local/bin/claude',
-        log_dir: '~/logs',
+        log_dir: './data/logs',
         frequency: '1h',
         daytime: false,
         weekends: false,

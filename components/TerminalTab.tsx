@@ -14,6 +14,19 @@ import {
   type DocItem,
 } from '@/lib/terminal-session-store'
 
+interface JobDict {
+  id: string
+  kind: string
+  status: string
+  session_id: string | null
+  started_at: number
+  finished_at: number | null
+  exit_code: number | null
+  user_prompt: string | null
+  prompt: string | null
+  context_meta: string | null
+}
+
 interface SessionItem {
   id: string
   prompt: string | null
@@ -206,7 +219,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
       .then(r => r.json())
       .then(async (data) => {
-        const jobs: any[] = data.jobs ?? []
+        const jobs: JobDict[] = data.jobs ?? []
         const matches = jobs
           .filter(j => j.session_id === initialSessionId && j.kind === 'run')
           .sort((a, b) => a.started_at - b.started_at)
@@ -287,6 +300,20 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         const kind = data.kind || jobParam.split('-').slice(1, -1).join('-')
         const isClaudeJob = ['run', 'review', 'fix', 'fix-ci'].includes(data.kind) || (typeof data.kind === 'string' && data.kind.startsWith('agent:'))
         entries.push({ role: 'status', text: kind })
+
+        // Populate toolbar chips from contextMeta if the job recorded them (agents do this).
+        if (data.context_meta) {
+          try {
+            const meta = JSON.parse(data.context_meta)
+            if (Array.isArray(meta.skills)) {
+              terminalStore.update(projectName, () => ({ selectedItems: meta.skills }))
+            }
+            if (Array.isArray(meta.docs)) {
+              terminalStore.update(projectName, () => ({ selectedDocs: meta.docs }))
+            }
+          } catch {}
+        }
+
         if (isClaudeJob) {
           terminalStore.update(projectName, () => ({ history: entries }))
           terminalStore.startStream(projectName, jobParam)
@@ -512,22 +539,27 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
       const isFollowUp = !!sessionId
       let fullPrompt = text
 
-      if (!isFollowUp) {
-        const dbSkills = selectedItems.filter(s => s.source === 'db' && s.content)
-        if (dbSkills.length > 0) {
-          const skillContext = dbSkills.map(s => `## ${s.name}\n${s.content}`).join('\n\n---\n\n')
-          fullPrompt = skillContext + '\n\n---\n\n' + fullPrompt
-        }
-        if (selectedDocs.length > 0) {
-          const docContext = selectedDocs.map(d => `## ${d.name}\n${d.content}`).join('\n\n---\n\n')
-          fullPrompt = docContext + '\n\n---\n\n' + fullPrompt
-        }
+      // Always prepend currently-selected skills/docs so the toolbar badges
+      // reflect reality. Follow-up messages that add a new doc mid-session
+      // need the content sent too — users rightly expect "if it's in the bar,
+      // it's in context."
+      const dbSkills = selectedItems.filter(s => s.source === 'db' && s.content)
+      if (dbSkills.length > 0) {
+        const skillContext = dbSkills.map(s => `## ${s.name}\n${s.content}`).join('\n\n---\n\n')
+        fullPrompt = skillContext + '\n\n---\n\n' + fullPrompt
+      }
+      if (selectedDocs.length > 0) {
+        const docContext = selectedDocs.map(d => `## ${d.name}\n${d.content}`).join('\n\n---\n\n')
+        fullPrompt = docContext + '\n\n---\n\n' + fullPrompt
       }
 
-      const personaPaths = !isFollowUp
-        ? selectedItems.filter(s => s.source === 'file').map(s => s.id.replace('persona:', ''))
-        : []
+      // Personas (file-path skills) are re-sent on every turn so the toolbar
+      // badges match reality. The server reads the file each time — cheap.
+      const personaPaths = selectedItems
+        .filter(s => s.source === 'file')
+        .map(s => s.id.replace('persona:', ''))
 
+      // contextMeta snapshots the selection at session creation for restore.
       const contextMetaStr = !isFollowUp
         ? JSON.stringify({
             skills: selectedItems.map(s => ({ id: s.id, name: s.name, description: s.description, content: s.content, source: s.source })),
@@ -559,9 +591,9 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     try {
       const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
       const data = await res.json()
-      const jobs: any[] = (data.jobs ?? [])
-        .filter((j: any) => j.kind === 'run')
-        .sort((a: any, b: any) => b.started_at - a.started_at)
+      const jobs: JobDict[] = (data.jobs ?? [])
+        .filter((j: JobDict) => j.kind === 'run')
+        .sort((a: JobDict, b: JobDict) => b.started_at - a.started_at)
 
       const seen = new Set<string>()
       const grouped: SessionItem[] = []
@@ -602,7 +634,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
       try {
         const listRes = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
         const listData = await listRes.json()
-        const jobs: any[] = listData.jobs ?? []
+        const jobs: JobDict[] = listData.jobs ?? []
         const matches = jobs
           .filter(j => j.session_id === session.sessionId && j.kind === 'run')
           .sort((a, b) => a.started_at - b.started_at)
@@ -908,7 +940,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         {showSessions && (
           <div className="border-b border-[#2a2a2a] bg-[#151515] overflow-y-auto shrink-0" style={{ maxHeight: '200px' }}>
             {loadingSessions ? (
-              <div className="px-4 py-3 text-xs text-[#555] font-mono">loading...</div>
+              <div className="px-4 py-3 text-xs text-[#555] font-mono flex items-center gap-1.5"><div className="spinner-sm opacity-50" />loading…</div>
             ) : sessions.length === 0 ? (
               <div className="px-4 py-3 text-xs text-[#555] font-mono">no sessions</div>
             ) : (

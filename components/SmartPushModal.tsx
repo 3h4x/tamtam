@@ -30,8 +30,8 @@ const STATUS_COLOR: Record<string, string> = {
   R: 'text-status-info',
 }
 
-const BTN_SECONDARY = 'px-4 py-2 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer'
-const BTN_PRIMARY = 'px-4 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer'
+const BTN_SECONDARY = 'px-4 py-2 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
+const BTN_PRIMARY = 'px-4 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
 
 const COMMIT_EMOJI: Record<string, string> = {
   'feat:': '\u{2728}',
@@ -155,7 +155,7 @@ export function SmartPushModal({ projectName, onClose, onSuccess }: SmartPushMod
           <h3 className="m-0 text-base font-semibold">Push {projectName}</h3>
           {step !== 'execute' && (
             <button
-              className="bg-transparent border-none text-xl cursor-pointer text-text-secondary p-0 leading-none"
+              className="bg-transparent border-none text-xl cursor-pointer text-text-secondary hover:text-text-primary transition-colors p-0 leading-none"
               onClick={onClose}
             >
               &times;

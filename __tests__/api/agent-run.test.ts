@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/lib/db/schema';
@@ -56,6 +59,7 @@ describe('POST /api/agents/{agentId}/run', () => {
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let createJobMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
+  let tempSkillsDir: string;
 
   const now = Date.now() / 1000;
 
@@ -81,6 +85,7 @@ describe('POST /api/agents/{agentId}/run', () => {
   beforeEach(async () => {
     vi.resetModules();
     testDb = createTestDb();
+    tempSkillsDir = mkdtempSync(join(tmpdir(), 'tamtam-agent-run-test-'));
 
     startJobMock = vi.fn().mockResolvedValue(12345);
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
@@ -121,6 +126,8 @@ describe('POST /api/agents/{agentId}/run', () => {
       startJob: startJobMock,
     }));
 
+    vi.doMock('@/lib/skills', () => ({ SKILLS_DIR: tempSkillsDir, DATA_SKILLS_DIR: join(tempSkillsDir, 'data-skills') }));
+
     vi.doMock('@/lib/config', () => ({
       withBasePrompt: (p: string) => p,
       getPermissionModeFlag: () => '--dangerously-skip-permissions',
@@ -138,6 +145,7 @@ describe('POST /api/agents/{agentId}/run', () => {
   afterEach(() => {
     vi.resetModules();
     delete process.env.Z_API_TOKEN;
+    rmSync(tempSkillsDir, { recursive: true, force: true });
   });
 
   it('returns 404 if agent not found', async () => {
@@ -245,14 +253,13 @@ describe('POST /api/agents/{agentId}/run', () => {
     });
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-    const [, cmd, fullPrompt] = startJobMock.mock.calls[0];
-    expect(cmd).toContain('--append-system-prompt');
+    const [, , fullPrompt] = startJobMock.mock.calls[0];
     expect(fullPrompt).toContain('## My Skill');
     expect(fullPrompt).toContain('Skill instructions here');
     expect(fullPrompt).toContain('task prompt');
   });
 
-  it('does not add --append-system-prompt when agent has no skills', async () => {
+  it('does not prepend skill content when agent has no skills', async () => {
     insertAgent({ skillIds: '[]' });
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
@@ -260,8 +267,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     });
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-    const [, cmd, fullPrompt] = startJobMock.mock.calls[0];
-    expect(cmd).not.toContain('--append-system-prompt');
+    const [, , fullPrompt] = startJobMock.mock.calls[0];
     expect(fullPrompt).toBe('task prompt');
   });
 
@@ -299,5 +305,90 @@ describe('POST /api/agents/{agentId}/run', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
     expect(res.status).toBe(200);
+  });
+
+  it('prepends file-based persona content when skillIds contains persona:<path>', async () => {
+    const docsDir = join(tempSkillsDir, 'docs', 'skills', 'engineering-team');
+    mkdirSync(docsDir, { recursive: true });
+    writeFileSync(join(docsDir, 'senior-fullstack.md'), 'FULLSTACK-PERSONA-BODY');
+
+    insertAgent({ skillIds: '["persona:engineering-team/senior-fullstack"]' });
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'build it' }),
+    });
+    await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    expect(fullPrompt).toContain('FULLSTACK-PERSONA-BODY');
+    expect(fullPrompt).toContain('build it');
+  });
+
+  it('mixes DB skills and file-based personas in skillIds', async () => {
+    const docsDir = join(tempSkillsDir, 'docs', 'skills');
+    mkdirSync(docsDir, { recursive: true });
+    writeFileSync(join(docsDir, 'reviewer.md'), 'REVIEWER-FILE-CONTENT');
+
+    testDb.db
+      .insert(schema.skills)
+      .values({ id: 'skill-1', name: 'DB Skill', description: '', content: 'DB-SKILL-BODY', createdAt: now, updatedAt: now })
+      .run();
+    insertAgent({ skillIds: '["skill-1","persona:reviewer"]' });
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'task' }),
+    });
+    await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    expect(fullPrompt).toContain('DB-SKILL-BODY');
+    expect(fullPrompt).toContain('REVIEWER-FILE-CONTENT');
+    expect(fullPrompt).toContain('task');
+  });
+
+  it('records resolved skills in contextMeta so the terminal toolbar can show chips', async () => {
+    const docsDir = join(tempSkillsDir, 'docs', 'skills', 'engineering-team');
+    mkdirSync(docsDir, { recursive: true });
+    writeFileSync(join(docsDir, 'senior-fullstack.md'), '---\nname: Senior Fullstack\n---\nbody');
+
+    testDb.db
+      .insert(schema.skills)
+      .values({ id: 'skill-db', name: 'DB One', description: 'desc', content: 'x', createdAt: now, updatedAt: now })
+      .run();
+    insertAgent({ skillIds: '["skill-db","persona:engineering-team/senior-fullstack"]' });
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'task' }),
+    });
+    await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    // createJob is called as createJob(project, kind, pid, logPath, prompt, contextMeta, userPrompt)
+    const createArgs = createJobMock.mock.calls[0];
+    const contextMeta = createArgs[5];
+    expect(contextMeta).toBeTruthy();
+    const meta = JSON.parse(contextMeta);
+    expect(meta.skills).toHaveLength(2);
+    const dbChip = meta.skills.find((s: any) => s.source === 'db');
+    const fileChip = meta.skills.find((s: any) => s.source === 'file');
+    expect(dbChip?.name).toBe('DB One');
+    expect(fileChip?.id).toBe('persona:engineering-team/senior-fullstack');
+    expect(fileChip?.name).toBe('Senior Fullstack');
+  });
+
+  it('silently skips persona paths whose file does not exist', async () => {
+    insertAgent({ skillIds: '["persona:nonexistent/missing"]' });
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'task' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    expect(res.status).toBe(200);
+
+    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    expect(fullPrompt).toBe('task');
   });
 });

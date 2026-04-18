@@ -109,7 +109,7 @@ export function RunModal({ projectName, onClose }: RunModalProps) {
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h3 className="m-0 text-base font-semibold">Run — {projectName}</h3>
           <button
-            className="bg-transparent border-none text-xl cursor-pointer text-text-secondary p-0 leading-none"
+            className="bg-transparent border-none text-xl cursor-pointer text-text-secondary p-0 leading-none hover:text-text-primary transition-colors"
             onClick={onClose}
           >
             &times;
@@ -253,7 +253,7 @@ export function RunModal({ projectName, onClose }: RunModalProps) {
               >
                 <textarea
                   ref={textareaRef}
-                  className="w-full min-h-[120px] p-3 font-mono text-sm leading-relaxed bg-bg-primary text-text-primary border border-border rounded-sm resize-y mb-3 outline-none focus:border-accent placeholder:text-text-tertiary"
+                  className="w-full min-h-[120px] p-3 font-mono text-sm leading-relaxed bg-bg-primary text-text-primary border border-border rounded-sm resize-y mb-3 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent placeholder:text-text-tertiary transition-colors"
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -324,14 +324,14 @@ export function RunModal({ projectName, onClose }: RunModalProps) {
                   }}
                 />
                 <button
-                  className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
+                  className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   onClick={onClose}
                   disabled={submitting}
                 >
                   Cancel
                 </button>
                 <button
-                  className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer"
+                  className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   onClick={handleSubmit}
                   disabled={!prompt.trim() || submitting}
                 >

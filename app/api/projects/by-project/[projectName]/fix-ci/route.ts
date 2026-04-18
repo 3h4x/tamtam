@@ -7,6 +7,7 @@ import { createJob, listJobs, probeJobStatus, updateJob } from '@/lib/job-storag
 import { startJob } from '@/lib/pm2-jobs';
 import { exec } from '@/lib/shell';
 import { getPermissionModeFlag } from '@/lib/config';
+import { errMsg } from '@/lib/types';
 
 export async function POST(
   request: NextRequest,
@@ -91,10 +92,10 @@ Do not commit — just make the code changes.
       projPath
     );
     job.pid = pid;
-  } catch (e: any) {
+  } catch (e: unknown) {
     job.finishedAt = Date.now() / 1000;
     job.exitCode = -1;
-    return NextResponse.json({ detail: `Failed to start CI fix: ${e.message}` }, { status: 500 });
+    return NextResponse.json({ detail: `Failed to start CI fix: ${errMsg(e)}` }, { status: 500 });
   }
 
   updateJob(job);

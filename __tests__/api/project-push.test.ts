@@ -421,4 +421,124 @@ describe('POST /api/projects/by-project/[name]/push/generate', () => {
     expect(data.options).toEqual([]);
     expect(data.error).toContain('exec failed');
   });
+
+  it('always uses haiku model regardless of project settings', async () => {
+    execMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('--print')) {
+        return Promise.resolve({ exitCode: 0, stdout: '1. feat: add thing', stderr: '' });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push/generate', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.model).toBe('haiku');
+
+    // Verify claude was called with --model haiku
+    const claudeCall = execMock.mock.calls.find(([, args]: any) => args.includes('--print'));
+    expect(claudeCall![1]).toContain('haiku');
+  });
+
+  it('filters out lines that do not match conventional commit type prefix', async () => {
+    execMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('--print')) {
+        return Promise.resolve({
+          exitCode: 0,
+          stdout: [
+            '1. feat: valid commit',
+            '2. This is just prose and should be filtered',
+            '3. fix: another valid one',
+            '4. random text without type',
+            '5. chore: cleanup',
+          ].join('\n'),
+          stderr: '',
+        });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push/generate', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.options).toHaveLength(3);
+    expect(data.options).toContain('feat: valid commit');
+    expect(data.options).toContain('fix: another valid one');
+    expect(data.options).toContain('chore: cleanup');
+    expect(data.options).not.toContain('This is just prose and should be filtered');
+  });
+
+  it('strips backtick and quote wrapping before checking commit type', async () => {
+    execMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('--print')) {
+        return Promise.resolve({
+          exitCode: 0,
+          stdout: [
+            '1. `feat: wrapped in backticks`',
+            "2. 'fix: single quotes'",
+            '3. "docs: double quotes"',
+            '4. *refactor: asterisk wrapped*',
+          ].join('\n'),
+          stderr: '',
+        });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push/generate', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.options).toHaveLength(4);
+    expect(data.options[0]).toBe('feat: wrapped in backticks');
+    expect(data.options[1]).toBe('fix: single quotes');
+    expect(data.options[2]).toBe('docs: double quotes');
+    expect(data.options[3]).toBe('refactor: asterisk wrapped');
+  });
+
+  it('accepts scoped commit type like feat(ui):', async () => {
+    execMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('--print')) {
+        return Promise.resolve({
+          exitCode: 0,
+          stdout: '1. feat(ui): add button component',
+          stderr: '',
+        });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push/generate', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.options).toContain('feat(ui): add button component');
+  });
+
+  it('returns empty options when all lines fail commit type filter', async () => {
+    execMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('--print')) {
+        return Promise.resolve({
+          exitCode: 0,
+          stdout: 'Here are some commit options:\n- option one\n- option two',
+          stderr: '',
+        });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push/generate', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.options).toEqual([]);
+    expect(data.error).toBeNull();
+  });
 });

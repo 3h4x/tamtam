@@ -525,7 +525,7 @@ export function ProjectDetailPage({
         <div className="flex items-center gap-2 flex-wrap">
           {aggregateCi === 'failure' && ciFailedUrl && (
             <button
-              className="px-3 py-1.5 text-sm border border-status-error text-status-error rounded-md hover:bg-status-error/10"
+              className="px-3 py-1.5 text-sm border border-status-error text-status-error rounded-md hover:bg-status-error/10 disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={handleFixCi}
               disabled={fixingCi || isCiFixRunning}
               title={isCiFixRunning ? 'CI fix already in progress' : 'Start CI fix'}
@@ -539,7 +539,7 @@ export function ProjectDetailPage({
             </span>
           )}
           <button
-            className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
+            className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleReview}
             disabled={isReviewRunning || project.totalChanges === 0}
             title={isReviewRunning ? 'Review already in progress' : project.totalChanges === 0 ? 'No changes to review' : 'Start review'}
@@ -547,7 +547,7 @@ export function ProjectDetailPage({
             {isReviewRunning ? 'Reviewing...' : 'Review'}
           </button>
           <button
-            className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
+            className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleTest}
             disabled={isTestRunning}
             title={isTestRunning ? 'Tests already running' : 'Run test suite'}
@@ -565,7 +565,7 @@ export function ProjectDetailPage({
             </span>
           )}
           <button
-            className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
+            className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={() => setShowPushModal(true)}
             disabled={project.totalChanges === 0}
             title={project.totalChanges === 0 ? 'No changes to push' : 'Push changes to git'}
@@ -573,7 +573,7 @@ export function ProjectDetailPage({
             Push
           </button>
           <button
-            className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover"
+            className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer"
             onClick={() => setShowRunModal(true)}
             title="Run a custom Claude prompt"
           >
@@ -719,7 +719,10 @@ export function ProjectDetailPage({
       {activeTab === 'config' && (
         <div className="mt-4">
           {configLoading ? (
-            <div className="text-text-secondary text-sm">Loading configuration...</div>
+            <div className="flex items-center gap-2 text-text-secondary text-sm py-4">
+              <div className="spinner-sm" />
+              Loading configuration…
+            </div>
           ) : config ? (
             <div className="flex flex-col gap-6">
               <div className="bg-bg-secondary rounded-lg p-4">

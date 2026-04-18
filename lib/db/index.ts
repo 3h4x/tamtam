@@ -4,10 +4,10 @@ import * as schema from './schema';
 import { join } from 'path';
 import { mkdirSync } from 'fs';
 
-const dataDir = join(process.cwd(), 'data');
-mkdirSync(dataDir, { recursive: true });
+const dbDir = join(process.cwd(), 'data', 'db');
+mkdirSync(dbDir, { recursive: true });
 
-const dbPath = join(dataDir, 'tamtam.db');
+const dbPath = join(dbDir, 'tamtam.db');
 
 const sqlite = new Database(dbPath);
 sqlite.pragma('journal_mode = WAL');

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { checkAuth } from '@/lib/auth';
 import { resolveProjectPath } from '@/lib/project-data';
 import { exec } from '@/lib/shell';
+import { errMsg } from '@/lib/types';
 
 export async function POST(
   request: NextRequest,
@@ -25,36 +26,37 @@ export async function POST(
     const changesSummary = `\nGIT STATUS:\n${porcelainR.stdout}\nRepository: ${projectName}\n`;
 
     const numOptions = 5;
-    const commitPrompt = `Generate ${numOptions} different conventional commit titles. Be fast and concise.
+    const commitPrompt = `Output exactly ${numOptions} conventional commit titles, one per line, numbered 1-${numOptions}. No prose, no code blocks, no backticks, no quotes.
 
 ${changesSummary}${fileSummary}
 
-Format: <type>: <description>
-Types: feat, fix, docs, style, refactor, test, chore, ci, build
-
-Rules: One line only, present tense, max 50 chars, no period.
-
-Return ONLY ${numOptions} commit messages, one per line, numbered 1-${numOptions}. No other text.`;
+Format: <type>: <description>  (types: feat|fix|docs|style|refactor|test|chore|ci|build)
+Rules: present tense, ≤50 chars, no trailing period, plain text only.`;
 
     const { getImproveConfig } = await import('@/lib/scheduling');
     const { claudeBin } = getImproveConfig();
-    const { getSettings } = await import('@/lib/config');
-    const model = getSettings().default_model || 'sonnet';
+    // Commit message generation is short and latency-sensitive. Always use haiku,
+    // regardless of the project's default_model preference.
+    const model = 'haiku';
 
     const result = await exec(claudeBin, ['--print', '--model', model, '-p', commitPrompt], {
       cwd: projPath,
-      timeout: 60000,
+      timeout: 30000,
     });
 
+    const stripWrap = (s: string) =>
+      s.replace(/^[`'"*_]+/, '').replace(/[`'"*_]+$/, '').trim();
     const options = result.stdout
       .trim()
       .split('\n')
-      .map((l) => l.replace(/^\d+[.)]\s*/, '').trim())
-      .filter((l) => l.length > 0)
+      .map((l) => l.replace(/^\s*[-*•]\s*/, ''))
+      .map((l) => l.replace(/^\d+[.)]\s*/, ''))
+      .map(stripWrap)
+      .filter((l) => l.length > 0 && /^(feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert)(\(.+\))?:/i.test(l))
       .slice(0, numOptions);
 
     return NextResponse.json({ options, model, error: null });
-  } catch (e: any) {
-    return NextResponse.json({ options: [], model: 'unknown', error: e.message });
+  } catch (e: unknown) {
+    return NextResponse.json({ options: [], model: 'unknown', error: errMsg(e) });
   }
 }

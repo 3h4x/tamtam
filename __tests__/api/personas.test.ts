@@ -7,14 +7,17 @@ describe('GET /api/projects/personas', () => {
   let GET: any;
   let tempDir: string;
   let skillsDir: string;
+  let dataSkillsDir: string;
 
   beforeEach(async () => {
     vi.resetModules();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-personas-test-'));
     skillsDir = tempDir;
+    dataSkillsDir = join(tempDir, 'data-skills');
 
     vi.doMock('@/lib/skills', () => ({
       SKILLS_DIR: skillsDir,
+      DATA_SKILLS_DIR: dataSkillsDir,
     }));
 
     const mod = await import('@/app/api/projects/personas/route');
@@ -26,7 +29,7 @@ describe('GET /api/projects/personas', () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('returns empty personas when docs/skills dir does not exist', async () => {
+  it('returns empty personas when neither skills dir exists', async () => {
     const res = await GET();
     expect(res.status).toBe(200);
     const data = await res.json();
@@ -48,6 +51,39 @@ describe('GET /api/projects/personas', () => {
     expect(data.personas[0].description).toBe('Reviews code changes');
     expect(data.personas[0].category).toBe('engineering');
     expect(data.personas[0].path).toBe('engineering/code-reviewer');
+  });
+
+  it('returns personas from data/skills', async () => {
+    const cat = join(dataSkillsDir, 'custom');
+    mkdirSync(cat, { recursive: true });
+    writeFileSync(
+      join(cat, 'my-skill.md'),
+      '---\ntitle: "My Skill"\ndescription: "A custom skill"\n---\n\n# Content'
+    );
+
+    const res = await GET();
+    const data = await res.json();
+    expect(data.personas.length).toBe(1);
+    expect(data.personas[0].name).toBe('My Skill');
+    expect(data.personas[0].category).toBe('custom');
+    expect(data.personas[0].path).toBe('custom/my-skill');
+  });
+
+  it('merges personas from both skills dirs', async () => {
+    const docsSkills = join(skillsDir, 'docs', 'skills', 'engineering');
+    mkdirSync(docsSkills, { recursive: true });
+    writeFileSync(join(docsSkills, 'reviewer.md'), '# Reviewer');
+
+    const dataCat = join(dataSkillsDir, 'custom');
+    mkdirSync(dataCat, { recursive: true });
+    writeFileSync(join(dataCat, 'helper.md'), '# Helper');
+
+    const res = await GET();
+    const data = await res.json();
+    expect(data.personas.length).toBe(2);
+    const paths = data.personas.map((p: any) => p.path);
+    expect(paths).toContain('engineering/reviewer');
+    expect(paths).toContain('custom/helper');
   });
 
   it('returns personas from multiple categories', async () => {

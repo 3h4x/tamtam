@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { errMsg } from '@/lib/types'
 
 interface SettingsMap {
   workspace_path: string
@@ -261,8 +262,8 @@ export function SettingsPage() {
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
       loadProjects()
-    } catch (e: any) {
-      setError(`Failed to save: ${e.message}`)
+    } catch (e: unknown) {
+      setError(`Failed to save: ${errMsg(e)}`)
     } finally {
       setSaving(false)
     }
@@ -305,8 +306,8 @@ export function SettingsPage() {
       if (!res.ok) throw new Error('Failed to save')
       setProjectsSaved(true)
       setTimeout(() => setProjectsSaved(false), 2500)
-    } catch (e: any) {
-      setError(`Failed to save projects: ${e.message}`)
+    } catch (e: unknown) {
+      setError(`Failed to save projects: ${errMsg(e)}`)
     } finally {
       setProjectsSaving(false)
     }
@@ -326,8 +327,8 @@ export function SettingsPage() {
       if (!res.ok) throw new Error(data.error || res.statusText)
       setBackupResult({ filename: data.filename })
       setTimeout(() => setBackupResult(null), 5000)
-    } catch (e: any) {
-      setBackupError(e.message)
+    } catch (e: unknown) {
+      setBackupError(errMsg(e))
       setTimeout(() => setBackupError(null), 5000)
     } finally {
       setBackingUp(false)

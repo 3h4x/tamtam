@@ -86,7 +86,7 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
   const closeModal = () => { setEditing(null); setCreating(false) }
 
   const handleSaveAgent = async (data: { name: string; prompt: string; skillIds: string[]; model: string; schedule: string | null; runner: string }) => {
-    const parseAgent = (a: any): Agent => ({
+    const parseAgent = (a: Agent & { skillIds: string | string[] }): Agent => ({
       ...a,
       skillIds: typeof a.skillIds === 'string' ? JSON.parse(a.skillIds) : a.skillIds,
     })
@@ -102,7 +102,12 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
     closeModal()
   }
 
-  if (loading) return <div className="mt-4 text-text-secondary text-sm">Loading...</div>
+  if (loading) return (
+    <div className="mt-4 flex items-center gap-2 text-text-secondary text-sm">
+      <div className="spinner-sm" />
+      Loading agents…
+    </div>
+  )
 
   return (
     <div className="mt-4 flex flex-col gap-4">
@@ -121,7 +126,7 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
 
       {/* Agent list */}
       {agents.length === 0 && !creating && (
-        <div className="text-text-secondary text-sm p-4 bg-bg-secondary rounded-lg">
+        <div className="text-text-secondary text-sm p-4 bg-bg-secondary rounded-lg border border-border">
           No agents defined for this project. Create one to get started.
         </div>
       )}
@@ -171,7 +176,7 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
                     Edit
                   </button>
                   <button
-                    className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer"
+                    className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={() => handleRun(agent)}
                     disabled={runSubmitting === agent.id}
                   >

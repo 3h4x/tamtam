@@ -44,6 +44,31 @@ describe('claude-stream-parser', () => {
     }]);
   });
 
+  it('attaches errorText when is_error=true and result is a non-empty string', () => {
+    const line = '{"type":"result","subtype":"success","is_error":true,"duration_ms":9636496,"total_cost_usd":1.5,"session_id":"sess-x","result":"API Error: Stream idle timeout - partial response received"}';
+    const events = parseStreamLines(line);
+    expect(events).toHaveLength(1);
+    const done = events[0];
+    expect(done.type).toBe('done');
+    if (done.type !== 'done') return;
+    expect(done.result.error).toBe(true);
+    expect(done.result.errorText).toBe('API Error: Stream idle timeout - partial response received');
+  });
+
+  it('does not attach errorText on successful runs', () => {
+    const line = '{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"session_id":"s","result":"done"}';
+    const events = parseStreamLines(line);
+    if (events[0]?.type !== 'done') throw new Error('expected done');
+    expect(events[0].result.errorText).toBeUndefined();
+  });
+
+  it('does not attach errorText when result is empty string even on error', () => {
+    const line = '{"type":"result","subtype":"error","is_error":true,"duration_ms":50,"session_id":"s","result":""}';
+    const events = parseStreamLines(line);
+    if (events[0]?.type !== 'done') throw new Error('expected done');
+    expect(events[0].result.errorText).toBeUndefined();
+  });
+
   it('ignores system/init/hook events', () => {
     const lines = [
       '{"type":"system","subtype":"init","session_id":"x"}',

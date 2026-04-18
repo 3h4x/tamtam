@@ -245,3 +245,56 @@ describe('agent-scheduler', () => {
     });
   });
 });
+
+describe('agent-scheduler — custom logDir from getImproveConfig', () => {
+  let tempDir: string;
+  let execMock: ReturnType<typeof vi.fn>;
+  let installAgentSchedule: typeof import('@/lib/agent-scheduler').installAgentSchedule;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-scheduler-custom-logdir-'));
+    execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+
+    vi.doMock('os', async () => {
+      const actual = await vi.importActual<typeof import('os')>('os');
+      return { ...actual, homedir: () => tempDir };
+    });
+
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+
+    vi.doMock('@/lib/config', () => ({
+      getSettings: vi.fn().mockReturnValue({ launchagent_prefix: 'com.test' }),
+    }));
+
+    // Override scheduling to return a custom logDir different from homedir/logs
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: vi.fn().mockReturnValue({
+        logDir: join(tempDir, 'custom-logs'),
+        claudeBin: 'claude',
+      }),
+    }));
+
+    const mod = await import('@/lib/agent-scheduler');
+    installAgentSchedule = mod.installAgentSchedule;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('writes script to custom logDir from getImproveConfig', async () => {
+    await installAgentSchedule('agent-custom', '1h', 'prompt', 'pm2');
+    const scriptPath = join(tempDir, 'custom-logs', 'agent-scripts', 'agent-custom.sh');
+    expect(existsSync(scriptPath)).toBe(true);
+  });
+
+  it('writes prompt json to custom logDir from getImproveConfig', async () => {
+    await installAgentSchedule('agent-custom-prompt', '30m', 'my task', 'pm2');
+    const promptPath = join(tempDir, 'custom-logs', 'agent-scripts', 'agent-custom-prompt.prompt.json');
+    expect(existsSync(promptPath)).toBe(true);
+    const content = JSON.parse(readFileSync(promptPath, 'utf-8'));
+    expect(content.prompt).toBe('my task');
+  });
+});

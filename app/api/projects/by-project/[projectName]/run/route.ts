@@ -5,11 +5,12 @@ import { randomUUID } from 'crypto';
 import { extname } from 'path';
 import { checkAuth } from '@/lib/auth';
 import { getImproveConfig } from '@/lib/scheduling';
-import { SKILLS_DIR } from '@/lib/skills';
+import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills';
 import { resolveProjectPath } from '@/lib/project-data';
 import { createJob, updateJob } from '@/lib/job-storage';
 import { startJob } from '@/lib/pm2-jobs';
 import { withBasePrompt, getPermissionModeFlag } from '@/lib/config';
+import { errMsg } from '@/lib/types';
 
 export async function POST(
   request: NextRequest,
@@ -49,7 +50,7 @@ export async function POST(
     const formUserPrompt = form.get('userPrompt') as string;
     if (formUserPrompt) userPrompt = formUserPrompt;
 
-    const attachDir = join(logDir, 'attachments');
+    const attachDir = join(process.cwd(), 'data', 'attachments');
     mkdirSync(attachDir, { recursive: true });
 
     for (const [, value] of form.entries()) {
@@ -81,19 +82,22 @@ export async function POST(
     prompt = 'See the attached files.';
   }
 
-  // For follow-ups (--resume), skip persona/base prompt injection — context is already in the session.
-  // Attachments, however, MUST always be referenced in the prompt so Claude knows to open them.
-  if (!resumeSessionId) {
-    const docsBase = join(SKILLS_DIR, 'docs', 'skills');
-    for (const pPath of personaPaths) {
-      const personaFile = join(docsBase, `${pPath}.md`);
-      if (existsSync(personaFile)) {
-        try {
-          const personaContent = readFileSync(personaFile, 'utf-8');
-          prompt = personaContent + '\n\n---\n\n' + prompt;
-        } catch {}
-      }
+  // Personas (file-based skills) are always prepended when selected in the
+  // toolbar — initial turn or follow-up — so the user's mental model "if it's
+  // in the +skill bar, it's in context" holds. The base prompt is only
+  // injected on the initial turn.
+  const docsBase = join(SKILLS_DIR, 'docs', 'skills');
+  for (const pPath of personaPaths) {
+    const docsFile = join(docsBase, `${pPath}.md`);
+    const personaFile = existsSync(docsFile) ? docsFile : join(DATA_SKILLS_DIR, `${pPath}.md`);
+    if (existsSync(personaFile)) {
+      try {
+        const personaContent = readFileSync(personaFile, 'utf-8');
+        prompt = personaContent + '\n\n---\n\n' + prompt;
+      } catch {}
     }
+  }
+  if (!resumeSessionId) {
     prompt = withBasePrompt(prompt);
   }
 
@@ -119,10 +123,10 @@ export async function POST(
       projPath
     );
     job.pid = pid;
-  } catch (e: any) {
+  } catch (e: unknown) {
     job.finishedAt = Date.now() / 1000;
     job.exitCode = -1;
-    return NextResponse.json({ detail: `Failed to start: ${e.message}` }, { status: 500 });
+    return NextResponse.json({ detail: `Failed to start: ${errMsg(e)}` }, { status: 500 });
   }
 
   updateJob(job);

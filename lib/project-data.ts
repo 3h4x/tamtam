@@ -15,10 +15,11 @@ import {
 } from './scheduling';
 import { fireTimesStr } from './fire-times';
 import { launchctlInfo, plistPath, pausedPlistPath, type LaunchctlInfo } from './launchagent';
-import { ghStatusLookup } from './gh-status';
+import { ghStatusLookup, type GhStatusEntry } from './gh-status';
 import { lastRunLookup, type RunEntry } from './run-history';
 import { gitChanges, isReviewed } from './git-utils';
 import { exec } from './shell';
+import type { Task } from './types';
 
 /**
  * Get enabled projects from the DB projects table.
@@ -91,17 +92,17 @@ async function assembleProject(
   baseFreqMin: number,
   multipliers: Record<string, number>,
   lastRuns: Record<string, RunEntry>,
-  ghStatus: Record<string, any>,
+  ghStatus: Record<string, GhStatusEntry>,
   changesMap: Record<string, number>,
   infoMap: Record<string, LaunchctlInfo>
-): Promise<Record<string, any>> {
+): Promise<Task> {
   const priority = cfg.priority;
   const effFreq = priority
     ? effectiveFreqMin(priority, multipliers, baseFreqMin)
     : baseFreqMin;
 
   let minute: number, cycleHours: number, hourPhase: number, firesAt: string;
-  const staticCron = (cfg as any).cron;
+  const staticCron = (cfg as ProjectConfig & { cron?: string }).cron;
   if (staticCron) {
     const parsed = parseCronTime(staticCron);
     minute = parsed.minute;
@@ -139,7 +140,7 @@ async function assembleProject(
   const gh = ghStatus[projName] ?? {};
   const releaseTag = gh.release ?? null;
   const ci = gh.ci ?? null;
-  const ciFailedUrl = gh.ciFailedUrl ?? gh.ci_failed_url ?? null;
+  const ciFailedUrl = gh.ciFailedUrl ?? null;
 
   let githubUrl: string | null = null;
   if (cfg.github) {
@@ -163,24 +164,25 @@ async function assembleProject(
     job: cfg.scheduler,
     path: cfg.path,
     github: githubUrl,
-    priority,
-    launchctl,
+    priority: priority as Task['priority'],
+    launchctl: launchctl as Task['launchctl'],
     fires_at: firesAt,
     sync,
     changes,
+    unpushed: 0,
     reviewed,
     last_run: lastRun,
     last_run_ago: lastRunAgo,
     last_run_duration_s: lastRunDurationS,
     last_run_exit: lastRunExit,
     release_tag: releaseTag,
-    ci,
+    ci: ci as Task['ci'],
     ci_failed_url: ciFailedUrl,
   };
 }
 
 // TTL cache
-let _cache: { data: any; time: number } = { data: null, time: 0 };
+let _cache: { data: { projects: Record<string, Task[]>; priorities: readonly string[] } | null; time: number } = { data: null, time: 0 };
 const CACHE_TTL = 10;
 
 export function clearProjectDataCache(): void {
@@ -188,7 +190,7 @@ export function clearProjectDataCache(): void {
 }
 
 export async function fetchProjectData(): Promise<{
-  projects: Record<string, any[]>;
+  projects: Record<string, Task[]>;
   priorities: readonly string[];
 }> {
   const now = Date.now() / 1000;
@@ -222,7 +224,7 @@ export async function fetchProjectData(): Promise<{
         return [sid, info] as const;
       })
     ),
-    ghStatusLookup(projects).catch(() => ({} as Record<string, any>)),
+    ghStatusLookup(projects).catch(() => ({} as Record<string, GhStatusEntry>)),
   ]);
 
   const changesMap: Record<string, number> = {};
@@ -232,7 +234,7 @@ export async function fetchProjectData(): Promise<{
   for (const [sid, val] of infoResults) infoMap[sid] = val;
 
   // Group by project name
-  const projectTasks: Record<string, any[]> = {};
+  const projectTasks: Record<string, Task[]> = {};
   for (const [sid, cfg] of Object.entries(projects)) {
     const task = await assembleProject(
       sid, cfg, tierIdxMap[sid], baseFreqMin, multipliers,

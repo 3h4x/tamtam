@@ -4,6 +4,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { getJob } from '@/lib/job-storage';
 import { parseStreamLines } from '@/lib/claude-stream-parser';
+import { errMsg } from '@/lib/types';
 
 function getLogPath(jobId: string): string {
   const job = getJob(jobId);
@@ -67,7 +68,7 @@ export async function GET(
         try {
           if (!existsSync(logPath)) return 'log file missing';
           const content = readFileSync(logPath, 'utf-8');
-          if (!content.trim()) return 'log file empty (claude produced no output)';
+          if (!content.trim()) return 'log file empty — claude CLI exited without writing anything. Common causes: rate-limited (5-hour window), cold-start crash, or auth/session conflict with a concurrent run. Retrying usually works.';
           const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
           const nonJson: string[] = [];
           for (const line of lines) {
@@ -80,8 +81,8 @@ export async function GET(
             return 'claude streamed partial output but never emitted a final result — likely killed/crashed mid-response';
           }
           return 'claude wrote JSON to log but never emitted a final result line';
-        } catch (e: any) {
-          return `could not read log: ${e?.message ?? 'unknown'}`;
+        } catch (e: unknown) {
+          return `could not read log: ${errMsg(e)}`;
         }
       }
 

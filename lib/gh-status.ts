@@ -6,7 +6,7 @@ import { homedir } from 'os';
 const GH_CACHE_TTL = 3600;
 const GH_CACHE_TTL_PENDING = 30;
 
-interface GhStatusEntry {
+export interface GhStatusEntry {
   release: string | null;
   ci: string | null;
   ciFailedUrl: string | null;
