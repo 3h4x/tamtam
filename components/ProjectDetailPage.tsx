@@ -350,7 +350,7 @@ export function ProjectDetailPage({
 
   // Load config when the overview or config tab is active (overview uses it for cron schedule hint).
   useEffect(() => {
-    if ((activeTab !== 'config' && activeTab !== 'overview') || !name) return
+    if ((activeTab !== 'config' && activeTab !== 'overview' && activeTab !== 'terminal') || !name) return
     let active = true
     setConfigLoading(true)
     Promise.all([
@@ -998,7 +998,11 @@ export function ProjectDetailPage({
       {activeTab === 'terminal' && name && (
         <>
           {(() => {
-            const hasTestCommand = !!(config?.effective_test_command || config?.detected_test_command)
+            const hasTestCommand = !!(
+              config?.effective_test_command ||
+              config?.detected_test_command ||
+              projectJobs.some(j => j.kind === 'test' && j.started_at >= (Date.now() / 1000 - 60 * 60))
+            )
             type StepState = 'pending' | 'running' | 'done' | 'failed'
             const pipelineStarted = projectJobs.some(
               j => ['test', 'review', 'fix'].includes(j.kind) && j.started_at >= (Date.now() / 1000 - 60 * 60)
@@ -1022,20 +1026,78 @@ export function ProjectDetailPage({
             }
 
             const testState: StepState = hasTestCommand ? stateOf(testJob) : 'pending'
-            const reviewState: StepState = stateOf(reviewJob)
-            // Review fails → fix triggers. Show reviewing state as "running" while fix is in flight.
-            const reviewInFix = reviewState === 'failed' && fixJob && fixJob.status === 'running'
-            const effectiveReviewState: StepState = reviewInFix ? 'running' : reviewState
-            const reviewPassed = reviewState === 'done' && reviewJob?.verdict === 'LGTM'
-            const hasChanges = project.totalChanges > 0 || (project.unpushed ?? 0) > 0
-            const commitState: StepState = !hasChanges ? 'done' : reviewPassed ? 'pending' : 'pending'
-            const pushState: StepState = !hasChanges ? 'done' : 'pending'
+            // Review is only "done" when the verdict is LGTM. Any other verdict
+            // (NEEDS ATTENTION / DO NOT SHIP) is "failed" — a green check would
+            // mislead. Stale LGTM (files changed after) also drops to pending.
+            const reviewRawState = stateOf(reviewJob)
+            const reviewVerdict = reviewJob?.verdict
+            let reviewState: StepState
+            let reviewHint = ''
+            let reviewFixAction: (() => void) | null = null
+            if (reviewRawState === 'running') { reviewState = 'running'; reviewHint = 'review in progress' }
+            else if (!reviewJob) { reviewState = 'pending'; reviewHint = 'not run yet — click 🚀 Release or Review' }
+            else if (reviewRawState === 'failed') { reviewState = 'failed'; reviewHint = `review job failed (exit ${reviewJob.exit_code}) — click to view log`; reviewFixAction = () => router.push(`/project/${name}/terminal?job=${encodeURIComponent(reviewJob.id)}`) }
+            else if (reviewVerdict === 'LGTM') {
+              if (hasUnreviewed) {
+                reviewState = 'pending'
+                reviewHint = 'last verdict was LGTM but files changed since — re-run Review to revalidate'
+                reviewFixAction = handleReview
+              } else {
+                reviewState = 'done'
+                reviewHint = 'LGTM — ready to push'
+              }
+            } else {
+              // NEEDS ATTENTION / DO NOT SHIP / unknown
+              reviewState = 'failed'
+              reviewHint = `verdict: ${reviewVerdict || 'unknown'} — click Fix Review or address findings`
+              reviewFixAction = () => handleFixReview(reviewJob.id)
+            }
+            // Review failed → fix triggers. Show as running while fix is in flight.
+            if (reviewState === 'failed' && fixJob && fixJob.status === 'running') {
+              reviewState = 'running'
+              reviewHint = 'fix in progress — will re-review when done'
+              reviewFixAction = null
+            }
+            const reviewPassed = reviewState === 'done'
+            const hasChanges = project.totalChanges > 0
+            const unpushed = (project.unpushed ?? 0) > 0
+            // Commit is done when there are no uncommitted changes (either
+            // nothing to commit or already committed). Running when review
+            // LGTM'd and auto-push is chaining. Failed when review blocked it.
+            let commitState: StepState
+            if (!hasChanges) commitState = 'done'
+            else if (reviewPassed) commitState = 'running'
+            else commitState = 'pending'
+            // Push is done when there are no unpushed commits (and no uncommitted changes).
+            let pushState: StepState
+            if (!hasChanges && !unpushed) pushState = 'done'
+            else if (reviewPassed && !hasChanges) pushState = 'running'
+            else pushState = 'pending'
 
-            const steps: Array<{ label: string; state: StepState; skipped?: boolean }> = []
-            if (hasTestCommand) steps.push({ label: 'test', state: testState })
-            steps.push({ label: 'review', state: effectiveReviewState })
-            steps.push({ label: 'commit', state: commitState })
-            steps.push({ label: 'push', state: pushState })
+            const testHint = !hasTestCommand
+              ? 'no test command'
+              : testState === 'running' ? 'tests running'
+              : testState === 'done' ? `tests passed (${formatAgo(testJob?.finished_at ?? testJob?.started_at ?? 0)})`
+              : testState === 'failed' ? `tests failed (exit ${testJob?.exit_code})`
+              : 'tests not run yet'
+            const pushHint = pushState === 'done'
+              ? 'nothing to push'
+              : pushState === 'running'
+                ? 'push in progress'
+                : unpushed
+                  ? `${project.unpushed} unpushed commit${project.unpushed === 1 ? '' : 's'}`
+                  : `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — need review & commit first`
+            const commitHint = commitState === 'done'
+              ? 'nothing to commit'
+              : commitState === 'running'
+                ? 'committing…'
+                : `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — need LGTM review to proceed`
+
+            const steps: Array<{ label: string; state: StepState; hint: string; action?: (() => void) | null }> = []
+            if (hasTestCommand) steps.push({ label: 'test', state: testState, hint: testHint, action: testJob ? () => router.push(`/project/${name}/terminal?job=${encodeURIComponent(testJob.id)}`) : null })
+            steps.push({ label: 'review', state: reviewState, hint: reviewHint, action: reviewFixAction })
+            steps.push({ label: 'commit', state: commitState, hint: commitHint })
+            steps.push({ label: 'push', state: pushState, hint: pushHint })
 
             const glyph = (s: StepState) => {
               if (s === 'done') return <span className="text-status-success">✓</span>
@@ -1046,15 +1108,32 @@ export function ProjectDetailPage({
 
             return (
               <div className="mt-3 mb-3 px-3 py-2 rounded-md border border-border bg-bg-secondary text-sm flex items-center gap-2 flex-wrap">
-                {steps.map((s, i) => (
-                  <div key={s.label} className="flex items-center gap-1.5">
-                    <span className="inline-flex items-center justify-center w-5 h-5">{glyph(s.state)}</span>
-                    <span className={`font-mono text-xs ${s.state === 'running' ? 'text-accent font-semibold' : s.state === 'done' ? 'text-text-primary' : s.state === 'failed' ? 'text-status-error' : 'text-text-secondary'}`}>
-                      {s.label}
-                    </span>
-                    {i < steps.length - 1 && <span className="text-text-tertiary mx-1">→</span>}
-                  </div>
-                ))}
+                {steps.map((s, i) => {
+                  const clickable = !!s.action
+                  const inner = (
+                    <>
+                      <span className="inline-flex items-center justify-center w-5 h-5">{glyph(s.state)}</span>
+                      <span className={`font-mono text-xs ${s.state === 'running' ? 'text-accent font-semibold' : s.state === 'done' ? 'text-text-primary' : s.state === 'failed' ? 'text-status-error' : 'text-text-secondary'}`}>
+                        {s.label}
+                      </span>
+                    </>
+                  )
+                  return (
+                    <div key={s.label} className="flex items-center gap-1.5">
+                      {clickable ? (
+                        <button
+                          type="button"
+                          className="flex items-center gap-1.5 hover:bg-bg-tertiary rounded px-1 py-0.5 -mx-1 -my-0.5 cursor-pointer"
+                          onClick={s.action!}
+                          title={s.hint}
+                        >{inner}</button>
+                      ) : (
+                        <div className="flex items-center gap-1.5" title={s.hint}>{inner}</div>
+                      )}
+                      {i < steps.length - 1 && <span className="text-text-tertiary mx-1">→</span>}
+                    </div>
+                  )
+                })}
               </div>
             )
           })()}
