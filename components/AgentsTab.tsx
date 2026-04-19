@@ -4,12 +4,65 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { fetchAgents, createAgent, updateAgent, deleteAgent, runAgent, fetchSkills, fetchPersonas } from '@/lib/client-api'
 import type { Agent, Skill, Persona } from '@/lib/client-api'
+import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { useToast } from '@/components/Toast'
 import { nextFireDisplay } from '@/lib/fire-times'
 
 const MODELS = ['sonnet', 'opus', 'haiku']
 const RUNNERS = ['pm2', 'launchctl']
 const SCHEDULES = ['', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h']
+
+interface RecommendedAgent extends AgentTemplateRecord {
+  skillIds: string[]
+}
+
+const RECOMMENDED_AGENTS: RecommendedAgent[] = [
+  {
+    name: 'security-review',
+    description: 'Scans uncommitted diffs for OWASP issues, secrets, and vulnerabilities.',
+    model: 'sonnet',
+    schedule: '24h',
+    runner: 'pm2',
+    prompt: 'Review the uncommitted git diff in this project for security issues: OWASP top 10 vulnerabilities, hardcoded secrets or API keys, SQL injection, XSS, command injection, insecure dependencies. Report findings with severity (critical/high/medium/low) and suggested fixes.',
+    skillIds: [],
+  },
+  {
+    name: 'dependency-check',
+    description: 'Scans for outdated or vulnerable dependencies and suggests updates.',
+    model: 'sonnet',
+    schedule: '24h',
+    runner: 'pm2',
+    prompt: 'Run npm audit and npm outdated (or the equivalent for this project\'s package manager). Summarize vulnerabilities by severity, list significantly outdated packages, and suggest which to prioritize updating.',
+    skillIds: [],
+  },
+  {
+    name: 'blog',
+    description: 'Generates a daily post from recent git commits and writes it to blog/YYYY-MM-DD.md.',
+    model: 'sonnet',
+    schedule: '24h',
+    runner: 'pm2',
+    prompt: 'Read git log --since=yesterday --oneline for this project. Write a concise blog post summarizing what was built or changed. Save it to blog/YYYY-MM-DD.md (use today\'s date). Focus on the "why" and impact. Keep it under 400 words.',
+    skillIds: [],
+  },
+  {
+    name: 'ci-monitor',
+    description: 'Checks GitHub Actions status and applies fixes when the latest run fails.',
+    model: 'sonnet',
+    schedule: '30m',
+    runner: 'pm2',
+    prompt: 'Check GitHub Actions CI status with gh run list --limit 5. If the latest run failed, analyze failure logs with gh run view --log-failed and apply fixes for compilation errors, test failures, and linting issues.',
+    skillIds: [],
+  },
+  {
+    name: 'release-ready',
+    description: 'Pre-flight check: runs tests and surfaces whether the project is ready to ship.',
+    model: 'sonnet',
+    schedule: '24h',
+    runner: 'pm2',
+    prompt: 'Check if this project is ready to ship: 1) Run the test suite and report pass/fail. 2) Check git status for uncommitted changes. 3) Check for TODOs or FIXMEs in recently changed files. Output a clear READY / NOT READY verdict with a brief summary of any blockers.',
+    skillIds: [],
+  },
+]
 
 const MODEL_LABELS: Record<string, { label: string; desc: string }> = {
   sonnet: { label: 'Sonnet', desc: 'Fast & capable' },
@@ -30,19 +83,27 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Agent | null>(null)
   const [creating, setCreating] = useState(false)
+  const [recommendedTemplate, setRecommendedTemplate] = useState<AgentTemplateRecord | null>(null)
   const [runSubmitting, setRunSubmitting] = useState<string | null>(null)
   const [runPromptAgent, setRunPromptAgent] = useState<string | null>(null)
   const [runPrompt, setRunPrompt] = useState('')
 
+  const [customTemplates, setCustomTemplates] = useState<AgentTemplateRecord[]>([])
+
   const loadData = async () => {
-    const [agentsData, skillsData, personasData] = await Promise.all([
+    const [agentsData, skillsData, personasData, settingsData] = await Promise.all([
       fetchAgents(projectName),
       fetchSkills(),
       fetchPersonas(),
+      fetch('/api/settings').then(r => r.json()).catch(() => ({ settings: {} })),
     ])
     setAgents(agentsData.agents)
     setSkills(skillsData.skills)
     setPersonas(personasData.personas)
+    try {
+      const raw = settingsData.settings?.agent_templates
+      if (raw) setCustomTemplates(JSON.parse(raw))
+    } catch {}
     setLoading(false)
   }
 
@@ -84,7 +145,7 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
     }
   }
 
-  const closeModal = () => { setEditing(null); setCreating(false) }
+  const closeModal = () => { setEditing(null); setCreating(false); setRecommendedTemplate(null) }
 
   const handleSaveAgent = async (data: { name: string; prompt: string; skillIds: string[]; model: string; schedule: string | null; runner: string }) => {
     const parseAgent = (a: Agent & { skillIds: string | string[] }): Agent => ({
@@ -234,10 +295,49 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
         })}
       </div>
 
+      {/* Recommended agents */}
+      {(() => {
+        const existingNames = new Set(agents.map(a => a.name.toLowerCase()))
+        const customNames = new Set(customTemplates.map(t => t.name.toLowerCase()))
+        const merged = [
+          ...customTemplates,
+          ...RECOMMENDED_AGENTS.filter(r => !customNames.has(r.name.toLowerCase())),
+        ]
+        const suggestions = merged.filter(r => !existingNames.has(r.name.toLowerCase()))
+        if (suggestions.length === 0) return null
+        return (
+          <div className="mt-2 flex flex-col gap-2">
+            <h3 className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">Recommended</h3>
+            {suggestions.map(rec => {
+              const isCustom = customNames.has(rec.name.toLowerCase())
+              return (
+              <div
+                key={rec.name}
+                className="p-3 rounded-lg border border-border border-dashed bg-bg-secondary/50 flex items-center justify-between gap-4"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="font-medium text-sm text-text-secondary">{rec.name}</span>
+                  {isCustom && <span className="text-xs px-1.5 py-0.5 rounded bg-accent/10 text-accent shrink-0">custom</span>}
+                  {rec.schedule && <span className="text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-tertiary shrink-0">every {rec.schedule}</span>}
+                  {rec.description && <span className="text-xs text-text-tertiary truncate hidden sm:block">{rec.description}</span>}
+                </div>
+                <button
+                  className="px-3 py-1.5 text-xs border border-border rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors cursor-pointer shrink-0"
+                  onClick={() => { setRecommendedTemplate(rec); setCreating(true); setEditing(null) }}
+                >
+                  Add
+                </button>
+              </div>
+            )})}
+          </div>
+        )
+      })()}
+
       {/* Agent modal */}
       {(creating || editing) && (
         <AgentModal
           agent={editing || undefined}
+          template={(!editing && recommendedTemplate) || undefined}
           skills={skills}
           personas={personas}
           onSave={handleSaveAgent}
@@ -251,6 +351,7 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
 
 function AgentModal({
   agent,
+  template,
   skills,
   personas,
   onSave,
@@ -258,18 +359,19 @@ function AgentModal({
   onClose,
 }: {
   agent?: Agent
+  template?: AgentTemplateRecord
   skills: Skill[]
   personas: Persona[]
   onSave: (data: { name: string; prompt: string; skillIds: string[]; model: string; schedule: string | null; runner: string }) => Promise<void>
   onDelete?: () => void
   onClose: () => void
 }) {
-  const [name, setName] = useState(agent?.name || '')
-  const [agentPrompt, setAgentPrompt] = useState(agent?.prompt || '')
-  const [selectedSkills, setSelectedSkills] = useState<string[]>(agent?.skillIds || [])
-  const [model, setModel] = useState(agent?.model || 'sonnet')
-  const [schedule, setSchedule] = useState(agent?.schedule || '')
-  const [runner, setRunner] = useState(agent?.runner || 'pm2')
+  const [name, setName] = useState(agent?.name || template?.name || '')
+  const [agentPrompt, setAgentPrompt] = useState(agent?.prompt || template?.prompt || '')
+  const [selectedSkills, setSelectedSkills] = useState<string[]>(agent?.skillIds || template?.skillIds || [])
+  const [model, setModel] = useState(agent?.model || template?.model || 'sonnet')
+  const [schedule, setSchedule] = useState(agent?.schedule || template?.schedule || '')
+  const [runner, setRunner] = useState(agent?.runner || template?.runner || 'pm2')
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [skillSearch, setSkillSearch] = useState('')

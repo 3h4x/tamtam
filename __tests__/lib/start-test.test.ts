@@ -70,12 +70,12 @@ describe('detectTestCommand', () => {
 
   it('detects pytest when pyproject.toml exists', () => {
     writeFileSync(join(projDir, 'pyproject.toml'), '[tool.pytest]');
-    expect(detectTestCommand(projDir)).toBe('python -m pytest');
+    expect(detectTestCommand(projDir)).toBe('python3 -m pytest');
   });
 
   it('detects pytest when requirements.txt exists (takes priority over Makefile)', () => {
     writeFileSync(join(projDir, 'requirements.txt'), 'pytest');
-    expect(detectTestCommand(projDir)).toBe('python -m pytest');
+    expect(detectTestCommand(projDir)).toBe('python3 -m pytest');
   });
 
   it('detects forge test when foundry.toml exists', () => {

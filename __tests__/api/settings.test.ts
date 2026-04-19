@@ -185,6 +185,7 @@ describe('settings API', () => {
         'fix_ci_max_retries',
         'fix_ci_retry_window_seconds',
         'fix_ci_fast_crash_ms',
+        'agent_templates',
       ];
 
       const body = Object.fromEntries(validKeys.map((k) => [k, 'test-value']));
@@ -229,6 +230,34 @@ describe('settings API', () => {
 
       const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'review_verdict_rules');
       expect(row?.value).toBe('Always LGTM unless broken');
+    });
+
+    it('saves agent_templates as a JSON string', async () => {
+      const templates = [
+        { name: 'security-review', description: 'Scans for OWASP issues', model: 'sonnet', schedule: '24h', runner: 'pm2', prompt: 'Review the diff for security issues.' },
+      ];
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ agent_templates: JSON.stringify(templates) }),
+      });
+      await PATCH(request);
+
+      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'agent_templates');
+      expect(row?.value).toBe(JSON.stringify(templates));
+      expect(JSON.parse(row!.value)).toEqual(templates);
+    });
+
+    it('deletes agent_templates when set to empty string', async () => {
+      testDb.db.insert(schema.settings).values({ key: 'agent_templates', value: '[{"name":"old"}]' }).run();
+
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ agent_templates: '' }),
+      });
+      await PATCH(request);
+
+      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'agent_templates');
+      expect(row).toBeUndefined();
     });
   });
 

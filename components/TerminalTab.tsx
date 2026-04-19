@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { runProject, fetchSkills, fetchPersonas } from '@/lib/client-api'
 import type { Skill, Persona } from '@/lib/client-api'
 import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { renderAnsi, hasAnsi } from '@/lib/ansi-render'
 import {
   terminalStore,
@@ -13,6 +14,13 @@ import {
   type SkillItem,
   type DocItem,
 } from '@/lib/terminal-session-store'
+
+// Exported for unit testing — determines whether a job kind uses Claude's
+// stream-json output format (parsed path) vs raw log output.
+export function isClaudeJobKind(kind: string | undefined): boolean {
+  return ['run', 'review', 'fix', 'fix-ci', 'fix-push', 'release'].includes(kind ?? '') ||
+    (typeof kind === 'string' && kind.startsWith('agent:'))
+}
 
 interface JobDict {
   id: string
@@ -318,24 +326,21 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         const res = await fetch(`/api/jobs/${encodeURIComponent(jobParam)}`)
         if (!res.ok) return
         const data = await res.json()
-        // If this job shares a session_id with other jobs, promote to the
-        // session URL so the full thread (review + fix + etc.) is rendered.
+        // If this job has a session_id, promote to the session URL so the
+        // restore path sets claudeSessionId — follow-up chats then resume the
+        // session and group with the original run (agent/review/fix/etc.)
+        // instead of starting a brand-new thread.
         if (data.session_id) {
-          try {
-            const listRes = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
-            const listData = await listRes.json()
-            const siblings = (listData.jobs ?? []).filter(
-              (j: JobDict) => j.session_id === data.session_id && j.id !== data.id
-            )
-            if (siblings.length > 0) {
-              router.replace(`/project/${projectName}/terminal/${data.session_id}`)
-              return
-            }
-          } catch {}
+          router.replace(`/project/${projectName}/terminal/${data.session_id}`)
+          return
         }
         const entries: TermEntry[] = []
         const kind = data.kind || jobParam.split('-').slice(1, -1).join('-')
-        const isClaudeJob = ['run', 'review', 'fix', 'fix-ci'].includes(data.kind) || (typeof data.kind === 'string' && data.kind.startsWith('agent:'))
+        // 'release' and 'fix-push' both carry stream-json (release aggregates
+        // its children's logs; fix-push spawns Claude itself), so they MUST
+        // stream through the parsed path — otherwise the terminal dumps raw
+        // JSON for the review/fix-push sections.
+        const isClaudeJob = isClaudeJobKind(data.kind)
         entries.push({ role: 'status', text: kind })
 
         // Populate toolbar chips from contextMeta if the job recorded them (agents do this).
@@ -1061,7 +1066,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
               {entry.role === 'assistant'
                 ? (hasAnsi(entry.text)
                     ? <pre className="whitespace-pre-wrap font-mono text-xs m-0">{renderAnsi(entry.text)}</pre>
-                    : <Markdown>{entry.text}</Markdown>)
+                    : <Markdown remarkPlugins={[remarkGfm]}>{entry.text}</Markdown>)
                 : entry.role === 'raw'
                   ? (hasAnsi(entry.text)
                       ? <pre className="whitespace-pre-wrap font-mono text-xs m-0 inline">{renderAnsi(collapseCarriageReturns(entry.text))}</pre>
@@ -1105,7 +1110,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
                     : collapseCarriageReturns(streamBuffer))
                 : hasAnsi(streamBuffer)
                   ? <pre className="whitespace-pre-wrap font-mono text-xs m-0">{renderAnsi(streamBuffer)}</pre>
-                  : <Markdown>{streamBuffer}</Markdown>}
+                  : <Markdown remarkPlugins={[remarkGfm]}>{streamBuffer}</Markdown>}
             </div>
           )}
 

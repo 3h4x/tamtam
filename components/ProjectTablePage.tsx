@@ -2,12 +2,11 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { reviewProject, fetchJobs, fetchAgents } from '@/lib/client-api'
+import { reviewProject, releaseProject, fetchJobs, fetchAgents } from '@/lib/client-api'
 import type { JobInfo, Agent } from '@/lib/client-api'
 import type { FleetHealth } from '@/hooks/useProjectHealth'
 import { formatAgo } from '@/lib/format'
 import { getAggregateCi, getCiFailedUrl, getReleaseTag } from '@/lib/statusConstants'
-import { SmartPushModal } from '@/components/SmartPushModal'
 import { useToast } from '@/components/Toast'
 
 interface ProjectTablePageProps {
@@ -82,7 +81,7 @@ function AgentPills({
 export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageProps) {
   const router = useRouter()
   const { toast } = useToast()
-  const [pushProject, setPushProject] = useState<string | null>(null)
+  const [releasing, setReleasing] = useState<Set<string>>(new Set())
   const [allJobs, setAllJobs] = useState<JobInfo[]>([])
   const [agentsByProject, setAgentsByProject] = useState<Record<string, Agent[]>>({})
 
@@ -144,9 +143,24 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
     }
   }
 
-  const handleDeploy = (e: React.MouseEvent, projectName: string) => {
+  const handleRelease = async (e: React.MouseEvent, projectName: string) => {
     e.stopPropagation()
-    setPushProject(projectName)
+    if (releasing.has(projectName)) return
+    setReleasing(prev => new Set(prev).add(projectName))
+    try {
+      const r = await releaseProject(projectName)
+      toast(r.message || `Release started for ${projectName}`, 'success')
+      if (onPush) onPush()
+      else onRefresh()
+    } catch (err) {
+      toast(err instanceof Error ? err.message : `Failed to start release for ${projectName}`, 'error')
+    } finally {
+      setReleasing(prev => {
+        const next = new Set(prev)
+        next.delete(projectName)
+        return next
+      })
+    }
   }
 
   return (
@@ -314,14 +328,15 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
                   {release || '—'}
                 </td>
 
-                {/* Deploy */}
+                {/* Release */}
                 <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                   {isReviewed && (
                     <button
-                      className="px-3 py-1.5 text-xs font-medium bg-accent text-white rounded-md hover:bg-accent-hover transition-colors cursor-pointer border-none"
-                      onClick={e => handleDeploy(e, project.project)}
+                      className="px-3 py-1.5 text-xs font-medium bg-accent text-white rounded-md hover:bg-accent-hover transition-colors cursor-pointer border-none disabled:opacity-60 disabled:cursor-not-allowed"
+                      onClick={e => handleRelease(e, project.project)}
+                      disabled={releasing.has(project.project)}
                     >
-                      Push
+                      {releasing.has(project.project) ? 'Releasing…' : '🚀 Release'}
                     </button>
                   )}
                 </td>
@@ -330,18 +345,6 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
           })}
         </tbody>
       </table>
-
-      {pushProject && (
-        <SmartPushModal
-          projectName={pushProject}
-          onClose={() => setPushProject(null)}
-          onSuccess={() => {
-            setPushProject(null)
-            if (onPush) onPush()
-            else onRefresh()
-          }}
-        />
-      )}
     </div>
   )
 }
