@@ -335,6 +335,60 @@ describe('startProjectPush — push result tracking', () => {
     expect(setProjectPushResultMock).toHaveBeenCalledWith('proj', expect.stringContaining('Commit failed'));
   });
 
+  it('rebases and retries when push is rejected with "fetch first" (stale tracking info)', async () => {
+    // Scenario: local tracking branch is stale so the pre-push behind-check shows 0,
+    // but the remote has new commits. After rejection, pull --rebase + retry must succeed.
+    execMock
+      .mockImplementationOnce(() => resp(0))                                  // git add -A
+      .mockImplementationOnce(() => resp(0, ''))                              // git diff --cached (nothing staged)
+      .mockImplementationOnce(() => resp(0, '1\n'))                           // git rev-list --count @{u}..HEAD (1 ahead)
+      .mockImplementationOnce(() => resp(0, '# branch.ab +1 -0\n'))          // git status --porcelain=v2 --branch (behind=0)
+      .mockImplementationOnce(() => resp(1, '', 'error: failed to push some refs\nhint: Updates were rejected because the remote contains work that you do not\nhint: have locally. This is usually caused by another repository pushing to\nhint: the same ref. If you want to integrate the remote changes, use\nhint: \'git pull\' before pushing again.')) // git push → fetch first
+      .mockImplementationOnce(() => resp(0))                                  // git pull --rebase
+      .mockImplementationOnce(() => resp(0))                                  // git push (retry)
+      .mockImplementationOnce(() => resp(0, 'abc1234'));                      // git rev-parse
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(true);
+    const rebaseCalls = execMock.mock.calls.filter(
+      ([cmd, args]: any) => cmd === 'git' && args.includes('pull') && args.includes('--rebase')
+    );
+    expect(rebaseCalls.length).toBe(1);
+    expect(setProjectPushResultMock).toHaveBeenCalledWith('proj', null);
+  });
+
+  it('rebases and retries when push is rejected with "fetch first" message variant', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0))                                  // git add -A
+      .mockImplementationOnce(() => resp(0, ''))                              // git diff --cached (nothing staged)
+      .mockImplementationOnce(() => resp(0, '1\n'))                           // git rev-list --count @{u}..HEAD
+      .mockImplementationOnce(() => resp(0, '# branch.ab +1 -0\n'))          // behind check (shows 0 behind)
+      .mockImplementationOnce(() => resp(1, '', '! [rejected] master -> master (fetch first)')) // git push
+      .mockImplementationOnce(() => resp(0))                                  // git pull --rebase
+      .mockImplementationOnce(() => resp(0))                                  // git push (retry)
+      .mockImplementationOnce(() => resp(0, 'def5678'));                      // git rev-parse
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(true);
+  });
+
+  it('returns 409 when rebase fails after "fetch first" rejection', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0))                                  // git add -A
+      .mockImplementationOnce(() => resp(0, ''))                              // git diff --cached (nothing staged)
+      .mockImplementationOnce(() => resp(0, '1\n'))                           // git rev-list --count
+      .mockImplementationOnce(() => resp(0, '# branch.ab +1 -0\n'))          // behind check
+      .mockImplementationOnce(() => resp(1, '', 'Updates were rejected because the remote contains work'))  // git push
+      .mockImplementationOnce(() => resp(1, '', 'CONFLICT: merge conflict in foo.ts')); // git pull --rebase fails
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(409);
+      expect(r.detail).toContain('Rebase failed');
+    }
+  });
+
   it('does not create a push job when project path cannot be resolved', async () => {
     vi.resetModules();
     vi.doMock('@/lib/project-data', () => ({

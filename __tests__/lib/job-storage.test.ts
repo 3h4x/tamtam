@@ -1652,3 +1652,377 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     });
   });
 });
+
+describe('markDone – isClaudeKind exit-code override for new kinds', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+  let tempDir: string;
+
+  function makeJob(kind: string, logPath: string | null): JobData {
+    return {
+      id: `${kind.replace(':', '-')}-override-test`,
+      project: 'proj',
+      kind,
+      prompt: null,
+      pid: 12345,
+      logPath,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    };
+  }
+
+  const resultLine = '{"type":"result","subtype":"success","is_error":false,"duration_ms":500,"total_cost_usd":0,"session_id":"s1","result":"ok"}';
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-isclaudekind-'));
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/pm2-jobs', () => ({
+      getJobStatus: vi.fn(),
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({ autoPushEnabled: false }),
+    }));
+    vi.doMock('@/lib/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/start-review', () => ({
+      startProjectReview: vi.fn().mockResolvedValue({ ok: false, status: 503, detail: 'test' }),
+    }));
+    vi.doMock('@/lib/start-push', () => ({
+      startProjectPush: vi.fn().mockResolvedValue({ ok: false, status: 503, detail: 'test' }),
+    }));
+    vi.doMock('@/lib/start-fix-push', () => ({
+      isHookRejection: vi.fn().mockReturnValue(false),
+      startFixPush: vi.fn().mockResolvedValue({ ok: false, status: 503, detail: 'test' }),
+    }));
+
+    const mod = await import('@/lib/job-storage');
+    markDoneFn = mod.markDone;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it.each(['fix', 'fix-ci', 'fix-push', 'agent:my-agent'])(
+    'overrides exit code to 0 for kind=%s when result is_error=false',
+    async (kind) => {
+      const logFile = join(tempDir, `${kind.replace(':', '-')}.log`);
+      writeFileSync(logFile, resultLine + '\n');
+      const job = makeJob(kind, logFile);
+
+      await markDoneFn(job, -1);
+
+      expect(job.exitCode).toBe(0);
+    }
+  );
+
+  it('does NOT override exit code for push kind', async () => {
+    const logFile = join(tempDir, 'push.log');
+    writeFileSync(logFile, resultLine + '\n');
+    const job = makeJob('push', logFile);
+
+    await markDoneFn(job, -1);
+
+    expect(job.exitCode).toBe(-1);
+  });
+
+  it('does NOT override exit code for test kind', async () => {
+    const logFile = join(tempDir, 'test-kind.log');
+    writeFileSync(logFile, resultLine + '\n');
+    const job = makeJob('test', logFile);
+
+    await markDoneFn(job, -1);
+
+    expect(job.exitCode).toBe(-1);
+  });
+
+  it('does not override when result has is_error=true', async () => {
+    const errorLine = '{"type":"result","subtype":"error","is_error":true,"duration_ms":100,"total_cost_usd":0,"session_id":"s2","result":""}';
+    const logFile = join(tempDir, 'fix-error.log');
+    writeFileSync(logFile, errorLine + '\n');
+    const job = makeJob('fix', logFile);
+
+    await markDoneFn(job, -1);
+
+    expect(job.exitCode).toBe(-1);
+  });
+});
+
+describe('runCompletionHooks – fix-push auto-fix chain', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let startFixPushMock: ReturnType<typeof vi.fn>;
+  let startProjectPushMock: ReturnType<typeof vi.fn>;
+  let startProjectReviewMock: ReturnType<typeof vi.fn>;
+  let isHookRejectionMock: ReturnType<typeof vi.fn>;
+  let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
+  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+  let tempDir: string;
+
+  function makeJob(kind: string, logPath: string | null, overrides: Partial<JobData> = {}): JobData {
+    return {
+      id: `${kind}-chain-test`,
+      project: 'my-proj',
+      kind,
+      prompt: null,
+      pid: 12345,
+      logPath,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      ...overrides,
+    };
+  }
+
+  function insertActiveRelease() {
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.jobs).values({
+      id: 'active-release-job',
+      project: 'my-proj',
+      kind: 'release',
+      prompt: null,
+      pid: 1,
+      logPath: null,
+      startedAt: now - 5,
+      finishedAt: null,
+      exitCode: null,
+      seen: 0,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    } as any).run();
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-fixpush-chain-'));
+
+    startFixPushMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-push-1', pid: 999, logPath: '/tmp/fp.log' });
+    startProjectPushMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'pushed' });
+    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-1', pid: 888, logPath: '/tmp/rev.log' });
+    isHookRejectionMock = vi.fn().mockReturnValue(false);
+    getProjectTestConfigMock = vi.fn().mockReturnValue({ autoPushEnabled: false });
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/pm2-jobs', () => ({
+      getJobStatus: vi.fn(),
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getProjectTestConfig: getProjectTestConfigMock,
+    }));
+    vi.doMock('@/lib/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/start-fix-push', () => ({
+      isHookRejection: isHookRejectionMock,
+      startFixPush: startFixPushMock,
+    }));
+
+    const mod = await import('@/lib/job-storage');
+    markDoneFn = mod.markDone;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('spawns fix-push when push fails with a hook rejection', async () => {
+    isHookRejectionMock.mockReturnValue(true);
+    const logFile = join(tempDir, 'push-hook-fail.log');
+    writeFileSync(logFile, 'husky - pre-commit hook exited with code 1');
+    const job = makeJob('push', logFile);
+
+    await markDoneFn(job, 1);
+
+    expect(isHookRejectionMock).toHaveBeenCalled();
+    expect(startFixPushMock).toHaveBeenCalledWith('my-proj', expect.stringContaining('husky'));
+  });
+
+  it('does not spawn fix-push when push fails for a non-hook reason', async () => {
+    isHookRejectionMock.mockReturnValue(false);
+    const logFile = join(tempDir, 'push-network-fail.log');
+    writeFileSync(logFile, 'error: failed to push some refs to origin');
+    const job = makeJob('push', logFile);
+
+    await markDoneFn(job, 1);
+
+    expect(startFixPushMock).not.toHaveBeenCalled();
+  });
+
+  it('does not spawn fix-push when push succeeds', async () => {
+    isHookRejectionMock.mockReturnValue(true);
+    const job = makeJob('push', null);
+
+    await markDoneFn(job, 0);
+
+    expect(startFixPushMock).not.toHaveBeenCalled();
+  });
+
+  it('does not spawn fix-push when the attempt cap (2) has been reached', async () => {
+    isHookRejectionMock.mockReturnValue(true);
+    const now = Date.now() / 1000;
+    for (let i = 0; i < 2; i++) {
+      testDb.db.insert(schema.jobs).values({
+        id: `prior-fixpush-${i}`,
+        project: 'my-proj',
+        kind: 'fix-push',
+        prompt: null,
+        pid: 100 + i,
+        logPath: null,
+        startedAt: now - i * 10,
+        finishedAt: now - i * 10 + 5,
+        exitCode: 0,
+        seen: 1,
+        durationMs: null,
+        inputTokens: null,
+        outputTokens: null,
+        cacheReadTokens: null,
+        cacheCreateTokens: null,
+        sessionId: null,
+      } as any).run();
+    }
+    const logFile = join(tempDir, 'push-hook-capped.log');
+    writeFileSync(logFile, 'pre-commit failed');
+    const job = makeJob('push', logFile);
+
+    await markDoneFn(job, 1);
+
+    expect(startFixPushMock).not.toHaveBeenCalled();
+  });
+
+  it('still spawns fix-push when only 1 prior attempt exists (cap is 2)', async () => {
+    isHookRejectionMock.mockReturnValue(true);
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.jobs).values({
+      id: 'prior-fixpush-0',
+      project: 'my-proj',
+      kind: 'fix-push',
+      prompt: null,
+      pid: 100,
+      logPath: null,
+      startedAt: now - 10,
+      finishedAt: now - 5,
+      exitCode: 0,
+      seen: 1,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    } as any).run();
+    const logFile = join(tempDir, 'push-hook-one-prior.log');
+    writeFileSync(logFile, 'pre-commit failed');
+    const job = makeJob('push', logFile);
+
+    await markDoneFn(job, 1);
+
+    expect(startFixPushMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls startProjectPush when fix-push finishes with exit 0', async () => {
+    const job = makeJob('fix-push', null);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj');
+  });
+
+  it('does not call startProjectPush when fix-push exits non-zero', async () => {
+    const job = makeJob('fix-push', null);
+
+    await markDoneFn(job, 1);
+
+    expect(startProjectPushMock).not.toHaveBeenCalled();
+  });
+
+  it('continues gracefully when startProjectPush throws after fix-push success', async () => {
+    startProjectPushMock.mockRejectedValue(new Error('push service down'));
+    const job = makeJob('fix-push', null);
+
+    await expect(markDoneFn(job, 0)).resolves.toBeUndefined();
+  });
+
+  it('chains review LGTM → push when inRelease even though auto-push is disabled', async () => {
+    getProjectTestConfigMock.mockReturnValue({ autoPushEnabled: false });
+    insertActiveRelease();
+    const logFile = join(tempDir, 'lgtm-release.log');
+    writeFileSync(logFile, 'Verdict: LGTM\n');
+    const job = makeJob('review', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj');
+  });
+
+  it('chains test pass → review when inRelease even though auto-push is disabled', async () => {
+    getProjectTestConfigMock.mockReturnValue({ autoPushEnabled: false });
+    insertActiveRelease();
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectReviewMock).toHaveBeenCalledWith('my-proj');
+  });
+
+  it('chains fix success → review when inRelease even though auto-push is disabled', async () => {
+    getProjectTestConfigMock.mockReturnValue({ autoPushEnabled: false });
+    insertActiveRelease();
+    const job = makeJob('fix', null);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectReviewMock).toHaveBeenCalledWith('my-proj');
+  });
+
+  it('does NOT chain review when neither inRelease nor auto-push', async () => {
+    getProjectTestConfigMock.mockReturnValue({ autoPushEnabled: false });
+    const logFile = join(tempDir, 'lgtm-no-release.log');
+    writeFileSync(logFile, 'Verdict: LGTM\n');
+    const job = makeJob('review', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectPushMock).not.toHaveBeenCalled();
+  });
+});

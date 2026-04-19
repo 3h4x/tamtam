@@ -125,6 +125,11 @@ async function assembleProject(
   const projName = cfg.project;
   const reviewed = changes > 0 ? await isReviewed(projName, cfg.path) : null;
 
+  const unpushedR = await exec('git', ['-C', cfg.path, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
+  const unpushed = (unpushedR.exitCode === 0 && unpushedR.stdout.trim())
+    ? (parseInt(unpushedR.stdout.trim(), 10) || 0)
+    : 0;
+
   const run = lastRuns[schedId];
   let lastRun: string | null = null;
   let lastRunAgo: string | null = null;
@@ -169,7 +174,7 @@ async function assembleProject(
     fires_at: firesAt,
     sync,
     changes,
-    unpushed: 0,
+    unpushed,
     reviewed,
     last_run: lastRun,
     last_run_ago: lastRunAgo,

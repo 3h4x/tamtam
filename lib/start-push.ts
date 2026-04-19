@@ -166,6 +166,22 @@ async function runPush(
     if (branch) pushR = await tryPush(['-u', 'origin', branch]);
   }
 
+  // Push rejected because the remote has commits the local clone doesn't know about
+  // (stale tracking info — the pre-push behind-check missed it). Pull --rebase and retry.
+  if (pushR.exitCode !== 0 && (pushR.stderr.includes('fetch first') || pushR.stderr.includes('Updates were rejected'))) {
+    log(`\n# remote has new commits (stale tracking) — rebasing before retry\n`);
+    const rebaseR = await exec('git', ['-C', projPath, 'pull', '--rebase'], { timeout: 60000 });
+    if (rebaseR.stdout) log(rebaseR.stdout);
+    if (rebaseR.stderr) log(rebaseR.stderr);
+    if (rebaseR.exitCode === 0) {
+      log(`\n# rebase succeeded — retrying push\n`);
+      pushR = await tryPush();
+    } else {
+      const detail = (rebaseR.stderr.trim() || rebaseR.stdout.trim() || 'rebase failed').slice(0, 2000);
+      return { ok: false, status: 409, detail: `Rebase failed before push: ${detail}` };
+    }
+  }
+
   // Pre-push hook may have left new uncommitted changes on disk.
   // Stage and commit just those changes ("revisiting just new changes"), then retry once.
   if (pushR.exitCode !== 0) {
