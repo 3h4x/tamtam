@@ -4,11 +4,23 @@ describe('startProjectPush — push result tracking', () => {
   let startProjectPush: typeof import('@/lib/start-push').startProjectPush;
   let execMock: ReturnType<typeof vi.fn>;
   let setProjectPushResultMock: ReturnType<typeof vi.fn>;
+  let createJobMock: ReturnType<typeof vi.fn>;
+  let markDoneMock: ReturnType<typeof vi.fn>;
+  let updateJobMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
     execMock = vi.fn();
     setProjectPushResultMock = vi.fn();
+    createJobMock = vi.fn().mockImplementation((project: string, kind: string, pid: number, logPath: string) => ({
+      id: `${project}-${kind}-test-id`, project, kind, pid, logPath, prompt: null,
+      startedAt: 0, finishedAt: null, exitCode: null, seen: false,
+      durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+      contextMeta: null, userPrompt: null,
+    }));
+    markDoneMock = vi.fn().mockResolvedValue(undefined);
+    updateJobMock = vi.fn();
 
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
@@ -20,6 +32,11 @@ describe('startProjectPush — push result tracking', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+    }));
+    vi.doMock('@/lib/job-storage', () => ({
+      createJob: createJobMock,
+      markDone: markDoneMock,
+      updateJob: updateJobMock,
     }));
 
     ({ startProjectPush } = await import('@/lib/start-push'));
@@ -91,6 +108,11 @@ describe('startProjectPush — push result tracking', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+    }));
+    vi.doMock('@/lib/job-storage', () => ({
+      createJob: createJobMock,
+      markDone: markDoneMock,
+      updateJob: updateJobMock,
     }));
     const { startProjectPush: fn } = await import('@/lib/start-push');
     const r = await fn('missing');
@@ -195,5 +217,62 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, '0'));                        // git rev-list --count
 
     await expect(startProjectPush('proj')).resolves.not.toThrow();
+  });
+
+  it('creates a tracked "push" job and marks it done with exit 0 on success', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0))                              // git add -A
+      .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached
+      .mockImplementationOnce(() => resp(0, 'M\tfoo.ts\n'))               // git diff --cached --stat
+      .mockImplementationOnce(() => resp(0, 'M\tfoo.ts\n'))               // git diff --cached (content)
+      .mockImplementationOnce(() => resp(0, 'chore: update'))             // claude commit msg
+      .mockImplementationOnce(() => resp(0))                              // git commit
+      .mockImplementationOnce(() => resp(0))                              // git push
+      .mockImplementationOnce(() => resp(0, 'abc1234'));                  // git rev-parse
+
+    await startProjectPush('proj');
+    expect(createJobMock).toHaveBeenCalledWith('proj', 'push', expect.any(Number), '');
+    const job = createJobMock.mock.results[0].value;
+    expect(job.logPath).toMatch(/\.log$/);
+    expect(markDoneMock).toHaveBeenCalledWith(job, 0);
+  });
+
+  it('creates a tracked "push" job and marks it done with exit 1 on commit failure', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0))                              // git add -A
+      .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached
+      .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached --stat
+      .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached (content)
+      .mockImplementationOnce(() => resp(0, 'chore: update'))             // claude commit msg
+      .mockImplementationOnce(() => resp(1, '', 'pre-commit hook failed')); // git commit
+
+    await startProjectPush('proj');
+    expect(createJobMock).toHaveBeenCalled();
+    const job = createJobMock.mock.results[0].value;
+    expect(markDoneMock).toHaveBeenCalledWith(job, 1);
+  });
+
+  it('does not create a push job when project path cannot be resolved', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+      clearProjectDataCache: vi.fn(),
+    }));
+    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      setProjectPushResult: setProjectPushResultMock,
+    }));
+    vi.doMock('@/lib/job-storage', () => ({
+      createJob: createJobMock,
+      markDone: markDoneMock,
+      updateJob: updateJobMock,
+    }));
+    const { startProjectPush: fn } = await import('@/lib/start-push');
+    await fn('missing');
+    expect(createJobMock).not.toHaveBeenCalled();
+    expect(markDoneMock).not.toHaveBeenCalled();
   });
 });

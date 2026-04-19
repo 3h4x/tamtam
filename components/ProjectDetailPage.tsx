@@ -408,7 +408,8 @@ export function ProjectDetailPage({
     .sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))[0]
   const verdict = latestReview?.verdict
 
-  const pushBlockReason = computePushBlockReason(project.totalChanges, hasUnreviewed, verdict)
+  const commitJustFailed = !!config?.last_push_error && config.last_push_error.startsWith('Commit failed')
+  const pushBlockReason = computePushBlockReason(project.totalChanges, hasUnreviewed, verdict, commitJustFailed)
 
   // Get latest test result
   const latestTest = projectJobs
@@ -903,10 +904,14 @@ export function ProjectDetailPage({
               projectJobs.some(j => j.kind === 'test' && j.started_at >= (Date.now() / 1000 - 60 * 60))
             )
             type StepState = 'pending' | 'running' | 'done' | 'warning' | 'failed'
-            const pipelineStarted = projectJobs.some(
-              j => ['test', 'review', 'fix'].includes(j.kind) && j.started_at >= (Date.now() / 1000 - 60 * 60)
+            // Show strip only while the release pipeline is actively running,
+            // or when a step just failed/needs attention (so the user can see
+            // why). At rest, hide it — stale ✓s from a past release are noise.
+            const pipelineRunning = projectJobs.some(
+              j => ['test', 'review', 'fix', 'push'].includes(j.kind) && j.status === 'running'
             )
-            if (!pipelineStarted) return null
+            const hasPushError = !!config?.last_push_error
+            if (!pipelineRunning && !hasPushError) return null
 
             const hourAgo = Date.now() / 1000 - 60 * 60
             const latestOfKind = (kind: string) => projectJobs
@@ -916,6 +921,7 @@ export function ProjectDetailPage({
             const testJob = latestOfKind('test')
             const reviewJob = latestOfKind('review')
             const fixJob = latestOfKind('fix')
+            const pushJob = latestOfKind('push')
 
             const stateOf = (job: JobInfo | undefined): StepState => {
               if (!job) return 'pending'
@@ -954,13 +960,22 @@ export function ProjectDetailPage({
               reviewFixAction = openJob(reviewJob)
             }
             else if (reviewVerdict === 'LGTM') {
-              if (hasUnreviewed) {
+              // If the most recent push attempt failed at the commit step (e.g.
+              // pre-commit hook rejected), the working-tree hash may shift from
+              // hook artifacts even though the code the reviewer read is
+              // unchanged. The LGTM is still valid — keep review ✓ and let the
+              // commit step carry the ✗.
+              const commitHookJustFailed = !!config?.last_push_error
+                && config.last_push_error.startsWith('Commit failed')
+              if (hasUnreviewed && !commitHookJustFailed) {
                 reviewState = 'pending'
                 reviewHint = 'last verdict was LGTM but files changed since — click to view last review'
                 reviewFixAction = openJob(reviewJob)
               } else {
                 reviewState = 'done'
-                reviewHint = 'LGTM — click to view review log'
+                reviewHint = commitHookJustFailed
+                  ? 'LGTM — commit blocked by pre-commit hook; click to view review'
+                  : 'LGTM — click to view review log'
                 reviewFixAction = openJob(reviewJob)
               }
             } else if (reviewVerdict === 'NEEDS ATTENTION') {
@@ -1016,11 +1031,18 @@ export function ProjectDetailPage({
                   ? `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — ${autoPush ? 'auto-commit pending' : 'commit manually'}`
                   : `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — need LGTM review to proceed`
 
+            const openPushJob = pushJob ? () => router.push(`/project/${name}/terminal?job=${encodeURIComponent(pushJob.id)}`) : null
+            // If a push job is running, show commit/push as running and let
+            // clicking either step open its log — it's a single tracked job
+            // that does both git commit and git push.
+            const pushRunning = pushJob?.status === 'running'
+            const commitStateEffective: StepState = pushRunning ? 'running' : commitState
+            const pushStateEffective: StepState = pushRunning ? 'running' : pushState
             const steps: Array<{ label: string; state: StepState; hint: string; action?: (() => void) | null }> = []
             if (hasTestCommand) steps.push({ label: 'test', state: testState, hint: testHint, action: testJob ? () => router.push(`/project/${name}/terminal?job=${encodeURIComponent(testJob.id)}`) : null })
             steps.push({ label: 'review', state: reviewState, hint: reviewHint, action: reviewFixAction })
-            steps.push({ label: 'commit', state: commitState, hint: commitHint })
-            steps.push({ label: 'push', state: pushState, hint: pushHint })
+            steps.push({ label: 'commit', state: commitStateEffective, hint: commitHint, action: openPushJob })
+            steps.push({ label: 'push', state: pushStateEffective, hint: pushHint, action: openPushJob })
 
             const glyph = (s: StepState) => {
               if (s === 'done') return <span className="text-status-success">✓</span>

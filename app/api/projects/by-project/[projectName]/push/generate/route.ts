@@ -3,6 +3,7 @@ import { resolveProjectPath } from '@/lib/project-data';
 import { exec } from '@/lib/shell';
 import { getSettings } from '@/lib/config';
 import { errMsg } from '@/lib/types';
+import { buildDiffContext } from '@/lib/diff-context';
 
 export async function POST(
   request: NextRequest,
@@ -14,20 +15,32 @@ export async function POST(
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
 
   try {
-    const [statusR, porcelainR, diffR] = await Promise.all([
-      exec('git', ['-C', projPath, 'diff', '--cached', '--stat'], { timeout: 10000 }),
-      exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 10000 }),
-      exec('git', ['-C', projPath, 'diff', 'HEAD', '--stat', '--no-color'], { timeout: 10000 }),
+    const [statR, diffR] = await Promise.all([
+      exec('git', ['-C', projPath, 'diff', '--cached', '--stat', '--no-color'], { timeout: 10000 }),
+      exec('git', ['-C', projPath, 'diff', '--cached', '--no-color'], { timeout: 10000 }),
     ]);
 
-    const fileSummary = statusR.stdout.trim() ? `\n\nFILE STATISTICS:\n${statusR.stdout.trim()}` : '';
-    const changesSummary = `\nGIT STATUS:\n${porcelainR.stdout}\nRepository: ${projectName}\n`;
+    const { context } = buildDiffContext(statR.stdout, diffR.stdout);
 
     const numOptions = 5;
     const styleGuide = (getSettings().commit_style ?? '').trim();
-    const commitPrompt = `Output exactly ${numOptions} commit titles, one per line, numbered 1-${numOptions}. No prose, no code blocks, no backticks, no quotes.
+    const commitPrompt = `Output exactly ${numOptions} conventional commit titles, one per line, numbered 1-${numOptions}. No prose, no code blocks, no backticks, no quotes.
 
-${changesSummary}${fileSummary}
+Use the format: <type>(<optional scope>): <description>
+Types: feat, fix, refactor, chore, docs, test, style, perf, ci, build
+
+Analyze the diff to determine the correct type:
+- feat: new capability or behavior added
+- fix: corrects broken/incorrect behavior
+- refactor: restructures code without changing behavior
+- chore: tooling, config, dependencies, maintenance
+- docs: documentation only
+- test: adds or updates tests
+
+Generate ${numOptions} distinct options varying in scope specificity and phrasing — all must be accurate to the actual changes.
+
+Repository: ${projectName}
+${context}
 
 ${styleGuide ? `STYLE GUIDE:\n${styleGuide}\n` : ''}
 Return ONLY the ${numOptions} titles — nothing else.`;

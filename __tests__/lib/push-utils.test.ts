@@ -45,4 +45,28 @@ describe('computePushBlockReason', () => {
   it('returns null when changes exist, reviewed, and verdict is LGTM', () => {
     expect(computePushBlockReason(4, false, 'LGTM')).toBeNull()
   })
+
+  describe('commitJustFailed override', () => {
+    it('allows retry when commit failed even with no recorded changes', () => {
+      expect(computePushBlockReason(0, false, 'LGTM', true)).toBeNull()
+    })
+
+    it('allows retry when commit failed and files look unreviewed (hook modified files)', () => {
+      expect(computePushBlockReason(3, true, 'LGTM', true)).toBeNull()
+    })
+
+    it('allows retry when commit failed and verdict is missing', () => {
+      expect(computePushBlockReason(3, false, null, true)).toBeNull()
+    })
+
+    it('allows retry when commit failed even with unreviewed changes and no verdict', () => {
+      expect(computePushBlockReason(3, true, null, true)).toBeNull()
+    })
+
+    it('does NOT allow retry when verdict is explicitly bad and commit has not failed', () => {
+      expect(computePushBlockReason(3, false, 'DO NOT SHIP', false)).toBe(
+        'Review verdict is "DO NOT SHIP" — fix issues before pushing',
+      )
+    })
+  })
 })

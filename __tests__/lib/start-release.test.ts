@@ -1,0 +1,184 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+describe('startRelease — release pipeline entry decision tree', () => {
+  let startRelease: typeof import('@/lib/start-release').startRelease;
+  let execMock: ReturnType<typeof vi.fn>;
+  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
+  let listJobsMock: ReturnType<typeof vi.fn>;
+  let probeJobStatusMock: ReturnType<typeof vi.fn>;
+  let startProjectTestMock: ReturnType<typeof vi.fn>;
+  let detectTestCommandMock: ReturnType<typeof vi.fn>;
+  let startProjectReviewMock: ReturnType<typeof vi.fn>;
+  let startProjectPushMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    execMock = vi.fn();
+    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
+    listJobsMock = vi.fn().mockReturnValue([]);
+    probeJobStatusMock = vi.fn();
+    startProjectTestMock = vi.fn();
+    detectTestCommandMock = vi.fn();
+    startProjectReviewMock = vi.fn();
+    startProjectPushMock = vi.fn();
+
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/job-storage', () => ({ listJobs: listJobsMock, probeJobStatus: probeJobStatusMock }));
+    vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
+    vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
+
+    ({ startRelease } = await import('@/lib/start-release'));
+  });
+
+  afterEach(() => { vi.resetModules(); });
+
+  function gitStatus(porcelain: string) {
+    return Promise.resolve({ exitCode: 0, stdout: porcelain, stderr: '' });
+  }
+  function gitAhead(count: string) {
+    return Promise.resolve({ exitCode: 0, stdout: count, stderr: '' });
+  }
+
+  it('returns 404 when project path cannot be resolved', async () => {
+    resolveProjectPathMock.mockReturnValue(null);
+    const r = await startRelease('missing');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(404);
+  });
+
+  it('returns 409 when a pipeline job is already running for the project', async () => {
+    listJobsMock.mockReturnValue([
+      { id: 'j1', project: 'proj', kind: 'test', finishedAt: null },
+    ]);
+    probeJobStatusMock.mockResolvedValue('running');
+    const r = await startRelease('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(409);
+  });
+
+  it('ignores non-pipeline running jobs (e.g. run, agent) when deciding conflict', async () => {
+    listJobsMock.mockReturnValue([
+      { id: 'j1', project: 'proj', kind: 'run', finishedAt: null },
+    ]);
+    probeJobStatusMock.mockResolvedValue('running');
+    detectTestCommandMock.mockReturnValue(null);
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n')) // status --porcelain (hasChanges)
+      .mockImplementationOnce(() => gitAhead('0'));           // rev-list --count
+    startProjectReviewMock.mockResolvedValue({ ok: true, jobId: 'r1' });
+    const r = await startRelease('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.step).toBe('review');
+  });
+
+  it('returns 400 when there are no changes and no unpushed commits', async () => {
+    detectTestCommandMock.mockReturnValue(null);
+    execMock
+      .mockImplementationOnce(() => gitStatus(''))     // no changes
+      .mockImplementationOnce(() => gitAhead('0'));    // no unpushed
+    const r = await startRelease('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(400);
+      expect(r.detail).toContain('Nothing to release');
+    }
+  });
+
+  it('starts tests first when a test command is configured and there are changes', async () => {
+    detectTestCommandMock.mockReturnValue('pnpm test');
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n')) // has tracked changes
+      .mockImplementationOnce(() => gitAhead('0'));
+    startProjectTestMock.mockResolvedValue({ ok: true, jobId: 't1', pid: 1, logPath: '/tmp/t.log', testCmd: 'pnpm test' });
+
+    const r = await startRelease('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.step).toBe('test');
+      expect(r.jobId).toBe('t1');
+      expect(r.message).toContain('pnpm test');
+    }
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+    expect(startProjectPushMock).not.toHaveBeenCalled();
+  });
+
+  it('starts review when there are changes and no test command is detected', async () => {
+    detectTestCommandMock.mockReturnValue(null);
+    execMock
+      .mockImplementationOnce(() => gitStatus('?? new.ts\n')) // untracked changes only — should still release
+      .mockImplementationOnce(() => gitAhead('0'));
+    startProjectReviewMock.mockResolvedValue({ ok: true, jobId: 'r1' });
+
+    const r = await startRelease('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.step).toBe('review');
+    expect(startProjectTestMock).not.toHaveBeenCalled();
+  });
+
+  it('pushes directly when there are no changes but unpushed commits exist', async () => {
+    detectTestCommandMock.mockReturnValue(null);
+    execMock
+      .mockImplementationOnce(() => gitStatus(''))    // clean
+      .mockImplementationOnce(() => gitAhead('2'));   // 2 unpushed
+    startProjectPushMock.mockResolvedValue({ ok: true, commitSha: 'abc', message: 'pushed' });
+
+    const r = await startRelease('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.step).toBe('push');
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+  });
+
+  it('propagates failure from startProjectTest', async () => {
+    detectTestCommandMock.mockReturnValue('pnpm test');
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'));
+    startProjectTestMock.mockResolvedValue({ ok: false, status: 409, detail: 'Tests already running for proj' });
+
+    const r = await startRelease('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(409);
+      expect(r.detail).toContain('already running');
+    }
+  });
+
+  it('propagates failure from startProjectReview', async () => {
+    detectTestCommandMock.mockReturnValue(null);
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'));
+    startProjectReviewMock.mockResolvedValue({ ok: false, status: 500, detail: 'review spawn failed' });
+
+    const r = await startRelease('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(500);
+  });
+
+  it('propagates failure from startProjectPush (push-only path)', async () => {
+    detectTestCommandMock.mockReturnValue(null);
+    execMock
+      .mockImplementationOnce(() => gitStatus(''))
+      .mockImplementationOnce(() => gitAhead('1'));
+    startProjectPushMock.mockResolvedValue({ ok: false, status: 502, detail: 'Push failed: remote rejected' });
+
+    const r = await startRelease('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(502);
+      expect(r.detail).toContain('remote rejected');
+    }
+  });
+
+  it('treats git status exit failure as no tracked changes', async () => {
+    detectTestCommandMock.mockReturnValue(null);
+    execMock
+      .mockImplementationOnce(() => Promise.resolve({ exitCode: 128, stdout: '', stderr: 'not a repo' }))
+      .mockImplementationOnce(() => gitAhead('0'));
+    const r = await startRelease('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(400);
+  });
+});
