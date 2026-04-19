@@ -103,13 +103,22 @@ async function runPush(
   if (hasStaged) {
     log(`\n# generating commit message via Claude...\n`);
     const message = await generateCommitMessage(projPath, projectName);
-    // Use --no-verify to bypass pre-commit hooks. Quality gates live in
-    // pre-push hooks (or the AI review step upstream). Pre-commit hooks that
-    // modify files would abort the commit and leave us stuck.
-    log(`# commit message: ${message}\n\n$ git commit --no-verify -m "${message}"\n`);
-    const commitR = await exec('git', ['-C', projPath, 'commit', '--no-verify', '-m', message], { timeout: 30000 });
+    log(`# commit message: ${message}\n\n$ git commit -m "${message}"\n`);
+    let commitR = await exec('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 });
     if (commitR.stdout) log(commitR.stdout);
     if (commitR.stderr) log(commitR.stderr);
+    // Pre-commit hook may have modified files, causing the commit to abort.
+    // Stage the hook's changes and retry once so the hook's work is included.
+    if (commitR.exitCode !== 0 && !commitR.stdout.includes('nothing to commit')) {
+      const hookChangesR = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
+      if (hookChangesR.stdout.trim()) {
+        log(`\n# pre-commit hook modified files — staging and retrying commit\n`);
+        await exec('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
+        commitR = await exec('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 });
+        if (commitR.stdout) log(commitR.stdout);
+        if (commitR.stderr) log(commitR.stderr);
+      }
+    }
     if (commitR.exitCode !== 0 && !commitR.stdout.includes('nothing to commit')) {
       const detail = (commitR.stderr.trim() || commitR.stdout.trim() || `git commit exited ${commitR.exitCode}`).slice(0, 2000);
       return { ok: false, status: 500, detail: `Commit failed: ${detail}` };
@@ -166,8 +175,8 @@ async function runPush(
       log(`\n# pre-push hook left new changes — committing delta\n`);
       await exec('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
       const fixMsg = await generateCommitMessage(projPath, projectName);
-      log(`# fix commit message: ${fixMsg}\n\n$ git commit --no-verify -m "${fixMsg}"\n`);
-      const fixCommitR = await exec('git', ['-C', projPath, 'commit', '--no-verify', '-m', fixMsg], { timeout: 30000 });
+      log(`# fix commit message: ${fixMsg}\n\n$ git commit -m "${fixMsg}"\n`);
+      const fixCommitR = await exec('git', ['-C', projPath, 'commit', '-m', fixMsg], { timeout: 30000 });
       if (fixCommitR.stdout) log(fixCommitR.stdout);
       if (fixCommitR.stderr) log(fixCommitR.stderr);
       if (fixCommitR.exitCode === 0 || fixCommitR.stdout.includes('nothing to commit')) {

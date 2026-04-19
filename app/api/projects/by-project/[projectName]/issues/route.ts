@@ -103,10 +103,17 @@ export async function POST(
 ) {
   const { projectName } = await params;
   const body = await request.json().catch(() => ({}));
-  const { prNumber, mergeMethod = 'merge' } = body as { prNumber?: number; mergeMethod?: string };
+  const { prNumber, mergeMethod = 'merge', action = 'merge' } = body as {
+    prNumber?: number;
+    mergeMethod?: string;
+    action?: 'merge' | 'approve';
+  };
 
   if (!prNumber) return NextResponse.json({ detail: 'prNumber required' }, { status: 400 });
-  if (!['merge', 'squash', 'rebase'].includes(mergeMethod)) {
+  if (!['merge', 'approve'].includes(action)) {
+    return NextResponse.json({ detail: 'action must be merge or approve' }, { status: 400 });
+  }
+  if (action === 'merge' && !['merge', 'squash', 'rebase'].includes(mergeMethod)) {
     return NextResponse.json({ detail: 'mergeMethod must be merge, squash, or rebase' }, { status: 400 });
   }
 
@@ -117,11 +124,38 @@ export async function POST(
   const repo = await getGhRepo(projectName, expanded);
   if (!repo) return NextResponse.json({ detail: 'could not determine GitHub repo' }, { status: 422 });
 
-  const result = await exec(
-    'gh',
-    ['pr', 'merge', String(prNumber), '--repo', repo, `--${mergeMethod}`, '--auto'],
-    { timeout: 30000 }
-  );
+  if (action === 'approve') {
+    const result = await exec(
+      'gh',
+      ['pr', 'review', String(prNumber), '--repo', repo, '--approve'],
+      { timeout: 30000 }
+    );
+    if (result.exitCode !== 0) {
+      const errMsg = result.stderr.trim() || 'approve failed';
+      return NextResponse.json({ detail: errMsg }, { status: 422 });
+    }
+    db.delete(schema.ghIssuesCache)
+      .where(eq(schema.ghIssuesCache.project, projectName))
+      .run();
+    return NextResponse.json({ status: 'approved', pr: prNumber, repo });
+  }
+
+  // merge — try direct merge first. If the repo requires auto-merge
+  // enablement AND branch protection hasn't been satisfied yet, gh returns
+  // a "Pull request Auto merge is not allowed for this repository" error,
+  // which is an actionable signal: approve first, then retry.
+  const tryMerge = async (autoFlag: boolean) => {
+    const args = ['pr', 'merge', String(prNumber), '--repo', repo, `--${mergeMethod}`];
+    if (autoFlag) args.push('--auto');
+    return exec('gh', args, { timeout: 30000 });
+  };
+
+  let result = await tryMerge(false);
+  if (result.exitCode !== 0 && /auto.?merge|mergeable|required|pending/i.test(result.stderr)) {
+    // Fall back to queuing with --auto (if the repo supports it) — useful
+    // for the "tests are still running" case.
+    result = await tryMerge(true);
+  }
 
   if (result.exitCode !== 0) {
     const errMsg = result.stderr.trim() || 'merge failed';

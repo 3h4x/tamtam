@@ -63,12 +63,12 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `components/` — React client components
 - `hooks/` — Custom React hooks
 - `lib/` — Server-side business logic
-- `lib/db/` — Drizzle schema and connection (tables: settings, projects, jobs, gh_status, skills, agents)
+- `lib/db/` — Drizzle schema and connection (tables: settings, projects, jobs, gh_status, gh_issues_cache, skills, agents)
 - `skills/` — claude-skills submodule
 - `data/` — SQLite database (gitignored)
 - `__tests__/` — vitest unit tests
 - `e2e/` — Playwright integration tests
-- `docs/` — architecture docs (see `docs/TERMINAL.md` for terminal page streaming)
+- `docs/` — architecture docs (see `docs/TERMINAL.md` for terminal page streaming, `docs/AGENT.md` for agent concepts)
 
 ## Pages
 - `/` — Projects list with status, changes, CI
@@ -108,7 +108,8 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `/api/projects/by-project/[name]/changes/diff` — Full git diff content (GET)
 - `/api/projects/by-project/[name]/push` — Push changes to git (POST); sub-routes: `/preview`, `/execute`, `/generate`
 - `/api/projects/by-project/[name]/release` — Trigger release pipeline (POST)
-- `/api/projects/by-project/[name]/issues` — GitHub PRs and issues for the project (GET)
+- `/api/projects/by-project/[name]/issues` — GitHub PRs and issues for the project (GET, POST to force refresh)
+- `/api/projects/by-project/[name]/behind` — Ahead/behind commit counts vs remote (GET)
 - `/api/projects/by-project/[name]/logs` — Project run log files (GET)
 - `/api/projects/by-project/[name]/docs` — Project documentation files (GET)
 - `/api/config/projects` — Scan workspace for git repos and configure projects (GET, PATCH)

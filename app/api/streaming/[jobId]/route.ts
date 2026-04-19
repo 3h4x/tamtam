@@ -70,8 +70,18 @@ export async function GET(
           const content = readFileSync(logPath, 'utf-8');
           if (!content.trim()) return 'log file empty — claude CLI exited without writing anything. Common causes: rate-limited (5-hour window), cold-start crash, or auth/session conflict with a concurrent run. Retrying usually works.';
           const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
+          // If every non-empty line is a [tamtam] wrapper marker (the launch
+          // banner and exit-code tail), claude CLI never actually emitted
+          // anything. Surface that as a diagnosable message instead of
+          // echoing the launching command as "detail" — that was useless to
+          // the user.
+          const wrapperOnly = lines.every(l => l.startsWith('[tamtam]'));
+          if (wrapperOnly) {
+            return 'claude CLI exited immediately without producing any output. Usually one of: (1) invalid --resume session id, (2) rate-limited (5-hour window), (3) auth expired, or (4) a concurrent claude run in the same project holding the session. Try again, or start a new session without --resume.';
+          }
           const nonJson: string[] = [];
           for (const line of lines) {
+            if (line.startsWith('[tamtam]')) continue; // drop wrapper chrome from detail
             try { JSON.parse(line); } catch { nonJson.push(line); }
           }
           if (nonJson.length > 0) return nonJson.slice(-20).join('\n');

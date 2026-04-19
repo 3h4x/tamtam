@@ -436,4 +436,106 @@ describe('GET /api/streaming/[jobId] – extractLogDetail in done event', () => 
     expect(payload.detail as string).toContain('error line 6');
     expect(payload.detail as string).not.toContain('error line 5');
   });
+
+  it('done event with only [tamtam] wrapper lines has specific wrapper-only detail', async () => {
+    const wrapperContent = [
+      '[tamtam] launching: claude --print --model haiku',
+      '[tamtam] exit 1',
+    ].join('\n') + '\n';
+    const payload = await getDonePayload(wrapperContent, 1);
+    expect(payload.detail as string).toContain('immediately without producing any output');
+  });
+});
+
+describe('GET /api/streaming/[jobId] – tool_result SSE event', () => {
+  let tempDir: string;
+  let GET: any;
+  let getJobMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-streaming-tr-test-'));
+    vi.resetModules();
+    getJobMock = vi.fn().mockReturnValue(null);
+    vi.doMock('@/lib/job-storage', () => ({ getJob: getJobMock }));
+
+    const { parseStreamLines } = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
+      '@/lib/claude-stream-parser'
+    );
+    vi.doMock('@/lib/claude-stream-parser', () => ({ parseStreamLines }));
+
+    const mod = await import('@/app/api/streaming/[jobId]/route');
+    GET = mod.GET;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('emits tool_result SSE event from system subtype tool_result log line', async () => {
+    const logFile = join(tempDir, 'sys-tr.log');
+    const line = JSON.stringify({
+      type: 'system',
+      subtype: 'tool_result',
+      content: 'tool output text',
+    });
+    writeFileSync(logFile, line + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as any);
+
+    const ac = new AbortController();
+    const req = new NextRequest('http://localhost/api/streaming/job-sys-tr', { signal: ac.signal });
+    const response = await GET(req, { params: Promise.resolve({ jobId: 'job-sys-tr' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    expect(combined).toContain('event: tool_result');
+    expect(combined).toContain('tool output text');
+  });
+
+  it('emits tool_result SSE event from user message content block', async () => {
+    const logFile = join(tempDir, 'user-tr.log');
+    const line = JSON.stringify({
+      type: 'user',
+      message: {
+        content: [{
+          type: 'tool_result',
+          content: 'user block tool output',
+        }],
+      },
+    });
+    writeFileSync(logFile, line + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as any);
+
+    const ac = new AbortController();
+    const req = new NextRequest('http://localhost/api/streaming/job-user-tr', { signal: ac.signal });
+    const response = await GET(req, { params: Promise.resolve({ jobId: 'job-user-tr' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    expect(combined).toContain('event: tool_result');
+    expect(combined).toContain('user block tool output');
+  });
+
+  it('tool_result payload includes content field as JSON', async () => {
+    const logFile = join(tempDir, 'tr-payload.log');
+    const line = JSON.stringify({
+      type: 'system',
+      subtype: 'tool_result',
+      content: 'payload content',
+    });
+    writeFileSync(logFile, line + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as any);
+
+    const ac = new AbortController();
+    const req = new NextRequest('http://localhost/api/streaming/job-tr-payload', { signal: ac.signal });
+    const response = await GET(req, { params: Promise.resolve({ jobId: 'job-tr-payload' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    // The SSE data should be JSON with a "content" field
+    const match = combined.match(/event: tool_result\ndata: (.+)/);
+    expect(match).not.toBeNull();
+    const payload = JSON.parse(match![1]);
+    expect(payload).toHaveProperty('content', 'payload content');
+  });
 });

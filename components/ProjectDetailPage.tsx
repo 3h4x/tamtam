@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError } from '@/lib/client-api'
+import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
 import { priorityColor, getHighestPriority, getAggregateCi, formatDuration } from '@/lib/statusConstants'
@@ -12,9 +12,10 @@ import { AgentsTab } from '@/components/AgentsTab'
 import { ProjectRunsTab } from '@/components/ProjectRunsTab'
 import { ChangesTab } from '@/components/ChangesTab'
 import { IssuesTab } from '@/components/IssuesTab'
+import { DocsTab } from '@/components/DocsTab'
 import { useToast } from '@/components/Toast'
 
-type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues'
+type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs'
 
 type Verdict = 'LGTM' | 'NEEDS ATTENTION' | 'DO NOT SHIP'
 
@@ -270,7 +271,7 @@ export function ProjectDetailPage({
   const name = params.name
   const router = useRouter()
   const { toast } = useToast()
-  const VALID_TABS: Tab[] = ['overview', 'config', 'history', 'terminal', 'changes', 'issues']
+  const VALID_TABS: Tab[] = ['overview', 'config', 'history', 'terminal', 'changes', 'issues', 'docs']
   const activeTab: Tab = params.sessionId
     ? 'terminal'
     : VALID_TABS.includes(params.tab as Tab) ? (params.tab as Tab) : 'overview'
@@ -411,6 +412,7 @@ export function ProjectDetailPage({
     .sort((a, b) => (b.started_at || 0) - (a.started_at || 0))
 
   const [releasing, setReleasing] = useState(false)
+  const [testing, setTesting] = useState(false)
   const [pulling, setPulling] = useState(false)
   const [pullResult, setPullResult] = useState<string | null>(null)
   const [pullDiverged, setPullDiverged] = useState(false)
@@ -442,6 +444,19 @@ export function ProjectDetailPage({
       }
     } finally {
       setPulling(false)
+    }
+  }
+
+  const handleTest = async () => {
+    if (!name || testing || isTestRunning) return
+    setTesting(true)
+    try {
+      const result = await testProject(name)
+      router.push(`/project/${name}/terminal?job=${result.job_id}`)
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to start test', 'error')
+    } finally {
+      setTesting(false)
     }
   }
 
@@ -600,6 +615,16 @@ export function ProjectDetailPage({
               </button>
             )
           })()}
+          {!!(config?.effective_test_command || config?.detected_test_command) && (
+            <button
+              className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+              onClick={handleTest}
+              disabled={testing || isTestRunning}
+              title={isTestRunning ? 'Tests already running' : `Run: ${config?.effective_test_command || config?.detected_test_command}`}
+            >
+              {testing || isTestRunning ? 'Testing…' : 'Test'}
+            </button>
+          )}
           {customActions.map((action) => (
             <button
               key={action.name}
@@ -726,6 +751,12 @@ export function ProjectDetailPage({
           Issues / PRs
         </button>
         <button
+          className={`px-3 py-1.5 text-sm cursor-pointer ${activeTab === 'docs' ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`}
+          onClick={() => setActiveTab('docs')}
+        >
+          Docs
+        </button>
+        <button
           className={`px-3 py-1.5 text-sm cursor-pointer ${activeTab === 'config' ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`}
           onClick={() => setActiveTab('config')}
         >
@@ -792,152 +823,173 @@ export function ProjectDetailPage({
               Loading configuration…
             </div>
           ) : config ? (
-            <div className="flex flex-col gap-6">
-              <div className="bg-bg-secondary rounded-lg p-4">
-                <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-2">Test Command</h3>
-                <p className="text-text-secondary text-sm mb-4">
-                  Configure the command used when running tests for this project.
-                  Leave empty to use auto-detection.
-                </p>
+            <div className="flex flex-col gap-4 max-w-2xl">
 
-                <div className="mb-4">
-                  <label className="block mb-1 font-medium text-sm text-text-primary" htmlFor="test-command">
-                    Custom test command
-                  </label>
-                  <div className="flex items-center gap-2">
+              {/* Testing */}
+              <div className="bg-bg-secondary rounded-lg p-5">
+                <h3 className="text-sm font-semibold text-text-primary mb-4">Testing</h3>
+
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <label className="block mb-1.5 text-xs font-medium text-text-secondary uppercase tracking-wider" htmlFor="test-command">
+                      Test command
+                    </label>
                     <input
                       id="test-command"
                       type="text"
-                      className="flex-1 px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary font-mono"
+                      className="w-full px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary font-mono"
                       value={testCommandInput}
                       onChange={(e) => setTestCommandInput(e.target.value)}
                       placeholder={config.detected_test_command || 'e.g. npm test, pytest, forge test'}
                     />
-                    <button
-                      className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                      onClick={handleSaveConfig}
-                      disabled={configSaving || !configDirty}
-                    >
-                      {configSaving ? 'Saving...' : configSaved ? 'Saved' : 'Save'}
-                    </button>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-tertiary">
+                      <span>Auto-detected: <code className="font-mono text-text-secondary">{config.detected_test_command || 'none'}</code></span>
+                      <span>Effective: <code className="font-mono text-accent font-medium">{config.effective_test_command || 'none'}</code></span>
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex flex-col gap-1 text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="text-text-secondary">Auto-detected:</span>
-                    <code className="font-mono text-xs bg-bg-tertiary px-1.5 py-0.5 rounded text-text-primary">
-                      {config.detected_test_command || 'none'}
-                    </code>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-text-secondary">Effective command:</span>
-                    <code className="font-mono text-xs bg-accent-light px-1.5 py-0.5 rounded text-accent font-semibold">
-                      {config.effective_test_command || 'none'}
-                    </code>
-                  </div>
-                </div>
-
-                <div className="mt-5 pt-4 border-t border-border">
-                  <div className="flex items-center gap-2 mb-2">
-                    <input
-                      id="test-cron-enabled"
-                      type="checkbox"
-                      className="w-4 h-4 cursor-pointer accent-accent"
-                      checked={testCronEnabledInput}
-                      onChange={(e) => setTestCronEnabledInput(e.target.checked)}
-                    />
-                    <label htmlFor="test-cron-enabled" className="font-medium text-sm text-text-primary cursor-pointer">
-                      Run tests on schedule
+                  <div className="pt-3 border-t border-border">
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        id="test-cron-enabled"
+                        type="checkbox"
+                        className="w-4 h-4 cursor-pointer accent-accent"
+                        checked={testCronEnabledInput}
+                        onChange={(e) => setTestCronEnabledInput(e.target.checked)}
+                      />
+                      <span className="text-sm font-medium text-text-primary">Run on schedule</span>
                     </label>
+                    {testCronEnabledInput && (
+                      <div className="mt-2.5 ml-6 flex items-center gap-2">
+                        <input
+                          type="text"
+                          className="w-36 px-3 py-1.5 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary font-mono"
+                          value={testCronScheduleInput}
+                          onChange={(e) => setTestCronScheduleInput(e.target.value)}
+                          placeholder="1h"
+                        />
+                        <span className="text-xs text-text-tertiary">e.g. <code className="font-mono">30m</code>, <code className="font-mono">6h</code>, <code className="font-mono">1d</code></span>
+                      </div>
+                    )}
+                    {!testCronEnabledInput && (
+                      <p className="mt-1 ml-6 text-xs text-text-tertiary">Tests only run manually or via release pipeline.</p>
+                    )}
                   </div>
-                  <p className="text-text-secondary text-xs mb-3">
-                    When enabled, the effective test command runs on the schedule below. Examples: <code className="font-mono">30m</code>, <code className="font-mono">1h</code>, <code className="font-mono">6h</code>, <code className="font-mono">1d</code>, or a raw cron expression.
-                  </p>
+                </div>
+
+                <div className="mt-4 flex items-center gap-3">
+                  <button
+                    className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleSaveConfig}
+                    disabled={configSaving || !configDirty}
+                  >
+                    {configSaving ? 'Saving…' : configSaved ? 'Saved' : 'Save'}
+                  </button>
+                  {configDirty && !configSaving && (
+                    <span className="text-xs text-text-tertiary">Unsaved changes</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Release Pipeline */}
+              <div className="bg-bg-secondary rounded-lg p-5">
+                <h3 className="text-sm font-semibold text-text-primary mb-4">Release Pipeline</h3>
+
+                <label className="flex items-start gap-2.5 cursor-pointer select-none">
                   <input
-                    type="text"
-                    className="w-48 px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary font-mono disabled:opacity-50"
-                    value={testCronScheduleInput}
-                    onChange={(e) => setTestCronScheduleInput(e.target.value)}
-                    placeholder="1h"
-                    disabled={!testCronEnabledInput}
+                    id="auto-push-enabled"
+                    type="checkbox"
+                    className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
+                    checked={autoPushEnabledInput}
+                    onChange={(e) => setAutoPushEnabledInput(e.target.checked)}
                   />
-                </div>
-
-                <div className="mt-5 pt-4 border-t border-border">
-                  <div className="flex items-center gap-2 mb-2">
-                    <input
-                      id="auto-push-enabled"
-                      type="checkbox"
-                      className="w-4 h-4 cursor-pointer accent-accent"
-                      checked={autoPushEnabledInput}
-                      onChange={(e) => setAutoPushEnabledInput(e.target.checked)}
-                    />
-                    <label htmlFor="auto-push-enabled" className="font-medium text-sm text-text-primary cursor-pointer">
-                      Auto-push when review passes
-                    </label>
+                  <div>
+                    <span className="text-sm font-medium text-text-primary">Auto-push when review passes</span>
+                    <p className="mt-0.5 text-xs text-text-tertiary">
+                      On <code className="font-mono">LGTM</code> verdict, automatically commit and push. Off by default.
+                    </p>
                   </div>
-                  <p className="text-text-secondary text-xs">
-                    When enabled, a review with <code className="font-mono">LGTM</code> verdict automatically runs the tests, and on pass, commits and pushes. Disabled by default.
-                  </p>
+                </label>
+
+                <div className="mt-4 flex items-center gap-3">
+                  <button
+                    className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleSaveConfig}
+                    disabled={configSaving || !configDirty}
+                  >
+                    {configSaving ? 'Saving…' : configSaved ? 'Saved' : 'Save'}
+                  </button>
+                  {configDirty && !configSaving && (
+                    <span className="text-xs text-text-tertiary">Unsaved changes</span>
+                  )}
                 </div>
               </div>
 
               {/* Custom Actions */}
-              <div className="bg-bg-secondary rounded-lg p-4">
-                <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-2">Custom Actions</h3>
-                <p className="text-text-secondary text-sm mb-4">
-                  Define bash commands that appear as buttons on the project page. Each action runs in the project directory.
+              <div className="bg-bg-secondary rounded-lg p-5">
+                <h3 className="text-sm font-semibold text-text-primary mb-1">Custom Actions</h3>
+                <p className="text-xs text-text-tertiary mb-4">
+                  Bash commands that appear as buttons on the project page, run in the project directory.
                 </p>
 
-                <div className="flex flex-col gap-3 mb-4">
-                  {editActions.map((action, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        className="w-32 px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary"
-                        value={action.name}
-                        onChange={(e) => {
-                          const next = [...editActions]
-                          next[i] = { ...next[i], name: e.target.value }
-                          setEditActions(next)
-                        }}
-                        placeholder="Name"
-                      />
-                      <input
-                        type="text"
-                        className="flex-1 px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary font-mono"
-                        value={action.command}
-                        onChange={(e) => {
-                          const next = [...editActions]
-                          next[i] = { ...next[i], command: e.target.value }
-                          setEditActions(next)
-                        }}
-                        placeholder="bash command"
-                      />
-                      <input
-                        type="color"
-                        className="w-10 h-9 p-0.5 bg-bg-tertiary border border-border rounded-md cursor-pointer"
-                        value={action.color || '#6366f1'}
-                        onChange={(e) => {
-                          const next = [...editActions]
-                          next[i] = { ...next[i], color: e.target.value }
-                          setEditActions(next)
-                        }}
-                        title="Button color"
-                      />
-                      <button
-                        className="px-2 py-2 text-sm text-status-error hover:bg-status-error/10 rounded-md cursor-pointer"
-                        onClick={() => setEditActions(editActions.filter((_, j) => j !== i))}
-                        title="Remove action"
-                      >
-                        &times;
-                      </button>
+                {editActions.length > 0 && (
+                  <div className="mb-3">
+                    <div className="grid gap-x-2 mb-1.5 px-1" style={{ gridTemplateColumns: '8rem 1fr 2.5rem 2rem' }}>
+                      <span className="text-xs font-medium text-text-tertiary uppercase tracking-wider">Label</span>
+                      <span className="text-xs font-medium text-text-tertiary uppercase tracking-wider">Command</span>
+                      <span className="text-xs font-medium text-text-tertiary uppercase tracking-wider">Color</span>
+                      <span />
                     </div>
-                  ))}
-                </div>
+                    <div className="flex flex-col gap-2">
+                      {editActions.map((action, i) => (
+                        <div key={i} className="grid items-center gap-2" style={{ gridTemplateColumns: '8rem 1fr 2.5rem 2rem' }}>
+                          <input
+                            type="text"
+                            className="px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary"
+                            value={action.name}
+                            onChange={(e) => {
+                              const next = [...editActions]
+                              next[i] = { ...next[i], name: e.target.value }
+                              setEditActions(next)
+                            }}
+                            placeholder="Deploy"
+                          />
+                          <input
+                            type="text"
+                            className="px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary font-mono"
+                            value={action.command}
+                            onChange={(e) => {
+                              const next = [...editActions]
+                              next[i] = { ...next[i], command: e.target.value }
+                              setEditActions(next)
+                            }}
+                            placeholder="./deploy.sh"
+                          />
+                          <input
+                            type="color"
+                            className="w-10 h-9 p-0.5 bg-bg-tertiary border border-border rounded-md cursor-pointer"
+                            value={action.color || '#6366f1'}
+                            onChange={(e) => {
+                              const next = [...editActions]
+                              next[i] = { ...next[i], color: e.target.value }
+                              setEditActions(next)
+                            }}
+                            title="Button color"
+                          />
+                          <button
+                            className="flex items-center justify-center h-9 w-8 text-text-tertiary hover:text-status-error hover:bg-status-error/10 rounded-md cursor-pointer transition-colors"
+                            onClick={() => setEditActions(editActions.filter((_, j) => j !== i))}
+                            title="Remove"
+                          >
+                            &times;
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 mt-2">
                   <button
                     className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
                     onClick={() => setEditActions([...editActions, { name: '', command: '', color: '#6366f1' }])}
@@ -949,10 +1001,11 @@ export function ProjectDetailPage({
                     onClick={handleSaveActions}
                     disabled={actionsSaving}
                   >
-                    {actionsSaving ? 'Saving...' : actionsSaved ? 'Saved' : 'Save Actions'}
+                    {actionsSaving ? 'Saving…' : actionsSaved ? 'Saved' : 'Save Actions'}
                   </button>
                 </div>
               </div>
+
             </div>
           ) : (
             <div className="text-text-secondary text-sm">Failed to load configuration</div>
@@ -966,6 +1019,10 @@ export function ProjectDetailPage({
 
       {activeTab === 'issues' && name && (
         <IssuesTab projectName={name} />
+      )}
+
+      {activeTab === 'docs' && name && (
+        <DocsTab projectName={name} />
       )}
 
       {/* Runs Tab */}

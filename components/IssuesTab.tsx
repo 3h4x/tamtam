@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { fetchIssuesAndPRs, mergePR } from '@/lib/client-api'
+import { fetchIssuesAndPRs, mergePR, approvePR } from '@/lib/client-api'
 import type { GhPullRequest, GhIssue, GhLabel } from '@/lib/client-api'
 import { formatAgo } from '@/lib/format'
 
@@ -37,6 +37,8 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
   const [merging, setMerging] = useState(false)
   const [mergeError, setMergeError] = useState<string | null>(null)
   const [merged, setMerged] = useState(false)
+  const [approving, setApproving] = useState(false)
+  const [approved, setApproved] = useState(pr.reviewDecision === 'APPROVED')
 
   const reviewColor =
     pr.reviewDecision === 'APPROVED'
@@ -74,6 +76,25 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
       setMerging(false)
     }
   }
+
+  const doApprove = async () => {
+    setApproving(true)
+    setMergeError(null)
+    try {
+      await approvePR(projectName, pr.number)
+      setApproved(true)
+      // Refresh from server so reviewDecision reflects reality.
+      setTimeout(onMerged, 500)
+    } catch (err) {
+      setMergeError(err instanceof Error ? err.message : 'Approve failed')
+    } finally {
+      setApproving(false)
+    }
+  }
+
+  const needsApproval = !approved
+    && pr.reviewDecision !== 'APPROVED'
+    && pr.reviewDecision !== 'CHANGES_REQUESTED'
 
   return (
     <div className={`border-b border-border last:border-b-0 ${merged ? 'opacity-50' : ''}`}>
@@ -115,6 +136,16 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          {!merged && needsApproval && (
+            <button
+              className="px-2 py-1 text-xs border border-accent/50 rounded-md bg-accent/10 text-accent hover:bg-accent/20 cursor-pointer disabled:opacity-50"
+              onClick={doApprove}
+              disabled={approving}
+              title="Submit an APPROVE review (required by branch protection before merge)"
+            >
+              {approving ? 'Approving…' : 'Approve'}
+            </button>
+          )}
           {!merged && (
             mergeConfirm ? (
               <div className="flex items-center gap-1">

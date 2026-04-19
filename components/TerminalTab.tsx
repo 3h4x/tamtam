@@ -208,11 +208,31 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   useEffect(() => {
     if (!initialSessionId) return
     const cur = terminalStore.get(projectName)
-    // Already hydrated for THIS session (full restore done) → don't refetch.
-    if (cur.restoredFor === initialSessionId) return
+    // Never wipe a live stream — user is watching output right now.
     if (cur.streaming) return
 
-    fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
+    let cancelled = false
+    const run = async () => {
+      // If history already reflects this session AND has content, only
+      // re-fetch if the DB now holds more turns than we rendered (follow-ups
+      // submitted since the last restore must become visible).
+      if (cur.restoredFor === initialSessionId && cur.history.length > 0) {
+        const userEntries = cur.history.filter(h => h.role === 'user').length
+        try {
+          const listRes = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
+          const listData = await listRes.json()
+          const dbMatches = (listData.jobs ?? []).filter(
+            (j: JobDict) => j.session_id === initialSessionId
+              && (['run', 'review', 'fix', 'fix-ci'].includes(j.kind) || j.kind.startsWith('agent:'))
+          ).length
+          if (dbMatches <= userEntries) return
+        } catch {
+          return
+        }
+      }
+
+      if (cancelled) return
+      await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
       .then(r => r.json())
       .then(async (data) => {
         const jobs: JobDict[] = data.jobs ?? []
@@ -276,6 +296,9 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         }
       })
       .catch(() => {})
+    }
+    run()
+    return () => { cancelled = true }
   }, [initialSessionId, projectName])
 
   // Load job output by job ID (e.g. from notification click)

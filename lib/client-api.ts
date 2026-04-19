@@ -182,11 +182,27 @@ export async function mergePR(
   const response = await fetch(`${API_BASE}/by-project/${projectName}/issues`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prNumber, mergeMethod }),
+    body: JSON.stringify({ prNumber, mergeMethod, action: 'merge' }),
   })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
     throw new Error((data as { detail?: string }).detail || `Merge failed: ${response.statusText}`)
+  }
+  return response.json()
+}
+
+export async function approvePR(
+  projectName: string,
+  prNumber: number
+): Promise<{ status: string; pr: number; repo: string }> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/issues`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prNumber, action: 'approve' }),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error((data as { detail?: string }).detail || `Approve failed: ${response.statusText}`)
   }
   return response.json()
 }
@@ -688,5 +704,17 @@ export async function runAgent(agentId: string, prompt: string): Promise<{ statu
     const data = await response.json().catch(() => ({}))
     throw new Error(data.detail || 'Failed to run agent')
   }
+  return response.json()
+}
+
+export interface ProjectDoc {
+  name: string
+  path: string
+  content: string
+}
+
+export async function fetchProjectDocs(projectName: string): Promise<{ docs: ProjectDoc[] }> {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/docs`)
+  if (!response.ok) throw new Error('Failed to fetch docs')
   return response.json()
 }
