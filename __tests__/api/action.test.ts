@@ -20,7 +20,9 @@ function createTestDb() {
       test_command TEXT,
       test_cron_enabled INTEGER DEFAULT 0,
       test_cron_schedule TEXT,
-      auto_push_enabled INTEGER DEFAULT 0
+      auto_push_enabled INTEGER DEFAULT 0,
+      last_push_error TEXT,
+      last_push_at REAL
     );
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,

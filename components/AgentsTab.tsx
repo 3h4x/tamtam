@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { fetchAgents, createAgent, updateAgent, deleteAgent, runAgent, fetchSkills, fetchPersonas } from '@/lib/client-api'
 import type { Agent, Skill, Persona } from '@/lib/client-api'
 import { useToast } from '@/components/Toast'
+import { nextFireDisplay } from '@/lib/fire-times'
 
 const MODELS = ['sonnet', 'opus', 'haiku']
 const RUNNERS = ['pm2', 'launchctl']
@@ -160,7 +161,12 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
                   <span className="text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-secondary">{agent.model}</span>
                   <span className="text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-secondary">{agent.runner}</span>
                   {agent.schedule && (
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${agent.enabled ? 'bg-status-success/10 text-status-success' : 'bg-bg-tertiary text-text-tertiary line-through'}`}>every {agent.schedule}</span>
+                    <>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${agent.enabled ? 'bg-status-success/10 text-status-success' : 'bg-bg-tertiary text-text-tertiary line-through'}`}>every {agent.schedule}</span>
+                      {agent.enabled && nextFireDisplay(agent.schedule, agent.id) && (
+                        <span className="text-xs text-text-tertiary font-mono">{nextFireDisplay(agent.schedule, agent.id)}</span>
+                      )}
+                    </>
                   )}
                   {agentSkills.map(s => (
                     <span key={s.id} className="text-xs px-2 py-0.5 rounded-full bg-accent/10 text-accent">{s.name}</span>

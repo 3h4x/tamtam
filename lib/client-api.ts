@@ -302,6 +302,8 @@ export interface ProjectConfig {
   test_cron_enabled: boolean
   test_cron_schedule: string
   auto_push_enabled?: boolean
+  last_push_error?: string | null
+  last_push_at?: number | null
 }
 
 export async function fetchProjectConfig(projectName: string): Promise<ProjectConfig> {

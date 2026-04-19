@@ -114,6 +114,17 @@ try {
 try {
   sqlite.exec('ALTER TABLE projects ADD COLUMN auto_push_enabled INTEGER DEFAULT 0');
 } catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN last_push_error TEXT');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN last_push_at REAL');
+} catch {}
+
+// Migrate: add enabled column to agents if missing
+try {
+  sqlite.exec('ALTER TABLE agents ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1');
+} catch {}
 
 // Migrate: add token/duration/session columns to jobs if missing
 try {

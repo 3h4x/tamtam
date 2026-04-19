@@ -106,6 +106,7 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `/api/projects/by-project/[name]/changes` — Uncommitted changes summary (GET)
 - `/api/projects/by-project/[name]/changes/diff` — Full git diff content (GET)
 - `/api/projects/by-project/[name]/push` — Push changes to git (POST); sub-routes: `/preview`, `/execute`, `/generate`
+- `/api/projects/by-project/[name]/release` — Trigger release pipeline (POST)
 - `/api/projects/by-project/[name]/logs` — Project run log files (GET)
 - `/api/projects/by-project/[name]/docs` — Project documentation files (GET)
 - `/api/config/projects` — Scan workspace for git repos and configure projects (GET, PATCH)

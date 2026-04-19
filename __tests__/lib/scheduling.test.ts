@@ -31,7 +31,9 @@ function createTestDb() {
       test_command TEXT,
       test_cron_enabled INTEGER DEFAULT 0,
       test_cron_schedule TEXT,
-      auto_push_enabled INTEGER DEFAULT 0
+      auto_push_enabled INTEGER DEFAULT 0,
+      last_push_error TEXT,
+      last_push_at REAL
     );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };
@@ -328,5 +330,88 @@ describe('getImproveConfig — logDir path expansion', () => {
     const { getImproveConfig } = await import('@/lib/scheduling');
     const config = getImproveConfig();
     expect(config.logDir).toBe('/var/log/tamtam');
+  });
+});
+
+describe('setProjectPushResult / getProjectPushResult', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/config', () => ({
+      getSettings: vi.fn().mockReturnValue({
+        workspace_path: '/workspace',
+        github_owner: '',
+        claude_bin: '~/.local/bin/claude',
+        log_dir: '~/logs',
+        frequency: '1h',
+        daytime: false,
+        weekends: false,
+        launchagent_prefix: 'com.tamtam',
+      }),
+    }));
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('getProjectPushResult returns null for unknown project', async () => {
+    const { getProjectPushResult } = await import('@/lib/scheduling');
+    expect(getProjectPushResult('no-such-project')).toBeNull();
+  });
+
+  it('getProjectPushResult returns null error and null timestamp when project has no push history', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { getProjectPushResult } = await import('@/lib/scheduling');
+    const result = getProjectPushResult('proj1');
+    expect(result).not.toBeNull();
+    expect(result!.lastPushError).toBeNull();
+    expect(result!.lastPushAt).toBeNull();
+  });
+
+  it('setProjectPushResult stores null error on success', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { setProjectPushResult, getProjectPushResult } = await import('@/lib/scheduling');
+    setProjectPushResult('proj1', null);
+    const result = getProjectPushResult('proj1');
+    expect(result!.lastPushError).toBeNull();
+    expect(result!.lastPushAt).toBeGreaterThan(0);
+  });
+
+  it('setProjectPushResult stores error string on failure', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { setProjectPushResult, getProjectPushResult } = await import('@/lib/scheduling');
+    setProjectPushResult('proj1', 'Push failed: remote rejected');
+    const result = getProjectPushResult('proj1');
+    expect(result!.lastPushError).toBe('Push failed: remote rejected');
+    expect(result!.lastPushAt).toBeGreaterThan(0);
+  });
+
+  it('setProjectPushResult overwrites a previous error with null', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { setProjectPushResult, getProjectPushResult } = await import('@/lib/scheduling');
+    setProjectPushResult('proj1', 'previous error');
+    setProjectPushResult('proj1', null);
+    const result = getProjectPushResult('proj1');
+    expect(result!.lastPushError).toBeNull();
+  });
+
+  it('setProjectPushResult updates lastPushAt on each call', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { setProjectPushResult, getProjectPushResult } = await import('@/lib/scheduling');
+    setProjectPushResult('proj1', null);
+    const first = getProjectPushResult('proj1')!.lastPushAt!;
+    setProjectPushResult('proj1', null);
+    const second = getProjectPushResult('proj1')!.lastPushAt!;
+    expect(second).toBeGreaterThanOrEqual(first);
+  });
+
+  it('setProjectPushResult is a no-op for unknown project', async () => {
+    const { setProjectPushResult, getProjectPushResult } = await import('@/lib/scheduling');
+    expect(() => setProjectPushResult('ghost', 'err')).not.toThrow();
+    expect(getProjectPushResult('ghost')).toBeNull();
   });
 });

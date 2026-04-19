@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getImproveConfig, writeProjectFieldYaml, getProjectTestConfig } from '@/lib/scheduling';
+import { getImproveConfig, writeProjectFieldYaml, getProjectTestConfig, getProjectPushResult } from '@/lib/scheduling';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/project-data';
 import { reloadConfig } from '@/lib/config';
 import { installTestSchedule, uninstallTestSchedule, parseTestScheduleToCron } from '@/lib/test-scheduler';
@@ -23,6 +23,7 @@ export async function GET(
   }
   const detectedTestCmd = detectTestCommand(projPath);
   const testCfg = getProjectTestConfig(projectName);
+  const pushResult = getProjectPushResult(projectName);
 
   return NextResponse.json({
     project: projectName,
@@ -32,6 +33,8 @@ export async function GET(
     test_cron_enabled: testCfg?.testCronEnabled ?? false,
     test_cron_schedule: testCfg?.testCronSchedule ?? '',
     auto_push_enabled: testCfg?.autoPushEnabled ?? false,
+    last_push_error: pushResult?.lastPushError ?? null,
+    last_push_at: pushResult?.lastPushAt ?? null,
   });
 }
 

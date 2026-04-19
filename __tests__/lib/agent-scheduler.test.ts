@@ -71,6 +71,18 @@ describe('agent-scheduler', () => {
       expect(deleteIdx).toBeLessThan(startIdx);
     });
 
+    it('stops the process immediately after start to prevent initial execution', async () => {
+      await installAgentSchedule('agent-abc', '1h', 'hello', 'pm2');
+      const startIdx = execMock.mock.calls.findIndex(
+        ([cmd, args]: any) => cmd === 'pm2' && args[0] === 'start'
+      );
+      const stopIdx = execMock.mock.calls.findIndex(
+        ([cmd, args]: any) => cmd === 'pm2' && args[0] === 'stop'
+      );
+      expect(stopIdx).toBeGreaterThan(startIdx);
+      expect(execMock.mock.calls[stopIdx][1]).toContain('tamtam-agent-agent-abc');
+    });
+
     it('writes script file to disk', async () => {
       await installAgentSchedule('agent-xyz', '5m', 'my prompt', 'pm2');
       const scriptPath = join(tempDir, 'logs', 'agent-scripts', 'agent-xyz.sh');
@@ -104,14 +116,90 @@ describe('agent-scheduler', () => {
       expect(args[cronIdx + 1]).toBe('*/30 * * * *');
     });
 
-    it('converts hours to cron expression', async () => {
+    it('converts hours to cron expression with per-agent offset', async () => {
       await installAgentSchedule('agent-hourly', '2h', 'prompt', 'pm2');
       const startCall = execMock.mock.calls.find(
         ([cmd, args]: any) => cmd === 'pm2' && args[0] === 'start'
       );
       const args: string[] = startCall![1];
       const cronIdx = args.indexOf('--cron');
-      expect(args[cronIdx + 1]).toBe('0 */2 * * *');
+      // Format: `{minute} {startHour}/2 * * *` — deterministic offset from agent ID
+      expect(args[cronIdx + 1]).toMatch(/^\d+ \d+\/2 \* \* \*$/);
+    });
+
+    it('different agentIds produce different cron schedules for same interval', async () => {
+      await installAgentSchedule('agent-alpha', '4h', 'prompt', 'pm2');
+      const call1 = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'pm2' && args[0] === 'start');
+      const cronA = call1![1][call1![1].indexOf('--cron') + 1];
+      execMock.mockClear();
+
+      await installAgentSchedule('agent-beta', '4h', 'prompt', 'pm2');
+      const call2 = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'pm2' && args[0] === 'start');
+      const cronB = call2![1][call2![1].indexOf('--cron') + 1];
+
+      expect(cronA).toMatch(/^\d+ \d+\/4 \* \* \*$/);
+      expect(cronB).toMatch(/^\d+ \d+\/4 \* \* \*$/);
+      expect(cronA).not.toBe(cronB);
+    });
+
+    it('converts minutes >= 60 to cron expression with per-agent offset', async () => {
+      await installAgentSchedule('agent-120m', '120m', 'prompt', 'pm2');
+      const startCall = execMock.mock.calls.find(
+        ([cmd, args]: any) => cmd === 'pm2' && args[0] === 'start'
+      );
+      const args: string[] = startCall![1];
+      const cronIdx = args.indexOf('--cron');
+      // 120m = 2 hours, should use per-agent offset like an hours schedule
+      expect(args[cronIdx + 1]).toMatch(/^\d+ \d+\/2 \* \* \*$/);
+    });
+
+    it('same agentId always produces the same cron (deterministic hash)', async () => {
+      await installAgentSchedule('agent-det', '3h', 'prompt', 'pm2');
+      const call1 = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'pm2' && args[0] === 'start');
+      const cron1 = call1![1][call1![1].indexOf('--cron') + 1];
+      execMock.mockClear();
+
+      await installAgentSchedule('agent-det', '3h', 'prompt', 'pm2');
+      const call2 = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'pm2' && args[0] === 'start');
+      const cron2 = call2![1][call2![1].indexOf('--cron') + 1];
+
+      expect(cron1).toBe(cron2);
+    });
+
+    it('cron minute offset is within valid cron range [0, 59]', async () => {
+      await installAgentSchedule('agent-min-range', '6h', 'prompt', 'pm2');
+      const startCall = execMock.mock.calls.find(
+        ([cmd, args]: any) => cmd === 'pm2' && args[0] === 'start'
+      );
+      const args: string[] = startCall![1];
+      const cron = args[args.indexOf('--cron') + 1];
+      const minute = parseInt(cron.split(' ')[0]);
+      expect(minute).toBeGreaterThanOrEqual(0);
+      expect(minute).toBeLessThan(60);
+    });
+
+    it('cron start hour is within valid range for the interval (< interval)', async () => {
+      await installAgentSchedule('agent-hour-range', '4h', 'prompt', 'pm2');
+      const startCall = execMock.mock.calls.find(
+        ([cmd, args]: any) => cmd === 'pm2' && args[0] === 'start'
+      );
+      const args: string[] = startCall![1];
+      const cron = args[args.indexOf('--cron') + 1];
+      // format: "{minute} {startHour}/4 * * *"
+      const [startHour] = cron.split(' ')[1].split('/').map(Number);
+      expect(startHour).toBeGreaterThanOrEqual(0);
+      expect(startHour).toBeLessThan(4);
+    });
+
+    it('sub-minute schedule is not affected by agentId offset', async () => {
+      await installAgentSchedule('agent-submin', '30m', 'prompt', 'pm2');
+      const startCall = execMock.mock.calls.find(
+        ([cmd, args]: any) => cmd === 'pm2' && args[0] === 'start'
+      );
+      const args: string[] = startCall![1];
+      const cron = args[args.indexOf('--cron') + 1];
+      // < 60 min schedules use simple */N form, no per-agent offset
+      expect(cron).toBe('*/30 * * * *');
     });
   });
 

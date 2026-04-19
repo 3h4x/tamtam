@@ -24,6 +24,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
       getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
       writeProjectFieldYaml: vi.fn().mockReturnValue(true),
       getProjectTestConfig: vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null }),
+      getProjectPushResult: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/test-scheduler', () => ({
       installTestSchedule: vi.fn(),
@@ -129,6 +130,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
       }),
       writeProjectFieldYaml: vi.fn().mockReturnValue(true),
       getProjectTestConfig: vi.fn().mockReturnValue({ testCommand: 'custom test cmd', testCronEnabled: false, testCronSchedule: null }),
+      getProjectPushResult: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/test-scheduler', () => ({
       installTestSchedule: vi.fn(),

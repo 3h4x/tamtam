@@ -2,7 +2,7 @@ import { resolveProjectPath, clearProjectDataCache } from './project-data';
 import { invalidateProject } from './gh-status';
 import { exec } from './shell';
 import { getSettings } from './config';
-import { getImproveConfig } from './scheduling';
+import { getImproveConfig, setProjectPushResult } from './scheduling';
 
 export type PushResult =
   | { ok: true; commitSha: string; message: string }
@@ -41,6 +41,18 @@ Return ONLY the title — nothing else.`;
 }
 
 export async function startProjectPush(projectName: string): Promise<PushResult> {
+  const result = await runPush(projectName);
+  try {
+    setProjectPushResult(projectName, result.ok ? null : result.detail);
+  } catch {}
+  if (result.ok) {
+    invalidateProject(projectName);
+    clearProjectDataCache();
+  }
+  return result;
+}
+
+async function runPush(projectName: string): Promise<PushResult> {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
 
@@ -54,7 +66,8 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
     const message = await generateCommitMessage(projPath, projectName);
     const commitR = await exec('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 });
     if (commitR.exitCode !== 0 && !commitR.stdout.includes('nothing to commit')) {
-      return { ok: false, status: 500, detail: `Commit failed: ${commitR.stderr.trim()}` };
+      const detail = (commitR.stderr.trim() || commitR.stdout.trim() || `git commit exited ${commitR.exitCode}`).slice(0, 2000);
+      return { ok: false, status: 500, detail: `Commit failed: ${detail}` };
     }
   } else {
     const aheadR = await exec('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
@@ -74,15 +87,13 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
       }
     }
     if (pushR.exitCode !== 0) {
-      return { ok: false, status: 502, detail: `Push failed: ${pushR.stderr.trim()}` };
+      const detail = (pushR.stderr.trim() || pushR.stdout.trim() || `git push exited ${pushR.exitCode}`).slice(0, 2000);
+      return { ok: false, status: 502, detail: `Push failed: ${detail}` };
     }
   }
 
   const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
   const commitSha = shaR.exitCode === 0 ? shaR.stdout.trim() : '';
-
-  invalidateProject(projectName);
-  clearProjectDataCache();
 
   return { ok: true, commitSha, message: 'pushed' };
 }

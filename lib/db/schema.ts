@@ -16,6 +16,8 @@ export const projects = sqliteTable('projects', {
   testCronEnabled: integer('test_cron_enabled', { mode: 'boolean' }).default(false),
   testCronSchedule: text('test_cron_schedule'),
   autoPushEnabled: integer('auto_push_enabled', { mode: 'boolean' }).default(false),
+  lastPushError: text('last_push_error'),
+  lastPushAt: real('last_push_at'),
 });
 
 export const jobs = sqliteTable('jobs', {

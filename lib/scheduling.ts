@@ -174,6 +174,24 @@ export function writeProjectFieldYaml(
   return true;
 }
 
+export function setProjectPushResult(projName: string, error: string | null): void {
+  db
+    .update(schema.projects)
+    .set({ lastPushError: error, lastPushAt: Date.now() / 1000 })
+    .where(eq(schema.projects.name, projName))
+    .run();
+}
+
+export function getProjectPushResult(projName: string): { lastPushError: string | null; lastPushAt: number | null } | null {
+  const row = db
+    .select()
+    .from(schema.projects)
+    .where(eq(schema.projects.name, projName))
+    .get();
+  if (!row) return null;
+  return { lastPushError: row.lastPushError ?? null, lastPushAt: row.lastPushAt ?? null };
+}
+
 export function getProjectTestConfig(projName: string): {
   testCommand: string | null;
   testCronEnabled: boolean;

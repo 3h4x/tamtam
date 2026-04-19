@@ -984,11 +984,16 @@ export function ProjectDetailPage({
             const unpushed = (project.unpushed ?? 0) > 0
             const autoPush = !!config?.auto_push_enabled
             // Commit/push run synchronously inside the review completion hook,
-            // so there's no distinct job to observe. Stay in 'pending' until
-            // state flips to 'done' on refresh — we can't reliably detect a
-            // mid-flight push and don't want to get stuck showing a spinner.
-            const commitState: StepState = hasChanges ? 'pending' : 'done'
-            const pushState: StepState = !hasChanges && !unpushed ? 'done' : 'pending'
+            // so there's no distinct job to observe. We surface failures via
+            // `last_push_error` stored on the project after each push attempt.
+            const pushError = config?.last_push_error ?? null
+            const pushErrorIsCommit = !!pushError && pushError.startsWith('Commit failed')
+            const commitState: StepState = pushErrorIsCommit
+              ? 'failed'
+              : hasChanges ? 'pending' : 'done'
+            const pushState: StepState = pushError && !pushErrorIsCommit
+              ? 'failed'
+              : !hasChanges && !unpushed ? 'done' : 'pending'
 
             const testHint = !hasTestCommand
               ? 'no test command'
@@ -996,16 +1001,20 @@ export function ProjectDetailPage({
               : testState === 'done' && testJob ? `tests passed (${formatAgo(testJob.finished_at ?? testJob.started_at)})`
               : testState === 'failed' ? `tests failed (exit ${testJob?.exit_code})`
               : 'tests not run yet'
-            const pushHint = pushState === 'done'
-              ? 'nothing to push'
-              : unpushed
-                ? `${project.unpushed} unpushed commit${project.unpushed === 1 ? '' : 's'}${autoPush && reviewPassed ? ' — auto-push pending' : ''}`
-                : `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — need review & commit first`
-            const commitHint = commitState === 'done'
-              ? 'nothing to commit'
-              : reviewPassed
-                ? `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — ${autoPush ? 'auto-commit pending' : 'commit manually'}`
-                : `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — need LGTM review to proceed`
+            const pushHint = pushState === 'failed'
+              ? (pushError ?? 'push failed')
+              : pushState === 'done'
+                ? 'nothing to push'
+                : unpushed
+                  ? `${project.unpushed} unpushed commit${project.unpushed === 1 ? '' : 's'}${autoPush && reviewPassed ? ' — auto-push pending' : ''}`
+                  : `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — need review & commit first`
+            const commitHint = commitState === 'failed'
+              ? (pushError ?? 'commit failed')
+              : commitState === 'done'
+                ? 'nothing to commit'
+                : reviewPassed
+                  ? `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — ${autoPush ? 'auto-commit pending' : 'commit manually'}`
+                  : `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — need LGTM review to proceed`
 
             const steps: Array<{ label: string; state: StepState; hint: string; action?: (() => void) | null }> = []
             if (hasTestCommand) steps.push({ label: 'test', state: testState, hint: testHint, action: testJob ? () => router.push(`/project/${name}/terminal?job=${encodeURIComponent(testJob.id)}`) : null })
