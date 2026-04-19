@@ -14,7 +14,8 @@ export function detectTestCommand(projPath: string, projectName?: string): strin
     }
   }
   if (existsSync(join(projPath, 'pyproject.toml')) || existsSync(join(projPath, 'requirements.txt'))) {
-    return 'python -m pytest';
+    const venvPython = join(projPath, '.venv', 'bin', 'python');
+    return existsSync(venvPython) ? `${venvPython} -m pytest` : 'python3 -m pytest';
   }
   const pkgJson = join(projPath, 'package.json');
   if (existsSync(pkgJson)) {

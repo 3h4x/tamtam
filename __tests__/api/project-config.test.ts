@@ -89,7 +89,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     const data = await res.json();
-    expect(data.detected_test_command).toBe('python -m pytest');
+    expect(data.detected_test_command).toBe('python3 -m pytest');
   });
 
   it('detects python -m pytest when requirements.txt exists', async () => {
@@ -98,7 +98,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     const data = await res.json();
-    expect(data.detected_test_command).toBe('python -m pytest');
+    expect(data.detected_test_command).toBe('python3 -m pytest');
   });
 
   it('detects forge test when foundry.toml exists', async () => {

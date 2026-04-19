@@ -125,7 +125,7 @@ function modelFromContext(ctx: string | null | undefined): string | null {
   } catch { return null }
 }
 
-function buildEntries(jobs: JobInfo[]): Entry[] {
+export function buildEntries(jobs: JobInfo[]): Entry[] {
   // Sort ascending first so session groupings see the earliest prompt first.
   const sorted = [...jobs].sort((a, b) => a.started_at - b.started_at)
   const sessionGroup = new Map<string, Entry>()

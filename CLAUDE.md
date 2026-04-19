@@ -23,6 +23,7 @@ The **🚀 Release** button triggers the pipeline at the right starting step. Wh
 - `lib/start-test.ts` → `startProjectTest`
 - `lib/start-review.ts` → `startProjectReview`
 - `lib/start-fix.ts` → `startFixFromJob`
+- `lib/start-fix-push.ts` → `startFixPush` (pre-commit/pre-push hook failure recovery)
 - `lib/start-push.ts` → `startProjectPush`
 - `lib/start-release.ts` → `startRelease` (pipeline entry point)
 
@@ -68,7 +69,7 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `data/` — SQLite database (gitignored)
 - `__tests__/` — vitest unit tests
 - `e2e/` — Playwright integration tests
-- `docs/` — architecture docs (see `docs/TERMINAL.md` for terminal page streaming, `docs/AGENT.md` for agent concepts)
+- `docs/` — architecture docs: `STREAMING.md` (job lifecycle + SSE), `PIPELINE.md` (release pipeline state machine), `DATABASE.md` (schema reference), `SETTINGS.md` (all config keys), `AGENT.md` (agent concepts)
 
 ## Pages
 - `/` — Projects list with status, changes, CI
@@ -77,7 +78,7 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `/project/[name]/history` — Project runs with filter tabs (all/running/failed/done)
 - `/project/[name]/changes` — Git diff viewer for uncommitted changes
 - `/project/[name]/issues` — GitHub PRs and issues viewer (open PRs with review status, open issues)
-- `/project/[name]/terminal/[sessionId]` — Interactive Claude runner with model selector (haiku/sonnet/opus), skill picker, and real-time token streaming via SSE (see `docs/TERMINAL.md`)
+- `/project/[name]/terminal/[sessionId]` — Interactive Claude runner with model selector (haiku/sonnet/opus), skill picker, and real-time token streaming via SSE (see `docs/STREAMING.md`)
 - `/project/[name]/task/[task]` — Task detail view
 - `/agents` — Agents management page
 - `/monitoring` — Prometheus + Loki health dashboard (alerts, service up/down, log errors)
@@ -104,7 +105,7 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `/api/projects/by-project/[name]/review` — Start AI code review (POST)
 - `/api/projects/by-project/[name]/fix-ci` — Start AI CI fix run (POST)
 - `/api/projects/by-project/[name]/test` — Run project test command (POST)
-- `/api/projects/by-project/[name]/changes` — Uncommitted changes summary (GET)
+- `/api/projects/by-project/[name]/changes` — Uncommitted changes summary (GET); git pull with configurable strategy (POST: ff-only/merge/rebase)
 - `/api/projects/by-project/[name]/changes/diff` — Full git diff content (GET)
 - `/api/projects/by-project/[name]/push` — Push changes to git (POST); sub-routes: `/preview`, `/execute`, `/generate`
 - `/api/projects/by-project/[name]/release` — Trigger release pipeline (POST)
@@ -137,7 +138,7 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - Workspace path configured in Settings UI, projects discovered by scanning for git repos
 - All CLI calls (git, gh, launchctl, pm2) go through `lib/shell.ts`
 - `lib/project-data.ts` assembles project data with 10s TTL cache
-- Terminal runs use `claude --output-format stream-json` for token-by-token streaming via PM2 + log file + fs.watch + NDJSON parser (see `docs/TERMINAL.md`)
+- Terminal runs use `claude --output-format stream-json` for token-by-token streaming via PM2 + log file + fs.watch + NDJSON parser (see `docs/STREAMING.md`)
 - SSE at `/api/streaming/[jobId]` parses NDJSON and sends text deltas + `done` event (`?raw=1` for raw mode)
 - Agent runs compose skill content into the prompt before sending to Claude CLI
 - `commit_style` setting injects a style guide into the commit-message generation prompt; `review_verdict_rules` setting drives LGTM/NEEDS ATTENTION/DO NOT SHIP decisions in code reviews — both configurable in Settings UI (Behavior tab)

@@ -14,6 +14,7 @@ import { ChangesTab } from '@/components/ChangesTab'
 import { IssuesTab } from '@/components/IssuesTab'
 import { DocsTab } from '@/components/DocsTab'
 import { useToast } from '@/components/Toast'
+import { isPipelineBusy } from '@/lib/pipeline-status'
 
 type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs'
 
@@ -144,11 +145,9 @@ function StatusStrip({
       />
     )
   } else if (verdict && latestReview) {
-    // LGTM with still-uncommitted changes is "approved but not yet pushed",
-    // not a clean green — downgrade tone until changes are pushed.
     const pendingPush = verdict === 'LGTM' && totalChanges > 0
     const tone: StatusCardProps['tone'] =
-      verdict === 'LGTM' ? (pendingPush ? 'neutral' : 'success')
+      verdict === 'LGTM' ? 'success'
         : verdict === 'NEEDS ATTENTION' ? 'warning' : 'error'
     reviewCard = (
       <StatusCard
@@ -394,7 +393,7 @@ export function ProjectDetailPage({
   const isReviewRunning = projectJobs.some(j => j.kind === 'review' && j.status === 'running')
   const isCiFixRunning = projectJobs.some(j => j.kind === 'fix-ci' && j.status === 'running')
   const isTestRunning = projectJobs.some(j => j.kind === 'test' && j.status === 'running')
-  const isFixRunning = projectJobs.some(j => j.kind === 'fix' && j.status === 'running')
+  const isPipelineRunning = isPipelineBusy(projectJobs)
 
   // Get latest review verdict
   const latestReview = projectJobs
@@ -407,9 +406,18 @@ export function ProjectDetailPage({
     .filter(j => j.kind === 'test' && j.status === 'done')
     .sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))[0]
 
-  const runningJobs = projectJobs
-    .filter(j => j.status === 'running')
-    .sort((a, b) => (b.started_at || 0) - (a.started_at || 0))
+  const runningJobs = (() => {
+    const running = projectJobs.filter(j => j.status === 'running')
+    // A release job orchestrates test/review/fix/push as children. Surfacing
+    // both the parent and its active child as separate "running" rows is
+    // noisy — collapse to just the release while it's in flight.
+    const releaseRunning = running.some(j => j.kind === 'release')
+    const RELEASE_CHILD_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push'])
+    const filtered = releaseRunning
+      ? running.filter(j => !RELEASE_CHILD_KINDS.has(j.kind))
+      : running
+    return filtered.sort((a, b) => (b.started_at || 0) - (a.started_at || 0))
+  })()
 
   const [releasing, setReleasing] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -576,7 +584,7 @@ export function ProjectDetailPage({
             </span>
           )}
           {(() => {
-            const busy = releasing || isReviewRunning || isTestRunning || isFixRunning
+            const busy = releasing || isPipelineRunning
             const nothingToRelease = project.totalChanges === 0 && (project.unpushed ?? 0) === 0
             const hasTestCommand = !!(config?.effective_test_command || config?.detected_test_command)
             // Fresh LGTM review on the current tree → hitting Release skips
@@ -671,13 +679,13 @@ export function ProjectDetailPage({
                   : 'border-border bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer'
               }`}
               onClick={() => handlePull('ff-only')}
-              disabled={pulling || project.totalChanges > 0}
+              disabled={pulling || project.totalChanges > 0 || behindCount === 0}
               title={
                 project.totalChanges > 0
                   ? `Commit or stash your ${project.totalChanges} local change${project.totalChanges !== 1 ? 's' : ''} before pulling`
                   : behindCount > 0
                   ? `${behindCount} commit${behindCount !== 1 ? 's' : ''} behind origin — git pull --ff-only`
-                  : 'git pull --ff-only'
+                  : 'Already up to date'
               }
             >
               {pulling ? 'Pulling…' : behindCount > 0 ? `Pull (${behindCount})` : 'Pull'}
@@ -1126,28 +1134,24 @@ export function ProjectDetailPage({
               reviewFixAction = openJob(reviewJob)
             }
             else if (reviewVerdict === 'LGTM') {
-              // If a push is running or recently failed at commit, hook side
-              // effects (lint-staged stash/restore, .eslintcache, etc.) can
-              // briefly shift the working-tree hash even though the code the
-              // reviewer read hasn't changed. The LGTM is still valid — keep
-              // review ✓ and let the commit step carry any ✗.
+              // LGTM is a verdict, not a file-hash predicate. Once Claude
+              // emitted LGTM, the step stays ✓ — build artifacts, cache
+              // files, hook side-effects, and gitignored edits routinely
+              // drift the porcelain hash without invalidating the review.
+              // A real code edit will trigger a new release → new review
+              // job → this resets naturally.
               const commitHookJustFailed = !!config?.last_push_error
                 && config.last_push_error.startsWith('Commit failed')
               const pushInFlight = pushJob?.status === 'running'
-              const keepReviewValid = commitHookJustFailed || pushInFlight
-              if (hasUnreviewed && !keepReviewValid) {
-                reviewState = 'pending'
-                reviewHint = 'last verdict was LGTM but files changed since — click to view last review'
-                reviewFixAction = openJob(reviewJob)
-              } else {
-                reviewState = 'done'
-                reviewHint = commitHookJustFailed
-                  ? 'LGTM — commit blocked by pre-commit hook; click to view review'
-                  : pushInFlight
-                    ? 'LGTM — commit & push in progress; click to view review'
+              reviewState = 'done'
+              reviewHint = commitHookJustFailed
+                ? 'LGTM — commit blocked by pre-commit hook; click to view review'
+                : pushInFlight
+                  ? 'LGTM — commit & push in progress; click to view review'
+                  : hasUnreviewed
+                    ? 'LGTM — files changed since, but verdict is still valid; click to view review'
                     : 'LGTM — click to view review log'
-                reviewFixAction = openJob(reviewJob)
-              }
+              reviewFixAction = openJob(reviewJob)
             } else if (reviewVerdict === 'NEEDS ATTENTION') {
               reviewState = 'warning'
               reviewHint = 'verdict: NEEDS ATTENTION — click to view findings'
