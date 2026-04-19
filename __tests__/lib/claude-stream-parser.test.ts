@@ -147,4 +147,99 @@ describe('claude-stream-parser', () => {
     const events = parseStreamLines(line);
     expect(events).toEqual([]);
   });
+
+  // Regression: the parser used to JSON.stringify any non-string tool_result
+  // content, which made structured tool outputs appear in the terminal as raw
+  // `[{"type":"text","text":"..."}]` JSON blobs — exactly what the user sees
+  // in the release meta-terminal review section.
+  describe('tool_result content extraction', () => {
+    it('extracts text from array-of-blocks content (system tool_result)', () => {
+      const line = JSON.stringify({
+        type: 'system', subtype: 'tool_result',
+        content: [{ type: 'text', text: 'file written' }],
+      });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([{ type: 'tool_result', content: 'file written' }]);
+    });
+
+    it('joins multiple text blocks with newlines', () => {
+      const line = JSON.stringify({
+        type: 'user',
+        message: {
+          content: [{
+            type: 'tool_result',
+            content: [
+              { type: 'text', text: 'line 1' },
+              { type: 'text', text: 'line 2' },
+            ],
+          }],
+        },
+      });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([{ type: 'tool_result', content: 'line 1\nline 2' }]);
+    });
+
+    it('renders image blocks as [image] placeholder', () => {
+      const line = JSON.stringify({
+        type: 'user',
+        message: {
+          content: [{
+            type: 'tool_result',
+            content: [
+              { type: 'text', text: 'screenshot attached:' },
+              { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'xxxx' } },
+            ],
+          }],
+        },
+      });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([{ type: 'tool_result', content: 'screenshot attached:\n[image]' }]);
+    });
+
+    it('passes through plain string content unchanged', () => {
+      const line = JSON.stringify({
+        type: 'system', subtype: 'tool_result', content: 'plain string output',
+      });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([{ type: 'tool_result', content: 'plain string output' }]);
+    });
+
+    it('extracts text property from object-shaped content', () => {
+      const line = JSON.stringify({
+        type: 'user',
+        message: { content: [{ type: 'tool_result', content: { text: 'single object text' } }] },
+      });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([{ type: 'tool_result', content: 'single object text' }]);
+    });
+
+    it('falls back to JSON stringification for truly unknown shapes', () => {
+      const line = JSON.stringify({
+        type: 'user',
+        message: { content: [{ type: 'tool_result', content: { foo: 'bar', baz: 42 } }] },
+      });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([{ type: 'tool_result', content: '{"foo":"bar","baz":42}' }]);
+    });
+
+    it('does not emit raw Claude usage/metadata objects as text', () => {
+      // This is the shape the user saw dumped as raw JSON in the terminal.
+      // parseStreamLines should ignore usage-only message_delta events.
+      const line = JSON.stringify({
+        type: 'stream_event',
+        event: {
+          type: 'message_delta',
+          delta: { stop_reason: 'end_turn' },
+          usage: {
+            output_tokens: 20,
+            cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 1936 },
+            service_tier: 'standard',
+          },
+        },
+        parent_tool_use_id: null,
+      });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([]);
+    });
+  });
 });

@@ -507,17 +507,6 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
     await markDone(job, -1);
     return 'done';
   }
-  // Release meta-jobs store process.pid (the server's own PID) as a sentinel —
-  // they are NOT real child processes and must not be probed by pid or PM2.
-  // Completion hooks (finalizeReleaseJob) are responsible for marking them done.
-  // If the stored pid differs from the current process.pid, the server was
-  // restarted and this job is orphaned — mark it done cleanly (exit 0) rather
-  // than failed (-1) so it doesn't show a spurious red indicator in the UI.
-  if (job.kind === 'release') {
-    if (job.pid === process.pid) return 'running';
-    await markDone(job, 0);
-    return 'done';
-  }
   // Claude CLI sometimes hangs after emitting its final result event. If the log
   // already contains a result line, treat the job as done regardless of PM2 status.
   if ((job.kind === 'run' || job.kind === 'review') && logHasClaudeResult(job)) {

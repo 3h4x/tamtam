@@ -15,7 +15,6 @@ describe('startRelease — release pipeline entry decision tree', () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    execMock = vi.fn();
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     listJobsMock = vi.fn().mockReturnValue([]);
     probeJobStatusMock = vi.fn();
@@ -31,6 +30,18 @@ describe('startRelease — release pipeline entry decision tree', () => {
       contextMeta: null, userPrompt: null,
     }));
     updateJobMock = vi.fn();
+
+    // Default exec mock: PM2 calls succeed; git calls must be set per-test via
+    // mockImplementationOnce (they take priority over this default).
+    execMock = vi.fn().mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'pm2' && args[0] === 'start') {
+        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+      }
+      if (cmd === 'pm2' && args[0] === 'jlist') {
+        return Promise.resolve({ exitCode: 0, stdout: '[]', stderr: '' });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
 
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
@@ -199,7 +210,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.releaseJobId).toBe('proj-release-rel-id');
-      expect(createJobMock).toHaveBeenCalledWith('proj', 'release', expect.any(Number), '');
+      expect(createJobMock).toHaveBeenCalledWith('proj', 'release', 0, '');
     }
   });
 

@@ -859,61 +859,6 @@ describe('job-storage', () => {
       expect(job.exitCode).toBe(-1);
     });
 
-    it('returns running for release job with current process.pid', async () => {
-      const job: JobData = {
-        id: 'release-current',
-        project: 'proj',
-        kind: 'release',
-        prompt: null,
-        pid: process.pid,
-        logPath: null,
-        startedAt: Date.now() / 1000,
-        finishedAt: null,
-        exitCode: null,
-        seen: false,
-        durationMs: null,
-        inputTokens: null,
-        outputTokens: null,
-        cacheReadTokens: null,
-        cacheCreateTokens: null,
-        sessionId: null,
-      };
-
-      const status = await probeJobStatus(job);
-      expect(status).toBe('running');
-      expect(job.finishedAt).toBeNull();
-    });
-
-    it('marks orphaned release job done with exit_code=0 when pid differs from current process', async () => {
-      const job: JobData = {
-        id: 'release-orphan',
-        project: 'proj',
-        kind: 'release',
-        prompt: null,
-        pid: 99999999, // a pid that is definitely not the current process
-        logPath: null,
-        startedAt: Date.now() / 1000 - 300,
-        finishedAt: null,
-        exitCode: null,
-        seen: false,
-        durationMs: null,
-        inputTokens: null,
-        outputTokens: null,
-        cacheReadTokens: null,
-        cacheCreateTokens: null,
-        sessionId: null,
-      };
-      // Ensure the job is in cache so markDone can save it
-      createJob(job.project, job.kind, job.pid, job.logPath ?? '');
-      const freshJob = { ...job };
-
-      const status = await probeJobStatus(freshJob);
-      expect(status).toBe('done');
-      expect(freshJob.finishedAt).not.toBeNull();
-      // exit_code=0 (not -1) so it shows green rather than a spurious red X
-      expect(freshJob.exitCode).toBe(0);
-    });
-
   });
 });
 

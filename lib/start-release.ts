@@ -1,5 +1,6 @@
-import { appendFileSync, mkdirSync } from 'fs';
+import { appendFileSync, mkdirSync, writeFileSync, chmodSync } from 'fs';
 import { join } from 'path';
+import { homedir } from 'os';
 import { resolveProjectPath } from './project-data';
 import { startProjectTest, detectTestCommand } from './start-test';
 import { startProjectReview } from './start-review';
@@ -24,18 +25,79 @@ export type ReleaseResult =
   | { ok: true; step: 'test' | 'review' | 'push'; jobId?: string; releaseJobId?: string; message: string }
   | { ok: false; status: number; detail: string };
 
-// Create a meta "release" job up-front so the whole pipeline has a single
-// terminal to watch. Each downstream step appends its log to this file via
-// appendToActiveRelease in job-storage completion hooks.
-function createReleaseJob(projectName: string): { id: string; logPath: string } | null {
+// Create a meta "release" job and start a PM2 monitor process for it.
+// The monitor polls the release log for the "# release finished" marker
+// written by finalizeReleaseJob() and exits with the embedded exit code,
+// giving the release job a real pid and PM2-managed lifecycle.
+async function createReleaseJob(projectName: string): Promise<{ id: string; logPath: string } | null> {
   try {
     const { logDir } = getImproveConfig();
     mkdirSync(logDir, { recursive: true });
-    const job = createJob(projectName, 'release', process.pid, '');
+
+    const job = createJob(projectName, 'release', 0, '');
     const logPath = join(logDir, `${job.id}.log`);
+    const scriptPath = join(logDir, `${job.id}.sh`);
+    const monitorLogPath = join(logDir, `${job.id}.monitor.log`);
     job.logPath = logPath;
-    updateJob(job);
+
     appendFileSync(logPath, `# release start — ${new Date().toISOString()}\n# project: ${projectName}\n`);
+
+    // Bash monitor: polls the release log for the completion marker, then exits
+    // with the embedded exit code so PM2 records it correctly.
+    const scriptContent = [
+      '#!/bin/bash',
+      `export PATH="${process.env.PATH || ''}"`,
+      `export HOME="${homedir()}"`,
+      `RELEASE_LOG="${logPath}"`,
+      'TIMEOUT=14400',
+      'elapsed=0',
+      'echo "[tamtam] release monitor started"',
+      'while [ "$elapsed" -lt "$TIMEOUT" ]; do',
+      '  sleep 2',
+      '  elapsed=$((elapsed + 2))',
+      '  if [ -f "$RELEASE_LOG" ]; then',
+      "    line=$(grep -m1 '^# release finished' \"$RELEASE_LOG\" 2>/dev/null || true)",
+      '    if [ -n "$line" ]; then',
+      "      code=$(echo \"$line\" | sed 's/.*exit \\([0-9]*\\).*/\\1/')",
+      '      echo "[tamtam] release finished (exit $code)"',
+      '      exit "$code"',
+      '    fi',
+      '  fi',
+      'done',
+      'echo "[tamtam] release monitor timed out"',
+      'exit 1',
+    ].join('\n');
+
+    writeFileSync(scriptPath, scriptContent);
+    chmodSync(scriptPath, 0o755);
+
+    const pm2Result = await exec(
+      'pm2',
+      [
+        'start', scriptPath,
+        '--name', job.id,
+        '--no-autorestart',
+        '--output', monitorLogPath,
+        '--error', monitorLogPath,
+        '--merge-logs',
+      ],
+      { timeout: 15000 }
+    );
+
+    if (pm2Result.exitCode !== 0) {
+      throw new Error(`pm2 start failed: ${pm2Result.stderr}`);
+    }
+
+    const jlistR = await exec('pm2', ['jlist'], { timeout: 10000 });
+    const pid = (() => {
+      try {
+        const procs: Array<{ name: string; pid?: number }> = JSON.parse(jlistR.stdout);
+        return procs.find(p => p.name === job.id)?.pid ?? 0;
+      } catch { return 0; }
+    })();
+
+    job.pid = pid;
+    updateJob(job);
     return { id: job.id, logPath };
   } catch {
     return null;
@@ -83,7 +145,7 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
     return { ok: false, status: 400, detail: 'Nothing to release — no changes and no unpushed commits' };
   }
 
-  const release = createReleaseJob(projectName);
+  const release = await createReleaseJob(projectName);
   const releaseJobId = release?.id;
 
   const testCmd = detectTestCommand(projPath, projectName);

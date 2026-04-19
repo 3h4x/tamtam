@@ -211,6 +211,68 @@ describe('GET /api/streaming/[jobId]', () => {
     expect(combined).toContain('"name":"Read"');
   });
 
+  // Regression: review logs with structured tool_result content (array of
+  // {type:"text",text:"..."} blocks) used to dump as raw JSON in the
+  // terminal. The parser now extracts the text; the SSE stream must deliver
+  // the readable payload, not the stringified blob.
+  it('extracts text from array-shaped tool_result instead of dumping raw JSON', async () => {
+    const logFile = join(tempDir, 'toolresult.log');
+    const toolResultLine = JSON.stringify({
+      type: 'user',
+      message: {
+        content: [{
+          type: 'tool_result',
+          content: [{ type: 'text', text: 'readable tool output' }],
+        }],
+      },
+    });
+    writeFileSync(logFile, toolResultLine + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-tr', { signal: ac.signal });
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-tr' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    expect(combined).toContain('event: tool_result');
+    expect(combined).toContain('readable tool output');
+    // Must NOT contain the raw [{"type":"text"...}] blob anywhere.
+    expect(combined).not.toMatch(/\[\{"type":"text"/);
+  });
+
+  it('does not emit raw usage/metadata JSON as text for message_delta events', async () => {
+    // This is the exact shape that leaked into the release terminal —
+    // usage stats with ephemeral_5m_input_tokens etc. With the fix, these
+    // events produce no output at all (they carry no user-visible text).
+    const logFile = join(tempDir, 'meta.log');
+    const metaLine = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'message_delta',
+        delta: { stop_reason: 'end_turn' },
+        usage: {
+          output_tokens: 20,
+          cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 1936 },
+          service_tier: 'standard',
+        },
+      },
+      parent_tool_use_id: null,
+    });
+    writeFileSync(logFile, metaLine + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-meta', { signal: ac.signal });
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-meta' }) });
+    const events = await collectSSEStream(response, ac, 200);
+
+    const combined = events.join('');
+    // No data events should contain raw ephemeral/usage fields.
+    expect(combined).not.toContain('ephemeral_5m_input_tokens');
+    expect(combined).not.toContain('parent_tool_use_id');
+  });
+
   it('emits done via poll when job finishes after last log write (fs.watch miss)', async () => {
     const logFile = join(tempDir, 'polled.log');
     writeFileSync(logFile, 'test output line\n');
