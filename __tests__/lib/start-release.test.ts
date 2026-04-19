@@ -89,6 +89,16 @@ describe('startRelease — release pipeline entry decision tree', () => {
     if (!r.ok) expect(r.status).toBe(409);
   });
 
+  it('returns 409 when a fix-push pipeline job is already running (fix-push is a pipeline kind)', async () => {
+    listJobsMock.mockReturnValue([
+      { id: 'j1', project: 'proj', kind: 'fix-push', finishedAt: null },
+    ]);
+    probeJobStatusMock.mockResolvedValue('running');
+    const r = await startRelease('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(409);
+  });
+
   it('ignores non-pipeline running jobs (e.g. run, agent) when deciding conflict', async () => {
     listJobsMock.mockReturnValue([
       { id: 'j1', project: 'proj', kind: 'run', finishedAt: null },
