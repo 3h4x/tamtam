@@ -17,6 +17,9 @@ interface SettingsMap {
   permission_mode: string
   commit_style: string
   review_verdict_rules: string
+  fix_ci_max_retries: string
+  fix_ci_retry_window_seconds: string
+  fix_ci_fast_crash_ms: string
 }
 
 const DEFAULTS: SettingsMap = {
@@ -37,6 +40,9 @@ const DEFAULTS: SettingsMap = {
 - NEEDS ATTENTION when you have at least one finding but nothing that risks data loss, security regressions, or breakage in production. Orphaned code, dead imports, missing imports that happen to compile, hardcoded strings that should use env vars, non-ideal UX state leaks, stylistic inconsistencies — all NEEDS ATTENTION.
 - DO NOT SHIP when there is a real risk of breakage, data loss, security regression, or a test that hides behavior.
 - If LGTM, just confirm the changes look good and add nothing else.`,
+  fix_ci_max_retries: '2',
+  fix_ci_retry_window_seconds: '120',
+  fix_ci_fast_crash_ms: '5000',
 }
 
 interface FieldDef {
@@ -126,6 +132,26 @@ const FIELDS: Record<keyof SettingsMap, FieldDef> = {
     help: 'Rules that drive LGTM / NEEDS ATTENTION / DO NOT SHIP decisions in code reviews',
     group: 'behavior',
     span: 2,
+  },
+  fix_ci_max_retries: {
+    label: 'Fix-CI Max Retries',
+    help: 'How many times to auto-retry a fix-ci job that crashes fast before giving up. 0 disables retries.',
+    group: 'behavior',
+    span: 1,
+  },
+  fix_ci_retry_window_seconds: {
+    label: 'Fix-CI Retry Window (s)',
+    help: 'Window in seconds within which retries are counted toward the cap',
+    group: 'behavior',
+    advanced: true,
+    span: 1,
+  },
+  fix_ci_fast_crash_ms: {
+    label: 'Fix-CI Fast-Crash (ms)',
+    help: 'Duration under which a non-zero exit is treated as a boot crash and retried. Longer failures surface as-is.',
+    group: 'behavior',
+    advanced: true,
+    span: 1,
   },
 }
 

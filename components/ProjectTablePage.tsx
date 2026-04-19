@@ -193,7 +193,7 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
               .filter(j => j.status === 'done')
               .sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))
             const lastJob = recentDone[0]
-            const lastFailed = lastJob?.exit_code != null && lastJob.exit_code > 0 ? lastJob : null
+            const lastFailed = lastJob?.exit_code != null && lastJob.exit_code !== 0 ? lastJob : null
 
             const agents = agentsByProject[project.project] || []
             const runningAgentNames = getRunningAgentNames(project.project)

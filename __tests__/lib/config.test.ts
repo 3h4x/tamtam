@@ -64,6 +64,9 @@ describe('config', () => {
         permission_mode: 'bypassPermissions',
         commit_style: 'Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Types: feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert.',
         review_verdict_rules: expect.stringContaining('Pragmatic verdict rules'),
+        fix_ci_max_retries: 2,
+        fix_ci_retry_window_seconds: 120,
+        fix_ci_fast_crash_ms: 5000,
       });
     });
 
@@ -316,6 +319,50 @@ describe('config', () => {
         expect(getPermissionModeFlag()).toBe(`--permission-mode ${mode}`);
       }
     );
+  });
+
+  describe('fix_ci_* integer settings', () => {
+    it('parses fix_ci_max_retries from DB as integer', () => {
+      testDb.db.insert(schema.settings).values({ key: 'fix_ci_max_retries', value: '5' }).run();
+      reloadConfig();
+      expect(getSettings().fix_ci_max_retries).toBe(5);
+    });
+
+    it('falls back to default when fix_ci_max_retries is non-numeric', () => {
+      testDb.db.insert(schema.settings).values({ key: 'fix_ci_max_retries', value: 'abc' }).run();
+      reloadConfig();
+      expect(getSettings().fix_ci_max_retries).toBe(2);
+    });
+
+    it('accepts 0 to disable retries', () => {
+      testDb.db.insert(schema.settings).values({ key: 'fix_ci_max_retries', value: '0' }).run();
+      reloadConfig();
+      expect(getSettings().fix_ci_max_retries).toBe(0);
+    });
+
+    it('parses fix_ci_retry_window_seconds from DB as integer', () => {
+      testDb.db.insert(schema.settings).values({ key: 'fix_ci_retry_window_seconds', value: '300' }).run();
+      reloadConfig();
+      expect(getSettings().fix_ci_retry_window_seconds).toBe(300);
+    });
+
+    it('falls back to default when fix_ci_retry_window_seconds is non-numeric', () => {
+      testDb.db.insert(schema.settings).values({ key: 'fix_ci_retry_window_seconds', value: 'bad' }).run();
+      reloadConfig();
+      expect(getSettings().fix_ci_retry_window_seconds).toBe(120);
+    });
+
+    it('parses fix_ci_fast_crash_ms from DB as integer', () => {
+      testDb.db.insert(schema.settings).values({ key: 'fix_ci_fast_crash_ms', value: '10000' }).run();
+      reloadConfig();
+      expect(getSettings().fix_ci_fast_crash_ms).toBe(10000);
+    });
+
+    it('falls back to default when fix_ci_fast_crash_ms is non-numeric', () => {
+      testDb.db.insert(schema.settings).values({ key: 'fix_ci_fast_crash_ms', value: 'nope' }).run();
+      reloadConfig();
+      expect(getSettings().fix_ci_fast_crash_ms).toBe(5000);
+    });
   });
 
   describe('commit_style and review_verdict_rules', () => {

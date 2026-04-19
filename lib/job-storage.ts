@@ -177,6 +177,29 @@ async function isAutoPushEnabled(projectName: string): Promise<boolean> {
 // per-environment without a code change.
 const MAX_FIX_ITERATIONS = parseInt(process.env.TAMTAM_MAX_FIX_ITERATIONS ?? '', 10) || 3;
 const FIX_WINDOW_SECONDS = parseInt(process.env.TAMTAM_FIX_WINDOW_SECONDS ?? '', 10) || 30 * 60;
+// fix-ci retries — live-read from settings so the user can tune this in the UI
+// without restarting the server. Only crash-fast failures are retried so real
+// errors still surface.
+async function getFixCiRetryConfig(): Promise<{ maxRetries: number; windowSeconds: number; fastCrashMs: number }> {
+  try {
+    const { getSettings } = await import('./config');
+    const s = getSettings();
+    return {
+      maxRetries: s.fix_ci_max_retries,
+      windowSeconds: s.fix_ci_retry_window_seconds,
+      fastCrashMs: s.fix_ci_fast_crash_ms,
+    };
+  } catch {
+    return { maxRetries: 2, windowSeconds: 120, fastCrashMs: 5000 };
+  }
+}
+
+function recentFixCiCount(projectName: string, windowSeconds: number): number {
+  const cutoff = Date.now() / 1000 - windowSeconds;
+  return listJobs().filter(
+    (j) => j.project === projectName && j.kind === 'fix-ci' && j.startedAt >= cutoff
+  ).length;
+}
 
 function recentFixCount(projectName: string): number {
   const cutoff = Date.now() / 1000 - FIX_WINDOW_SECONDS;
@@ -225,88 +248,135 @@ async function runCompletionHooks(job: JobData): Promise<void> {
     if (release) appendToReleaseLog(release, job.kind, job);
   }
 
-  if (job.kind === 'review' && job.exitCode === 0) {
-    try {
-      const { resolveProjectPath } = await import('./project-data');
-      const projPath = resolveProjectPath(job.project);
-      if (projPath) await markReviewed(job.project, projPath);
-    } catch {}
+  // Tracks whether this hook kicked off a downstream step. If not, the
+  // release meta-job is at a natural endpoint and should be finalized so the
+  // UI doesn't render it as "live" forever.
+  let chainedNext = false;
+
+  if (job.kind === 'review') {
+    if (job.exitCode === 0) {
+      try {
+        const { resolveProjectPath } = await import('./project-data');
+        const projPath = resolveProjectPath(job.project);
+        if (projPath) await markReviewed(job.project, projPath);
+      } catch {}
+    }
     // Release pipeline: review LGTM → push; NEEDS ATTENTION/DO NOT SHIP → fix
     try {
-      if (!(await isAutoPushEnabled(job.project))) return;
-      const verdict = getVerdict(job);
-      if (verdict === 'LGTM') {
-        const { startProjectPush } = await import('./start-push');
-        const r = await startProjectPush(job.project);
-        if (!r.ok) {
-          console.log(`[release] push failed for ${job.project}: ${r.detail}`);
-        } else {
-          console.log(`[release] review LGTM → pushed ${job.project} (${r.commitSha || 'no-op'})`);
+      if (job.exitCode === 0 && (await isAutoPushEnabled(job.project))) {
+        const verdict = getVerdict(job);
+        if (verdict === 'LGTM') {
+          const { startProjectPush } = await import('./start-push');
+          const r = await startProjectPush(job.project);
+          if (!r.ok) {
+            console.log(`[release] push failed for ${job.project}: ${r.detail}`);
+          } else {
+            console.log(`[release] review LGTM → pushed ${job.project} (${r.commitSha || 'no-op'})`);
+          }
+          // startProjectPush creates a 'push' job that will itself finalize
+          // the release via its own completion hook.
+          chainedNext = true;
+        } else if (verdict === 'NEEDS ATTENTION' || verdict === 'DO NOT SHIP') {
+          const count = recentFixCount(job.project);
+          if (count < MAX_FIX_ITERATIONS) {
+            const { startFixFromJob } = await import('./start-fix');
+            const r = await startFixFromJob(job.id);
+            if (r.ok) {
+              console.log(`[release] review ${verdict} → started fix ${r.jobId} (iter ${count + 1})`);
+              chainedNext = true;
+            } else {
+              console.log(`[release] skipped fix for ${job.project}: ${r.detail}`);
+            }
+          } else {
+            console.log(`[release] fix cap reached for ${job.project} (${count}/${MAX_FIX_ITERATIONS}) — stopping`);
+          }
         }
-        const release = findActiveReleaseJob(job.project);
-        if (release) await finalizeReleaseJob(release, r.ok ? 0 : 1);
-      } else if (verdict === 'NEEDS ATTENTION' || verdict === 'DO NOT SHIP') {
-        const count = recentFixCount(job.project);
-        if (count >= MAX_FIX_ITERATIONS) {
-          console.log(`[release] fix cap reached for ${job.project} (${count}/${MAX_FIX_ITERATIONS}) — stopping`);
-          const release = findActiveReleaseJob(job.project);
-          if (release) await finalizeReleaseJob(release, 1);
-          return;
-        }
-        const { startFixFromJob } = await import('./start-fix');
-        const r = await startFixFromJob(job.id);
-        if (!r.ok) {
-          console.log(`[release] skipped fix for ${job.project}: ${r.detail}`);
-          const release = findActiveReleaseJob(job.project);
-          if (release) await finalizeReleaseJob(release, 1);
-        } else {
-          console.log(`[release] review ${verdict} → started fix ${r.jobId} (iter ${count + 1})`);
-        }
-      } else {
-        // Unknown / no verdict — terminal failure for the release.
-        const release = findActiveReleaseJob(job.project);
-        if (release) await finalizeReleaseJob(release, 1);
+        // else: unknown / no verdict — fall through, release will finalize below
       }
     } catch (e) {
       console.log(`[release] review hook error for ${job.project}:`, e);
     }
   }
+
   if (job.kind === 'fix' && job.exitCode === 0) {
     try {
-      if (!(await isAutoPushEnabled(job.project))) return;
-      const { startProjectReview } = await import('./start-review');
-      const r = await startProjectReview(job.project);
-      if (!r.ok) {
-        console.log(`[fix→review] skipped auto-review for ${job.project}: ${r.detail}`);
-      } else {
-        console.log(`[fix→review] auto-started review ${r.jobId} for ${job.project}`);
+      if (await isAutoPushEnabled(job.project)) {
+        const { startProjectReview } = await import('./start-review');
+        const r = await startProjectReview(job.project);
+        if (r.ok) {
+          console.log(`[fix→review] auto-started review ${r.jobId} for ${job.project}`);
+          chainedNext = true;
+        } else {
+          console.log(`[fix→review] skipped auto-review for ${job.project}: ${r.detail}`);
+        }
       }
     } catch (e) {
       console.log(`[fix→review] error starting auto-review for ${job.project}:`, e);
     }
   }
+
   if (job.kind === 'test' && job.exitCode === 0) {
-    // Release pipeline: test passes → review
     try {
-      if (!(await isAutoPushEnabled(job.project))) return;
-      const { startProjectReview } = await import('./start-review');
-      const r = await startProjectReview(job.project);
-      if (!r.ok) {
-        console.log(`[release] test→review skipped for ${job.project}: ${r.detail}`);
-        const release = findActiveReleaseJob(job.project);
-        if (release) await finalizeReleaseJob(release, 1);
-      } else {
-        console.log(`[release] tests passed → started review ${r.jobId} for ${job.project}`);
+      if (await isAutoPushEnabled(job.project)) {
+        const { startProjectReview } = await import('./start-review');
+        const r = await startProjectReview(job.project);
+        if (r.ok) {
+          console.log(`[release] tests passed → started review ${r.jobId} for ${job.project}`);
+          chainedNext = true;
+        } else {
+          console.log(`[release] test→review skipped for ${job.project}: ${r.detail}`);
+        }
       }
     } catch (e) {
       console.log(`[release] test hook error for ${job.project}:`, e);
     }
   }
 
-  // Any pipeline step failing non-zero ends the release chain.
-  if (['test', 'push'].includes(job.kind) && job.exitCode !== 0) {
+  // If this is a pipeline step and we didn't chain to another step, the
+  // release job reached a natural endpoint — finalize it. Exit code mirrors
+  // this step's outcome.
+  if (['test', 'review', 'fix', 'push'].includes(job.kind) && !chainedNext) {
     const release = findActiveReleaseJob(job.project);
-    if (release) await finalizeReleaseJob(release, 1);
+    if (release) {
+      const exitCode = (job.exitCode === 0) ? 0 : 1;
+      await finalizeReleaseJob(release, exitCode);
+    }
+  }
+
+  // fix-ci auto-retry: if the job crashed fast (pm2/claude boot failure) and
+  // we haven't exhausted retries, kick off another attempt so the user sees
+  // a spinner instead of a red exit -1.
+  if (job.kind === 'fix-ci' && job.exitCode !== null && job.exitCode !== 0) {
+    const { maxRetries, windowSeconds, fastCrashMs } = await getFixCiRetryConfig();
+    if (maxRetries <= 0) return; // retries disabled via settings
+    const durationMs = (job.finishedAt ?? 0) * 1000 - (job.startedAt ?? 0) * 1000;
+    const crashedFast = durationMs > 0 && durationMs < fastCrashMs;
+    const attempts = recentFixCiCount(job.project, windowSeconds);
+    if (crashedFast && attempts <= maxRetries) {
+      console.log(`[fix-ci] retry ${attempts}/${maxRetries} for ${job.project} — previous crashed in ${durationMs}ms`);
+      const delayMs = Math.min(500 * attempts, 3000);
+      setTimeout(() => {
+        retryFixCi(job.project).catch((e) => {
+          console.log(`[fix-ci] retry error for ${job.project}:`, e);
+        });
+      }, delayMs);
+    } else if (attempts > maxRetries) {
+      console.log(`[fix-ci] retry cap reached for ${job.project} (${attempts}/${maxRetries}) — giving up`);
+    }
+  }
+}
+
+async function retryFixCi(projectName: string): Promise<void> {
+  // Re-invoke the fix-ci API route's logic by calling it HTTP-less. We post
+  // to the same endpoint so it stays the single source of truth for the
+  // "start a fix-ci" flow (prompt construction, log path, permission mode).
+  const port = parseInt(process.env.PORT ?? '', 10) || 1337;
+  try {
+    await fetch(`http://127.0.0.1:${port}/api/projects/by-project/${encodeURIComponent(projectName)}/fix-ci`, {
+      method: 'POST',
+    });
+  } catch (e) {
+    console.log(`[fix-ci] retry fetch failed for ${projectName}:`, e);
   }
 }
 
@@ -435,6 +505,17 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
   if (job.finishedAt !== null) return 'done';
   if (job.pid <= 0) {
     await markDone(job, -1);
+    return 'done';
+  }
+  // Release meta-jobs store process.pid (the server's own PID) as a sentinel —
+  // they are NOT real child processes and must not be probed by pid or PM2.
+  // Completion hooks (finalizeReleaseJob) are responsible for marking them done.
+  // If the stored pid differs from the current process.pid, the server was
+  // restarted and this job is orphaned — mark it done cleanly (exit 0) rather
+  // than failed (-1) so it doesn't show a spurious red indicator in the UI.
+  if (job.kind === 'release') {
+    if (job.pid === process.pid) return 'running';
+    await markDone(job, 0);
     return 'done';
   }
   // Claude CLI sometimes hangs after emitting its final result event. If the log

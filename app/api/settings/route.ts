@@ -16,6 +16,9 @@ const SETTING_KEYS = [
   'permission_mode',
   'commit_style',
   'review_verdict_rules',
+  'fix_ci_max_retries',
+  'fix_ci_retry_window_seconds',
+  'fix_ci_fast_crash_ms',
 ] as const;
 
 export async function GET() {

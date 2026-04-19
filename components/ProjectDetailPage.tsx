@@ -895,14 +895,26 @@ export function ProjectDetailPage({
                 && j.exit_code !== 0
                 && j.started_at >= recentCutoff
             )
+            // Review done but verdict isn't LGTM — this includes "unknown"
+            // (verdict undefined/empty because getVerdict returned null).
+            // The user needs to see ✗ with the hint, so the strip must stay
+            // visible.
             const recentReviewNotLgtm = projectJobs.some(
               j => j.kind === 'review'
                 && j.status === 'done'
                 && j.started_at >= recentCutoff
-                && j.verdict
                 && j.verdict !== 'LGTM'
             )
-            if (!pipelineRunning && !hasPushError && !recentFailedJob && !recentReviewNotLgtm) return null
+            // LGTM verdict but the pipeline hasn't actually finished shipping
+            // (changes still uncommitted or commits still unpushed). Keep the
+            // strip up so the user can tell the release is mid-flight.
+            const recentLgtmWithWorkRemaining = projectJobs.some(
+              j => j.kind === 'review'
+                && j.status === 'done'
+                && j.verdict === 'LGTM'
+                && j.started_at >= recentCutoff
+            ) && (project.totalChanges > 0 || (project.unpushed ?? 0) > 0)
+            if (!pipelineRunning && !hasPushError && !recentFailedJob && !recentReviewNotLgtm && !recentLgtmWithWorkRemaining) return null
 
             const hourAgo = Date.now() / 1000 - 60 * 60
             const latestOfKind = (kind: string) => projectJobs

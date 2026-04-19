@@ -248,6 +248,100 @@ test.describe('Release flow — review verdict handling', () => {
     await page.goto(`/project/${project}/terminal`);
     await expect(page.getByTitle(/review job failed/i).first()).toBeVisible();
   });
+
+  // Reviewed verdict cases reflecting the regex used by getVerdict — these
+  // exist to guard against regressions where the UI stops mapping a detected
+  // verdict to the right state. Actual string→verdict parsing is covered by
+  // the unit tests in __tests__/lib/job-storage.test.ts (getVerdict block).
+
+  test('review with LGTM + rationale (em-dash) shows ✓ LGTM', async ({ page }) => {
+    const now = sec();
+    // totalChanges>0 so the strip stays up — LGTM but awaiting commit/push.
+    const project = await mockFlow(page, {
+      totalChanges: 2, reviewed: true, unpushed: 0, testCommand: 'pnpm test',
+      jobs: [{
+        id: 'demoproj-review-lgtm-emdash', project: 'demoproj', kind: 'review',
+        status: 'done', exit_code: 0, verdict: 'LGTM',
+        started_at: now - 120, finished_at: now - 60,
+        session_id: 'sess-lgtm-emdash',
+      }],
+    });
+    await page.goto(`/project/${project}/terminal`);
+    // Look for the canonical LGTM hint from the pipeline-strip review step.
+    // When verdict is LGTM we show ✓ with a hint like "LGTM — click to view review log".
+    await expect(page.getByTitle(/LGTM/i).first()).toBeVisible();
+  });
+
+  test('review finished ok but verdict is undefined (unknown) shows ✗ with unknown hint', async ({ page }) => {
+    // Mirrors the real-world regression: Claude produced a long output but
+    // didn't emit a parseable verdict token → backend getVerdict returns
+    // null → UI must surface this as ✗ so the user sees something went wrong
+    // instead of a stale "not run yet" state.
+    const now = sec();
+    const project = await mockFlow(page, {
+      totalChanges: 2, reviewed: false, unpushed: 0, testCommand: 'pnpm test',
+      jobs: [{
+        id: 'demoproj-review-unknown', project: 'demoproj', kind: 'review',
+        status: 'done', exit_code: 0, // verdict intentionally undefined
+        started_at: now - 120, finished_at: now - 60,
+        session_id: 'sess-unknown',
+      }],
+    });
+    await page.goto(`/project/${project}/terminal`);
+    // Hint text is "verdict: unknown — click to view findings" per the
+    // reviewVerdict fallthrough branch.
+    await expect(page.getByTitle(/verdict:\s*unknown/i).first()).toBeVisible();
+  });
+
+  test('review with empty-string verdict is treated as unknown (not LGTM)', async ({ page }) => {
+    const now = sec();
+    const project = await mockFlow(page, {
+      totalChanges: 2, reviewed: false, unpushed: 0, testCommand: 'pnpm test',
+      jobs: [{
+        id: 'demoproj-review-emptyverdict', project: 'demoproj', kind: 'review',
+        status: 'done', exit_code: 0, verdict: '',
+        started_at: now - 120, finished_at: now - 60,
+        session_id: 'sess-emptyverdict',
+      }],
+    });
+    await page.goto(`/project/${project}/terminal`);
+    // An empty verdict must NOT show as LGTM ✓ — it's "unknown" and failed.
+    await expect(page.getByTitle(/verdict:\s*unknown/i).first()).toBeVisible();
+  });
+
+  test('review with NEEDS ATTENTION shows ! warning state', async ({ page }) => {
+    const now = sec();
+    const project = await mockFlow(page, {
+      totalChanges: 3, reviewed: false, unpushed: 0, testCommand: 'pnpm test',
+      jobs: [{
+        id: 'demoproj-review-na2', project: 'demoproj', kind: 'review',
+        status: 'done', exit_code: 0, verdict: 'NEEDS ATTENTION',
+        started_at: now - 120, finished_at: now - 60,
+      }],
+    });
+    await page.goto(`/project/${project}/terminal`);
+    await expect(page.getByTitle(/NEEDS ATTENTION/i).first()).toBeVisible();
+  });
+
+  test('review with LGTM + pending push queued stays ✓ and shows "awaiting push" behind the scenes', async ({ page }) => {
+    // When LGTM lands but there are still tracked changes, the review step
+    // must remain ✓ — not downgrade to ○ / ! — because the verdict is still
+    // valid. The commit step takes over visibility from here.
+    const now = sec();
+    const project = await mockFlow(page, {
+      totalChanges: 4, reviewed: true, unpushed: 0, testCommand: 'pnpm test',
+      jobs: [
+        {
+          id: 'demoproj-review-lgtm-pending', project: 'demoproj', kind: 'review',
+          status: 'done', exit_code: 0, verdict: 'LGTM',
+          started_at: now - 120, finished_at: now - 60,
+          session_id: 'sess-lgtm-pending',
+        },
+      ],
+    });
+    await page.goto(`/project/${project}/terminal`);
+    await expect(page.getByTitle(/LGTM/i).first()).toBeVisible();
+  });
 });
 
 test.describe('Release flow — commit/push failure surfacing', () => {

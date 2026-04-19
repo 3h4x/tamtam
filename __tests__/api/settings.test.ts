@@ -182,6 +182,9 @@ describe('settings API', () => {
         'permission_mode',
         'commit_style',
         'review_verdict_rules',
+        'fix_ci_max_retries',
+        'fix_ci_retry_window_seconds',
+        'fix_ci_fast_crash_ms',
       ];
 
       const body = Object.fromEntries(validKeys.map((k) => [k, 'test-value']));
@@ -204,6 +207,17 @@ describe('settings API', () => {
 
       const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'commit_style');
       expect(row?.value).toBe('squash everything into one commit');
+    });
+
+    it('saves fix_ci_max_retries setting', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ fix_ci_max_retries: '5' }),
+      });
+      await PATCH(request);
+
+      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'fix_ci_max_retries');
+      expect(row?.value).toBe('5');
     });
 
     it('saves review_verdict_rules setting', async () => {

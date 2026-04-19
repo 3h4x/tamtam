@@ -19,6 +19,9 @@ export interface TamTamConfig {
   permission_mode: string;
   commit_style: string;
   review_verdict_rules: string;
+  fix_ci_max_retries: number;
+  fix_ci_retry_window_seconds: number;
+  fix_ci_fast_crash_ms: number;
 }
 
 const DEFAULTS: TamTamConfig = {
@@ -40,6 +43,9 @@ const DEFAULTS: TamTamConfig = {
 - DO NOT SHIP for real risk: data loss, security regression, guaranteed production breakage.
 - Prefer LGTM over NEEDS ATTENTION when in doubt. Do not list every stylistic opinion. Aim for fewer than 3 findings — if you have more, the review has drifted into nitpicking.
 - Keep LGTM responses short: one sentence confirmation is enough.`,
+  fix_ci_max_retries: 2,
+  fix_ci_retry_window_seconds: 120,
+  fix_ci_fast_crash_ms: 5000,
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
@@ -67,6 +73,9 @@ export function getSettings(): TamTamConfig {
     permission_mode: map.permission_mode ?? DEFAULTS.permission_mode,
     commit_style: map.commit_style ?? DEFAULTS.commit_style,
     review_verdict_rules: map.review_verdict_rules ?? DEFAULTS.review_verdict_rules,
+    fix_ci_max_retries: parseIntOr(map.fix_ci_max_retries, DEFAULTS.fix_ci_max_retries),
+    fix_ci_retry_window_seconds: parseIntOr(map.fix_ci_retry_window_seconds, DEFAULTS.fix_ci_retry_window_seconds),
+    fix_ci_fast_crash_ms: parseIntOr(map.fix_ci_fast_crash_ms, DEFAULTS.fix_ci_fast_crash_ms),
   };
 
   _cache = { config, time: now };
@@ -75,6 +84,12 @@ export function getSettings(): TamTamConfig {
 
 export function reloadConfig(): void {
   _cache = null;
+}
+
+function parseIntOr(v: string | undefined, fallback: number): number {
+  if (v === undefined || v === '') return fallback;
+  const n = parseInt(v, 10);
+  return isNaN(n) ? fallback : n;
 }
 
 const VALID_PERMISSION_MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'default', 'dontAsk', 'plan'] as const;
