@@ -96,7 +96,7 @@ export async function reviewProject(projectName: string): Promise<{ status: stri
   return response.json()
 }
 
-export async function releaseProject(projectName: string): Promise<{ status: string; step: 'test' | 'review' | 'push'; job_id?: string; message: string }> {
+export async function releaseProject(projectName: string): Promise<{ status: string; step: 'test' | 'review' | 'push'; job_id?: string; release_job_id?: string; message: string }> {
   const response = await fetch(`${API_BASE}/by-project/${projectName}/release`, {
     method: 'POST',
   })

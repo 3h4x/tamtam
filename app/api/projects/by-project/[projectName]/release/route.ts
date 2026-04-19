@@ -8,5 +8,11 @@ export async function POST(
   const { projectName } = await params;
   const r = await startRelease(projectName);
   if (!r.ok) return NextResponse.json({ detail: r.detail }, { status: r.status });
-  return NextResponse.json({ status: 'started', step: r.step, job_id: r.jobId, message: r.message });
+  return NextResponse.json({
+    status: 'started',
+    step: r.step,
+    job_id: r.jobId,
+    release_job_id: r.releaseJobId,
+    message: r.message,
+  });
 }

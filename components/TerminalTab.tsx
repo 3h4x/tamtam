@@ -989,44 +989,6 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           onScroll={handleScroll}
           className="flex-1 overflow-y-auto font-mono text-sm flex flex-col"
         >
-          {!streaming && history.length === 0 && !claudeSessionId && sessions.length > 0 && (
-            <div className="px-4 py-3 border-b border-[#1e1e1e]">
-              <div className="text-[10px] text-[#555] uppercase tracking-wider mb-2 font-mono">
-                resume recent
-              </div>
-              <div className="flex flex-col gap-1">
-                {sessions.slice(0, 5).map(session => {
-                  const isRunning = session.finishedAt === null && session.exitCode === null
-                  const isSuccess = session.exitCode === 0
-                  const prompt = session.prompt
-                    ? session.prompt.length > 90 ? session.prompt.slice(0, 90) + '...' : session.prompt
-                    : '(no prompt)'
-                  const secs = Math.floor(Date.now() / 1000 - session.startedAt)
-                  const timeAgo = secs < 60 ? `${secs}s ago` : secs < 3600 ? `${Math.floor(secs / 60)}m ago` : secs < 86400 ? `${Math.floor(secs / 3600)}h ago` : `${Math.floor(secs / 86400)}d ago`
-                  return (
-                    <button
-                      key={session.id}
-                      className="flex items-center gap-3 w-full px-3 py-1.5 text-left hover:bg-[#1a1a1a] rounded cursor-pointer border-none bg-transparent group"
-                      onClick={() => restoreSession(session)}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRunning ? 'bg-status-warning animate-pulse' : isSuccess ? 'bg-status-success' : 'bg-status-error'}`} />
-                      <span className="text-xs text-[#ccc] font-mono truncate flex-1 group-hover:text-[#fff]">{prompt}</span>
-                      {isRunning && <span className="text-[10px] text-status-warning font-mono shrink-0">running</span>}
-                      <span className="text-[10px] text-[#555] font-mono shrink-0">{timeAgo}</span>
-                    </button>
-                  )
-                })}
-              </div>
-              {sessions.length > 5 && (
-                <button
-                  className="mt-2 text-[10px] text-[#555] hover:text-[#888] cursor-pointer border-none bg-transparent font-mono"
-                  onClick={() => { if (!showSessions) loadSessions(); setShowSessions(true) }}
-                >
-                  show all {sessions.length} →
-                </button>
-              )}
-            </div>
-          )}
 
           {history.map((entry, i) => (
             entry.role === 'thinking' ? (

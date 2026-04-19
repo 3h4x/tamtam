@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, appendFileSync } from 'fs';
 import { db, schema } from './db';
 import { getJobStatus } from './pm2-jobs';
 import { markReviewed } from './git-utils';
@@ -24,6 +24,7 @@ export interface JobData {
   sessionId?: string | null;
   contextMeta?: string | null;
   userPrompt?: string | null;
+  parentJobId?: string | null;
 }
 
 const jobsCache = new Map<string, JobData>();
@@ -53,6 +54,7 @@ function loadFromDb(): void {
         sessionId: row.sessionId ?? null,
         contextMeta: row.contextMeta ?? null,
         userPrompt: row.userPrompt ?? null,
+        parentJobId: row.parentJobId ?? null,
       });
     }
     loaded = true;
@@ -183,7 +185,46 @@ function recentFixCount(projectName: string): number {
   ).length;
 }
 
+// Find the most recent in-flight release job for this project — the single
+// terminal the user watches during a release. Each pipeline step appends
+// its section to this job's log.
+function findActiveReleaseJob(projectName: string): JobData | null {
+  const candidates = listJobs()
+    .filter(j => j.project === projectName && j.kind === 'release' && j.finishedAt === null)
+    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+  return candidates[0] ?? null;
+}
+
+function appendToReleaseLog(release: JobData, kind: string, job: JobData, extra?: string): void {
+  if (!release.logPath) return;
+  try {
+    const header = `\n\n=== ${kind} (${job.id}) — started ${new Date((job.startedAt || 0) * 1000).toISOString()} — exit ${job.exitCode ?? '?'} ===\n`;
+    let body = '';
+    if (job.logPath && existsSync(job.logPath)) {
+      try { body = readFileSync(job.logPath, 'utf-8'); } catch {}
+    }
+    appendFileSync(release.logPath, header + body + (extra ? `\n${extra}\n` : ''));
+  } catch {}
+}
+
+async function finalizeReleaseJob(release: JobData, exitCode: number): Promise<void> {
+  if (release.finishedAt !== null) return;
+  try {
+    if (release.logPath) {
+      appendFileSync(release.logPath, `\n# release finished — exit ${exitCode} — ${new Date().toISOString()}\n`);
+    }
+  } catch {}
+  await markDone(release, exitCode);
+}
+
 async function runCompletionHooks(job: JobData): Promise<void> {
+  // Stream per-step output into the active release meta-log so the user can
+  // watch the whole pipeline in one terminal.
+  if (['test', 'review', 'fix', 'push'].includes(job.kind)) {
+    const release = findActiveReleaseJob(job.project);
+    if (release) appendToReleaseLog(release, job.kind, job);
+  }
+
   if (job.kind === 'review' && job.exitCode === 0) {
     try {
       const { resolveProjectPath } = await import('./project-data');
@@ -202,19 +243,29 @@ async function runCompletionHooks(job: JobData): Promise<void> {
         } else {
           console.log(`[release] review LGTM → pushed ${job.project} (${r.commitSha || 'no-op'})`);
         }
+        const release = findActiveReleaseJob(job.project);
+        if (release) await finalizeReleaseJob(release, r.ok ? 0 : 1);
       } else if (verdict === 'NEEDS ATTENTION' || verdict === 'DO NOT SHIP') {
         const count = recentFixCount(job.project);
         if (count >= MAX_FIX_ITERATIONS) {
           console.log(`[release] fix cap reached for ${job.project} (${count}/${MAX_FIX_ITERATIONS}) — stopping`);
+          const release = findActiveReleaseJob(job.project);
+          if (release) await finalizeReleaseJob(release, 1);
           return;
         }
         const { startFixFromJob } = await import('./start-fix');
         const r = await startFixFromJob(job.id);
         if (!r.ok) {
           console.log(`[release] skipped fix for ${job.project}: ${r.detail}`);
+          const release = findActiveReleaseJob(job.project);
+          if (release) await finalizeReleaseJob(release, 1);
         } else {
           console.log(`[release] review ${verdict} → started fix ${r.jobId} (iter ${count + 1})`);
         }
+      } else {
+        // Unknown / no verdict — terminal failure for the release.
+        const release = findActiveReleaseJob(job.project);
+        if (release) await finalizeReleaseJob(release, 1);
       }
     } catch (e) {
       console.log(`[release] review hook error for ${job.project}:`, e);
@@ -242,12 +293,20 @@ async function runCompletionHooks(job: JobData): Promise<void> {
       const r = await startProjectReview(job.project);
       if (!r.ok) {
         console.log(`[release] test→review skipped for ${job.project}: ${r.detail}`);
+        const release = findActiveReleaseJob(job.project);
+        if (release) await finalizeReleaseJob(release, 1);
       } else {
         console.log(`[release] tests passed → started review ${r.jobId} for ${job.project}`);
       }
     } catch (e) {
       console.log(`[release] test hook error for ${job.project}:`, e);
     }
+  }
+
+  // Any pipeline step failing non-zero ends the release chain.
+  if (['test', 'push'].includes(job.kind) && job.exitCode !== 0) {
+    const release = findActiveReleaseJob(job.project);
+    if (release) await finalizeReleaseJob(release, 1);
   }
 }
 
@@ -320,11 +379,17 @@ export function getVerdict(job: JobData): string | null {
   // decision.
   const multiline = [...tail.matchAll(/[Vv]erdict[^A-Za-z]{1,80}?(LGTM|NEEDS ATTENTION|DO NOT SHIP)(?![*_` ]*\s*\/)/g)];
   if (multiline.length > 0) return multiline[multiline.length - 1][1];
-  // Fallback: bare token alone on the final non-empty line.
+  // Fallback: scan the final non-empty lines for a verdict token at the
+  // start (with optional markdown decoration) followed by either end-of-line
+  // or a separator like " — ", ":", " -" introducing a one-line rationale.
+  // Accepts bare `LGTM`, `**LGTM**`, `LGTM — summary`, `LGTM: summary`, etc.
+  // Rejects `LGTM / NEEDS ATTENTION / DO NOT SHIP` (the prompt's own enum)
+  // because that line has a "/" right after the token.
   const lines = tail.split('\n').map((l) => l.trim()).filter(Boolean);
-  const last = lines[lines.length - 1];
-  if (last && /^[*_` ]*(LGTM|NEEDS ATTENTION|DO NOT SHIP)[*_` ]*$/.test(last)) {
-    return last.replace(/[*_` ]/g, '').trim();
+  const lineTokenRe = /^[*_` ]*(LGTM|NEEDS ATTENTION|DO NOT SHIP)[*_` ]*(?:\s*[-–—:]|\s*$)(?![*_` ]*\s*\/)/;
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 5); i--) {
+    const m = lineTokenRe.exec(lines[i]);
+    if (m) return m[1];
   }
   return null;
 }

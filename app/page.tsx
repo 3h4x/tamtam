@@ -20,7 +20,6 @@ export default function Home() {
     <ProjectTablePage
       fleet={fleet}
       onRefresh={loadProjects}
-      onPush={() => { startFastPolling(); loadProjects() }}
     />
   )
 }

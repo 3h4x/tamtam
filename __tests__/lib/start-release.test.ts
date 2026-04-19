@@ -10,6 +10,8 @@ describe('startRelease — release pipeline entry decision tree', () => {
   let detectTestCommandMock: ReturnType<typeof vi.fn>;
   let startProjectReviewMock: ReturnType<typeof vi.fn>;
   let startProjectPushMock: ReturnType<typeof vi.fn>;
+  let createJobMock: ReturnType<typeof vi.fn>;
+  let updateJobMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -21,10 +23,24 @@ describe('startRelease — release pipeline entry decision tree', () => {
     detectTestCommandMock = vi.fn();
     startProjectReviewMock = vi.fn();
     startProjectPushMock = vi.fn();
+    createJobMock = vi.fn().mockImplementation((project: string, kind: string) => ({
+      id: `${project}-${kind}-rel-id`, project, kind, pid: 0, logPath: '',
+      prompt: null, startedAt: 0, finishedAt: null, exitCode: null, seen: false,
+      durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+      contextMeta: null, userPrompt: null,
+    }));
+    updateJobMock = vi.fn();
 
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/job-storage', () => ({ listJobs: listJobsMock, probeJobStatus: probeJobStatusMock }));
+    vi.doMock('@/lib/job-storage', () => ({
+      listJobs: listJobsMock, probeJobStatus: probeJobStatusMock,
+      createJob: createJobMock, updateJob: updateJobMock,
+    }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
+    }));
     vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
     vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
     vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
@@ -170,6 +186,32 @@ describe('startRelease — release pipeline entry decision tree', () => {
       expect(r.status).toBe(502);
       expect(r.detail).toContain('remote rejected');
     }
+  });
+
+  it('creates a release meta-job and returns its id', async () => {
+    detectTestCommandMock.mockReturnValue('pnpm test');
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'));
+    startProjectTestMock.mockResolvedValue({ ok: true, jobId: 't1', pid: 1, logPath: '/tmp/t.log', testCmd: 'pnpm test' });
+
+    const r = await startRelease('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.releaseJobId).toBe('proj-release-rel-id');
+      expect(createJobMock).toHaveBeenCalledWith('proj', 'release', expect.any(Number), '');
+    }
+  });
+
+  it('does not create a release meta-job when there is nothing to release', async () => {
+    detectTestCommandMock.mockReturnValue(null);
+    execMock
+      .mockImplementationOnce(() => gitStatus(''))
+      .mockImplementationOnce(() => gitAhead('0'));
+
+    const r = await startRelease('proj');
+    expect(r.ok).toBe(false);
+    expect(createJobMock).not.toHaveBeenCalled();
   });
 
   it('treats git status exit failure as no tracked changes', async () => {

@@ -20,7 +20,7 @@ export async function POST(
   const hasStaged = !!statusR.stdout.trim();
 
   if (hasStaged) {
-    const commitR = await exec('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 });
+    const commitR = await exec('git', ['-C', projPath, 'commit', '--no-verify', '-m', message], { timeout: 30000 });
     if (commitR.exitCode !== 0 && !commitR.stdout.includes('nothing to commit')) {
       return NextResponse.json({ detail: `Commit failed: ${commitR.stderr.trim()}` }, { status: 400 });
     }
@@ -34,17 +34,13 @@ export async function POST(
   }
 
   let pushR = await exec('git', ['-C', projPath, 'push'], { timeout: 30000 });
+  if (pushR.exitCode !== 0 && (pushR.stderr.includes('no upstream') || pushR.stderr.includes('set-upstream'))) {
+    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+    const branch = branchR.stdout.trim();
+    if (branch) pushR = await exec('git', ['-C', projPath, 'push', '-u', 'origin', branch], { timeout: 30000 });
+  }
   if (pushR.exitCode !== 0) {
-    if (pushR.stderr.includes('no upstream') || pushR.stderr.includes('set-upstream')) {
-      const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
-      const branch = branchR.stdout.trim();
-      if (branch) {
-        pushR = await exec('git', ['-C', projPath, 'push', '-u', 'origin', branch], { timeout: 30000 });
-      }
-    }
-    if (pushR.exitCode !== 0) {
-      return NextResponse.json({ detail: `Push failed: ${pushR.stderr.trim()}` }, { status: 400 });
-    }
+    return NextResponse.json({ detail: `Push failed: ${pushR.stderr.trim()}` }, { status: 400 });
   }
 
   const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });

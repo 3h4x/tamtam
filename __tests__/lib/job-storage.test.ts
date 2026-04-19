@@ -32,7 +32,8 @@ function createTestDb() {
       cache_create_tokens INTEGER,
       session_id TEXT,
       user_prompt TEXT,
-      context_meta TEXT
+      context_meta TEXT,
+      parent_job_id TEXT
     );
   `);
 
@@ -569,6 +570,95 @@ describe('job-storage', () => {
       };
 
       expect(getVerdict(job)).toBe('LGTM');
+    });
+
+    // Real-world verdict formats Claude emits — each regression here came
+    // from a concrete release where we silently fell back to "unknown".
+    function reviewJob(id: string, logContent: string, tempDir: string): JobData {
+      const logFile = join(tempDir, `${id}.log`);
+      writeFileSync(logFile, logContent);
+      return {
+        id, project: 'proj', kind: 'review', prompt: null, pid: 123,
+        logPath: logFile,
+        startedAt: Date.now() / 1000, finishedAt: Date.now() / 1000,
+        exitCode: 0, seen: false, durationMs: null,
+        inputTokens: null, outputTokens: null, cacheReadTokens: null,
+        cacheCreateTokens: null, sessionId: null,
+      };
+    }
+
+    it('matches "LGTM — one-line rationale" (em-dash) as LGTM', () => {
+      const job = reviewJob('verdict-emdash', [
+        'Review complete.',
+        'All tests pass, no obvious issues.',
+        'LGTM — adds configurable engine tuning knobs (seed count, similar toggle), wires them through ConfigPanel with a UI refactor, and backs it with solid test coverage.',
+      ].join('\n'), tempDir);
+      expect(getVerdict(job)).toBe('LGTM');
+    });
+
+    it('matches "LGTM - one-line rationale" (ASCII hyphen) as LGTM', () => {
+      const job = reviewJob('verdict-hyphen', 'LGTM - clean change, covered by tests.', tempDir);
+      expect(getVerdict(job)).toBe('LGTM');
+    });
+
+    it('matches "LGTM – one-line rationale" (en-dash) as LGTM', () => {
+      const job = reviewJob('verdict-endash', 'LGTM – no concerns.', tempDir);
+      expect(getVerdict(job)).toBe('LGTM');
+    });
+
+    it('matches "LGTM: rationale" (colon) as LGTM', () => {
+      const job = reviewJob('verdict-colon', 'LGTM: tests cover the new branches.', tempDir);
+      expect(getVerdict(job)).toBe('LGTM');
+    });
+
+    it('matches "**LGTM** — rationale" (bold markdown) as LGTM', () => {
+      const job = reviewJob('verdict-bold', '**LGTM** — refactor is clean.', tempDir);
+      expect(getVerdict(job)).toBe('LGTM');
+    });
+
+    it('matches "NEEDS ATTENTION — rationale" as NEEDS ATTENTION', () => {
+      const job = reviewJob('verdict-na', 'NEEDS ATTENTION — missing error handling in push.ts.', tempDir);
+      expect(getVerdict(job)).toBe('NEEDS ATTENTION');
+    });
+
+    it('matches "DO NOT SHIP — reason" as DO NOT SHIP', () => {
+      const job = reviewJob('verdict-dns', 'DO NOT SHIP — regressions in test suite.', tempDir);
+      expect(getVerdict(job)).toBe('DO NOT SHIP');
+    });
+
+    it('rejects the prompt enumeration line "LGTM / NEEDS ATTENTION / DO NOT SHIP"', () => {
+      const job = reviewJob('verdict-enum', 'Pick one: LGTM / NEEDS ATTENTION / DO NOT SHIP', tempDir);
+      expect(getVerdict(job)).toBeNull();
+    });
+
+    it('returns the last verdict when multiple appear (final decision wins)', () => {
+      const job = reviewJob('verdict-last', [
+        'Initially thought NEEDS ATTENTION but reconsidered.',
+        '',
+        'LGTM — issue is cosmetic.',
+      ].join('\n'), tempDir);
+      expect(getVerdict(job)).toBe('LGTM');
+    });
+
+    it('picks verdict from any of the last few non-empty lines (tolerates trailing metadata)', () => {
+      const job = reviewJob('verdict-near-end', [
+        'LGTM — looks great.',
+        '',
+        '(review duration: 1m 12s)',
+      ].join('\n'), tempDir);
+      expect(getVerdict(job)).toBe('LGTM');
+    });
+
+    it('does not match verdict when review job has not finished', () => {
+      const job = reviewJob('verdict-running', 'LGTM — done.', tempDir);
+      job.finishedAt = null; // still running
+      expect(getVerdict(job)).toBeNull();
+    });
+
+    it('does not match verdict for non-review job kinds', () => {
+      const job = reviewJob('verdict-wrong-kind', 'LGTM — done.', tempDir);
+      job.kind = 'test';
+      expect(getVerdict(job)).toBeNull();
     });
   });
 

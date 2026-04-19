@@ -21,7 +21,6 @@ export default function TerminalSessionPage() {
       onPause={handlePause}
       onResume={handleResume}
       onRefresh={loadProjects}
-      onPush={() => { startFastPolling(); loadProjects() }}
     />
   )
 }

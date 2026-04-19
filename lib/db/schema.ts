@@ -39,6 +39,7 @@ export const jobs = sqliteTable('jobs', {
   sessionId: text('session_id'),
   userPrompt: text('user_prompt'),
   contextMeta: text('context_meta'),
+  parentJobId: text('parent_job_id'),
 });
 
 export const skills = sqliteTable('skills', {

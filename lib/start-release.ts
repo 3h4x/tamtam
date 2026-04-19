@@ -1,11 +1,14 @@
+import { appendFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
 import { resolveProjectPath } from './project-data';
 import { startProjectTest, detectTestCommand } from './start-test';
 import { startProjectReview } from './start-review';
 import { startProjectPush } from './start-push';
-import { listJobs, probeJobStatus } from './job-storage';
+import { listJobs, probeJobStatus, createJob, updateJob } from './job-storage';
 import { exec } from './shell';
+import { getImproveConfig } from './scheduling';
 
-const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push']);
+const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'release']);
 
 async function isReleasePipelineRunning(projectName: string): Promise<boolean> {
   const candidates = listJobs().filter(
@@ -18,8 +21,26 @@ async function isReleasePipelineRunning(projectName: string): Promise<boolean> {
 }
 
 export type ReleaseResult =
-  | { ok: true; step: 'test' | 'review' | 'push'; jobId?: string; message: string }
+  | { ok: true; step: 'test' | 'review' | 'push'; jobId?: string; releaseJobId?: string; message: string }
   | { ok: false; status: number; detail: string };
+
+// Create a meta "release" job up-front so the whole pipeline has a single
+// terminal to watch. Each downstream step appends its log to this file via
+// appendToActiveRelease in job-storage completion hooks.
+function createReleaseJob(projectName: string): { id: string; logPath: string } | null {
+  try {
+    const { logDir } = getImproveConfig();
+    mkdirSync(logDir, { recursive: true });
+    const job = createJob(projectName, 'release', process.pid, '');
+    const logPath = join(logDir, `${job.id}.log`);
+    job.logPath = logPath;
+    updateJob(job);
+    appendFileSync(logPath, `# release start — ${new Date().toISOString()}\n# project: ${projectName}\n`);
+    return { id: job.id, logPath };
+  } catch {
+    return null;
+  }
+}
 
 async function hasChanges(projPath: string): Promise<boolean> {
   const r = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
@@ -62,21 +83,24 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
     return { ok: false, status: 400, detail: 'Nothing to release — no changes and no unpushed commits' };
   }
 
+  const release = createReleaseJob(projectName);
+  const releaseJobId = release?.id;
+
   const testCmd = detectTestCommand(projPath, projectName);
   if (testCmd) {
     const r = await startProjectTest(projectName);
     if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
-    return { ok: true, step: 'test', jobId: r.jobId, message: `Running tests (${r.testCmd})` };
+    return { ok: true, step: 'test', jobId: r.jobId, releaseJobId, message: `Running tests (${r.testCmd})` };
   }
 
   if (changes) {
     const r = await startProjectReview(projectName);
     if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
-    return { ok: true, step: 'review', jobId: r.jobId, message: 'Running review' };
+    return { ok: true, step: 'review', jobId: r.jobId, releaseJobId, message: 'Running review' };
   }
 
   // Only unpushed commits remain — push directly.
   const r = await startProjectPush(projectName);
   if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
-  return { ok: true, step: 'push', message: r.message };
+  return { ok: true, step: 'push', releaseJobId, message: r.message };
 }

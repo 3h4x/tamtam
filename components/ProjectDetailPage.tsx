@@ -7,8 +7,6 @@ import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
 import { priorityColor, getHighestPriority, getAggregateCi, formatDuration } from '@/lib/statusConstants'
 import { formatAgo } from '@/lib/format'
-import { computePushBlockReason } from '@/lib/push-utils'
-import { InlinePushPanel } from '@/components/InlinePushPanel'
 import { TerminalTab } from '@/components/TerminalTab'
 import { AgentsTab } from '@/components/AgentsTab'
 import { ProjectRunsTab } from '@/components/ProjectRunsTab'
@@ -257,7 +255,6 @@ interface ProjectDetailPageProps {
   onPause: (taskId: string) => Promise<void>
   onResume: (taskId: string) => Promise<void>
   onRefresh: () => Promise<void>
-  onPush?: () => void
 }
 
 export function ProjectDetailPage({
@@ -267,7 +264,6 @@ export function ProjectDetailPage({
   onPause,
   onResume,
   onRefresh,
-  onPush,
 }: ProjectDetailPageProps) {
   const params = useParams<{ name: string; tab?: string; sessionId?: string }>()
   const name = params.name
@@ -283,7 +279,6 @@ export function ProjectDetailPage({
   const [fixingCi, setFixingCi] = useState(false)
   const [fixCiResult, setFixCiResult] = useState<string | null>(null)
   const [projectJobs, setProjectJobs] = useState<JobInfo[]>([])
-  const [showPushPanel, setShowPushPanel] = useState(false)
 
   // Custom actions
   const [customActions, setCustomActions] = useState<CustomAction[]>([])
@@ -305,9 +300,6 @@ export function ProjectDetailPage({
   const [actionsSaved, setActionsSaved] = useState(false)
   const [actionsLoaded, setActionsLoaded] = useState(false)
 
-  useEffect(() => {
-    if (activeTab !== 'terminal') setShowPushPanel(false)
-  }, [activeTab])
 
   useEffect(() => {
     if (!name) return
@@ -408,9 +400,6 @@ export function ProjectDetailPage({
     .sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))[0]
   const verdict = latestReview?.verdict
 
-  const commitJustFailed = !!config?.last_push_error && config.last_push_error.startsWith('Commit failed')
-  const pushBlockReason = computePushBlockReason(project.totalChanges, hasUnreviewed, verdict, commitJustFailed)
-
   // Get latest test result
   const latestTest = projectJobs
     .filter(j => j.kind === 'test' && j.status === 'done')
@@ -428,8 +417,11 @@ export function ProjectDetailPage({
     try {
       const result = await releaseProject(name)
       toast(`${result.step}: ${result.message}`, 'info')
-      if (result.job_id) {
-        router.push(`/project/${name}/terminal?job=${encodeURIComponent(result.job_id)}`)
+      // Prefer the unified release meta-terminal so the user sees
+      // test → review → commit → push in a single log.
+      const jobIdToOpen = result.release_job_id ?? result.job_id
+      if (jobIdToOpen) {
+        router.push(`/project/${name}/terminal?job=${encodeURIComponent(jobIdToOpen)}`)
       }
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to start release', 'error')
@@ -566,22 +558,6 @@ export function ProjectDetailPage({
               </button>
             )
           })()}
-          <button
-            className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={() => {
-              setShowPushPanel(p => {
-                const next = !p
-                // When opening the push flow, jump to Terminal so the inline
-                // panel renders beside the terminal context instead of on top.
-                if (next) setActiveTab('terminal')
-                return next
-              })
-            }}
-            disabled={!showPushPanel && pushBlockReason !== null}
-            title={!showPushPanel && pushBlockReason ? pushBlockReason : 'Push changes to git'}
-          >
-            {showPushPanel ? 'Cancel Push' : 'Push'}
-          </button>
           {customActions.map((action) => (
             <button
               key={action.name}
@@ -907,11 +883,26 @@ export function ProjectDetailPage({
             // Show strip only while the release pipeline is actively running,
             // or when a step just failed/needs attention (so the user can see
             // why). At rest, hide it — stale ✓s from a past release are noise.
+            const recentCutoff = Date.now() / 1000 - 60 * 60
+            const pipelineKinds = ['test', 'review', 'fix', 'push']
             const pipelineRunning = projectJobs.some(
-              j => ['test', 'review', 'fix', 'push'].includes(j.kind) && j.status === 'running'
+              j => pipelineKinds.includes(j.kind) && j.status === 'running'
             )
             const hasPushError = !!config?.last_push_error
-            if (!pipelineRunning && !hasPushError) return null
+            const recentFailedJob = projectJobs.some(
+              j => pipelineKinds.includes(j.kind)
+                && j.status === 'done'
+                && j.exit_code !== 0
+                && j.started_at >= recentCutoff
+            )
+            const recentReviewNotLgtm = projectJobs.some(
+              j => j.kind === 'review'
+                && j.status === 'done'
+                && j.started_at >= recentCutoff
+                && j.verdict
+                && j.verdict !== 'LGTM'
+            )
+            if (!pipelineRunning && !hasPushError && !recentFailedJob && !recentReviewNotLgtm) return null
 
             const hourAgo = Date.now() / 1000 - 60 * 60
             const latestOfKind = (kind: string) => projectJobs
@@ -960,14 +951,16 @@ export function ProjectDetailPage({
               reviewFixAction = openJob(reviewJob)
             }
             else if (reviewVerdict === 'LGTM') {
-              // If the most recent push attempt failed at the commit step (e.g.
-              // pre-commit hook rejected), the working-tree hash may shift from
-              // hook artifacts even though the code the reviewer read is
-              // unchanged. The LGTM is still valid — keep review ✓ and let the
-              // commit step carry the ✗.
+              // If a push is running or recently failed at commit, hook side
+              // effects (lint-staged stash/restore, .eslintcache, etc.) can
+              // briefly shift the working-tree hash even though the code the
+              // reviewer read hasn't changed. The LGTM is still valid — keep
+              // review ✓ and let the commit step carry any ✗.
               const commitHookJustFailed = !!config?.last_push_error
                 && config.last_push_error.startsWith('Commit failed')
-              if (hasUnreviewed && !commitHookJustFailed) {
+              const pushInFlight = pushJob?.status === 'running'
+              const keepReviewValid = commitHookJustFailed || pushInFlight
+              if (hasUnreviewed && !keepReviewValid) {
                 reviewState = 'pending'
                 reviewHint = 'last verdict was LGTM but files changed since — click to view last review'
                 reviewFixAction = openJob(reviewJob)
@@ -975,7 +968,9 @@ export function ProjectDetailPage({
                 reviewState = 'done'
                 reviewHint = commitHookJustFailed
                   ? 'LGTM — commit blocked by pre-commit hook; click to view review'
-                  : 'LGTM — click to view review log'
+                  : pushInFlight
+                    ? 'LGTM — commit & push in progress; click to view review'
+                    : 'LGTM — click to view review log'
                 reviewFixAction = openJob(reviewJob)
               }
             } else if (reviewVerdict === 'NEEDS ATTENTION') {
@@ -1083,20 +1078,6 @@ export function ProjectDetailPage({
               </div>
             )
           })()}
-          {showPushPanel && (
-            <div className="mb-3">
-              <InlinePushPanel
-                projectName={name}
-                onClose={() => setShowPushPanel(false)}
-                onSuccess={() => {
-                  setShowPushPanel(false)
-                  toast('Changes pushed successfully', 'success')
-                  if (onPush) onPush()
-                  onRefresh()
-                }}
-              />
-            </div>
-          )}
           <Suspense fallback={null}>
             <TerminalTab projectName={name} initialSessionId={params.sessionId} />
           </Suspense>

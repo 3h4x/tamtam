@@ -103,8 +103,11 @@ async function runPush(
   if (hasStaged) {
     log(`\n# generating commit message via Claude...\n`);
     const message = await generateCommitMessage(projPath, projectName);
-    log(`# commit message: ${message}\n\n$ git commit -m "${message}"\n`);
-    const commitR = await exec('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 });
+    // Use --no-verify to bypass pre-commit hooks. Quality gates live in
+    // pre-push hooks (or the AI review step upstream). Pre-commit hooks that
+    // modify files would abort the commit and leave us stuck.
+    log(`# commit message: ${message}\n\n$ git commit --no-verify -m "${message}"\n`);
+    const commitR = await exec('git', ['-C', projPath, 'commit', '--no-verify', '-m', message], { timeout: 30000 });
     if (commitR.stdout) log(commitR.stdout);
     if (commitR.stderr) log(commitR.stderr);
     if (commitR.exitCode !== 0 && !commitR.stdout.includes('nothing to commit')) {
@@ -120,25 +123,47 @@ async function runPush(
     }
   }
 
-  log(`\n$ git push\n`);
-  let pushR = await exec('git', ['-C', projPath, 'push'], { timeout: 30000 });
-  if (pushR.stdout) log(pushR.stdout);
-  if (pushR.stderr) log(pushR.stderr);
+  const tryPush = async (extraArgs: string[] = []): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
+    const args = ['-C', projPath, 'push', ...extraArgs];
+    log(`\n$ git push${extraArgs.length ? ' ' + extraArgs.join(' ') : ''}\n`);
+    const r = await exec('git', args, { timeout: 30000 });
+    if (r.stdout) log(r.stdout);
+    if (r.stderr) log(r.stderr);
+    return r;
+  };
+
+  let pushR = await tryPush();
+
+  // If no upstream branch is set, detect current branch and set it.
+  if (pushR.exitCode !== 0 && (pushR.stderr.includes('no upstream') || pushR.stderr.includes('set-upstream'))) {
+    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+    const branch = branchR.stdout.trim();
+    if (branch) pushR = await tryPush(['-u', 'origin', branch]);
+  }
+
+  // Pre-push hook may have left new uncommitted changes on disk.
+  // Stage and commit just those changes ("revisiting just new changes"), then retry once.
   if (pushR.exitCode !== 0) {
-    if (pushR.stderr.includes('no upstream') || pushR.stderr.includes('set-upstream')) {
-      const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
-      const branch = branchR.stdout.trim();
-      if (branch) {
-        log(`\n$ git push -u origin ${branch}\n`);
-        pushR = await exec('git', ['-C', projPath, 'push', '-u', 'origin', branch], { timeout: 30000 });
-        if (pushR.stdout) log(pushR.stdout);
-        if (pushR.stderr) log(pushR.stderr);
+    const hookChangesR = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
+    const hookHasChanges = !!hookChangesR.stdout.trim();
+    if (hookHasChanges) {
+      log(`\n# pre-push hook left new changes — committing delta\n`);
+      await exec('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
+      const fixMsg = await generateCommitMessage(projPath, projectName);
+      log(`# fix commit message: ${fixMsg}\n\n$ git commit --no-verify -m "${fixMsg}"\n`);
+      const fixCommitR = await exec('git', ['-C', projPath, 'commit', '--no-verify', '-m', fixMsg], { timeout: 30000 });
+      if (fixCommitR.stdout) log(fixCommitR.stdout);
+      if (fixCommitR.stderr) log(fixCommitR.stderr);
+      if (fixCommitR.exitCode === 0 || fixCommitR.stdout.includes('nothing to commit')) {
+        log(`\n# retrying push after hook fix commit\n`);
+        pushR = await tryPush();
       }
     }
-    if (pushR.exitCode !== 0) {
-      const detail = (pushR.stderr.trim() || pushR.stdout.trim() || `git push exited ${pushR.exitCode}`).slice(0, 2000);
-      return { ok: false, status: 502, detail: `Push failed: ${detail}` };
-    }
+  }
+
+  if (pushR.exitCode !== 0) {
+    const detail = (pushR.stderr.trim() || pushR.stdout.trim() || `git push exited ${pushR.exitCode}`).slice(0, 2000);
+    return { ok: false, status: 502, detail: `Push failed: ${detail}` };
   }
 
   const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });

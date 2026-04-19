@@ -115,6 +115,9 @@ try {
   sqlite.exec('ALTER TABLE projects ADD COLUMN auto_push_enabled INTEGER DEFAULT 0');
 } catch {}
 try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN parent_job_id TEXT');
+} catch {}
+try {
   sqlite.exec('ALTER TABLE projects ADD COLUMN last_push_error TEXT');
 } catch {}
 try {
