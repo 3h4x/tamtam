@@ -32,7 +32,8 @@ function createTestDb() {
       cache_create_tokens INTEGER,
       session_id TEXT,
       user_prompt TEXT,
-      context_meta TEXT
+      context_meta TEXT,
+      parent_job_id TEXT
     );
   `);
 
@@ -518,6 +519,198 @@ describe('job-storage', () => {
 
       expect(getVerdict(job)).toBeNull();
     });
+
+    it('does not classify prose containing "not LGTM" as LGTM', () => {
+      const logFile = join(tempDir, 'not-lgtm.log');
+      writeFileSync(logFile, 'This is not LGTM because there are issues.\nSee above.\n');
+
+      const job: JobData = {
+        id: 'test-12',
+        project: 'proj',
+        kind: 'review',
+        prompt: null,
+        pid: 123,
+        logPath: logFile,
+        startedAt: Date.now() / 1000,
+        finishedAt: Date.now() / 1000,
+        exitCode: 0,
+        seen: false,
+        durationMs: null,
+        inputTokens: null,
+        outputTokens: null,
+        cacheReadTokens: null,
+        cacheCreateTokens: null,
+        sessionId: null,
+      };
+
+      expect(getVerdict(job)).toBeNull();
+    });
+
+    it('accepts a token when it stands alone on the final line', () => {
+      const logFile = join(tempDir, 'final-line.log');
+      writeFileSync(logFile, 'Review follows...\nIssues: none.\n\nLGTM\n');
+
+      const job: JobData = {
+        id: 'test-13',
+        project: 'proj',
+        kind: 'review',
+        prompt: null,
+        pid: 123,
+        logPath: logFile,
+        startedAt: Date.now() / 1000,
+        finishedAt: Date.now() / 1000,
+        exitCode: 0,
+        seen: false,
+        durationMs: null,
+        inputTokens: null,
+        outputTokens: null,
+        cacheReadTokens: null,
+        cacheCreateTokens: null,
+        sessionId: null,
+      };
+
+      expect(getVerdict(job)).toBe('LGTM');
+    });
+
+    // Real-world verdict formats Claude emits — each regression here came
+    // from a concrete release where we silently fell back to "unknown".
+    function reviewJob(id: string, logContent: string, tempDir: string): JobData {
+      const logFile = join(tempDir, `${id}.log`);
+      writeFileSync(logFile, logContent);
+      return {
+        id, project: 'proj', kind: 'review', prompt: null, pid: 123,
+        logPath: logFile,
+        startedAt: Date.now() / 1000, finishedAt: Date.now() / 1000,
+        exitCode: 0, seen: false, durationMs: null,
+        inputTokens: null, outputTokens: null, cacheReadTokens: null,
+        cacheCreateTokens: null, sessionId: null,
+      };
+    }
+
+    it('matches "LGTM — one-line rationale" (em-dash) as LGTM', () => {
+      const job = reviewJob('verdict-emdash', [
+        'Review complete.',
+        'All tests pass, no obvious issues.',
+        'LGTM — adds configurable engine tuning knobs (seed count, similar toggle), wires them through ConfigPanel with a UI refactor, and backs it with solid test coverage.',
+      ].join('\n'), tempDir);
+      expect(getVerdict(job)).toBe('LGTM');
+    });
+
+    it('matches "LGTM - one-line rationale" (ASCII hyphen) as LGTM', () => {
+      const job = reviewJob('verdict-hyphen', 'LGTM - clean change, covered by tests.', tempDir);
+      expect(getVerdict(job)).toBe('LGTM');
+    });
+
+    it('matches "LGTM – one-line rationale" (en-dash) as LGTM', () => {
+      const job = reviewJob('verdict-endash', 'LGTM – no concerns.', tempDir);
+      expect(getVerdict(job)).toBe('LGTM');
+    });
+
+    it('matches "LGTM: rationale" (colon) as LGTM', () => {
+      const job = reviewJob('verdict-colon', 'LGTM: tests cover the new branches.', tempDir);
+      expect(getVerdict(job)).toBe('LGTM');
+    });
+
+    it('matches "**LGTM** — rationale" (bold markdown) as LGTM', () => {
+      const job = reviewJob('verdict-bold', '**LGTM** — refactor is clean.', tempDir);
+      expect(getVerdict(job)).toBe('LGTM');
+    });
+
+    it('matches "NEEDS ATTENTION — rationale" as NEEDS ATTENTION', () => {
+      const job = reviewJob('verdict-na', 'NEEDS ATTENTION — missing error handling in push.ts.', tempDir);
+      expect(getVerdict(job)).toBe('NEEDS ATTENTION');
+    });
+
+    it('matches "DO NOT SHIP — reason" as DO NOT SHIP', () => {
+      const job = reviewJob('verdict-dns', 'DO NOT SHIP — regressions in test suite.', tempDir);
+      expect(getVerdict(job)).toBe('DO NOT SHIP');
+    });
+
+    it('rejects the prompt enumeration line "LGTM / NEEDS ATTENTION / DO NOT SHIP"', () => {
+      const job = reviewJob('verdict-enum', 'Pick one: LGTM / NEEDS ATTENTION / DO NOT SHIP', tempDir);
+      expect(getVerdict(job)).toBeNull();
+    });
+
+    it('returns the last verdict when multiple appear (final decision wins)', () => {
+      const job = reviewJob('verdict-last', [
+        'Initially thought NEEDS ATTENTION but reconsidered.',
+        '',
+        'LGTM — issue is cosmetic.',
+      ].join('\n'), tempDir);
+      expect(getVerdict(job)).toBe('LGTM');
+    });
+
+    it('picks verdict from any of the last few non-empty lines (tolerates trailing metadata)', () => {
+      const job = reviewJob('verdict-near-end', [
+        'LGTM — looks great.',
+        '',
+        '(review duration: 1m 12s)',
+      ].join('\n'), tempDir);
+      expect(getVerdict(job)).toBe('LGTM');
+    });
+
+    it('does not match verdict when review job has not finished', () => {
+      const job = reviewJob('verdict-running', 'LGTM — done.', tempDir);
+      job.finishedAt = null; // still running
+      expect(getVerdict(job)).toBeNull();
+    });
+
+    it('does not match verdict for non-review job kinds', () => {
+      const job = reviewJob('verdict-wrong-kind', 'LGTM — done.', tempDir);
+      job.kind = 'test';
+      expect(getVerdict(job)).toBeNull();
+    });
+
+    // Regressions from real production review outputs. Each case is a log
+    // shape that previously slipped through with `null` (→ UI shows unknown
+    // ✗ even though Claude clearly signaled LGTM).
+    it('detects LGTM when followed by a long rationale across multiple lines', () => {
+      const job = reviewJob('verdict-long-rationale', [
+        '## Summary',
+        '',
+        'All tests pass, the refactor is straightforward and well-covered.',
+        '',
+        'LGTM — adds configurable engine tuning knobs, wires them through ConfigPanel with a UI refactor, and backs it with solid test coverage. One non-blocking note: the actor engine threshold loosened previously required count>=3 && count>=2 && more actor groups at default settings — looks intentional given the new tunable.',
+      ].join('\n'), tempDir);
+      expect(getVerdict(job)).toBe('LGTM');
+    });
+
+    it('returns null when the review body has no verdict at all (report-only)', () => {
+      // This mirrors the real case where Claude summarized its fix actions
+      // but never emitted LGTM/NEEDS ATTENTION/DO NOT SHIP. We want null
+      // (→ UI surfaces "unknown") rather than a false positive.
+      const job = reviewJob('verdict-report-only', [
+        '## Summary',
+        '',
+        'Root cause: Release meta-jobs were created with process.pid. When the server restarts, probeJobStatus detected the old PID dead and marked the job with exit_code=-1 — causing the red X in Last Run.',
+        '',
+        'Three fixes made:',
+        '',
+        '1. lib/job-storage.ts — probeJobStatus: Release jobs now check pid === process.pid.',
+        '2. lib/job-storage.ts — runCompletionHooks: A successful push now always finalizes the active release meta-job.',
+        '3. components/ProjectDetailPage.tsx: Changed lastFailed check from exit_code > 0 to exit_code !== 0.',
+        '',
+        'Both new tests pass. Let me mark the last task done.',
+      ].join('\n'), tempDir);
+      expect(getVerdict(job)).toBeNull();
+    });
+
+    it('does not match "LGTM!" variants embedded in prose without a separator', () => {
+      // "...the refactor LGTM overall" — no line-start token, no separator;
+      // must NOT be treated as a verdict or we get false positives from
+      // reviewers who use the term descriptively.
+      const job = reviewJob('verdict-inline', 'Honestly the refactor LGTM overall, but we should split it.', tempDir);
+      expect(getVerdict(job)).toBeNull();
+    });
+
+    it('prefers "Verdict: X" header over a later unrelated token mention', () => {
+      const job = reviewJob('verdict-header-wins', [
+        'Verdict: LGTM',
+        '',
+        'Some extra notes: we should consider whether DO NOT SHIP rules apply to docs-only changes.',
+      ].join('\n'), tempDir);
+      expect(getVerdict(job)).toBe('LGTM');
+    });
   });
 
   describe('jobToDict', () => {
@@ -853,5 +1046,609 @@ describe('probeJobStatus with pm2', () => {
     const status = await probeJobStatusFn(job);
     // Either running (if signal succeeds by chance) or done (pid dead) — both valid
     expect(['running', 'done']).toContain(status);
+  });
+
+  it('overrides exit code to 0 when log has a clean result and pm2 reports non-zero', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: -1 });
+
+    const logFile = join(tmpdir(), `tamtam-exitcode-override-${Date.now()}.log`);
+    const resultLine = '{"type":"result","subtype":"success","is_error":false,"duration_ms":500,"total_cost_usd":0,"session_id":"s1","result":"ok"}';
+    writeFileSync(logFile, resultLine + '\n');
+
+    const job: JobData = {
+      id: 'job-override',
+      project: 'proj',
+      kind: 'run',
+      prompt: null,
+      pid: 9999,
+      logPath: logFile,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    try {
+      // logHasClaudeResult fires first: log has "type":"result" → markDone(0)
+      const status = await probeJobStatusFn(job);
+      expect(status).toBe('done');
+      expect(job.exitCode).toBe(0);
+    } finally {
+      try { rmSync(logFile); } catch {}
+    }
+  });
+
+  it('does NOT override exit code for test kind even with a result in the log', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: -1 });
+
+    const logFile = join(tmpdir(), `tamtam-test-kind-${Date.now()}.log`);
+    const resultLine = '{"type":"result","subtype":"success","is_error":false,"duration_ms":200,"total_cost_usd":0,"session_id":"s3","result":"ok"}';
+    writeFileSync(logFile, resultLine + '\n');
+
+    const job: JobData = {
+      id: 'job-test-kind',
+      project: 'proj',
+      kind: 'test',
+      prompt: null,
+      pid: 9999,
+      logPath: logFile,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    try {
+      // logHasClaudeResult check is only for run/review → skipped for test kind
+      const status = await probeJobStatusFn(job);
+      // pm2 reports done with exitCode=-1, no override for test kind
+      expect(status).toBe('done');
+      expect(job.exitCode).toBe(-1);
+    } finally {
+      try { rmSync(logFile); } catch {}
+    }
+  });
+});
+
+describe('probeJobStatus – test/action kind liveness via process.kill', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let probeJobStatusFn: typeof import('@/lib/job-storage').probeJobStatus;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/pm2-jobs', () => ({ getJobStatus: vi.fn(), deleteJob: vi.fn() }));
+    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
+
+    const mod = await import('@/lib/job-storage');
+    probeJobStatusFn = mod.probeJobStatus;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('test kind with live pid returns running (does not hit pm2)', async () => {
+    const livePid = process.pid;
+    const job: JobData = {
+      id: 'job-test-live',
+      project: 'proj',
+      kind: 'test',
+      prompt: null,
+      pid: livePid,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('running');
+  });
+
+  it('action kind with live pid returns running', async () => {
+    const job: JobData = {
+      id: 'job-action-live',
+      project: 'proj',
+      kind: 'action',
+      prompt: null,
+      pid: process.pid,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('running');
+  });
+
+  it('test kind with dead pid returns done', async () => {
+    const job: JobData = {
+      id: 'job-test-dead',
+      project: 'proj',
+      kind: 'test',
+      prompt: null,
+      pid: 2147483647,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(['running', 'done']).toContain(status);
+  });
+});
+
+describe('runCompletionHooks – fix→review auto-trigger', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let startProjectReviewMock: ReturnType<typeof vi.fn>;
+  let getJobStatusMock: ReturnType<typeof vi.fn>;
+  let probeJobStatusFn: typeof import('@/lib/job-storage').probeJobStatus;
+
+  function makeFixJob(overrides: Partial<JobData> = {}): JobData {
+    return {
+      id: 'fix-job-1',
+      project: 'my-proj',
+      kind: 'fix',
+      prompt: null,
+      pid: 12345,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-auto', pid: 999, logPath: '/tmp/rev.log' });
+    getJobStatusMock = vi.fn();
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/pm2-jobs', () => ({
+      getJobStatus: getJobStatusMock,
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/start-review', () => ({
+      startProjectReview: startProjectReviewMock,
+    }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({
+        testCommand: null,
+        testCronEnabled: false,
+        testCronSchedule: null,
+        autoPushEnabled: true,
+      }),
+    }));
+
+    const mod = await import('@/lib/job-storage');
+    probeJobStatusFn = mod.probeJobStatus;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('calls startProjectReview after a fix job finishes with exitCode 0', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
+    const job = makeFixJob();
+
+    await probeJobStatusFn(job);
+
+    expect(job.exitCode).toBe(0);
+    expect(startProjectReviewMock).toHaveBeenCalledWith('my-proj');
+  });
+
+  it('does not call startProjectReview when fix job exits non-zero', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 1 });
+    const job = makeFixJob();
+
+    await probeJobStatusFn(job);
+
+    expect(job.exitCode).toBe(1);
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+  });
+
+  it('does not call startProjectReview for a review job (only fix triggers it)', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
+    const job = makeFixJob({ id: 'review-job-x', kind: 'review' });
+
+    await probeJobStatusFn(job);
+
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+  });
+
+  it('does not call startProjectReview for a run job', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
+    const job = makeFixJob({ id: 'run-job-x', kind: 'run' });
+
+    await probeJobStatusFn(job);
+
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+  });
+
+  it('continues gracefully when startProjectReview throws', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
+    startProjectReviewMock.mockRejectedValue(new Error('review service down'));
+    const job = makeFixJob();
+
+    // should not throw even when startProjectReview fails
+    await expect(probeJobStatusFn(job)).resolves.toBe('done');
+  });
+});
+
+describe('runCompletionHooks – auto-push pipeline', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let startProjectTestMock: ReturnType<typeof vi.fn>;
+  let startProjectPushMock: ReturnType<typeof vi.fn>;
+  let startProjectReviewMock: ReturnType<typeof vi.fn>;
+  let startFixFromJobMock: ReturnType<typeof vi.fn>;
+  let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
+  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+  let tempDir: string;
+
+  function makeJob(kind: string, logPath: string | null, overrides: Partial<JobData> = {}): JobData {
+    return {
+      id: `${kind}-job`,
+      project: 'my-proj',
+      kind,
+      prompt: null,
+      pid: 12345,
+      logPath,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-autopush-test-'));
+
+    startProjectTestMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'test-auto', pid: 999, logPath: '/tmp/t.log', testCmd: 'pnpm test' });
+    startProjectPushMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abcd123', message: 'pushed' });
+    getProjectTestConfigMock = vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoPushEnabled: true });
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/pm2-jobs', () => ({
+      getJobStatus: vi.fn(),
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+    }));
+    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-auto', pid: 1, logPath: '' });
+    startFixFromJobMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-auto', pid: 2 });
+    vi.doMock('@/lib/start-review', () => ({
+      startProjectReview: startProjectReviewMock,
+    }));
+    vi.doMock('@/lib/start-test', () => ({
+      startProjectTest: startProjectTestMock,
+    }));
+    vi.doMock('@/lib/start-push', () => ({
+      startProjectPush: startProjectPushMock,
+    }));
+    vi.doMock('@/lib/start-fix', () => ({
+      startFixFromJob: startFixFromJobMock,
+    }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getProjectTestConfig: getProjectTestConfigMock,
+    }));
+
+    const mod = await import('@/lib/job-storage');
+    markDoneFn = mod.markDone;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('finalizes active release job with exit 0 when push succeeds', async () => {
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.jobs).values({
+      id: 'release-job-push', project: 'my-proj', kind: 'release',
+      prompt: null, pid: 1, logPath: null,
+      startedAt: now - 10, finishedAt: null, exitCode: null,
+      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+    } as any).run();
+
+    const job = makeJob('push', null);
+    await markDoneFn(job, 0);
+
+    const releaseRow = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-job-push');
+    expect(releaseRow?.finishedAt).not.toBeNull();
+    expect(releaseRow?.exitCode).toBe(0);
+  });
+
+  it('finalizes active release job with exit 1 when push fails', async () => {
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.jobs).values({
+      id: 'release-job-push-fail', project: 'my-proj', kind: 'release',
+      prompt: null, pid: 1, logPath: null,
+      startedAt: now - 10, finishedAt: null, exitCode: null,
+      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+    } as any).run();
+
+    const job = makeJob('push', null);
+    await markDoneFn(job, 1);
+
+    const releaseRow = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-job-push-fail');
+    expect(releaseRow?.finishedAt).not.toBeNull();
+    expect(releaseRow?.exitCode).toBe(1);
+  });
+
+  it('does not finalize a release job that is already done (idempotent)', async () => {
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.jobs).values({
+      id: 'release-job-already-done', project: 'my-proj', kind: 'release',
+      prompt: null, pid: 1, logPath: null,
+      startedAt: now - 20, finishedAt: now - 5, exitCode: 0,
+      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+    } as any).run();
+
+    const job = makeJob('push', null);
+    await markDoneFn(job, 0);
+
+    // Already-done release job should not be re-finalized (finishedAt stays the same)
+    const releaseRow = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-job-already-done');
+    expect(releaseRow?.exitCode).toBe(0);
+  });
+
+  it('pushes when review finishes with LGTM and auto-push is enabled', async () => {
+    const logFile = join(tempDir, 'lgtm.log');
+    writeFileSync(logFile, 'Verdict: LGTM\n');
+    const job = makeJob('review', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj');
+    expect(startFixFromJobMock).not.toHaveBeenCalled();
+  });
+
+  it('starts a fix when review verdict is NEEDS ATTENTION and auto-push is enabled', async () => {
+    const logFile = join(tempDir, 'needs.log');
+    writeFileSync(logFile, 'Verdict: NEEDS ATTENTION\n');
+    const job = makeJob('review', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(startFixFromJobMock).toHaveBeenCalledWith(job.id);
+    expect(startProjectPushMock).not.toHaveBeenCalled();
+  });
+
+  it('starts a fix when review verdict is DO NOT SHIP', async () => {
+    const logFile = join(tempDir, 'dns.log');
+    writeFileSync(logFile, 'Verdict: DO NOT SHIP\n');
+    const job = makeJob('review', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(startFixFromJobMock).toHaveBeenCalledWith(job.id);
+  });
+
+  it('does not chain anything when auto-push is disabled', async () => {
+    getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoPushEnabled: false });
+    const logFile = join(tempDir, 'lgtm-off.log');
+    writeFileSync(logFile, 'Verdict: LGTM\n');
+    const job = makeJob('review', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectPushMock).not.toHaveBeenCalled();
+    expect(startFixFromJobMock).not.toHaveBeenCalled();
+  });
+
+  it('starts a review when tests pass and auto-push is enabled', async () => {
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectReviewMock).toHaveBeenCalledWith('my-proj');
+    expect(startProjectPushMock).not.toHaveBeenCalled();
+  });
+
+  it('does not chain when test fails', async () => {
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 1);
+
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+    expect(startProjectPushMock).not.toHaveBeenCalled();
+  });
+
+  it('does not start review when test passes but auto-push is disabled', async () => {
+    getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoPushEnabled: false });
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+  });
+
+  it('continues gracefully when startProjectPush throws', async () => {
+    startProjectPushMock.mockRejectedValue(new Error('git remote down'));
+    const logFile = join(tempDir, 'lgtm-throw.log');
+    writeFileSync(logFile, 'Verdict: LGTM\n');
+    const job = makeJob('review', logFile);
+
+    await expect(markDoneFn(job, 0)).resolves.toBeUndefined();
+  });
+
+  it('continues gracefully when startProjectReview throws', async () => {
+    startProjectReviewMock.mockRejectedValue(new Error('spawn failure'));
+    const job = makeJob('test', null);
+
+    await expect(markDoneFn(job, 0)).resolves.toBeUndefined();
+  });
+
+  it('stops chaining fixes once MAX_FIX_ITERATIONS recent fix jobs exist', async () => {
+    // Insert 3 recent fix jobs so recentFixCount hits the cap.
+    const now = Date.now() / 1000;
+    for (let i = 0; i < 3; i++) {
+      testDb.db
+        .insert(schema.jobs)
+        .values({
+          id: `prior-fix-${i}`,
+          project: 'my-proj',
+          kind: 'fix',
+          prompt: null,
+          pid: 100 + i,
+          logPath: null,
+          startedAt: now - 60 * i,
+          finishedAt: now - 60 * i + 5,
+          exitCode: 0,
+          seen: 1,
+          durationMs: null,
+          inputTokens: null,
+          outputTokens: null,
+          cacheReadTokens: null,
+          cacheCreateTokens: null,
+          sessionId: null,
+        } as any)
+        .run();
+    }
+
+    const logFile = join(tempDir, 'needs-cap.log');
+    writeFileSync(logFile, 'Verdict: NEEDS ATTENTION\n');
+    const job = makeJob('review', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(startFixFromJobMock).not.toHaveBeenCalled();
+  });
+
+  it('does not auto-chain fix→review when auto-push is disabled', async () => {
+    getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoPushEnabled: false });
+    const job = makeJob('fix', null);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+  });
+
+  describe('fix-ci auto-retry on fast crash', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('retries fix-ci when it crashes within the fast-crash window', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const now = Date.now() / 1000;
+      // Simulate a crashed-fast fix-ci: exit != 0, duration ~1s.
+      const job = makeJob('fix-ci', null);
+      job.startedAt = now - 1;
+
+      await markDoneFn(job, -1);
+      // Drain scheduled retry.
+      await vi.runAllTimersAsync();
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toMatch(/\/api\/projects\/by-project\/my-proj\/fix-ci$/);
+      expect(init.method).toBe('POST');
+      vi.unstubAllGlobals();
+    });
+
+    it('does not retry when fix-ci ran longer than the fast-crash threshold', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const now = Date.now() / 1000;
+      const job = makeJob('fix-ci', null);
+      job.startedAt = now - 30; // 30s of runtime — real failure, not boot crash
+
+      await markDoneFn(job, 1);
+      await vi.runAllTimersAsync();
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+
+    it('does not retry when the max retry count has been exceeded', async () => {
+      // Insert 3 prior fix-ci jobs so the count gate trips.
+      const now = Date.now() / 1000;
+      for (let i = 0; i < 3; i++) {
+        testDb.db.insert(schema.jobs).values({
+          id: `prior-fixci-${i}`, project: 'my-proj', kind: 'fix-ci',
+          prompt: null, pid: 200 + i, logPath: null,
+          startedAt: now - i, finishedAt: now - i + 1, exitCode: -1,
+          seen: 1, durationMs: null, inputTokens: null, outputTokens: null,
+          cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+        } as any).run();
+      }
+
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const job = makeJob('fix-ci', null);
+      job.startedAt = now - 1;
+      await markDoneFn(job, -1);
+      await vi.runAllTimersAsync();
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+
+    it('does not retry a successful fix-ci (exit 0)', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const job = makeJob('fix-ci', null);
+      job.startedAt = Date.now() / 1000 - 1;
+      await markDoneFn(job, 0);
+      await vi.runAllTimersAsync();
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
   });
 });

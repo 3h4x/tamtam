@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { fireTimesStr } from '@/lib/fire-times';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { fireTimesStr, stableHash, nextFireDisplay } from '@/lib/fire-times';
 
 describe('fireTimesStr', () => {
   describe('cycleHours <= 1 (hourly)', () => {
@@ -66,5 +66,124 @@ describe('fireTimesStr', () => {
       // Hours: 0, 6, 12, 18 → "0:00, 6:00, 12:00, 18:00" = 24 chars > 18
       expect(result).toBe('every 6h +0h :00');
     });
+  });
+});
+
+describe('stableHash', () => {
+  it('returns a number within [0, mod)', () => {
+    expect(stableHash('agent-x', 60)).toBeGreaterThanOrEqual(0);
+    expect(stableHash('agent-x', 60)).toBeLessThan(60);
+  });
+
+  it('is deterministic for the same input', () => {
+    expect(stableHash('agent-det', 24)).toBe(stableHash('agent-det', 24));
+  });
+
+  it('produces different values for different inputs', () => {
+    expect(stableHash('alpha', 100)).not.toBe(stableHash('beta', 100));
+  });
+
+  it('returns 0 for empty string (empty loop, h stays 0)', () => {
+    expect(stableHash('', 10)).toBe(0);
+    expect(stableHash('', 1)).toBe(0);
+  });
+
+  it('result is always < mod regardless of large mod', () => {
+    const result = stableHash('some-agent-id', 3600);
+    expect(result).toBeGreaterThanOrEqual(0);
+    expect(result).toBeLessThan(3600);
+  });
+
+  it('known hash: stableHash("x:h", 2) = 0', () => {
+    // 'x'=120 → h=120; ':'=58 → h=3778; 'h'=104 → h=117222; 117222%2=0
+    expect(stableHash('x:h', 2)).toBe(0);
+  });
+
+  it('known hash: stableHash("x:min", 60) = 52', () => {
+    // Computed: h after 'x:min' = 112658512; 112658512%60 = 52
+    expect(stableHash('x:min', 60)).toBe(52);
+  });
+});
+
+describe('nextFireDisplay', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('returns empty string for sub-hour schedule', () => {
+    vi.setSystemTime(new Date(2026, 0, 15, 10, 0, 0));
+    expect(nextFireDisplay('30m', 'agent-x')).toBe('');
+    expect(nextFireDisplay('15m', 'agent-x')).toBe('');
+    expect(nextFireDisplay('45m', 'agent-x')).toBe('');
+  });
+
+  it('returns empty string for empty schedule', () => {
+    vi.setSystemTime(new Date(2026, 0, 15, 10, 0, 0));
+    expect(nextFireDisplay('', 'agent-x')).toBe('');
+  });
+
+  it('is deterministic for the same agentId and schedule', () => {
+    vi.setSystemTime(new Date(2026, 0, 15, 10, 0, 0));
+    expect(nextFireDisplay('4h', 'agent-same')).toBe(nextFireDisplay('4h', 'agent-same'));
+  });
+
+  it('produces a "next in ..." string for hour-based schedule', () => {
+    vi.setSystemTime(new Date(2026, 0, 15, 10, 0, 0));
+    const result = nextFireDisplay('2h', 'agent-x');
+    expect(result).toMatch(/^next in (\d+m|\d+h \d+m)$/);
+  });
+
+  it('treats "120m" as 2h schedule and returns a fire time string', () => {
+    vi.setSystemTime(new Date(2026, 0, 15, 10, 0, 0));
+    const from2h = nextFireDisplay('2h', 'agent-x');
+    const from120m = nextFireDisplay('120m', 'agent-x');
+    // Both use periodHours=2 and the same agentId so they resolve identically
+    expect(from120m).toBe(from2h);
+  });
+
+  it('returns empty string for "59m" (periodHours stays 0)', () => {
+    vi.setSystemTime(new Date(2026, 0, 15, 10, 0, 0));
+    expect(nextFireDisplay('59m', 'agent-x')).toBe('');
+  });
+
+  it('uses known hash for agentId "x", "2h": fires at 00:52, 02:52, ...', () => {
+    // stableHash('x:h', 2)=0, stableHash('x:min', 60)=52 → fires at 00:52, 02:52 ...
+    // Set now to 00:00:00 — next fire is 00:52 → "next in 52m"
+    vi.setSystemTime(new Date(2026, 0, 15, 0, 0, 0));
+    expect(nextFireDisplay('2h', 'x')).toBe('next in 52m');
+  });
+
+  it('skips past candidates and finds next one later in the day', () => {
+    // For agentId 'x', '2h': fires at 00:52, 02:52 ...
+    // Set now to 01:00 — 00:52 already past, next is 02:52 → diffMin = 112 → "next in 1h 52m"
+    vi.setSystemTime(new Date(2026, 0, 15, 1, 0, 0));
+    expect(nextFireDisplay('2h', 'x')).toBe('next in 1h 52m');
+  });
+
+  it('falls back to tomorrow when all today slots are past', () => {
+    // For agentId 'x', '2h': last slot is 22:52. Set now to 23:00.
+    // All today's slots (00:52 ... 22:52) are in the past.
+    // Tomorrow: startHour=0, minOff=52 → 2026-01-16 00:52
+    // diffMin from 23:00 = 60+52 = 112 → "next in 1h 52m"
+    vi.setSystemTime(new Date(2026, 0, 15, 23, 0, 0));
+    expect(nextFireDisplay('2h', 'x')).toBe('next in 1h 52m');
+  });
+
+  it('returns "next in Xm" when less than 60 min away', () => {
+    // For agentId 'x', '2h': fires at 00:52. Set now to 00:20 → 32 min away
+    vi.setSystemTime(new Date(2026, 0, 15, 0, 20, 0));
+    expect(nextFireDisplay('2h', 'x')).toBe('next in 32m');
+  });
+
+  it('different agentIds produce valid output strings', () => {
+    vi.setSystemTime(new Date(2026, 0, 15, 10, 0, 0));
+    const a = nextFireDisplay('4h', 'agent-alpha');
+    const b = nextFireDisplay('4h', 'agent-beta-different');
+    expect(a).toMatch(/^next in /);
+    expect(b).toMatch(/^next in /);
   });
 });

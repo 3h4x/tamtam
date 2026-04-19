@@ -4,11 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "predev": "pm2 delete tamtam 2>/dev/null; lsof -ti:1337 | xargs kill -9 2>/dev/null; true",
     "dev": "pm2 start 'next dev --port 1337' --name tamtam --cwd . && pm2 logs tamtam",
     "stop": "pm2 stop tamtam",
     "restart": "pm2 restart tamtam",
     "logs": "pm2 logs tamtam",
-    "build": "next build",
+    "build": "NODE_ENV=production next build",
     "start": "pm2 start 'next start --port 1337' --name tamtam --cwd .",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
@@ -29,7 +30,8 @@
     "drizzle-orm": "^0.45.2",
     "next": "^16.2.4",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",

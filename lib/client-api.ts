@@ -96,6 +96,17 @@ export async function reviewProject(projectName: string): Promise<{ status: stri
   return response.json()
 }
 
+export async function releaseProject(projectName: string): Promise<{ status: string; step: 'test' | 'review' | 'push'; job_id?: string; release_job_id?: string; message: string }> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/release`, {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || `Failed to start release: ${response.statusText}`)
+  }
+  return response.json()
+}
+
 export async function testProject(projectName: string): Promise<{ status: string; job_id: string; pid: number; log_path: string }> {
   const response = await fetch(`${API_BASE}/by-project/${projectName}/test`, {
     method: 'POST',
@@ -103,6 +114,95 @@ export async function testProject(projectName: string): Promise<{ status: string
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
     throw new Error(data.detail || `Failed to start tests: ${response.statusText}`)
+  }
+  return response.json()
+}
+
+export interface GhLabel {
+  name: string
+  color: string
+}
+
+export interface GhAuthor {
+  login: string
+}
+
+export interface GhPullRequest {
+  number: number
+  title: string
+  state: string
+  author: GhAuthor
+  url: string
+  createdAt: string
+  updatedAt: string
+  headRefName: string
+  baseRefName: string
+  isDraft: boolean
+  reviewDecision: string | null
+  labels: GhLabel[]
+  body: string
+}
+
+export interface GhIssue {
+  number: number
+  title: string
+  state: string
+  author: GhAuthor
+  url: string
+  createdAt: string
+  updatedAt: string
+  assignees: GhAuthor[]
+  labels: GhLabel[]
+  body: string
+}
+
+export interface IssuesResponse {
+  repo: string
+  prs: GhPullRequest[]
+  issues: GhIssue[]
+  error: string | null
+  cached: boolean
+  cachedAt: number | null
+}
+
+export async function fetchIssuesAndPRs(projectName: string, forceRefresh = false): Promise<IssuesResponse> {
+  const url = `${API_BASE}/by-project/${projectName}/issues${forceRefresh ? '?refresh=1' : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw new Error(`Failed to fetch issues: ${response.statusText}`)
+  }
+  return response.json()
+}
+
+export async function mergePR(
+  projectName: string,
+  prNumber: number,
+  mergeMethod: 'merge' | 'squash' | 'rebase' = 'merge'
+): Promise<{ status: string; pr: number; repo: string }> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/issues`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prNumber, mergeMethod, action: 'merge' }),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error((data as { detail?: string }).detail || `Merge failed: ${response.statusText}`)
+  }
+  return response.json()
+}
+
+export async function approvePR(
+  projectName: string,
+  prNumber: number
+): Promise<{ status: string; pr: number; repo: string }> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/issues`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prNumber, action: 'approve' }),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error((data as { detail?: string }).detail || `Approve failed: ${response.statusText}`)
   }
   return response.json()
 }
@@ -238,12 +338,92 @@ export async function executeSmartPush(projectName: string, message: string): Pr
   return response.json()
 }
 
+// Changes API
+export type ChangeStatus = 'M' | 'A' | 'D' | 'R' | 'C' | 'U' | 'T'
+
+export interface ChangeFile {
+  status: ChangeStatus
+  filename: string
+  additions: number
+  deletions: number
+  binary: boolean
+}
+
+export interface ChangesResponse {
+  files: ChangeFile[]
+  totalFiles: number
+  totalAdditions: number
+  totalDeletions: number
+  branch: string | null
+  behind: number
+  ahead: number
+}
+
+export async function fetchChanges(projectName: string): Promise<ChangesResponse> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/changes`)
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || `Failed to fetch changes: ${response.statusText}`)
+  }
+  return response.json()
+}
+
+export async function fetchBehind(projectName: string): Promise<{ behind: number; ahead: number }> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/behind`)
+  if (!response.ok) return { behind: 0, ahead: 0 }
+  return response.json()
+}
+
+export class PullDivergedError extends Error {
+  constructor() { super('diverged') }
+}
+
+export async function pullProject(
+  projectName: string,
+  strategy: 'ff-only' | 'merge' | 'rebase' = 'ff-only'
+): Promise<{ status: string; output: string }> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/changes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ strategy }),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    if (response.status === 409 && (data as { diverged?: boolean }).diverged) {
+      throw new PullDivergedError()
+    }
+    throw new Error((data as { detail?: string }).detail || `Pull failed: ${response.statusText}`)
+  }
+  return response.json()
+}
+
+export interface ChangeDiffResponse {
+  diff: string
+  untracked: boolean
+}
+
+export async function fetchChangeDiff(projectName: string, filename: string): Promise<ChangeDiffResponse> {
+  const response = await fetch(
+    `${API_BASE}/by-project/${projectName}/changes/diff?file=${encodeURIComponent(filename)}`
+  )
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || `Failed to fetch diff: ${response.statusText}`)
+  }
+  return response.json()
+}
+
 // Project Config API
 export interface ProjectConfig {
   project: string
   test_command: string
   detected_test_command: string
   effective_test_command: string
+  test_cron_enabled: boolean
+  test_cron_schedule: string
+  auto_push_enabled?: boolean
+  last_push_error?: string | null
+  last_push_at?: number | null
 }
 
 export async function fetchProjectConfig(projectName: string): Promise<ProjectConfig> {
@@ -256,7 +436,12 @@ export async function fetchProjectConfig(projectName: string): Promise<ProjectCo
 
 export async function updateProjectConfig(
   projectName: string,
-  config: { test_command?: string }
+  config: {
+    test_command?: string
+    test_cron_enabled?: boolean
+    test_cron_schedule?: string
+    auto_push_enabled?: boolean
+  }
 ): Promise<{ status: string }> {
   const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/config`, {
     method: 'PATCH',
@@ -293,6 +478,8 @@ export interface JobInfo {
   cache_read_tokens?: number | null
   cache_create_tokens?: number | null
   session_id?: string | null
+  user_prompt?: string | null
+  context_meta?: string | null
 }
 
 export async function fetchJobs(project?: string): Promise<{ jobs: JobInfo[] }> {
@@ -469,7 +656,7 @@ export async function fetchAgents(project?: string): Promise<{ agents: Agent[] }
   if (!response.ok) return { agents: [] }
   const data = await response.json()
   return {
-    agents: data.agents.map((a: any) => ({
+    agents: data.agents.map((a: Agent & { skillIds: string | string[] }) => ({
       ...a,
       skillIds: typeof a.skillIds === 'string' ? JSON.parse(a.skillIds) : a.skillIds,
     })),
@@ -517,5 +704,17 @@ export async function runAgent(agentId: string, prompt: string): Promise<{ statu
     const data = await response.json().catch(() => ({}))
     throw new Error(data.detail || 'Failed to run agent')
   }
+  return response.json()
+}
+
+export interface ProjectDoc {
+  name: string
+  path: string
+  content: string
+}
+
+export async function fetchProjectDocs(projectName: string): Promise<{ docs: ProjectDoc[] }> {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/docs`)
+  if (!response.ok) throw new Error('Failed to fetch docs')
   return response.json()
 }

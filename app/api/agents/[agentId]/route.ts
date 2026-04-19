@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { checkAuth } from '@/lib/auth';
 import { installAgentSchedule, uninstallAgentSchedule } from '@/lib/agent-scheduler';
+import { errMsg } from '@/lib/types';
 
 export async function GET(
   _request: NextRequest,
@@ -18,8 +18,6 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ agentId: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { agentId } = await params;
 
   const existing = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
@@ -46,8 +44,8 @@ export async function PATCH(
       } else {
         await uninstallAgentSchedule(agentId, agent.runner, agent.project, agent.name);
       }
-    } catch (e: any) {
-      console.error(`Failed to update schedule for agent ${agentId}:`, e.message);
+    } catch (e: unknown) {
+      console.error(`Failed to update schedule for agent ${agentId}:`, errMsg(e));
     }
   }
 
@@ -58,15 +56,13 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ agentId: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { agentId } = await params;
   // Uninstall schedule before deleting
   const agent = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
   try {
     await uninstallAgentSchedule(agentId, agent?.runner || 'pm2', agent?.project, agent?.name);
-  } catch (e: any) {
-    console.error(`Failed to uninstall schedule for agent ${agentId}:`, e.message);
+  } catch (e: unknown) {
+    console.error(`Failed to uninstall schedule for agent ${agentId}:`, errMsg(e));
   }
 
   db.delete(schema.agents).where(eq(schema.agents.id, agentId)).run();

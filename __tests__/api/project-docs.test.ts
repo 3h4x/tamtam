@@ -81,4 +81,31 @@ describe('GET /api/projects/by-project/{projectName}/docs', () => {
     expect(data.docs).toHaveLength(1);
     expect(data.docs[0].name).toBe('top.md');
   });
+
+  it('returns README first then docs/ files sorted alphabetically', async () => {
+    writeFileSync(join(tempDir, 'README.md'), '# Root README');
+    mkdirSync(join(tempDir, 'docs'));
+    writeFileSync(join(tempDir, 'docs', 'TERMINAL.md'), '# Terminal');
+    writeFileSync(join(tempDir, 'docs', 'AGENT.md'), '# Agent');
+    writeFileSync(join(tempDir, 'docs', 'SETUP.md'), '# Setup');
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/docs');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.docs).toHaveLength(4);
+    expect(data.docs[0].name).toBe('README.md');
+    expect(data.docs.slice(1).map((d: { name: string }) => d.name)).toEqual(['AGENT.md', 'SETUP.md', 'TERMINAL.md']);
+  });
+
+  it('returns README without docs dir', async () => {
+    writeFileSync(join(tempDir, 'README.md'), '# Just a readme');
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/docs');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.docs).toHaveLength(1);
+    expect(data.docs[0].name).toBe('README.md');
+    expect(data.docs[0].path).toBe('README.md');
+    expect(data.docs[0].content).toBe('# Just a readme');
+  });
 });

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { checkAuth } from '@/lib/auth';
 import { resolveProjectPath } from '@/lib/project-data';
 import { exec } from '@/lib/shell';
 
@@ -7,8 +6,6 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectName: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { projectName } = await params;
 
   const projPath = resolveProjectPath(projectName);

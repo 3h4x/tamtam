@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { checkAuth } from '@/lib/auth';
 import { resolveProjectPath } from '@/lib/project-data';
 import { exec } from '@/lib/shell';
 
@@ -7,8 +6,6 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ projectName: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { projectName } = await params;
 
   const projPath = resolveProjectPath(projectName);
@@ -37,7 +34,7 @@ export async function GET(
     }
   }
 
-  const files: any[] = [];
+  const files: { status: string; filename: string; stats: string }[] = [];
   if (nameStatus.stdout.trim()) {
     for (const line of nameStatus.stdout.trim().split('\n')) {
       if (!line.trim()) continue;

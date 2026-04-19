@@ -1,16 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, schema } from '@/lib/db';
-import { checkAuth } from '@/lib/auth';
-
 export async function GET() {
   const skills = db.select().from(schema.skills).all();
   return NextResponse.json({ skills });
 }
 
 export async function POST(request: NextRequest) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
-
   const body = await request.json();
   const { name, description, content } = body;
 

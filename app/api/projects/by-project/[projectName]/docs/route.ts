@@ -13,20 +13,32 @@ export async function GET(
     return NextResponse.json({ detail: 'project not found' }, { status: 404 });
   }
 
+  const docs: { name: string; path: string; content: string }[] = [];
+
+  // README at project root
+  for (const candidate of ['README.md', 'readme.md', 'Readme.md']) {
+    const p = join(projPath, candidate);
+    if (existsSync(p)) {
+      try {
+        docs.push({ name: 'README.md', path: candidate, content: readFileSync(p, 'utf-8') });
+      } catch {}
+      break;
+    }
+  }
+
+  // docs/ directory
   const docsDir = join(projPath, 'docs');
-  if (!existsSync(docsDir)) {
-    return NextResponse.json({ docs: [] });
+  if (existsSync(docsDir)) {
+    for (const entry of readdirSync(docsDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+      try {
+        const content = readFileSync(join(docsDir, entry.name), 'utf-8');
+        docs.push({ name: entry.name, path: `docs/${entry.name}`, content });
+      } catch {}
+    }
+    const rest = docs.splice(1).sort((a, b) => a.name.localeCompare(b.name));
+    docs.push(...rest);
   }
 
-  const docs: { name: string; content: string }[] = [];
-  for (const entry of readdirSync(docsDir, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-    try {
-      const content = readFileSync(join(docsDir, entry.name), 'utf-8');
-      docs.push({ name: entry.name, content });
-    } catch {}
-  }
-
-  docs.sort((a, b) => a.name.localeCompare(b.name));
   return NextResponse.json({ docs });
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/lib/db/schema';
@@ -23,7 +23,13 @@ function createTestDb() {
       enabled INTEGER DEFAULT 0,
       github TEXT,
       priority TEXT,
-      custom_actions TEXT
+      custom_actions TEXT,
+      test_command TEXT,
+      test_cron_enabled INTEGER DEFAULT 0,
+      test_cron_schedule TEXT,
+      auto_push_enabled INTEGER DEFAULT 0,
+      last_push_error TEXT,
+      last_push_at REAL
     );
   `);
 
@@ -47,7 +53,6 @@ describe('GET /api/config/projects', () => {
     testDb = createTestDb();
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/auth', () => ({ checkAuth: () => null }));
 
     const mod = await import('@/app/api/config/projects/route');
     GET = mod.GET;
@@ -275,20 +280,6 @@ describe('PATCH /api/config/projects', () => {
     testDb = createTestDb();
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: (request: NextRequest) => {
-        const token = process.env.Z_API_TOKEN;
-        if (!token) return null;
-        const authHeader = request.headers.get('authorization') ?? '';
-        if (!authHeader.startsWith('Bearer ') || authHeader.slice(7) !== token) {
-          return new NextResponse(
-            JSON.stringify({ detail: 'Unauthorized' }),
-            { status: 401 }
-          );
-        }
-        return null;
-      },
-    }));
 
     const mod = await import('@/app/api/config/projects/route');
     PATCH = mod.PATCH;
@@ -296,18 +287,6 @@ describe('PATCH /api/config/projects', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
-  });
-
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-
-    const req = new NextRequest('http://localhost/api/config/projects', {
-      method: 'PATCH',
-      body: JSON.stringify({ projects: [] }),
-    });
-    const res = await PATCH(req);
-    expect(res.status).toBe(401);
   });
 
   it('returns 400 when projects is not an array', async () => {
@@ -418,15 +397,5 @@ describe('PATCH /api/config/projects', () => {
     expect(saved[0].github).toBeNull();
   });
 
-  it('passes auth with correct Bearer token', async () => {
-    process.env.Z_API_TOKEN = 'my-token';
-
-    const req = new NextRequest('http://localhost/api/config/projects', {
-      method: 'PATCH',
-      headers: { Authorization: 'Bearer my-token' },
-      body: JSON.stringify({ projects: [] }),
-    });
-    const res = await PATCH(req);
-    expect(res.status).toBe(200);
-  });
 });
+

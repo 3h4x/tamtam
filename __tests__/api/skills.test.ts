@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/lib/db/schema';
@@ -38,28 +38,6 @@ describe('skills API', () => {
     vi.doMock('@/lib/db', () => ({
       db: testDb.db,
       schema,
-    }));
-
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: (request: NextRequest) => {
-        const token = process.env.Z_API_TOKEN;
-        if (!token) return null;
-        const authHeader = request.headers.get('authorization') ?? '';
-        if (!authHeader.startsWith('Bearer ')) {
-          const response = new Response(
-            JSON.stringify({ detail: 'Missing or invalid Authorization header' }),
-            { status: 401 }
-          );
-          return new NextResponse(response.body, { status: 401 });
-        }
-        if (authHeader.slice(7) !== token) {
-          const response = new Response(JSON.stringify({ detail: 'Invalid API token' }), {
-            status: 401,
-          });
-          return new NextResponse(response.body, { status: 401 });
-        }
-        return null;
-      },
     }));
 
     const skillsRoute = await import('@/app/api/skills/route');
@@ -116,28 +94,10 @@ describe('skills API', () => {
       expect(data.skills[1].name).toBe('Skill 2');
     });
 
-    it('does not require authentication', async () => {
-      const response = await skillsGET();
-      expect(response.status).toBe(200);
-    });
   });
 
   describe('POST /skills', () => {
-    it('requires authentication when Z_API_TOKEN is set', async () => {
-      process.env.Z_API_TOKEN = 'secret-token';
-
-      const request = new NextRequest('http://localhost/api/skills', {
-        method: 'POST',
-        body: JSON.stringify({ name: 'New Skill' }),
-      });
-
-      const response = await skillsPOST(request);
-      expect(response.status).toBe(401);
-
-      delete process.env.Z_API_TOKEN;
-    });
-
-    it('creates skill without authentication when Z_API_TOKEN not set', async () => {
+    it('creates skill successfully', async () => {
       const request = new NextRequest('http://localhost/api/skills', {
         method: 'POST',
         body: JSON.stringify({ name: 'New Skill' }),
@@ -254,22 +214,6 @@ describe('skills API', () => {
   });
 
   describe('PATCH /skills/{skillId}', () => {
-    it('requires authentication', async () => {
-      process.env.Z_API_TOKEN = 'secret-token';
-
-      const request = new NextRequest('http://localhost/api/skills/skill-1', {
-        method: 'PATCH',
-        body: JSON.stringify({ name: 'Updated' }),
-      });
-
-      const response = await skillDetailPATCH(request, {
-        params: Promise.resolve({ skillId: 'skill-1' }),
-      });
-
-      expect(response.status).toBe(401);
-      delete process.env.Z_API_TOKEN;
-    });
-
     it('returns 404 for nonexistent skill', async () => {
       const request = new NextRequest('http://localhost/api/skills/nonexistent', {
         method: 'PATCH',
@@ -396,21 +340,6 @@ describe('skills API', () => {
   });
 
   describe('DELETE /skills/{skillId}', () => {
-    it('requires authentication', async () => {
-      process.env.Z_API_TOKEN = 'secret-token';
-
-      const request = new NextRequest('http://localhost/api/skills/skill-1', {
-        method: 'DELETE',
-      });
-
-      const response = await skillDetailDELETE(request, {
-        params: Promise.resolve({ skillId: 'skill-1' }),
-      });
-
-      expect(response.status).toBe(401);
-      delete process.env.Z_API_TOKEN;
-    });
-
     it('deletes skill by ID', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;

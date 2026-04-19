@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { checkAuth } from '@/lib/auth';
 import { getImproveConfig } from '@/lib/scheduling';
 import { pauseAll } from '@/lib/launchagent';
 
@@ -7,8 +6,6 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ schedId: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { schedId } = await params;
   const { projects } = getImproveConfig();
   if (!projects[schedId]) {

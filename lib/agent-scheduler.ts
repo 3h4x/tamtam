@@ -3,9 +3,17 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { exec } from './shell';
 import { getSettings } from './config';
+import { getImproveConfig } from './scheduling';
+import { stableHash } from './fire-times';
 
 const LAUNCH_AGENTS_DIR = join(homedir(), 'Library', 'LaunchAgents');
-const SCRIPTS_DIR = join(homedir(), 'logs', 'agent-scripts');
+
+function getLogDir(): string {
+  try { return getImproveConfig().logDir; } catch { return join(homedir(), 'logs'); }
+}
+function getScriptsDir(): string {
+  return join(getLogDir(), 'agent-scripts');
+}
 
 function parseScheduleToSeconds(schedule: string): number {
   const s = schedule.trim();
@@ -14,20 +22,21 @@ function parseScheduleToSeconds(schedule: string): number {
   return parseInt(s, 10);
 }
 
-function parseScheduleToCron(schedule: string): string {
+function parseScheduleToCron(schedule: string, agentId = ''): string {
   const s = schedule.trim();
+  const minOff = agentId ? stableHash(agentId + ':min', 60) : 0;
   if (s.endsWith('m')) {
     const mins = parseInt(s.slice(0, -1), 10);
     if (mins < 60) return `*/${mins} * * * *`;
-    // Fall through to hours
     const hours = Math.floor(mins / 60);
-    return `0 */${hours} * * *`;
+    const startHour = agentId ? stableHash(agentId + ':h', hours) : 0;
+    return `${minOff} ${startHour}/${hours} * * *`;
   }
   if (s.endsWith('h')) {
     const hours = parseInt(s.slice(0, -1), 10);
-    return `0 */${hours} * * *`;
+    const startHour = agentId ? stableHash(agentId + ':h', hours) : 0;
+    return `${minOff} ${startHour}/${hours} * * *`;
   }
-  // Assume seconds, convert to nearest minute
   const secs = parseInt(s, 10);
   const mins = Math.max(1, Math.round(secs / 60));
   return `*/${mins} * * * *`;
@@ -49,22 +58,20 @@ function agentPlistPath(agentId: string): string {
 }
 
 function agentScriptPath(agentId: string): string {
-  return join(SCRIPTS_DIR, `${agentId}.sh`);
+  return join(getScriptsDir(), `${agentId}.sh`);
 }
 
 function agentPromptPath(agentId: string): string {
-  return join(SCRIPTS_DIR, `${agentId}.prompt.json`);
+  return join(getScriptsDir(), `${agentId}.prompt.json`);
 }
 
 function buildScript(agentId: string): string {
-  const token = process.env.Z_API_TOKEN || '';
-  const authFlag = token ? `-H "Authorization: Bearer ${token}"` : '';
   const port = process.env.PORT || '1337';
   const url = `http://localhost:${port}/api/agents/${agentId}/run`;
   const promptFile = agentPromptPath(agentId);
 
   return `#!/bin/bash
-/usr/bin/curl -s -X POST ${authFlag} -H "Content-Type: application/json" -d @"${promptFile}" "${url}"
+/usr/bin/curl -s -X POST -H "Content-Type: application/json" -H "X-Tamtam-Trigger: schedule" -d @"${promptFile}" "${url}"
 `;
 }
 
@@ -91,14 +98,12 @@ function buildPlist(agentId: string, schedule: string): string {
   <string>${logPath}</string>
   <key>StandardErrorPath</key>
   <string>${logPath}</string>
-  <key>RunAtLoad</key>
-  <true/>
 </dict>
 </plist>`;
 }
 
 function ensureDirs(): void {
-  mkdirSync(SCRIPTS_DIR, { recursive: true });
+  mkdirSync(getScriptsDir(), { recursive: true });
   mkdirSync(join(homedir(), 'logs'), { recursive: true });
 }
 
@@ -126,10 +131,13 @@ async function installPm2Schedule(agentId: string, schedule: string, prompt: str
   writeScriptAndPrompt(agentId, prompt);
 
   const name = pm2Name(agentId, project, agentName);
-  const cron = parseScheduleToCron(schedule);
+  const cron = parseScheduleToCron(schedule, agentId);
   const scriptPath = agentScriptPath(agentId);
 
   await exec('pm2', ['start', scriptPath, '--name', name, '--no-autorestart', '--cron', cron]);
+  // Stop immediately after registering — pm2 start fires the script right away,
+  // but we only want it to run when the cron hits.
+  await exec('pm2', ['stop', name]);
 }
 
 async function uninstallPm2Schedule(agentId: string, project?: string, agentName?: string): Promise<void> {

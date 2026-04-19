@@ -74,19 +74,6 @@ describe('PATCH /api/projects/[schedId]/priority', () => {
     });
     writePriorityYamlMock = vi.fn();
 
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: (req: NextRequest) => {
-        const token = process.env.Z_API_TOKEN;
-        if (!token) return null;
-        const auth = req.headers.get('authorization') ?? '';
-        if (!auth.startsWith('Bearer ') || auth.slice(7) !== token) {
-          const { NextResponse } = require('next/server');
-          return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-        }
-        return null;
-      },
-    }));
-
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: getImproveConfigMock,
       writePriorityYaml: writePriorityYamlMock,
@@ -99,17 +86,6 @@ describe('PATCH /api/projects/[schedId]/priority', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
-  });
-
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-    const req = new NextRequest('http://localhost/api/projects/sched-1/priority', {
-      method: 'PATCH',
-      body: JSON.stringify({ priority: 'high' }),
-    });
-    const res = await PATCH(req, { params: Promise.resolve({ schedId: 'sched-1' }) });
-    expect(res.status).toBe(401);
   });
 
   it('returns 422 for invalid priority value', async () => {
@@ -165,19 +141,6 @@ describe('POST /api/projects/[schedId]/pause', () => {
     });
     pauseAllMock = vi.fn().mockResolvedValue(undefined);
 
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: (req: NextRequest) => {
-        const token = process.env.Z_API_TOKEN;
-        if (!token) return null;
-        const auth = req.headers.get('authorization') ?? '';
-        if (!auth.startsWith('Bearer ') || auth.slice(7) !== token) {
-          const { NextResponse } = require('next/server');
-          return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-        }
-        return null;
-      },
-    }));
-
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: getImproveConfigMock,
     }));
@@ -192,16 +155,6 @@ describe('POST /api/projects/[schedId]/pause', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
-  });
-
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-    const req = new NextRequest('http://localhost/api/projects/sched-1/pause', {
-      method: 'POST',
-    });
-    const res = await POST(req, { params: Promise.resolve({ schedId: 'sched-1' }) });
-    expect(res.status).toBe(401);
   });
 
   it('returns 404 for unknown schedId', async () => {
@@ -243,19 +196,6 @@ describe('POST /api/projects/[schedId]/resume', () => {
     });
     resumeAllMock = vi.fn().mockResolvedValue(undefined);
 
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: (req: NextRequest) => {
-        const token = process.env.Z_API_TOKEN;
-        if (!token) return null;
-        const auth = req.headers.get('authorization') ?? '';
-        if (!auth.startsWith('Bearer ') || auth.slice(7) !== token) {
-          const { NextResponse } = require('next/server');
-          return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-        }
-        return null;
-      },
-    }));
-
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: getImproveConfigMock,
     }));
@@ -270,16 +210,6 @@ describe('POST /api/projects/[schedId]/resume', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
-  });
-
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-    const req = new NextRequest('http://localhost/api/projects/sched-1/resume', {
-      method: 'POST',
-    });
-    const res = await POST(req, { params: Promise.resolve({ schedId: 'sched-1' }) });
-    expect(res.status).toBe(401);
   });
 
   it('returns 404 for unknown schedId', async () => {

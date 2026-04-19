@@ -41,14 +41,24 @@ export function SkillsPage() {
       </div>
 
       {loading ? (
-        <div className="text-text-secondary text-sm">Loading...</div>
+        <div className="flex gap-6">
+          <div className="w-72 shrink-0 flex flex-col gap-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="p-3 rounded-lg border border-border bg-bg-secondary flex flex-col gap-2" style={{ opacity: 1 - i * 0.2 }}>
+                <div className="skeleton h-4 w-28" />
+                <div className="skeleton h-3 w-40" />
+              </div>
+            ))}
+          </div>
+          <div className="flex-1 skeleton rounded-lg h-64" />
+        </div>
       ) : (
         <div className="flex gap-6">
           {/* Skill list */}
           <div className="w-72 shrink-0 flex flex-col gap-2">
             {skills.length === 0 && !creating && (
-              <div className="text-text-secondary text-sm p-4 bg-bg-secondary rounded-lg">
-                No skills yet. Create one to get started.
+              <div className="text-text-secondary text-sm p-4 bg-bg-secondary rounded-lg border border-border">
+                No custom skills yet. Create one to compose reusable instructions into your agents.
               </div>
             )}
             {skills.map(skill => (
@@ -182,7 +192,7 @@ function SkillEditor({
         <input
           ref={nameRef}
           type="text"
-          className="w-full px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary"
+          className="w-full px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. security-reviewer"
@@ -193,7 +203,7 @@ function SkillEditor({
         <label className="block mb-1 text-sm font-medium text-text-primary">Description</label>
         <input
           type="text"
-          className="w-full px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary"
+          className="w-full px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="Short description of what this skill does"
@@ -205,7 +215,7 @@ function SkillEditor({
           Prompt Content
         </label>
         <textarea
-          className="w-full px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary font-mono resize-y"
+          className="w-full px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary font-mono resize-y focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
           value={content}
           onChange={(e) => setContent(e.target.value)}
           placeholder="The system prompt / instructions for this skill..."

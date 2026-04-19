@@ -23,6 +23,7 @@ describe('config', () => {
   let getSettings: typeof import('@/lib/config').getSettings;
   let reloadConfig: typeof import('@/lib/config').reloadConfig;
   let withBasePrompt: typeof import('@/lib/config').withBasePrompt;
+  let getPermissionModeFlag: typeof import('@/lib/config').getPermissionModeFlag;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -38,6 +39,7 @@ describe('config', () => {
     getSettings = config.getSettings;
     reloadConfig = config.reloadConfig;
     withBasePrompt = config.withBasePrompt;
+    getPermissionModeFlag = config.getPermissionModeFlag;
   });
 
   afterEach(() => {
@@ -52,13 +54,19 @@ describe('config', () => {
         workspace_path: '',
         github_owner: '',
         claude_bin: '~/.local/bin/claude',
-        log_dir: '~/logs',
+        log_dir: './data/logs',
         frequency: '1h',
         daytime: false,
         weekends: false,
         launchagent_prefix: 'com.tamtam',
         base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
         default_model: 'haiku',
+        permission_mode: 'bypassPermissions',
+        commit_style: 'Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Types: feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert.',
+        review_verdict_rules: expect.stringContaining('Pragmatic verdict rules'),
+        fix_ci_max_retries: 2,
+        fix_ci_retry_window_seconds: 120,
+        fix_ci_fast_crash_ms: 5000,
       });
     });
 
@@ -283,6 +291,101 @@ describe('config', () => {
 
       const result = withBasePrompt('task here');
       expect(result).toBe('Rule 1\nRule 2\n\n---\n\ntask here');
+    });
+  });
+
+  describe('getPermissionModeFlag', () => {
+    it('returns default bypassPermissions flag when no setting in DB', () => {
+      expect(getPermissionModeFlag()).toBe('--permission-mode bypassPermissions');
+    });
+
+    it('returns flag for a valid mode stored in DB', () => {
+      testDb.db.insert(schema.settings).values({ key: 'permission_mode', value: 'acceptEdits' }).run();
+      reloadConfig();
+      expect(getPermissionModeFlag()).toBe('--permission-mode acceptEdits');
+    });
+
+    it('falls back to bypassPermissions for an unrecognised mode', () => {
+      testDb.db.insert(schema.settings).values({ key: 'permission_mode', value: 'dangerousMode' }).run();
+      reloadConfig();
+      expect(getPermissionModeFlag()).toBe('--permission-mode bypassPermissions');
+    });
+
+    it.each(['acceptEdits', 'auto', 'bypassPermissions', 'default', 'dontAsk', 'plan'])(
+      'accepts valid mode %s',
+      (mode) => {
+        testDb.db.insert(schema.settings).values({ key: 'permission_mode', value: mode }).run();
+        reloadConfig();
+        expect(getPermissionModeFlag()).toBe(`--permission-mode ${mode}`);
+      }
+    );
+  });
+
+  describe('fix_ci_* integer settings', () => {
+    it('parses fix_ci_max_retries from DB as integer', () => {
+      testDb.db.insert(schema.settings).values({ key: 'fix_ci_max_retries', value: '5' }).run();
+      reloadConfig();
+      expect(getSettings().fix_ci_max_retries).toBe(5);
+    });
+
+    it('falls back to default when fix_ci_max_retries is non-numeric', () => {
+      testDb.db.insert(schema.settings).values({ key: 'fix_ci_max_retries', value: 'abc' }).run();
+      reloadConfig();
+      expect(getSettings().fix_ci_max_retries).toBe(2);
+    });
+
+    it('accepts 0 to disable retries', () => {
+      testDb.db.insert(schema.settings).values({ key: 'fix_ci_max_retries', value: '0' }).run();
+      reloadConfig();
+      expect(getSettings().fix_ci_max_retries).toBe(0);
+    });
+
+    it('parses fix_ci_retry_window_seconds from DB as integer', () => {
+      testDb.db.insert(schema.settings).values({ key: 'fix_ci_retry_window_seconds', value: '300' }).run();
+      reloadConfig();
+      expect(getSettings().fix_ci_retry_window_seconds).toBe(300);
+    });
+
+    it('falls back to default when fix_ci_retry_window_seconds is non-numeric', () => {
+      testDb.db.insert(schema.settings).values({ key: 'fix_ci_retry_window_seconds', value: 'bad' }).run();
+      reloadConfig();
+      expect(getSettings().fix_ci_retry_window_seconds).toBe(120);
+    });
+
+    it('parses fix_ci_fast_crash_ms from DB as integer', () => {
+      testDb.db.insert(schema.settings).values({ key: 'fix_ci_fast_crash_ms', value: '10000' }).run();
+      reloadConfig();
+      expect(getSettings().fix_ci_fast_crash_ms).toBe(10000);
+    });
+
+    it('falls back to default when fix_ci_fast_crash_ms is non-numeric', () => {
+      testDb.db.insert(schema.settings).values({ key: 'fix_ci_fast_crash_ms', value: 'nope' }).run();
+      reloadConfig();
+      expect(getSettings().fix_ci_fast_crash_ms).toBe(5000);
+    });
+  });
+
+  describe('commit_style and review_verdict_rules', () => {
+    it('returns default commit_style when not set', () => {
+      const config = getSettings();
+      expect(config.commit_style).toContain('conventional commits');
+    });
+
+    it('returns overridden commit_style from DB', () => {
+      testDb.db.insert(schema.settings).values({ key: 'commit_style', value: 'squash everything' }).run();
+      reloadConfig();
+      expect(getSettings().commit_style).toBe('squash everything');
+    });
+
+    it('returns default review_verdict_rules when not set', () => {
+      const config = getSettings();
+      expect(config.review_verdict_rules).toContain('Pragmatic verdict rules');
+    });
+
+    it('returns overridden review_verdict_rules from DB', () => {
+      testDb.db.insert(schema.settings).values({ key: 'review_verdict_rules', value: 'always LGTM' }).run();
+      reloadConfig();
+      expect(getSettings().review_verdict_rules).toBe('always LGTM');
     });
   });
 });

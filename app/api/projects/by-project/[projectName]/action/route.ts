@@ -5,7 +5,6 @@ import { spawn } from 'child_process';
 import { homedir } from 'os';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { checkAuth } from '@/lib/auth';
 import { resolveProjectPath } from '@/lib/project-data';
 import { createJob, updateJob } from '@/lib/job-storage';
 import { getSettings } from '@/lib/config';
@@ -42,8 +41,6 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ projectName: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { projectName } = await params;
   const body = await request.json();
   const actions = body.actions as CustomAction[];
@@ -70,8 +67,6 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectName: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { projectName } = await params;
   const body = await request.json();
   const actionName = body.action as string;

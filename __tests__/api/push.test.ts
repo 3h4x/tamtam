@@ -21,7 +21,6 @@ describe('POST /api/projects/by-project/[projectName]/push', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn();
 
-    vi.doMock('@/lib/auth', () => ({ checkAuth: () => null }));
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
@@ -130,7 +129,6 @@ describe('GET /api/projects/by-project/[projectName]/push/preview', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn().mockResolvedValue(makeExecResult());
 
-    vi.doMock('@/lib/auth', () => ({ checkAuth: () => null }));
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
@@ -207,7 +205,6 @@ describe('POST /api/projects/by-project/[projectName]/push/execute', () => {
     invalidateProjectMock = vi.fn();
     clearProjectDataCacheMock = vi.fn();
 
-    vi.doMock('@/lib/auth', () => ({ checkAuth: () => null }));
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: clearProjectDataCacheMock,
@@ -255,6 +252,7 @@ describe('POST /api/projects/by-project/[projectName]/push/execute', () => {
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })) // git add -A
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0, stdout: 'M\tsrc/file.ts\n' })) // diff cached
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })) // git commit
+      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head master\n# branch.ab +0 -0\n' })) // behind check
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })) // git push
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0, stdout: 'abc1234' })); // rev-parse
 
@@ -274,6 +272,7 @@ describe('POST /api/projects/by-project/[projectName]/push/execute', () => {
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })) // add
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0, stdout: 'M\tfile.ts\n' })) // diff
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })) // commit
+      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head master\n# branch.ab +0 -0\n' })) // behind check
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })) // push
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0, stdout: 'abc1234' })); // sha
 
@@ -292,6 +291,7 @@ describe('POST /api/projects/by-project/[projectName]/push/execute', () => {
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })) // add
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0, stdout: 'M\tfile.ts\n' })) // diff
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })) // commit
+      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head master\n# branch.ab +0 -0\n' })) // behind check
       .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'push rejected' })) // push fails
       .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'push rejected' })); // retry push also fails
 
@@ -303,5 +303,62 @@ describe('POST /api/projects/by-project/[projectName]/push/execute', () => {
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.detail).toContain('Push failed');
+  });
+
+  it('auto-rebases when behind remote and then pushes successfully', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })) // add
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0, stdout: 'M\tfile.ts\n' })) // diff cached
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })) // commit
+      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head master\n# branch.ab +2 -3\n' })) // 3 behind
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0, stdout: 'Successfully rebased and updated' })) // pull --rebase
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })) // push
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0, stdout: 'def5678' })); // rev-parse
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/push/execute', {
+      method: 'POST',
+      body: JSON.stringify({ message: 'feat: new thing' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('success');
+    expect(data.commit_sha).toBe('def5678');
+  });
+
+  it('returns 409 when rebase fails (conflict)', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })) // add
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0, stdout: 'M\tfile.ts\n' })) // diff cached
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })) // commit
+      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head master\n# branch.ab +0 -2\n' })) // 2 behind
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'CONFLICT (content): Merge conflict in file.ts' })); // rebase fails
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/push/execute', {
+      method: 'POST',
+      body: JSON.stringify({ message: 'fix: something' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.detail).toContain('Rebase failed');
+  });
+
+  it('strips hint: lines from rebase error detail', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })) // add
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0, stdout: 'M\tfile.ts\n' })) // diff cached
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })) // commit
+      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head master\n# branch.ab +0 -1\n' })) // 1 behind
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'CONFLICT in file.ts\nhint: use git rebase --continue' }));
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/push/execute', {
+      method: 'POST',
+      body: JSON.stringify({ message: 'chore: update' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.detail).not.toMatch(/hint:/i);
+    expect(data.detail).toContain('CONFLICT');
   });
 });

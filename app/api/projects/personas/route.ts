@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join, relative, dirname } from 'path';
-import { SKILLS_DIR } from '@/lib/skills';
+import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills';
 import { existsSync } from 'fs';
 
 interface Persona {
@@ -14,27 +14,19 @@ interface Persona {
 
 let _personaCache: { data: Persona[]; time: number } = { data: [], time: 0 };
 
-function listPersonas(): Persona[] {
-  const now = Date.now() / 1000;
-  if (_personaCache.data.length > 0 && now - _personaCache.time < 300) return _personaCache.data;
-
-  const docsBase = join(SKILLS_DIR, 'docs', 'skills');
-  if (!existsSync(docsBase)) return [];
-
-  const personas: Persona[] = [];
-
-  for (const catEntry of readdirSync(docsBase, { withFileTypes: true })) {
+function scanDir(base: string, personas: Persona[]) {
+  if (!existsSync(base)) return;
+  for (const catEntry of readdirSync(base, { withFileTypes: true })) {
     if (!catEntry.isDirectory()) continue;
-    const catDir = join(docsBase, catEntry.name);
+    const catDir = join(base, catEntry.name);
     const category = catEntry.name;
-
     for (const entry of readdirSync(catDir, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith('.md') || entry.name === 'index.md') continue;
       const fpath = join(catDir, entry.name);
       const slug = entry.name.replace('.md', '');
       let name = slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
       let description = '';
-      let emoji = '';
+      const emoji = '';
       try {
         const content = readFileSync(fpath, 'utf-8').slice(0, 2000);
         if (content.startsWith('---')) {
@@ -55,6 +47,15 @@ function listPersonas(): Persona[] {
       personas.push({ path: `${category}/${slug}`, category, name, description, emoji });
     }
   }
+}
+
+function listPersonas(): Persona[] {
+  const now = Date.now() / 1000;
+  if (_personaCache.data.length > 0 && now - _personaCache.time < 300) return _personaCache.data;
+
+  const personas: Persona[] = [];
+  scanDir(join(SKILLS_DIR, 'docs', 'skills'), personas);
+  scanDir(DATA_SKILLS_DIR, personas);
 
   _personaCache = { data: personas, time: now };
   return personas;

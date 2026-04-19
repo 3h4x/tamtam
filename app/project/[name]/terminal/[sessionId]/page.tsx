@@ -4,7 +4,7 @@ import { useProjects } from '@/components/ProjectsProvider'
 import { ProjectDetailPage } from '@/components/ProjectDetailPage'
 import { LoadingState } from '@/components/LoadingState'
 
-export default function ExperimentalSessionPage() {
+export default function TerminalSessionPage() {
   const {
     tasks, loading, fleet, priorities,
     handlePriorityChange, handlePause, handleResume,
@@ -21,7 +21,6 @@ export default function ExperimentalSessionPage() {
       onPause={handlePause}
       onResume={handleResume}
       onRefresh={loadProjects}
-      onPush={() => { startFastPolling(); loadProjects() }}
     />
   )
 }

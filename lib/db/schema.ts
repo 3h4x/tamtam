@@ -12,6 +12,12 @@ export const projects = sqliteTable('projects', {
   github: text('github'),
   priority: text('priority'),
   customActions: text('custom_actions'),
+  testCommand: text('test_command'),
+  testCronEnabled: integer('test_cron_enabled', { mode: 'boolean' }).default(false),
+  testCronSchedule: text('test_cron_schedule'),
+  autoPushEnabled: integer('auto_push_enabled', { mode: 'boolean' }).default(false),
+  lastPushError: text('last_push_error'),
+  lastPushAt: real('last_push_at'),
 });
 
 export const jobs = sqliteTable('jobs', {
@@ -33,6 +39,7 @@ export const jobs = sqliteTable('jobs', {
   sessionId: text('session_id'),
   userPrompt: text('user_prompt'),
   contextMeta: text('context_meta'),
+  parentJobId: text('parent_job_id'),
 });
 
 export const skills = sqliteTable('skills', {
@@ -66,4 +73,12 @@ export const ghStatus = sqliteTable('gh_status', {
   headSha: text('head_sha'),
   localHeadSha: text('local_head_sha'),
   fetchedAt: text('fetched_at').notNull(),
+});
+
+export const ghIssuesCache = sqliteTable('gh_issues_cache', {
+  project: text('project').primaryKey(),
+  repo: text('repo').notNull(),
+  prs: text('prs').notNull().default('[]'),
+  issues: text('issues').notNull().default('[]'),
+  fetchedAt: real('fetched_at').notNull(),
 });

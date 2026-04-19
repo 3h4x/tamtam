@@ -94,7 +94,7 @@ export function getImproveConfig(): ImproveConfig {
       scheduler: null,
       github: p.github ?? null,
       priority: p.priority ?? null,
-      test_command: null,
+      test_command: p.testCommand ?? null,
     };
   }
 
@@ -162,8 +162,54 @@ export function writeProjectFieldYaml(
     db.update(schema.projects).set({ github: value }).where(eq(schema.projects.name, projName)).run();
   } else if (fieldName === 'priority') {
     db.update(schema.projects).set({ priority: value }).where(eq(schema.projects.name, projName)).run();
+  } else if (fieldName === 'test_command') {
+    db.update(schema.projects).set({ testCommand: value }).where(eq(schema.projects.name, projName)).run();
+  } else if (fieldName === 'test_cron_schedule') {
+    db.update(schema.projects).set({ testCronSchedule: value }).where(eq(schema.projects.name, projName)).run();
+  } else if (fieldName === 'test_cron_enabled') {
+    db.update(schema.projects).set({ testCronEnabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
+  } else if (fieldName === 'auto_push_enabled') {
+    db.update(schema.projects).set({ autoPushEnabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
   }
   return true;
+}
+
+export function setProjectPushResult(projName: string, error: string | null): void {
+  db
+    .update(schema.projects)
+    .set({ lastPushError: error, lastPushAt: Date.now() / 1000 })
+    .where(eq(schema.projects.name, projName))
+    .run();
+}
+
+export function getProjectPushResult(projName: string): { lastPushError: string | null; lastPushAt: number | null } | null {
+  const row = db
+    .select()
+    .from(schema.projects)
+    .where(eq(schema.projects.name, projName))
+    .get();
+  if (!row) return null;
+  return { lastPushError: row.lastPushError ?? null, lastPushAt: row.lastPushAt ?? null };
+}
+
+export function getProjectTestConfig(projName: string): {
+  testCommand: string | null;
+  testCronEnabled: boolean;
+  testCronSchedule: string | null;
+  autoPushEnabled: boolean;
+} | null {
+  const row = db
+    .select()
+    .from(schema.projects)
+    .where(eq(schema.projects.name, projName))
+    .get();
+  if (!row) return null;
+  return {
+    testCommand: row.testCommand ?? null,
+    testCronEnabled: !!row.testCronEnabled,
+    testCronSchedule: row.testCronSchedule ?? null,
+    autoPushEnabled: !!row.autoPushEnabled,
+  };
 }
 
 export function parseCronTime(cron: string): {
@@ -218,6 +264,12 @@ export function cronFiresStr(cron: string): string {
 function expandHome(p: string): string {
   if (p.startsWith('~/') || p === '~') {
     return join(homedir(), p.slice(2));
+  }
+  // Resolve relative paths against the tamtam process working directory so
+  // defaults like `./data/logs` land inside the project, not wherever the
+  // command was launched from.
+  if (p.startsWith('./') || p.startsWith('../') || (!p.startsWith('/') && p !== '')) {
+    return join(process.cwd(), p);
   }
   return p;
 }

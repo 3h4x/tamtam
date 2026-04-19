@@ -33,19 +33,6 @@ describe('settings API', () => {
       schema,
     }));
 
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: (request: NextRequest) => {
-        const token = process.env.Z_API_TOKEN;
-        if (!token) return null;
-        const authHeader = request.headers.get('authorization') ?? '';
-        if (!authHeader.startsWith('Bearer ') || authHeader.slice(7) !== token) {
-          const { NextResponse } = require('next/server');
-          return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-        }
-        return null;
-      },
-    }));
-
     const mod = await import('@/app/api/settings/route');
     GET = mod.GET;
     PATCH = mod.PATCH;
@@ -53,7 +40,6 @@ describe('settings API', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
   });
 
   describe('GET /settings', () => {
@@ -75,24 +61,9 @@ describe('settings API', () => {
       expect(data.settings.github_owner).toBe('octocat');
     });
 
-    it('does not require authentication', async () => {
-      process.env.Z_API_TOKEN = 'secret';
-      const response = await GET();
-      expect(response.status).toBe(200);
-    });
   });
 
   describe('PATCH /settings', () => {
-    it('requires authentication when Z_API_TOKEN is set', async () => {
-      process.env.Z_API_TOKEN = 'secret';
-      const request = new NextRequest('http://localhost/api/settings', {
-        method: 'PATCH',
-        body: JSON.stringify({ workspace_path: '/new' }),
-      });
-      const response = await PATCH(request);
-      expect(response.status).toBe(401);
-    });
-
     it('updates a setting', async () => {
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',
@@ -207,6 +178,13 @@ describe('settings API', () => {
         'launchagent_prefix',
         'workspace_path',
         'base_prompt',
+        'default_model',
+        'permission_mode',
+        'commit_style',
+        'review_verdict_rules',
+        'fix_ci_max_retries',
+        'fix_ci_retry_window_seconds',
+        'fix_ci_fast_crash_ms',
       ];
 
       const body = Object.fromEntries(validKeys.map((k) => [k, 'test-value']));
@@ -218,6 +196,71 @@ describe('settings API', () => {
 
       const rows = testDb.db.select().from(schema.settings).all();
       expect(rows).toHaveLength(validKeys.length);
+    });
+
+    it('saves commit_style setting', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ commit_style: 'squash everything into one commit' }),
+      });
+      await PATCH(request);
+
+      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'commit_style');
+      expect(row?.value).toBe('squash everything into one commit');
+    });
+
+    it('saves fix_ci_max_retries setting', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ fix_ci_max_retries: '5' }),
+      });
+      await PATCH(request);
+
+      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'fix_ci_max_retries');
+      expect(row?.value).toBe('5');
+    });
+
+    it('saves review_verdict_rules setting', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ review_verdict_rules: 'Always LGTM unless broken' }),
+      });
+      await PATCH(request);
+
+      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'review_verdict_rules');
+      expect(row?.value).toBe('Always LGTM unless broken');
+    });
+  });
+
+  describe('reloadConfig on PATCH', () => {
+    let reloadConfigMock: ReturnType<typeof vi.fn>;
+    let PATCHWithSpy: any;
+
+    beforeEach(async () => {
+      vi.resetModules();
+      testDb.sqlite.close();
+      testDb = createTestDb();
+
+      reloadConfigMock = vi.fn();
+      vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+      vi.doMock('@/lib/config', () => ({ reloadConfig: reloadConfigMock }));
+
+      const mod = await import('@/app/api/settings/route');
+      PATCHWithSpy = mod.PATCH;
+    });
+
+    afterEach(() => {
+      testDb.sqlite.close();
+    });
+
+    it('calls reloadConfig after saving settings', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ workspace_path: '/new/path' }),
+      });
+      await PATCHWithSpy(request);
+
+      expect(reloadConfigMock).toHaveBeenCalledOnce();
     });
   });
 });

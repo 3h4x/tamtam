@@ -152,6 +152,151 @@ describe('GET /api/streaming/[jobId]', () => {
     expect(combined).toContain('"duration":1234');
   });
 
+  it('sends thinking events as named SSE event', async () => {
+    const logFile = join(tempDir, 'thinking.log');
+    const thinkingLine =
+      '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me consider this"}}}';
+    writeFileSync(logFile, thinkingLine + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-1', {
+      signal: ac.signal,
+    });
+
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    expect(combined).toContain('event: thinking');
+    expect(combined).toContain('data: Let me consider this');
+  });
+
+  it('preserves newlines in text via multi-line SSE data encoding', async () => {
+    const logFile = join(tempDir, 'multiline.log');
+    const line1 = '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"line1\\nline2\\nline3"}}}';
+    writeFileSync(logFile, line1 + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-1', {
+      signal: ac.signal,
+    });
+
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    // Multi-line SSE: each line gets its own "data:" prefix
+    expect(combined).toContain('data: line1\ndata: line2\ndata: line3');
+  });
+
+  it('sends tool_use events with newlines preserved', async () => {
+    const logFile = join(tempDir, 'tool.log');
+    const toolStart = '{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"t1","name":"Read","input":{}}}}';
+    const toolStop = '{"type":"stream_event","event":{"type":"content_block_stop","index":1}}';
+    writeFileSync(logFile, toolStart + '\n' + toolStop + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-1', {
+      signal: ac.signal,
+    });
+
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    expect(combined).toContain('event: tool_use');
+    expect(combined).toContain('"name":"Read"');
+  });
+
+  // Regression: review logs with structured tool_result content (array of
+  // {type:"text",text:"..."} blocks) used to dump as raw JSON in the
+  // terminal. The parser now extracts the text; the SSE stream must deliver
+  // the readable payload, not the stringified blob.
+  it('extracts text from array-shaped tool_result instead of dumping raw JSON', async () => {
+    const logFile = join(tempDir, 'toolresult.log');
+    const toolResultLine = JSON.stringify({
+      type: 'user',
+      message: {
+        content: [{
+          type: 'tool_result',
+          content: [{ type: 'text', text: 'readable tool output' }],
+        }],
+      },
+    });
+    writeFileSync(logFile, toolResultLine + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-tr', { signal: ac.signal });
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-tr' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    expect(combined).toContain('event: tool_result');
+    expect(combined).toContain('readable tool output');
+    // Must NOT contain the raw [{"type":"text"...}] blob anywhere.
+    expect(combined).not.toMatch(/\[\{"type":"text"/);
+  });
+
+  it('does not emit raw usage/metadata JSON as text for message_delta events', async () => {
+    // This is the exact shape that leaked into the release terminal —
+    // usage stats with ephemeral_5m_input_tokens etc. With the fix, these
+    // events produce no output at all (they carry no user-visible text).
+    const logFile = join(tempDir, 'meta.log');
+    const metaLine = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'message_delta',
+        delta: { stop_reason: 'end_turn' },
+        usage: {
+          output_tokens: 20,
+          cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 1936 },
+          service_tier: 'standard',
+        },
+      },
+      parent_tool_use_id: null,
+    });
+    writeFileSync(logFile, metaLine + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-meta', { signal: ac.signal });
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-meta' }) });
+    const events = await collectSSEStream(response, ac, 200);
+
+    const combined = events.join('');
+    // No data events should contain raw ephemeral/usage fields.
+    expect(combined).not.toContain('ephemeral_5m_input_tokens');
+    expect(combined).not.toContain('parent_tool_use_id');
+  });
+
+  it('emits done via poll when job finishes after last log write (fs.watch miss)', async () => {
+    const logFile = join(tempDir, 'polled.log');
+    writeFileSync(logFile, 'test output line\n');
+    // Start with job not finished — stream must poll, then finish.
+    let finished = false;
+    getJobMock.mockImplementation(() => ({
+      logPath: logFile,
+      finishedAt: finished ? Date.now() / 1000 : null,
+      exitCode: finished ? 0 : null,
+    } as any));
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-poll?raw=1', { signal: ac.signal });
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-poll' }) });
+
+    // Flip the job to finished AFTER the stream has already started and replayed initial content.
+    setTimeout(() => { finished = true; }, 50);
+
+    const events = await collectSSEStream(response, ac, 2000);
+    const combined = events.join('');
+    expect(combined).toContain('event: done');
+    expect(combined).toContain('"exitCode":0');
+  });
+
   it('uses fallback path from homedir when job has no logPath', async () => {
     getJobMock.mockReturnValue(null);
 
@@ -164,5 +309,233 @@ describe('GET /api/streaming/[jobId]', () => {
     const response = await GET(request, { params: Promise.resolve({ jobId: 'unknown-job' }) });
     expect(response.status).toBe(200);
     ac.abort();
+  });
+});
+
+describe('GET /api/streaming/[jobId] – extractLogDetail in done event', () => {
+  let tempDir: string;
+  let GET: any;
+  let getJobMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-streaming-detail-test-'));
+    vi.resetModules();
+
+    getJobMock = vi.fn().mockReturnValue(null);
+    vi.doMock('@/lib/job-storage', () => ({ getJob: getJobMock }));
+
+    const { parseStreamLines } = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
+      '@/lib/claude-stream-parser'
+    );
+    vi.doMock('@/lib/claude-stream-parser', () => ({ parseStreamLines }));
+
+    const mod = await import('@/app/api/streaming/[jobId]/route');
+    GET = mod.GET;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  async function getDonePayload(logContent: string, exitCode: number): Promise<Record<string, unknown>> {
+    const logFile = join(tempDir, `test-${Date.now()}.log`);
+    writeFileSync(logFile, logContent);
+    getJobMock.mockReturnValue({
+      logPath: logFile,
+      finishedAt: Date.now() / 1000,
+      exitCode,
+    } as any);
+
+    const ac = new AbortController();
+    const request = new NextRequest(`http://localhost/api/streaming/job-detail?raw=1`, {
+      signal: ac.signal,
+    });
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-detail' }) });
+    const events = await collectSSEStream(response, ac, 300);
+    const combined = events.join('');
+
+    const match = combined.match(/event: done\ndata: (.+)/);
+    if (!match) throw new Error(`No done event found in: ${combined}`);
+    return JSON.parse(match[1]);
+  }
+
+  it('done event with exitCode=0 has no detail field', async () => {
+    const logFile = join(tempDir, 'ok.log');
+    writeFileSync(logFile, 'some output\n');
+    getJobMock.mockReturnValue({
+      logPath: logFile,
+      finishedAt: Date.now() / 1000,
+      exitCode: 0,
+    } as any);
+
+    const ac = new AbortController();
+    const request = new NextRequest(`http://localhost/api/streaming/job-ok?raw=1`, { signal: ac.signal });
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-ok' }) });
+    const events = await collectSSEStream(response, ac, 300);
+    const combined = events.join('');
+
+    const match = combined.match(/event: done\ndata: (.+)/);
+    expect(match).not.toBeNull();
+    const payload = JSON.parse(match![1]);
+    expect(payload).not.toHaveProperty('detail');
+    expect(payload.exitCode).toBe(0);
+  });
+
+  it('done event with exitCode=1 and missing log has detail "log file missing"', async () => {
+    getJobMock.mockReturnValue({
+      logPath: join(tempDir, 'nonexistent.log'),
+      finishedAt: Date.now() / 1000,
+      exitCode: 1,
+    } as any);
+
+    const ac = new AbortController();
+    const request = new NextRequest(`http://localhost/api/streaming/job-missing?raw=1`, { signal: ac.signal });
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-missing' }) });
+    const events = await collectSSEStream(response, ac, 300);
+    const combined = events.join('');
+
+    const match = combined.match(/event: done\ndata: (.+)/);
+    expect(match).not.toBeNull();
+    const payload = JSON.parse(match![1]);
+    expect(payload.detail).toBe('log file missing');
+  });
+
+  it('done event with empty log has detail about empty output', async () => {
+    const payload = await getDonePayload('', 1);
+    expect(payload.detail).toMatch(/empty/i);
+    expect(payload.exitCode).toBe(1);
+  });
+
+  it('done event with non-JSON lines returns last non-JSON lines as detail', async () => {
+    const content = 'some error output\nanother error line\n';
+    const payload = await getDonePayload(content, 2);
+    expect(payload.detail).toContain('some error output');
+    expect(payload.detail).toContain('another error line');
+  });
+
+  it('done event with only stream_event JSON has partial-output detail', async () => {
+    const streamLine = '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}}';
+    const payload = await getDonePayload(streamLine + '\n', 137);
+    expect(typeof payload.detail).toBe('string');
+    expect(payload.detail as string).toContain('partial output');
+    expect(payload.exitCode).toBe(137);
+  });
+
+  it('done event with only non-stream JSON (no stream_event) has never-emitted-result detail', async () => {
+    const jsonLine = '{"type":"system","subtype":"init","session_id":"abc123"}';
+    const payload = await getDonePayload(jsonLine + '\n', 1);
+    expect(typeof payload.detail).toBe('string');
+    expect(payload.detail as string).toMatch(/never emitted a final result|no.*result/i);
+  });
+
+  it('done event detail respects last 20 non-JSON lines limit', async () => {
+    const lines = Array.from({ length: 25 }, (_, i) => `error line ${i + 1}`).join('\n');
+    const payload = await getDonePayload(lines + '\n', 1);
+    expect(payload.detail as string).toContain('error line 25');
+    expect(payload.detail as string).toContain('error line 6');
+    expect(payload.detail as string).not.toContain('error line 5');
+  });
+
+  it('done event with only [tamtam] wrapper lines has specific wrapper-only detail', async () => {
+    const wrapperContent = [
+      '[tamtam] launching: claude --print --model haiku',
+      '[tamtam] exit 1',
+    ].join('\n') + '\n';
+    const payload = await getDonePayload(wrapperContent, 1);
+    expect(payload.detail as string).toContain('immediately without producing any output');
+  });
+});
+
+describe('GET /api/streaming/[jobId] – tool_result SSE event', () => {
+  let tempDir: string;
+  let GET: any;
+  let getJobMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-streaming-tr-test-'));
+    vi.resetModules();
+    getJobMock = vi.fn().mockReturnValue(null);
+    vi.doMock('@/lib/job-storage', () => ({ getJob: getJobMock }));
+
+    const { parseStreamLines } = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
+      '@/lib/claude-stream-parser'
+    );
+    vi.doMock('@/lib/claude-stream-parser', () => ({ parseStreamLines }));
+
+    const mod = await import('@/app/api/streaming/[jobId]/route');
+    GET = mod.GET;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('emits tool_result SSE event from system subtype tool_result log line', async () => {
+    const logFile = join(tempDir, 'sys-tr.log');
+    const line = JSON.stringify({
+      type: 'system',
+      subtype: 'tool_result',
+      content: 'tool output text',
+    });
+    writeFileSync(logFile, line + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as any);
+
+    const ac = new AbortController();
+    const req = new NextRequest('http://localhost/api/streaming/job-sys-tr', { signal: ac.signal });
+    const response = await GET(req, { params: Promise.resolve({ jobId: 'job-sys-tr' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    expect(combined).toContain('event: tool_result');
+    expect(combined).toContain('tool output text');
+  });
+
+  it('emits tool_result SSE event from user message content block', async () => {
+    const logFile = join(tempDir, 'user-tr.log');
+    const line = JSON.stringify({
+      type: 'user',
+      message: {
+        content: [{
+          type: 'tool_result',
+          content: 'user block tool output',
+        }],
+      },
+    });
+    writeFileSync(logFile, line + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as any);
+
+    const ac = new AbortController();
+    const req = new NextRequest('http://localhost/api/streaming/job-user-tr', { signal: ac.signal });
+    const response = await GET(req, { params: Promise.resolve({ jobId: 'job-user-tr' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    expect(combined).toContain('event: tool_result');
+    expect(combined).toContain('user block tool output');
+  });
+
+  it('tool_result payload includes content field as JSON', async () => {
+    const logFile = join(tempDir, 'tr-payload.log');
+    const line = JSON.stringify({
+      type: 'system',
+      subtype: 'tool_result',
+      content: 'payload content',
+    });
+    writeFileSync(logFile, line + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile } as any);
+
+    const ac = new AbortController();
+    const req = new NextRequest('http://localhost/api/streaming/job-tr-payload', { signal: ac.signal });
+    const response = await GET(req, { params: Promise.resolve({ jobId: 'job-tr-payload' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    // The SSE data should be JSON with a "content" field
+    const match = combined.match(/event: tool_result\ndata: (.+)/);
+    expect(match).not.toBeNull();
+    const payload = JSON.parse(match![1]);
+    expect(payload).toHaveProperty('content', 'payload content');
   });
 });

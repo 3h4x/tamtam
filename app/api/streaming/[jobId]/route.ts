@@ -4,6 +4,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { getJob } from '@/lib/job-storage';
 import { parseStreamLines } from '@/lib/claude-stream-parser';
+import { errMsg } from '@/lib/types';
 
 function getLogPath(jobId: string): string {
   const job = getJob(jobId);
@@ -25,11 +26,11 @@ export async function GET(
       let offset = 0;
 
       function sendRawLines(text: string) {
-        for (const line of text.split('\n')) {
-          if (line.trim()) {
-            controller.enqueue(encoder.encode(`data: ${line}\n\n`));
-          }
-        }
+        if (!text) return;
+        // Use SSE multi-`data:` field syntax so embedded newlines are preserved
+        // in the single reconstructed event.data on the browser side.
+        const payload = text.split('\n').map(l => `data: ${l}`).join('\n');
+        controller.enqueue(encoder.encode(`${payload}\n\n`));
       }
 
       function sseEncode(data: string, event?: string): string {
@@ -45,12 +46,9 @@ export async function GET(
           } else if (event.type === 'thinking') {
             controller.enqueue(encoder.encode(sseEncode(event.text, 'thinking')));
           } else if (event.type === 'tool_use') {
-            controller.enqueue(encoder.encode(sseEncode(`\n> Tool: ${event.name}\n`)));
+            controller.enqueue(encoder.encode(sseEncode(JSON.stringify({ name: event.name, input: event.input }), 'tool_use')));
           } else if (event.type === 'tool_result') {
-            const truncated = event.content.length > 500
-              ? event.content.slice(0, 500) + '...'
-              : event.content;
-            controller.enqueue(encoder.encode(sseEncode(truncated)));
+            controller.enqueue(encoder.encode(sseEncode(JSON.stringify({ content: event.content }), 'tool_result')));
           } else if (event.type === 'done') {
             controller.enqueue(
               encoder.encode(sseEncode(JSON.stringify(event.result), 'done'))
@@ -66,9 +64,46 @@ export async function GET(
         try { controller.close(); } catch {}
       }
 
+      function extractLogDetail(): string | null {
+        try {
+          if (!existsSync(logPath)) return 'log file missing';
+          const content = readFileSync(logPath, 'utf-8');
+          if (!content.trim()) return 'log file empty — claude CLI exited without writing anything. Common causes: rate-limited (5-hour window), cold-start crash, or auth/session conflict with a concurrent run. Retrying usually works.';
+          const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
+          // If every non-empty line is a [tamtam] wrapper marker (the launch
+          // banner and exit-code tail), claude CLI never actually emitted
+          // anything. Surface that as a diagnosable message instead of
+          // echoing the launching command as "detail" — that was useless to
+          // the user.
+          const wrapperOnly = lines.every(l => l.startsWith('[tamtam]'));
+          if (wrapperOnly) {
+            return 'claude CLI exited immediately without producing any output. Usually one of: (1) invalid --resume session id, (2) rate-limited (5-hour window), (3) auth expired, or (4) a concurrent claude run in the same project holding the session. Try again, or start a new session without --resume.';
+          }
+          const nonJson: string[] = [];
+          for (const line of lines) {
+            if (line.startsWith('[tamtam]')) continue; // drop wrapper chrome from detail
+            try { JSON.parse(line); } catch { nonJson.push(line); }
+          }
+          if (nonJson.length > 0) return nonJson.slice(-20).join('\n');
+          // Only JSON in log, no `"type":"result"` — Claude was streaming tokens then died mid-response
+          const hasAnyStream = content.includes('"stream_event"');
+          if (hasAnyStream) {
+            return 'claude streamed partial output but never emitted a final result — likely killed/crashed mid-response';
+          }
+          return 'claude wrote JSON to log but never emitted a final result line';
+        } catch (e: unknown) {
+          return `could not read log: ${errMsg(e)}`;
+        }
+      }
+
       function emitDone(watcher: ReturnType<typeof watch> | null, exitCode?: number | null) {
         try {
-          controller.enqueue(encoder.encode(sseEncode(JSON.stringify({ exitCode: exitCode ?? null }), 'done')));
+          const payload: Record<string, unknown> = { exitCode: exitCode ?? null };
+          if ((exitCode ?? 0) !== 0) {
+            const detail = extractLogDetail();
+            if (detail) payload.detail = detail;
+          }
+          controller.enqueue(encoder.encode(sseEncode(JSON.stringify(payload), 'done')));
         } catch {}
         closeStream(watcher);
       }
@@ -99,41 +134,74 @@ export async function GET(
         return;
       }
 
+      // If log file doesn't exist, there's nothing to watch (fs.watch would throw).
+      if (!existsSync(logPath)) {
+        try { controller.close(); } catch {}
+        return;
+      }
+
       // Watch for new content
       let watcher: ReturnType<typeof watch> | null = null;
+      let pollTimer: ReturnType<typeof setInterval> | null = null;
+      let closed = false;
+
+      function cleanup() {
+        if (closed) return;
+        closed = true;
+        watcher?.close();
+        if (pollTimer) clearInterval(pollTimer);
+        try { controller.close(); } catch {}
+      }
+
+      function checkFinished(): boolean {
+        try {
+          const content = existsSync(logPath) ? readFileSync(logPath, 'utf-8') : '';
+          const currentSize = Buffer.byteLength(content);
+          if (currentSize > offset) {
+            const newContent = Buffer.from(content).slice(offset).toString('utf-8');
+            offset = currentSize;
+            sendContent(newContent);
+          }
+          const job = getJob(jobId);
+          if (!job?.finishedAt) return false;
+          if (raw) {
+            emitDoneAndCleanup(job.exitCode);
+          } else {
+            const fullContent = existsSync(logPath) ? readFileSync(logPath, 'utf-8') : '';
+            if (!fullContent.includes('"type":"result"')) {
+              emitDoneAndCleanup(job.exitCode);
+            } else {
+              cleanup();
+            }
+          }
+          return true;
+        } catch {
+          return false;
+        }
+      }
+
+      function emitDoneAndCleanup(exitCode?: number | null) {
+        try {
+          const payload: Record<string, unknown> = { exitCode: exitCode ?? null };
+          if ((exitCode ?? 0) !== 0) {
+            const detail = extractLogDetail();
+            if (detail) payload.detail = detail;
+          }
+          controller.enqueue(encoder.encode(sseEncode(JSON.stringify(payload), 'done')));
+        } catch {}
+        cleanup();
+      }
+
       try {
-        watcher = watch(logPath, () => {
-          try {
-            const content = readFileSync(logPath, 'utf-8');
-            const currentSize = Buffer.byteLength(content);
-            if (currentSize > offset) {
-              const newContent = Buffer.from(content).slice(offset).toString('utf-8');
-              offset = currentSize;
-              sendContent(newContent);
-            }
-            // Job finished — emit done and close
-            const job = getJob(jobId);
-            if (job?.finishedAt) {
-              if (raw) {
-                emitDone(watcher, job.exitCode);
-              } else {
-                const fullContent = readFileSync(logPath, 'utf-8');
-                if (!fullContent.includes('"type":"result"')) {
-                  emitDone(watcher, job.exitCode);
-                } else {
-                  closeStream(watcher);
-                }
-              }
-            }
-          } catch {}
-        });
+        watcher = watch(logPath, () => { checkFinished(); });
       } catch {}
 
+      // Poll every 1s as a safety net — fs.watch can miss the finishedAt
+      // transition if the last log write happens before the job's exit handler runs.
+      pollTimer = setInterval(() => { checkFinished(); }, 1000);
+
       // Clean up on abort
-      request.signal.addEventListener('abort', () => {
-        watcher?.close();
-        try { controller.close(); } catch {}
-      });
+      request.signal.addEventListener('abort', () => { cleanup(); });
     },
   });
 

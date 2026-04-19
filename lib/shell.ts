@@ -79,11 +79,12 @@ export function execSync(
       maxBuffer: 10 * 1024 * 1024,
     });
     return { stdout: stdout.toString(), stderr: '', exitCode: 0 };
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const err = e as { stdout?: Buffer; stderr?: Buffer; status?: number };
     return {
-      stdout: (e.stdout ?? '').toString(),
-      stderr: (e.stderr ?? '').toString(),
-      exitCode: e.status ?? 1,
+      stdout: (err.stdout ?? '').toString(),
+      stderr: (err.stderr ?? '').toString(),
+      exitCode: err.status ?? 1,
     };
   }
 }

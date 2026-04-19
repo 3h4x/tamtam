@@ -2,8 +2,15 @@ import { writeFileSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { exec } from './shell';
+import { getImproveConfig } from './scheduling';
 
-const LOG_DIR = join(homedir(), 'logs');
+function resolveLogDir(): string {
+  try {
+    return getImproveConfig().logDir;
+  } catch {
+    return join(homedir(), 'logs');
+  }
+}
 
 export async function startJob(
   jobId: string,
@@ -11,6 +18,7 @@ export async function startJob(
   prompt: string,
   cwd: string
 ): Promise<number> {
+  const LOG_DIR = resolveLogDir();
   const { mkdirSync } = await import('fs');
   mkdirSync(LOG_DIR, { recursive: true });
 
@@ -24,7 +32,13 @@ export async function startJob(
     '#!/bin/bash',
     `export PATH="${process.env.PATH || ''}"`,
     `export HOME="${homedir()}"`,
-    `cat "${promptPath}" | ${command}`,
+    // Echo the exact command + stderr redirect so a silent CLI crash leaves
+    // a breadcrumb in the log instead of zero bytes.
+    `echo "[tamtam] launching: ${command.replace(/"/g, '\\"')}" >&2`,
+    `cat "${promptPath}" | ${command} 2>&1`,
+    `__rc=$?`,
+    `echo "[tamtam] claude exited with code $__rc" >&2`,
+    `exit $__rc`,
   ].join('\n');
   writeFileSync(scriptPath, scriptContent);
   chmodSync(scriptPath, 0o755);
@@ -58,9 +72,11 @@ export async function startJob(
 
 export async function getJobStatus(
   jobId: string
-): Promise<{ status: 'running' | 'done'; exitCode: number | null }> {
+): Promise<{ status: 'running' | 'done' | 'unknown'; exitCode: number | null }> {
   const info = await getPm2Info(jobId);
-  if (!info) return { status: 'done', exitCode: -1 };
+  // PM2 doesn't know about this job — could be a non-PM2 spawn (e.g. custom action).
+  // Caller should fall back to process.kill(pid, 0) to verify liveness.
+  if (!info) return { status: 'unknown', exitCode: null };
 
   const pm2Status = info.pm2_env?.status ?? '';
   if (pm2Status === 'online') return { status: 'running', exitCode: null };
@@ -74,12 +90,12 @@ export async function deleteJob(jobId: string): Promise<void> {
   await exec('pm2', ['delete', jobId], { timeout: 10000 });
 }
 
-async function getPm2Info(jobId: string): Promise<any | null> {
+async function getPm2Info(jobId: string): Promise<{ name: string; pid?: number; pm2_env?: { status?: string; exit_code?: number } } | null> {
   try {
     const result = await exec('pm2', ['jlist'], { timeout: 10000 });
     if (result.exitCode !== 0) return null;
-    const processes = JSON.parse(result.stdout);
-    return processes.find((p: any) => p.name === jobId) ?? null;
+    const processes: { name: string }[] = JSON.parse(result.stdout);
+    return processes.find((p) => p.name === jobId) ?? null;
   } catch {
     return null;
   }

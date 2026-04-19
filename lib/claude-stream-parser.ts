@@ -3,7 +3,31 @@ export type ParsedEvent =
   | { type: 'thinking'; text: string }
   | { type: 'tool_use'; name: string; input: string }
   | { type: 'tool_result'; content: string }
-  | { type: 'done'; result: { duration: number; sessionId: string; error: boolean; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreateTokens: number } };
+  | { type: 'done'; result: { duration: number; sessionId: string; error: boolean; errorText?: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreateTokens: number } };
+
+// Tool results arrive as either a string or an array of content blocks
+// ([{type:"text",text:"..."}, {type:"image",...}]). Dumping the array with
+// JSON.stringify would pollute the terminal with raw JSON — extract the
+// text payload so the user sees readable output.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toolContentToString(content: any): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    const parts: string[] = [];
+    for (const block of content) {
+      if (typeof block === 'string') parts.push(block);
+      else if (block?.type === 'text' && typeof block.text === 'string') parts.push(block.text);
+      else if (block?.type === 'image') parts.push('[image]');
+      else parts.push(JSON.stringify(block));
+    }
+    return parts.join('\n');
+  }
+  if (content && typeof content === 'object') {
+    if (typeof content.text === 'string') return content.text;
+    return JSON.stringify(content);
+  }
+  return String(content ?? '');
+}
 
 export function parseStreamLines(content: string): ParsedEvent[] {
   const events: ParsedEvent[] = [];
@@ -15,6 +39,7 @@ export function parseStreamLines(content: string): ParsedEvent[] {
     const trimmed = line.trim();
     if (!trimmed) continue;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let parsed: any;
     try {
       parsed = JSON.parse(trimmed);
@@ -84,7 +109,16 @@ export function parseStreamLines(content: string): ParsedEvent[] {
     ) {
       const content = parsed.content ?? parsed.output ?? '';
       if (content) {
-        events.push({ type: 'tool_result', content: typeof content === 'string' ? content : JSON.stringify(content) });
+        events.push({ type: 'tool_result', content: toolContentToString(content) });
+      }
+    }
+
+    // Tool results from user message events (Write, Edit, Bash, etc.)
+    if (parsed.type === 'user' && parsed.message?.content) {
+      for (const block of Array.isArray(parsed.message.content) ? parsed.message.content : []) {
+        if (block.type === 'tool_result' && block.content) {
+          events.push({ type: 'tool_result', content: toolContentToString(block.content) });
+        }
       }
     }
 
@@ -99,12 +133,14 @@ export function parseStreamLines(content: string): ParsedEvent[] {
           cacheCreateTokens += model.cacheCreationInputTokens ?? 0;
         }
       }
+      const errorText = parsed.is_error && typeof parsed.result === 'string' ? parsed.result : undefined;
       events.push({
         type: 'done',
         result: {
           duration: parsed.duration_ms ?? 0,
           sessionId: parsed.session_id ?? '',
           error: parsed.is_error ?? false,
+          ...(errorText ? { errorText } : {}),
           inputTokens,
           outputTokens,
           cacheReadTokens,

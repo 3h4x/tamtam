@@ -5,6 +5,6 @@ export default defineConfig({
   out: './lib/db/migrations',
   dialect: 'sqlite',
   dbCredentials: {
-    url: './data/tamtam.db',
+    url: './data/db/tamtam.db',
   },
 });

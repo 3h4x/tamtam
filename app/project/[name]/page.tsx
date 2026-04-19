@@ -21,7 +21,6 @@ export default function ProjectPage() {
       onPause={handlePause}
       onResume={handleResume}
       onRefresh={loadProjects}
-      onPush={() => { startFastPolling(); loadProjects() }}
     />
   )
 }

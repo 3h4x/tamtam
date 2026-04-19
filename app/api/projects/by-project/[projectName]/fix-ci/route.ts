@@ -1,18 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { join } from 'path';
-import { checkAuth } from '@/lib/auth';
 import { getImproveConfig } from '@/lib/scheduling';
 import { resolveProjectPath } from '@/lib/project-data';
 import { createJob, listJobs, probeJobStatus, updateJob } from '@/lib/job-storage';
 import { startJob } from '@/lib/pm2-jobs';
 import { exec } from '@/lib/shell';
+import { getPermissionModeFlag } from '@/lib/config';
+import { errMsg } from '@/lib/types';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectName: string }> }
 ) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
   const { projectName } = await params;
 
   const jobs = listJobs();
@@ -85,15 +84,15 @@ Do not commit — just make the code changes.
   try {
     const pid = await startJob(
       job.id,
-      `${claudeBin} --print --dangerously-skip-permissions`,
+      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()}`,
       prompt,
       projPath
     );
     job.pid = pid;
-  } catch (e: any) {
+  } catch (e: unknown) {
     job.finishedAt = Date.now() / 1000;
     job.exitCode = -1;
-    return NextResponse.json({ detail: `Failed to start CI fix: ${e.message}` }, { status: 500 });
+    return NextResponse.json({ detail: `Failed to start CI fix: ${errMsg(e)}` }, { status: 500 });
   }
 
   updateJob(job);

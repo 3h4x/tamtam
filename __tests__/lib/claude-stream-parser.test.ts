@@ -44,6 +44,31 @@ describe('claude-stream-parser', () => {
     }]);
   });
 
+  it('attaches errorText when is_error=true and result is a non-empty string', () => {
+    const line = '{"type":"result","subtype":"success","is_error":true,"duration_ms":9636496,"total_cost_usd":1.5,"session_id":"sess-x","result":"API Error: Stream idle timeout - partial response received"}';
+    const events = parseStreamLines(line);
+    expect(events).toHaveLength(1);
+    const done = events[0];
+    expect(done.type).toBe('done');
+    if (done.type !== 'done') return;
+    expect(done.result.error).toBe(true);
+    expect(done.result.errorText).toBe('API Error: Stream idle timeout - partial response received');
+  });
+
+  it('does not attach errorText on successful runs', () => {
+    const line = '{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"session_id":"s","result":"done"}';
+    const events = parseStreamLines(line);
+    if (events[0]?.type !== 'done') throw new Error('expected done');
+    expect(events[0].result.errorText).toBeUndefined();
+  });
+
+  it('does not attach errorText when result is empty string even on error', () => {
+    const line = '{"type":"result","subtype":"error","is_error":true,"duration_ms":50,"session_id":"s","result":""}';
+    const events = parseStreamLines(line);
+    if (events[0]?.type !== 'done') throw new Error('expected done');
+    expect(events[0].result.errorText).toBeUndefined();
+  });
+
   it('ignores system/init/hook events', () => {
     const lines = [
       '{"type":"system","subtype":"init","session_id":"x"}',
@@ -121,5 +146,100 @@ describe('claude-stream-parser', () => {
     const line = '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hi"}]}}';
     const events = parseStreamLines(line);
     expect(events).toEqual([]);
+  });
+
+  // Regression: the parser used to JSON.stringify any non-string tool_result
+  // content, which made structured tool outputs appear in the terminal as raw
+  // `[{"type":"text","text":"..."}]` JSON blobs — exactly what the user sees
+  // in the release meta-terminal review section.
+  describe('tool_result content extraction', () => {
+    it('extracts text from array-of-blocks content (system tool_result)', () => {
+      const line = JSON.stringify({
+        type: 'system', subtype: 'tool_result',
+        content: [{ type: 'text', text: 'file written' }],
+      });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([{ type: 'tool_result', content: 'file written' }]);
+    });
+
+    it('joins multiple text blocks with newlines', () => {
+      const line = JSON.stringify({
+        type: 'user',
+        message: {
+          content: [{
+            type: 'tool_result',
+            content: [
+              { type: 'text', text: 'line 1' },
+              { type: 'text', text: 'line 2' },
+            ],
+          }],
+        },
+      });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([{ type: 'tool_result', content: 'line 1\nline 2' }]);
+    });
+
+    it('renders image blocks as [image] placeholder', () => {
+      const line = JSON.stringify({
+        type: 'user',
+        message: {
+          content: [{
+            type: 'tool_result',
+            content: [
+              { type: 'text', text: 'screenshot attached:' },
+              { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'xxxx' } },
+            ],
+          }],
+        },
+      });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([{ type: 'tool_result', content: 'screenshot attached:\n[image]' }]);
+    });
+
+    it('passes through plain string content unchanged', () => {
+      const line = JSON.stringify({
+        type: 'system', subtype: 'tool_result', content: 'plain string output',
+      });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([{ type: 'tool_result', content: 'plain string output' }]);
+    });
+
+    it('extracts text property from object-shaped content', () => {
+      const line = JSON.stringify({
+        type: 'user',
+        message: { content: [{ type: 'tool_result', content: { text: 'single object text' } }] },
+      });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([{ type: 'tool_result', content: 'single object text' }]);
+    });
+
+    it('falls back to JSON stringification for truly unknown shapes', () => {
+      const line = JSON.stringify({
+        type: 'user',
+        message: { content: [{ type: 'tool_result', content: { foo: 'bar', baz: 42 } }] },
+      });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([{ type: 'tool_result', content: '{"foo":"bar","baz":42}' }]);
+    });
+
+    it('does not emit raw Claude usage/metadata objects as text', () => {
+      // This is the shape the user saw dumped as raw JSON in the terminal.
+      // parseStreamLines should ignore usage-only message_delta events.
+      const line = JSON.stringify({
+        type: 'stream_event',
+        event: {
+          type: 'message_delta',
+          delta: { stop_reason: 'end_turn' },
+          usage: {
+            output_tokens: 20,
+            cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 1936 },
+            service_tier: 'standard',
+          },
+        },
+        parent_tool_use_id: null,
+      });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([]);
+    });
   });
 });

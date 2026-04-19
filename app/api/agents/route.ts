@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { checkAuth } from '@/lib/auth';
 import { installAgentSchedule } from '@/lib/agent-scheduler';
+import { errMsg } from '@/lib/types';
 
 export async function GET(request: NextRequest) {
   const project = request.nextUrl.searchParams.get('project');
@@ -16,9 +16,6 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
-
   const body = await request.json();
   const { name, project, skillIds, model, prompt, schedule, runner } = body;
 
@@ -50,8 +47,8 @@ export async function POST(request: NextRequest) {
   if (agent.schedule && agent.prompt) {
     try {
       await installAgentSchedule(id, agent.schedule, agent.prompt, agent.runner, agent.project, agent.name);
-    } catch (e: any) {
-      console.error(`Failed to install schedule for agent ${id}:`, e.message);
+    } catch (e: unknown) {
+      console.error(`Failed to install schedule for agent ${id}:`, errMsg(e));
     }
   }
 

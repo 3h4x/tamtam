@@ -16,7 +16,13 @@ function createTestDb() {
       enabled INTEGER DEFAULT 0,
       github TEXT,
       priority TEXT,
-      custom_actions TEXT
+      custom_actions TEXT,
+      test_command TEXT,
+      test_cron_enabled INTEGER DEFAULT 0,
+      test_cron_schedule TEXT,
+      auto_push_enabled INTEGER DEFAULT 0,
+      last_push_error TEXT,
+      last_push_at REAL
     );
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
@@ -53,19 +59,6 @@ describe('action API (GET and PUT)', () => {
       schema,
     }));
 
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: (request: NextRequest) => {
-        const token = process.env.Z_API_TOKEN;
-        if (!token) return null;
-        const authHeader = request.headers.get('authorization') ?? '';
-        if (!authHeader.startsWith('Bearer ') || authHeader.slice(7) !== token) {
-          const { NextResponse } = require('next/server');
-          return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-        }
-        return null;
-      },
-    }));
-
     const mod = await import('@/app/api/projects/by-project/[projectName]/action/route');
     GET = mod.GET;
     PUT = mod.PUT;
@@ -73,7 +66,6 @@ describe('action API (GET and PUT)', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
   });
 
   describe('GET /projects/by-project/[projectName]/action', () => {
@@ -144,14 +136,6 @@ describe('action API (GET and PUT)', () => {
       expect(data.actions).toEqual([]);
     });
 
-    it('does not require authentication', async () => {
-      process.env.Z_API_TOKEN = 'secret';
-      const request = new NextRequest('http://localhost/api/projects/by-project/proj1/action');
-      const response = await GET(request, {
-        params: Promise.resolve({ projectName: 'proj1' }),
-      });
-      expect(response.status).toBe(200);
-    });
   });
 
   describe('PUT /projects/by-project/[projectName]/action', () => {
@@ -160,18 +144,6 @@ describe('action API (GET and PUT)', () => {
         .insert(schema.projects)
         .values({ name: 'proj1', path: '/path/to/proj1' })
         .run();
-    });
-
-    it('requires authentication when Z_API_TOKEN is set', async () => {
-      process.env.Z_API_TOKEN = 'secret';
-      const request = new NextRequest('http://localhost/api/projects/by-project/proj1/action', {
-        method: 'PUT',
-        body: JSON.stringify({ actions: [] }),
-      });
-      const response = await PUT(request, {
-        params: Promise.resolve({ projectName: 'proj1' }),
-      });
-      expect(response.status).toBe(401);
     });
 
     it('validates that actions is an array', async () => {

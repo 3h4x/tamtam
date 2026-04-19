@@ -4,10 +4,10 @@ import * as schema from './schema';
 import { join } from 'path';
 import { mkdirSync } from 'fs';
 
-const dataDir = join(process.cwd(), 'data');
-mkdirSync(dataDir, { recursive: true });
+const dbDir = join(process.cwd(), 'data', 'db');
+mkdirSync(dbDir, { recursive: true });
 
-const dbPath = join(dataDir, 'tamtam.db');
+const dbPath = join(dbDir, 'tamtam.db');
 
 const sqlite = new Database(dbPath);
 sqlite.pragma('journal_mode = WAL');
@@ -101,6 +101,64 @@ try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN context_meta TEXT');
 } catch {}
 
+// Migrate: add test_command and cron columns to projects if missing
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN test_command TEXT');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN test_cron_enabled INTEGER DEFAULT 0');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN test_cron_schedule TEXT');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN auto_push_enabled INTEGER DEFAULT 0');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN parent_job_id TEXT');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN last_push_error TEXT');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN last_push_at REAL');
+} catch {}
+
+// Migrate: add enabled column to agents if missing
+try {
+  sqlite.exec('ALTER TABLE agents ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1');
+} catch {}
+
+// gh_issues_cache table
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS gh_issues_cache (
+    project TEXT PRIMARY KEY,
+    repo TEXT NOT NULL,
+    prs TEXT NOT NULL DEFAULT '[]',
+    issues TEXT NOT NULL DEFAULT '[]',
+    fetched_at REAL NOT NULL
+  );
+`);
+
+// Migrate: add token/duration/session columns to jobs if missing
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN duration_ms INTEGER');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN input_tokens INTEGER');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN output_tokens INTEGER');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN cache_read_tokens INTEGER');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN cache_create_tokens INTEGER');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN session_id TEXT');
+} catch {}
 
 export const db = drizzle(sqlite, { schema });
 export { schema };

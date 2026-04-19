@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { checkAuth } from '@/lib/auth';
-
+import { reloadConfig } from '@/lib/config';
 const SETTING_KEYS = [
   'github_owner',
   'claude_bin',
@@ -14,6 +13,12 @@ const SETTING_KEYS = [
   'workspace_path',
   'base_prompt',
   'default_model',
+  'permission_mode',
+  'commit_style',
+  'review_verdict_rules',
+  'fix_ci_max_retries',
+  'fix_ci_retry_window_seconds',
+  'fix_ci_fast_crash_ms',
 ] as const;
 
 export async function GET() {
@@ -26,9 +31,6 @@ export async function GET() {
 }
 
 export async function PATCH(request: NextRequest) {
-  const authError = checkAuth(request);
-  if (authError) return authError;
-
   const body = await request.json();
 
   for (const [key, value] of Object.entries(body)) {
@@ -46,5 +48,6 @@ export async function PATCH(request: NextRequest) {
     }
   }
 
+  reloadConfig();
   return NextResponse.json({ status: 'ok' });
 }

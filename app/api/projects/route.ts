@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { fetchProjectData } from '@/lib/project-data';
+import type { Task } from '@/lib/types';
 
 export async function GET() {
   const data = await fetchProjectData();
-  const tasks: any[] = [];
+  const tasks: Task[] = [];
   for (const [projectName, projectTasks] of Object.entries(data.projects)) {
     for (const task of projectTasks) {
       task.project = projectName;

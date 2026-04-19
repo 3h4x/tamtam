@@ -1,0 +1,18 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { startRelease } from '@/lib/start-release';
+
+export async function POST(
+  _request: NextRequest,
+  { params }: { params: Promise<{ projectName: string }> }
+) {
+  const { projectName } = await params;
+  const r = await startRelease(projectName);
+  if (!r.ok) return NextResponse.json({ detail: r.detail }, { status: r.status });
+  return NextResponse.json({
+    status: 'started',
+    step: r.step,
+    job_id: r.jobId,
+    release_job_id: r.releaseJobId,
+    message: r.message,
+  });
+}

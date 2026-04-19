@@ -1,21 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
-function makeAuthMock() {
-  return {
-    checkAuth: (req: NextRequest) => {
-      const token = process.env.Z_API_TOKEN;
-      if (!token) return null;
-      const auth = req.headers.get('authorization') ?? '';
-      if (!auth.startsWith('Bearer ') || auth.slice(7) !== token) {
-        const { NextResponse } = require('next/server');
-        return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-      }
-      return null;
-    },
-  };
-}
-
 // ─── GET /api/projects/by-project/[name]/push/preview ─────────────────────────
 
 describe('GET /api/projects/by-project/[name]/push/preview', () => {
@@ -29,7 +14,7 @@ describe('GET /api/projects/by-project/[name]/push/preview', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
 
-    vi.doMock('@/lib/auth', () => makeAuthMock());
+
     vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
 
@@ -39,14 +24,7 @@ describe('GET /api/projects/by-project/[name]/push/preview', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
-  });
 
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push/preview');
-    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(401);
   });
 
   it('returns 404 if project not found', async () => {
@@ -116,7 +94,7 @@ describe('POST /api/projects/by-project/[name]/push', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
 
-    vi.doMock('@/lib/auth', () => makeAuthMock());
+
     vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
 
@@ -126,14 +104,7 @@ describe('POST /api/projects/by-project/[name]/push', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
-  });
 
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push', { method: 'POST' });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(401);
   });
 
   it('returns 404 if project not found', async () => {
@@ -232,7 +203,7 @@ describe('POST /api/projects/by-project/[name]/push/execute', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
 
-    vi.doMock('@/lib/auth', () => makeAuthMock());
+
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: vi.fn(),
@@ -246,17 +217,7 @@ describe('POST /api/projects/by-project/[name]/push/execute', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
-  });
 
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push/execute', {
-      method: 'POST',
-      body: JSON.stringify({ message: 'chore: update' }),
-    });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(401);
   });
 
   it('returns 404 if project not found', async () => {
@@ -351,7 +312,7 @@ describe('POST /api/projects/by-project/[name]/push/generate', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
 
-    vi.doMock('@/lib/auth', () => makeAuthMock());
+
     vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/scheduling', () => ({
@@ -364,16 +325,7 @@ describe('POST /api/projects/by-project/[name]/push/generate', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
-  });
 
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret';
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push/generate', {
-      method: 'POST',
-    });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(401);
   });
 
   it('returns 404 if project not found', async () => {
@@ -416,9 +368,129 @@ describe('POST /api/projects/by-project/[name]/push/generate', () => {
       method: 'POST',
     });
     const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(500);
     const data = await res.json();
     expect(data.options).toEqual([]);
     expect(data.error).toContain('exec failed');
+  });
+
+  it('always uses haiku model regardless of project settings', async () => {
+    execMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('--print')) {
+        return Promise.resolve({ exitCode: 0, stdout: '1. feat: add thing', stderr: '' });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push/generate', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.model).toBe('haiku');
+
+    // Verify claude was called with --model haiku
+    const claudeCall = execMock.mock.calls.find(([, args]: any) => args.includes('--print'));
+    expect(claudeCall![1]).toContain('haiku');
+  });
+
+  it('filters out lines that do not match conventional commit type prefix', async () => {
+    execMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('--print')) {
+        return Promise.resolve({
+          exitCode: 0,
+          stdout: [
+            '1. feat: valid commit',
+            '2. This is just prose and should be filtered',
+            '3. fix: another valid one',
+            '4. random text without type',
+            '5. chore: cleanup',
+          ].join('\n'),
+          stderr: '',
+        });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push/generate', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.options).toHaveLength(3);
+    expect(data.options).toContain('feat: valid commit');
+    expect(data.options).toContain('fix: another valid one');
+    expect(data.options).toContain('chore: cleanup');
+    expect(data.options).not.toContain('This is just prose and should be filtered');
+  });
+
+  it('strips backtick and quote wrapping before checking commit type', async () => {
+    execMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('--print')) {
+        return Promise.resolve({
+          exitCode: 0,
+          stdout: [
+            '1. `feat: wrapped in backticks`',
+            "2. 'fix: single quotes'",
+            '3. "docs: double quotes"',
+            '4. *refactor: asterisk wrapped*',
+          ].join('\n'),
+          stderr: '',
+        });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push/generate', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.options).toHaveLength(4);
+    expect(data.options[0]).toBe('feat: wrapped in backticks');
+    expect(data.options[1]).toBe('fix: single quotes');
+    expect(data.options[2]).toBe('docs: double quotes');
+    expect(data.options[3]).toBe('refactor: asterisk wrapped');
+  });
+
+  it('accepts scoped commit type like feat(ui):', async () => {
+    execMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('--print')) {
+        return Promise.resolve({
+          exitCode: 0,
+          stdout: '1. feat(ui): add button component',
+          stderr: '',
+        });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push/generate', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.options).toContain('feat(ui): add button component');
+  });
+
+  it('returns empty options when all lines fail commit type filter', async () => {
+    execMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('--print')) {
+        return Promise.resolve({
+          exitCode: 0,
+          stdout: 'Here are some commit options:\n- option one\n- option two',
+          stderr: '',
+        });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push/generate', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.options).toEqual([]);
+    expect(data.error).toBeNull();
   });
 });

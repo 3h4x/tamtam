@@ -39,19 +39,6 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     createJobMock = vi.fn().mockImplementation(() => makeJob());
     updateJobMock = vi.fn();
 
-    vi.doMock('@/lib/auth', () => ({
-      checkAuth: (request: NextRequest) => {
-        const token = process.env.Z_API_TOKEN;
-        if (!token) return null;
-        const authHeader = request.headers.get('authorization') ?? '';
-        if (!authHeader.startsWith('Bearer ') || authHeader.slice(7) !== token) {
-          const { NextResponse } = require('next/server');
-          return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-        }
-        return null;
-      },
-    }));
-
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
@@ -73,6 +60,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
 
     vi.doMock('@/lib/skills', () => ({
       SKILLS_DIR: skillsDir,
+      DATA_SKILLS_DIR: join(skillsDir, 'data-skills'),
     }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
@@ -81,7 +69,6 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
 
   afterEach(() => {
     vi.resetModules();
-    delete process.env.Z_API_TOKEN;
     rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -192,24 +179,101 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     expect(data.detail).toContain('pm2 crashed');
   });
 
-  it('requires authentication when Z_API_TOKEN is set', async () => {
-    process.env.Z_API_TOKEN = 'secret-token';
+  it('prepends persona content on follow-up turns (resumeSessionId set)', async () => {
+    const docsSkillsDir = join(skillsDir, 'docs', 'skills');
+    mkdirSync(docsSkillsDir, { recursive: true });
+    writeFileSync(join(docsSkillsDir, 'reviewer.md'), '# Senior reviewer persona');
+
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
       method: 'POST',
-      body: JSON.stringify({ prompt: 'hello' }),
+      body: JSON.stringify({
+        prompt: 'follow-up message',
+        persona: 'reviewer',
+        resumeSessionId: 'sess-abc-123',
+      }),
     });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(401);
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    expect(fullPrompt).toContain('# Senior reviewer persona');
+    expect(fullPrompt).toContain('follow-up message');
   });
 
-  it('passes auth with correct Bearer token', async () => {
-    process.env.Z_API_TOKEN = 'my-token';
+  it('supports multiple personas via personas array on follow-up', async () => {
+    const docsSkillsDir = join(skillsDir, 'docs', 'skills');
+    mkdirSync(docsSkillsDir, { recursive: true });
+    writeFileSync(join(docsSkillsDir, 'a.md'), 'PERSONA-A');
+    writeFileSync(join(docsSkillsDir, 'b.md'), 'PERSONA-B');
+
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
       method: 'POST',
-      body: JSON.stringify({ prompt: 'hello' }),
-      headers: { Authorization: 'Bearer my-token' },
+      body: JSON.stringify({
+        prompt: 'do it',
+        personas: ['a', 'b'],
+        resumeSessionId: 'sess-xyz',
+      }),
     });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(200);
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    expect(fullPrompt).toContain('PERSONA-A');
+    expect(fullPrompt).toContain('PERSONA-B');
+    expect(fullPrompt).toContain('do it');
+  });
+
+  it('does NOT inject base_prompt on follow-up turns', async () => {
+    vi.resetModules();
+    // Re-mock with a recognizable base_prompt via config
+    vi.doMock('@/lib/config', () => ({
+      withBasePrompt: (p: string) => `BASE-PROMPT-SENTINEL\n\n---\n\n${p}`,
+      getPermissionModeFlag: () => '--permission-mode bypassPermissions',
+    }));
+    // Re-apply other mocks that resetModules cleared
+    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: join(tempDir, 'logs') }),
+    }));
+    vi.doMock('@/lib/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock }));
+    vi.doMock('@/lib/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/skills', () => ({ SKILLS_DIR: skillsDir, DATA_SKILLS_DIR: join(skillsDir, 'data-skills') }));
+    const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
+    const POST2 = mod.POST;
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'follow up', resumeSessionId: 'sess-1' }),
+    });
+    await POST2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    expect(fullPrompt).not.toContain('BASE-PROMPT-SENTINEL');
+    expect(fullPrompt).toContain('follow up');
+  });
+
+  it('DOES inject base_prompt on initial turn (no resumeSessionId)', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/config', () => ({
+      withBasePrompt: (p: string) => `BASE-PROMPT-SENTINEL\n\n---\n\n${p}`,
+      getPermissionModeFlag: () => '--permission-mode bypassPermissions',
+    }));
+    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: join(tempDir, 'logs') }),
+    }));
+    vi.doMock('@/lib/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock }));
+    vi.doMock('@/lib/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/skills', () => ({ SKILLS_DIR: skillsDir, DATA_SKILLS_DIR: join(skillsDir, 'data-skills') }));
+    const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
+    const POST2 = mod.POST;
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'first message' }),
+    });
+    await POST2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    expect(fullPrompt).toContain('BASE-PROMPT-SENTINEL');
+    expect(fullPrompt).toContain('first message');
   });
 });
