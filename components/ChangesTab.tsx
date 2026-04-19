@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { fetchChanges, fetchChangeDiff } from '@/lib/client-api'
+import { fetchChanges, fetchChangeDiff, pullProject, PullDivergedError } from '@/lib/client-api'
 import type { ChangeFile, ChangeStatus, ChangesResponse } from '@/lib/client-api'
 
 const STATUS_LABEL: Record<ChangeStatus, string> = {
@@ -89,6 +89,9 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [diffs, setDiffs] = useState<Record<string, DiffEntry>>({})
+  const [pulling, setPulling] = useState(false)
+  const [pullError, setPullError] = useState<string | null>(null)
+  const [diverged, setDiverged] = useState(false)
 
   const load = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
     if (mode === 'refresh') setRefreshing(true)
@@ -103,6 +106,24 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
       setRefreshing(false)
     }
   }, [projectName])
+
+  const doPull = async (strategy: 'ff-only' | 'merge' | 'rebase' = 'ff-only') => {
+    setPulling(true)
+    setPullError(null)
+    setDiverged(false)
+    try {
+      await pullProject(projectName, strategy)
+      await load('refresh')
+    } catch (err) {
+      if (err instanceof PullDivergedError) {
+        setDiverged(true)
+      } else {
+        setPullError(err instanceof Error ? err.message : 'Pull failed')
+      }
+    } finally {
+      setPulling(false)
+    }
+  }
 
   useEffect(() => {
     load('initial')
@@ -178,6 +199,64 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
             <span className="text-text-secondary text-xs uppercase tracking-wider font-medium">Branch</span>
             <code className="font-mono text-xs bg-bg-tertiary px-1.5 py-0.5 rounded text-text-primary">{data.branch}</code>
           </div>
+        )}
+        {data.behind > 0 && !diverged && (
+          <div className="flex items-center gap-2">
+            <span className={`text-xs font-medium ${data.totalFiles > 0 ? 'text-text-tertiary' : 'text-status-warning'}`}>
+              ↓ {data.behind} commit{data.behind !== 1 ? 's' : ''} behind origin/{data.branch}
+            </span>
+            <button
+              className={`px-2 py-1 text-xs border rounded-md font-medium disabled:cursor-not-allowed ${
+                data.totalFiles > 0
+                  ? 'border-border bg-bg-secondary text-text-tertiary opacity-50'
+                  : 'bg-status-warning/15 border-status-warning/40 text-status-warning hover:bg-status-warning/25 cursor-pointer'
+              }`}
+              onClick={() => doPull('ff-only')}
+              disabled={pulling || data.totalFiles > 0}
+              title={
+                data.totalFiles > 0
+                  ? `Commit or stash your ${data.totalFiles} local change${data.totalFiles !== 1 ? 's' : ''} before pulling`
+                  : `git pull --ff-only on ${data.branch}`
+              }
+            >
+              {pulling ? 'Pulling…' : 'Pull'}
+            </button>
+          </div>
+        )}
+        {diverged && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-status-error font-medium">Branches diverged — choose strategy:</span>
+            <button
+              className="px-2 py-1 text-xs bg-status-info/15 border border-status-info/40 text-status-info rounded-md hover:bg-status-info/25 cursor-pointer disabled:opacity-50 font-medium"
+              onClick={() => doPull('rebase')}
+              disabled={pulling}
+              title="git pull --rebase (replay your commits on top of remote)"
+            >
+              {pulling ? 'Working…' : 'Rebase'}
+            </button>
+            <button
+              className="px-2 py-1 text-xs bg-bg-tertiary border border-border text-text-primary rounded-md hover:bg-bg-secondary cursor-pointer disabled:opacity-50 font-medium"
+              onClick={() => doPull('merge')}
+              disabled={pulling}
+              title="git pull --no-ff (create a merge commit)"
+            >
+              {pulling ? 'Working…' : 'Merge'}
+            </button>
+            <button
+              className="px-2 py-1 text-xs text-text-tertiary hover:text-text-secondary cursor-pointer"
+              onClick={() => setDiverged(false)}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        {data.ahead > 0 && data.behind === 0 && (
+          <span className="text-xs text-status-info">
+            ↑ {data.ahead} commit{data.ahead !== 1 ? 's' : ''} ahead of origin/{data.branch}
+          </span>
+        )}
+        {pullError && (
+          <span className="text-xs text-status-error">{pullError}</span>
         )}
         <button
           className="ml-auto px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-60"

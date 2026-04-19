@@ -129,6 +129,17 @@ try {
   sqlite.exec('ALTER TABLE agents ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1');
 } catch {}
 
+// gh_issues_cache table
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS gh_issues_cache (
+    project TEXT PRIMARY KEY,
+    repo TEXT NOT NULL,
+    prs TEXT NOT NULL DEFAULT '[]',
+    issues TEXT NOT NULL DEFAULT '[]',
+    fetched_at REAL NOT NULL
+  );
+`);
+
 // Migrate: add token/duration/session columns to jobs if missing
 try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN duration_ms INTEGER');

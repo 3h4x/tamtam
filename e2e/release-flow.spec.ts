@@ -323,6 +323,77 @@ test.describe('Release flow — review verdict handling', () => {
     await expect(page.getByTitle(/NEEDS ATTENTION/i).first()).toBeVisible();
   });
 
+  test('Ship path: old test ✓ and old review ✓ stay visible while commit+push run', async ({ page }) => {
+    // Regression for the "clicked Ship but test/review showed ○" bug.
+    // When the fast-path skips test+review (LGTM already), the pipeline
+    // strip must still render those earlier steps as ✓ done — the prior
+    // LGTM is what authorized the ship. testJob/reviewJob live in the last
+    // 24h so they should be picked up.
+    const now = sec();
+    const olderTest = {
+      id: 'demoproj-test-old', project: 'demoproj', kind: 'test' as const,
+      status: 'done' as const, exit_code: 0,
+      started_at: now - 3 * 60 * 60, finished_at: now - 3 * 60 * 60 + 30,
+    };
+    const olderReview = {
+      id: 'demoproj-review-old-lgtm', project: 'demoproj', kind: 'review' as const,
+      status: 'done' as const, exit_code: 0, verdict: 'LGTM',
+      started_at: now - 2.5 * 60 * 60, finished_at: now - 2.5 * 60 * 60 + 60,
+      session_id: 'sess-old-lgtm',
+    };
+    const runningPush = {
+      id: 'demoproj-push-ship', project: 'demoproj', kind: 'push' as const,
+      status: 'running' as const, exit_code: null,
+      started_at: now - 5, finished_at: null,
+    };
+    const project = await mockFlow(page, {
+      totalChanges: 2, reviewed: true, unpushed: 0, testCommand: 'pnpm test',
+      jobs: [olderTest, olderReview, runningPush],
+    });
+    await page.goto(`/project/${project}/terminal`);
+    // All four steps must be visible — test/review carrying their earlier
+    // ✓ state and commit/push spinning.
+    await expect(page.getByTitle(/tests passed/i).first()).toBeVisible();
+    await expect(page.getByTitle(/LGTM/i).first()).toBeVisible();
+    // Strip is shown (pipelineRunning because push job is running).
+    await expect(page.locator('text=/test.*→.*review.*→.*commit.*→.*push/i').first()).toBeVisible();
+  });
+
+  test('Ship button label + tooltip visible when LGTM + reviewed tree', async ({ page }) => {
+    const now = sec();
+    const project = await mockFlow(page, {
+      totalChanges: 3, reviewed: true, unpushed: 0, testCommand: 'pnpm test',
+      jobs: [{
+        id: 'demoproj-review-fresh-lgtm', project: 'demoproj', kind: 'review',
+        status: 'done', exit_code: 0, verdict: 'LGTM',
+        started_at: now - 300, finished_at: now - 240,
+        session_id: 'sess-fresh',
+      }],
+    });
+    await page.goto(`/project/${project}`);
+    const ship = page.getByRole('button', { name: /🚢 Ship \(LGTM\)/ });
+    await expect(ship).toBeVisible();
+    await expect(ship).toHaveAttribute('title', /skips test \+ review/i);
+  });
+
+  test('Release button label (not Ship) when review is unreviewed', async ({ page }) => {
+    const now = sec();
+    const project = await mockFlow(page, {
+      // reviewed=false means hasUnreviewed=true — Ship path must NOT trigger
+      totalChanges: 3, reviewed: false, unpushed: 0, testCommand: 'pnpm test',
+      jobs: [{
+        id: 'demoproj-review-stale', project: 'demoproj', kind: 'review',
+        status: 'done', exit_code: 0, verdict: 'LGTM',
+        started_at: now - 7200, finished_at: now - 7100,
+      }],
+    });
+    await page.goto(`/project/${project}`);
+    const release = page.getByRole('button', { name: /🚀 Release/ });
+    await expect(release).toBeVisible();
+    // And the Ship label must NOT be present.
+    await expect(page.getByRole('button', { name: /🚢 Ship/ })).toHaveCount(0);
+  });
+
   test('review terminal renders tool_result text, not raw JSON blob', async ({ page }) => {
     // Regression for the "review didn't parse JSON in terminal output" bug:
     // a tool_result with structured content ([{type:"text",text:"..."}])

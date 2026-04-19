@@ -50,11 +50,11 @@ export async function GET(
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
 
-  const [nameStatus, numstat, untracked, branch] = await Promise.all([
+  const [nameStatus, numstat, untracked, porcelain] = await Promise.all([
     exec('git', ['-C', projPath, 'diff', 'HEAD', '--name-status'], { timeout: 10000 }),
     exec('git', ['-C', projPath, 'diff', 'HEAD', '--numstat'], { timeout: 10000 }),
     exec('git', ['-C', projPath, 'ls-files', '--others', '--exclude-standard'], { timeout: 10000 }),
-    exec('git', ['-C', projPath, 'rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 5000 }),
+    exec('git', ['-C', projPath, 'status', '--porcelain=v2', '--branch'], { timeout: 5000 }),
   ]);
 
   const statMap: Record<string, { additions: number; deletions: number; binary: boolean }> = {};
@@ -128,11 +128,65 @@ export async function GET(
   const totalAdditions = files.reduce((sum, f) => sum + f.additions, 0);
   const totalDeletions = files.reduce((sum, f) => sum + f.deletions, 0);
 
+  // Parse branch name and ahead/behind from porcelain v2 (no network)
+  const porcelainLines = porcelain.stdout.split('\n');
+  const branchName = porcelainLines.find((l) => l.startsWith('# branch.head '))?.slice('# branch.head '.length).trim() || null;
+  let behind = 0;
+  let ahead = 0;
+  const abLine = porcelainLines.find((l) => l.startsWith('# branch.ab '));
+  if (abLine) {
+    const m = abLine.match(/\+(\d+)\s+-(\d+)/);
+    if (m) { ahead = parseInt(m[1], 10); behind = parseInt(m[2], 10); }
+  }
+
   return NextResponse.json({
     files,
     totalFiles: files.length,
     totalAdditions,
     totalDeletions,
-    branch: branch.stdout.trim() || null,
+    branch: branchName,
+    behind,
+    ahead,
   });
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ projectName: string }> }
+) {
+  const { projectName } = await params;
+  const body = await request.json().catch(() => ({}));
+  const strategy: 'ff-only' | 'merge' | 'rebase' = body.strategy || 'ff-only';
+
+  const projPath = resolveProjectPath(projectName);
+  if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
+
+  const args =
+    strategy === 'rebase'
+      ? ['pull', '--rebase']
+      : strategy === 'merge'
+      ? ['pull', '--no-ff']
+      : ['pull', '--ff-only'];
+
+  const result = await exec('git', ['-C', projPath, ...args], { timeout: 30000 });
+
+  if (result.exitCode !== 0) {
+    const stderr = result.stderr.trim();
+    const diverged =
+      stderr.includes('Not possible to fast-forward') ||
+      stderr.includes('diverged') ||
+      stderr.includes('need to specify how to reconcile');
+    if (diverged) {
+      return NextResponse.json({ detail: 'diverged', diverged: true }, { status: 409 });
+    }
+    // Strip git hint lines from the error shown to the user
+    const clean = stderr
+      .split('\n')
+      .filter((l) => !l.startsWith('hint:'))
+      .join('\n')
+      .trim();
+    return NextResponse.json({ detail: clean || 'git pull failed' }, { status: 422 });
+  }
+
+  return NextResponse.json({ status: 'ok', output: result.stdout.trim() });
 }

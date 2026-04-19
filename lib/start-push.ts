@@ -132,6 +132,22 @@ async function runPush(
     return r;
   };
 
+  // Auto-rebase if behind remote to prevent non-fast-forward rejection
+  const branchStatusR = await exec('git', ['-C', projPath, 'status', '--porcelain=v2', '--branch'], { timeout: 5000 });
+  const abLine = branchStatusR.stdout.split('\n').find(l => l.startsWith('# branch.ab '));
+  const behind = abLine ? parseInt(abLine.match(/-(\d+)/)?.[1] ?? '0', 10) : 0;
+  if (behind > 0) {
+    log(`\n# ${behind} commit(s) behind remote — rebasing before push\n`);
+    const rebaseR = await exec('git', ['-C', projPath, 'pull', '--rebase'], { timeout: 60000 });
+    if (rebaseR.stdout) log(rebaseR.stdout);
+    if (rebaseR.stderr) log(rebaseR.stderr);
+    if (rebaseR.exitCode !== 0) {
+      const detail = (rebaseR.stderr.trim() || rebaseR.stdout.trim() || 'rebase failed').slice(0, 2000);
+      return { ok: false, status: 409, detail: `Rebase failed before push: ${detail}` };
+    }
+    log(`\n# rebase succeeded\n`);
+  }
+
   let pushR = await tryPush();
 
   // If no upstream branch is set, detect current branch and set it.

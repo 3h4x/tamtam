@@ -118,6 +118,79 @@ export async function testProject(projectName: string): Promise<{ status: string
   return response.json()
 }
 
+export interface GhLabel {
+  name: string
+  color: string
+}
+
+export interface GhAuthor {
+  login: string
+}
+
+export interface GhPullRequest {
+  number: number
+  title: string
+  state: string
+  author: GhAuthor
+  url: string
+  createdAt: string
+  updatedAt: string
+  headRefName: string
+  baseRefName: string
+  isDraft: boolean
+  reviewDecision: string | null
+  labels: GhLabel[]
+  body: string
+}
+
+export interface GhIssue {
+  number: number
+  title: string
+  state: string
+  author: GhAuthor
+  url: string
+  createdAt: string
+  updatedAt: string
+  assignees: GhAuthor[]
+  labels: GhLabel[]
+  body: string
+}
+
+export interface IssuesResponse {
+  repo: string
+  prs: GhPullRequest[]
+  issues: GhIssue[]
+  error: string | null
+  cached: boolean
+  cachedAt: number | null
+}
+
+export async function fetchIssuesAndPRs(projectName: string, forceRefresh = false): Promise<IssuesResponse> {
+  const url = `${API_BASE}/by-project/${projectName}/issues${forceRefresh ? '?refresh=1' : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw new Error(`Failed to fetch issues: ${response.statusText}`)
+  }
+  return response.json()
+}
+
+export async function mergePR(
+  projectName: string,
+  prNumber: number,
+  mergeMethod: 'merge' | 'squash' | 'rebase' = 'merge'
+): Promise<{ status: string; pr: number; repo: string }> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/issues`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prNumber, mergeMethod }),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error((data as { detail?: string }).detail || `Merge failed: ${response.statusText}`)
+  }
+  return response.json()
+}
+
 export interface Persona {
   path: string
   category: string
@@ -266,6 +339,8 @@ export interface ChangesResponse {
   totalAdditions: number
   totalDeletions: number
   branch: string | null
+  behind: number
+  ahead: number
 }
 
 export async function fetchChanges(projectName: string): Promise<ChangesResponse> {
@@ -273,6 +348,35 @@ export async function fetchChanges(projectName: string): Promise<ChangesResponse
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
     throw new Error(data.detail || `Failed to fetch changes: ${response.statusText}`)
+  }
+  return response.json()
+}
+
+export async function fetchBehind(projectName: string): Promise<{ behind: number; ahead: number }> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/behind`)
+  if (!response.ok) return { behind: 0, ahead: 0 }
+  return response.json()
+}
+
+export class PullDivergedError extends Error {
+  constructor() { super('diverged') }
+}
+
+export async function pullProject(
+  projectName: string,
+  strategy: 'ff-only' | 'merge' | 'rebase' = 'ff-only'
+): Promise<{ status: string; output: string }> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/changes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ strategy }),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    if (response.status === 409 && (data as { diverged?: boolean }).diverged) {
+      throw new PullDivergedError()
+    }
+    throw new Error((data as { detail?: string }).detail || `Pull failed: ${response.statusText}`)
   }
   return response.json()
 }

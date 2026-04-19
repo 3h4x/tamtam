@@ -74,3 +74,11 @@ export const ghStatus = sqliteTable('gh_status', {
   localHeadSha: text('local_head_sha'),
   fetchedAt: text('fetched_at').notNull(),
 });
+
+export const ghIssuesCache = sqliteTable('gh_issues_cache', {
+  project: text('project').primaryKey(),
+  repo: text('repo').notNull(),
+  prs: text('prs').notNull().default('[]'),
+  issues: text('issues').notNull().default('[]'),
+  fetchedAt: real('fetched_at').notNull(),
+});

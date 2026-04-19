@@ -48,6 +48,10 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/job-storage', () => ({
       listJobs: listJobsMock, probeJobStatus: probeJobStatusMock,
       createJob: createJobMock, updateJob: updateJobMock,
+      getVerdict: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/git-utils', () => ({
+      isReviewed: vi.fn().mockResolvedValue(false),
     }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
@@ -197,6 +201,97 @@ describe('startRelease — release pipeline entry decision tree', () => {
       expect(r.status).toBe(502);
       expect(r.detail).toContain('remote rejected');
     }
+  });
+
+  it('skips test+review and pushes directly when a fresh LGTM review exists', async () => {
+    vi.resetModules();
+    const latestReview = {
+      id: 'prev-review', project: 'proj', kind: 'review',
+      finishedAt: Date.now() / 1000 - 60, exitCode: 0,
+    };
+    const listJobsWithReview = vi.fn().mockReturnValue([latestReview]);
+    const getVerdictLgtm = vi.fn().mockReturnValue('LGTM');
+    const isReviewedTrue = vi.fn().mockResolvedValue(true);
+    startProjectPushMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'deadbee', message: 'pushed' });
+    detectTestCommandMock = vi.fn().mockReturnValue('pnpm test');
+    execMock = vi.fn()
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n')) // hasChanges
+      .mockImplementationOnce(() => gitAhead('0'))            // unpushed
+      // PM2 / jlist calls from createReleaseJob:
+      .mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'pm2' && args[0] === 'start') return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+        if (cmd === 'pm2' && args[0] === 'jlist') return Promise.resolve({ exitCode: 0, stdout: '[]', stderr: '' });
+        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+      });
+
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/job-storage', () => ({
+      listJobs: listJobsWithReview,
+      probeJobStatus: probeJobStatusMock,
+      createJob: createJobMock,
+      updateJob: updateJobMock,
+      getVerdict: getVerdictLgtm,
+    }));
+    vi.doMock('@/lib/git-utils', () => ({ isReviewed: isReviewedTrue }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
+    }));
+    vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
+    vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
+
+    const { startRelease: fn } = await import('@/lib/start-release');
+    const r = await fn('proj');
+
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.step).toBe('push');
+    expect(startProjectPushMock).toHaveBeenCalledWith('proj');
+    expect(startProjectTestMock).not.toHaveBeenCalled();
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+  });
+
+  it('does NOT skip review when the working tree has changed since the LGTM (isReviewed=false)', async () => {
+    vi.resetModules();
+    const latestReview = {
+      id: 'stale-review', project: 'proj', kind: 'review',
+      finishedAt: Date.now() / 1000 - 60, exitCode: 0,
+    };
+    detectTestCommandMock = vi.fn().mockReturnValue(null);
+    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'r1' });
+    execMock = vi.fn()
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'pm2' && args[0] === 'start') return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+        if (cmd === 'pm2' && args[0] === 'jlist') return Promise.resolve({ exitCode: 0, stdout: '[]', stderr: '' });
+        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+      });
+
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/job-storage', () => ({
+      listJobs: vi.fn().mockReturnValue([latestReview]),
+      probeJobStatus: probeJobStatusMock,
+      createJob: createJobMock,
+      updateJob: updateJobMock,
+      getVerdict: vi.fn().mockReturnValue('LGTM'),
+    }));
+    vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
+    }));
+    vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
+    vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
+
+    const { startRelease: fn } = await import('@/lib/start-release');
+    const r = await fn('proj');
+
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.step).toBe('review');
+    expect(startProjectReviewMock).toHaveBeenCalledWith('proj');
+    expect(startProjectPushMock).not.toHaveBeenCalled();
   });
 
   it('creates a release meta-job and returns its id', async () => {

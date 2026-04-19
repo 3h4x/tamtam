@@ -189,11 +189,12 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
 
             const projectJobs = allJobs.filter(j => j.project === project.project)
             const runningJobs = projectJobs.filter(j => j.status === 'running')
-            const recentDone = projectJobs
-              .filter(j => j.status === 'done')
-              .sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))
-            const lastJob = recentDone[0]
-            const lastFailed = lastJob?.exit_code != null && lastJob.exit_code !== 0 ? lastJob : null
+            // "Last Run" = the single most recent job for this project,
+            // regardless of status. Running jobs use started_at; done jobs
+            // use finished_at (falling back to started_at).
+            const jobTime = (j: typeof projectJobs[number]) => j.finished_at ?? j.started_at ?? 0
+            const lastJob = projectJobs.slice().sort((a, b) => jobTime(b) - jobTime(a))[0]
+            const lastFailed = lastJob?.status === 'done' && lastJob.exit_code != null && lastJob.exit_code !== 0 ? lastJob : null
 
             const agents = agentsByProject[project.project] || []
             const runningAgentNames = getRunningAgentNames(project.project)
@@ -227,7 +228,7 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
                       <span>{lastFailed.kind}</span>
                       <span className="text-xs text-text-tertiary">{formatAgo(lastFailed.finished_at ?? lastFailed.started_at)}</span>
                     </span>
-                  ) : recentDone.length > 0 ? (
+                  ) : lastJob ? (
                     <span className="flex items-center gap-1.5 text-sm text-text-tertiary">
                       <StatusDot ok={true} />
                       idle
@@ -275,9 +276,17 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
                 <td className="px-4 py-3">
                   {lastJob ? (
                     <span className="flex items-center gap-1.5">
-                      <StatusDot ok={lastJob.exit_code === 0} />
+                      {lastJob.status === 'running' ? (
+                        <SpinnerIcon />
+                      ) : (
+                        <StatusDot ok={lastJob.exit_code === 0} />
+                      )}
                       <span className="text-xs text-text-secondary font-medium">{lastJob.kind.startsWith('agent:') ? lastJob.kind.slice(6) : lastJob.kind}</span>
-                      <span className="text-xs text-text-tertiary">{formatAgo(lastJob.finished_at ?? lastJob.started_at)}</span>
+                      <span className="text-xs text-text-tertiary">
+                        {lastJob.status === 'running'
+                          ? `running · started ${formatAgo(lastJob.started_at)}`
+                          : formatAgo(lastJob.finished_at ?? lastJob.started_at)}
+                      </span>
                     </span>
                   ) : (
                     <span className="text-text-tertiary text-sm">—</span>

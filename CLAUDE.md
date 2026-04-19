@@ -76,6 +76,7 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `/project/[name]/config` — Test command + custom actions editor (name, command, color)
 - `/project/[name]/history` — Project runs with filter tabs (all/running/failed/done)
 - `/project/[name]/changes` — Git diff viewer for uncommitted changes
+- `/project/[name]/issues` — GitHub PRs and issues viewer (open PRs with review status, open issues)
 - `/project/[name]/terminal/[sessionId]` — Interactive Claude runner with model selector (haiku/sonnet/opus), skill picker, and real-time token streaming via SSE (see `docs/TERMINAL.md`)
 - `/project/[name]/task/[task]` — Task detail view
 - `/agents` — Agents management page
@@ -107,6 +108,7 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `/api/projects/by-project/[name]/changes/diff` — Full git diff content (GET)
 - `/api/projects/by-project/[name]/push` — Push changes to git (POST); sub-routes: `/preview`, `/execute`, `/generate`
 - `/api/projects/by-project/[name]/release` — Trigger release pipeline (POST)
+- `/api/projects/by-project/[name]/issues` — GitHub PRs and issues for the project (GET)
 - `/api/projects/by-project/[name]/logs` — Project run log files (GET)
 - `/api/projects/by-project/[name]/docs` — Project documentation files (GET)
 - `/api/config/projects` — Scan workspace for git repos and configure projects (GET, PATCH)

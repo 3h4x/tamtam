@@ -33,6 +33,19 @@ export async function POST(
     }
   }
 
+  // Auto-rebase if behind remote to prevent non-fast-forward rejection
+  const branchStatusR = await exec('git', ['-C', projPath, 'status', '--porcelain=v2', '--branch'], { timeout: 5000 });
+  const abLine = branchStatusR.stdout.split('\n').find(l => l.startsWith('# branch.ab '));
+  const behind = abLine ? parseInt(abLine.match(/-(\d+)/)?.[1] ?? '0', 10) : 0;
+  if (behind > 0) {
+    const rebaseR = await exec('git', ['-C', projPath, 'pull', '--rebase'], { timeout: 60000 });
+    if (rebaseR.exitCode !== 0) {
+      const detail = (rebaseR.stderr || rebaseR.stdout)
+        .split('\n').filter(l => !l.startsWith('hint:')).join('\n').trim().slice(0, 1000);
+      return NextResponse.json({ detail: `Rebase failed: ${detail || 'conflict during rebase'}` }, { status: 409 });
+    }
+  }
+
   let pushR = await exec('git', ['-C', projPath, 'push'], { timeout: 30000 });
   if (pushR.exitCode !== 0 && (pushR.stderr.includes('no upstream') || pushR.stderr.includes('set-upstream'))) {
     const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });

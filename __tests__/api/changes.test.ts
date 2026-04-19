@@ -61,7 +61,7 @@ describe('GET /api/projects/by-project/[projectName]/changes', () => {
       .mockResolvedValueOnce(makeExecResult({ stdout: 'M\tsrc/a.ts\nA\tsrc/b.ts\n' })) // name-status
       .mockResolvedValueOnce(makeExecResult({ stdout: '10\t2\tsrc/a.ts\n5\t0\tsrc/b.ts\n' })) // numstat
       .mockResolvedValueOnce(makeExecResult({ stdout: '' })) // untracked
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' })); // branch
+      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head master\n# branch.ab +0 -0\n' })); // porcelain
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -79,7 +79,7 @@ describe('GET /api/projects/by-project/[projectName]/changes', () => {
       .mockResolvedValueOnce(makeExecResult({ stdout: 'M\timage.png\n' }))
       .mockResolvedValueOnce(makeExecResult({ stdout: '-\t-\timage.png\n' }))
       .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'main\n' }));
+      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head main\n# branch.ab +0 -0\n' }));
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -92,7 +92,7 @@ describe('GET /api/projects/by-project/[projectName]/changes', () => {
       .mockResolvedValueOnce(makeExecResult({ stdout: '' })) // name-status empty
       .mockResolvedValueOnce(makeExecResult({ stdout: '' })) // numstat empty
       .mockResolvedValueOnce(makeExecResult({ stdout: 'new.ts\n' })) // untracked
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'main\n' })) // branch
+      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head main\n# branch.ab +0 -0\n' })) // porcelain
       .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stdout: '7\t0\t/dev/null\n' })); // diff --no-index
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
@@ -108,7 +108,7 @@ describe('GET /api/projects/by-project/[projectName]/changes', () => {
       .mockResolvedValueOnce(makeExecResult({ stdout: 'A\tnew.ts\n' })) // name-status (already staged? unlikely but guard)
       .mockResolvedValueOnce(makeExecResult({ stdout: '3\t0\tnew.ts\n' }))
       .mockResolvedValueOnce(makeExecResult({ stdout: 'new.ts\n' })) // untracked (duplicate)
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'main\n' }));
+      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head main\n# branch.ab +0 -0\n' }));
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -123,7 +123,7 @@ describe('GET /api/projects/by-project/[projectName]/changes', () => {
       .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
       .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
       .mockResolvedValueOnce(makeExecResult({ stdout: 'big.bin\n' }))
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'main\n' }));
+      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head main\n# branch.ab +0 -0\n' }));
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });

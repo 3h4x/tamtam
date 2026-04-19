@@ -5,7 +5,8 @@ import { resolveProjectPath } from './project-data';
 import { startProjectTest, detectTestCommand } from './start-test';
 import { startProjectReview } from './start-review';
 import { startProjectPush } from './start-push';
-import { listJobs, probeJobStatus, createJob, updateJob } from './job-storage';
+import { listJobs, probeJobStatus, createJob, updateJob, getVerdict } from './job-storage';
+import { isReviewed } from './git-utils';
 import { exec } from './shell';
 import { getImproveConfig } from './scheduling';
 
@@ -145,8 +146,20 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
     return { ok: false, status: 400, detail: 'Nothing to release — no changes and no unpushed commits' };
   }
 
+  // Fast-path: the working tree already has a valid LGTM review (hash
+  // unchanged since markReviewed). Re-running tests and review would be
+  // busywork — skip straight to commit & push. This keeps Release as a
+  // single button while still being smart about what to do.
+  const skipToPush = await hasFreshLgtm(projectName, projPath);
+
   const release = await createReleaseJob(projectName);
   const releaseJobId = release?.id;
+
+  if (skipToPush) {
+    const r = await startProjectPush(projectName);
+    if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+    return { ok: true, step: 'push', releaseJobId, message: r.message };
+  }
 
   const testCmd = detectTestCommand(projPath, projectName);
   if (testCmd) {
@@ -165,4 +178,20 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
   const r = await startProjectPush(projectName);
   if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
   return { ok: true, step: 'push', releaseJobId, message: r.message };
+}
+
+// Returns true when the project's most recent finished review is LGTM AND
+// the working-tree hash still matches the one markReviewed captured. That's
+// the signal that re-running tests + review would add nothing.
+async function hasFreshLgtm(projectName: string, projPath: string): Promise<boolean> {
+  try {
+    const latestReview = listJobs()
+      .filter(j => j.project === projectName && j.kind === 'review' && j.finishedAt !== null && j.exitCode === 0)
+      .sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0))[0];
+    if (!latestReview) return false;
+    if (getVerdict(latestReview) !== 'LGTM') return false;
+    return await isReviewed(projectName, projPath);
+  } catch {
+    return false;
+  }
 }

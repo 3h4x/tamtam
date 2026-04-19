@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions } from '@/lib/client-api'
+import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
 import { priorityColor, getHighestPriority, getAggregateCi, formatDuration } from '@/lib/statusConstants'
@@ -11,9 +11,10 @@ import { TerminalTab } from '@/components/TerminalTab'
 import { AgentsTab } from '@/components/AgentsTab'
 import { ProjectRunsTab } from '@/components/ProjectRunsTab'
 import { ChangesTab } from '@/components/ChangesTab'
+import { IssuesTab } from '@/components/IssuesTab'
 import { useToast } from '@/components/Toast'
 
-type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes'
+type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues'
 
 type Verdict = 'LGTM' | 'NEEDS ATTENTION' | 'DO NOT SHIP'
 
@@ -269,7 +270,7 @@ export function ProjectDetailPage({
   const name = params.name
   const router = useRouter()
   const { toast } = useToast()
-  const VALID_TABS: Tab[] = ['overview', 'config', 'history', 'terminal', 'changes']
+  const VALID_TABS: Tab[] = ['overview', 'config', 'history', 'terminal', 'changes', 'issues']
   const activeTab: Tab = params.sessionId
     ? 'terminal'
     : VALID_TABS.includes(params.tab as Tab) ? (params.tab as Tab) : 'overview'
@@ -410,6 +411,39 @@ export function ProjectDetailPage({
     .sort((a, b) => (b.started_at || 0) - (a.started_at || 0))
 
   const [releasing, setReleasing] = useState(false)
+  const [pulling, setPulling] = useState(false)
+  const [pullResult, setPullResult] = useState<string | null>(null)
+  const [pullDiverged, setPullDiverged] = useState(false)
+  const [behindCount, setBehindCount] = useState(0)
+
+  useEffect(() => {
+    if (!name) return
+    fetchBehind(name).then((r) => setBehindCount(r.behind)).catch(() => {})
+  }, [name])
+
+  const handlePull = async (strategy: 'ff-only' | 'merge' | 'rebase' = 'ff-only') => {
+    if (!name || pulling) return
+    setPulling(true)
+    setPullResult(null)
+    setPullDiverged(false)
+    try {
+      const res = await pullProject(name, strategy)
+      const msg = res.output || 'Already up to date.'
+      const alreadyUpToDate = msg.includes('Already up to date')
+      setPullResult(alreadyUpToDate ? 'Already up to date.' : 'Pulled.')
+      if (!alreadyUpToDate) setBehindCount(0)
+      setTimeout(() => setPullResult(null), 4000)
+    } catch (err) {
+      if (err instanceof PullDivergedError) {
+        setPullDiverged(true)
+      } else {
+        setPullResult(err instanceof Error ? err.message : 'Pull failed')
+        setTimeout(() => setPullResult(null), 6000)
+      }
+    } finally {
+      setPulling(false)
+    }
+  }
 
   const handleRelease = async () => {
     if (!name || releasing) return
@@ -530,15 +564,21 @@ export function ProjectDetailPage({
             const busy = releasing || isReviewRunning || isTestRunning || isFixRunning
             const nothingToRelease = project.totalChanges === 0 && (project.unpushed ?? 0) === 0
             const hasTestCommand = !!(config?.effective_test_command || config?.detected_test_command)
-            // Push-only branch (no uncommitted changes) skips test/review entirely.
+            // Fresh LGTM review on the current tree → hitting Release skips
+            // test+review and goes straight to commit & push. Make that obvious
+            // in the label/tooltip so the user isn't surprised.
+            const freshLgtm = verdict === 'LGTM' && !hasUnreviewed && project.totalChanges > 0
             const steps: string[] = []
-            if (project.totalChanges > 0) {
+            if (freshLgtm) {
+              steps.push('commit', 'push')
+            } else if (project.totalChanges > 0) {
               if (hasTestCommand) steps.push('test')
-              steps.push('review')
+              steps.push('review', 'commit', 'push')
+            } else {
+              steps.push('push')
             }
-            steps.push('push')
             const multiStep = steps.length > 1
-            const chainSuffix = multiStep && !config?.auto_push_enabled
+            const chainSuffix = multiStep && !config?.auto_push_enabled && !freshLgtm
               ? ' (enable auto-push in config to auto-chain)'
               : ''
             return (
@@ -551,10 +591,12 @@ export function ProjectDetailPage({
                     ? 'Nothing to release — no changes and no unpushed commits'
                     : busy
                       ? 'Release pipeline already running'
-                      : `Release: ${steps.join(' → ')}${chainSuffix}`
+                      : freshLgtm
+                        ? `Ship it — review already LGTM, will commit & push directly (skips test + review)`
+                        : `Release: ${steps.join(' → ')}${chainSuffix}`
                 }
               >
-                {busy ? 'Releasing…' : '🚀 Release'}
+                {busy ? 'Releasing…' : freshLgtm ? '🚢 Ship (LGTM)' : '🚀 Release'}
               </button>
             )
           })()}
@@ -570,6 +612,57 @@ export function ProjectDetailPage({
               {runningActions.has(action.name) ? `${action.name}...` : action.name}
             </button>
           ))}
+          {pullDiverged ? (
+            <>
+              <span className="text-xs text-status-error font-medium">Diverged:</span>
+              <button
+                className="px-3 py-1.5 text-sm border border-status-info/50 bg-status-info/10 text-status-info rounded-md hover:bg-status-info/20 cursor-pointer disabled:opacity-50 font-medium"
+                onClick={() => handlePull('rebase')}
+                disabled={pulling}
+                title="git pull --rebase"
+              >
+                {pulling ? 'Working…' : 'Rebase'}
+              </button>
+              <button
+                className="px-3 py-1.5 text-sm border border-border bg-bg-secondary text-text-primary rounded-md hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 font-medium"
+                onClick={() => handlePull('merge')}
+                disabled={pulling}
+                title="git pull --no-ff"
+              >
+                {pulling ? 'Working…' : 'Merge'}
+              </button>
+              <button
+                className="px-2 py-1 text-xs text-text-tertiary hover:text-text-secondary cursor-pointer"
+                onClick={() => setPullDiverged(false)}
+              >✕</button>
+            </>
+          ) : (
+            <button
+              className={`px-3 py-1.5 text-sm border rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                project.totalChanges > 0
+                  ? 'border-border bg-bg-secondary text-text-primary cursor-not-allowed'
+                  : behindCount > 0
+                  ? 'border-status-warning/60 bg-status-warning/10 text-status-warning hover:bg-status-warning/20 cursor-pointer'
+                  : 'border-border bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer'
+              }`}
+              onClick={() => handlePull('ff-only')}
+              disabled={pulling || project.totalChanges > 0}
+              title={
+                project.totalChanges > 0
+                  ? `Commit or stash your ${project.totalChanges} local change${project.totalChanges !== 1 ? 's' : ''} before pulling`
+                  : behindCount > 0
+                  ? `${behindCount} commit${behindCount !== 1 ? 's' : ''} behind origin — git pull --ff-only`
+                  : 'git pull --ff-only'
+              }
+            >
+              {pulling ? 'Pulling…' : behindCount > 0 ? `Pull (${behindCount})` : 'Pull'}
+            </button>
+          )}
+          {pullResult && (
+            <span className={`text-xs ${pullResult.includes('failed') || pullResult.includes('error') ? 'text-status-error' : 'text-status-success'}`}>
+              {pullResult}
+            </span>
+          )}
           {githubUrl && (
             <a
               className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer inline-flex items-center"
@@ -625,6 +718,12 @@ export function ProjectDetailPage({
           onClick={() => setActiveTab('history')}
         >
           History
+        </button>
+        <button
+          className={`px-3 py-1.5 text-sm cursor-pointer ${activeTab === 'issues' ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`}
+          onClick={() => setActiveTab('issues')}
+        >
+          Issues / PRs
         </button>
         <button
           className={`px-3 py-1.5 text-sm cursor-pointer ${activeTab === 'config' ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`}
@@ -865,6 +964,10 @@ export function ProjectDetailPage({
         <ChangesTab projectName={name} />
       )}
 
+      {activeTab === 'issues' && name && (
+        <IssuesTab projectName={name} />
+      )}
+
       {/* Runs Tab */}
       {activeTab === 'history' && name && (
         <ProjectRunsTab projectName={name} />
@@ -916,9 +1019,12 @@ export function ProjectDetailPage({
             ) && (project.totalChanges > 0 || (project.unpushed ?? 0) > 0)
             if (!pipelineRunning && !hasPushError && !recentFailedJob && !recentReviewNotLgtm && !recentLgtmWithWorkRemaining) return null
 
-            const hourAgo = Date.now() / 1000 - 60 * 60
+            // Look back 24h so Ship-path (skips test+review) still shows the
+            // previously-done steps as ✓ instead of blank ○. The prior LGTM
+            // is what authorized the ship, so it belongs on the strip.
+            const dayAgo = Date.now() / 1000 - 24 * 60 * 60
             const latestOfKind = (kind: string) => projectJobs
-              .filter(j => j.kind === kind && j.started_at >= hourAgo)
+              .filter(j => j.kind === kind && j.started_at >= dayAgo)
               .sort((a, b) => (b.started_at || 0) - (a.started_at || 0))[0]
 
             const testJob = latestOfKind('test')
