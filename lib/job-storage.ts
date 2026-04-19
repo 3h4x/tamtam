@@ -127,9 +127,20 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
     job.cacheCreateTokens = doneEvent.result.cacheCreateTokens;
     job.sessionId = doneEvent.result.sessionId;
     // Claude completed successfully — override pm2's exit code. Claude CLI
-    // sometimes hangs after flushing its final result and gets killed, which
-    // makes pm2 report -1, but the logical outcome was a clean finish.
-    if ((job.kind === 'run' || job.kind === 'review') && !doneEvent.result.error && exitCode !== 0) {
+    // frequently hangs for a few seconds after flushing its final result
+    // event (flushing stdio, tearing down child processes) and gets killed
+    // by pm2's hard-timeout or our SIGKILL fallback, which makes pm2 report
+    // exit -1 / 137. If the stream-json result line says is_error=false,
+    // the logical outcome was a clean finish — trust that over pm2's code.
+    const isClaudeKind = (
+      job.kind === 'run' ||
+      job.kind === 'review' ||
+      job.kind === 'fix' ||
+      job.kind === 'fix-ci' ||
+      job.kind === 'fix-push' ||
+      job.kind.startsWith('agent:')
+    );
+    if (isClaudeKind && !doneEvent.result.error && exitCode !== 0) {
       console.log(`[job ${job.id}] claude result present (is_error=false) but pm2 reported exit ${exitCode}; overriding to 0`);
       job.exitCode = 0;
     }
@@ -201,6 +212,17 @@ function recentFixCiCount(projectName: string, windowSeconds: number): number {
   ).length;
 }
 
+// Cap auto-fix-push retries so a stubbornly-broken lint rule can't spin
+// Claude in a loop. Same 30min window as review-fix for consistency.
+const MAX_FIX_PUSH_ATTEMPTS = 2;
+
+function recentFixPushCount(projectName: string): number {
+  const cutoff = Date.now() / 1000 - FIX_WINDOW_SECONDS;
+  return listJobs().filter(
+    (j) => j.project === projectName && j.kind === 'fix-push' && j.startedAt >= cutoff
+  ).length;
+}
+
 function recentFixCount(projectName: string): number {
   const cutoff = Date.now() / 1000 - FIX_WINDOW_SECONDS;
   return listJobs().filter(
@@ -243,7 +265,7 @@ async function finalizeReleaseJob(release: JobData, exitCode: number): Promise<v
 async function runCompletionHooks(job: JobData): Promise<void> {
   // Stream per-step output into the active release meta-log so the user can
   // watch the whole pipeline in one terminal.
-  if (['test', 'review', 'fix', 'push'].includes(job.kind)) {
+  if (['test', 'review', 'fix', 'push', 'fix-push'].includes(job.kind)) {
     const release = findActiveReleaseJob(job.project);
     if (release) appendToReleaseLog(release, job.kind, job);
   }
@@ -263,7 +285,8 @@ async function runCompletionHooks(job: JobData): Promise<void> {
     }
     // Release pipeline: review LGTM → push; NEEDS ATTENTION/DO NOT SHIP → fix
     try {
-      if (job.exitCode === 0 && (await isAutoPushEnabled(job.project))) {
+      const inRelease = !!findActiveReleaseJob(job.project);
+      if (job.exitCode === 0 && (inRelease || (await isAutoPushEnabled(job.project)))) {
         const verdict = getVerdict(job);
         if (verdict === 'LGTM') {
           const { startProjectPush } = await import('./start-push');
@@ -300,7 +323,7 @@ async function runCompletionHooks(job: JobData): Promise<void> {
 
   if (job.kind === 'fix' && job.exitCode === 0) {
     try {
-      if (await isAutoPushEnabled(job.project)) {
+      if (!!findActiveReleaseJob(job.project) || (await isAutoPushEnabled(job.project))) {
         const { startProjectReview } = await import('./start-review');
         const r = await startProjectReview(job.project);
         if (r.ok) {
@@ -317,7 +340,7 @@ async function runCompletionHooks(job: JobData): Promise<void> {
 
   if (job.kind === 'test' && job.exitCode === 0) {
     try {
-      if (await isAutoPushEnabled(job.project)) {
+      if (!!findActiveReleaseJob(job.project) || (await isAutoPushEnabled(job.project))) {
         const { startProjectReview } = await import('./start-review');
         const r = await startProjectReview(job.project);
         if (r.ok) {
@@ -332,10 +355,54 @@ async function runCompletionHooks(job: JobData): Promise<void> {
     }
   }
 
+  // Auto-fix-push: when a push fails because of a pre-commit / pre-push hook
+  // (husky/eslint/lint-staged), spawn a Claude fix job targeting the exact
+  // hook error and re-trigger the push once it finishes. Bounded by
+  // MAX_FIX_PUSH_ATTEMPTS per window to prevent infinite loops on a
+  // fundamentally-broken lint rule.
+  if (job.kind === 'push' && job.exitCode !== 0) {
+    try {
+      const rawLog = readLog(job, 100_000);
+      const { isHookRejection, startFixPush } = await import('./start-fix-push');
+      if (isHookRejection(rawLog)) {
+        const attempts = recentFixPushCount(job.project);
+        if (attempts < MAX_FIX_PUSH_ATTEMPTS) {
+          const r = await startFixPush(job.project, rawLog);
+          if (r.ok) {
+            console.log(`[push] hook rejection → auto-fix-push ${r.jobId} (attempt ${attempts + 1}/${MAX_FIX_PUSH_ATTEMPTS})`);
+            chainedNext = true;
+          } else {
+            console.log(`[push] hook rejection — could not start fix-push: ${r.detail}`);
+          }
+        } else {
+          console.log(`[push] hook rejection — fix-push cap reached (${attempts}/${MAX_FIX_PUSH_ATTEMPTS}) — surfacing error`);
+        }
+      }
+    } catch (e) {
+      console.log(`[push] fix-push hook error for ${job.project}:`, e);
+    }
+  }
+
+  // Chain fix-push → re-run push when Claude finishes fixing.
+  if (job.kind === 'fix-push' && job.exitCode === 0) {
+    try {
+      const { startProjectPush } = await import('./start-push');
+      const r = await startProjectPush(job.project);
+      if (r.ok) {
+        console.log(`[fix-push→push] re-pushed ${job.project} (${r.commitSha || 'no-op'})`);
+      } else {
+        console.log(`[fix-push→push] push still failing for ${job.project}: ${r.detail}`);
+      }
+      chainedNext = true;
+    } catch (e) {
+      console.log(`[fix-push→push] retry error for ${job.project}:`, e);
+    }
+  }
+
   // If this is a pipeline step and we didn't chain to another step, the
   // release job reached a natural endpoint — finalize it. Exit code mirrors
   // this step's outcome.
-  if (['test', 'review', 'fix', 'push'].includes(job.kind) && !chainedNext) {
+  if (['test', 'review', 'fix', 'push', 'fix-push'].includes(job.kind) && !chainedNext) {
     const release = findActiveReleaseJob(job.project);
     if (release) {
       const exitCode = (job.exitCode === 0) ? 0 : 1;

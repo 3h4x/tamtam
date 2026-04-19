@@ -581,6 +581,29 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           })
         : undefined
 
+      // If the terminal is viewing an open release/push/fix-push/test job,
+      // prepend that job's log as context so Claude knows exactly what just
+      // failed and can act on it — no manual paste required.
+      if (!isFollowUp && cur.currentJobId) {
+        const inspectableKinds = ['release', 'push', 'fix-push', 'test', 'review', 'fix', 'fix-ci']
+        const jobKindFromId = inspectableKinds.find(k => cur.currentJobId!.includes(`-${k}-`))
+        if (jobKindFromId) {
+          try {
+            const logRes = await fetch(`/api/jobs/${encodeURIComponent(cur.currentJobId)}/logs`)
+            if (logRes.ok) {
+              const logData = await logRes.json()
+              const rawLog: string = typeof logData.content === 'string' ? logData.content : ''
+              if (rawLog.trim()) {
+                const tail = rawLog.length > 12000 ? '...(truncated)...\n' + rawLog.slice(-12000) : rawLog
+                fullPrompt = `## Previous session output (${jobKindFromId} job, for context)\n\n\`\`\`\n${tail}\n\`\`\`\n\n---\n\n${fullPrompt}`
+              }
+            }
+          } catch {
+            // Best-effort — if the fetch fails, just send the prompt as-is.
+          }
+        }
+      }
+
       const result = await runProject(
         projectName, fullPrompt,
         imageFiles.length > 0 ? imageFiles : undefined,

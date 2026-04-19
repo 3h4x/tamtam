@@ -10,7 +10,7 @@ import { isReviewed } from './git-utils';
 import { exec } from './shell';
 import { getImproveConfig } from './scheduling';
 
-const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'release']);
+const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push', 'release']);
 
 async function isReleasePipelineRunning(projectName: string): Promise<boolean> {
   const candidates = listJobs().filter(
