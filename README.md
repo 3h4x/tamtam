@@ -19,6 +19,7 @@ The agent management dashboard built for Claude CLI. Define skills, compose agen
 | **Smart push** | AI-generated commit messages, diff preview, one-click push |
 | **CI repair** | Failed CI run? One click sends Claude to fix it |
 | **Scheduling** | Built-in cron scheduler — daily reviews, nightly audits, whatever you need, running unattended |
+| **Release pipeline** | Quality-gated: test → review → fix loop → commit → push, all driven by Claude |
 | **Custom actions** | Per-project bash commands (deploy, migrate, seed) as colored buttons |
 | **Notifications** | Unseen run alerts with bell badge |
 
@@ -93,6 +94,7 @@ Run any agent on demand from the UI, or let the scheduler fire it automatically.
 pnpm test           # vitest unit tests
 pnpm test:e2e       # Playwright (requires dev server running)
 pnpm type-check     # TypeScript
+pnpm check          # lint + type-check + test (all in one)
 ```
 
 All API routes have corresponding tests in `__tests__/`. Follow the existing pattern: in-memory SQLite, mocked shell/PM2 calls.

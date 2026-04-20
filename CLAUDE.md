@@ -56,6 +56,7 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `pnpm test` — run unit tests
 - `pnpm test:e2e` — run Playwright e2e tests (requires dev server running)
 - `pnpm type-check` — TypeScript check
+- `pnpm check` — lint + type-check + test (all in one)
 
 **Never run `next dev` directly — always use PM2 via the scripts above.**
 

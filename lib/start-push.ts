@@ -12,7 +12,12 @@ export type PushResult =
   | { ok: true; commitSha: string; message: string }
   | { ok: false; status: number; detail: string };
 
-async function generateCommitMessage(projPath: string, projectName: string): Promise<string> {
+// Matches any conventional commit title with a non-trivial description (3+ chars).
+const CONV_RE = /^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+?\))?:\s*.{3,}/i;
+// Generic fallback phrases the model produces when it lacks real diff context.
+const GENERIC_RE = /^chore:\s*(automated?\s*update|update|changes?)$/i;
+
+export async function generateCommitMessage(projPath: string, projectName: string): Promise<string> {
   const [statR, diffR] = await Promise.all([
     exec('git', ['-C', projPath, 'diff', '--cached', '--stat', '--no-color'], { timeout: 10000 }),
     exec('git', ['-C', projPath, 'diff', '--cached', '--no-color'], { timeout: 10000 }),
@@ -20,7 +25,9 @@ async function generateCommitMessage(projPath: string, projectName: string): Pro
 
   const { context } = buildDiffContext(statR.stdout, diffR.stdout);
   const styleGuide = (getSettings().commit_style ?? '').trim();
-  const prompt = `Output exactly one conventional commit title. No prose, no code blocks, no backticks, no quotes.
+
+  const buildPrompt = (extra = '') =>
+    `Output exactly one conventional commit title. No prose, no code blocks, no backticks, no quotes.
 
 Use the format: <type>(<optional scope>): <description>
 Types: feat, fix, refactor, chore, docs, test, style, perf, ci, build
@@ -35,17 +42,51 @@ Analyze the diff to determine the correct type:
 
 Repository: ${projectName}
 ${context}
-
-${styleGuide ? `STYLE GUIDE:\n${styleGuide}\n` : ''}
-Return ONLY the title — nothing else.`;
+${styleGuide ? `\nSTYLE GUIDE:\n${styleGuide}\n` : ''}
+Return ONLY the title — nothing else.${extra}`;
 
   const { claudeBin } = getImproveConfig();
-  const result = await exec(claudeBin, ['--print', '--model', 'haiku', '-p', prompt], {
-    cwd: projPath,
-    timeout: 30000,
-  });
-  const line = result.stdout.trim().split('\n')[0] ?? '';
-  return line.replace(/^[`'"*_]+/, '').replace(/[`'"*_]+$/, '').trim() || 'chore: automated update';
+
+  // --system-prompt replaces the injected CLAUDE.md/git-history system prompt so the
+  // model cannot pattern-match on recent "chore: automated update" commits.
+  // --tools "" prevents the model from running git commands itself instead of using
+  // the diff context we embed in the user prompt.
+  const claudeArgs = (prompt: string) => [
+    '--print', '--tools', '', '--system-prompt',
+    'You are a commit message generator. Output only what is requested. Do not add prose or explanation.',
+    '--model', 'haiku', '-p', prompt,
+  ];
+
+  const parse = (stdout: string): string => {
+    const cleaned = stdout
+      .trim()
+      .split('\n')
+      .map((l) => l.replace(/^[`'"*_\d.)\-•\s]+/, '').replace(/[`'"*_]+$/, '').trim())
+      .filter(Boolean);
+    // Prefer a specific conventional title; skip generic ones on first pass.
+    return (
+      cleaned.find((l) => CONV_RE.test(l) && !GENERIC_RE.test(l)) ??
+      cleaned.find((l) => CONV_RE.test(l)) ??
+      cleaned[0] ??
+      ''
+    );
+  };
+
+  const r1 = await exec(claudeBin, claudeArgs(buildPrompt()), { cwd: projPath, timeout: 30000 });
+  const msg1 = parse(r1.stdout);
+
+  // If the first attempt returns a generic placeholder, retry once with an explicit nudge.
+  if (!msg1 || GENERIC_RE.test(msg1)) {
+    const r2 = await exec(
+      claudeBin,
+      claudeArgs(buildPrompt('\n\nIMPORTANT: Be specific about what actually changed in the diff above. Do not use generic descriptions like "automated update".')),
+      { cwd: projPath, timeout: 30000 },
+    );
+    const msg2 = parse(r2.stdout);
+    if (msg2) return msg2;
+  }
+
+  return msg1 || 'chore: automated update';
 }
 
 export async function startProjectPush(projectName: string): Promise<PushResult> {

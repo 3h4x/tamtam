@@ -54,7 +54,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached --name-status (hasStaged)
       .mockImplementationOnce(() => resp(0, 'M\tfoo.ts\n'))               // git diff --cached --stat (commit msg)
       .mockImplementationOnce(() => resp(0, 'diff --git a/foo.ts'))       // git diff --cached --no-color (commit msg)
-      .mockImplementationOnce(() => resp(0, 'chore: update'))             // claude commit msg
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))         // claude commit msg
       .mockImplementationOnce(() => resp(0))                              // git commit
       .mockImplementationOnce(() => resp(0, '# branch.head master\n# branch.ab +0 -0\n')) // behind check
       .mockImplementationOnce(() => resp(0))                              // git push
@@ -71,7 +71,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached --stat
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git status --porcelain
-      .mockImplementationOnce(() => resp(0, 'chore: update'))             // claude commit msg
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))         // claude commit msg
       .mockImplementationOnce(() => resp(1, '', 'pre-commit hook failed')) // git commit
       .mockImplementationOnce(() => resp(0, ''));                          // git status --porcelain (no hook changes)
 
@@ -87,7 +87,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached
       .mockImplementationOnce(() => resp(0, ''))                          // git diff --cached --stat
       .mockImplementationOnce(() => resp(0, ''))                          // git diff --cached --no-color (diff content)
-      .mockImplementationOnce(() => resp(0, 'chore: update'))             // claude commit msg
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))         // claude commit msg
       .mockImplementationOnce(() => resp(0))                              // git commit
       .mockImplementationOnce(() => resp(0, '# branch.head master\n# branch.ab +0 -0\n')) // behind check
       .mockImplementationOnce(() => resp(1, '', 'remote rejected: permission denied')) // git push
@@ -130,7 +130,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached --stat
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git status --porcelain
-      .mockImplementationOnce(() => resp(0, 'chore: update'))             // claude commit msg
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))         // claude commit msg
       .mockImplementationOnce(() => resp(1, 'CONFLICT: pre-commit rejected', '')) // git commit (stderr empty)
       .mockImplementationOnce(() => resp(0, ''));                                   // git status --porcelain (no hook changes)
 
@@ -148,7 +148,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached --stat
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git status --porcelain
-      .mockImplementationOnce(() => resp(0, 'chore: update'))             // claude commit msg
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))         // claude commit msg
       .mockImplementationOnce(() => resp(2, '', ''))                      // git commit (both empty)
       .mockImplementationOnce(() => resp(0, ''));                          // git status --porcelain (no hook changes)
 
@@ -178,7 +178,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))                        // git diff --cached
       .mockImplementationOnce(() => resp(0, 'M\tfoo.ts\n'))                        // git diff --cached --stat
       .mockImplementationOnce(() => resp(0, 'M\tfoo.ts\n'))                        // git diff --cached (content)
-      .mockImplementationOnce(() => resp(0, 'chore: update'))                      // claude commit msg
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))                  // claude commit msg
       .mockImplementationOnce(() => resp(0))                                       // git commit
       .mockImplementationOnce(() => resp(0, '# branch.head master\n# branch.ab +0 -0\n')) // behind check
       .mockImplementationOnce(() => resp(1, '', 'error: The current branch has no upstream branch')) // git push (no upstream)
@@ -200,7 +200,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))                         // git diff --cached
       .mockImplementationOnce(() => resp(0, 'M\tfoo.ts\n'))                         // git diff --cached --stat
       .mockImplementationOnce(() => resp(0, 'M\tfoo.ts\n'))                         // git diff --cached (content)
-      .mockImplementationOnce(() => resp(0, 'chore: update'))                       // claude commit msg
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))                   // claude commit msg
       .mockImplementationOnce(() => resp(0))                                        // git commit
       .mockImplementationOnce(() => resp(0, '# branch.head master\n# branch.ab +0 -0\n')) // behind check
       .mockImplementationOnce(() => resp(1, '', 'error: no upstream branch'))       // git push (no upstream)
@@ -261,7 +261,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached --name-status (hasStaged)
       .mockImplementationOnce(() => resp(0, 'M\tfoo.ts\n'))               // git diff --cached --stat (commit msg)
       .mockImplementationOnce(() => resp(0, 'diff --git a/foo.ts'))       // git diff --cached --no-color (commit msg)
-      .mockImplementationOnce(() => resp(0, 'chore: update'))             // claude commit msg
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))         // claude commit msg
       .mockImplementationOnce(() => resp(0))                              // git commit
       .mockImplementationOnce(() => resp(0, '# branch.head master\n# branch.ab +0 -0\n')) // behind check
       .mockImplementationOnce(() => resp(0))                              // git push
@@ -280,7 +280,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached --stat
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached (content)
-      .mockImplementationOnce(() => resp(0, 'chore: update'))             // claude commit msg
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))         // claude commit msg
       .mockImplementationOnce(() => resp(1, '', 'pre-commit hook failed')) // git commit
       .mockImplementationOnce(() => resp(0, ''));                          // git status --porcelain (no hook changes)
 
@@ -296,7 +296,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached --name-status (hasStaged)
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached --stat (commit msg)
       .mockImplementationOnce(() => resp(0, 'diff --git a/foo.ts'))       // git diff --cached --no-color (commit msg)
-      .mockImplementationOnce(() => resp(0, 'chore: update'))             // claude commit msg
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))         // claude commit msg
       .mockImplementationOnce(() => resp(1, '', 'pre-commit hook failed')) // git commit (first attempt fails)
       .mockImplementationOnce(() => resp(0, 'M\t.lint-cache\n'))          // git status --porcelain (hook left changes)
       .mockImplementationOnce(() => resp(0))                              // git add -A (stage hook changes)
@@ -320,7 +320,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached --name-status (hasStaged)
       .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached --stat (commit msg)
       .mockImplementationOnce(() => resp(0, 'diff --git a/foo.ts'))       // git diff --cached --no-color (commit msg)
-      .mockImplementationOnce(() => resp(0, 'chore: update'))             // claude commit msg
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))         // claude commit msg
       .mockImplementationOnce(() => resp(1, '', 'pre-commit hook failed')) // git commit (first attempt fails)
       .mockImplementationOnce(() => resp(0, 'M\t.lint-cache\n'))          // git status --porcelain (hook left changes)
       .mockImplementationOnce(() => resp(0))                              // git add -A (stage hook changes)
@@ -411,5 +411,171 @@ describe('startProjectPush — push result tracking', () => {
     await fn('missing');
     expect(createJobMock).not.toHaveBeenCalled();
     expect(markDoneMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('generateCommitMessage', () => {
+  let generateCommitMessage: typeof import('@/lib/start-push').generateCommitMessage;
+  let execMock: ReturnType<typeof vi.fn>;
+
+  function resp(exitCode: number, stdout = '', stderr = '') {
+    return Promise.resolve({ exitCode, stdout, stderr });
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    execMock = vi.fn();
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+    }));
+    ({ generateCommitMessage } = await import('@/lib/start-push'));
+  });
+
+  afterEach(() => { vi.resetModules(); });
+
+  it('passes --tools "" and --system-prompt to claude to prevent tool use and CLAUDE.md injection', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0, 'file.ts | 1 +'))    // git diff --cached --stat
+      .mockImplementationOnce(() => resp(0, 'diff --git a/file.ts')) // git diff --cached
+      .mockImplementationOnce(() => resp(0, 'feat: add feature')); // claude
+
+    await generateCommitMessage('/proj', 'myrepo');
+
+    const claudeCall = execMock.mock.calls.find(([cmd]: any) => cmd === 'claude');
+    expect(claudeCall).toBeTruthy();
+    const args: string[] = claudeCall![1];
+    expect(args).toContain('--tools');
+    expect(args[args.indexOf('--tools') + 1]).toBe('');
+    expect(args).toContain('--system-prompt');
+    expect(args).toContain('--print');
+  });
+
+  it('returns the commit message from a single-line claude response', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0, ''))
+      .mockImplementationOnce(() => resp(0, ''))
+      .mockImplementationOnce(() => resp(0, 'fix(auth): correct token expiry logic'));
+
+    const msg = await generateCommitMessage('/proj', 'myrepo');
+    expect(msg).toBe('fix(auth): correct token expiry logic');
+  });
+
+  it('extracts conventional title from multiline response that includes prose', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0, ''))
+      .mockImplementationOnce(() => resp(0, ''))
+      .mockImplementationOnce(() => resp(0, 'Here is the commit title:\n\nfeat(api): add rate limiting middleware'));
+
+    const msg = await generateCommitMessage('/proj', 'myrepo');
+    expect(msg).toBe('feat(api): add rate limiting middleware');
+  });
+
+  it('retries when first response matches generic GENERIC_RE pattern', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0, ''))                              // git diff --stat
+      .mockImplementationOnce(() => resp(0, ''))                              // git diff
+      .mockImplementationOnce(() => resp(0, 'chore: automated update'))       // first claude → generic
+      .mockImplementationOnce(() => resp(0, 'refactor(push): improve retry logic')); // retry claude
+
+    const msg = await generateCommitMessage('/proj', 'myrepo');
+    expect(msg).toBe('refactor(push): improve retry logic');
+    const claudeCalls = execMock.mock.calls.filter(([cmd]: any) => cmd === 'claude');
+    expect(claudeCalls).toHaveLength(2);
+  });
+
+  it('retries when first response is "chore: update" (bare generic)', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0, ''))
+      .mockImplementationOnce(() => resp(0, ''))
+      .mockImplementationOnce(() => resp(0, 'chore: update'))
+      .mockImplementationOnce(() => resp(0, 'test(lib): add coverage for push helper'));
+
+    const msg = await generateCommitMessage('/proj', 'myrepo');
+    expect(msg).toBe('test(lib): add coverage for push helper');
+  });
+
+  it('retries when first response is empty', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0, ''))
+      .mockImplementationOnce(() => resp(0, ''))
+      .mockImplementationOnce(() => resp(0, ''))                              // empty first attempt
+      .mockImplementationOnce(() => resp(0, 'chore(deps): bump dependencies'));
+
+    const msg = await generateCommitMessage('/proj', 'myrepo');
+    expect(msg).toBe('chore(deps): bump dependencies');
+  });
+
+  it('returns fallback when both attempts produce no usable output', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0, ''))
+      .mockImplementationOnce(() => resp(0, ''))
+      .mockImplementationOnce(() => resp(0, ''))   // first attempt: empty
+      .mockImplementationOnce(() => resp(0, ''));  // retry: also empty
+
+    const msg = await generateCommitMessage('/proj', 'myrepo');
+    expect(msg).toBe('chore: automated update');
+  });
+
+  it('does not retry when first response is a specific conventional commit (not generic)', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0, ''))
+      .mockImplementationOnce(() => resp(0, ''))
+      .mockImplementationOnce(() => resp(0, 'chore(ci): update workflow permissions'));
+
+    const msg = await generateCommitMessage('/proj', 'myrepo');
+    expect(msg).toBe('chore(ci): update workflow permissions');
+    const claudeCalls = execMock.mock.calls.filter(([cmd]: any) => cmd === 'claude');
+    expect(claudeCalls).toHaveLength(1);
+  });
+
+  it('prefers specific conventional line over generic one when both are in output', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0, ''))
+      .mockImplementationOnce(() => resp(0, ''))
+      .mockImplementationOnce(() => resp(0, 'chore: automated update\nfeat(push): add stale-tracking rebase\nchore: update'));
+
+    const msg = await generateCommitMessage('/proj', 'myrepo');
+    expect(msg).toBe('feat(push): add stale-tracking rebase');
+  });
+
+  it('includes style guide in prompt when commit_style is set', async () => {
+    vi.resetModules();
+    execMock = vi.fn();
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/config', () => ({
+      getSettings: () => ({ commit_style: 'Always include a ticket number like PROJ-123.' }),
+    }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+    }));
+    const { generateCommitMessage: fn } = await import('@/lib/start-push');
+
+    execMock
+      .mockImplementationOnce(() => resp(0, ''))
+      .mockImplementationOnce(() => resp(0, ''))
+      .mockImplementationOnce(() => resp(0, 'feat: add something'));
+
+    await fn('/proj', 'myrepo');
+
+    const claudeCall = execMock.mock.calls.find(([cmd]: any) => cmd === 'claude');
+    const prompt: string = claudeCall![1][claudeCall![1].indexOf('-p') + 1];
+    expect(prompt).toContain('STYLE GUIDE');
+    expect(prompt).toContain('Always include a ticket number');
+  });
+
+  it('includes diff context (stat + patch) in the prompt', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0, 'lib/foo.ts | 5 +++++'))        // git diff --stat
+      .mockImplementationOnce(() => resp(0, 'diff --git a/lib/foo.ts\n+const x = 1;')) // git diff
+      .mockImplementationOnce(() => resp(0, 'feat: add foo'));
+
+    await generateCommitMessage('/proj', 'myrepo');
+
+    const claudeCall = execMock.mock.calls.find(([cmd]: any) => cmd === 'claude');
+    const prompt: string = claudeCall![1][claudeCall![1].indexOf('-p') + 1];
+    expect(prompt).toContain('lib/foo.ts');
+    expect(prompt).toContain('myrepo');
   });
 });

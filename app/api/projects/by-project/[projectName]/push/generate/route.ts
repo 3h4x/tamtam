@@ -51,7 +51,11 @@ Return ONLY the ${numOptions} titles — nothing else.`;
     // regardless of the project's default_model preference.
     const model = 'haiku';
 
-    const result = await exec(claudeBin, ['--print', '--model', model, '-p', commitPrompt], {
+    const result = await exec(claudeBin, [
+      '--print', '--tools', '', '--system-prompt',
+      'You are a commit message generator. Output only what is requested. Do not add prose or explanation.',
+      '--model', model, '-p', commitPrompt,
+    ], {
       cwd: projPath,
       timeout: 30000,
     });
