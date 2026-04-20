@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { fetchChanges, fetchChangeDiff, pullProject, PullDivergedError } from '@/lib/client-api'
+import { useRouter } from 'next/navigation'
+import { fetchChanges, fetchChangeDiff, pullProject, pushProject, PullDivergedError } from '@/lib/client-api'
 import type { ChangeFile, ChangeStatus, ChangesResponse } from '@/lib/client-api'
 
 const STATUS_LABEL: Record<ChangeStatus, string> = {
@@ -84,6 +85,7 @@ function StatBar({ additions, deletions }: { additions: number; deletions: numbe
 }
 
 export function ChangesTab({ projectName }: ChangesTabProps) {
+  const router = useRouter()
   const [data, setData] = useState<ChangesResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -92,6 +94,8 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
   const [pulling, setPulling] = useState(false)
   const [pullError, setPullError] = useState<string | null>(null)
   const [diverged, setDiverged] = useState(false)
+  const [pushing, setPushing] = useState(false)
+  const [pushError, setPushError] = useState<string | null>(null)
 
   const load = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
     if (mode === 'refresh') setRefreshing(true)
@@ -122,6 +126,19 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
       }
     } finally {
       setPulling(false)
+    }
+  }
+
+  const doPush = async () => {
+    setPushing(true)
+    setPushError(null)
+    try {
+      const result = await pushProject(projectName)
+      router.push(`/project/${projectName}/terminal?job=${result.job_id}`)
+    } catch (err) {
+      setPushError(err instanceof Error ? err.message : 'Push failed')
+    } finally {
+      setPushing(false)
     }
   }
 
@@ -177,6 +194,22 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
         {data?.branch && (
           <p className="text-xs text-text-tertiary mt-1">on branch <code className="font-mono">{data.branch}</code></p>
         )}
+        {(data?.ahead ?? 0) > 0 && (
+          <div className="mt-3 flex flex-col items-center gap-2">
+            <p className="text-xs text-status-warning font-medium">
+              ↑ {data!.ahead} commit{data!.ahead !== 1 ? 's' : ''} ahead of origin — not yet pushed
+            </p>
+            <button
+              className="px-4 py-1.5 text-sm border border-status-warning/60 bg-status-warning/10 text-status-warning rounded-md hover:bg-status-warning/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+              onClick={doPush}
+              disabled={pushing}
+              title={`Push ${data!.ahead} commit${data!.ahead !== 1 ? 's' : ''} to origin`}
+            >
+              {pushing ? 'Pushing…' : `Push ${data!.ahead} commit${data!.ahead !== 1 ? 's' : ''}`}
+            </button>
+            {pushError && <p className="text-xs text-status-error">{pushError}</p>}
+          </div>
+        )}
       </div>
     )
   }
@@ -198,6 +231,21 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
           <div className="flex items-center gap-2 text-sm">
             <span className="text-text-secondary text-xs uppercase tracking-wider font-medium">Branch</span>
             <code className="font-mono text-xs bg-bg-tertiary px-1.5 py-0.5 rounded text-text-primary">{data.branch}</code>
+          </div>
+        )}
+        {data.ahead > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-status-warning">
+              ↑ {data.ahead} commit{data.ahead !== 1 ? 's' : ''} ahead
+            </span>
+            <button
+              className="px-2 py-1 text-xs border border-status-warning/60 bg-status-warning/10 text-status-warning rounded-md hover:bg-status-warning/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+              onClick={doPush}
+              disabled={pushing}
+              title={`Push ${data.ahead} commit${data.ahead !== 1 ? 's' : ''} to origin/${data.branch}`}
+            >
+              {pushing ? 'Pushing…' : 'Push'}
+            </button>
           </div>
         )}
         {data.behind > 0 && !diverged && (
@@ -250,10 +298,8 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
             </button>
           </div>
         )}
-        {data.ahead > 0 && data.behind === 0 && (
-          <span className="text-xs text-status-info">
-            ↑ {data.ahead} commit{data.ahead !== 1 ? 's' : ''} ahead of origin/{data.branch}
-          </span>
+        {pushError && (
+          <span className="text-xs text-status-error">{pushError}</span>
         )}
         {pullError && (
           <span className="text-xs text-status-error">{pullError}</span>

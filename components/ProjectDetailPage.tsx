@@ -31,6 +31,7 @@ function runLabel(j: JobInfo): string {
 interface StatusStripProps {
   projectName: string
   totalChanges: number
+  unpushed: number
   hasUnreviewed: boolean
   verdict: Verdict | undefined
   isReviewRunning: boolean
@@ -95,6 +96,7 @@ function StatusCard({ label, primary, detail, tone, onClick, disabled, running }
 function StatusStrip({
   projectName: _projectName,
   totalChanges,
+  unpushed,
   hasUnreviewed,
   verdict,
   isReviewRunning,
@@ -239,12 +241,26 @@ function StatusStrip({
     ciCard = <StatusCard label="CI" primary="no status" tone="neutral" />
   }
 
+  // PUSH card
+  const pushCard = unpushed > 0 ? (
+    <StatusCard
+      label="Push"
+      primary={`${unpushed} commit${unpushed !== 1 ? 's' : ''} ahead`}
+      detail="not yet pushed to origin"
+      tone="warning"
+      onClick={onOpenChanges}
+    />
+  ) : null
+
+  const colCount = pushCard ? 'grid-cols-2 lg:grid-cols-5' : 'grid-cols-2 lg:grid-cols-4'
+
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-4">
+    <div className={`grid ${colCount} gap-2 mb-4`}>
       {changesCard}
       {reviewCard}
       {testsCard}
       {ciCard}
+      {pushCard}
     </div>
   )
 }
@@ -293,7 +309,9 @@ export function ProjectDetailPage({
   const [testCommandInput, setTestCommandInput] = useState('')
   const [testCronEnabledInput, setTestCronEnabledInput] = useState(false)
   const [testCronScheduleInput, setTestCronScheduleInput] = useState('')
+  const [autoCommitEnabledInput, setAutoCommitEnabledInput] = useState(false)
   const [autoPushEnabledInput, setAutoPushEnabledInput] = useState(false)
+  const [releaseAfterRunInput, setReleaseAfterRunInput] = useState(false)
   const [configSaving, setConfigSaving] = useState(false)
   const [configSaved, setConfigSaved] = useState(false)
 
@@ -364,7 +382,9 @@ export function ProjectDetailPage({
           setTestCommandInput(configData.test_command)
           setTestCronEnabledInput(configData.test_cron_enabled)
           setTestCronScheduleInput(configData.test_cron_schedule)
+          setAutoCommitEnabledInput(!!configData.auto_commit_enabled)
           setAutoPushEnabledInput(!!configData.auto_push_enabled)
+          setReleaseAfterRunInput(!!configData.release_after_run)
           if (actionsData) {
             setEditActions(actionsData.actions)
             setActionsLoaded(true)
@@ -430,6 +450,7 @@ export function ProjectDetailPage({
 
   const [releasing, setReleasing] = useState(false)
   const [testing, setTesting] = useState(false)
+  const [pushing, setPushing] = useState(false)
   const [pulling, setPulling] = useState(false)
   const [pullResult, setPullResult] = useState<string | null>(null)
   const [pullDiverged, setPullDiverged] = useState(false)
@@ -474,6 +495,19 @@ export function ProjectDetailPage({
       toast(err instanceof Error ? err.message : 'Failed to start test', 'error')
     } finally {
       setTesting(false)
+    }
+  }
+
+  const handlePush = async () => {
+    if (!name || pushing) return
+    setPushing(true)
+    try {
+      const result = await pushProject(name)
+      router.push(`/project/${name}/terminal?job=${result.job_id}`)
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to push', 'error')
+    } finally {
+      setPushing(false)
     }
   }
 
@@ -537,7 +571,9 @@ export function ProjectDetailPage({
         test_command: testCommandInput,
         test_cron_enabled: testCronEnabledInput,
         test_cron_schedule: testCronScheduleInput,
+        auto_commit_enabled: autoCommitEnabledInput,
         auto_push_enabled: autoPushEnabledInput,
+        release_after_run: releaseAfterRunInput,
       })
       setConfigSaved(true)
       // Reload config to show effective command
@@ -546,7 +582,9 @@ export function ProjectDetailPage({
       setTestCommandInput(data.test_command)
       setTestCronEnabledInput(data.test_cron_enabled)
       setTestCronScheduleInput(data.test_cron_schedule)
+      setAutoCommitEnabledInput(!!data.auto_commit_enabled)
       setAutoPushEnabledInput(!!data.auto_push_enabled)
+      setReleaseAfterRunInput(!!data.release_after_run)
       setTimeout(() => setConfigSaved(false), 3000)
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to save config', 'error')
@@ -560,14 +598,16 @@ export function ProjectDetailPage({
     (testCommandInput !== config.test_command ||
       testCronEnabledInput !== config.test_cron_enabled ||
       testCronScheduleInput !== config.test_cron_schedule ||
-      autoPushEnabledInput !== !!config.auto_push_enabled)
+      autoCommitEnabledInput !== !!config.auto_commit_enabled ||
+      autoPushEnabledInput !== !!config.auto_push_enabled ||
+      releaseAfterRunInput !== !!config.release_after_run)
 
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <h2 className="text-xl font-semibold text-text-primary">{project.project}</h2>
-          {releaseTag && <span className="text-text-secondary text-sm">{releaseTag}</span>}
+          <h2 className="text-xl font-semibold text-text-primary" data-private>{project.project}</h2>
+          {releaseTag && <span className="text-text-secondary text-sm" data-private>{releaseTag}</span>}
         </div>
         {highestPriority && (
           <div className="flex items-center gap-3">
@@ -654,6 +694,16 @@ export function ProjectDetailPage({
               {runningActions.has(action.name) ? `${action.name}...` : action.name}
             </button>
           ))}
+          {(project.unpushed ?? 0) > 0 && project.totalChanges === 0 && (
+            <button
+              className="px-3 py-1.5 text-sm border border-status-warning/60 bg-status-warning/10 text-status-warning rounded-md hover:bg-status-warning/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+              onClick={handlePush}
+              disabled={pushing}
+              title={`Push ${project.unpushed} commit${project.unpushed !== 1 ? 's' : ''} to origin`}
+            >
+              {pushing ? 'Pushing…' : `Push (${project.unpushed})`}
+            </button>
+          )}
           {pullDiverged ? (
             <>
               <span className="text-xs text-status-error font-medium">Diverged:</span>
@@ -818,6 +868,7 @@ export function ProjectDetailPage({
           <StatusStrip
             projectName={name}
             totalChanges={project.totalChanges}
+            unpushed={project.unpushed ?? 0}
             hasUnreviewed={hasUnreviewed}
             verdict={verdict}
             isReviewRunning={isReviewRunning}
@@ -917,21 +968,63 @@ export function ProjectDetailPage({
               <div className="bg-bg-secondary rounded-lg p-5">
                 <h3 className="text-sm font-semibold text-text-primary mb-4">Release Pipeline</h3>
 
-                <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                  <input
-                    id="auto-push-enabled"
-                    type="checkbox"
-                    className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
-                    checked={autoPushEnabledInput}
-                    onChange={(e) => setAutoPushEnabledInput(e.target.checked)}
-                  />
-                  <div>
-                    <span className="text-sm font-medium text-text-primary">Auto-push when review passes</span>
-                    <p className="mt-0.5 text-xs text-text-tertiary">
-                      On <code className="font-mono">LGTM</code> verdict, automatically commit and push. Off by default.
-                    </p>
-                  </div>
-                </label>
+                <div className="space-y-4">
+                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input
+                      id="auto-commit-enabled"
+                      type="checkbox"
+                      className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
+                      checked={autoCommitEnabledInput}
+                      onChange={(e) => {
+                        const next = e.target.checked
+                        setAutoCommitEnabledInput(next)
+                        if (!next) setAutoPushEnabledInput(false)
+                      }}
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-text-primary">Auto-commit when review passes</span>
+                      <p className="mt-0.5 text-xs text-text-tertiary">
+                        On <code className="font-mono">LGTM</code> verdict, stage and commit changes automatically — without pushing.
+                      </p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input
+                      id="auto-push-enabled"
+                      type="checkbox"
+                      className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
+                      checked={autoPushEnabledInput}
+                      onChange={(e) => {
+                        const next = e.target.checked
+                        setAutoPushEnabledInput(next)
+                        if (next) setAutoCommitEnabledInput(true)
+                      }}
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-text-primary">Auto-push after committing</span>
+                      <p className="mt-0.5 text-xs text-text-tertiary">
+                        After auto-commit, also push to origin. Implies auto-commit.
+                      </p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input
+                      id="release-after-run"
+                      type="checkbox"
+                      className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
+                      checked={releaseAfterRunInput}
+                      onChange={(e) => setReleaseAfterRunInput(e.target.checked)}
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-text-primary">Run release pipeline after each agent run</span>
+                      <p className="mt-0.5 text-xs text-text-tertiary">
+                        When a terminal or agent run finishes successfully, automatically trigger the full release pipeline (test → review → commit → push).
+                      </p>
+                    </div>
+                  </label>
+                </div>
 
                 <div className="mt-4 flex items-center gap-3">
                   <button

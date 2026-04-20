@@ -155,12 +155,14 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
   const release = await createReleaseJob(projectName);
   const releaseJobId = release?.id;
 
-  if (skipToPush) {
+  // Fresh LGTM or only unpushed commits (nothing to test/review) — push directly.
+  if (skipToPush || !changes) {
     const r = await startProjectPush(projectName);
     if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
     return { ok: true, step: 'push', releaseJobId, message: r.message };
   }
 
+  // Has uncommitted changes — run tests first (if configured), then review.
   const testCmd = detectTestCommand(projPath, projectName);
   if (testCmd) {
     const r = await startProjectTest(projectName);
@@ -168,16 +170,9 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
     return { ok: true, step: 'test', jobId: r.jobId, releaseJobId, message: `Running tests (${r.testCmd})` };
   }
 
-  if (changes) {
-    const r = await startProjectReview(projectName);
-    if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
-    return { ok: true, step: 'review', jobId: r.jobId, releaseJobId, message: 'Running review' };
-  }
-
-  // Only unpushed commits remain — push directly.
-  const r = await startProjectPush(projectName);
+  const r = await startProjectReview(projectName);
   if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
-  return { ok: true, step: 'push', releaseJobId, message: r.message };
+  return { ok: true, step: 'review', jobId: r.jobId, releaseJobId, message: 'Running review' };
 }
 
 // Returns true when the project's most recent finished review is LGTM AND

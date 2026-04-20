@@ -12,7 +12,7 @@ TamTam's north star is a **quality-gated release pipeline** for each tracked rep
 
 Each step is pluggable per project and coordinated by completion hooks in `lib/job-storage.ts`:
 
-- **test** — runs the project's test command (auto-detected from `package.json`/`pyproject.toml`/`Package.swift`/`Cargo.toml`/`go.mod`/`Makefile:test` or user-configured). Skipped if none.
+- **test** — runs the project's test command (auto-detected from `package.json`/`pyproject.toml`/`Package.swift`/`Cargo.toml`/`go.mod`/`Makefile:test` or user-configured). Skipped if none. If tests pass and there are no uncommitted changes, the pipeline short-circuits directly to push (skipping review).
 - **review** — Claude reads the uncommitted diff and emits a verdict: `LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP` (verdict rules are configurable in Settings).
 - **fix** — on `NEEDS ATTENTION` / `DO NOT SHIP`, Claude resumes the review session and applies fixes. Capped at 3 iterations per 30-minute window to prevent loops. On success it chains back to review.
 - **commit + push** — on `LGTM`, staged changes are committed with a Claude-generated message (respecting the `commit_style` setting) and pushed. Only tracked file modifications are staged automatically (untracked files are left alone to avoid sweeping up secrets).

@@ -389,6 +389,54 @@ describe('startProjectPush — push result tracking', () => {
     }
   });
 
+  it('commitOnly=true commits but skips push and returns ok', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0))                              // git add -A
+      .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached (staged)
+      .mockImplementationOnce(() => resp(0, 'M\tfoo.ts\n'))               // git diff --cached --stat
+      .mockImplementationOnce(() => resp(0, 'diff --git a/foo.ts'))       // git diff --cached (content)
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))         // claude commit msg
+      .mockImplementationOnce(() => resp(0))                              // git commit
+      .mockImplementationOnce(() => resp(0, 'abc1234'));                  // git rev-parse
+
+    const r = await startProjectPush('proj', { commitOnly: true });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.message).toContain('committed');
+      expect(r.message).toContain('push skipped');
+    }
+    // git push should NOT have been called
+    const pushCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args.includes('push'));
+    expect(pushCalls).toHaveLength(0);
+  });
+
+  it('commitOnly=true returns ok with "Nothing to commit" when nothing staged and not ahead', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0))         // git add -A
+      .mockImplementationOnce(() => resp(0, ''))     // git diff --cached (nothing staged)
+      .mockImplementationOnce(() => resp(0, '0'));   // git rev-list --count
+
+    const r = await startProjectPush('proj', { commitOnly: true });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.message).toContain('Nothing to commit');
+    // push not called
+    const pushCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args.includes('push'));
+    expect(pushCalls).toHaveLength(0);
+  });
+
+  it('commitOnly=true when already ahead and nothing to stage skips push and returns ok', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0))         // git add -A
+      .mockImplementationOnce(() => resp(0, ''))     // git diff --cached (nothing staged)
+      .mockImplementationOnce(() => resp(0, '1\n')); // git rev-list --count (1 ahead)
+
+    const r = await startProjectPush('proj', { commitOnly: true });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.message).toContain('committed');
+    const pushCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args.includes('push'));
+    expect(pushCalls).toHaveLength(0);
+  });
+
   it('does not create a push job when project path cannot be resolved', async () => {
     vi.resetModules();
     vi.doMock('@/lib/project-data', () => ({
@@ -515,7 +563,45 @@ describe('generateCommitMessage', () => {
       .mockImplementationOnce(() => resp(0, ''));  // retry: also empty
 
     const msg = await generateCommitMessage('/proj', 'myrepo');
-    expect(msg).toBe('chore: automated update');
+    expect(msg).toBe('chore: update files');
+  });
+
+  it('does not return msg2 when it is also a generic placeholder', async () => {
+    // msg1 is empty (triggers retry); msg2 is a generic placeholder.
+    // Old behavior: returned msg2 because it was truthy.
+    // New behavior: generic msg2 is filtered, falls through to 'chore: update files'.
+    execMock
+      .mockImplementationOnce(() => resp(0, ''))   // git diff --stat (no files)
+      .mockImplementationOnce(() => resp(0, ''))   // git diff (no content)
+      .mockImplementationOnce(() => resp(0, ''))   // first claude attempt: empty
+      .mockImplementationOnce(() => resp(0, 'chore: update'));  // retry: generic
+
+    const msg = await generateCommitMessage('/proj', 'myrepo');
+    expect(msg).not.toBe('chore: update');
+    expect(msg).toBe('chore: update files');
+  });
+
+  it('derives chore:update <files> from stat when both claude attempts are generic', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0, 'lib/foo.ts | 3 +++\nlib/bar.ts | 1 -\n 2 files changed'))
+      .mockImplementationOnce(() => resp(0, 'diff --git a/lib/foo.ts'))
+      .mockImplementationOnce(() => resp(0, 'chore: automated update'))  // first: generic
+      .mockImplementationOnce(() => resp(0, 'chore: update'));           // retry: generic
+
+    const msg = await generateCommitMessage('/proj', 'myrepo');
+    expect(msg).toBe('chore: update lib/foo.ts, lib/bar.ts');
+  });
+
+  it('caps file-name fallback at 3 files', async () => {
+    const stat = ['a.ts | 1', 'b.ts | 1', 'c.ts | 1', 'd.ts | 1'].join('\n');
+    execMock
+      .mockImplementationOnce(() => resp(0, stat))
+      .mockImplementationOnce(() => resp(0, ''))
+      .mockImplementationOnce(() => resp(0, 'chore: automated update'))
+      .mockImplementationOnce(() => resp(0, 'chore: update'));
+
+    const msg = await generateCommitMessage('/proj', 'myrepo');
+    expect(msg).toBe('chore: update a.ts, b.ts, c.ts');
   });
 
   it('does not retry when first response is a specific conventional commit (not generic)', async () => {

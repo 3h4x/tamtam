@@ -159,6 +159,12 @@ try {
 try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN session_id TEXT');
 } catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN auto_commit_enabled INTEGER DEFAULT 0');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN release_after_run INTEGER DEFAULT 0');
+} catch {}
 
 export const db = drizzle(sqlite, { schema });
 export { schema };

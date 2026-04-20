@@ -174,13 +174,22 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
   }
 }
 
-async function isAutoPushEnabled(projectName: string): Promise<boolean> {
+async function getProjectPipelineConfig(projectName: string): Promise<{ autoCommitEnabled: boolean; autoPushEnabled: boolean; releaseAfterRun: boolean }> {
   try {
     const { getProjectTestConfig } = await import('./scheduling');
-    return !!getProjectTestConfig(projectName)?.autoPushEnabled;
+    const cfg = getProjectTestConfig(projectName);
+    return {
+      autoCommitEnabled: !!cfg?.autoCommitEnabled,
+      autoPushEnabled: !!cfg?.autoPushEnabled,
+      releaseAfterRun: !!cfg?.releaseAfterRun,
+    };
   } catch {
-    return false;
+    return { autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false };
   }
+}
+
+async function isAutoPushEnabled(projectName: string): Promise<boolean> {
+  return (await getProjectPipelineConfig(projectName)).autoPushEnabled;
 }
 
 // Cap runaway review→fix→review loops when auto-push is on. Override via
@@ -286,11 +295,13 @@ async function runCompletionHooks(job: JobData): Promise<void> {
     // Release pipeline: review LGTM → push; NEEDS ATTENTION/DO NOT SHIP → fix
     try {
       const inRelease = !!findActiveReleaseJob(job.project);
-      if (job.exitCode === 0 && (inRelease || (await isAutoPushEnabled(job.project)))) {
+      const pipelineCfg = await getProjectPipelineConfig(job.project);
+      if (job.exitCode === 0 && (inRelease || pipelineCfg.autoPushEnabled || pipelineCfg.autoCommitEnabled)) {
         const verdict = getVerdict(job);
         if (verdict === 'LGTM') {
           const { startProjectPush } = await import('./start-push');
-          const r = await startProjectPush(job.project);
+          const commitOnly = !inRelease && pipelineCfg.autoCommitEnabled && !pipelineCfg.autoPushEnabled;
+          const r = await startProjectPush(job.project, { commitOnly });
           if (!r.ok) {
             console.log(`[release] push failed for ${job.project}: ${r.detail}`);
           } else {
@@ -323,7 +334,8 @@ async function runCompletionHooks(job: JobData): Promise<void> {
 
   if (job.kind === 'fix' && job.exitCode === 0) {
     try {
-      if (!!findActiveReleaseJob(job.project) || (await isAutoPushEnabled(job.project))) {
+      const { autoCommitEnabled, autoPushEnabled } = await getProjectPipelineConfig(job.project);
+      if (!!findActiveReleaseJob(job.project) || autoPushEnabled || autoCommitEnabled) {
         const { startProjectReview } = await import('./start-review');
         const r = await startProjectReview(job.project);
         if (r.ok) {
@@ -340,14 +352,38 @@ async function runCompletionHooks(job: JobData): Promise<void> {
 
   if (job.kind === 'test' && job.exitCode === 0) {
     try {
-      if (!!findActiveReleaseJob(job.project) || (await isAutoPushEnabled(job.project))) {
-        const { startProjectReview } = await import('./start-review');
-        const r = await startProjectReview(job.project);
-        if (r.ok) {
-          console.log(`[release] tests passed → started review ${r.jobId} for ${job.project}`);
-          chainedNext = true;
+      const { autoCommitEnabled, autoPushEnabled } = await getProjectPipelineConfig(job.project);
+      const inRelease = !!findActiveReleaseJob(job.project);
+      if (inRelease || autoPushEnabled || autoCommitEnabled) {
+        const { resolveProjectPath } = await import('./project-data');
+        const { exec } = await import('./shell');
+        const projPath = resolveProjectPath(job.project);
+        const changesR = projPath
+          ? await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 })
+          : null;
+        const hasUncommittedChanges = changesR?.exitCode === 0 && changesR.stdout.trim().length > 0;
+
+        if (hasUncommittedChanges) {
+          const { startProjectReview } = await import('./start-review');
+          const r = await startProjectReview(job.project);
+          if (r.ok) {
+            console.log(`[release] tests passed → started review ${r.jobId} for ${job.project}`);
+            chainedNext = true;
+          } else {
+            console.log(`[release] test→review skipped for ${job.project}: ${r.detail}`);
+          }
         } else {
-          console.log(`[release] test→review skipped for ${job.project}: ${r.detail}`);
+          // Tests passed and nothing left to review — push directly.
+          // If only auto-commit is enabled (not auto-push, not in release), respect that and skip the actual push.
+          const commitOnly = !inRelease && autoCommitEnabled && !autoPushEnabled;
+          const { startProjectPush } = await import('./start-push');
+          const r = await startProjectPush(job.project, { commitOnly });
+          if (r.ok) {
+            console.log(`[release] tests passed (no changes) → push ${job.project}${commitOnly ? ' (commit-only)' : ''}`);
+            chainedNext = true;
+          } else {
+            console.log(`[release] test→push skipped for ${job.project}: ${r.detail}`);
+          }
         }
       }
     } catch (e) {
@@ -429,6 +465,24 @@ async function runCompletionHooks(job: JobData): Promise<void> {
       }, delayMs);
     } else if (attempts > maxRetries) {
       console.log(`[fix-ci] retry cap reached for ${job.project} (${attempts}/${maxRetries}) — giving up`);
+    }
+  }
+
+  // Release-after-run: when a terminal/agent run finishes successfully, auto-trigger the release pipeline.
+  if ((job.kind === 'run' || job.kind.startsWith('agent:')) && job.exitCode === 0) {
+    try {
+      const { releaseAfterRun } = await getProjectPipelineConfig(job.project);
+      if (releaseAfterRun) {
+        const { startRelease } = await import('./start-release');
+        const r = await startRelease(job.project);
+        if (r.ok) {
+          console.log(`[release-after-run] triggered release ${r.jobId} for ${job.project} after run ${job.id}`);
+        } else {
+          console.log(`[release-after-run] skipped for ${job.project}: ${r.detail}`);
+        }
+      }
+    } catch (e) {
+      console.log(`[release-after-run] error for ${job.project}:`, e);
     }
   }
 }

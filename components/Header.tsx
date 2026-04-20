@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { ThemeToggle } from './ThemeToggle'
 import { NotificationBell } from './NotificationBell'
+import { PrivacyToggle } from './PrivacyToggle'
 import { useTheme } from '@/hooks/useTheme'
 
 interface HeaderProps {
@@ -53,6 +54,7 @@ export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
       </div>
       <div className="flex items-center gap-2 shrink-0">
         {loading && <span className="text-xs text-text-tertiary animate-spin" aria-label="Loading" role="status">{'\u27F3'}</span>}
+        <PrivacyToggle />
         <NotificationBell />
         <ThemeToggle />
       </div>

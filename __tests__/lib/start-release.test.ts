@@ -339,4 +339,19 @@ describe('startRelease — release pipeline entry decision tree', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(400);
   });
+
+  it('pushes directly when no uncommitted changes exist even if a test command is configured', async () => {
+    // changes=false, unpushed=1 — even with a test command, skip straight to push.
+    detectTestCommandMock.mockReturnValue('pnpm test');
+    execMock
+      .mockImplementationOnce(() => gitStatus(''))   // no uncommitted changes
+      .mockImplementationOnce(() => gitAhead('1'));   // 1 unpushed commit
+    startProjectPushMock.mockResolvedValue({ ok: true, commitSha: 'abc', message: 'pushed' });
+
+    const r = await startRelease('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.step).toBe('push');
+    expect(startProjectTestMock).not.toHaveBeenCalled();
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+  });
 });

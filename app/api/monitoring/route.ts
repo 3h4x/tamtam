@@ -81,9 +81,14 @@ export async function GET(request: Request) {
       prometheus = { status: 'ok', alerts, services }
     })(),
     (async () => {
+      // Exclude info/debug/trace across the three common log formats:
+      //   logfmt:  level=info
+      //   JSON:    "level":"info" or "level": "info"
+      //   bracket: [INFO] [DEBUG]
+      const EXCLUDE_LOW_LEVELS = '!~ "(?i)(\\\\blevel=(info|debug|trace)\\\\b|\\"level\\"\\\\s*:\\\\s*\\"(info|debug|trace)\\"|(^|\\\\s)\\\\[(info|debug|trace)\\\\])"'
       const [errors, warnings] = await Promise.all([
-        queryLoki('{job!=""} |~ "(?i)\\\\b(err|error|fatal|panic)\\\\b" !~ "(?i)\\\\b(no|zero)\\\\s+(err|error|errors|fatal|panic)\\\\b"', start15mNs, 30),
-        queryLoki('{job!=""} |~ "(?i)\\\\b(warn|warning)\\\\b" !~ "(?i)\\\\b(no|zero)\\\\s+(warn|warning|warnings)\\\\b"', start15mNs, 20),
+        queryLoki(`{job!=""} |~ "(?i)\\\\b(err|error|fatal|panic)\\\\b" !~ "(?i)\\\\b(no|zero)\\\\s+(err|error|errors|fatal|panic)\\\\b" ${EXCLUDE_LOW_LEVELS}`, start15mNs, 30),
+        queryLoki(`{job!=""} |~ "(?i)\\\\b(warn|warning)\\\\b" !~ "(?i)\\\\b(no|zero)\\\\s+(warn|warning|warnings)\\\\b" ${EXCLUDE_LOW_LEVELS}`, start15mNs, 20),
       ])
       loki = { status: 'ok', errors: errors.slice(0, 30), warnings: warnings.slice(0, 20) }
     })(),

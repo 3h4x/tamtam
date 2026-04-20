@@ -421,7 +421,9 @@ export interface ProjectConfig {
   effective_test_command: string
   test_cron_enabled: boolean
   test_cron_schedule: string
+  auto_commit_enabled?: boolean
   auto_push_enabled?: boolean
+  release_after_run?: boolean
   last_push_error?: string | null
   last_push_at?: number | null
 }
@@ -440,7 +442,9 @@ export async function updateProjectConfig(
     test_command?: string
     test_cron_enabled?: boolean
     test_cron_schedule?: string
+    auto_commit_enabled?: boolean
     auto_push_enabled?: boolean
+    release_after_run?: boolean
   }
 ): Promise<{ status: string }> {
   const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/config`, {
