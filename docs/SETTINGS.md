@@ -2,6 +2,14 @@
 
 All settings stored in the `settings` table (key-value, both TEXT). Accessed via `lib/config.ts` (`getSettings()`, `TamTamConfig`). Config is cached with a 5s TTL; `PATCH /api/settings` calls `reloadConfig()` to invalidate.
 
+## When to read this
+
+- Pointing tamtam at a different workspace or Claude binary
+- Tuning review verdict strictness (`review_verdict_rules`)
+- Changing commit message style (`commit_style`)
+- Adjusting fix-CI retry behavior after flaky test failures
+- Restricting agent runs to specific hours (`daytime`, `weekends`)
+
 ---
 
 ## All Keys
@@ -102,3 +110,37 @@ These live on the `projects` table row, accessed via `GET/PATCH /api/projects/by
 | `testCronEnabled` | boolean | `false` | Scheduled test runs |
 | `testCronSchedule` | string | `''` | Cron interval for scheduled tests |
 | `customActions` | JSON | `[]` | Per-project buttons (name, command, color) shown in the UI |
+
+---
+
+## Quick Reference
+
+### Common configuration scenarios
+
+| Goal | Setting(s) to change |
+|------|----------------------|
+| Point to a different workspace | `workspace_path` |
+| Use a different Claude binary | `claude_bin` |
+| Make reviews more lenient | `review_verdict_rules` — soften NEEDS ATTENTION criteria |
+| Use conventional commits | `commit_style` — already the default |
+| Run agents 24/7 (not just nights) | `daytime = true` |
+| Run agents on weekends | `weekends = on` |
+| Disable fix-CI auto-retry | `fix_ci_max_retries = 0` |
+| Faster polling after a run | Handled automatically by `startFastPolling()` in UI |
+
+### Settings that take effect immediately vs on next run
+
+| Immediate (no restart) | Next job only |
+|-----------------------|---------------|
+| `fix_ci_max_retries`, `fix_ci_retry_window_seconds`, `fix_ci_fast_crash_ms` | `base_prompt`, `commit_style`, `review_verdict_rules` (read at job start) |
+| `workspace_path` (next projects scan) | `claude_bin`, `permission_mode` (read at job start) |
+
+### Common Issues
+
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| Projects list empty | `workspace_path` not set or wrong path | Go to Settings → set workspace path |
+| Claude not found | `claude_bin` path wrong | Verify with `which claude` and update the setting |
+| Reviews always pass | `review_verdict_rules` too permissive | Tighten the rules in Settings → Behavior |
+| fix-CI loops on a flaky test | `fix_ci_max_retries` too high | Lower to `1` or `0` to disable auto-retry |
+| Agents run during the day unexpectedly | `daytime = true` | Set `daytime = false` for night-only |

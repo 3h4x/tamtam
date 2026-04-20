@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { fetchNotifications, markNotificationsSeen, markJobSeen, fetchJobs } from '@/lib/client-api'
+import { fetchNotifications, markNotificationsSeen, markJobSeen } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 
 function timeAgo(date: Date): string {
@@ -83,8 +83,9 @@ export function NotificationBell() {
   useEffect(() => {
     const poll = async () => {
       try {
-        const [notifs, allJobs] = await Promise.all([fetchNotifications(), fetchJobs()])
+        const notifs = await fetchNotifications()
         setUnseenCount(notifs.count)
+        setRunningJobs(notifs.runningJobs ?? [])
 
         const sorted = [...notifs.jobs].sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))
         const seen = new Set<string>()
@@ -94,7 +95,6 @@ export function NotificationBell() {
           seen.add(key)
           return true
         }))
-        setRunningJobs(allJobs.jobs.filter(j => j.status === 'running'))
       } catch {
         // ignore
       }

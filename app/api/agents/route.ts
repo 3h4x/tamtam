@@ -4,15 +4,26 @@ import { db, schema } from '@/lib/db';
 import { installAgentSchedule } from '@/lib/agent-scheduler';
 import { errMsg } from '@/lib/types';
 
+const AGENTS_CACHE_TTL = 10; // seconds
+let _agentsCache: { agents: typeof schema.agents.$inferSelect[]; time: number } | null = null;
+
+function getAllAgentsCached() {
+  const now = Date.now() / 1000;
+  if (_agentsCache && now - _agentsCache.time < AGENTS_CACHE_TTL) return _agentsCache.agents;
+  const agents = db.select().from(schema.agents).all();
+  _agentsCache = { agents, time: now };
+  return agents;
+}
+
+export function clearAgentsCache() {
+  _agentsCache = null;
+}
+
 export async function GET(request: NextRequest) {
   const project = request.nextUrl.searchParams.get('project');
-  let agents;
-  if (project) {
-    agents = db.select().from(schema.agents).where(eq(schema.agents.project, project)).all();
-  } else {
-    agents = db.select().from(schema.agents).all();
-  }
-  return NextResponse.json({ agents });
+  const agents = getAllAgentsCached();
+  const result = project ? agents.filter(a => a.project === project) : agents;
+  return NextResponse.json({ agents: result });
 }
 
 export async function POST(request: NextRequest) {
@@ -42,6 +53,7 @@ export async function POST(request: NextRequest) {
   };
 
   db.insert(schema.agents).values(agent).run();
+  clearAgentsCache();
 
   // Install schedule if configured (uses pm2 or launchctl based on runner)
   if (agent.schedule && agent.prompt) {

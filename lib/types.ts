@@ -27,4 +27,5 @@ export interface Task {
 export interface ProjectsResponse {
   tasks: Task[]
   priorities: string[]
+  issueCounts: Record<string, { prs: number; issues: number }>
 }

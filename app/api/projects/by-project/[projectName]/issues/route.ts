@@ -56,7 +56,7 @@ export async function GET(
   const repo = await getGhRepo(projectName, expanded);
   if (!repo) return NextResponse.json({ detail: 'could not determine GitHub repo' }, { status: 422 });
 
-  const prFields = 'number,title,state,author,url,createdAt,updatedAt,headRefName,baseRefName,isDraft,reviewDecision,labels,body';
+  const prFields = 'number,title,state,author,url,createdAt,updatedAt,headRefName,baseRefName,isDraft,reviewDecision,labels,body,statusCheckRollup';
   const issueFields = 'number,title,state,author,url,createdAt,updatedAt,assignees,labels,body';
 
   const [prsResult, issuesResult] = await Promise.all([

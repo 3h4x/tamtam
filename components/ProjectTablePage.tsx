@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { reviewProject, releaseProject, fetchJobs, fetchAgents, fetchIssuesAndPRs } from '@/lib/client-api'
+import { reviewProject, releaseProject, fetchJobs, fetchAgents } from '@/lib/client-api'
 import type { JobInfo, Agent } from '@/lib/client-api'
 import type { FleetHealth } from '@/hooks/useProjectHealth'
 import { formatAgo } from '@/lib/format'
@@ -16,6 +16,7 @@ interface ProjectTablePageProps {
   fleet: FleetHealth
   onRefresh: () => Promise<void>
   onPush?: () => void
+  issueCounts?: Record<string, { prs: number; issues: number }>
 }
 
 function StatusDot({ ok }: { ok: boolean }) {
@@ -112,13 +113,12 @@ function AgentPills({
 const healthOrder: Record<string, number> = { error: 0, warning: 1, unknown: 2, healthy: 3 }
 const ciOrder: Record<string, number> = { failure: 0, in_progress: 1, success: 2 }
 
-export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageProps) {
+export function ProjectTablePage({ fleet, onRefresh, onPush, issueCounts = {} }: ProjectTablePageProps) {
   const router = useRouter()
   const { toast } = useToast()
   const [releasing, setReleasing] = useState<Set<string>>(new Set())
   const [allJobs, setAllJobs] = useState<JobInfo[]>([])
   const [agentsByProject, setAgentsByProject] = useState<Record<string, Agent[]>>({})
-  const [issueCounts, setIssueCounts] = useState<Record<string, { prs: number; issues: number }>>({})
   const [sortKey, setSortKey] = useState<SortKey>('last_run')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
 
@@ -154,29 +154,7 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
     return () => { active = false; clearInterval(interval) }
   }, [])
 
-  useEffect(() => {
-    let active = true
-    const load = async () => {
-      const results = await Promise.allSettled(
-        fleet.projects.map(p => fetchIssuesAndPRs(p.project))
-      )
-      if (!active) return
-      const counts: Record<string, { prs: number; issues: number }> = {}
-      results.forEach((r, i) => {
-        if (r.status === 'fulfilled') {
-          counts[fleet.projects[i].project] = {
-            prs: r.value.prs.length,
-            issues: r.value.issues.length,
-          }
-        }
-      })
-      setIssueCounts(counts)
-    }
-    load()
-    return () => { active = false }
-  }, [fleet.projects])
-
-  const isReviewRunning = (projectName: string) =>
+const isReviewRunning = (projectName: string) =>
     allJobs.some(j => j.project === projectName && j.kind === 'review' && j.status === 'running')
 
   const getLatestVerdict = (projectName: string) =>

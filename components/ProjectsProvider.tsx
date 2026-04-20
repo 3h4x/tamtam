@@ -12,6 +12,7 @@ interface ProjectsContextType {
   error: string | null
   lastRefresh: number
   fleet: FleetHealth
+  issueCounts: Record<string, { prs: number; issues: number }>
   setError: (e: string | null) => void
   loadProjects: () => Promise<void>
   handlePriorityChange: (taskId: string, priority: string) => Promise<void>
@@ -31,6 +32,7 @@ export function useProjects() {
 export function ProjectsProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<ProjectsResponse['tasks']>([])
   const [priorities, setPriorities] = useState<string[]>([])
+  const [issueCounts, setIssueCounts] = useState<Record<string, { prs: number; issues: number }>>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastRefresh, setLastRefresh] = useState<number>(Date.now())
@@ -44,6 +46,7 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
       const data = await fetchProjects()
       setTasks(data.tasks)
       setPriorities(data.priorities)
+      setIssueCounts(data.issueCounts ?? {})
       setLastRefresh(Date.now())
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load projects'
@@ -104,7 +107,7 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
   return (
     <ProjectsContext.Provider
       value={{
-        tasks, priorities, loading, error, lastRefresh, fleet,
+        tasks, priorities, loading, error, lastRefresh, fleet, issueCounts,
         setError, loadProjects, handlePriorityChange, handlePause, handleResume, startFastPolling,
       }}
     >
