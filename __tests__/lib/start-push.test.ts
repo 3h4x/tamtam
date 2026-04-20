@@ -579,3 +579,152 @@ describe('generateCommitMessage', () => {
     expect(prompt).toContain('myrepo');
   });
 });
+
+describe('launchProjectPush — fire-and-forget', () => {
+  let launchProjectPush: typeof import('@/lib/start-push').launchProjectPush;
+  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
+  let execMock: ReturnType<typeof vi.fn>;
+  let createJobMock: ReturnType<typeof vi.fn>;
+  let updateJobMock: ReturnType<typeof vi.fn>;
+  let markDoneMock: ReturnType<typeof vi.fn>;
+  let setProjectPushResultMock: ReturnType<typeof vi.fn>;
+  let mkdirSyncMock: ReturnType<typeof vi.fn>;
+  let appendFileSyncMock: ReturnType<typeof vi.fn>;
+
+  function resp(exitCode: number, stdout = '', stderr = '') {
+    return Promise.resolve({ exitCode, stdout, stderr });
+  }
+
+  function flush() {
+    return new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    execMock = vi.fn();
+    setProjectPushResultMock = vi.fn();
+    mkdirSyncMock = vi.fn();
+    appendFileSyncMock = vi.fn();
+    createJobMock = vi.fn().mockImplementation((project: string, kind: string, pid: number, logPath: string) => ({
+      id: `${project}-${kind}-launch-id`, project, kind, pid, logPath, prompt: null,
+      startedAt: 0, finishedAt: null, exitCode: null, seen: false,
+      durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+      contextMeta: null, userPrompt: null,
+    }));
+    markDoneMock = vi.fn().mockResolvedValue(undefined);
+    updateJobMock = vi.fn();
+
+    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
+
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: resolveProjectPathMock,
+      clearProjectDataCache: vi.fn(),
+    }));
+    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp/test-logs' }),
+      setProjectPushResult: setProjectPushResultMock,
+    }));
+    vi.doMock('@/lib/job-storage', () => ({
+      createJob: createJobMock,
+      markDone: markDoneMock,
+      updateJob: updateJobMock,
+    }));
+    vi.doMock('fs', () => ({
+      mkdirSync: mkdirSyncMock,
+      appendFileSync: appendFileSyncMock,
+    }));
+
+    ({ launchProjectPush } = await import('@/lib/start-push'));
+  });
+
+  afterEach(() => { vi.resetModules(); });
+
+  it('returns error object immediately when project path cannot be resolved', () => {
+    resolveProjectPathMock.mockReturnValue(null);
+    const result = launchProjectPush('nonexistent');
+    expect(result).toEqual({ error: 'project not found' });
+    expect(createJobMock).not.toHaveBeenCalled();
+  });
+
+  it('returns jobId synchronously when project exists', () => {
+    execMock.mockResolvedValue(resp(0));
+    const result = launchProjectPush('proj');
+    expect('jobId' in result).toBe(true);
+    if ('jobId' in result) {
+      expect(typeof result.jobId).toBe('string');
+      expect(result.jobId.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('creates a job and updates it with logPath before returning', () => {
+    execMock.mockResolvedValue(resp(0));
+    launchProjectPush('proj');
+    expect(createJobMock).toHaveBeenCalledWith('proj', 'push', expect.any(Number), '');
+    expect(updateJobMock).toHaveBeenCalledOnce();
+    const updatedJob = updateJobMock.mock.calls[0][0];
+    expect(updatedJob.logPath).toMatch(/\.log$/);
+  });
+
+  it('job ID in return value matches the created job ID', () => {
+    execMock.mockResolvedValue(resp(0));
+    const result = launchProjectPush('proj');
+    if ('jobId' in result) {
+      const createdJobId = createJobMock.mock.results[0].value.id;
+      expect(result.jobId).toBe(createdJobId);
+    }
+  });
+
+  it('marks job done with exit 0 after successful background push', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0))                              // git add -A
+      .mockImplementationOnce(() => resp(0, ''))                          // git diff --cached (nothing staged)
+      .mockImplementationOnce(() => resp(0, '0'));                        // git rev-list --count
+
+    launchProjectPush('proj');
+    await flush();
+    await flush();
+
+    expect(markDoneMock).toHaveBeenCalled();
+    const [, exitCode] = markDoneMock.mock.calls[0];
+    expect(exitCode).toBe(0);
+  });
+
+  it('marks job done with exit 1 after failed background push', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0))              // git add -A
+      .mockImplementationOnce(() => resp(0, 'A\tf.ts\n')) // git diff --cached (staged)
+      .mockImplementationOnce(() => resp(0, ''))          // git diff --cached --stat
+      .mockImplementationOnce(() => resp(0, ''))          // git diff --cached --no-color
+      .mockImplementationOnce(() => resp(0, 'feat: x'))   // claude commit msg
+      .mockImplementationOnce(() => resp(1, '', 'pre-commit failed')) // git commit fails
+      .mockImplementationOnce(() => resp(0, ''));         // git status --porcelain (no hook changes)
+
+    launchProjectPush('proj');
+    await flush();
+    await flush();
+    await flush();
+
+    expect(markDoneMock).toHaveBeenCalled();
+    const [, exitCode] = markDoneMock.mock.calls[0];
+    expect(exitCode).toBe(1);
+  });
+
+  it('writes a start header to the log file immediately', () => {
+    execMock.mockResolvedValue(resp(0));
+    launchProjectPush('proj');
+    expect(appendFileSyncMock).toHaveBeenCalled();
+    const firstWrite: string = appendFileSyncMock.mock.calls[0][1];
+    expect(firstWrite).toContain('push start');
+    expect(firstWrite).toContain('/path/to/proj');
+  });
+
+  it('creates logDir with recursive mkdirSync', () => {
+    execMock.mockResolvedValue(resp(0));
+    launchProjectPush('proj');
+    expect(mkdirSyncMock).toHaveBeenCalledWith('/tmp/test-logs', { recursive: true });
+  });
+});

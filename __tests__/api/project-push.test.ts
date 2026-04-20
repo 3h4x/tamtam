@@ -85,108 +85,43 @@ describe('GET /api/projects/by-project/[name]/push/preview', () => {
 
 describe('POST /api/projects/by-project/[name]/push', () => {
   let POST: any;
-  let execMock: ReturnType<typeof vi.fn>;
-  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
+  let launchProjectPushMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
-
-    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
-    execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
-
-
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-
+    launchProjectPushMock = vi.fn().mockReturnValue({ jobId: 'test-job-id' });
+    vi.doMock('@/lib/start-push', () => ({ launchProjectPush: launchProjectPushMock }));
     const mod = await import('@/app/api/projects/by-project/[projectName]/push/route');
     POST = mod.POST;
   });
 
   afterEach(() => {
     vi.resetModules();
-
   });
 
   it('returns 404 if project not found', async () => {
-    resolveProjectPathMock.mockReturnValue(null);
+    launchProjectPushMock.mockReturnValue({ error: 'project not found' });
     const req = new NextRequest('http://localhost/api/projects/by-project/unknown/push', { method: 'POST' });
     const res = await POST(req, { params: Promise.resolve({ projectName: 'unknown' }) });
     expect(res.status).toBe(404);
+    const data = await res.json();
+    expect(data.detail).toBe('project not found');
   });
 
-  it('returns success with no changes message when nothing to push', async () => {
-    // add succeeds, status returns empty
-    execMock.mockImplementation((_cmd: string, args: string[]) => {
-      if (args.includes('--porcelain')) {
-        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-      }
-      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-    });
-
+  it('returns started status with job_id on success', async () => {
+    launchProjectPushMock.mockReturnValue({ jobId: 'launch-xyz' });
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push', { method: 'POST' });
     const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.status).toBe('success');
-    expect(data.message).toContain('No changes');
+    expect(data.status).toBe('started');
+    expect(data.job_id).toBe('launch-xyz');
   });
 
-  it('returns 400 if git add fails', async () => {
-    execMock.mockResolvedValue({ exitCode: 1, stdout: '', stderr: 'git add failed' });
-
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push', { method: 'POST' });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(400);
-    const data = await res.json();
-    expect(data.detail).toContain('Git add failed');
-  });
-
-  it('pushes changes and returns success', async () => {
-    execMock.mockImplementation((_cmd: string, args: string[]) => {
-      if (args.includes('-A')) {
-        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-      }
-      if (args.includes('--porcelain') || args.includes('status')) {
-        return Promise.resolve({ exitCode: 0, stdout: 'M file.ts\n', stderr: '' });
-      }
-      if (args.includes('commit')) {
-        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-      }
-      if (args.includes('push')) {
-        return Promise.resolve({ exitCode: 0, stdout: 'pushed', stderr: '' });
-      }
-      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-    });
-
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push', { method: 'POST' });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.status).toBe('success');
-  });
-
-  it('returns 400 if push fails', async () => {
-    execMock.mockImplementation((_cmd: string, args: string[]) => {
-      if (args.includes('-A')) {
-        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-      }
-      if (args.includes('--porcelain') || args.includes('status')) {
-        return Promise.resolve({ exitCode: 0, stdout: 'M file.ts\n', stderr: '' });
-      }
-      if (args.includes('commit')) {
-        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-      }
-      if (args.includes('push')) {
-        return Promise.resolve({ exitCode: 1, stdout: '', stderr: 'push failed' });
-      }
-      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-    });
-
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push', { method: 'POST' });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(400);
-    const data = await res.json();
-    expect(data.detail).toContain('Push failed');
+  it('calls launchProjectPush with the correct project name', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/my-repo/push', { method: 'POST' });
+    await POST(req, { params: Promise.resolve({ projectName: 'my-repo' }) });
+    expect(launchProjectPushMock).toHaveBeenCalledWith('my-repo');
   });
 });
 

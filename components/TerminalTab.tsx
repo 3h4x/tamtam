@@ -656,19 +656,19 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     try {
       const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
       const data = await res.json()
+      const isSessionKind = (k: string) =>
+        k === 'run' || k.startsWith('agent:')
       const jobs: JobDict[] = (data.jobs ?? [])
-        .filter((j: JobDict) => j.kind === 'run')
+        .filter((j: JobDict) => isSessionKind(j.kind) && j.session_id)
         .sort((a: JobDict, b: JobDict) => b.started_at - a.started_at)
 
       const seen = new Set<string>()
       const grouped: SessionItem[] = []
       for (const j of jobs) {
-        const key = j.session_id || `job:${j.id}`
+        const key = j.session_id!
         if (seen.has(key)) continue
         seen.add(key)
-        const sameSession = j.session_id
-          ? jobs.filter(o => o.session_id === j.session_id)
-          : [j]
+        const sameSession = jobs.filter(o => o.session_id === key)
         const earliest = sameSession[sameSession.length - 1]
         const latest = sameSession[0]
         grouped.push({
@@ -679,7 +679,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           sessionId: latest.session_id,
           exitCode: latest.exit_code,
         })
-        if (grouped.length >= 100) break
+        if (grouped.length >= 5) break
       }
       setSessions(grouped)
     } catch {}
@@ -853,16 +853,11 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
             <button
               className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-[#888] hover:text-[#ccc] cursor-pointer border-none font-mono leading-none flex items-center gap-1"
               onClick={() => { if (!showSessions) loadSessions(); setShowSessions(s => !s) }}
-              title="Previous sessions"
+              title="Recent sessions"
             >
-              {showSessions ? 'close' : 'sessions'}
-              {!showSessions && sessions.length > 0 && (
-                <span className="text-[10px] text-[#555]">
-                  {sessions.length}
-                  {sessions.some(s => s.finishedAt === null && s.exitCode === null) && (
-                    <span className="ml-0.5 text-status-warning">●</span>
-                  )}
-                </span>
+              {showSessions ? 'close' : 'recent'}
+              {!showSessions && sessions.some(s => s.finishedAt === null && s.exitCode === null) && (
+                <span className="ml-0.5 text-status-warning text-[10px]">●</span>
               )}
             </button>
             {streaming && (
@@ -1001,32 +996,31 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           </div>
         </div>
 
-        {/* Sessions panel */}
+        {/* Sessions panel — last 5 resumable sessions */}
         {showSessions && (
-          <div className="border-b border-[#2a2a2a] bg-[#151515] overflow-y-auto shrink-0" style={{ maxHeight: '200px' }}>
+          <div className="border-b border-[#2a2a2a] bg-[#151515] shrink-0">
             {loadingSessions ? (
-              <div className="px-4 py-3 text-xs text-[#555] font-mono flex items-center gap-1.5"><div className="spinner-sm opacity-50" />loading…</div>
+              <div className="px-4 py-3 text-xs text-[#555] font-mono">loading…</div>
             ) : sessions.length === 0 ? (
-              <div className="px-4 py-3 text-xs text-[#555] font-mono">no sessions</div>
+              <div className="px-4 py-3 text-xs text-[#555] font-mono">no recent sessions</div>
             ) : (
               sessions.map(session => {
                 const isRunning = session.finishedAt === null && session.exitCode === null
                 const isSuccess = session.exitCode === 0
                 const prompt = session.prompt
-                  ? session.prompt.length > 60 ? session.prompt.slice(0, 60) + '...' : session.prompt
+                  ? session.prompt.length > 80 ? session.prompt.slice(0, 80) + '…' : session.prompt
                   : '(no prompt)'
                 const secs = Math.floor(Date.now() / 1000 - session.startedAt)
                 const timeAgo = secs < 60 ? `${secs}s ago` : secs < 3600 ? `${Math.floor(secs / 60)}m ago` : `${Math.floor(secs / 3600)}h ago`
                 return (
                   <button
                     key={session.id}
-                    className="flex items-center gap-3 w-full px-4 py-2 text-left hover:bg-[#1e1e1e] border-none bg-transparent border-b border-[#222] last:border-b-0 cursor-pointer"
+                    className="flex items-center gap-3 w-full px-4 py-2 text-left hover:bg-[#1e1e1e] border-none bg-transparent border-b border-[#1d1d1d] last:border-b-0 cursor-pointer"
                     onClick={() => restoreSession(session)}
                   >
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${isRunning ? 'bg-status-warning animate-pulse' : isSuccess ? 'bg-status-success' : 'bg-status-error'}`} />
-                    <span className="text-xs text-[#ccc] font-mono truncate flex-1">{prompt}</span>
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRunning ? 'bg-status-warning animate-pulse' : isSuccess ? 'bg-status-success' : 'bg-[#555]'}`} />
+                    <span className="text-xs text-[#bbb] font-mono truncate flex-1">{prompt}</span>
                     <span className="text-[10px] text-[#555] font-mono shrink-0">{timeAgo}</span>
-                    {session.sessionId && <span className="text-[10px] text-[#444] font-mono shrink-0">{session.sessionId.slice(0, 8)}</span>}
                   </button>
                 )
               })

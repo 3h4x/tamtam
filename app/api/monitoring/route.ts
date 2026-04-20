@@ -48,9 +48,17 @@ async function queryLoki(query: string, startNs: string, limit = 30): Promise<Lo
   return lines.sort((a, b) => b.ts.localeCompare(a.ts))
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const windowMs = (() => {
+    switch (searchParams.get('window')) {
+      case '5m': return 5 * 60 * 1000
+      case '1h': return 60 * 60 * 1000
+      default: return 15 * 60 * 1000
+    }
+  })()
   const now = Date.now()
-  const start15mNs = String((now - 15 * 60 * 1000) * 1_000_000)
+  const start15mNs = String((now - windowMs) * 1_000_000)
 
   let prometheus: {
     status: 'ok' | 'unavailable'
@@ -86,5 +94,5 @@ export async function GET() {
     (prometheus.status === 'ok' && (prometheus.alerts.length > 0 || downServices.length > 0)) ||
     (loki.status === 'ok' && loki.errors.length > 0)
 
-  return NextResponse.json({ prometheus, loki, hasIssues, fetchedAt: now, config: { prometheusUrl: PROMETHEUS_URL, lokiUrl: LOKI_URL } })
+  return NextResponse.json({ prometheus, loki, hasIssues, fetchedAt: now, windowMs, config: { prometheusUrl: PROMETHEUS_URL, lokiUrl: LOKI_URL } })
 }

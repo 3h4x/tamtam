@@ -2,12 +2,15 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { reviewProject, releaseProject, fetchJobs, fetchAgents } from '@/lib/client-api'
+import { reviewProject, releaseProject, fetchJobs, fetchAgents, fetchIssuesAndPRs } from '@/lib/client-api'
 import type { JobInfo, Agent } from '@/lib/client-api'
 import type { FleetHealth } from '@/hooks/useProjectHealth'
 import { formatAgo } from '@/lib/format'
 import { getAggregateCi, getCiFailedUrl, getReleaseTag } from '@/lib/statusConstants'
 import { useToast } from '@/components/Toast'
+
+type SortKey = 'project' | 'status' | 'changes' | 'last_run' | 'ci' | 'release'
+type SortDir = 'asc' | 'desc'
 
 interface ProjectTablePageProps {
   fleet: FleetHealth
@@ -29,10 +32,38 @@ function StatusDot({ ok }: { ok: boolean }) {
   )
 }
 
+function WarningDot() {
+  return (
+    <svg className="w-3.5 h-3.5 text-status-warning shrink-0" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 1.5L12.5 12H1.5L7 1.5z" />
+      <path d="M7 5.5v3M7 10v.5" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 function SpinnerIcon() {
   return (
     <svg className="w-3.5 h-3.5 text-accent animate-spin shrink-0" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
       <path d="M7 1.5a5.5 5.5 0 1 1-3.889 1.611" />
+    </svg>
+  )
+}
+
+function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
+  if (!active) {
+    return (
+      <svg className="w-3 h-3 opacity-30 shrink-0" viewBox="0 0 12 12" fill="currentColor">
+        <path d="M6 2l3 4H3l3-4zM6 10L3 6h6l-3 4z" />
+      </svg>
+    )
+  }
+  return dir === 'asc' ? (
+    <svg className="w-3 h-3 shrink-0" viewBox="0 0 12 12" fill="currentColor">
+      <path d="M6 2l3 4H3l3-4z" />
+    </svg>
+  ) : (
+    <svg className="w-3 h-3 shrink-0" viewBox="0 0 12 12" fill="currentColor">
+      <path d="M6 10L3 6h6l-3 4z" />
     </svg>
   )
 }
@@ -78,12 +109,18 @@ function AgentPills({
   )
 }
 
+const healthOrder: Record<string, number> = { error: 0, warning: 1, unknown: 2, healthy: 3 }
+const ciOrder: Record<string, number> = { failure: 0, in_progress: 1, success: 2 }
+
 export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageProps) {
   const router = useRouter()
   const { toast } = useToast()
   const [releasing, setReleasing] = useState<Set<string>>(new Set())
   const [allJobs, setAllJobs] = useState<JobInfo[]>([])
   const [agentsByProject, setAgentsByProject] = useState<Record<string, Agent[]>>({})
+  const [issueCounts, setIssueCounts] = useState<Record<string, { prs: number; issues: number }>>({})
+  const [sortKey, setSortKey] = useState<SortKey>('last_run')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
 
   useEffect(() => {
     let active = true
@@ -117,6 +154,28 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
     return () => { active = false; clearInterval(interval) }
   }, [])
 
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      const results = await Promise.allSettled(
+        fleet.projects.map(p => fetchIssuesAndPRs(p.project))
+      )
+      if (!active) return
+      const counts: Record<string, { prs: number; issues: number }> = {}
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled') {
+          counts[fleet.projects[i].project] = {
+            prs: r.value.prs.length,
+            issues: r.value.issues.length,
+          }
+        }
+      })
+      setIssueCounts(counts)
+    }
+    load()
+    return () => { active = false }
+  }, [fleet.projects])
+
   const isReviewRunning = (projectName: string) =>
     allJobs.some(j => j.project === projectName && j.kind === 'review' && j.status === 'running')
 
@@ -131,6 +190,25 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
         .filter(j => j.project === projectName && j.status === 'running' && j.kind.startsWith('agent:'))
         .map(j => j.kind.slice('agent:'.length))
     )
+
+  const getRecentTs = (name: string) => {
+    let max = 0
+    for (const j of allJobs) {
+      if (j.project !== name) continue
+      const t = Math.max(j.started_at || 0, j.finished_at || 0)
+      if (t > max) max = t
+    }
+    return max
+  }
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortKey(key)
+      setSortDir(key === 'project' ? 'asc' : 'desc')
+    }
+  }
 
   const handleReview = async (e: React.MouseEvent, projectName: string) => {
     e.stopPropagation()
@@ -163,36 +241,69 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
     }
   }
 
+  const sortedProjects = [...fleet.projects].sort((a, b) => {
+    let cmp = 0
+    switch (sortKey) {
+      case 'project':
+        cmp = a.project.localeCompare(b.project)
+        break
+      case 'status':
+        cmp = (healthOrder[a.status] ?? 99) - (healthOrder[b.status] ?? 99)
+        break
+      case 'changes':
+        cmp = a.totalChanges - b.totalChanges
+        break
+      case 'last_run':
+        cmp = getRecentTs(a.project) - getRecentTs(b.project)
+        break
+      case 'ci': {
+        const ca = getAggregateCi(a)
+        const cb = getAggregateCi(b)
+        cmp = (ciOrder[ca ?? ''] ?? 99) - (ciOrder[cb ?? ''] ?? 99)
+        break
+      }
+      case 'release': {
+        const ra = getReleaseTag(a) ?? ''
+        const rb = getReleaseTag(b) ?? ''
+        cmp = ra.localeCompare(rb)
+        break
+      }
+    }
+    return sortDir === 'asc' ? cmp : -cmp
+  })
+
+  const thClass = (key: SortKey) =>
+    `px-4 py-2.5 font-medium cursor-pointer select-none hover:text-text-secondary transition-colors ${sortKey === key ? 'text-text-secondary' : ''}`
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse">
         <thead>
           <tr className="text-left text-xs text-text-tertiary uppercase tracking-wider border-b border-border">
-            <th className="px-4 py-2.5 font-medium">Project</th>
+            <th className={thClass('project')} onClick={() => handleSort('project')}>
+              <span className="flex items-center gap-1">Project <SortIcon active={sortKey === 'project'} dir={sortDir} /></span>
+            </th>
             <th className="px-4 py-2.5 font-medium">Agents</th>
-            <th className="px-4 py-2.5 font-medium">Status</th>
-            <th className="px-4 py-2.5 font-medium">Changes</th>
-            <th className="px-4 py-2.5 font-medium">Last Run</th>
-            <th className="px-4 py-2.5 font-medium">CI</th>
-            <th className="px-4 py-2.5 font-medium">Release</th>
+            <th className={thClass('status')} onClick={() => handleSort('status')}>
+              <span className="flex items-center gap-1">Status <SortIcon active={sortKey === 'status'} dir={sortDir} /></span>
+            </th>
+            <th className={thClass('changes')} onClick={() => handleSort('changes')}>
+              <span className="flex items-center gap-1">Changes <SortIcon active={sortKey === 'changes'} dir={sortDir} /></span>
+            </th>
+            <th className={thClass('last_run')} onClick={() => handleSort('last_run')}>
+              <span className="flex items-center gap-1">Last Run <SortIcon active={sortKey === 'last_run'} dir={sortDir} /></span>
+            </th>
+            <th className={thClass('ci')} onClick={() => handleSort('ci')}>
+              <span className="flex items-center gap-1">CI <SortIcon active={sortKey === 'ci'} dir={sortDir} /></span>
+            </th>
+            <th className={thClass('release')} onClick={() => handleSort('release')}>
+              <span className="flex items-center gap-1">Release <SortIcon active={sortKey === 'release'} dir={sortDir} /></span>
+            </th>
             <th className="px-4 py-2.5 font-medium"></th>
           </tr>
         </thead>
         <tbody>
-          {[...fleet.projects]
-            .sort((a, b) => {
-              const recentTs = (name: string) => {
-                let max = 0
-                for (const j of allJobs) {
-                  if (j.project !== name) continue
-                  const t = Math.max(j.started_at || 0, j.finished_at || 0)
-                  if (t > max) max = t
-                }
-                return max
-              }
-              return recentTs(b.project) - recentTs(a.project)
-            })
-            .map((project) => {
+          {sortedProjects.map((project) => {
             const ci = getAggregateCi(project)
             const ciUrl = getCiFailedUrl(project)
             const release = getReleaseTag(project)
@@ -203,15 +314,14 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
 
             const projectJobs = allJobs.filter(j => j.project === project.project)
             const runningJobs = projectJobs.filter(j => j.status === 'running')
-            // "Last Run" = the single most recent job for this project,
-            // regardless of status. Running jobs use started_at; done jobs
-            // use finished_at (falling back to started_at).
             const jobTime = (j: typeof projectJobs[number]) => j.finished_at ?? j.started_at ?? 0
             const lastJob = projectJobs.slice().sort((a, b) => jobTime(b) - jobTime(a))[0]
-            const lastFailed = lastJob?.status === 'done' && lastJob.exit_code != null && lastJob.exit_code !== 0 ? lastJob : null
 
             const agents = agentsByProject[project.project] || []
             const runningAgentNames = getRunningAgentNames(project.project)
+
+            // show warning in STATUS only for non-unreviewed reasons (paused, out-of-sync, stale)
+            const showWarning = project.status === 'warning' && !hasUnreviewed
 
             return (
               <tr
@@ -221,7 +331,32 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
               >
                 {/* Project */}
                 <td className="px-4 py-3">
-                  <span className="font-medium text-text-primary">{project.project}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="font-medium text-text-primary">{project.project}</span>
+                    {issueCounts[project.project]?.prs > 0 && (
+                      <span
+                        title={`${issueCounts[project.project].prs} open PR${issueCounts[project.project].prs !== 1 ? 's' : ''}`}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-accent/15 text-accent border border-accent/30"
+                      >
+                        <svg className="w-3 h-3 shrink-0" viewBox="0 0 16 16" fill="currentColor">
+                          <path d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
+                        </svg>
+                        {issueCounts[project.project].prs}
+                      </span>
+                    )}
+                    {issueCounts[project.project]?.issues > 0 && (
+                      <span
+                        title={`${issueCounts[project.project].issues} open issue${issueCounts[project.project].issues !== 1 ? 's' : ''}`}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-bg-tertiary text-text-secondary border border-border"
+                      >
+                        <svg className="w-3 h-3 shrink-0" viewBox="0 0 16 16" fill="currentColor">
+                          <path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
+                          <path fillRule="evenodd" d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z" />
+                        </svg>
+                        {issueCounts[project.project].issues}
+                      </span>
+                    )}
+                  </span>
                 </td>
 
                 {/* Agents */}
@@ -236,11 +371,15 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
                       <SpinnerIcon />
                       {runningJobs.length > 1 ? `${runningJobs.length} running` : runningJobs[0].kind}
                     </span>
-                  ) : lastFailed ? (
+                  ) : project.status === 'error' ? (
                     <span className="flex items-center gap-1.5 text-sm text-status-error">
                       <StatusDot ok={false} />
-                      <span>{lastFailed.kind}</span>
-                      <span className="text-xs text-text-tertiary">{formatAgo(lastFailed.finished_at ?? lastFailed.started_at)}</span>
+                      <span>error</span>
+                    </span>
+                  ) : showWarning ? (
+                    <span className="flex items-center gap-1.5 text-sm text-status-warning">
+                      <WarningDot />
+                      <span>warning</span>
                     </span>
                   ) : lastJob ? (
                     <span className="flex items-center gap-1.5 text-sm text-text-tertiary">
@@ -328,7 +467,7 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
                   {release || '—'}
                 </td>
 
-                {/* Release */}
+                {/* Actions */}
                 <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                   {isReviewed && (
                     <button

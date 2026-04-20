@@ -126,6 +126,41 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
   return result;
 }
 
+// Fire-and-forget variant: creates the job synchronously, runs push in the
+// background, and returns the job ID immediately so callers can stream output.
+export function launchProjectPush(projectName: string): { jobId: string } | { error: string } {
+  const projPath = resolveProjectPath(projectName);
+  if (!projPath) return { error: 'project not found' };
+
+  const { logDir } = getImproveConfig();
+  mkdirSync(logDir, { recursive: true });
+  const job = createJob(projectName, 'push', process.pid, '');
+  const logPath = join(logDir, `${job.id}.log`);
+  job.logPath = logPath;
+  updateJob(job);
+
+  const append = (s: string) => {
+    try { appendFileSync(logPath, s); } catch {}
+  };
+  append(`# push start — ${new Date().toISOString()}\n# repo: ${projPath}\n`);
+
+  // Run async in background — do not await
+  ;(async () => {
+    const result = await runPush(projectName, projPath, append);
+    try { setProjectPushResult(projectName, result.ok ? null : result.detail); } catch {}
+    if (result.ok) {
+      invalidateProject(projectName);
+      clearProjectDataCache();
+      append(`\n# push ok — ${'commitSha' in result && result.commitSha ? result.commitSha : 'no-op'}\n${result.message}\n`);
+    } else {
+      append(`\n# push failed (${result.status})\n${result.detail}\n`);
+    }
+    await markDone(job, result.ok ? 0 : 1);
+  })();
+
+  return { jobId: job.id };
+}
+
 async function runPush(
   projectName: string,
   projPath: string,
@@ -173,10 +208,15 @@ async function runPush(
     }
   }
 
+  // Pre-push hooks (e.g. borged's full CI pipeline) can take 15-20 minutes.
+  // killProcessGroup ensures the entire hook process tree (check.ts + vitest workers)
+  // is killed if the timeout fires, preventing orphaned workers.
+  const PUSH_TIMEOUT = 25 * 60 * 1000; // 25 minutes
+
   const tryPush = async (extraArgs: string[] = []): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
     const args = ['-C', projPath, 'push', ...extraArgs];
     log(`\n$ git push${extraArgs.length ? ' ' + extraArgs.join(' ') : ''}\n`);
-    const r = await exec('git', args, { timeout: 30000 });
+    const r = await exec('git', args, { timeout: PUSH_TIMEOUT, killProcessGroup: true });
     if (r.stdout) log(r.stdout);
     if (r.stderr) log(r.stderr);
     return r;
@@ -188,7 +228,7 @@ async function runPush(
   const behind = abLine ? parseInt(abLine.match(/-(\d+)/)?.[1] ?? '0', 10) : 0;
   if (behind > 0) {
     log(`\n# ${behind} commit(s) behind remote — rebasing before push\n`);
-    const rebaseR = await exec('git', ['-C', projPath, 'pull', '--rebase'], { timeout: 60000 });
+    const rebaseR = await exec('git', ['-C', projPath, 'pull', '--rebase'], { timeout: PUSH_TIMEOUT, killProcessGroup: true });
     if (rebaseR.stdout) log(rebaseR.stdout);
     if (rebaseR.stderr) log(rebaseR.stderr);
     if (rebaseR.exitCode !== 0) {
@@ -211,7 +251,7 @@ async function runPush(
   // (stale tracking info — the pre-push behind-check missed it). Pull --rebase and retry.
   if (pushR.exitCode !== 0 && (pushR.stderr.includes('fetch first') || pushR.stderr.includes('Updates were rejected'))) {
     log(`\n# remote has new commits (stale tracking) — rebasing before retry\n`);
-    const rebaseR = await exec('git', ['-C', projPath, 'pull', '--rebase'], { timeout: 60000 });
+    const rebaseR = await exec('git', ['-C', projPath, 'pull', '--rebase'], { timeout: PUSH_TIMEOUT, killProcessGroup: true });
     if (rebaseR.stdout) log(rebaseR.stdout);
     if (rebaseR.stderr) log(rebaseR.stderr);
     if (rebaseR.exitCode === 0) {

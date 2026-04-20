@@ -16,6 +16,10 @@ function lokiQueryResponse(streams: Array<{ stream: Record<string, string>; valu
   return makeJsonResponse({ data: { result: streams } });
 }
 
+function makeRequest(url = 'http://localhost/api/monitoring') {
+  return new Request(url);
+}
+
 describe('GET /api/monitoring', () => {
   let GET: any;
   let fetchSpy: ReturnType<typeof vi.fn>;
@@ -36,7 +40,7 @@ describe('GET /api/monitoring', () => {
   it('returns unavailable for both when fetch throws', async () => {
     fetchSpy.mockRejectedValue(new Error('connection refused'));
 
-    const res = await GET();
+    const res = await GET(makeRequest());
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.prometheus.status).toBe('unavailable');
@@ -57,7 +61,7 @@ describe('GET /api/monitoring', () => {
       // Loki warnings query
       .mockReturnValueOnce(lokiQueryResponse([]));
 
-    const res = await GET();
+    const res = await GET(makeRequest());
     const data = await res.json();
     expect(data.prometheus.status).toBe('ok');
     expect(data.loki.status).toBe('ok');
@@ -74,7 +78,7 @@ describe('GET /api/monitoring', () => {
       .mockReturnValueOnce(lokiQueryResponse([]))
       .mockReturnValueOnce(lokiQueryResponse([]));
 
-    const res = await GET();
+    const res = await GET(makeRequest());
     const data = await res.json();
     expect(data.prometheus.alerts).toHaveLength(1);
     expect(data.prometheus.alerts[0].metric.alertname).toBe('HighMemory');
@@ -89,7 +93,7 @@ describe('GET /api/monitoring', () => {
       .mockReturnValueOnce(lokiQueryResponse([]))
       .mockReturnValueOnce(lokiQueryResponse([]));
 
-    const res = await GET();
+    const res = await GET(makeRequest());
     const data = await res.json();
     expect(data.hasIssues).toBe(true);
   });
@@ -103,7 +107,7 @@ describe('GET /api/monitoring', () => {
       .mockReturnValueOnce(lokiQueryResponse([stream]))
       .mockReturnValueOnce(lokiQueryResponse([]));
 
-    const res = await GET();
+    const res = await GET(makeRequest());
     const data = await res.json();
     expect(data.loki.errors).toHaveLength(1);
     expect(data.loki.errors[0].line).toBe('FATAL error occurred');
@@ -119,7 +123,7 @@ describe('GET /api/monitoring', () => {
       .mockReturnValueOnce(lokiQueryResponse([]))
       .mockReturnValueOnce(lokiQueryResponse([warnStream]));
 
-    const res = await GET();
+    const res = await GET(makeRequest());
     const data = await res.json();
     expect(data.loki.warnings).toHaveLength(1);
     expect(data.hasIssues).toBe(false);
@@ -132,7 +136,7 @@ describe('GET /api/monitoring', () => {
       .mockReturnValueOnce(lokiQueryResponse([]))
       .mockReturnValueOnce(lokiQueryResponse([]));
 
-    const res = await GET();
+    const res = await GET(makeRequest());
     const data = await res.json();
     expect(data.prometheus.status).toBe('unavailable');
     expect(data.loki.status).toBe('ok');
@@ -149,9 +153,52 @@ describe('GET /api/monitoring', () => {
       .mockReturnValueOnce(lokiQueryResponse([{ stream: { job: 'svc' }, values: manyErrors }]))
       .mockReturnValueOnce(lokiQueryResponse([{ stream: { job: 'svc' }, values: manyWarns }]));
 
-    const res = await GET();
+    const res = await GET(makeRequest());
     const data = await res.json();
     expect(data.loki.errors.length).toBeLessThanOrEqual(30);
     expect(data.loki.warnings.length).toBeLessThanOrEqual(20);
+  });
+
+  // --- window query parameter ---
+
+  it('defaults to 15m window when no ?window param', async () => {
+    fetchSpy.mockRejectedValue(new Error('connection refused'));
+    const res = await GET(makeRequest('http://localhost/api/monitoring'));
+    const data = await res.json();
+    expect(data.windowMs).toBe(15 * 60 * 1000);
+  });
+
+  it('uses 5m window when ?window=5m', async () => {
+    fetchSpy.mockRejectedValue(new Error('connection refused'));
+    const res = await GET(makeRequest('http://localhost/api/monitoring?window=5m'));
+    const data = await res.json();
+    expect(data.windowMs).toBe(5 * 60 * 1000);
+  });
+
+  it('uses 1h window when ?window=1h', async () => {
+    fetchSpy.mockRejectedValue(new Error('connection refused'));
+    const res = await GET(makeRequest('http://localhost/api/monitoring?window=1h'));
+    const data = await res.json();
+    expect(data.windowMs).toBe(60 * 60 * 1000);
+  });
+
+  it('falls back to 15m window for unknown ?window values', async () => {
+    fetchSpy.mockRejectedValue(new Error('connection refused'));
+    const res = await GET(makeRequest('http://localhost/api/monitoring?window=99d'));
+    const data = await res.json();
+    expect(data.windowMs).toBe(15 * 60 * 1000);
+  });
+
+  it('includes windowMs in response alongside fetchedAt', async () => {
+    fetchSpy
+      .mockReturnValueOnce(prometheusQueryResponse([]))
+      .mockReturnValueOnce(prometheusQueryResponse([]))
+      .mockReturnValueOnce(lokiQueryResponse([]))
+      .mockReturnValueOnce(lokiQueryResponse([]));
+
+    const res = await GET(makeRequest('http://localhost/api/monitoring?window=1h'));
+    const data = await res.json();
+    expect(data.windowMs).toBe(60 * 60 * 1000);
+    expect(typeof data.fetchedAt).toBe('number');
   });
 });

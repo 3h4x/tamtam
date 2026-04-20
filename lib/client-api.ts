@@ -270,7 +270,7 @@ export async function fetchProjectLogs(projectName: string): Promise<{ logs: Log
   return response.json()
 }
 
-export async function pushProject(projectName: string): Promise<{ status: string; message: string; output: string }> {
+export async function pushProject(projectName: string): Promise<{ status: string; job_id: string }> {
   const response = await fetch(`${API_BASE}/by-project/${projectName}/push`, {
     method: 'POST',
   })
