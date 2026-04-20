@@ -493,4 +493,25 @@ describe('POST /api/projects/by-project/[name]/push/generate', () => {
     expect(data.options).toEqual([]);
     expect(data.error).toBeNull();
   });
+
+  it('passes --tools "" and --system-prompt to claude to prevent tool use and CLAUDE.md injection', async () => {
+    let capturedArgs: string[] = [];
+    execMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('--print')) {
+        capturedArgs = args;
+        return Promise.resolve({ exitCode: 0, stdout: '1. feat: add thing', stderr: '' });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/push/generate', {
+      method: 'POST',
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    expect(capturedArgs).toContain('--tools');
+    expect(capturedArgs[capturedArgs.indexOf('--tools') + 1]).toBe('');
+    expect(capturedArgs).toContain('--system-prompt');
+    expect(capturedArgs).toContain('--print');
+  });
 });
