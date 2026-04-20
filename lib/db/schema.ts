@@ -15,7 +15,9 @@ export const projects = sqliteTable('projects', {
   testCommand: text('test_command'),
   testCronEnabled: integer('test_cron_enabled', { mode: 'boolean' }).default(false),
   testCronSchedule: text('test_cron_schedule'),
+  autoCommitEnabled: integer('auto_commit_enabled', { mode: 'boolean' }).default(false),
   autoPushEnabled: integer('auto_push_enabled', { mode: 'boolean' }).default(false),
+  releaseAfterRun: integer('release_after_run', { mode: 'boolean' }).default(false),
   lastPushError: text('last_push_error'),
   lastPushAt: real('last_push_at'),
 });

@@ -83,13 +83,24 @@ Return ONLY the title — nothing else.${extra}`;
       { cwd: projPath, timeout: 30000 },
     );
     const msg2 = parse(r2.stdout);
-    if (msg2) return msg2;
+    if (msg2 && !GENERIC_RE.test(msg2)) return msg2;
   }
 
-  return msg1 || 'chore: automated update';
+  // Both attempts were generic or empty — derive a specific fallback from the stat.
+  if (!msg1 || GENERIC_RE.test(msg1)) {
+    const fileNames = statR.stdout.trim().split('\n')
+      .filter(l => l.includes('|'))
+      .map(l => l.split('|')[0].trim())
+      .filter(Boolean);
+    if (fileNames.length > 0) {
+      return `chore: update ${fileNames.slice(0, 3).join(', ')}`;
+    }
+  }
+
+  return msg1 || 'chore: update files';
 }
 
-export async function startProjectPush(projectName: string): Promise<PushResult> {
+export async function startProjectPush(projectName: string, opts: { commitOnly?: boolean } = {}): Promise<PushResult> {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) {
     setProjectPushResult(projectName, 'project not found');
@@ -110,7 +121,7 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
   };
   append(`# push start — ${new Date().toISOString()}\n# repo: ${projPath}\n`);
 
-  const result = await runPush(projectName, projPath, append);
+  const result = await runPush(projectName, projPath, append, opts);
   try {
     setProjectPushResult(projectName, result.ok ? null : result.detail);
   } catch {}
@@ -165,6 +176,7 @@ async function runPush(
   projectName: string,
   projPath: string,
   log: (s: string) => void,
+  opts: { commitOnly?: boolean } = {},
 ): Promise<PushResult> {
   // Stage all changes including new (untracked) files. .gitignore is expected
   // to exclude secrets — auto-push trusts it.
@@ -199,12 +211,19 @@ async function runPush(
       const detail = (commitR.stderr.trim() || commitR.stdout.trim() || `git commit exited ${commitR.exitCode}`).slice(0, 2000);
       return { ok: false, status: 500, detail: `Commit failed: ${detail}` };
     }
+    if (opts.commitOnly) {
+      const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
+      return { ok: true, commitSha: shaR.exitCode === 0 ? shaR.stdout.trim() : '', message: 'committed (push skipped)' };
+    }
   } else {
     const aheadR = await exec('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
     log(`\n$ git rev-list --count @{u}..HEAD\n${aheadR.stdout}`);
     const ahead = parseInt(aheadR.stdout.trim(), 10);
     if (!aheadR.stdout.trim() || aheadR.exitCode !== 0 || isNaN(ahead) || ahead === 0) {
-      return { ok: true, commitSha: '', message: 'No changes to push' };
+      return { ok: true, commitSha: '', message: opts.commitOnly ? 'Nothing to commit' : 'No changes to push' };
+    }
+    if (opts.commitOnly) {
+      return { ok: true, commitSha: '', message: 'committed (push skipped)' };
     }
   }
 

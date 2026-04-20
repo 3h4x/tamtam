@@ -86,9 +86,9 @@ function LogRow({ entry, color }: { entry: LogLine; color: 'error' | 'warning' }
     >
       <span className="text-text-tertiary shrink-0 tabular-nums">{tsToDate(entry.ts)}</span>
       {entry.stream.job && (
-        <span className={`${accent} shrink-0 font-medium`}>[{entry.stream.job}]</span>
+        <span className={`${accent} shrink-0 font-medium`} data-private>[{entry.stream.job}]</span>
       )}
-      <span className="text-text-primary break-all whitespace-pre-wrap min-w-0 flex-1">
+      <span className="text-text-primary break-all whitespace-pre-wrap min-w-0 flex-1" data-private>
         {display}
         {isLong && !expanded && (
           <span className="text-text-tertiary ml-1 cursor-pointer hover:text-text-secondary">
@@ -221,7 +221,7 @@ export function MonitoringPage() {
       <section>
         <SectionHeader title="Prometheus" status={promStatus} />
         {data.prometheus.status === 'unavailable' ? (
-          <p className="text-sm text-text-tertiary">Not reachable at {data.config.prometheusUrl}</p>
+          <p className="text-sm text-text-tertiary">Not reachable at <span data-private>{data.config.prometheusUrl}</span></p>
         ) : (
           <div className="space-y-4">
             {data.prometheus.alerts.length > 0 && (
@@ -232,14 +232,14 @@ export function MonitoringPage() {
                 <div className="space-y-1">
                   {data.prometheus.alerts.map((a, i) => (
                     <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-md bg-status-error/5 border border-status-error/30 text-sm">
-                      <span className="text-status-error font-medium">{a.metric.alertname ?? 'Alert'}</span>
+                      <span className="text-status-error font-medium" data-private>{a.metric.alertname ?? 'Alert'}</span>
                       {a.metric.severity && (
                         <span className="text-xs px-1.5 py-0.5 rounded bg-status-error/10 text-status-error">
                           {a.metric.severity}
                         </span>
                       )}
                       {a.metric.instance && (
-                        <span className="text-text-tertiary text-xs ml-auto">{a.metric.instance}</span>
+                        <span className="text-text-tertiary text-xs ml-auto" data-private>{a.metric.instance}</span>
                       )}
                     </div>
                   ))}
@@ -259,9 +259,9 @@ export function MonitoringPage() {
                       up ? 'bg-bg-secondary border-border' : 'bg-status-error/5 border-status-error/30'
                     }`}>
                       <StatusDot ok={up} />
-                      <span className="font-medium text-text-primary truncate">{s.metric.job ?? s.metric.instance ?? 'unknown'}</span>
+                      <span className="font-medium text-text-primary truncate" data-private>{s.metric.job ?? s.metric.instance ?? 'unknown'}</span>
                       {s.metric.instance && s.metric.job && (
-                        <span className="text-text-tertiary text-xs ml-auto truncate">{s.metric.instance}</span>
+                        <span className="text-text-tertiary text-xs ml-auto truncate" data-private>{s.metric.instance}</span>
                       )}
                     </div>
                   )
@@ -279,7 +279,7 @@ export function MonitoringPage() {
       <section>
         <SectionHeader title={`Loki — last ${WINDOW_LABELS[window_]}`} status={lokiStatus} />
         {data.loki.status === 'unavailable' ? (
-          <p className="text-sm text-text-tertiary">Not reachable at {data.config.lokiUrl}</p>
+          <p className="text-sm text-text-tertiary">Not reachable at <span data-private>{data.config.lokiUrl}</span></p>
         ) : (
           <div className="space-y-4">
             <div>

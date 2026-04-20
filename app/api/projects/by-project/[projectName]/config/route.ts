@@ -32,7 +32,9 @@ export async function GET(
     effective_test_command: configuredTestCmd || detectedTestCmd || '',
     test_cron_enabled: testCfg?.testCronEnabled ?? false,
     test_cron_schedule: testCfg?.testCronSchedule ?? '',
+    auto_commit_enabled: testCfg?.autoCommitEnabled ?? false,
     auto_push_enabled: testCfg?.autoPushEnabled ?? false,
+    release_after_run: testCfg?.releaseAfterRun ?? false,
     last_push_error: pushResult?.lastPushError ?? null,
     last_push_at: pushResult?.lastPushAt ?? null,
   });
@@ -83,10 +85,28 @@ export async function PATCH(
     }
   }
 
+  if (body.auto_commit_enabled !== undefined) {
+    touched = true;
+    const value = body.auto_commit_enabled ? '1' : '0';
+    const ok = writeProjectFieldYaml(projectName, 'auto_commit_enabled', value);
+    if (!ok) {
+      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
+    }
+  }
+
   if (body.auto_push_enabled !== undefined) {
     touched = true;
     const value = body.auto_push_enabled ? '1' : '0';
     const ok = writeProjectFieldYaml(projectName, 'auto_push_enabled', value);
+    if (!ok) {
+      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
+    }
+  }
+
+  if (body.release_after_run !== undefined) {
+    touched = true;
+    const value = body.release_after_run ? '1' : '0';
+    const ok = writeProjectFieldYaml(projectName, 'release_after_run', value);
     if (!ok) {
       return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
     }

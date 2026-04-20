@@ -201,4 +201,38 @@ describe('GET /api/monitoring', () => {
     expect(data.windowMs).toBe(60 * 60 * 1000);
     expect(typeof data.fetchedAt).toBe('number');
   });
+
+  it('loki queries exclude info/debug/trace log levels', async () => {
+    fetchSpy.mockResolvedValue(lokiQueryResponse([]));
+
+    await GET(makeRequest());
+
+    // Collect all URLs fetched (Prometheus + Loki calls).
+    const allUrls: string[] = fetchSpy.mock.calls.map((args: any[]) => decodeURIComponent(args[0] as string));
+    const lokiUrls = allUrls.filter(u => u.includes('/loki/'));
+
+    expect(lokiUrls.length).toBeGreaterThanOrEqual(2);
+    for (const url of lokiUrls) {
+      // Both error and warning queries must carry the level exclusion filter.
+      expect(url).toContain('level=');
+      expect(url).toContain('info');
+      expect(url).toContain('debug');
+      expect(url).toContain('trace');
+    }
+  });
+
+  it('loki error query does not return info-level log lines even when they match "error" in text', async () => {
+    // An info-level log line that happens to contain the word "error" should be
+    // suppressed by the EXCLUDE_LOW_LEVELS filter — verified by checking the
+    // query string sent to Loki includes the level exclusion pipe stage.
+    fetchSpy.mockResolvedValue(lokiQueryResponse([]));
+
+    await GET(makeRequest());
+
+    const lokiErrorUrl = decodeURIComponent(
+      fetchSpy.mock.calls.map((args: any[]) => args[0] as string).find((u: string) => u.includes('/loki/') && u.includes('err')) ?? ''
+    );
+    expect(lokiErrorUrl).toContain('level=');
+    expect(lokiErrorUrl).toContain('!~');
+  });
 });

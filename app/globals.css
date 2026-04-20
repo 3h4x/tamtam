@@ -69,6 +69,15 @@ body {
   padding: 0;
 }
 
+/* Privacy mode — blur sensitive project names and versions */
+html.privacy-mode [data-private] {
+  filter: blur(8px);
+  user-select: none;
+  cursor: default;
+  transition: filter 0.15s ease;
+  border-radius: 3px;
+}
+
 /* Scrollbar styling for dark mode */
 [data-theme="dark"] ::-webkit-scrollbar { width: 8px; height: 8px; }
 [data-theme="dark"] ::-webkit-scrollbar-track { background: var(--color-bg-secondary); }

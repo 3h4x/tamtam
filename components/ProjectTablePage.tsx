@@ -332,7 +332,7 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
                 {/* Project */}
                 <td className="px-4 py-3">
                   <span className="flex items-center gap-2">
-                    <span className="font-medium text-text-primary">{project.project}</span>
+                    <span className="font-medium text-text-primary" data-private>{project.project}</span>
                     {issueCounts[project.project]?.prs > 0 && (
                       <span
                         title={`${issueCounts[project.project].prs} open PR${issueCounts[project.project].prs !== 1 ? 's' : ''}`}
@@ -464,7 +464,7 @@ export function ProjectTablePage({ fleet, onRefresh, onPush }: ProjectTablePageP
 
                 {/* Release */}
                 <td className="px-4 py-3 text-sm text-text-tertiary tabular-nums">
-                  {release || '—'}
+                  <span data-private>{release || '—'}</span>
                 </td>
 
                 {/* Actions */}
