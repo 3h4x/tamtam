@@ -1028,12 +1028,20 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           </div>
         )}
 
-        {/* Terminal body */}
+        {/* Terminal body — scrollable only */}
         <div
           ref={termRef}
           onScroll={handleScroll}
-          className="flex-1 overflow-y-auto font-mono text-sm flex flex-col"
+          className="flex-1 overflow-y-auto font-mono text-sm flex flex-col min-h-0"
         >
+
+          {/* Empty state */}
+          {history.length === 0 && !streaming && (
+            <div className="flex-1 flex flex-col items-center justify-center gap-2 select-none py-16">
+              <span className="text-2xl font-mono text-[#222]">_</span>
+              <span className="text-sm font-mono text-[#2a2a2a]">start a conversation</span>
+            </div>
+          )}
 
           {history.map((entry, i) => (
             entry.role === 'thinking' ? (
@@ -1187,7 +1195,10 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
             </div>
           )}
 
-          <div className="flex items-start px-4 py-1.5">
+        </div>{/* end scrollable terminal body */}
+
+        {/* Input row — pinned below the scrollable body */}
+        <div className={`border-t flex items-start px-4 py-2 ${streaming ? 'border-[#1e1e1e]' : 'border-[#252525]'} bg-[#0e0e0e] shrink-0`}>
             <span className={`shrink-0 mr-1 mt-0.5 ${streaming ? 'text-[#555]' : 'text-accent'}`}>{streaming ? '>' : '#'}</span>
             <textarea
               ref={inputRef}
@@ -1277,7 +1288,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
             )}
           </div>
 
-          <div className="flex items-center gap-3 px-4 py-1 border-t border-[#1e1e1e] shrink-0 text-[10px] text-[#444] font-mono">
+          <div className="flex items-center gap-3 px-4 py-1.5 border-t border-[#1a1a1a] shrink-0 text-[10px] text-[#444] font-mono bg-[#0e0e0e]">
             {claudeSessionId ? (
               <>
                 <span className="text-[#555]">session</span>
@@ -1312,6 +1323,5 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           </div>
         </div>
       </div>
-    </div>
   )
 }
