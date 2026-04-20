@@ -164,6 +164,58 @@ Checks the push job log for strings from husky, lint-staged, eslint, pre-commit 
 
 ---
 
+## Pipeline Strip — Desired UX & Scoped Fix
+
+### The problem
+
+The strip currently shows misleading state when a **standalone test** runs on a clean repo:
+
+```
+test ✓  →  review ✓  →  commit ✓  →  push ✓
+```
+
+`commitState` and `pushState` are derived from git cleanliness (`hasChanges`, `unpushed`), not from actual job runs. On a repo with nothing uncommitted/unpushed, those steps are always green — even if the user just ran `test` in isolation and no release pipeline was ever triggered.
+
+### Rule: strip is release-scoped
+
+The pipeline strip should only reflect an **active or recently-completed Release run**. Standalone test/review/fix runs (not triggered by 🚀 Release) must **not** surface the strip.
+
+### Desired step states
+
+| Step | Shows as ✓ when | Shows as ○ (pending) when | Shows as ✗ when |
+|------|-----------------|---------------------------|-----------------|
+| **test** | test job in this release exited 0 | no test command, or not yet run | exit ≠ 0 |
+| **review** | review job in this release has verdict `LGTM` | not yet run | exit ≠ 0 or verdict ≠ LGTM |
+| **commit** | push job in this release exited 0 (commit is part of push) | not yet run | `last_push_error` starts with "Commit failed" |
+| **push** | push job in this release exited 0 | not yet run | push job exit ≠ 0 |
+
+Steps should **never** derive state from ambient git state (`hasChanges`, `unpushed`) — only from actual job runs within the release.
+
+### Visibility rule
+
+Show the strip **only** when:
+1. There is an active release job (`kind='release'`, `status='running'`) for this project, **or**
+2. There is a release job that completed within the last hour
+
+Hide it otherwise. Stale ✓s from yesterday's release are noise.
+
+### Scoped implementation changes
+
+1. **`ProjectDetailPage.tsx`** — look up the most recent `release` job (new `kind` lookup). Drive strip visibility from `releaseJob !== null && releaseJob.started_at >= hourAgo`. Remove the current collection of booleans (`pipelineRunning`, `recentFailedJob`, `recentReviewNotLgtm`, `recentLgtmWithWorkRemaining`).
+
+2. **Step job lookup** — filter candidate jobs by `release_id === releaseJob.id` instead of the flat 24h window. This requires `release_id` to be present on child jobs (it already is set in `start-release.ts`).
+
+3. **`commitState` / `pushState`** — derive from `pushJob` (exit code, `last_push_error`) only. Remove git-state fallback (`hasChanges`, `unpushed`) from step coloring. Git state can remain as tooltip text ("nothing to push") but must not make a step green.
+
+4. **Standalone runs** — test/review/fix run outside a release → strip is hidden. The individual buttons (Run Tests, Review) continue to work; they just don't hijack the pipeline strip.
+
+### Non-goals for this fix
+
+- No change to how chaining works (completion hooks in `job-storage.ts`)
+- No change to the 🚀 Release button behavior
+- No change to how `release_id` is set on child jobs
+- `auto_push_enabled` behavior unchanged
+
 ## Common Issues
 
 | Symptom | Likely Cause | Fix |
