@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject, fetchIssuesAndPRs, pushProject } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
-import { priorityColor, getHighestPriority, getAggregateCi, formatDuration } from '@/lib/statusConstants'
+import { getAggregateCi, formatDuration } from '@/lib/statusConstants'
 import { formatAgo } from '@/lib/format'
 import { TerminalTab } from '@/components/TerminalTab'
 import { AgentsTab } from '@/components/AgentsTab'
@@ -412,7 +412,6 @@ export function ProjectDetailPage({
     )
   }
 
-  const highestPriority = getHighestPriority(project)
   const aggregateCi = getAggregateCi(project)
 
   const ciFailedUrl = project.tasks.find(t => t.task.ci_failed_url)?.task.ci_failed_url || null
@@ -609,13 +608,6 @@ export function ProjectDetailPage({
           <h2 className="text-xl font-semibold text-text-primary" data-private>{project.project}</h2>
           {releaseTag && <span className="text-text-secondary text-sm" data-private>{releaseTag}</span>}
         </div>
-        {highestPriority && (highestPriority === 'critical' || highestPriority === 'high') && (
-          <div className="flex items-center gap-3">
-            <span style={{ color: priorityColor[highestPriority] }} className="text-sm">
-              {highestPriority}
-            </span>
-          </div>
-        )}
         <div className="flex items-center gap-2 flex-wrap">
           {aggregateCi === 'failure' && ciFailedUrl && (
             <button
