@@ -80,6 +80,7 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `/project/[name]/changes` — Git diff viewer for uncommitted changes
 - `/project/[name]/issues` — GitHub PRs and issues viewer (open PRs with review status, open issues)
 - `/project/[name]/terminal/[sessionId]` — Interactive Claude runner with model selector (haiku/sonnet/opus), skill picker, and real-time token streaming via SSE (see `docs/STREAMING.md`)
+- `/project/[name]/docs` — Project documentation files viewer
 - `/project/[name]/task/[task]` — Task detail view
 - `/agents` — Agents management page
 - `/monitoring` — Prometheus + Loki health dashboard (alerts, service up/down, log errors)

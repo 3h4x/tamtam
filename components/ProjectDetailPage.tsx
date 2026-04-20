@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject } from '@/lib/client-api'
+import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject, fetchIssuesAndPRs, pushProject } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
 import { priorityColor, getHighestPriority, getAggregateCi, formatDuration } from '@/lib/statusConstants'
@@ -279,7 +279,9 @@ export function ProjectDetailPage({
   }
   const [fixingCi, setFixingCi] = useState(false)
   const [fixCiResult, setFixCiResult] = useState<string | null>(null)
+  const [retryingPush, setRetryingPush] = useState(false)
   const [projectJobs, setProjectJobs] = useState<JobInfo[]>([])
+  const [issueCount, setIssueCount] = useState<{ prs: number; issues: number } | null>(null)
 
   // Custom actions
   const [customActions, setCustomActions] = useState<CustomAction[]>([])
@@ -320,6 +322,13 @@ export function ProjectDetailPage({
   useEffect(() => {
     if (!name) return
     fetchCustomActions(name).then((data) => setCustomActions(data.actions)).catch(() => {})
+  }, [name])
+
+  useEffect(() => {
+    if (!name) return
+    fetchIssuesAndPRs(name).then((data) => {
+      setIssueCount({ prs: data.prs.length, issues: data.issues.length })
+    }).catch(() => {})
   }, [name])
 
   const handleCustomAction = async (actionName: string) => {
@@ -757,6 +766,11 @@ export function ProjectDetailPage({
           onClick={() => setActiveTab('issues')}
         >
           Issues / PRs
+          {issueCount && (issueCount.prs + issueCount.issues) > 0 && (
+            <span className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full bg-accent-light text-accent font-medium">
+              {issueCount.prs + issueCount.issues}
+            </span>
+          )}
         </button>
         <button
           className={`px-3 py-1.5 text-sm cursor-pointer ${activeTab === 'docs' ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`}
@@ -1212,11 +1226,29 @@ export function ProjectDetailPage({
             const pushRunning = pushJob?.status === 'running'
             const commitStateEffective: StepState = pushRunning ? 'running' : commitState
             const pushStateEffective: StepState = pushRunning ? 'running' : pushState
-            const steps: Array<{ label: string; state: StepState; hint: string; action?: (() => void) | null }> = []
+            const handleRetryPush = async () => {
+              if (retryingPush) return
+              setRetryingPush(true)
+              try {
+                const result = await pushProject(name)
+                if (result.job_id) {
+                  router.push(`/project/${name}/terminal?job=${encodeURIComponent(result.job_id)}`)
+                } else {
+                  toast('Push started', 'success')
+                  onRefresh()
+                }
+              } catch (err) {
+                toast(err instanceof Error ? err.message : 'Push failed', 'error')
+              } finally {
+                setRetryingPush(false)
+              }
+            }
+
+            const steps: Array<{ label: string; state: StepState; hint: string; action?: (() => void) | null; retryAction?: (() => void) | null }> = []
             if (hasTestCommand) steps.push({ label: 'test', state: testState, hint: testHint, action: testJob ? () => router.push(`/project/${name}/terminal?job=${encodeURIComponent(testJob.id)}`) : null })
             steps.push({ label: 'review', state: reviewState, hint: reviewHint, action: reviewFixAction })
             steps.push({ label: 'commit', state: commitStateEffective, hint: commitHint, action: openPushJob })
-            steps.push({ label: 'push', state: pushStateEffective, hint: pushHint, action: openPushJob })
+            steps.push({ label: 'push', state: pushStateEffective, hint: pushHint, action: openPushJob, retryAction: pushStateEffective === 'failed' && !pushErrorIsCommit ? handleRetryPush : null })
 
             const glyph = (s: StepState) => {
               if (s === 'done') return <span className="text-status-success">✓</span>
@@ -1249,6 +1281,17 @@ export function ProjectDetailPage({
                         >{inner}</button>
                       ) : (
                         <div className="flex items-center gap-1.5" title={s.hint}>{inner}</div>
+                      )}
+                      {s.retryAction && (
+                        <button
+                          type="button"
+                          className="text-[10px] px-1.5 py-0.5 rounded border border-status-error/40 text-status-error hover:bg-status-error/10 cursor-pointer disabled:opacity-50 font-mono leading-none"
+                          onClick={s.retryAction}
+                          disabled={retryingPush}
+                          title="Retry push"
+                        >
+                          {retryingPush ? '…' : '↻'}
+                        </button>
                       )}
                       {i < steps.length - 1 && <span className="text-text-tertiary mx-1">→</span>}
                     </div>
