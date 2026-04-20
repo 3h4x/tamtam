@@ -1133,7 +1133,7 @@ export function ProjectDetailPage({
       )}
 
       {activeTab === 'issues' && name && (
-        <IssuesTab projectName={name} />
+        <IssuesTab projectName={name} onCountChange={setIssueCount} />
       )}
 
       {activeTab === 'docs' && name && (

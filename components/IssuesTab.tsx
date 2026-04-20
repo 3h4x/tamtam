@@ -8,6 +8,7 @@ import { formatAgo } from '@/lib/format'
 
 interface IssuesTabProps {
   projectName: string
+  onCountChange?: (count: { prs: number; issues: number }) => void
 }
 
 function Labels({ labels }: { labels: GhLabel[] }) {
@@ -360,7 +361,7 @@ function IssueRow({ issue, projectName }: { issue: GhIssue; projectName: string 
   )
 }
 
-export function IssuesTab({ projectName }: IssuesTabProps) {
+export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
   const [prs, setPrs] = useState<GhPullRequest[]>([])
   const [issues, setIssues] = useState<GhIssue[]>([])
   const [repo, setRepo] = useState<string | null>(null)
@@ -382,6 +383,7 @@ export function IssuesTab({ projectName }: IssuesTabProps) {
       setGhError(res.error)
       setCachedAt(res.cachedAt)
       setFromCache(res.cached)
+      onCountChange?.({ prs: res.prs.length, issues: res.issues.length })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load issues')
     } finally {
