@@ -63,6 +63,15 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     skillIds: [],
   },
   {
+    name: 'gha-audit',
+    description: 'Audits GitHub Actions workflows and creates missing ones for CI, release, and labels.',
+    model: 'sonnet',
+    schedule: '24h',
+    runner: 'pm2',
+    prompt: 'Audit this project\'s GitHub Actions setup: 1) List existing workflows in .github/workflows/. 2) Check for a CI workflow (runs tests on push/PR) — create one if missing. 3) Check for a release workflow (semantic-release or tag-based) — create one if missing. 4) Check for a PR labeler or label sync workflow — create one if missing. 5) Verify existing workflows reference current action versions (use latest major versions). Report what exists, what was created, and any issues found.',
+    skillIds: [],
+  },
+  {
     name: 'readme-sync',
     description: 'Verifies README.md is accurate and updates it to reflect the current state of the project.',
     model: 'sonnet',
