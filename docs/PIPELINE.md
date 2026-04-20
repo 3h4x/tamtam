@@ -2,6 +2,16 @@
 
 The pipeline is a quality-gated sequence: **test → review → fix loop → push**. Each step is a normal job; chaining happens in completion hooks inside `lib/job-storage.ts`. The 🚀 Release button is the entry point; `auto_push_enabled` enables the same chaining for standalone review/fix runs.
 
+## When to read this
+
+- Pipeline is stuck or not chaining to the next step
+- Understanding why Release skipped straight to push (or stopped early)
+- Configuring verdict rules or fix iteration limits
+- Debugging why "LGTM" wasn't detected in a review log
+- Setting up `auto_push_enabled` for continuous deployment
+
+---
+
 ---
 
 ## State machine
@@ -118,3 +128,49 @@ Checks the push job log for strings from husky, lint-staged, eslint, pre-commit 
 | `lib/start-push.ts` | `startProjectPush(project)` | git add → commit message → push |
 | `lib/start-fix-push.ts` | `startFixPush(project, log)` | Provides hook error context to Claude for fix |
 | `lib/job-storage.ts` | `markDone(jobId, exitCode)` | Called by PM2 exit handler; triggers all hooks |
+
+---
+
+## Quick Reference
+
+### Which entry point to use
+
+| Goal | Use |
+|------|-----|
+| Full quality-gated release | `startRelease(project)` — or 🚀 Release button |
+| Just review uncommitted changes | `startProjectReview(project)` |
+| Fix issues from a previous review | `startFixFromJob(reviewJob)` |
+| Run tests only | `startProjectTest(project)` |
+| Commit + push only | `startProjectPush(project)` |
+| Auto-chain on every review | Set `auto_push_enabled = true` on the project |
+
+### Pipeline short-circuit conditions
+
+| Condition | Result |
+|-----------|--------|
+| No uncommitted changes + no unpushed commits | 400 error — nothing to release |
+| Fresh LGTM exists for current working-tree hash | Skip review+fix, go straight to PUSH |
+| No `testCommand` configured, only unpushed commits | Skip review, go straight to PUSH |
+
+### Verdict detection cheat sheet
+
+| Review output format | Detected? |
+|----------------------|-----------|
+| `Verdict: LGTM` | ✓ |
+| `## Verdict\n**LGTM**` | ✓ |
+| `` `LGTM` `` on last line | ✓ |
+| `LGTM / NEEDS ATTENTION / DO NOT SHIP` (disambiguation list) | ✗ intentionally rejected |
+| Verdict in first 80% of log only | ✗ reads last 2000 chars only |
+
+---
+
+## Common Issues
+
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| Pipeline stops after test with no next step | `auto_push_enabled` is off and no active Release | Use 🚀 Release button or enable `auto_push_enabled` |
+| Review exits 0 but no verdict found | Verdict buried early in a long log | Check last 2000 chars of log; rephrase review prompt to emit verdict at the end |
+| Fix loop runs 3 times then stops | `MAX_FIX_ITERATIONS=3` cap reached within 30 min | Fix manually or wait 30 min for window to reset |
+| Push fails, no `fix-push` triggered | Hook strings not matched by `isHookRejection` | Check the push log for hook output; add new hook string patterns to `lib/start-fix-push.ts` |
+| Release button grayed out / 400 | No changes and no unpushed commits | Make a change or verify `git status` |
+| `DO NOT SHIP` verdict loops forever | Fix cap reached | Inspect fix logs; may need manual code changes |

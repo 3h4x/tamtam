@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { installAgentSchedule, uninstallAgentSchedule } from '@/lib/agent-scheduler';
 import { errMsg } from '@/lib/types';
+import { clearAgentsCache } from '@/app/api/agents/route';
 
 export async function GET(
   _request: NextRequest,
@@ -34,6 +35,7 @@ export async function PATCH(
   if (body.enabled !== undefined) updates.enabled = body.enabled;
 
   db.update(schema.agents).set(updates).where(eq(schema.agents.id, agentId)).run();
+  clearAgentsCache();
   const agent = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
 
   // Update schedule (uses pm2 or launchctl based on runner)
@@ -66,5 +68,6 @@ export async function DELETE(
   }
 
   db.delete(schema.agents).where(eq(schema.agents.id, agentId)).run();
+  clearAgentsCache();
   return NextResponse.json({ status: 'deleted' });
 }

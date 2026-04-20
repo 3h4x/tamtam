@@ -29,9 +29,31 @@ function Labels({ labels }: { labels: GhLabel[] }) {
 
 type MergeMethod = 'merge' | 'squash' | 'rebase'
 
+function CheckIcon({ conclusion, status }: { conclusion: string | null; status: string }) {
+  const ok = conclusion === 'SUCCESS' || conclusion === 'NEUTRAL' || conclusion === 'SKIPPED'
+  const pending = status !== 'COMPLETED'
+  if (pending) return (
+    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" className="animate-spin opacity-70">
+      <path d="M8 0a8 8 0 100 16A8 8 0 008 0zm0 14A6 6 0 118 2a6 6 0 010 12z" opacity=".3"/>
+      <path d="M8 2a6 6 0 016 6h-2A4 4 0 008 4V2z"/>
+    </svg>
+  )
+  if (ok) return (
+    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+      <path fillRule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/>
+    </svg>
+  )
+  return (
+    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+      <path fillRule="evenodd" d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z"/>
+    </svg>
+  )
+}
+
 function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: string; onMerged: () => void }) {
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
+  const [checksExpanded, setChecksExpanded] = useState(false)
   const [mergeConfirm, setMergeConfirm] = useState(false)
   const [mergeMethod, setMergeMethod] = useState<MergeMethod>('squash')
   const [merging, setMerging] = useState(false)
@@ -55,6 +77,20 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
       : pr.reviewDecision === 'REVIEW_REQUIRED'
       ? 'Review required'
       : null
+
+  const checks = pr.statusCheckRollup ?? []
+  const passCount = checks.filter(c => c.conclusion === 'SUCCESS' || c.conclusion === 'NEUTRAL' || c.conclusion === 'SKIPPED').length
+  const ciRollup = checks.length === 0 ? null
+    : checks.some(c => c.status !== 'COMPLETED') ? 'PENDING'
+    : checks.some(c => c.conclusion === 'FAILURE' || c.conclusion === 'ERROR' || c.conclusion === 'TIMED_OUT') ? 'FAILURE'
+    : checks.every(c => c.conclusion === 'SUCCESS' || c.conclusion === 'NEUTRAL' || c.conclusion === 'SKIPPED') ? 'SUCCESS'
+    : 'FAILURE'
+
+  const ciBadgeClass =
+    ciRollup === 'SUCCESS' ? 'bg-status-success/10 text-status-success border-status-success/30'
+    : ciRollup === 'FAILURE' ? 'bg-status-error/10 text-status-error border-status-error/30'
+    : ciRollup === 'PENDING' ? 'bg-status-warning/10 text-status-warning border-status-warning/30'
+    : null
 
   const openInTerminal = () => {
     const prompt = `Review pull request #${pr.number}: "${pr.title}" (${pr.url})\n\nBranch: ${pr.headRefName} → ${pr.baseRefName}`
@@ -124,13 +160,63 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
             )}
             <Labels labels={pr.labels} />
           </div>
-          <div className="flex items-center gap-3 mt-0.5 flex-wrap text-xs text-text-tertiary">
+          <div className="flex items-center gap-2 mt-0.5 flex-wrap text-xs text-text-tertiary">
             <span>#{pr.number}</span>
             <span>by {pr.author?.login}</span>
             <span title={pr.createdAt}>{formatAgo(new Date(pr.createdAt).getTime() / 1000)}</span>
             <code className="font-mono bg-bg-tertiary px-1 rounded text-[10px]">{pr.headRefName}</code>
-            {reviewLabel && <span className={reviewColor}>{reviewLabel}</span>}
+            {reviewLabel && (
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${
+                pr.reviewDecision === 'APPROVED' ? 'bg-status-success/10 text-status-success border-status-success/30'
+                : pr.reviewDecision === 'CHANGES_REQUESTED' ? 'bg-status-error/10 text-status-error border-status-error/30'
+                : 'bg-bg-tertiary text-text-secondary border-border'
+              }`}>{reviewLabel}</span>
+            )}
+            {ciRollup && ciBadgeClass && (
+              <button
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium border cursor-pointer transition-colors hover:opacity-80 ${ciBadgeClass}`}
+                onClick={e => { e.stopPropagation(); setChecksExpanded(v => !v) }}
+                title={checksExpanded ? 'Hide checks' : 'Show checks'}
+              >
+                <CheckIcon conclusion={ciRollup === 'SUCCESS' ? 'SUCCESS' : ciRollup === 'FAILURE' ? 'FAILURE' : null} status={ciRollup === 'PENDING' ? 'PENDING' : 'COMPLETED'} />
+                {passCount}/{checks.length} checks
+                <svg width="8" height="8" viewBox="0 0 16 16" fill="currentColor" className={`transition-transform ${checksExpanded ? 'rotate-180' : ''}`}>
+                  <path d="M4.427 7.427l3.396 3.396a.25.25 0 00.354 0l3.396-3.396A.25.25 0 0011.396 7H4.604a.25.25 0 00-.177.427z"/>
+                </svg>
+              </button>
+            )}
           </div>
+          {checksExpanded && checks.length > 0 && (
+            <div className="mt-1.5 flex flex-col gap-0.5 ml-0">
+              {checks.map((c, i) => {
+                const ok = c.conclusion === 'SUCCESS' || c.conclusion === 'NEUTRAL' || c.conclusion === 'SKIPPED'
+                const pending = c.status !== 'COMPLETED'
+                const dotCls = pending ? 'bg-status-warning' : ok ? 'bg-status-success' : 'bg-status-error'
+                return (
+                  <a
+                    key={i}
+                    href={c.detailsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-[10px] text-text-secondary hover:text-text-primary hover:bg-bg-tertiary rounded px-1 py-0.5 -mx-1 transition-colors"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotCls}`} />
+                    <span className="font-medium">{c.workflowName || c.name}</span>
+                    {c.workflowName && c.name !== c.workflowName && (
+                      <span className="text-text-tertiary">/ {c.name}</span>
+                    )}
+                    <span className={`ml-auto ${ok ? 'text-status-success' : pending ? 'text-status-warning' : 'text-status-error'}`}>
+                      {pending ? c.status.toLowerCase() : (c.conclusion ?? '').toLowerCase()}
+                    </span>
+                    <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor" className="text-text-tertiary shrink-0">
+                      <path d="M10.604 1h4.146a.25.25 0 01.25.25v4.146a.25.25 0 01-.427.177L13.03 4.03 9.28 7.78a.75.75 0 01-1.06-1.06l3.75-3.75-1.543-1.543A.25.25 0 0110.604 1zM3.75 2A1.75 1.75 0 002 3.75v8.5c0 .966.784 1.75 1.75 1.75h8.5A1.75 1.75 0 0014 12.25v-3.5a.75.75 0 00-1.5 0v3.5a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25v-8.5a.25.25 0 01.25-.25h3.5a.75.75 0 000-1.5h-3.5z"/>
+                    </svg>
+                  </a>
+                )
+              })}
+            </div>
+          )}
           {mergeError && (
             <div className="mt-1 text-xs text-status-error">{mergeError}</div>
           )}

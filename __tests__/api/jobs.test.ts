@@ -229,6 +229,7 @@ describe('GET /api/jobs/notifications', () => {
     vi.doMock('@/lib/job-storage', () => ({
       unseenFinished: unseenFinishedMock,
       jobToDict: jobToDictMock,
+      listJobs: vi.fn().mockReturnValue([]),
     }));
 
     const mod = await import('@/app/api/jobs/notifications/route');

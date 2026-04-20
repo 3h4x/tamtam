@@ -2,6 +2,16 @@
 
 All Claude runs (terminal, review, fix, test, push) share the same streaming infrastructure: PM2 spawns the process, writes NDJSON to a log file, and an SSE endpoint tails that file to the browser.
 
+## When to read this
+
+- Terminal tab shows blank output or stops mid-stream
+- Implementing a new job kind that needs real-time output
+- Debugging SSE disconnects or reconnect behavior
+- Understanding how multi-turn terminal sessions are stored and restored
+- Integrating with the `/api/streaming/[jobId]` endpoint from external tools
+
+---
+
 ---
 
 ## Common job lifecycle
@@ -168,3 +178,59 @@ Verdict detection (`getVerdict`) reads the **last 2000 chars** of the parsed log
 - Unit: `__tests__/api/project-docs.test.ts` — docs route
 - E2E: `e2e/terminal-streaming.spec.ts` — Playwright (requires dev server on `localhost:1337`)
 - `pnpm test` / `pnpm test:e2e`
+
+---
+
+## Quick Reference
+
+### SSE endpoint modes
+
+| Mode | URL | Use case |
+|------|-----|----------|
+| Parsed (default) | `/api/streaming/[jobId]` | Terminal UI — typed events (text, thinking, tool_use, done) |
+| Raw NDJSON | `/api/streaming/[jobId]?raw=1` | Agent runs, fix-push — full NDJSON lines unparsed |
+
+### Job kind → streaming mode
+
+| Kind | Format | Client parses |
+|------|--------|---------------|
+| `run` | `stream-json` NDJSON | text, thinking, tool_use, tool_result, done |
+| `review`, `fix`, `fix-push` | Plain text mixed | Text events + done |
+| `test`, `push`, `action` | Plain text | Text events + done |
+
+### Log file locations
+
+```
+~/logs/<jobId>.log          — standard job log (NDJSON or plain text)
+~/logs/agent-scripts/       — agent prompt files
+~/logs/agent-scheduler-<id>.log — scheduled agent output
+```
+
+### Diagnose a stuck stream
+
+```bash
+# Check if the job is still running
+curl http://localhost:1337/api/jobs/<jobId>
+
+# Tail the raw log file
+tail -f ~/logs/<jobId>.log
+
+# Check PM2 process list
+pm2 list
+
+# Replay full stream from offset 0
+curl -N http://localhost:1337/api/streaming/<jobId>
+```
+
+---
+
+## Common Issues
+
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| Terminal shows nothing after submit | PM2 process didn't start; log file empty | Check `pm2 list`; look for "rate-limited" in done event `detail` |
+| Stream stops mid-response | Claude rate limited or crashed | Check log file; `done` event `detail` has diagnosis |
+| Session history not restored on navigate | `sessionId` not saved (job didn't emit `result` line) | Job may have crashed before completion; check exit code |
+| `tool_use` events missing in terminal | Using `?raw=1` by mistake | Use default (parsed) mode for terminal UI |
+| SSE reconnects immediately and replays | `finishedAt` already set in DB | Normal — endpoint flushes remaining content then closes |
+| Multi-turn follow-up re-injects skills | `resumeSessionId` not passed | Ensure `resumeSessionId` is set on follow-up requests |

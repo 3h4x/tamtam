@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
-import { unseenFinished, jobToDict } from '@/lib/job-storage';
+import { unseenFinished, listJobs, jobToDict } from '@/lib/job-storage';
 
 export async function GET() {
   const jobs = unseenFinished();
+  const running = listJobs().filter(j => j.finishedAt === null);
   return NextResponse.json({
     count: jobs.length,
     jobs: jobs.map(jobToDict),
+    runningCount: running.length,
+    runningJobs: running.map(jobToDict),
   });
 }

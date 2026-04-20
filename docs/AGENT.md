@@ -2,6 +2,16 @@
 
 Agents are reusable automation units that combine skills, a model, a prompt template, and optional scheduling. Each agent runs Claude CLI with a composed system prompt (skills) and a task prompt, either on-demand or on a recurring schedule.
 
+## When to read this
+
+- Creating a new agent via API or UI
+- Debugging why a scheduled agent isn't firing
+- Understanding how skills are composed into the system prompt
+- Preventing duplicate/concurrent agent runs
+- Switching between PM2 and launchctl schedulers
+
+---
+
 ## Concepts
 
 - **Agent** — A configuration combining skills, model, and prompt template
@@ -332,3 +342,64 @@ This prevents concurrent runs if a schedule fires faster than the agent complete
 - E2E: `e2e/agents.spec.ts` — Playwright tests (requires dev server)
 - `pnpm test` — run unit tests
 - `pnpm test:e2e` — run e2e tests
+
+---
+
+## Quick Reference
+
+### Schedule format
+
+| String | Fires every |
+|--------|-------------|
+| `"15m"` | 15 minutes |
+| `"30m"` | 30 minutes |
+| `"1h"` | 1 hour |
+| `"8h"` | 8 hours |
+| `"24h"` | 24 hours |
+| `null` | Manual only (no schedule installed) |
+
+### Runner selection
+
+| Runner | Requires | Persists across reboots | Use when |
+|--------|----------|------------------------|----------|
+| `pm2` | PM2 installed | Only if PM2 on startup | Server/Linux environments |
+| `launchctl` | macOS | Yes (LaunchAgent) | macOS dev machines |
+
+### Prompt composition order
+
+```
+[base_prompt from settings]
+  + ## SkillName\nContent\n---  (for each skillId)
+  + [task prompt from agent.prompt or run-time override]
+```
+
+### Verify a scheduled agent
+
+```bash
+# Check PM2 cron jobs
+pm2 cron list
+
+# Check launchctl agents (macOS)
+launchctl list | grep tamtam
+
+# Manually trigger
+curl -X POST http://localhost:1337/api/agents/{agentId}/run \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "test run"}'
+
+# Watch output
+curl -N http://localhost:1337/api/streaming/{job_id}
+```
+
+---
+
+## Common Issues
+
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| Agent returns 409 on run | Another instance already running | Wait for the current run to finish; duplicate prevention is intentional |
+| Schedule not firing | `prompt` or `schedule` is empty | Both fields required for schedule installation |
+| Skills not in Claude's context | `skillIds` references deleted skills | Re-check skill IDs; missing skills are silently skipped |
+| LaunchAgent not surviving reboot | plist not loaded | Run `launchctl load ~/Library/LaunchAgents/com.tamtam.agent.{id}.plist` |
+| Agent runs but no output in UI | Job started but SSE not connected | Navigate to `/project/[name]/history`, open the run log |
+| `schedule` change didn't take effect | Old schedule still installed | PATCH the agent — schedule is reinstalled on any update |

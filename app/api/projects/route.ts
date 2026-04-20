@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { fetchProjectData } from '@/lib/project-data';
+import { db, schema } from '@/lib/db';
 import type { Task } from '@/lib/types';
 
 export async function GET() {
@@ -11,5 +12,16 @@ export async function GET() {
       tasks.push(task);
     }
   }
-  return NextResponse.json({ tasks, priorities: data.priorities });
+
+  const cached = db.select().from(schema.ghIssuesCache).all();
+  const issueCounts: Record<string, { prs: number; issues: number }> = {};
+  for (const row of cached) {
+    try {
+      const prs = JSON.parse(row.prs) as unknown[];
+      const issues = JSON.parse(row.issues) as unknown[];
+      issueCounts[row.project] = { prs: prs.length, issues: issues.length };
+    } catch { /* ignore malformed cache rows */ }
+  }
+
+  return NextResponse.json({ tasks, priorities: data.priorities, issueCounts });
 }

@@ -141,6 +141,13 @@ export interface GhPullRequest {
   reviewDecision: string | null
   labels: GhLabel[]
   body: string
+  statusCheckRollup: Array<{
+    name: string
+    conclusion: string | null
+    status: string
+    workflowName: string
+    detailsUrl: string
+  }> | null
 }
 
 export interface GhIssue {
@@ -525,7 +532,7 @@ export async function rerunJob(jobId: string): Promise<{ status: string; job_id:
   return response.json()
 }
 
-export async function fetchNotifications(): Promise<{ count: number; jobs: JobInfo[] }> {
+export async function fetchNotifications(): Promise<{ count: number; jobs: JobInfo[]; runningCount: number; runningJobs: JobInfo[] }> {
   const response = await fetch(`${JOBS_BASE}/notifications`)
   if (!response.ok) {
     throw new Error(`Failed to fetch notifications: ${response.statusText}`)
