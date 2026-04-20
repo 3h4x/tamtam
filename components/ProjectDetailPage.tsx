@@ -609,7 +609,7 @@ export function ProjectDetailPage({
           <h2 className="text-xl font-semibold text-text-primary" data-private>{project.project}</h2>
           {releaseTag && <span className="text-text-secondary text-sm" data-private>{releaseTag}</span>}
         </div>
-        {highestPriority && (
+        {highestPriority && (highestPriority === 'critical' || highestPriority === 'high') && (
           <div className="flex items-center gap-3">
             <span style={{ color: priorityColor[highestPriority] }} className="text-sm">
               {highestPriority}
