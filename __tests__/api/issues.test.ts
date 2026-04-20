@@ -259,10 +259,24 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
     expect(mergeCalls[0][1]).toContain('--squash');
   });
 
-  it('falls back to --auto when direct merge fails with "auto merge" error', async () => {
+  it('returns 422 and does NOT fall back to --auto when repo has auto-merge disabled', async () => {
     execMock
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
-      .mockImplementationOnce(() => resp(1, '', 'Pull request Auto merge is not allowed'))
+      .mockImplementationOnce(() => resp(1, '', 'Pull request Auto merge is not allowed for this repository (enablePullRequestAutoMerge)'));
+
+    const res = await POST(makeReq({ prNumber: 9, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(422);
+    const data = await res.json();
+    expect(data.detail).toContain('not allowed');
+
+    const autoCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('--auto'));
+    expect(autoCalls).toHaveLength(0);
+  });
+
+  it('falls back to --auto when direct merge fails due to pending required checks', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
+      .mockImplementationOnce(() => resp(1, '', 'required status checks have not passed'))
       .mockImplementationOnce(() => resp(0, '')); // retry with --auto succeeds
 
     const res = await POST(makeReq({ prNumber: 9, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });

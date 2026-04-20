@@ -151,9 +151,13 @@ export async function POST(
   };
 
   let result = await tryMerge(false);
-  if (result.exitCode !== 0 && /auto.?merge|mergeable|required|pending/i.test(result.stderr)) {
-    // Fall back to queuing with --auto (if the repo supports it) — useful
-    // for the "tests are still running" case.
+  // Only fall back to --auto when checks are still pending — not when auto-merge
+  // is disabled on the repo (that error also contains "auto merge" but means something different).
+  if (
+    result.exitCode !== 0 &&
+    /required status checks|mergeable|pending/i.test(result.stderr) &&
+    !/not allowed/i.test(result.stderr)
+  ) {
     result = await tryMerge(true);
   }
 
