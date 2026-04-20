@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { fetchIssuesAndPRs, mergePR, approvePR } from '@/lib/client-api'
+import { fetchIssuesAndPRs, mergePR, approvePR, reviewPR } from '@/lib/client-api'
 import type { GhPullRequest, GhIssue, GhLabel } from '@/lib/client-api'
 import { formatAgo } from '@/lib/format'
 
@@ -62,6 +62,7 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
   const [merged, setMerged] = useState(false)
   const [approving, setApproving] = useState(false)
   const [approved, setApproved] = useState(pr.reviewDecision === 'APPROVED')
+  const [reviewing, setReviewing] = useState(false)
 
   const reviewColor =
     pr.reviewDecision === 'APPROVED'
@@ -96,6 +97,18 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
   const openInTerminal = () => {
     const prompt = `Review pull request #${pr.number}: "${pr.title}" (${pr.url})\n\nBranch: ${pr.headRefName} → ${pr.baseRefName}`
     router.push(`/project/${projectName}/terminal?prompt=${encodeURIComponent(prompt)}`)
+  }
+
+  const doReview = async () => {
+    setReviewing(true)
+    try {
+      const res = await reviewPR(projectName, pr.number, pr.title, pr.headRefName, pr.baseRefName)
+      router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(res.job_id)}`)
+    } catch (err) {
+      setMergeError(err instanceof Error ? err.message : 'Review failed')
+    } finally {
+      setReviewing(false)
+    }
   }
 
   const doMerge = async () => {
@@ -270,6 +283,16 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
                 Merge
               </button>
             )
+          )}
+          {!merged && (
+            <button
+              className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50"
+              onClick={doReview}
+              disabled={reviewing}
+              title="AI code review of this PR's diff"
+            >
+              {reviewing ? 'Starting…' : 'Review'}
+            </button>
           )}
           <button
             className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"

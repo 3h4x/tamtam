@@ -214,6 +214,25 @@ export async function approvePR(
   return response.json()
 }
 
+export async function reviewPR(
+  projectName: string,
+  prNumber: number,
+  prTitle: string,
+  headRef: string,
+  baseRef: string,
+): Promise<{ status: string; job_id: string; pid: number; log_path: string }> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/review-pr`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prNumber, prTitle, headRef, baseRef }),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error((data as { detail?: string }).detail || `Review failed: ${response.statusText}`)
+  }
+  return response.json()
+}
+
 export interface Persona {
   path: string
   category: string

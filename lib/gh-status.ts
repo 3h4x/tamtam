@@ -4,6 +4,7 @@ import { exec } from './shell';
 import { homedir } from 'os';
 
 const GH_CACHE_TTL = 3600;
+const GH_CACHE_TTL_FAILURE = 300;
 const GH_CACHE_TTL_PENDING = 30;
 
 export interface GhStatusEntry {
@@ -324,7 +325,10 @@ export async function ghStatusLookup(
 
     try {
       const fetchedAt = new Date(entry.fetchedAt.replace('Z', '+00:00')).getTime();
-      const ttl = entry.ci === 'in_progress' ? GH_CACHE_TTL_PENDING : GH_CACHE_TTL;
+      const ttl =
+      entry.ci === 'in_progress' ? GH_CACHE_TTL_PENDING :
+      entry.ci === 'failure' ? GH_CACHE_TTL_FAILURE :
+      GH_CACHE_TTL;
       if ((now - fetchedAt) / 1000 > ttl) {
         stale.push([projName, repo]);
       }

@@ -106,6 +106,95 @@ describe('gh-status invalidateProject', () => {
   });
 });
 
+describe('gh-status cache TTL per CI status', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let execMock: ReturnType<typeof vi.fn>;
+  let ghStatusLookup: typeof import('@/lib/gh-status').ghStatusLookup;
+
+  function insertStatus(project: string, ci: string, fetchedSecondsAgo: number) {
+    const fetchedAt = new Date(Date.now() - fetchedSecondsAgo * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    testDb.db.insert(schema.ghStatus).values({
+      project,
+      releaseTag: null,
+      ci,
+      ciFailedUrl: ci === 'failure' ? 'https://github.com/actions/run/1' : null,
+      headSha: 'abc123',
+      localHeadSha: 'abc123',
+      fetchedAt,
+    }).run();
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    execMock = vi.fn().mockResolvedValue({ exitCode: 1, stdout: '', stderr: '' });
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+
+    const mod = await import('@/lib/gh-status');
+    ghStatusLookup = mod.ghStatusLookup;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('considers failure stale after 300s and re-fetches', async () => {
+    insertStatus('proj', 'failure', 301);
+
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'git' && args.includes('rev-parse')) return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
+      if (cmd === 'git' && args.includes('get-url')) return { exitCode: 1, stdout: '', stderr: '' };
+      if (cmd === 'gh' && args[0] === 'api') return { exitCode: 0, stdout: 'newabc123\n', stderr: '' };
+      if (cmd === 'gh' && args[0] === 'run') return { exitCode: 0, stdout: JSON.stringify({ ci: 'success', failed_url: null }), stderr: '' };
+      if (cmd === 'git' && args.includes('ls-remote')) return { exitCode: 1, stdout: '', stderr: '' };
+      return { exitCode: 1, stdout: '', stderr: '' };
+    });
+
+    await ghStatusLookup({ p1: { project: 'proj', github: 'org/proj', path: '/p' } });
+
+    const ghRunCalls = execMock.mock.calls.filter(
+      (c: any[]) => c[0] === 'gh' && c[1]?.[0] === 'run'
+    );
+    expect(ghRunCalls.length).toBeGreaterThan(0);
+  });
+
+  it('does not re-fetch failure within 300s', async () => {
+    insertStatus('proj', 'failure', 299);
+
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'git' && args.includes('rev-parse')) return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
+      if (cmd === 'git' && args.includes('get-url')) return { exitCode: 1, stdout: '', stderr: '' };
+      return { exitCode: 1, stdout: '', stderr: '' };
+    });
+
+    await ghStatusLookup({ p1: { project: 'proj', github: 'org/proj', path: '/p' } });
+
+    const ghApiCalls = execMock.mock.calls.filter(
+      (c: any[]) => c[0] === 'gh' && c[1]?.[0] === 'api'
+    );
+    expect(ghApiCalls).toHaveLength(0);
+  });
+
+  it('considers success stale only after 3600s', async () => {
+    insertStatus('proj', 'success', 301);
+
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'git' && args.includes('rev-parse')) return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
+      if (cmd === 'git' && args.includes('get-url')) return { exitCode: 1, stdout: '', stderr: '' };
+      return { exitCode: 1, stdout: '', stderr: '' };
+    });
+
+    await ghStatusLookup({ p1: { project: 'proj', github: 'org/proj', path: '/p' } });
+
+    const ghApiCalls = execMock.mock.calls.filter(
+      (c: any[]) => c[0] === 'gh' && c[1]?.[0] === 'api'
+    );
+    expect(ghApiCalls).toHaveLength(0);
+  });
+});
+
 describe('gh-status ghRepo auto-detection via git remote', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let execMock: ReturnType<typeof vi.fn>;
