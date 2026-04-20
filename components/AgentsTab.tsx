@@ -62,6 +62,15 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     prompt: 'Check if this project is ready to ship: 1) Run the test suite and report pass/fail. 2) Check git status for uncommitted changes. 3) Check for TODOs or FIXMEs in recently changed files. Output a clear READY / NOT READY verdict with a brief summary of any blockers.',
     skillIds: [],
   },
+  {
+    name: 'readme-sync',
+    description: 'Verifies README.md is accurate and updates it to reflect the current state of the project.',
+    model: 'sonnet',
+    schedule: '24h',
+    runner: 'pm2',
+    prompt: 'Read README.md and compare it against the actual project: package.json scripts, directory structure, and recent git log. Identify any outdated or missing sections (setup steps, commands, env vars, features). Update README.md in-place to reflect the current state. Keep the existing style and tone.',
+    skillIds: [],
+  },
 ]
 
 const MODEL_LABELS: Record<string, { label: string; desc: string }> = {
