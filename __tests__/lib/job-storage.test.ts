@@ -1339,6 +1339,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let startProjectTestMock: ReturnType<typeof vi.fn>;
   let startProjectPushMock: ReturnType<typeof vi.fn>;
+  let startProjectCommitMock: ReturnType<typeof vi.fn>;
   let startProjectReviewMock: ReturnType<typeof vi.fn>;
   let startFixFromJobMock: ReturnType<typeof vi.fn>;
   let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
@@ -1376,6 +1377,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
     startProjectTestMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'test-auto', pid: 999, logPath: '/tmp/t.log', testCmd: 'pnpm test' });
     startProjectPushMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abcd123', message: 'pushed' });
+    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abcd123', message: 'committed' });
     getProjectTestConfigMock = vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoPushEnabled: true });
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     resolveProjectPathMock = vi.fn().mockReturnValue('/proj');
@@ -1404,6 +1406,9 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     }));
     vi.doMock('@/lib/start-push', () => ({
       startProjectPush: startProjectPushMock,
+    }));
+    vi.doMock('@/lib/start-commit', () => ({
+      startProjectCommit: startProjectCommitMock,
     }));
     vi.doMock('@/lib/start-fix', () => ({
       startFixFromJob: startFixFromJobMock,
@@ -1475,14 +1480,14 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     expect(releaseRow?.exitCode).toBe(0);
   });
 
-  it('pushes when review finishes with LGTM and auto-push is enabled', async () => {
+  it('starts commit when review finishes with LGTM and auto-push is enabled', async () => {
     const logFile = join(tempDir, 'lgtm.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
     const job = makeJob('review', logFile);
 
     await markDoneFn(job, 0);
 
-    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj', expect.objectContaining({ commitOnly: false }));
+    expect(startProjectCommitMock).toHaveBeenCalledWith('my-proj');
     expect(startFixFromJobMock).not.toHaveBeenCalled();
   });
 
@@ -1555,7 +1560,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
     await markDoneFn(job, 0);
 
-    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj', expect.objectContaining({ commitOnly: false }));
+    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj');
     expect(startProjectReviewMock).not.toHaveBeenCalled();
   });
 
@@ -1566,7 +1571,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
     await markDoneFn(job, 0);
 
-    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj', expect.objectContaining({ commitOnly: false }));
+    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj');
     expect(startProjectReviewMock).not.toHaveBeenCalled();
   });
 
@@ -1576,23 +1581,24 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
     await markDoneFn(job, 0);
 
-    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj', expect.objectContaining({ commitOnly: false }));
+    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj');
     expect(startProjectReviewMock).not.toHaveBeenCalled();
   });
 
-  it('test→push uses commitOnly=true when autoCommitEnabled=true and autoPushEnabled=false and no uncommitted changes', async () => {
+  it('test→push (no commit needed) when autoCommitEnabled=true and autoPushEnabled=false and no uncommitted changes', async () => {
+    // When no uncommitted changes exist, nothing to commit, so push directly.
     getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: true, autoPushEnabled: false, releaseAfterRun: false });
     execMock.mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
     const job = makeJob('test', null);
 
     await markDoneFn(job, 0);
 
-    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj', expect.objectContaining({ commitOnly: true }));
+    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj');
     expect(startProjectReviewMock).not.toHaveBeenCalled();
   });
 
-  it('continues gracefully when startProjectPush throws', async () => {
-    startProjectPushMock.mockRejectedValue(new Error('git remote down'));
+  it('continues gracefully when startProjectCommit throws', async () => {
+    startProjectCommitMock.mockRejectedValue(new Error('git remote down'));
     const logFile = join(tempDir, 'lgtm-throw.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
     const job = makeJob('review', logFile);
@@ -1653,7 +1659,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     expect(startProjectReviewMock).not.toHaveBeenCalled();
   });
 
-  it('uses commitOnly=true push when autoCommitEnabled is set without autoPushEnabled after LGTM review', async () => {
+  it('starts commit (not push) when autoCommitEnabled is set without autoPushEnabled after LGTM review', async () => {
     getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: true, autoPushEnabled: false, releaseAfterRun: false });
     const logFile = join(tempDir, 'lgtm-commit-only.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
@@ -1661,10 +1667,11 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
     await markDoneFn(job, 0);
 
-    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj', expect.objectContaining({ commitOnly: true }));
+    expect(startProjectCommitMock).toHaveBeenCalledWith('my-proj');
+    expect(startProjectPushMock).not.toHaveBeenCalled();
   });
 
-  it('uses commitOnly=false when autoPushEnabled=true even if autoCommitEnabled=true', async () => {
+  it('starts commit when autoPushEnabled=true even if autoCommitEnabled=true after LGTM review', async () => {
     getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: true, autoPushEnabled: true, releaseAfterRun: false });
     const logFile = join(tempDir, 'lgtm-full-push.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
@@ -1672,7 +1679,8 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
     await markDoneFn(job, 0);
 
-    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj', expect.objectContaining({ commitOnly: false }));
+    expect(startProjectCommitMock).toHaveBeenCalledWith('my-proj');
+    expect(startProjectPushMock).not.toHaveBeenCalled();
   });
 
   it('auto-chains fix→review when autoCommitEnabled=true and autoPushEnabled=false', async () => {
@@ -1897,6 +1905,7 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let startFixPushMock: ReturnType<typeof vi.fn>;
   let startProjectPushMock: ReturnType<typeof vi.fn>;
+  let startProjectCommitMock: ReturnType<typeof vi.fn>;
   let startProjectReviewMock: ReturnType<typeof vi.fn>;
   let isHookRejectionMock: ReturnType<typeof vi.fn>;
   let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
@@ -1956,6 +1965,7 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
 
     startFixPushMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-push-1', pid: 999, logPath: '/tmp/fp.log' });
     startProjectPushMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'pushed' });
+    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'committed' });
     startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-1', pid: 888, logPath: '/tmp/rev.log' });
     isHookRejectionMock = vi.fn().mockReturnValue(false);
     getProjectTestConfigMock = vi.fn().mockReturnValue({ autoPushEnabled: false });
@@ -1981,6 +1991,7 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
     }));
     vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
     vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
     vi.doMock('@/lib/start-fix-push', () => ({
       isHookRejection: isHookRejectionMock,
       startFixPush: startFixPushMock,
@@ -2089,30 +2100,31 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
     expect(startFixPushMock).toHaveBeenCalledTimes(1);
   });
 
-  it('calls startProjectPush when fix-push finishes with exit 0', async () => {
+  it('calls startProjectCommit when fix-push finishes with exit 0', async () => {
     const job = makeJob('fix-push', null);
 
     await markDoneFn(job, 0);
 
-    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj');
+    expect(startProjectCommitMock).toHaveBeenCalledWith('my-proj');
+    expect(startProjectPushMock).not.toHaveBeenCalled();
   });
 
-  it('does not call startProjectPush when fix-push exits non-zero', async () => {
+  it('does not call startProjectCommit when fix-push exits non-zero', async () => {
     const job = makeJob('fix-push', null);
 
     await markDoneFn(job, 1);
 
-    expect(startProjectPushMock).not.toHaveBeenCalled();
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
   });
 
-  it('continues gracefully when startProjectPush throws after fix-push success', async () => {
-    startProjectPushMock.mockRejectedValue(new Error('push service down'));
+  it('continues gracefully when startProjectCommit throws after fix-push success', async () => {
+    startProjectCommitMock.mockRejectedValue(new Error('commit service down'));
     const job = makeJob('fix-push', null);
 
     await expect(markDoneFn(job, 0)).resolves.toBeUndefined();
   });
 
-  it('chains review LGTM → push when inRelease even though auto-push is disabled', async () => {
+  it('chains review LGTM → commit when inRelease even though auto-push is disabled', async () => {
     getProjectTestConfigMock.mockReturnValue({ autoPushEnabled: false });
     insertActiveRelease();
     const logFile = join(tempDir, 'lgtm-release.log');
@@ -2121,7 +2133,8 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
 
     await markDoneFn(job, 0);
 
-    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj', expect.objectContaining({ commitOnly: false }));
+    expect(startProjectCommitMock).toHaveBeenCalledWith('my-proj');
+    expect(startProjectPushMock).not.toHaveBeenCalled();
   });
 
   it('chains test pass → review when inRelease even though auto-push is disabled', async () => {

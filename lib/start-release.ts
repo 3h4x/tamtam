@@ -5,6 +5,7 @@ import { resolveProjectPath } from './project-data';
 import { startProjectTest, detectTestCommand } from './start-test';
 import { startProjectReview } from './start-review';
 import { startProjectPush } from './start-push';
+import { startProjectCommit } from './start-commit';
 import { listJobs, probeJobStatus, createJob, updateJob, getVerdict, markDone } from './job-storage';
 import { isReviewed } from './git-utils';
 import { exec } from './shell';
@@ -183,9 +184,16 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
   // single button while still being smart about what to do.
   const skipToPush = await hasFreshLgtm(projectName, projPath);
 
-  // Fresh LGTM or only unpushed commits (nothing to test/review) — push directly.
-  if (skipToPush || !changes) {
+  // No uncommitted changes, just push existing commits.
+  if (!changes) {
     const r = await startProjectPush(projectName);
+    if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+    return { ok: true, step: 'push', releaseJobId, message: r.message };
+  }
+
+  // Fresh LGTM and there are uncommitted changes — commit them first, then push.
+  if (skipToPush) {
+    const r = await startProjectCommit(projectName);
     if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
     return { ok: true, step: 'push', releaseJobId, message: r.message };
   }
