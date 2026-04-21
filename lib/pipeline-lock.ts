@@ -43,23 +43,17 @@ export async function acquireLock(projectName: string, jobId: string): Promise<{
   const existing = getLockSync(projectName);
 
   if (existing) {
-    // Check if lock is stale (job is terminal)
-    const age = Date.now() / 1000 - existing.acquiredAt;
-    if (age > STALE_LOCK_TIMEOUT_SECONDS) {
-      const blockingJob = listJobs().find(j => j.id === existing.lockedByJobId);
-      if (blockingJob && blockingJob.finishedAt !== null) {
-        // Job is terminal — force-release stale lock
-        releaseLockSync(projectName);
-      } else {
-        // Job is still running or not found but lock is old — let it try
-        if (!blockingJob) {
-          releaseLockSync(projectName);
-        } else {
-          return { acquired: false, lock: existing, blockingJobId: existing.lockedByJobId };
-        }
-      }
+    // Self-heal: if the holder job is already terminal (or no longer exists),
+    // release the stale lock immediately rather than waiting for the 30-min
+    // timeout. Covers the rare case where finalizeReleaseJob skipped the
+    // releaseLock call due to completion-hook ordering.
+    const blockingJob = listJobs().find(j => j.id === existing.lockedByJobId);
+    const holderFinished = blockingJob ? blockingJob.finishedAt !== null : false;
+    if (holderFinished || !blockingJob) {
+      releaseLockSync(projectName);
     } else {
-      // Lock is fresh — can't acquire
+      // Holder is still running. Preserve existing behavior: block new
+      // acquisitions for the lifetime of the holder.
       return { acquired: false, lock: existing, blockingJobId: existing.lockedByJobId };
     }
   }

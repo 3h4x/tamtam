@@ -57,23 +57,18 @@ export function tickCriteria(body: string, verifiedTexts: Set<string>): { body: 
  * changed:false on any recoverable error.
  */
 export async function startMarkDod(projectName: string): Promise<MarkDodResult> {
-  console.log('[mark-dod] step 1: resolve path');
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
 
-  console.log('[mark-dod] step 2: find issue context');
   const issueCtx = findIssueContext(projectName);
   if (!issueCtx) return { ok: false, status: 400, detail: 'no issue context on latest run' };
 
-  console.log('[mark-dod] step 3: getImproveConfig');
   const { logDir, claudeBin } = getImproveConfig();
   mkdirSync(logDir, { recursive: true });
-  console.log('[mark-dod] step 4: createJob; logDir=', logDir, 'claudeBin=', claudeBin);
 
   // pid=0 — inline job with no spawned process; avoids markDone's SIGKILL
   // fallback taking out our own children (Turbopack workers etc).
   const job = createJob(projectName, 'mark-dod', 0, '');
-  console.log('[mark-dod] step 5: job created', job.id);
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
   const log = (s: string) => { try { appendFileSync(logPath, s); } catch {} };

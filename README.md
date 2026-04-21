@@ -21,7 +21,7 @@ The agent management dashboard built for Claude CLI. Define skills, compose agen
 | **Scheduling** | Built-in cron scheduler — daily reviews, nightly audits, whatever you need, running unattended |
 | **Release pipeline** | Quality-gated: test → review → fix loop → commit → push, all driven by Claude |
 | **Custom actions** | Per-project bash commands (deploy, migrate, seed) as colored buttons |
-| **Notifications** | Unseen run alerts with bell badge |
+| **Notifications** | Unseen run alerts with bell badge; outbound webhooks (Slack, Discord, generic) for pipeline events |
 
 ## Stack
 

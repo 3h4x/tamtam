@@ -202,13 +202,31 @@ export function launchProjectPush(projectName: string): { jobId: string } | { er
   return { jobId: job.id };
 }
 
-function findIssueContext(projectName: string): { number: number; repo: string; title: string } | null {
+async function findIssueContext(
+  projectName: string,
+  projPath: string,
+): Promise<{ number: number; repo: string; title: string } | null> {
   const jobs = listJobs()
     .filter(j => j.project === projectName && j.kind === 'run' && j.ghIssueNumber != null)
     .sort((a, b) => b.startedAt - a.startedAt);
   const job = jobs[0];
   if (!job || job.ghIssueNumber == null) return null;
-  return { number: job.ghIssueNumber, repo: job.ghIssueRepo ?? '', title: job.ghIssueTitle ?? '' };
+  const repo = job.ghIssueRepo ?? '';
+  // Skip already-closed issues — otherwise the next release after an
+  // issue-driven merge creates a redundant PR targeting the closed issue
+  // (the run job keeps the gh_issue_number stamp forever).
+  if (repo) {
+    try {
+      const r = await exec('gh', ['issue', 'view', String(job.ghIssueNumber), '--repo', repo, '--json', 'state'], { cwd: projPath, timeout: 10000 });
+      if (r.exitCode === 0) {
+        const state = (JSON.parse(r.stdout).state ?? '').toString().toUpperCase();
+        if (state && state !== 'OPEN') return null;
+      }
+    } catch {
+      // gh unreachable — fall through and use the context optimistically.
+    }
+  }
+  return { number: job.ghIssueNumber, repo, title: job.ghIssueTitle ?? '' };
 }
 
 async function runPush(
@@ -220,7 +238,7 @@ async function runPush(
   // If we have issue context and are currently on the default branch, switch
   // to a feature branch BEFORE committing. Otherwise the commit lands on main,
   // the subsequent PR attempt produces an empty diff, and GH rejects it.
-  const issueCtx = findIssueContext(projectName);
+  const issueCtx = await findIssueContext(projectName, projPath);
   if (issueCtx) {
     const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
     const currentBranch = branchR.stdout.trim();
