@@ -92,6 +92,7 @@ Do not commit — just make the code changes.
   } catch (e: unknown) {
     job.finishedAt = Date.now() / 1000;
     job.exitCode = -1;
+    updateJob(job);
     return NextResponse.json({ detail: `Failed to start CI fix: ${errMsg(e)}` }, { status: 500 });
   }
 

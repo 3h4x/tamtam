@@ -62,6 +62,7 @@ export async function POST(
   } catch (e: unknown) {
     job.finishedAt = Date.now() / 1000;
     job.exitCode = -1;
+    updateJob(job);
     return NextResponse.json({ detail: `Failed to start rerun: ${errMsg(e)}` }, { status: 500 });
   }
 

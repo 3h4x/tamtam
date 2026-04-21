@@ -177,6 +177,11 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     expect(res.status).toBe(500);
     const data = await res.json();
     expect(data.detail).toContain('pm2 crashed');
+    // Job must be persisted as failed so it doesn't stay "running" in the DB
+    expect(updateJobMock).toHaveBeenCalledOnce();
+    const savedJob = updateJobMock.mock.calls[0][0];
+    expect(savedJob.exitCode).toBe(-1);
+    expect(savedJob.finishedAt).not.toBeNull();
   });
 
   it('prepends persona content on follow-up turns (resumeSessionId set)', async () => {
