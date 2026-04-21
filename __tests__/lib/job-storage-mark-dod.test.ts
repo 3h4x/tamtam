@@ -52,6 +52,7 @@ describe('runCompletionHooks – mark-dod integration', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let startMarkDodMock: ReturnType<typeof vi.fn>;
   let startProjectPushMock: ReturnType<typeof vi.fn>;
+  let startProjectCommitMock: ReturnType<typeof vi.fn>;
   let startFixFromJobMock: ReturnType<typeof vi.fn>;
   let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
   let markDoneFn: typeof import('@/lib/job-storage').markDone;
@@ -87,6 +88,7 @@ describe('runCompletionHooks – mark-dod integration', () => {
       ok: true, jobId: 'dod-job', issueNumber: 7, verified: 2, total: 2, changed: true,
     });
     startProjectPushMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'pushed' });
+    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' });
     startFixFromJobMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-job' });
     getProjectTestConfigMock = vi.fn().mockReturnValue({ autoPushEnabled: true, autoCommitEnabled: false });
 
@@ -106,6 +108,7 @@ describe('runCompletionHooks – mark-dod integration', () => {
     }));
     vi.doMock('@/lib/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
     vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
     vi.doMock('@/lib/start-fix', () => ({ startFixFromJob: startFixFromJobMock }));
     vi.doMock('@/lib/start-review', () => ({
       startProjectReview: vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-job' }),
@@ -126,7 +129,7 @@ describe('runCompletionHooks – mark-dod integration', () => {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('calls startMarkDod before startProjectPush when review verdict is LGTM and auto-push is on', async () => {
+  it('calls startMarkDod before startProjectCommit when review verdict is LGTM and auto-push is on', async () => {
     const logFile = join(tempDir, 'lgtm.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
     const callOrder: string[] = [];
@@ -134,14 +137,14 @@ describe('runCompletionHooks – mark-dod integration', () => {
       callOrder.push('mark-dod');
       return { ok: true, jobId: 'j', issueNumber: 1, verified: 0, total: 0, changed: false };
     });
-    startProjectPushMock.mockImplementation(async () => {
-      callOrder.push('push');
-      return { ok: true, commitSha: 'abc', message: 'pushed' };
+    startProjectCommitMock.mockImplementation(async () => {
+      callOrder.push('commit');
+      return { ok: true, commitSha: 'abc', message: 'committed' };
     });
 
     await markDoneFn(makeReviewJob(logFile), 0);
 
-    expect(callOrder).toEqual(['mark-dod', 'push']);
+    expect(callOrder).toEqual(['mark-dod', 'commit']);
   });
 
   it('calls startMarkDod with the project name', async () => {
@@ -151,20 +154,20 @@ describe('runCompletionHooks – mark-dod integration', () => {
     expect(startMarkDodMock).toHaveBeenCalledWith('my-proj');
   });
 
-  it('still calls startProjectPush when startMarkDod returns ok:false (non-fatal)', async () => {
+  it('still calls startProjectCommit when startMarkDod returns ok:false (non-fatal)', async () => {
     const logFile = join(tempDir, 'lgtm3.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
     startMarkDodMock.mockResolvedValue({ ok: false, status: 400, detail: 'no issue context' });
     await markDoneFn(makeReviewJob(logFile), 0);
-    expect(startProjectPushMock).toHaveBeenCalled();
+    expect(startProjectCommitMock).toHaveBeenCalled();
   });
 
-  it('still calls startProjectPush when startMarkDod throws (non-fatal)', async () => {
+  it('still calls startProjectCommit when startMarkDod throws (non-fatal)', async () => {
     const logFile = join(tempDir, 'lgtm4.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
     startMarkDodMock.mockRejectedValue(new Error('mark-dod crashed'));
     await markDoneFn(makeReviewJob(logFile), 0);
-    expect(startProjectPushMock).toHaveBeenCalled();
+    expect(startProjectCommitMock).toHaveBeenCalled();
   });
 
   it('does not call startMarkDod when verdict is NEEDS ATTENTION', async () => {
@@ -195,6 +198,7 @@ describe('runCompletionHooks – mark-dod integration', () => {
     await markDoneFn(makeReviewJob(logFile), 0);
     expect(startMarkDodMock).not.toHaveBeenCalled();
     expect(startProjectPushMock).not.toHaveBeenCalled();
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
   });
 
   it('calls startMarkDod when autoCommitEnabled is true (no autoPush)', async () => {

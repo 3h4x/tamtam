@@ -60,6 +60,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
     vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
     vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' }) }));
     vi.doMock('@/lib/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
@@ -219,7 +220,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     }
   });
 
-  it('skips test+review and pushes directly when a fresh LGTM review exists', async () => {
+  it('skips test+review and commits directly when a fresh LGTM review exists with uncommitted changes', async () => {
     vi.resetModules();
     const latestReview = {
       id: 'prev-review', project: 'proj', kind: 'review',
@@ -228,6 +229,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     const listJobsWithReview = vi.fn().mockReturnValue([latestReview]);
     const getVerdictLgtm = vi.fn().mockReturnValue('LGTM');
     const isReviewedTrue = vi.fn().mockResolvedValue(true);
+    const startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'deadbee', message: 'committed' });
     startProjectPushMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'deadbee', message: 'pushed' });
     detectTestCommandMock = vi.fn().mockReturnValue('pnpm test');
     execMock = vi.fn()
@@ -256,13 +258,15 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
     vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
     vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
 
     const { startRelease: fn } = await import('@/lib/start-release');
     const r = await fn('proj');
 
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.step).toBe('push');
-    expect(startProjectPushMock).toHaveBeenCalledWith('proj');
+    if (r.ok) expect(r.step).toBe('push'); // step label is still 'push' in the response
+    expect(startProjectCommitMock).toHaveBeenCalledWith('proj');
+    expect(startProjectPushMock).not.toHaveBeenCalled();
     expect(startProjectTestMock).not.toHaveBeenCalled();
     expect(startProjectReviewMock).not.toHaveBeenCalled();
   });
@@ -300,6 +304,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
     vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
     vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' }) }));
 
     const { startRelease: fn } = await import('@/lib/start-release');
     const r = await fn('proj');
@@ -390,6 +395,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
     vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
     vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' }) }));
     vi.doMock('@/lib/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: false, lock: {}, blockingJobId: 'blocking-job-42' }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),

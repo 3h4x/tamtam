@@ -18,7 +18,7 @@ Steps are pluggable per project and coordinated by completion hooks in `lib/job-
 - **mark-dod** *(PR Workflow only)* — after push, Claude inspects the codebase with tool access (Read/Grep/Glob) to verify which acceptance-criteria checkboxes in the linked GitHub issue are actually implemented, then ticks only the verified ones. Best-effort and non-fatal.
 - **merge** *(PR Workflow + auto-merge enabled)* — polls CI checks on the PR and merges once they pass. After merge, the working copy is returned to the default branch.
 
-The **🚀 Release** button triggers the pipeline at the right starting step. When `auto_push_enabled` is on (per-project config, off by default), the chain continues automatically from one step to the next. The pipeline strip in the Terminal tab shows the live state of each step (`○` pending, spinner running, `✓` done, `!` needs attention, `✗` failed); clicking a step re-triggers or opens its log.
+The **🚀 Release** button triggers the pipeline at the right starting step. When `auto_push_enabled` is on (per-project config, off by default), the chain continues automatically from one step to the next. The pipeline strip in the Terminal tab shows the live state of each step (`○` pending, spinner running, `✓` done, `!` needs attention, `✗` failed); clicking a step opens its log. The strip is **only visible while the pipeline is actively running** — it disappears when all steps finish. Each release starts with a clean strip: only jobs from the current run are shown. Steps that come after the currently-running step always render as `○` (they haven't executed yet in this run), and prior steps are only shown as `✓` if they started within 30 minutes of the running step (older jobs are from a previous release and are ignored).
 
 **Helpers** (composable building blocks used by both the API routes and the auto-chain):
 - `lib/start-test.ts` → `startProjectTest`
@@ -88,7 +88,7 @@ If you do restart and run into the EADDRINUSE loop, see `## Investigating a misb
 ## Pages
 - `/` — Projects list with status, changes, CI
 - `/project/[name]` — Project overview with agents, status bar (changes/review/tests)
-- `/project/[name]/config` — Test command, pipeline mode (Direct Branch / PR Workflow), automation flags, custom actions editor
+- `/project/[name]/config` — Test command, pipeline mode (Direct Branch / PR Workflow), automation flags, custom actions editor; single **Save** button at top covers all sections (config + custom actions saved together)
 - `/project/[name]/history` — Project runs with filter tabs (all/running/failed/done)
 - `/project/[name]/changes` — Git diff viewer for uncommitted changes
 - `/project/[name]/issues` — GitHub PRs and issues viewer (open PRs with review status, open issues)
@@ -128,6 +128,7 @@ If you do restart and run into the EADDRINUSE loop, see `## Investigating a misb
 - `/api/projects/by-project/[name]/issues` — GitHub PRs and issues for the project (GET, POST to force refresh); merge POST switches working copy to default branch after merge
 - `/api/projects/by-project/[name]/issue-branch` — Create or checkout `fix/issue-<n>-<slug>` before Claude edits (POST); called automatically from TerminalTab when opening from an issue
 - `/api/projects/by-project/[name]/mark-dod` — Run DoD verification for latest issue-linked run (POST); also triggered automatically after review→LGTM
+- `/api/projects/by-project/[name]/pr-branch` — Fetch and checkout a PR's head branch so Terminal opens on the right branch (POST: `{ branch }`)
 - `/api/projects/by-project/[name]/pr-gates` — TamTam-side gate state for a PR: tests/review/DoD badges (GET); used by IssuesTab
 - `/api/projects/by-project/[name]/behind` — Ahead/behind commit counts vs remote (GET)
 - `/api/projects/by-project/[name]/logs` — Project run log files (GET)

@@ -297,7 +297,7 @@ async function finalizeReleaseJob(release: JobData, exitCode: number): Promise<v
 async function runCompletionHooks(job: JobData): Promise<void> {
   // Stream per-step output into the active release meta-log so the user can
   // watch the whole pipeline in one terminal.
-  if (['test', 'review', 'fix', 'push', 'fix-push', 'pr-wait', 'mark-dod'].includes(job.kind)) {
+  if (['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod'].includes(job.kind)) {
     const release = findActiveReleaseJob(job.project);
     if (release) appendToReleaseLog(release, job.kind, job);
   }
@@ -342,16 +342,15 @@ async function runCompletionHooks(job: JobData): Promise<void> {
           } else {
             console.log(`[release] deferring mark-dod to post-merge for ${job.project} (auto_pr_merge_enabled)`);
           }
-          const { startProjectPush } = await import('./start-push');
-          const commitOnly = !inRelease && pipelineCfg.autoCommitEnabled && !pipelineCfg.autoPushEnabled;
-          const r = await startProjectPush(job.project, { commitOnly });
+          const { startProjectCommit } = await import('./start-commit');
+          const r = await startProjectCommit(job.project);
           if (!r.ok) {
-            console.log(`[release] push failed for ${job.project}: ${r.detail}`);
+            console.log(`[release] commit failed for ${job.project}: ${r.detail}`);
           } else {
-            console.log(`[release] review LGTM → pushed ${job.project} (${r.commitSha || 'no-op'})`);
+            console.log(`[release] review LGTM → committed ${job.project} (${r.commitSha || 'no-op'})`);
           }
-          // startProjectPush creates a 'push' job that will itself finalize
-          // the release via its own completion hook.
+          // startProjectCommit creates a 'commit' job that will itself chain to push
+          // (or finalize the release) via its own completion hook.
           chainedNext = true;
         } else if (verdict === 'NEEDS ATTENTION' || verdict === 'DO NOT SHIP') {
           if (verdict === 'DO NOT SHIP') {
@@ -397,6 +396,28 @@ async function runCompletionHooks(job: JobData): Promise<void> {
     }
   }
 
+  if (job.kind === 'commit' && job.exitCode === 0) {
+    try {
+      const { autoCommitEnabled, autoPushEnabled } = await getProjectPipelineConfig(job.project);
+      const inRelease = !!findActiveReleaseJob(job.project);
+      if (inRelease || autoPushEnabled) {
+        const { startProjectPush } = await import('./start-push');
+        const r = await startProjectPush(job.project);
+        if (r.ok) {
+          chainedNext = true;
+          console.log(`[commit→push] pushed ${job.project} (${r.commitSha || 'no-op'})`);
+        } else {
+          console.log(`[commit→push] push failed for ${job.project}: ${r.detail}`);
+        }
+      } else if (autoCommitEnabled && !autoPushEnabled) {
+        // commit-only mode: commit is done, no push needed — finalize here
+        console.log(`[commit] commit-only mode — not chaining to push for ${job.project}`);
+      }
+    } catch (e) {
+      console.log(`[commit→push] error for ${job.project}:`, e);
+    }
+  }
+
   if (job.kind === 'test' && job.exitCode === 0) {
     try {
       const { autoCommitEnabled, autoPushEnabled } = await getProjectPipelineConfig(job.project);
@@ -420,13 +441,11 @@ async function runCompletionHooks(job: JobData): Promise<void> {
             console.log(`[release] test→review skipped for ${job.project}: ${r.detail}`);
           }
         } else {
-          // Tests passed and nothing left to review — push directly.
-          // If only auto-commit is enabled (not auto-push, not in release), respect that and skip the actual push.
-          const commitOnly = !inRelease && autoCommitEnabled && !autoPushEnabled;
+          // Tests passed and nothing to commit — push existing commits directly.
           const { startProjectPush } = await import('./start-push');
-          const r = await startProjectPush(job.project, { commitOnly });
+          const r = await startProjectPush(job.project);
           if (r.ok) {
-            console.log(`[release] tests passed (no changes) → push ${job.project}${commitOnly ? ' (commit-only)' : ''}`);
+            console.log(`[release] tests passed (no changes) → push ${job.project}`);
             chainedNext = true;
           } else {
             console.log(`[release] test→push skipped for ${job.project}: ${r.detail}`);
@@ -489,26 +508,27 @@ async function runCompletionHooks(job: JobData): Promise<void> {
     }
   }
 
-  // Chain fix-push → re-run push when Claude finishes fixing.
+  // Chain fix-push → commit → push when Claude finishes fixing.
   if (job.kind === 'fix-push' && job.exitCode === 0) {
     try {
-      const { startProjectPush } = await import('./start-push');
-      const r = await startProjectPush(job.project);
+      const { startProjectCommit } = await import('./start-commit');
+      const r = await startProjectCommit(job.project);
       if (r.ok) {
-        console.log(`[fix-push→push] re-pushed ${job.project} (${r.commitSha || 'no-op'})`);
+        console.log(`[fix-push→commit] committed ${job.project} (${r.commitSha || 'no-op'})`);
+        chainedNext = true;
       } else {
-        console.log(`[fix-push→push] push still failing for ${job.project}: ${r.detail}`);
+        console.log(`[fix-push→commit] commit still failing for ${job.project}: ${r.detail}`);
+        chainedNext = true; // Still mark as chained — commit job will finalize
       }
-      chainedNext = true;
     } catch (e) {
-      console.log(`[fix-push→push] retry error for ${job.project}:`, e);
+      console.log(`[fix-push→commit] retry error for ${job.project}:`, e);
     }
   }
 
   // If this is a pipeline step and we didn't chain to another step, the
   // release job reached a natural endpoint — finalize it. Exit code mirrors
   // this step's outcome.
-  if (['test', 'review', 'fix', 'push', 'fix-push', 'pr-wait', 'mark-dod'].includes(job.kind) && !chainedNext) {
+  if (['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod'].includes(job.kind) && !chainedNext) {
     const release = findActiveReleaseJob(job.project);
     if (release) {
       const exitCode = (job.exitCode === 0) ? 0 : 1;

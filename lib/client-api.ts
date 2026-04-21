@@ -307,9 +307,7 @@ export async function fetchProjectLogs(projectName: string): Promise<{ logs: Log
 }
 
 export async function pushProject(projectName: string): Promise<{ status: string; job_id: string }> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/push`, {
-    method: 'POST',
-  })
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/push`, { method: 'POST' })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
     throw new Error(data.detail || `Failed to push: ${response.statusText}`)

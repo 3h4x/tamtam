@@ -1255,7 +1255,7 @@ export function ProjectDetailPage({
             )
             type StepState = 'pending' | 'running' | 'done' | 'warning' | 'failed'
             // Show strip only while the release pipeline is actively running.
-            const pipelineKinds = ['test', 'review', 'fix', 'push', 'mark-dod']
+            const pipelineKinds = ['test', 'review', 'fix', 'commit', 'push', 'mark-dod']
             const pipelineRunning = projectJobs.some(
               j => pipelineKinds.includes(j.kind) && j.status === 'running'
             )
@@ -1267,7 +1267,7 @@ export function ProjectDetailPage({
             // - Steps BEFORE the running step → only valid if they started within
             //   MAX_PIPELINE_DURATION seconds of the running step (i.e. same run).
             //   Anything older is from a previous release and must not carry its ✓ forward.
-            const pipelineSequence = ['test', 'review', 'fix', 'push', 'mark-dod']
+            const pipelineSequence = ['test', 'review', 'fix', 'commit', 'push', 'mark-dod']
             const runningJob = projectJobs.find(j => pipelineKinds.includes(j.kind) && j.status === 'running')
             const runningIdx = runningJob ? pipelineSequence.indexOf(runningJob.kind) : -1
             const MAX_PIPELINE_DURATION = 30 * 60 // seconds — longer than any realistic test run
@@ -1285,6 +1285,7 @@ export function ProjectDetailPage({
             const testJob = latestOfKind('test')
             const reviewJob = latestOfKind('review')
             const fixJob = latestOfKind('fix')
+            const commitJob = latestOfKind('commit')
             const pushJob = latestOfKind('push')
             const dodJob = latestOfKind('mark-dod')
             const priorPushStart = pushJob?.started_at ?? 0
@@ -1387,9 +1388,7 @@ export function ProjectDetailPage({
             const hasChanges = project.totalChanges > 0
             const unpushed = (project.unpushed ?? 0) > 0
             const autoPush = !!config?.auto_push_enabled
-            // Commit/push run synchronously inside the review completion hook,
-            // so there's no distinct job to observe. We surface failures via
-            // `last_push_error` stored on the project after each push attempt.
+            // Surface failures via `last_push_error` stored on the project after each push/commit attempt.
             const pushError = config?.last_push_error ?? null
             // Suppress a stale push error when the current pipeline attempt has
             // advanced past it: if any non-push step (test/review/fix) started
@@ -1402,11 +1401,23 @@ export function ProjectDetailPage({
             )
             const effectivePushError = pipelineEpoch > priorPushStart ? null : pushError
             const pushErrorIsCommit = !!effectivePushError && effectivePushError.startsWith('Commit failed')
-            const commitState: StepState = pushErrorIsCommit
-              ? 'failed'
+
+            // Commit step: use actual commit job if available, otherwise derive from project state.
+            const commitRunning = commitJob?.status === 'running'
+            const commitStateEffective: StepState = commitRunning
+              ? 'running'
+              : commitJob?.exit_code === 0 ? 'done'
+              : commitJob && commitJob.exit_code !== 0 ? 'failed'
+              : pushErrorIsCommit ? 'failed'
               : hasChanges ? 'pending' : 'done'
-            const pushState: StepState = effectivePushError && !pushErrorIsCommit
-              ? 'failed'
+
+            // Push step: use actual push job if available, otherwise derive from project state.
+            const pushRunning = pushJob?.status === 'running'
+            const pushStateEffective: StepState = pushRunning
+              ? 'running'
+              : pushJob?.exit_code === 0 ? 'done'
+              : pushJob && pushJob.exit_code !== 0 ? 'failed'
+              : effectivePushError && !pushErrorIsCommit ? 'failed'
               : !hasChanges && !unpushed ? 'done' : 'pending'
 
             const testHint = !hasTestCommand
@@ -1415,28 +1426,25 @@ export function ProjectDetailPage({
               : testState === 'done' && testJob ? `tests passed (${formatAgo(testJob.finished_at ?? testJob.started_at)})`
               : testState === 'failed' ? `tests failed (exit ${testJob?.exit_code})`
               : 'tests not run yet'
-            const pushHint = pushState === 'failed'
+            const pushHint = pushStateEffective === 'failed'
               ? (effectivePushError ?? 'push failed')
-              : pushState === 'done'
+              : pushStateEffective === 'done'
                 ? 'nothing to push'
                 : unpushed
                   ? `${project.unpushed} unpushed commit${project.unpushed === 1 ? '' : 's'}${autoPush && reviewPassed ? ' — auto-push pending' : ''}`
                   : `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — need review & commit first`
-            const commitHint = commitState === 'failed'
-              ? (effectivePushError ?? 'commit failed')
-              : commitState === 'done'
+            const commitHint = commitStateEffective === 'failed'
+              ? (commitJob ? `commit failed (exit ${commitJob.exit_code}) — click to view log` : (effectivePushError ?? 'commit failed'))
+              : commitStateEffective === 'done'
                 ? 'nothing to commit'
-                : reviewPassed
-                  ? `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — ${autoPush ? 'auto-commit pending' : 'commit manually'}`
-                  : `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — need LGTM review to proceed`
+                : commitStateEffective === 'running'
+                  ? 'commit in progress — click to open terminal'
+                  : reviewPassed
+                    ? `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — ${autoPush ? 'auto-commit pending' : 'commit manually'}`
+                    : `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — need LGTM review to proceed`
 
+            const openCommitJob = commitJob ? () => router.push(`/project/${name}/terminal?job=${encodeURIComponent(commitJob.id)}`) : null
             const openPushJob = pushJob ? () => router.push(`/project/${name}/terminal?job=${encodeURIComponent(pushJob.id)}`) : null
-            // If a push job is running, show commit/push as running and let
-            // clicking either step open its log — it's a single tracked job
-            // that does both git commit and git push.
-            const pushRunning = pushJob?.status === 'running'
-            const commitStateEffective: StepState = pushRunning ? 'running' : commitState
-            const pushStateEffective: StepState = pushRunning ? 'running' : pushState
             const handleRetryPush = async () => {
               if (retryingPush) return
               setRetryingPush(true)
@@ -1459,7 +1467,7 @@ export function ProjectDetailPage({
             if (hasTestCommand) steps.push({ label: 'test', state: testState, hint: testHint, action: testJob ? () => router.push(`/project/${name}/terminal?job=${encodeURIComponent(testJob.id)}`) : null })
             steps.push({ label: 'review', state: reviewState, hint: reviewHint, action: reviewFixAction })
             steps.push({ label: 'fix', state: fixState, hint: fixHint, action: fixAction })
-            steps.push({ label: 'commit', state: commitStateEffective, hint: commitHint, action: openPushJob })
+            steps.push({ label: 'commit', state: commitStateEffective, hint: commitHint, action: openCommitJob })
             steps.push({ label: 'push', state: pushStateEffective, hint: pushHint, action: openPushJob, retryAction: pushStateEffective === 'failed' && !pushErrorIsCommit ? handleRetryPush : null })
             if (config?.auto_pr_merge_enabled) {
               steps.push({ label: 'dod', state: dodState, hint: dodHint, action: dodAction })
