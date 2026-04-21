@@ -186,6 +186,13 @@ describe('settings API', () => {
         'fix_ci_retry_window_seconds',
         'fix_ci_fast_crash_ms',
         'agent_templates',
+        'notification_webhook_url',
+        'notification_webhook_secret',
+        'notification_on_release_success',
+        'notification_on_release_fail',
+        'notification_on_fix_loop_exhausted',
+        'notification_on_review_do_not_ship',
+        'notification_on_agent_run_fail',
       ];
 
       const body = Object.fromEntries(validKeys.map((k) => [k, 'test-value']));

@@ -23,6 +23,13 @@ const SETTING_KEYS = [
   'log_retention_count',
   'log_retention_days',
   'job_row_retention_days',
+  'notification_webhook_url',
+  'notification_webhook_secret',
+  'notification_on_release_success',
+  'notification_on_release_fail',
+  'notification_on_fix_loop_exhausted',
+  'notification_on_review_do_not_ship',
+  'notification_on_agent_run_fail',
 ] as const;
 
 export async function GET() {

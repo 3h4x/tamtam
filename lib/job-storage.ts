@@ -304,6 +304,7 @@ async function runCompletionHooks(job: JobData): Promise<void> {
   // release meta-job is at a natural endpoint and should be finalized so the
   // UI doesn't render it as "live" forever.
   let chainedNext = false;
+  let notificationEvent: string | null = null;
 
   if (job.kind === 'review') {
     if (job.exitCode === 0) {
@@ -332,6 +333,9 @@ async function runCompletionHooks(job: JobData): Promise<void> {
           // the release via its own completion hook.
           chainedNext = true;
         } else if (verdict === 'NEEDS ATTENTION' || verdict === 'DO NOT SHIP') {
+          if (verdict === 'DO NOT SHIP') {
+            notificationEvent = 'review_do_not_ship';
+          }
           const count = recentFixCount(job.project);
           if (count < MAX_FIX_ITERATIONS) {
             const { startFixFromJob } = await import('./start-fix');
@@ -344,6 +348,7 @@ async function runCompletionHooks(job: JobData): Promise<void> {
             }
           } else {
             console.log(`[release] fix cap reached for ${job.project} (${count}/${MAX_FIX_ITERATIONS}) — stopping`);
+            notificationEvent = 'fix_loop_exhausted';
           }
         }
         // else: unknown / no verdict — fall through, release will finalize below
@@ -463,6 +468,10 @@ async function runCompletionHooks(job: JobData): Promise<void> {
     const release = findActiveReleaseJob(job.project);
     if (release) {
       const exitCode = (job.exitCode === 0) ? 0 : 1;
+      // Emit release success/fail notification before finalizing
+      if (!notificationEvent) {
+        notificationEvent = exitCode === 0 ? 'release_success' : 'release_fail';
+      }
       await finalizeReleaseJob(release, exitCode);
     } else {
       // No active release job — still need to release the lock if this was a standalone pipeline job
@@ -470,6 +479,26 @@ async function runCompletionHooks(job: JobData): Promise<void> {
         const { releaseLock } = await import('./pipeline-lock');
         releaseLock(job.project, job.id);
       } catch {}
+    }
+  }
+
+  // Send notification if an event was triggered
+  if (notificationEvent) {
+    try {
+      const { notify } = await import('./notifications');
+      const logUrl = job.logPath ? `${process.env.TAMTAM_BASE_URL || 'http://localhost:1337'}/project/${encodeURIComponent(job.project)}/history` : undefined;
+      const verdict = job.kind === 'review' ? getVerdict(job) : null;
+      await notify({
+        event: notificationEvent as any,
+        project: job.project,
+        job_id: job.id,
+        status: job.exitCode === 0 ? 'success' : 'failed',
+        verdict: verdict ?? undefined,
+        log_url: logUrl,
+        timestamp: Date.now(),
+      });
+    } catch (e) {
+      console.error(`[notifications] failed to send notification for ${notificationEvent}:`, e);
     }
   }
 
@@ -492,6 +521,26 @@ async function runCompletionHooks(job: JobData): Promise<void> {
       }, delayMs);
     } else if (attempts > maxRetries) {
       console.log(`[fix-ci] retry cap reached for ${job.project} (${attempts}/${maxRetries}) — giving up`);
+    }
+  }
+
+  // Agent run failures: notify on agent run failures
+  if (job.kind.startsWith('agent:') && job.exitCode !== 0) {
+    try {
+      const { notify } = await import('./notifications');
+      const agentName = job.kind.replace('agent:', '');
+      const logUrl = job.logPath ? `${process.env.TAMTAM_BASE_URL || 'http://localhost:1337'}/project/${encodeURIComponent(job.project)}/history` : undefined;
+      await notify({
+        event: 'agent_run_fail',
+        project: job.project,
+        agent: agentName,
+        job_id: job.id,
+        status: 'failed',
+        log_url: logUrl,
+        timestamp: Date.now(),
+      });
+    } catch (e) {
+      console.error(`[notifications] failed to send agent_run_fail notification:`, e);
     }
   }
 

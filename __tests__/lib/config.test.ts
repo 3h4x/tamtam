@@ -70,6 +70,13 @@ describe('config', () => {
         log_retention_count: 200,
         log_retention_days: 30,
         job_row_retention_days: 180,
+        notification_webhook_url: '',
+        notification_webhook_secret: '',
+        notification_on_release_success: false,
+        notification_on_release_fail: false,
+        notification_on_fix_loop_exhausted: false,
+        notification_on_review_do_not_ship: false,
+        notification_on_agent_run_fail: false,
       });
     });
 
