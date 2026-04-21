@@ -119,6 +119,10 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const router = useRouter()
   const searchParams = useSearchParams()
   const jobParam = searchParams.get('job')
+  const promptParam = searchParams.get('prompt')
+  const issueNumberParam = searchParams.get('issue_number')
+  const issueRepoParam = searchParams.get('issue_repo')
+  const issueTitleParam = searchParams.get('issue_title')
 
   // Subscribe to the module-level session store. Survives component unmounts.
   const state = useSyncExternalStore(
@@ -174,6 +178,10 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   })
   const [historyIdx, setHistoryIdx] = useState<number | null>(null)
   const draftBeforeHistoryRef = useRef<string>('')
+  // Issue context captured from URL params — only used on the first submission of a new session
+  const issueContextRef = useRef<{ number: number; repo: string; title: string } | null>(
+    issueNumberParam ? { number: Number(issueNumberParam), repo: issueRepoParam ?? '', title: issueTitleParam ?? '' } : null
+  )
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const [autoScroll, setAutoScroll] = useState(true)
   const [elapsedMs, setElapsedMs] = useState(0)
@@ -208,6 +216,13 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   useEffect(() => {
     if (initialSessionId || jobParam) return
     loadSessions()
+  }, [])
+
+  // Auto-submit prompt from ?prompt= query param (e.g. opened from Issues tab)
+  useEffect(() => {
+    if (!promptParam || initialSessionId || jobParam) return
+    terminalStore.update(projectName, () => ({ pendingAutoSubmit: promptParam }))
+    router.replace(`/project/${projectName}/terminal`)
   }, [])
 
   // Restore session from URL param. Skipped if store already holds state for
@@ -355,6 +370,12 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
             }
           } catch {}
         }
+
+        // Loading a fresh job into the terminal — drop any lingering session
+        // state from a previous run. Otherwise a follow-up message in this
+        // terminal resumes the OLD session (with stale context) instead of
+        // chatting against the new job's log.
+        terminalStore.reset(projectName)
 
         if (isClaudeJob) {
           terminalStore.update(projectName, () => ({ history: entries }))
@@ -632,6 +653,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         }
       }
 
+      const issueCtx = !sessionId ? issueContextRef.current : null
       const result = await runProject(
         projectName, fullPrompt,
         imageFiles.length > 0 ? imageFiles : undefined,
@@ -640,7 +662,10 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         model,
         sessionId || undefined,
         contextMetaStr,
-        text
+        text,
+        issueCtx?.number ?? undefined,
+        issueCtx?.repo ?? undefined,
+        issueCtx?.title ?? undefined,
       )
       terminalStore.startStream(projectName, result.job_id)
     } catch (err) {

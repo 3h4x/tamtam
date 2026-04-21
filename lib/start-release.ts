@@ -5,10 +5,11 @@ import { resolveProjectPath } from './project-data';
 import { startProjectTest, detectTestCommand } from './start-test';
 import { startProjectReview } from './start-review';
 import { startProjectPush } from './start-push';
-import { listJobs, probeJobStatus, createJob, updateJob, getVerdict } from './job-storage';
+import { listJobs, probeJobStatus, createJob, updateJob, getVerdict, markDone } from './job-storage';
 import { isReviewed } from './git-utils';
 import { exec } from './shell';
 import { getImproveConfig } from './scheduling';
+import { acquireLock, getLock } from './pipeline-lock';
 
 const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push', 'release']);
 
@@ -24,7 +25,7 @@ async function isReleasePipelineRunning(projectName: string): Promise<boolean> {
 
 export type ReleaseResult =
   | { ok: true; step: 'test' | 'review' | 'push'; jobId?: string; releaseJobId?: string; message: string }
-  | { ok: false; status: number; detail: string };
+  | { ok: false; status: number; detail: string; blockingJobId?: string };
 
 // Create a meta "release" job and start a PM2 monitor process for it.
 // The monitor polls the release log for the "# release finished" marker
@@ -146,14 +147,35 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
     return { ok: false, status: 400, detail: 'Nothing to release — no changes and no unpushed commits' };
   }
 
+  // Pre-check the lock before creating the release job — otherwise a 409 return
+  // leaves an orphan "release" row with finishedAt=null showing as running forever.
+  const existingLock = getLock(projectName);
+  if (existingLock) {
+    return { ok: false, status: 409, detail: `Pipeline already running for ${projectName}`, blockingJobId: existingLock.lockedByJobId };
+  }
+
+  const release = await createReleaseJob(projectName);
+  if (!release) {
+    return { ok: false, status: 500, detail: 'Failed to create release job' };
+  }
+  const releaseJobId = release.id;
+
+  // Acquire lock. If a concurrent caller won the race after our pre-check,
+  // mark our just-created release job done so it doesn't linger as running.
+  const lockResult = await acquireLock(projectName, releaseJobId);
+  if (!lockResult.acquired) {
+    try {
+      const jobRow = listJobs().find(j => j.id === releaseJobId);
+      if (jobRow) await markDone(jobRow, 1);
+    } catch {}
+    return { ok: false, status: 409, detail: `Pipeline already running for ${projectName}`, blockingJobId: lockResult.blockingJobId };
+  }
+
   // Fast-path: the working tree already has a valid LGTM review (hash
   // unchanged since markReviewed). Re-running tests and review would be
   // busywork — skip straight to commit & push. This keeps Release as a
   // single button while still being smart about what to do.
   const skipToPush = await hasFreshLgtm(projectName, projPath);
-
-  const release = await createReleaseJob(projectName);
-  const releaseJobId = release?.id;
 
   // Fresh LGTM or only unpushed commits (nothing to test/review) — push directly.
   if (skipToPush || !changes) {

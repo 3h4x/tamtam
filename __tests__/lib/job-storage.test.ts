@@ -33,7 +33,10 @@ function createTestDb() {
       session_id TEXT,
       user_prompt TEXT,
       context_meta TEXT,
-      parent_job_id TEXT
+      parent_job_id TEXT,
+      gh_issue_number INTEGER,
+      gh_issue_repo TEXT,
+      gh_issue_title TEXT
     );
     CREATE TABLE IF NOT EXISTS gh_issues_cache (
       project TEXT PRIMARY KEY,
@@ -131,6 +134,28 @@ describe('job-storage', () => {
     it('creates job with null prompt when not provided', () => {
       const job = createJob('proj', 'run', 123, '/log');
       expect(job.prompt).toBeNull();
+    });
+
+    it('stores ghIssueNumber, ghIssueRepo, ghIssueTitle when provided', () => {
+      const job = createJob('proj', 'run', 123, '/log', 'prompt', undefined, undefined, 42, 'owner/repo', 'Fix login bug');
+      expect(job.ghIssueNumber).toBe(42);
+      expect(job.ghIssueRepo).toBe('owner/repo');
+      expect(job.ghIssueTitle).toBe('Fix login bug');
+    });
+
+    it('persists ghIssueNumber to db so getJob returns it', () => {
+      const job = createJob('proj', 'run', 123, '/log', undefined, undefined, undefined, 7, 'org/proj', 'Issue title');
+      const retrieved = getJob(job.id);
+      expect(retrieved?.ghIssueNumber).toBe(7);
+      expect(retrieved?.ghIssueRepo).toBe('org/proj');
+      expect(retrieved?.ghIssueTitle).toBe('Issue title');
+    });
+
+    it('defaults ghIssue fields to null when not provided', () => {
+      const job = createJob('proj', 'run', 123, '/log');
+      expect(job.ghIssueNumber).toBeNull();
+      expect(job.ghIssueRepo).toBeNull();
+      expect(job.ghIssueTitle).toBeNull();
     });
   });
 

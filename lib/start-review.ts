@@ -7,10 +7,11 @@ import { startJob } from './pm2-jobs';
 import { exec } from './shell';
 import { CODE_REVIEWER_SKILL } from './skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings } from './config';
+import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 
 export type StartReviewResult =
   | { ok: true; jobId: string; pid: number; logPath: string }
-  | { ok: false; status: number; detail: string };
+  | { ok: false; status: number; detail: string; blockingJobId?: string };
 
 function loadReviewPrompt(): string {
   let content = '';
@@ -35,6 +36,16 @@ function loadReviewPrompt(): string {
 
 /** Start a code review for the given project. Returns the new job id or a structured error. */
 export async function startProjectReview(projectName: string): Promise<StartReviewResult> {
+  // Check for existing pipeline lock — but allow running under a parent
+  // release job's lock (this step was kicked off by the release pipeline).
+  const underRelease = isLockOwnedByActiveRelease(projectName);
+  if (!underRelease) {
+    const lock = getLock(projectName);
+    if (lock) {
+      return { ok: false, status: 409, detail: `Pipeline is running for ${projectName}`, blockingJobId: lock.lockedByJobId };
+    }
+  }
+
   const jobs = listJobs();
   const running = jobs.filter(
     (j) => j.project === projectName && j.kind === 'review' && j.finishedAt === null
@@ -82,5 +93,15 @@ export async function startProjectReview(projectName: string): Promise<StartRevi
   }
 
   updateJob(job);
+
+  // Acquire pipeline lock — skip under parent release lock.
+  if (!underRelease) {
+    try {
+      await acquireLock(projectName, job.id);
+    } catch (e) {
+      console.log(`[start-review] failed to acquire pipeline lock for ${projectName}:`, e);
+    }
+  }
+
   return { ok: true, jobId: job.id, pid: job.pid, logPath };
 }

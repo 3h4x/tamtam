@@ -102,7 +102,10 @@ export async function releaseProject(projectName: string): Promise<{ status: str
   })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
-    throw new Error(data.detail || `Failed to start release: ${response.statusText}`)
+    const err = new Error(data.detail || `Failed to start release: ${response.statusText}`) as any
+    if (data.blocking_job_id) err.blockingJobId = data.blocking_job_id
+    if (response.status === 409) err.isPipelineLocked = true
+    throw err
   }
   return response.json()
 }
@@ -249,7 +252,7 @@ export async function fetchPersonas(): Promise<{ personas: Persona[] }> {
   return response.json()
 }
 
-export async function runProject(projectName: string, prompt: string, files?: File[], persona?: string, personas?: string[], model?: string, resumeSessionId?: string, contextMeta?: string, userPrompt?: string): Promise<{ status: string; job_id: string; pid: number }> {
+export async function runProject(projectName: string, prompt: string, files?: File[], persona?: string, personas?: string[], model?: string, resumeSessionId?: string, contextMeta?: string, userPrompt?: string, ghIssueNumber?: number, ghIssueRepo?: string, ghIssueTitle?: string): Promise<{ status: string; job_id: string; pid: number }> {
   let response: Response
   if ((files && files.length > 0) || persona) {
     const formData = new FormData()
@@ -260,6 +263,9 @@ export async function runProject(projectName: string, prompt: string, files?: Fi
     if (resumeSessionId) formData.append('resumeSessionId', resumeSessionId)
     if (contextMeta) formData.append('contextMeta', contextMeta)
     if (userPrompt) formData.append('userPrompt', userPrompt)
+    if (ghIssueNumber != null) formData.append('ghIssueNumber', String(ghIssueNumber))
+    if (ghIssueRepo) formData.append('ghIssueRepo', ghIssueRepo)
+    if (ghIssueTitle) formData.append('ghIssueTitle', ghIssueTitle)
     if (files) {
       for (const file of files) {
         formData.append('files', file, file.name)
@@ -273,7 +279,7 @@ export async function runProject(projectName: string, prompt: string, files?: Fi
     response = await fetch(`${API_BASE}/by-project/${projectName}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, ...(personas?.length ? { personas } : {}), ...(model ? { model } : {}), ...(resumeSessionId ? { resumeSessionId } : {}), ...(contextMeta ? { contextMeta } : {}), ...(userPrompt ? { userPrompt } : {}) }),
+      body: JSON.stringify({ prompt, ...(personas?.length ? { personas } : {}), ...(model ? { model } : {}), ...(resumeSessionId ? { resumeSessionId } : {}), ...(contextMeta ? { contextMeta } : {}), ...(userPrompt ? { userPrompt } : {}), ...(ghIssueNumber != null ? { ghIssueNumber } : {}), ...(ghIssueRepo ? { ghIssueRepo } : {}), ...(ghIssueTitle ? { ghIssueTitle } : {}) }),
     })
   }
   if (!response.ok) {

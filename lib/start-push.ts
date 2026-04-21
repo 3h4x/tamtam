@@ -6,11 +6,12 @@ import { exec } from './shell';
 import { getSettings } from './config';
 import { getImproveConfig, setProjectPushResult } from './scheduling';
 import { buildDiffContext } from './diff-context';
-import { createJob, markDone, updateJob } from './job-storage';
+import { createJob, markDone, updateJob, listJobs } from './job-storage';
+import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 
 export type PushResult =
   | { ok: true; commitSha: string; message: string }
-  | { ok: false; status: number; detail: string };
+  | { ok: false; status: number; detail: string; blockingJobId?: string };
 
 // Matches any conventional commit title with a non-trivial description (3+ chars).
 const CONV_RE = /^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+?\))?:\s*.{3,}/i;
@@ -101,6 +102,17 @@ Return ONLY the title — nothing else.${extra}`;
 }
 
 export async function startProjectPush(projectName: string, opts: { commitOnly?: boolean } = {}): Promise<PushResult> {
+  // Check for existing pipeline lock — but allow running under a parent
+  // release job's lock (this step was kicked off by the release pipeline).
+  const underRelease = isLockOwnedByActiveRelease(projectName);
+  if (!underRelease) {
+    const lock = getLock(projectName);
+    if (lock) {
+      setProjectPushResult(projectName, `Pipeline is running for ${projectName}`);
+      return { ok: false, status: 409, detail: `Pipeline is running for ${projectName}`, blockingJobId: lock.lockedByJobId };
+    }
+  }
+
   const projPath = resolveProjectPath(projectName);
   if (!projPath) {
     setProjectPushResult(projectName, 'project not found');
@@ -115,6 +127,15 @@ export async function startProjectPush(projectName: string, opts: { commitOnly?:
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
   updateJob(job);
+
+  // Acquire pipeline lock — skip under parent release lock.
+  if (!underRelease) {
+    try {
+      await acquireLock(projectName, job.id);
+    } catch (e) {
+      console.log(`[start-push] failed to acquire pipeline lock for ${projectName}:`, e);
+    }
+  }
 
   const append = (s: string) => {
     try { appendFileSync(logPath, s); } catch {}
@@ -157,6 +178,15 @@ export function launchProjectPush(projectName: string): { jobId: string } | { er
 
   // Run async in background — do not await
   ;(async () => {
+    // Acquire pipeline lock — skip under parent release lock.
+    if (!isLockOwnedByActiveRelease(projectName)) {
+      try {
+        await acquireLock(projectName, job.id);
+      } catch (e) {
+        console.log(`[launch-push] failed to acquire pipeline lock for ${projectName}:`, e);
+      }
+    }
+
     const result = await runPush(projectName, projPath, append);
     try { setProjectPushResult(projectName, result.ok ? null : result.detail); } catch {}
     if (result.ok) {
@@ -172,12 +202,47 @@ export function launchProjectPush(projectName: string): { jobId: string } | { er
   return { jobId: job.id };
 }
 
+function findIssueContext(projectName: string): { number: number; repo: string; title: string } | null {
+  const jobs = listJobs()
+    .filter(j => j.project === projectName && j.kind === 'run' && j.ghIssueNumber != null)
+    .sort((a, b) => b.startedAt - a.startedAt);
+  const job = jobs[0];
+  if (!job || job.ghIssueNumber == null) return null;
+  return { number: job.ghIssueNumber, repo: job.ghIssueRepo ?? '', title: job.ghIssueTitle ?? '' };
+}
+
 async function runPush(
   projectName: string,
   projPath: string,
   log: (s: string) => void,
   opts: { commitOnly?: boolean } = {},
 ): Promise<PushResult> {
+  // If we have issue context and are currently on the default branch, switch
+  // to a feature branch BEFORE committing. Otherwise the commit lands on main,
+  // the subsequent PR attempt produces an empty diff, and GH rejects it.
+  const issueCtx = findIssueContext(projectName);
+  if (issueCtx) {
+    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+    const currentBranch = branchR.stdout.trim();
+    const mainBranch = await detectMainBranch(projPath);
+    if (!currentBranch || currentBranch === mainBranch) {
+      const featureBranch = issueBranchName(issueCtx);
+      log(`\n# on ${currentBranch || '(detached)'} — switching to ${featureBranch} before commit\n`);
+      const coR = await exec('git', ['-C', projPath, 'checkout', '-b', featureBranch], { timeout: 10000 });
+      if (coR.stdout) log(coR.stdout);
+      if (coR.stderr) log(coR.stderr);
+      if (coR.exitCode !== 0) {
+        // Branch may already exist — try checking out existing
+        const coExistingR = await exec('git', ['-C', projPath, 'checkout', featureBranch], { timeout: 10000 });
+        if (coExistingR.stdout) log(coExistingR.stdout);
+        if (coExistingR.stderr) log(coExistingR.stderr);
+        if (coExistingR.exitCode !== 0) {
+          return { ok: false, status: 500, detail: `Failed to create issue branch ${featureBranch}: ${coR.stderr || coR.stdout}` };
+        }
+      }
+    }
+  }
+
   // Stage all changes including new (untracked) files. .gitignore is expected
   // to exclude secrets — auto-push trusts it.
   log(`\n$ git add -A\n`);
@@ -310,5 +375,89 @@ async function runPush(
   const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
   const commitSha = shaR.exitCode === 0 ? shaR.stdout.trim() : '';
 
+  // If this session was started from a GitHub issue, create a PR that closes it
+  if (issueCtx) {
+    const prUrl = await createIssuePR(projPath, log, issueCtx);
+    return { ok: true, commitSha, message: prUrl ? `PR created: ${prUrl}` : 'pushed (PR creation failed — see log)' };
+  }
+
   return { ok: true, commitSha, message: 'pushed' };
+}
+
+function issueBranchName(issue: { number: number; title: string }): string {
+  const slugTitle = issue.title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    .replace(/-+$/, '');
+  return `fix/issue-${issue.number}${slugTitle ? `-${slugTitle}` : ''}`;
+}
+
+async function createIssuePR(
+  projPath: string,
+  log: (s: string) => void,
+  issue: { number: number; repo: string; title: string },
+): Promise<string | null> {
+  // Determine current branch
+  const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+  const currentBranch = branchR.stdout.trim();
+  const mainBranch = await detectMainBranch(projPath);
+
+  // Defensive fallback: runPush should have already moved us off main before
+  // committing. If we're somehow still on main, do the old branch-off dance.
+  if (!currentBranch || currentBranch === mainBranch) {
+    const featureBranch = issueBranchName(issue);
+
+    log(`\n# creating branch ${featureBranch} for issue #${issue.number}\n`);
+
+    // Create the branch pointing at the current HEAD, then push it
+    const createR = await exec('git', ['-C', projPath, 'branch', featureBranch], { timeout: 5000 });
+    if (createR.stdout) log(createR.stdout);
+    if (createR.stderr) log(createR.stderr);
+
+    const pushR = await exec('git', ['-C', projPath, 'push', '-u', 'origin', featureBranch], { timeout: 30000 });
+    if (pushR.stdout) log(pushR.stdout);
+    if (pushR.stderr) log(pushR.stderr);
+    if (pushR.exitCode !== 0) {
+      log(`\n# branch push failed — skipping PR creation\n`);
+      return null;
+    }
+  }
+
+  // Create the PR via gh cli
+  const prTitle = `Fix: ${issue.title}`;
+  const prBody = `Closes #${issue.number}\n\nImplemented via TamTam from issue [#${issue.number}](https://github.com/${issue.repo}/issues/${issue.number}).`;
+  log(`\n# creating PR for issue #${issue.number}: "${prTitle}"\n`);
+
+  const prArgs = [
+    'pr', 'create',
+    '--title', prTitle,
+    '--body', prBody,
+    '--base', mainBranch,
+  ];
+  const prR = await exec('gh', prArgs, { cwd: projPath, timeout: 30000 });
+  if (prR.stdout) log(prR.stdout);
+  if (prR.stderr) log(prR.stderr);
+
+  if (prR.exitCode !== 0) {
+    log(`\n# PR creation failed\n`);
+    return null;
+  }
+
+  // gh pr create prints the URL on stdout
+  const prUrl = prR.stdout.trim().split('\n').find(l => l.startsWith('https://')) ?? prR.stdout.trim();
+  log(`\n# PR created: ${prUrl}\n`);
+  return prUrl || null;
+}
+
+async function detectMainBranch(projPath: string): Promise<string> {
+  const r = await exec('git', ['-C', projPath, 'symbolic-ref', 'refs/remotes/origin/HEAD'], { timeout: 5000 });
+  if (r.exitCode === 0) {
+    const match = r.stdout.trim().match(/refs\/remotes\/origin\/(.+)/);
+    if (match) return match[1];
+  }
+  // Fallback: check if 'main' or 'master' exists
+  const mainR = await exec('git', ['-C', projPath, 'rev-parse', '--verify', 'main'], { timeout: 3000 });
+  return mainR.exitCode === 0 ? 'main' : 'master';
 }

@@ -5,10 +5,11 @@ import { createJob, updateJob } from './job-storage';
 import { startJob } from './pm2-jobs';
 import { getPermissionModeFlag } from './config';
 import { errMsg } from './types';
+import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 
 export type StartFixPushResult =
   | { ok: true; jobId: string; pid: number; logPath: string }
-  | { ok: false; status: number; detail: string };
+  | { ok: false; status: number; detail: string; blockingJobId?: string };
 
 // Spawn a Claude job that reads the push-hook error and fixes the offending
 // files. The completion hook then re-triggers startProjectPush once the fix
@@ -58,6 +59,16 @@ Please:
   }
 
   updateJob(job);
+
+  // Acquire pipeline lock — skip under parent release lock.
+  if (!isLockOwnedByActiveRelease(projectName)) {
+    try {
+      await acquireLock(projectName, job.id);
+    } catch (e) {
+      console.log(`[start-fix-push] failed to acquire pipeline lock for ${projectName}:`, e);
+    }
+  }
+
   return { ok: true, jobId: job.id, pid: job.pid, logPath };
 }
 

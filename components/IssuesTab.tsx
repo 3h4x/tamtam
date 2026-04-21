@@ -326,7 +326,15 @@ function IssueRow({ issue, projectName }: { issue: GhIssue; projectName: string 
 
   const openInTerminal = () => {
     const prompt = `Work on GitHub issue #${issue.number}: "${issue.title}" (${issue.url})\n\n${issue.body || ''}`
-    router.push(`/project/${projectName}/terminal?prompt=${encodeURIComponent(prompt)}`)
+    const repoMatch = issue.url.match(/github\.com\/([^/]+\/[^/]+)\/issues\//)
+    const repo = repoMatch?.[1] ?? ''
+    const params = new URLSearchParams({
+      prompt,
+      issue_number: String(issue.number),
+      issue_repo: repo,
+      issue_title: issue.title,
+    })
+    router.push(`/project/${projectName}/terminal?${params.toString()}`)
   }
 
   return (

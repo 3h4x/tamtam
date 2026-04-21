@@ -76,4 +76,30 @@ describe('POST /api/projects/by-project/{projectName}/release', () => {
     await POST(req('my-proj'), { params: Promise.resolve({ projectName: 'my-proj' }) });
     expect(startReleaseMock).toHaveBeenCalledWith('my-proj');
   });
+
+  it('includes blocking_job_id in 409 response when pipeline is locked', async () => {
+    startReleaseMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      detail: 'Pipeline already running for proj1',
+      blockingJobId: 'blocker-job-42',
+    });
+    const res = await POST(req(), { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.detail).toContain('Pipeline already running');
+    expect(data.blocking_job_id).toBe('blocker-job-42');
+  });
+
+  it('does not include blocking_job_id when error has no blockingJobId', async () => {
+    startReleaseMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      detail: 'Nothing to release',
+    });
+    const res = await POST(req(), { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.blocking_job_id).toBeUndefined();
+  });
 });

@@ -42,6 +42,9 @@ export const jobs = sqliteTable('jobs', {
   userPrompt: text('user_prompt'),
   contextMeta: text('context_meta'),
   parentJobId: text('parent_job_id'),
+  ghIssueNumber: integer('gh_issue_number'),
+  ghIssueRepo: text('gh_issue_repo'),
+  ghIssueTitle: text('gh_issue_title'),
 });
 
 export const skills = sqliteTable('skills', {
@@ -83,4 +86,10 @@ export const ghIssuesCache = sqliteTable('gh_issues_cache', {
   prs: text('prs').notNull().default('[]'),
   issues: text('issues').notNull().default('[]'),
   fetchedAt: real('fetched_at').notNull(),
+});
+
+export const pipelineLocks = sqliteTable('pipeline_locks', {
+  project: text('project').primaryKey(),
+  lockedByJobId: text('locked_by_job_id').notNull(),
+  acquiredAt: real('acquired_at').notNull(),
 });

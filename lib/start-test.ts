@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import { getImproveConfig } from './scheduling';
 import { resolveProjectPath } from './project-data';
 import { createJob, listJobs, probeJobStatus, updateJob, markDone } from './job-storage';
+import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 
 export function detectTestCommand(projPath: string, projectName?: string): string | null {
   if (projectName) {
@@ -45,9 +46,19 @@ export function detectTestCommand(projPath: string, projectName?: string): strin
 
 export type StartTestResult =
   | { ok: true; jobId: string; pid: number; logPath: string; testCmd: string }
-  | { ok: false; status: number; detail: string };
+  | { ok: false; status: number; detail: string; blockingJobId?: string };
 
 export async function startProjectTest(projectName: string): Promise<StartTestResult> {
+  // Check for existing pipeline lock — but allow running under a parent
+  // release job's lock (this step was kicked off by the release pipeline).
+  const underRelease = isLockOwnedByActiveRelease(projectName);
+  if (!underRelease) {
+    const lock = getLock(projectName);
+    if (lock) {
+      return { ok: false, status: 409, detail: `Pipeline is running for ${projectName}`, blockingJobId: lock.lockedByJobId };
+    }
+  }
+
   const jobs = listJobs();
   const running = jobs.filter(
     (j) => j.project === projectName && j.kind === 'test' && j.finishedAt === null
@@ -95,6 +106,16 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
   job.pid = proc.pid ?? 0;
   proc.unref();
   updateJob(job);
+
+  // Acquire pipeline lock — skip if we're running under a parent release lock
+  // (the release meta-job owns the lock for the full pipeline duration).
+  if (!underRelease) {
+    try {
+      await acquireLock(projectName, job.id);
+    } catch (e) {
+      console.log(`[start-test] failed to acquire pipeline lock for ${projectName}:`, e);
+    }
+  }
 
   proc.on('exit', (code) => {
     try { closeSync(logFd); } catch {}

@@ -25,6 +25,9 @@ export interface JobData {
   contextMeta?: string | null;
   userPrompt?: string | null;
   parentJobId?: string | null;
+  ghIssueNumber?: number | null;
+  ghIssueRepo?: string | null;
+  ghIssueTitle?: string | null;
 }
 
 const jobsCache = new Map<string, JobData>();
@@ -55,6 +58,9 @@ function loadFromDb(): void {
         contextMeta: row.contextMeta ?? null,
         userPrompt: row.userPrompt ?? null,
         parentJobId: row.parentJobId ?? null,
+        ghIssueNumber: row.ghIssueNumber ?? null,
+        ghIssueRepo: row.ghIssueRepo ?? null,
+        ghIssueTitle: row.ghIssueTitle ?? null,
       });
     }
     loaded = true;
@@ -85,6 +91,9 @@ function saveToDb(job: JobData): void {
         sessionId: job.sessionId,
         contextMeta: job.contextMeta,
         userPrompt: job.userPrompt,
+        ghIssueNumber: job.ghIssueNumber ?? null,
+        ghIssueRepo: job.ghIssueRepo ?? null,
+        ghIssueTitle: job.ghIssueTitle ?? null,
       })
       .onConflictDoUpdate({
         target: schema.jobs.id,
@@ -272,6 +281,11 @@ async function finalizeReleaseJob(release: JobData, exitCode: number): Promise<v
     }
   } catch {}
   await markDone(release, exitCode);
+  // Release the pipeline lock
+  try {
+    const { releaseLock } = await import('./pipeline-lock');
+    releaseLock(release.project, release.id);
+  } catch {}
 }
 
 async function runCompletionHooks(job: JobData): Promise<void> {
@@ -446,6 +460,12 @@ async function runCompletionHooks(job: JobData): Promise<void> {
     if (release) {
       const exitCode = (job.exitCode === 0) ? 0 : 1;
       await finalizeReleaseJob(release, exitCode);
+    } else {
+      // No active release job — still need to release the lock if this was a standalone pipeline job
+      try {
+        const { releaseLock } = await import('./pipeline-lock');
+        releaseLock(job.project, job.id);
+      } catch {}
     }
   }
 
@@ -671,7 +691,10 @@ export function createJob(
   logPath: string,
   prompt?: string,
   contextMeta?: string,
-  userPrompt?: string
+  userPrompt?: string,
+  ghIssueNumber?: number | null,
+  ghIssueRepo?: string | null,
+  ghIssueTitle?: string | null,
 ): JobData {
   loadFromDb();
   let timestamp = Math.floor(Date.now() * 1000);
@@ -699,6 +722,9 @@ export function createJob(
     sessionId: null,
     contextMeta: contextMeta ?? null,
     userPrompt: userPrompt ?? null,
+    ghIssueNumber: ghIssueNumber ?? null,
+    ghIssueRepo: ghIssueRepo ?? null,
+    ghIssueTitle: ghIssueTitle ?? null,
   };
   jobsCache.set(jobId, job);
   saveToDb(job);
@@ -734,6 +760,9 @@ export function getJob(jobId: string): JobData | null {
     sessionId: row.sessionId ?? null,
     contextMeta: row.contextMeta ?? null,
     userPrompt: row.userPrompt ?? null,
+    ghIssueNumber: row.ghIssueNumber ?? null,
+    ghIssueRepo: row.ghIssueRepo ?? null,
+    ghIssueTitle: row.ghIssueTitle ?? null,
   };
   jobsCache.set(jobId, job);
   return job;
