@@ -1,6 +1,38 @@
 # Release Pipeline — How It Works
 
-The pipeline is a quality-gated sequence: **test → review → fix loop → push**. Each step is a normal job; chaining happens in completion hooks inside `lib/job-storage.ts`. The 🚀 Release button is the entry point; `auto_push_enabled` enables the same chaining for standalone review/fix runs.
+The pipeline is a quality-gated sequence driven by Claude. The exact steps depend on the **workflow mode** configured per project.
+
+## Workflow Modes
+
+Each project has a mode selector in its Config tab:
+
+| Mode | Push destination | Extra steps |
+|------|-----------------|-------------|
+| **Direct Branch** | Current branch, directly | — |
+| **PR Workflow** | Feature/issue branch → pull request | `dod` → optional `merge` |
+
+### Direct Branch
+
+```
+test → review → fix loop → commit → push
+```
+
+Changes are committed and pushed straight to whatever branch is currently checked out. No pull request is created.
+
+### PR Workflow
+
+```
+test → review → fix loop → commit → push → dod → merge (optional)
+```
+
+Changes are pushed to the current feature/issue branch. A pull request is created (or updated) automatically. After push:
+
+- **dod** — Claude verifies which acceptance-criteria checkboxes in the linked GitHub issue are actually implemented, then ticks the verified ones. Best-effort and non-fatal; the pipeline continues regardless.
+- **merge** — if *Auto-merge PR* is enabled, TamTam polls CI checks and merges the PR once they pass. If disabled, the PR is left open for manual merge.
+
+The `fix/issue-<n>-<slug>` branch is checked out automatically when opening a terminal run from an issue in the Issues tab. After a successful PR merge the working copy is returned to the default branch.
+
+---
 
 ## When to read this
 
@@ -12,9 +44,9 @@ The pipeline is a quality-gated sequence: **test → review → fix loop → pus
 
 ---
 
----
-
 ## State machine
+
+### Direct Branch
 
 ```
 startRelease()
@@ -53,6 +85,23 @@ FIX-PUSH
   └─ exit ≠0 → completion hook → finalize release (exit 1)
 ```
 
+### PR Workflow (additional steps after PUSH succeeds)
+
+```
+PUSH exit 0
+  └─ completion hook → start MARK-DOD
+
+MARK-DOD
+  ├─ exit 0  → completion hook
+  │   ├─ auto_pr_merge_enabled → start PR-MERGE-WAIT
+  │   └─ otherwise             → finalize release (exit 0)
+  └─ exit ≠0 → finalize release (exit 0)  ← non-fatal, pipeline still succeeds
+
+PR-MERGE-WAIT
+  ├─ CI passes → merge PR → switch to default branch → finalize release (exit 0)
+  └─ CI fails  → finalize release (exit 1)
+```
+
 The release meta-job (`kind='release'`) collects log sections from each step. Its own `finishedAt` is set when any step finalizes without chaining.
 
 ---
@@ -61,15 +110,17 @@ The release meta-job (`kind='release'`) collects log sections from each step. It
 
 Called by `markDone()` after every job finishes. Hooks run in order:
 
-1. **Release meta-log**: For pipeline jobs (`test/review/fix/push/fix-push`), if an active release exists for the project, append a log section.
-2. **Review mark**: If `review` exits 0, call `markReviewed(project, path)` to store the working-tree hash (used by the fresh-LGTM skip optimization).
+1. **Release meta-log**: For pipeline jobs, if an active release exists for the project, append a log section.
+2. **Review mark**: If `review` exits 0, call `markReviewed(project, path)` to store the working-tree hash (used by the fresh-LGTM skip).
 3. **Review chaining**: If `review` exits 0 AND (in-release OR `auto_push_enabled`): LGTM → start PUSH; NEEDS ATTENTION / DO NOT SHIP → start FIX (within iteration cap).
 4. **Fix chaining**: If `fix` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW.
 5. **Test chaining**: If `test` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW.
 6. **Push hook fix**: If `push` exits ≠0 and log matches hook rejection patterns: start FIX-PUSH (within attempt cap).
 7. **Fix-push re-push**: If `fix-push` exits 0: start PUSH again.
-8. **Release finalization**: If a pipeline job ran but no chaining happened, write `# release finished — exit {code}` to meta-log and mark the release job done.
-9. **Fix-CI auto-retry**: If `fix-ci` exits ≠0 and duration < `fix_ci_fast_crash_ms`: schedule retry after 500–3000ms backoff (within `fix_ci_max_retries`).
+8. **DoD (PR Workflow)**: If `push` exits 0 and `pr_workflow_enabled`: start MARK-DOD.
+9. **PR merge wait (PR Workflow)**: If `mark-dod` completes and `auto_pr_merge_enabled`: start PR-MERGE-WAIT.
+10. **Release finalization**: If a pipeline job ran but no chaining happened, write `# release finished — exit {code}` to meta-log and mark the release job done.
+11. **Fix-CI auto-retry**: If `fix-ci` exits ≠0 and duration < `fix_ci_fast_crash_ms`: schedule retry after 500–3000ms backoff.
 
 ---
 
@@ -102,12 +153,20 @@ Accepts markdown wrapping (`**LGTM**`, `` `LGTM` ``) and optional colon/dash del
 
 ---
 
-## `auto_push_enabled`
+## Per-project pipeline flags
 
-Per-project boolean flag on the `projects` table (off by default).
+All stored in the `projects` DB table; editable via the project Config tab.
 
-- When **off**: pipeline chaining only happens during an active Release run.
-- When **on**: the same review→fix→push chaining happens for any standalone review job on that project (even ones triggered manually or by an agent).
+| Flag | Default | Description |
+|------|---------|-------------|
+| `auto_commit_enabled` | off | On LGTM, stage + commit automatically |
+| `auto_push_enabled` | off | Push after auto-commit; also enables review→fix→push chaining for standalone review runs |
+| `pr_workflow_enabled` | off | Use PR Workflow mode — push to feature branch, run DoD, optionally merge |
+| `auto_pr_merge_enabled` | off | After DoD, poll CI and auto-merge the PR *(PR Workflow only)* |
+| `release_after_run` | off | Trigger the full pipeline automatically after each successful agent/terminal run |
+
+When `auto_push_enabled` is **off**: pipeline chaining only happens during an active Release run.
+When `auto_push_enabled` is **on**: the same review→fix→push chaining happens for any standalone review job on that project.
 
 ---
 
@@ -127,7 +186,8 @@ Checks the push job log for strings from husky, lint-staged, eslint, pre-commit 
 | `lib/start-test.ts` | `startProjectTest(project)` | Detects and runs test command |
 | `lib/start-push.ts` | `startProjectPush(project)` | git add → commit message → push |
 | `lib/start-fix-push.ts` | `startFixPush(project, log)` | Provides hook error context to Claude for fix |
-| `lib/job-storage.ts` | `markDone(jobId, exitCode)` | Called by PM2 exit handler; triggers all hooks |
+| `lib/start-mark-dod.ts` | `startMarkDod(project)` | DoD verification + GitHub issue checkbox update *(PR Workflow)* |
+| `lib/job-storage.ts` | `markDone(jobId, exitCode)` | Called by PM2 exit handler; triggers all completion hooks |
 
 ---
 
@@ -188,8 +248,8 @@ The pipeline strip should only reflect an **active or recently-completed Release
 | **review** | review job in this release has verdict `LGTM` | not yet run | exit ≠ 0 or verdict ≠ LGTM |
 | **commit** | push job in this release exited 0 (commit is part of push) | not yet run | `last_push_error` starts with "Commit failed" |
 | **push** | push job in this release exited 0 | not yet run | push job exit ≠ 0 |
-
-Steps should **never** derive state from ambient git state (`hasChanges`, `unpushed`) — only from actual job runs within the release.
+| **dod** *(PR Workflow)* | mark-dod job exited 0 | not yet run | exit ≠ 0 |
+| **merge** *(PR Workflow, auto-merge on)* | PR merged successfully | not yet run | CI failed or merge rejected |
 
 ### Visibility rule
 
@@ -197,24 +257,9 @@ Show the strip **only** when:
 1. There is an active release job (`kind='release'`, `status='running'`) for this project, **or**
 2. There is a release job that completed within the last hour
 
-Hide it otherwise. Stale ✓s from yesterday's release are noise.
+Hide it otherwise.
 
-### Scoped implementation changes
-
-1. **`ProjectDetailPage.tsx`** — look up the most recent `release` job (new `kind` lookup). Drive strip visibility from `releaseJob !== null && releaseJob.started_at >= hourAgo`. Remove the current collection of booleans (`pipelineRunning`, `recentFailedJob`, `recentReviewNotLgtm`, `recentLgtmWithWorkRemaining`).
-
-2. **Step job lookup** — filter candidate jobs by `release_id === releaseJob.id` instead of the flat 24h window. This requires `release_id` to be present on child jobs (it already is set in `start-release.ts`).
-
-3. **`commitState` / `pushState`** — derive from `pushJob` (exit code, `last_push_error`) only. Remove git-state fallback (`hasChanges`, `unpushed`) from step coloring. Git state can remain as tooltip text ("nothing to push") but must not make a step green.
-
-4. **Standalone runs** — test/review/fix run outside a release → strip is hidden. The individual buttons (Run Tests, Review) continue to work; they just don't hijack the pipeline strip.
-
-### Non-goals for this fix
-
-- No change to how chaining works (completion hooks in `job-storage.ts`)
-- No change to the 🚀 Release button behavior
-- No change to how `release_id` is set on child jobs
-- `auto_push_enabled` behavior unchanged
+---
 
 ## Common Issues
 
@@ -226,3 +271,5 @@ Hide it otherwise. Stale ✓s from yesterday's release are noise.
 | Push fails, no `fix-push` triggered | Hook strings not matched by `isHookRejection` | Check the push log for hook output; add new hook string patterns to `lib/start-fix-push.ts` |
 | Release button grayed out / 400 | No changes and no unpushed commits | Make a change or verify `git status` |
 | `DO NOT SHIP` verdict loops forever | Fix cap reached | Inspect fix logs; may need manual code changes |
+| DoD step skipped | No linked GitHub issue on the run | DoD only runs when a `gh_issue_number` is set on the job |
+| PR not created after push | `pr_workflow_enabled` is off, or not on a feature branch | Enable PR Workflow mode in project Config |

@@ -4,19 +4,19 @@ Next.js monolith (App Router) for managing Claude CLI agents across multiple pro
 
 ## Vision: CI/CD for code, driven by Claude
 
-TamTam's north star is a **quality-gated release pipeline** for each tracked repo:
+TamTam's north star is a **quality-gated release pipeline** for each tracked repo. Each project has two workflow modes (set in the project Config tab):
 
-```
-   test → review → (fix loop) → commit → push
-```
+**Direct Branch**: `test → review → (fix loop) → commit → push`
+**PR Workflow**: `test → review → (fix loop) → commit → push → dod → merge`
 
-Each step is pluggable per project and coordinated by completion hooks in `lib/job-storage.ts`:
+Steps are pluggable per project and coordinated by completion hooks in `lib/job-storage.ts`:
 
 - **test** — runs the project's test command (auto-detected from `package.json`/`pyproject.toml`/`Package.swift`/`Cargo.toml`/`go.mod`/`Makefile:test` or user-configured). Skipped if none. If tests pass and there are no uncommitted changes, the pipeline short-circuits directly to push (skipping review).
 - **review** — Claude reads the uncommitted diff and emits a verdict: `LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP` (verdict rules are configurable in Settings).
 - **fix** — on `NEEDS ATTENTION` / `DO NOT SHIP`, Claude resumes the review session and applies fixes. Capped at 3 iterations per 30-minute window to prevent loops. On success it chains back to review.
-- **mark-dod** — after `LGTM`, Claude inspects the codebase with tool access (Read/Grep/Glob) to verify which acceptance-criteria checkboxes in the linked GitHub issue are actually implemented, then ticks only the verified ones. Best-effort and non-fatal.
-- **commit + push** — on `LGTM`, staged changes are committed with a Claude-generated message (respecting the `commit_style` setting) and pushed. Only tracked file modifications are staged automatically (untracked files are left alone to avoid sweeping up secrets). After a PR is created from an issue branch, the working copy is automatically returned to the default branch and pulled.
+- **commit + push** — on `LGTM`, staged changes are committed with a Claude-generated message (respecting the `commit_style` setting) and pushed. Only tracked file modifications are staged automatically (untracked files are left alone to avoid sweeping up secrets).
+- **mark-dod** *(PR Workflow only)* — after push, Claude inspects the codebase with tool access (Read/Grep/Glob) to verify which acceptance-criteria checkboxes in the linked GitHub issue are actually implemented, then ticks only the verified ones. Best-effort and non-fatal.
+- **merge** *(PR Workflow + auto-merge enabled)* — polls CI checks on the PR and merges once they pass. After merge, the working copy is returned to the default branch.
 
 The **🚀 Release** button triggers the pipeline at the right starting step. When `auto_push_enabled` is on (per-project config, off by default), the chain continues automatically from one step to the next. The pipeline strip in the Terminal tab shows the live state of each step (`○` pending, spinner running, `✓` done, `!` needs attention, `✗` failed); clicking a step re-triggers or opens its log.
 
@@ -38,7 +38,7 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - **Agents** — composed from skills + model + prompt + schedule + runner (pm2/launchctl)
 - **Runs** — individual executions of an agent (what was previously called "jobs")
 - **Custom Actions** — per-project bash commands (e.g. deploy) with configurable button color
-- **Release Pipeline** — test → review → fix → commit → push, driven by Claude and configurable per project
+- **Release Pipeline** — two modes: *Direct Branch* (`test → review → fix → commit → push`) or *PR Workflow* (adds `dod → merge`), driven by Claude and configurable per project
 
 ## Tech Stack
 - **Framework**: Next.js 16 (App Router) — both frontend and backend
@@ -88,7 +88,7 @@ If you do restart and run into the EADDRINUSE loop, see `## Investigating a misb
 ## Pages
 - `/` — Projects list with status, changes, CI
 - `/project/[name]` — Project overview with agents, status bar (changes/review/tests)
-- `/project/[name]/config` — Test command + custom actions editor (name, command, color)
+- `/project/[name]/config` — Test command, pipeline mode (Direct Branch / PR Workflow), automation flags, custom actions editor
 - `/project/[name]/history` — Project runs with filter tabs (all/running/failed/done)
 - `/project/[name]/changes` — Git diff viewer for uncommitted changes
 - `/project/[name]/issues` — GitHub PRs and issues viewer (open PRs with review status, open issues)
@@ -172,6 +172,7 @@ If you do restart and run into the EADDRINUSE loop, see `## Investigating a misb
 - File-based skills scanned from `skills/docs/skills/` and `data/skills/` (category subdirs, any `.md` file with optional YAML frontmatter: `title`, `description`)
 - DB-backed skills created via `/skills` page or API; a set of built-in agent skills (cto, security-review, dependency-check, blog, ci-monitor, release-ready, gha-audit, readme-sync) is seeded from `lib/default-agent-skills.ts` on first `GET /api/skills`
 - GitHub owner fallback configurable via `GITHUB_OWNER` env var or Settings UI
-- Issue-driven runs auto-checkout `fix/issue-<n>-<slug>` branch before Claude edits (via `issue-branch` route called from TerminalTab); after the PR is created the working copy is returned to the default branch
+- Issue-driven runs auto-checkout `fix/issue-<n>-<slug>` branch before Claude edits (via `issue-branch` route called from TerminalTab); in PR Workflow mode, after the PR is merged the working copy is returned to the default branch
+- Pipeline workflow mode per project: *Direct Branch* (commit+push to current branch) or *PR Workflow* (push to feature branch → DoD → optional auto-merge); configured via project Config tab; `pr_workflow_enabled` + `auto_pr_merge_enabled` flags on the `projects` table
 - Outbound webhook notifications (`lib/notifications.ts`): Slack block kit, Discord embeds, or generic JSON POST; HMAC-SHA256 signed when `notification_webhook_secret` is set; events: `release_success`, `release_fail`, `fix_loop_exhausted`, `review_do_not_ship`, `agent_run_fail`; configured via Settings → Notifications tab; `TAMTAM_BASE_URL` env var sets the log link base
 - Dependabot with grouped PRs (production deps, dev deps, actions)

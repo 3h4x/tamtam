@@ -65,9 +65,10 @@ All config lives in the SQLite database (`data/tamtam.db`). Nothing to edit by h
 Optional env vars:
 
 ```bash
-GITHUB_OWNER=...     # GitHub org/user fallback for CI lookups
-PROMETHEUS_URL=...   # Prometheus base URL for monitoring dashboard (default: http://localhost:9090)
-LOKI_URL=...         # Loki base URL for log monitoring (default: http://localhost:3100)
+GITHUB_OWNER=...       # GitHub org/user fallback for CI lookups
+TAMTAM_BASE_URL=...    # Base URL for outbound webhook log links (default: http://localhost:1337)
+PROMETHEUS_URL=...     # Prometheus base URL for monitoring dashboard (default: http://localhost:9090)
+LOKI_URL=...           # Loki base URL for log monitoring (default: http://localhost:3100)
 ```
 
 ## Skills

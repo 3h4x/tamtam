@@ -191,9 +191,14 @@ try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN log_pruned INTEGER DEFAULT 0');
 } catch {}
 
-// Migrate: add auto_pr_merge_enabled to projects
+// Migrate: add auto_pr_merge_enabled column to projects if missing
 try {
   sqlite.exec('ALTER TABLE projects ADD COLUMN auto_pr_merge_enabled INTEGER DEFAULT 0');
+} catch {}
+
+// Migrate: add pr_workflow_enabled column to projects if missing
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN pr_workflow_enabled INTEGER DEFAULT 0');
 } catch {}
 
 // Migrate: add issue_auto_branch to projects — controls the "Work on" feature-branch step.

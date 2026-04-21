@@ -136,7 +136,19 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
     : ciRollup === 'PENDING' ? 'bg-status-warning/10 text-status-warning border-status-warning/30'
     : null
 
-  const openInTerminal = () => {
+  const [switchingBranch, setSwitchingBranch] = useState(false)
+
+  const openInTerminal = async () => {
+    setSwitchingBranch(true)
+    try {
+      await fetch(`/api/projects/by-project/${projectName}/pr-branch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ branch: pr.headRefName }),
+      })
+    } finally {
+      setSwitchingBranch(false)
+    }
     const prompt = `Review pull request #${pr.number}: "${pr.title}" (${pr.url})\n\nBranch: ${pr.headRefName} → ${pr.baseRefName}`
     router.push(`/project/${projectName}/terminal?prompt=${encodeURIComponent(prompt)}`)
   }
@@ -344,11 +356,12 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
             </button>
           )}
           <button
-            className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
+            className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50"
             onClick={openInTerminal}
-            title="Open in Terminal"
+            disabled={switchingBranch}
+            title={`Open in Terminal (switches to ${pr.headRefName})`}
           >
-            Terminal
+            {switchingBranch ? 'Switching…' : 'Terminal'}
           </button>
           <a
             href={pr.url}
