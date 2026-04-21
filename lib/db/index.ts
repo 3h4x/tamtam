@@ -191,5 +191,16 @@ try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN log_pruned INTEGER DEFAULT 0');
 } catch {}
 
+// Migrate: add auto_pr_merge_enabled to projects
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN auto_pr_merge_enabled INTEGER DEFAULT 0');
+} catch {}
+
+// Migrate: add issue_auto_branch to projects — controls the "Work on" feature-branch step.
+// Default 1 (existing behavior: always provision fix/issue-<n>-<slug>).
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN issue_auto_branch INTEGER DEFAULT 1');
+} catch {}
+
 export const db = drizzle(sqlite, { schema });
 export { schema };

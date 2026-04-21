@@ -10,7 +10,7 @@ import { createJob, markDone, updateJob, listJobs } from './job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 
 export type PushResult =
-  | { ok: true; commitSha: string; message: string }
+  | { ok: true; commitSha: string; message: string; prUrl?: string; prNumber?: number; prRepo?: string }
   | { ok: false; status: number; detail: string; blockingJobId?: string };
 
 // Matches any conventional commit title with a non-trivial description (3+ chars).
@@ -123,7 +123,16 @@ export async function startProjectPush(projectName: string, opts: { commitOnly?:
   // the user can inspect — same pattern as tests/review.
   const { logDir } = getImproveConfig();
   mkdirSync(logDir, { recursive: true });
-  const job = createJob(projectName, 'push', process.pid, '');
+  // Stamp issue context on the push job so downstream hooks can pick it up
+  // without re-scanning run jobs (avoids context loss on intervening runs).
+  const earlyIssueCtx = await findIssueContext(projectName, projPath);
+  const job = createJob(
+    projectName, 'push', process.pid, '',
+    undefined, undefined, undefined,
+    earlyIssueCtx?.number ?? null,
+    earlyIssueCtx?.repo ?? null,
+    earlyIssueCtx?.title ?? null,
+  );
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
   updateJob(job);
@@ -142,7 +151,7 @@ export async function startProjectPush(projectName: string, opts: { commitOnly?:
   };
   append(`# push start — ${new Date().toISOString()}\n# repo: ${projPath}\n`);
 
-  const result = await runPush(projectName, projPath, append, opts);
+  const result = await runPush(projectName, projPath, append, opts, earlyIssueCtx);
   try {
     setProjectPushResult(projectName, result.ok ? null : result.detail);
   } catch {}
@@ -150,6 +159,11 @@ export async function startProjectPush(projectName: string, opts: { commitOnly?:
     invalidateProject(projectName);
     clearProjectDataCache();
     append(`\n# push ok — ${'commitSha' in result && result.commitSha ? result.commitSha : 'no-op'}\n${result.message}\n`);
+    // Stamp PR metadata on the job so the completion hook can start pr-wait.
+    if (result.prUrl) {
+      job.contextMeta = JSON.stringify({ prUrl: result.prUrl, prNumber: result.prNumber, prRepo: result.prRepo });
+      updateJob(job);
+    }
   } else {
     append(`\n# push failed (${result.status})\n${result.detail}\n`);
   }
@@ -187,12 +201,17 @@ export function launchProjectPush(projectName: string): { jobId: string } | { er
       }
     }
 
-    const result = await runPush(projectName, projPath, append);
+    const issueCtx = await findIssueContext(projectName, projPath);
+    const result = await runPush(projectName, projPath, append, {}, issueCtx);
     try { setProjectPushResult(projectName, result.ok ? null : result.detail); } catch {}
     if (result.ok) {
       invalidateProject(projectName);
       clearProjectDataCache();
       append(`\n# push ok — ${'commitSha' in result && result.commitSha ? result.commitSha : 'no-op'}\n${result.message}\n`);
+      if (result.prUrl) {
+        job.contextMeta = JSON.stringify({ prUrl: result.prUrl, prNumber: result.prNumber, prRepo: result.prRepo });
+        updateJob(job);
+      }
     } else {
       append(`\n# push failed (${result.status})\n${result.detail}\n`);
     }
@@ -234,11 +253,12 @@ async function runPush(
   projPath: string,
   log: (s: string) => void,
   opts: { commitOnly?: boolean } = {},
+  issueCtx?: { number: number; repo: string; title: string } | null,
 ): Promise<PushResult> {
   // If we have issue context and are currently on the default branch, switch
   // to a feature branch BEFORE committing. Otherwise the commit lands on main,
   // the subsequent PR attempt produces an empty diff, and GH rejects it.
-  const issueCtx = await findIssueContext(projectName, projPath);
+  if (issueCtx === undefined) issueCtx = await findIssueContext(projectName, projPath);
   if (issueCtx) {
     const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
     const currentBranch = branchR.stdout.trim();
@@ -399,6 +419,7 @@ async function runPush(
   if (issueCtx) {
     const prUrl = await createIssuePR(projPath, log, issueCtx);
     if (prUrl) {
+      const prNumber = parseInt(prUrl.split('/').pop() ?? '0', 10) || undefined;
       const mainBranch = await detectMainBranch(projPath);
       log(`\n# switching back to ${mainBranch} and pulling\n`);
       const coR = await exec('git', ['-C', projPath, 'checkout', mainBranch], { timeout: 10000 });
@@ -409,8 +430,9 @@ async function runPush(
         if (pullR.stdout) log(pullR.stdout);
         if (pullR.stderr) log(pullR.stderr);
       }
+      return { ok: true, commitSha, message: `PR created: ${prUrl}`, prUrl, prNumber, prRepo: issueCtx.repo };
     }
-    return { ok: true, commitSha, message: prUrl ? `PR created: ${prUrl}` : 'pushed (PR creation failed — see log)' };
+    return { ok: true, commitSha, message: 'pushed (PR creation failed — see log)' };
   }
 
   return { ok: true, commitSha, message: 'pushed' };

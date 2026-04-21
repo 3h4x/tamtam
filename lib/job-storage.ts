@@ -190,7 +190,7 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
   }
 }
 
-async function getProjectPipelineConfig(projectName: string): Promise<{ autoCommitEnabled: boolean; autoPushEnabled: boolean; releaseAfterRun: boolean }> {
+async function getProjectPipelineConfig(projectName: string): Promise<{ autoCommitEnabled: boolean; autoPushEnabled: boolean; releaseAfterRun: boolean; autoPrMergeEnabled: boolean }> {
   try {
     const { getProjectTestConfig } = await import('./scheduling');
     const cfg = getProjectTestConfig(projectName);
@@ -198,9 +198,10 @@ async function getProjectPipelineConfig(projectName: string): Promise<{ autoComm
       autoCommitEnabled: !!cfg?.autoCommitEnabled,
       autoPushEnabled: !!cfg?.autoPushEnabled,
       releaseAfterRun: !!cfg?.releaseAfterRun,
+      autoPrMergeEnabled: !!cfg?.autoPrMergeEnabled,
     };
   } catch {
-    return { autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false };
+    return { autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false, autoPrMergeEnabled: false };
   }
 }
 
@@ -295,7 +296,7 @@ async function finalizeReleaseJob(release: JobData, exitCode: number): Promise<v
 async function runCompletionHooks(job: JobData): Promise<void> {
   // Stream per-step output into the active release meta-log so the user can
   // watch the whole pipeline in one terminal.
-  if (['test', 'review', 'fix', 'push', 'fix-push'].includes(job.kind)) {
+  if (['test', 'review', 'fix', 'push', 'fix-push', 'pr-wait', 'mark-dod'].includes(job.kind)) {
     const release = findActiveReleaseJob(job.project);
     if (release) appendToReleaseLog(release, job.kind, job);
   }
@@ -321,17 +322,24 @@ async function runCompletionHooks(job: JobData): Promise<void> {
       if (job.exitCode === 0 && (inRelease || pipelineCfg.autoPushEnabled || pipelineCfg.autoCommitEnabled)) {
         const verdict = getVerdict(job);
         if (verdict === 'LGTM') {
-          // Verify the linked issue's acceptance criteria against the
-          // codebase (Claude with tools) and tick only the ones actually
-          // implemented. Best-effort, non-fatal.
-          try {
-            const { startMarkDod } = await import('./start-mark-dod');
-            const md = await startMarkDod(job.project);
-            if (md.ok) {
-              console.log(`[release] DoD verification for #${md.issueNumber}: ${md.verified}/${md.total} verified${md.changed ? ' (issue updated)' : ''}`);
+          // When auto_pr_merge_enabled + issue context exist, defer DoD
+          // verification to launchPrWait (post-merge). Otherwise verify now.
+          const hasIssueContext = listJobs().some(
+            j => j.project === job.project && j.kind === 'run' && j.ghIssueNumber != null,
+          );
+          const shouldDeferDod = pipelineCfg.autoPrMergeEnabled && hasIssueContext;
+          if (!shouldDeferDod) {
+            try {
+              const { startMarkDod } = await import('./start-mark-dod');
+              const md = await startMarkDod(job.project);
+              if (md.ok) {
+                console.log(`[release] DoD verification for #${md.issueNumber}: ${md.verified}/${md.total} verified${md.changed ? ' (issue updated)' : ''}`);
+              }
+            } catch (e) {
+              console.log(`[release] mark-dod error for ${job.project}:`, e);
             }
-          } catch (e) {
-            console.log(`[release] mark-dod error for ${job.project}:`, e);
+          } else {
+            console.log(`[release] deferring mark-dod to post-merge for ${job.project} (auto_pr_merge_enabled)`);
           }
           const { startProjectPush } = await import('./start-push');
           const commitOnly = !inRelease && pipelineCfg.autoCommitEnabled && !pipelineCfg.autoPushEnabled;
@@ -429,6 +437,29 @@ async function runCompletionHooks(job: JobData): Promise<void> {
     }
   }
 
+  // Auto-merge: when a push succeeds with a PR and auto_pr_merge_enabled is on,
+  // launch a pr-wait job that polls checks and merges once they pass.
+  if (job.kind === 'push' && job.exitCode === 0) {
+    try {
+      const { autoPrMergeEnabled } = await getProjectPipelineConfig(job.project);
+      if (autoPrMergeEnabled && job.contextMeta) {
+        const meta = JSON.parse(job.contextMeta) as { prUrl?: string; prNumber?: number; prRepo?: string };
+        if (meta.prUrl && meta.prNumber && meta.prRepo) {
+          const { launchPrWait } = await import('./start-pr-wait');
+          const r = launchPrWait(job.project, meta.prNumber, meta.prRepo, meta.prUrl);
+          if ('jobId' in r) {
+            console.log(`[push→pr-wait] started pr-wait ${r.jobId} for PR #${meta.prNumber}`);
+            chainedNext = true;
+          } else {
+            console.log(`[push→pr-wait] failed to start pr-wait: ${r.error}`);
+          }
+        }
+      }
+    } catch (e) {
+      console.log(`[push→pr-wait] error for ${job.project}:`, e);
+    }
+  }
+
   // Auto-fix-push: when a push fails because of a pre-commit / pre-push hook
   // (husky/eslint/lint-staged), spawn a Claude fix job targeting the exact
   // hook error and re-trigger the push once it finishes. Bounded by
@@ -476,7 +507,7 @@ async function runCompletionHooks(job: JobData): Promise<void> {
   // If this is a pipeline step and we didn't chain to another step, the
   // release job reached a natural endpoint — finalize it. Exit code mirrors
   // this step's outcome.
-  if (['test', 'review', 'fix', 'push', 'fix-push'].includes(job.kind) && !chainedNext) {
+  if (['test', 'review', 'fix', 'push', 'fix-push', 'pr-wait', 'mark-dod'].includes(job.kind) && !chainedNext) {
     const release = findActiveReleaseJob(job.project);
     if (release) {
       const exitCode = (job.exitCode === 0) ? 0 : 1;

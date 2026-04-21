@@ -174,6 +174,10 @@ export function writeProjectFieldYaml(
     db.update(schema.projects).set({ autoPushEnabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
   } else if (fieldName === 'release_after_run') {
     db.update(schema.projects).set({ releaseAfterRun: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
+  } else if (fieldName === 'auto_pr_merge_enabled') {
+    db.update(schema.projects).set({ autoPrMergeEnabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
+  } else if (fieldName === 'issue_auto_branch') {
+    db.update(schema.projects).set({ issueAutoBranch: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
   }
   return true;
 }
@@ -203,6 +207,8 @@ export function getProjectTestConfig(projName: string): {
   autoCommitEnabled: boolean;
   autoPushEnabled: boolean;
   releaseAfterRun: boolean;
+  autoPrMergeEnabled: boolean;
+  issueAutoBranch: boolean;
 } | null {
   const row = db
     .select()
@@ -217,6 +223,10 @@ export function getProjectTestConfig(projName: string): {
     autoCommitEnabled: !!row.autoCommitEnabled,
     autoPushEnabled: !!row.autoPushEnabled,
     releaseAfterRun: !!row.releaseAfterRun,
+    autoPrMergeEnabled: !!row.autoPrMergeEnabled,
+    // Default ON — matches pre-existing behavior for any project that hasn't
+    // been touched since the column was added.
+    issueAutoBranch: row.issueAutoBranch == null ? true : !!row.issueAutoBranch,
   };
 }
 

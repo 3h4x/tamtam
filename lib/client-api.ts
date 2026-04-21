@@ -460,6 +460,8 @@ export interface ProjectConfig {
   auto_commit_enabled?: boolean
   auto_push_enabled?: boolean
   release_after_run?: boolean
+  auto_pr_merge_enabled?: boolean
+  issue_auto_branch?: boolean
   last_push_error?: string | null
   last_push_at?: number | null
 }
@@ -481,6 +483,8 @@ export async function updateProjectConfig(
     auto_commit_enabled?: boolean
     auto_push_enabled?: boolean
     release_after_run?: boolean
+    auto_pr_merge_enabled?: boolean
+    issue_auto_branch?: boolean
   }
 ): Promise<{ status: string }> {
   const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/config`, {

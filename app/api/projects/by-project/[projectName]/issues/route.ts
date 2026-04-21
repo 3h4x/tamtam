@@ -174,22 +174,22 @@ export async function POST(
   // Post-merge cleanup: return the working tree to the default branch and
   // pull so the next task starts clean. Stash any uncommitted work first so
   // checkout doesn't fail on dirty trees, then restore it afterwards.
-  // Non-fatal — the merge already succeeded, don't fail the response if this
-  // hiccups.
-  const switchedBranch = await (async () => {
-    try {
-      const symR = await exec('git', ['-C', expanded, 'symbolic-ref', 'refs/remotes/origin/HEAD'], { timeout: 5000 });
-      let mainBranch = 'main';
-      if (symR.exitCode === 0) {
-        const m = symR.stdout.trim().match(/refs\/remotes\/origin\/(.+)/);
-        if (m) mainBranch = m[1];
-      }
-      const curR = await exec('git', ['-C', expanded, 'branch', '--show-current'], { timeout: 5000 });
-      if (curR.stdout.trim() === mainBranch) {
-        // Already on the default branch — just pull.
-        await exec('git', ['-C', expanded, 'pull', '--ff-only', 'origin', mainBranch], { timeout: 30000 });
-        return mainBranch;
-      }
+  // This is transactional: if checkout fails we return an error so the caller
+  // knows the tree is still on the feature branch.
+  let switchedBranch: string | null = null;
+  let switchError: string | null = null;
+  try {
+    const symR = await exec('git', ['-C', expanded, 'symbolic-ref', 'refs/remotes/origin/HEAD'], { timeout: 5000 });
+    let mainBranch = 'main';
+    if (symR.exitCode === 0) {
+      const m = symR.stdout.trim().match(/refs\/remotes\/origin\/(.+)/);
+      if (m) mainBranch = m[1];
+    }
+    const curR = await exec('git', ['-C', expanded, 'branch', '--show-current'], { timeout: 5000 });
+    if (curR.stdout.trim() === mainBranch) {
+      await exec('git', ['-C', expanded, 'pull', '--ff-only', 'origin', mainBranch], { timeout: 30000 });
+      switchedBranch = mainBranch;
+    } else {
       const statusR = await exec('git', ['-C', expanded, 'status', '--porcelain'], { timeout: 5000 });
       const dirty = statusR.stdout.trim().length > 0;
       let stashed = false;
@@ -200,15 +200,20 @@ export async function POST(
       const coR = await exec('git', ['-C', expanded, 'checkout', mainBranch], { timeout: 10000 });
       if (coR.exitCode !== 0) {
         if (stashed) await exec('git', ['-C', expanded, 'stash', 'pop'], { timeout: 10000 });
-        return null;
+        switchError = `Failed to switch to ${mainBranch} after merge: ${coR.stderr.trim() || coR.stdout.trim() || 'checkout failed'}`;
+      } else {
+        await exec('git', ['-C', expanded, 'pull', '--ff-only', 'origin', mainBranch], { timeout: 30000 });
+        if (stashed) await exec('git', ['-C', expanded, 'stash', 'pop'], { timeout: 10000 });
+        switchedBranch = mainBranch;
       }
-      await exec('git', ['-C', expanded, 'pull', '--ff-only', 'origin', mainBranch], { timeout: 30000 });
-      if (stashed) await exec('git', ['-C', expanded, 'stash', 'pop'], { timeout: 10000 });
-      return mainBranch;
-    } catch {
-      return null;
     }
-  })();
+  } catch (e) {
+    switchError = `Post-merge checkout error: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  if (switchError) {
+    return NextResponse.json({ status: 'merged_dirty', pr: prNumber, repo, switchedTo: null, switchError }, { status: 207 });
+  }
 
   return NextResponse.json({ status: 'merged', pr: prNumber, repo, switchedTo: switchedBranch });
 }

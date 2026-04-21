@@ -22,6 +22,23 @@ export function isClaudeJobKind(kind: string | undefined): boolean {
     (typeof kind === 'string' && kind.startsWith('agent:'))
 }
 
+// Decides whether the pending-auto-submit effect should actually fire.
+// Extracted so React's StrictMode double-invoke in dev doesn't spawn two
+// identical run jobs — the effect consults this via a ref that remembers the
+// last text already submitted, and only submits when all three conditions
+// hold: not currently streaming, something is pending, and that pending text
+// hasn't already been consumed.
+export function shouldFireAutoSubmit(
+  streaming: boolean,
+  pendingAutoSubmit: string | null | undefined,
+  alreadyFired: string | null,
+): boolean {
+  if (streaming) return false
+  if (!pendingAutoSubmit) return false
+  if (alreadyFired === pendingAutoSubmit) return false
+  return true
+}
+
 interface JobDict {
   id: string
   kind: string
@@ -581,10 +598,14 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     setPendingImageUrls(prev => prev.filter((_, i) => i !== idx))
   }, [])
 
-  // Auto-submit dequeued message after streaming ends
+  // Auto-submit dequeued message after streaming ends.
+  // Guarded by a ref so React StrictMode's double-invoke in dev doesn't fire
+  // two submits for the same pending text (which creates duplicate run jobs).
+  const autoSubmittedRef = useRef<string | null>(null)
   useEffect(() => {
-    if (streaming || !pendingAutoSubmit) return
-    const text = pendingAutoSubmit
+    if (!shouldFireAutoSubmit(streaming, pendingAutoSubmit, autoSubmittedRef.current)) return
+    autoSubmittedRef.current = pendingAutoSubmit
+    const text = pendingAutoSubmit!
     terminalStore.clearPendingAutoSubmit(projectName)
     handleSubmit(text)
   }, [streaming, pendingAutoSubmit])
