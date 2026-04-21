@@ -304,7 +304,7 @@ async function runCompletionHooks(job: JobData): Promise<void> {
   // release meta-job is at a natural endpoint and should be finalized so the
   // UI doesn't render it as "live" forever.
   let chainedNext = false;
-  let notificationEvent: string | null = null;
+  let notificationEvent: import('./notifications').NotificationEvent | null = null;
 
   if (job.kind === 'review') {
     if (job.exitCode === 0) {
@@ -501,7 +501,7 @@ async function runCompletionHooks(job: JobData): Promise<void> {
       const logUrl = job.logPath ? `${process.env.TAMTAM_BASE_URL || 'http://localhost:1337'}/project/${encodeURIComponent(job.project)}/history` : undefined;
       const verdict = job.kind === 'review' ? getVerdict(job) : null;
       await notify({
-        event: notificationEvent as any,
+        event: notificationEvent,
         project: job.project,
         job_id: job.id,
         status: job.exitCode === 0 ? 'success' : 'failed',

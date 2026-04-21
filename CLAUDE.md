@@ -15,7 +15,8 @@ Each step is pluggable per project and coordinated by completion hooks in `lib/j
 - **test** — runs the project's test command (auto-detected from `package.json`/`pyproject.toml`/`Package.swift`/`Cargo.toml`/`go.mod`/`Makefile:test` or user-configured). Skipped if none. If tests pass and there are no uncommitted changes, the pipeline short-circuits directly to push (skipping review).
 - **review** — Claude reads the uncommitted diff and emits a verdict: `LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP` (verdict rules are configurable in Settings).
 - **fix** — on `NEEDS ATTENTION` / `DO NOT SHIP`, Claude resumes the review session and applies fixes. Capped at 3 iterations per 30-minute window to prevent loops. On success it chains back to review.
-- **commit + push** — on `LGTM`, staged changes are committed with a Claude-generated message (respecting the `commit_style` setting) and pushed. Only tracked file modifications are staged automatically (untracked files are left alone to avoid sweeping up secrets).
+- **mark-dod** — after `LGTM`, Claude inspects the codebase with tool access (Read/Grep/Glob) to verify which acceptance-criteria checkboxes in the linked GitHub issue are actually implemented, then ticks only the verified ones. Best-effort and non-fatal.
+- **commit + push** — on `LGTM`, staged changes are committed with a Claude-generated message (respecting the `commit_style` setting) and pushed. Only tracked file modifications are staged automatically (untracked files are left alone to avoid sweeping up secrets). After a PR is created from an issue branch, the working copy is automatically returned to the default branch and pulled.
 
 The **🚀 Release** button triggers the pipeline at the right starting step. When `auto_push_enabled` is on (per-project config, off by default), the chain continues automatically from one step to the next. The pipeline strip in the Terminal tab shows the live state of each step (`○` pending, spinner running, `✓` done, `!` needs attention, `✗` failed); clicking a step re-triggers or opens its log.
 
@@ -27,6 +28,8 @@ The **🚀 Release** button triggers the pipeline at the right starting step. Wh
 - `lib/start-push.ts` → `startProjectPush`
 - `lib/start-release.ts` → `startRelease` (pipeline entry point)
 - `lib/start-pr-review.ts` → `startPrReview` (AI review of a GitHub PR)
+- `lib/start-mark-dod.ts` → `startMarkDod` (DoD verification + GitHub issue checkbox update)
+- `lib/notifications.ts` → `notify` / `sendTestNotification` (outbound webhook delivery)
 
 Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars** of the parsed Claude log and looks for an explicit "Verdict: X" marker or a bare token on the final line — deliberately lenient across markdown formatting (`## Verdict\n**NEEDS ATTENTION**`) but robust against false positives from code snippets higher up in the log.
 
@@ -66,7 +69,7 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `components/` — React client components
 - `hooks/` — Custom React hooks
 - `lib/` — Server-side business logic
-- `lib/db/` — Drizzle schema and connection (tables: settings, projects, jobs, gh_status, gh_issues_cache, skills, agents)
+- `lib/db/` — Drizzle schema and connection (tables: settings, projects, jobs, gh_status, gh_issues_cache, skills, agents, pipeline_locks)
 - `skills/` — claude-skills submodule
 - `data/` — SQLite database (gitignored)
 - `__tests__/` — vitest unit tests
@@ -113,7 +116,10 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `/api/projects/by-project/[name]/changes/diff` — Full git diff content (GET)
 - `/api/projects/by-project/[name]/push` — Push changes to git (POST); sub-routes: `/preview`, `/execute`, `/generate`
 - `/api/projects/by-project/[name]/release` — Trigger release pipeline (POST)
-- `/api/projects/by-project/[name]/issues` — GitHub PRs and issues for the project (GET, POST to force refresh)
+- `/api/projects/by-project/[name]/issues` — GitHub PRs and issues for the project (GET, POST to force refresh); merge POST switches working copy to default branch after merge
+- `/api/projects/by-project/[name]/issue-branch` — Create or checkout `fix/issue-<n>-<slug>` before Claude edits (POST); called automatically from TerminalTab when opening from an issue
+- `/api/projects/by-project/[name]/mark-dod` — Run DoD verification for latest issue-linked run (POST); also triggered automatically after review→LGTM
+- `/api/projects/by-project/[name]/pr-gates` — TamTam-side gate state for a PR: tests/review/DoD badges (GET); used by IssuesTab
 - `/api/projects/by-project/[name]/behind` — Ahead/behind commit counts vs remote (GET)
 - `/api/projects/by-project/[name]/logs` — Project run log files (GET)
 - `/api/projects/by-project/[name]/docs` — Project documentation files (GET)
@@ -127,7 +133,8 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `/api/jobs/notifications` — Unseen job notifications (GET)
 - `/api/jobs/notifications/mark-seen` — Mark all notifications seen (POST)
 - `/api/streaming/[jobId]` — SSE stream of parsed text deltas from NDJSON log (`?raw=1` for raw lines)
-- `/api/settings` — Settings CRUD (GET, PATCH) — includes `base_prompt` for global agent instructions
+- `/api/settings` — Settings CRUD (GET, PATCH) — includes `base_prompt` for global agent instructions and all `notification_*` keys
+- `/api/settings/test-notification` — Send a test webhook payload to verify connectivity (POST)
 - `/api/settings/backup` — SQLite hot backup (POST)
 - `/api/health` — Health check (GET)
 - `/api/monitoring` — Prometheus + Loki status aggregation (GET); env: `PROMETHEUS_URL`, `LOKI_URL`
@@ -156,4 +163,6 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - File-based skills scanned from `skills/docs/skills/` and `data/skills/` (category subdirs, any `.md` file with optional YAML frontmatter: `title`, `description`)
 - DB-backed skills created via `/skills` page or API; a set of built-in agent skills (cto, security-review, dependency-check, blog, ci-monitor, release-ready, gha-audit, readme-sync) is seeded from `lib/default-agent-skills.ts` on first `GET /api/skills`
 - GitHub owner fallback configurable via `GITHUB_OWNER` env var or Settings UI
+- Issue-driven runs auto-checkout `fix/issue-<n>-<slug>` branch before Claude edits (via `issue-branch` route called from TerminalTab); after the PR is created the working copy is returned to the default branch
+- Outbound webhook notifications (`lib/notifications.ts`): Slack block kit, Discord embeds, or generic JSON POST; HMAC-SHA256 signed when `notification_webhook_secret` is set; events: `release_success`, `release_fail`, `fix_loop_exhausted`, `review_do_not_ship`, `agent_run_fail`; configured via Settings → Notifications tab; `TAMTAM_BASE_URL` env var sets the log link base
 - Dependabot with grouped PRs (production deps, dev deps, actions)

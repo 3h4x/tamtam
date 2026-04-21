@@ -567,6 +567,7 @@ describe('startProjectPush — push result tracking', () => {
     }));
 
     execMock
+      .mockImplementationOnce(() => resp(0, '{"state":"OPEN"}'))          // gh issue view --json state (findIssueContext open-check)
       .mockImplementationOnce(() => resp(0, 'main'))                      // git branch --show-current (pre-commit)
       .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main'))  // git symbolic-ref (pre-commit)
       .mockImplementationOnce(() => resp(0))                              // git checkout -b fix/issue-42-fix-login-bug
@@ -593,10 +594,61 @@ describe('startProjectPush — push result tracking', () => {
       expect(r.message).toContain('PR created');
       expect(r.message).toContain('https://github.com/owner/repo/pull/99');
     }
-    const ghCall = execMock.mock.calls.find(([cmd]: any) => cmd === 'gh');
-    expect(ghCall).toBeTruthy();
-    expect(ghCall![1]).toContain('pr');
-    expect(ghCall![1]).toContain('create');
+    const prCreateCall = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'gh' && args.includes('pr') && args.includes('create'));
+    expect(prCreateCall).toBeTruthy();
+  });
+
+  it('does NOT create a PR when the linked issue is already CLOSED', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+      clearProjectDataCache: vi.fn(),
+    }));
+    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      setProjectPushResult: setProjectPushResultMock,
+    }));
+    vi.doMock('@/lib/job-storage', () => ({
+      createJob: createJobMock,
+      markDone: markDoneMock,
+      updateJob: updateJobMock,
+      listJobs: vi.fn().mockReturnValue([{
+        id: 'run-job-stale', project: 'proj', kind: 'run', startedAt: Date.now() / 1000,
+        ghIssueNumber: 7, ghIssueRepo: 'owner/repo', ghIssueTitle: 'Already shipped',
+      }]),
+    }));
+    vi.doMock('@/lib/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+
+    execMock
+      .mockImplementationOnce(() => resp(0, '{"state":"CLOSED"}'))  // gh issue view — issue already closed
+      .mockImplementationOnce(() => resp(0))                        // git add -A
+      .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))         // git diff --cached
+      .mockImplementationOnce(() => resp(0, 'M\tfoo.ts\n'))         // git diff --cached --stat
+      .mockImplementationOnce(() => resp(0, 'diff --git a/foo.ts')) // git diff --cached content
+      .mockImplementationOnce(() => resp(0, 'feat: add'))           // claude commit msg
+      .mockImplementationOnce(() => resp(0))                        // git commit
+      .mockImplementationOnce(() => resp(0, '# branch.head master\n# branch.ab +0 -0\n')) // behind check
+      .mockImplementationOnce(() => resp(0))                        // git push
+      .mockImplementationOnce(() => resp(0, 'abc1234'));            // git rev-parse
+
+    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const r = await fn('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.message).toBe('pushed'); // plain message, NOT "PR created"
+
+    const prCreateCall = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'gh' && args.includes('pr') && args.includes('create'));
+    expect(prCreateCall).toBeUndefined();
+
+    // And no feature-branch checkout should have happened either.
+    const branchCheckout = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args[2] === 'checkout' && typeof args[3] === 'string' && args[3].startsWith('fix/issue-'));
+    expect(branchCheckout).toBeUndefined();
   });
 
   it('returns ok with plain "pushed" message when no issue context exists', async () => {

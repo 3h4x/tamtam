@@ -32,7 +32,6 @@ function getNotificationConfig(event: NotificationEvent): NotificationConfig {
   const webhookUrl = settings.notification_webhook_url || '';
   const webhookSecret = settings.notification_webhook_secret || '';
 
-  const eventKey = `notification_on_${event}`;
   let enabled = false;
 
   switch (event) {
@@ -67,7 +66,6 @@ function detectWebhookType(url: string): 'slack' | 'discord' | 'generic' {
 }
 
 function formatSlackMessage(payload: NotificationPayload): Record<string, unknown> {
-  const color = payload.status === 'success' ? '#36a64f' : '#ff0000';
   const emoji = payload.status === 'success' ? '✅' : '❌';
 
   return {

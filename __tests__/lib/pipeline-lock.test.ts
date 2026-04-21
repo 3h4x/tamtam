@@ -134,6 +134,31 @@ describe('pipeline-lock', () => {
       expect(result.lock.lockedByJobId).toBe('new-job');
     });
 
+    it('immediately self-heals a fresh lock whose holder is already finished', async () => {
+      // Regression: finalizeReleaseJob can skip the releaseLock call in rare
+      // completion-hook orderings, leaving a stale lock pointing at a
+      // terminal release job. Next acquire should recover without waiting
+      // 30 minutes for the old stale-timeout.
+      testDb.sqlite.exec(
+        `INSERT INTO pipeline_locks (project, locked_by_job_id, acquired_at) VALUES ('proj', 'release-done', ${Date.now() / 1000 - 10})`
+      );
+      listJobsMock.mockReturnValue([{ id: 'release-done', finishedAt: Date.now() / 1000 - 5 }]);
+
+      const result = await acquireLock('proj', 'new-release');
+      expect(result.acquired).toBe(true);
+      expect(result.lock.lockedByJobId).toBe('new-release');
+    });
+
+    it('immediately self-heals a fresh lock whose holder no longer exists', async () => {
+      testDb.sqlite.exec(
+        `INSERT INTO pipeline_locks (project, locked_by_job_id, acquired_at) VALUES ('proj', 'vanished', ${Date.now() / 1000 - 5})`
+      );
+      listJobsMock.mockReturnValue([]);
+
+      const result = await acquireLock('proj', 'new-release');
+      expect(result.acquired).toBe(true);
+    });
+
     it('returns acquired:false when stale lock job is still running', async () => {
       testDb.sqlite.exec(
         `INSERT INTO pipeline_locks (project, locked_by_job_id, acquired_at) VALUES ('proj', 'long-running', ${Date.now() / 1000 - 31 * 60})`

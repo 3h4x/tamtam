@@ -149,9 +149,15 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
 
   // Pre-check the lock before creating the release job — otherwise a 409 return
   // leaves an orphan "release" row with finishedAt=null showing as running forever.
+  // Self-heal: if the holder is already terminal (zombie lock from a completion
+  // hook that skipped releaseLock), ignore it — acquireLock below will clean up.
   const existingLock = getLock(projectName);
   if (existingLock) {
-    return { ok: false, status: 409, detail: `Pipeline already running for ${projectName}`, blockingJobId: existingLock.lockedByJobId };
+    const holder = listJobs().find(j => j.id === existingLock.lockedByJobId);
+    const holderFinished = holder ? holder.finishedAt !== null : false;
+    if (holder && !holderFinished) {
+      return { ok: false, status: 409, detail: `Pipeline already running for ${projectName}`, blockingJobId: existingLock.lockedByJobId };
+    }
   }
 
   const release = await createReleaseJob(projectName);
