@@ -378,4 +378,179 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
     const autoCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('--auto'));
     expect(autoCalls).toHaveLength(0);
   });
+
+  // Post-merge cleanup: switch back to the default branch + pull so the
+  // working copy is ready for the next task. Stashes dirty state first.
+  describe('post-merge cleanup', () => {
+    it('switches to default branch (origin/HEAD) and pulls after a clean merge', async () => {
+      execMock
+        .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git')) // remote get-url
+        .mockImplementationOnce(() => resp(0, '')) // gh pr merge
+        .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main\n')) // symbolic-ref
+        .mockImplementationOnce(() => resp(0, 'fix/issue-7\n')) // branch --show-current
+        .mockImplementationOnce(() => resp(0, '')) // status --porcelain (clean)
+        .mockImplementationOnce(() => resp(0, 'Switched to main')) // checkout main
+        .mockImplementationOnce(() => resp(0, 'Already up to date.')); // pull --ff-only
+
+      const res = await POST(makeReq({ prNumber: 42, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.status).toBe('merged');
+      expect(data.switchedTo).toBe('main');
+
+      const gitCalls = execMock.mock.calls.filter(([cmd]: any) => cmd === 'git');
+      expect(gitCalls.some(([, args]: any) => args[2] === 'symbolic-ref')).toBe(true);
+      expect(gitCalls.some(([, args]: any) => args[2] === 'checkout' && args[3] === 'main')).toBe(true);
+      expect(gitCalls.some(([, args]: any) => args[2] === 'pull' && args.includes('--ff-only'))).toBe(true);
+    });
+
+    it('resolves the default branch from origin/HEAD — honors master', async () => {
+      execMock
+        .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
+        .mockImplementationOnce(() => resp(0, ''))
+        .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/master\n'))
+        .mockImplementationOnce(() => resp(0, 'fix/issue-1\n'))
+        .mockImplementationOnce(() => resp(0, ''))
+        .mockImplementationOnce(() => resp(0, ''))
+        .mockImplementationOnce(() => resp(0, ''));
+
+      const res = await POST(makeReq({ prNumber: 1, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
+      const data = await res.json();
+      expect(data.switchedTo).toBe('master');
+
+      const checkoutCall = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args[2] === 'checkout');
+      expect(checkoutCall![1][3]).toBe('master');
+    });
+
+    it('stashes uncommitted work before checkout and pops it after pull', async () => {
+      execMock
+        .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
+        .mockImplementationOnce(() => resp(0, ''))
+        .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main\n'))
+        .mockImplementationOnce(() => resp(0, 'fix/issue-5\n'))
+        .mockImplementationOnce(() => resp(0, ' M lib/foo.ts\n')) // dirty
+        .mockImplementationOnce(() => resp(0, 'Saved working directory')) // stash push
+        .mockImplementationOnce(() => resp(0, '')) // checkout
+        .mockImplementationOnce(() => resp(0, '')) // pull
+        .mockImplementationOnce(() => resp(0, 'Applied stash@{0}')); // stash pop
+
+      const res = await POST(makeReq({ prNumber: 5, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
+      expect(res.status).toBe(200);
+
+      const stashPush = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args[2] === 'stash' && args[3] === 'push');
+      const stashPop = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args[2] === 'stash' && args[3] === 'pop');
+      expect(stashPush).toBeTruthy();
+      expect(stashPush![1]).toContain('-u'); // include untracked
+      expect(stashPop).toBeTruthy();
+    });
+
+    it('skips stash when working tree is clean', async () => {
+      execMock
+        .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
+        .mockImplementationOnce(() => resp(0, ''))
+        .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main\n'))
+        .mockImplementationOnce(() => resp(0, 'fix/issue-9\n'))
+        .mockImplementationOnce(() => resp(0, '')) // clean
+        .mockImplementationOnce(() => resp(0, '')) // checkout
+        .mockImplementationOnce(() => resp(0, '')); // pull
+
+      await POST(makeReq({ prNumber: 9, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
+
+      const stashCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args[2] === 'stash');
+      expect(stashCalls).toHaveLength(0);
+    });
+
+    it('short-circuits to pull when already on the default branch', async () => {
+      execMock
+        .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
+        .mockImplementationOnce(() => resp(0, ''))
+        .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main\n'))
+        .mockImplementationOnce(() => resp(0, 'main\n')) // already on main
+        .mockImplementationOnce(() => resp(0, '')); // pull
+
+      const res = await POST(makeReq({ prNumber: 3, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
+      const data = await res.json();
+      expect(data.switchedTo).toBe('main');
+
+      const checkoutCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args[2] === 'checkout');
+      expect(checkoutCalls).toHaveLength(0);
+      const stashCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args[2] === 'stash');
+      expect(stashCalls).toHaveLength(0);
+    });
+
+    it('restores the stash if checkout fails so uncommitted work is never lost', async () => {
+      execMock
+        .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
+        .mockImplementationOnce(() => resp(0, ''))
+        .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main\n'))
+        .mockImplementationOnce(() => resp(0, 'fix/issue-2\n'))
+        .mockImplementationOnce(() => resp(0, ' M lib/bar.ts\n')) // dirty
+        .mockImplementationOnce(() => resp(0, 'Saved')) // stash push
+        .mockImplementationOnce(() => resp(1, '', 'checkout failed')) // checkout FAIL
+        .mockImplementationOnce(() => resp(0, '')); // stash pop on failure path
+
+      const res = await POST(makeReq({ prNumber: 2, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
+      expect(res.status).toBe(200); // merge itself still succeeded
+      const data = await res.json();
+      expect(data.switchedTo).toBeNull();
+
+      const stashPop = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args[2] === 'stash' && args[3] === 'pop');
+      expect(stashPop).toBeTruthy();
+    });
+
+    it('merge success is not affected when cleanup step throws', async () => {
+      execMock
+        .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
+        .mockImplementationOnce(() => resp(0, '')) // merge ok
+        .mockImplementationOnce(() => Promise.reject(new Error('git fork bomb')));
+
+      const res = await POST(makeReq({ prNumber: 4, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.status).toBe('merged');
+      expect(data.switchedTo).toBeNull();
+    });
+
+    it('falls back to "main" when origin/HEAD is not set', async () => {
+      execMock
+        .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
+        .mockImplementationOnce(() => resp(0, ''))
+        .mockImplementationOnce(() => resp(1, '', 'no symbolic ref')) // symbolic-ref fails
+        .mockImplementationOnce(() => resp(0, 'fix/other\n'))
+        .mockImplementationOnce(() => resp(0, ''))
+        .mockImplementationOnce(() => resp(0, ''))
+        .mockImplementationOnce(() => resp(0, ''));
+
+      const res = await POST(makeReq({ prNumber: 6, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
+      const data = await res.json();
+      expect(data.switchedTo).toBe('main');
+
+      const checkoutCall = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args[2] === 'checkout');
+      expect(checkoutCall![1][3]).toBe('main');
+    });
+
+    it('does not run cleanup when merge itself fails', async () => {
+      execMock
+        .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
+        .mockImplementationOnce(() => resp(1, '', 'permission denied'));
+
+      const res = await POST(makeReq({ prNumber: 7, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
+      expect(res.status).toBe(422);
+
+      const gitCalls = execMock.mock.calls.filter(([cmd]: any) => cmd === 'git');
+      // only `git remote get-url` from getGhRepo — no checkout/pull/stash
+      expect(gitCalls.every(([, args]: any) => args[0] === 'remote' || args.includes('get-url'))).toBe(true);
+    });
+
+    it('does not run cleanup on approve path', async () => {
+      execMock
+        .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
+        .mockImplementationOnce(() => resp(0, '')); // gh pr review --approve
+
+      await POST(makeReq({ prNumber: 8, action: 'approve' }), { params: Promise.resolve({ projectName: 'myproj' }) });
+
+      const checkoutCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args[2] === 'checkout');
+      expect(checkoutCalls).toHaveLength(0);
+    });
+  });
 });

@@ -51,6 +51,29 @@ function CheckIcon({ conclusion, status }: { conclusion: string | null; status: 
   )
 }
 
+type GateState = 'pass' | 'fail' | 'warn' | 'none'
+type PrGates = { issueNumber: number | null; tests: GateState; review: GateState; dod: GateState; dodSummary: string | null }
+
+const GATE_CLASS: Record<GateState, string> = {
+  pass: 'bg-status-success/10 text-status-success border-status-success/30',
+  fail: 'bg-status-error/10 text-status-error border-status-error/30',
+  warn: 'bg-status-warning/10 text-status-warning border-status-warning/30',
+  none: 'bg-bg-tertiary text-text-tertiary border-border',
+}
+const GATE_SYMBOL: Record<GateState, string> = { pass: '✓', fail: '✗', warn: '!', none: '○' }
+
+function GateBadge({ label, state, title }: { label: string; state: GateState; title: string }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${GATE_CLASS[state]}`}
+      title={title}
+    >
+      <span>{GATE_SYMBOL[state]}</span>
+      <span>{label}</span>
+    </span>
+  )
+}
+
 function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: string; onMerged: () => void }) {
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
@@ -63,6 +86,25 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
   const [approving, setApproving] = useState(false)
   const [approved, setApproved] = useState(pr.reviewDecision === 'APPROVED')
   const [reviewing, setReviewing] = useState(false)
+  const [gates, setGates] = useState<PrGates | null>(null)
+
+  // Fetch TamTam-side gate state (tests / review / DoD) for this PR.
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const repoMatch = pr.url.match(/github\.com\/([^/]+\/[^/]+)\//)
+        const repo = repoMatch?.[1] ?? ''
+        const qs = new URLSearchParams({ body: pr.body ?? '', repo })
+        const res = await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/pr-gates?${qs.toString()}`)
+        if (!res.ok) return
+        const data: PrGates = await res.json()
+        if (!cancelled) setGates(data)
+      } catch {}
+    }
+    load()
+    return () => { cancelled = true }
+  }, [projectName, pr.number, pr.url, pr.body])
 
   const reviewColor =
     pr.reviewDecision === 'APPROVED'
@@ -185,6 +227,13 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
                 : pr.reviewDecision === 'CHANGES_REQUESTED' ? 'bg-status-error/10 text-status-error border-status-error/30'
                 : 'bg-bg-tertiary text-text-secondary border-border'
               }`}>{reviewLabel}</span>
+            )}
+            {gates && (
+              <>
+                <GateBadge label="tests" state={gates.tests} title={`TamTam tests: ${gates.tests}`} />
+                <GateBadge label="review" state={gates.review} title={`AI review verdict: ${gates.review === 'pass' ? 'LGTM' : gates.review === 'warn' ? 'NEEDS ATTENTION' : gates.review === 'fail' ? 'DO NOT SHIP / failed' : 'not run'}`} />
+                <GateBadge label={gates.dodSummary ?? 'DoD'} state={gates.dod} title={`Acceptance criteria${gates.issueNumber ? ` for #${gates.issueNumber}` : ''}: ${gates.dodSummary ?? gates.dod}`} />
+              </>
             )}
             {ciRollup && ciBadgeClass && (
               <button

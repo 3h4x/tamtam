@@ -440,7 +440,12 @@ async function createIssuePR(
   }
 
   // Create the PR via gh cli
-  const prTitle = `Fix: ${issue.title}`;
+  // Conventional-commit prefix — lowercase. If the issue title already starts
+  // with a conventional-commit type (feat:/fix:/…), pass it through as-is to
+  // avoid double-prefixing.
+  const prTitle = /^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+?\))?:\s/i.test(issue.title)
+    ? issue.title
+    : `fix: ${issue.title}`;
   const prBody = `Closes #${issue.number}\n\nImplemented via TamTam from issue [#${issue.number}](https://github.com/${issue.repo}/issues/${issue.number}).`;
   log(`\n# creating PR for issue #${issue.number}: "${prTitle}"\n`);
 
