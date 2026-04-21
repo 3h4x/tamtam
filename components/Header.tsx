@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { to: '/', label: 'Projects' },
   { to: '/monitoring', label: 'Monitoring' },
   { to: '/runs', label: 'Runs' },
+  { to: '/stats', label: 'Stats' },
   { to: '/skills', label: 'Skills' },
   { to: '/settings', label: 'Settings' },
 ]
