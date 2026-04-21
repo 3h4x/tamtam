@@ -1,26 +1,4 @@
-import { HealthStatus, ProjectHealth } from '@/hooks/useProjectHealth'
-
-export const statusDot: Record<HealthStatus, { color: string; label: string }> = {
-  healthy: { color: 'var(--color-status-success)', label: 'healthy' },
-  warning: { color: 'var(--color-status-warning)', label: 'warning' },
-  error: { color: 'var(--color-status-error)', label: 'error' },
-  unknown: { color: 'var(--color-text-tertiary)', label: 'unknown' },
-}
-
-export const priorityColor: Record<string, string> = {
-  critical: 'var(--color-status-error)',
-  high: 'var(--color-status-warning)',
-  medium: 'var(--color-accent)',
-  low: 'var(--color-text-tertiary)',
-}
-
-export function getHighestPriority(project: ProjectHealth): string | null {
-  const order = ['critical', 'high', 'medium', 'low']
-  for (const level of order) {
-    if (project.tasks.some(t => t.task.priority === level)) return level
-  }
-  return null
-}
+import { ProjectHealth } from '@/hooks/useProjectHealth'
 
 export function getAggregateCi(project: ProjectHealth): 'success' | 'failure' | 'in_progress' | null {
   const cis = project.tasks.map(t => t.task.ci).filter(Boolean)

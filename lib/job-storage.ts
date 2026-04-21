@@ -725,9 +725,17 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
     await markDone(job, -1);
     return 'done';
   }
-  // Claude CLI sometimes hangs after emitting its final result event. If the log
-  // already contains a result line, treat the job as done regardless of PM2 status.
-  if ((job.kind === 'run' || job.kind === 'review') && logHasClaudeResult(job)) {
+  // Claude CLI sometimes hangs after emitting its final result event (stop_reason
+  // = end_turn, is_error = false, but the process never exits — most often seen on
+  // long agent runs). If the log already contains a terminal result line, treat
+  // the job as done regardless of PM2 status. Applies to every claude-backed kind.
+  const claudeKind = job.kind === 'run'
+    || job.kind === 'review'
+    || job.kind === 'fix'
+    || job.kind === 'fix-ci'
+    || job.kind === 'fix-push'
+    || job.kind.startsWith('agent:');
+  if (claudeKind && logHasClaudeResult(job)) {
     await markDone(job, 0);
     return 'done';
   }

@@ -102,9 +102,13 @@ export async function releaseProject(projectName: string): Promise<{ status: str
   })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
-    const err = new Error(data.detail || `Failed to start release: ${response.statusText}`) as any
-    if (data.blocking_job_id) err.blockingJobId = data.blocking_job_id
-    if (response.status === 409) err.isPipelineLocked = true
+    const err = Object.assign(
+      new Error(data.detail || `Failed to start release: ${response.statusText}`),
+      {
+        blockingJobId: data.blocking_job_id as string | undefined,
+        isPipelineLocked: response.status === 409,
+      }
+    )
     throw err
   }
   return response.json()
