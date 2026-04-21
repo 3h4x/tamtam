@@ -35,7 +35,7 @@ export async function PATCH(request: NextRequest) {
   const body = await request.json();
 
   for (const [key, value] of Object.entries(body)) {
-    if (!SETTING_KEYS.includes(key as any)) continue;
+    if (!SETTING_KEYS.includes(key as (typeof SETTING_KEYS)[number])) continue;
     if (value === null || value === '') {
       db.delete(schema.settings).where(eq(schema.settings.key, key)).run();
     } else {

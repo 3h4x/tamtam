@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { join } from 'path';
 import { openSync } from 'fs';
-import { spawn } from 'child_process';
+import { spawn, type SpawnOptions } from 'child_process';
 import { homedir } from 'os';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
@@ -98,7 +98,7 @@ export async function POST(
   const logFd = openSync(logPath, 'w');
   const proc = spawn('bash', ['-c', action.command], {
     cwd: projPath,
-    stdio: ['ignore', logFd, logFd] as any,
+    stdio: ['ignore', logFd, logFd] as SpawnOptions['stdio'],
     env: {
       ...Object.fromEntries(
         Object.entries(process.env).filter(

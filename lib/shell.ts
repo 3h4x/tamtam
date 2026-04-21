@@ -103,7 +103,7 @@ export function exec(
       resolve({
         stdout: (stdout ?? '').toString(),
         stderr: (stderr ?? '').toString(),
-        exitCode: error ? (error as any).code ?? 1 : 0,
+        exitCode: error ? (Number((error as NodeJS.ErrnoException).code) || 1) : 0,
       });
     });
   });

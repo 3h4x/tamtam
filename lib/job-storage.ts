@@ -146,6 +146,9 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
     }
   }
   saveToDb(job);
+  try {
+    db.delete(schema.ghIssuesCache).where(eq(schema.ghIssuesCache.project, job.project)).run();
+  } catch {}
   await runCompletionHooks(job);
   // Clean up PM2 process now that it's saved to DB
   try {

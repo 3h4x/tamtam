@@ -55,14 +55,15 @@ describe('skills API', () => {
   });
 
   describe('GET /skills', () => {
-    it('returns empty list of skills initially', async () => {
+    it('returns default agent skills on first call', async () => {
       const response = await skillsGET();
       const data = await response.json();
 
-      expect(data.skills).toEqual([]);
+      expect(data.skills.length).toBeGreaterThan(0);
+      expect(data.skills.some((s: any) => s.id === 'agent-cto')).toBe(true);
     });
 
-    it('returns all skills', async () => {
+    it('returns all skills including user-created ones', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
       db.insert(schema.skills)
@@ -89,9 +90,9 @@ describe('skills API', () => {
       const response = await skillsGET();
       const data = await response.json();
 
-      expect(data.skills).toHaveLength(2);
-      expect(data.skills[0].name).toBe('Skill 1');
-      expect(data.skills[1].name).toBe('Skill 2');
+      const ids = data.skills.map((s: any) => s.id);
+      expect(ids).toContain('skill-1');
+      expect(ids).toContain('skill-2');
     });
 
   });

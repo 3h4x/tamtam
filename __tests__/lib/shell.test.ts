@@ -57,4 +57,13 @@ describe('exec — standard (execFile) mode', () => {
     expect(r.stderr.trim()).toBe('err');
     expect(r.exitCode).toBe(1);
   });
+
+  it('returns exitCode as a number 1 for a non-existent command (not a string error code)', async () => {
+    // When execFile encounters ENOENT, error.code is the string 'ENOENT'.
+    // The previous implementation returned that string directly via `?? 1`.
+    // The fixed implementation coerces with Number(), ensuring exitCode is always numeric.
+    const r = await exec('__no_such_command__', []);
+    expect(typeof r.exitCode).toBe('number');
+    expect(r.exitCode).toBe(1);
+  });
 });

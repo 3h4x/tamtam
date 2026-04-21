@@ -97,7 +97,7 @@ const VALID_PERMISSION_MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'def
 /** Returns the --permission-mode flag string for the Claude CLI. */
 export function getPermissionModeFlag(): string {
   const { permission_mode } = getSettings();
-  const mode = VALID_PERMISSION_MODES.includes(permission_mode as any) ? permission_mode : 'bypassPermissions';
+  const mode = (VALID_PERMISSION_MODES as readonly string[]).includes(permission_mode) ? permission_mode : 'bypassPermissions';
   return `--permission-mode ${mode}`;
 }
 

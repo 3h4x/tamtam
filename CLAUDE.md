@@ -26,6 +26,7 @@ The **🚀 Release** button triggers the pipeline at the right starting step. Wh
 - `lib/start-fix-push.ts` → `startFixPush` (pre-commit/pre-push hook failure recovery)
 - `lib/start-push.ts` → `startProjectPush`
 - `lib/start-release.ts` → `startRelease` (pipeline entry point)
+- `lib/start-pr-review.ts` → `startPrReview` (AI review of a GitHub PR)
 
 Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars** of the parsed Claude log and looks for an explicit "Verdict: X" marker or a bare token on the final line — deliberately lenient across markdown formatting (`## Verdict\n**NEEDS ATTENTION**`) but robust against false positives from code snippets higher up in the log.
 
@@ -105,6 +106,7 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `/api/projects/by-project/[name]/config` — Project test command config (GET, PATCH)
 - `/api/projects/by-project/[name]/run` — Run Claude on project (POST, accepts `model` param)
 - `/api/projects/by-project/[name]/review` — Start AI code review (POST)
+- `/api/projects/by-project/[name]/review-pr` — Start AI review of a GitHub PR (POST)
 - `/api/projects/by-project/[name]/fix-ci` — Start AI CI fix run (POST)
 - `/api/projects/by-project/[name]/test` — Run project test command (POST)
 - `/api/projects/by-project/[name]/changes` — Uncommitted changes summary (GET); git pull with configurable strategy (POST: ff-only/merge/rebase)
@@ -144,7 +146,7 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - SSE at `/api/streaming/[jobId]` parses NDJSON and sends text deltas + `done` event (`?raw=1` for raw mode)
 - Agent runs compose skill content into the prompt before sending to Claude CLI
 - `commit_style` setting injects a style guide into the commit-message generation prompt; `review_verdict_rules` setting drives LGTM/NEEDS ATTENTION/DO NOT SHIP decisions in code reviews — both configurable in Settings UI (Behavior tab)
-- File-based skills scanned from `skills/docs/skills/` and `data/skills/` (category subdirs, `.md` files with optional frontmatter)
-- DB-backed skills created via `/skills` page or API
+- File-based skills scanned from `skills/docs/skills/` and `data/skills/` (category subdirs, any `.md` file with optional YAML frontmatter: `title`, `description`)
+- DB-backed skills created via `/skills` page or API; a set of built-in agent skills (cto, security-review, dependency-check, blog, ci-monitor, release-ready, gha-audit, readme-sync) is seeded from `lib/default-agent-skills.ts` on first `GET /api/skills`
 - GitHub owner fallback configurable via `GITHUB_OWNER` env var or Settings UI
 - Dependabot with grouped PRs (production deps, dev deps, actions)
