@@ -1355,6 +1355,9 @@ export function ProjectDetailPage({
             let reviewJob = latestOfKind('review')
             let fixJob = latestOfKind('fix')
             let pushJob = latestOfKind('push')
+            let dodJob = latestOfKind('mark-dod')
+            // Capture before nulling — needed to detect stale push errors below.
+            const priorPushStart = pushJob?.started_at ?? 0
 
             // When the latest test failed, downstream jobs from a PRIOR
             // release are stale — they didn't run in this pipeline attempt.
@@ -1366,6 +1369,7 @@ export function ProjectDetailPage({
               if (reviewJob && (reviewJob.started_at ?? 0) < testStart) reviewJob = undefined
               if (fixJob && (fixJob.started_at ?? 0) < testStart) fixJob = undefined
               if (pushJob && (pushJob.started_at ?? 0) < testStart) pushJob = undefined
+              if (dodJob && (dodJob.started_at ?? 0) < testStart) dodJob = undefined
             }
 
             const stateOf = (job: JobInfo | undefined): StepState => {
@@ -1440,6 +1444,29 @@ export function ProjectDetailPage({
               reviewFixAction = openJob(fixJob)
             }
             const reviewPassed = reviewState === 'done'
+
+            // Fix step state — distinct from the review step
+            const fixState: StepState = fixJob?.status === 'running' ? 'running'
+              : fixJob && fixJob.exit_code === 0 ? 'done'
+              : fixJob && fixJob.exit_code !== 0 ? 'failed'
+              : reviewState === 'done' ? 'done'  // LGTM → no fix needed
+              : 'pending'
+            const fixHint = fixJob?.status === 'running' ? 'fix in progress — click to open terminal'
+              : fixJob?.exit_code === 0 ? 'fix applied — click to view log'
+              : fixJob && fixJob.exit_code !== 0 ? `fix failed (exit ${fixJob.exit_code}) — click to view log`
+              : reviewState === 'done' ? 'no fix needed (LGTM)'
+              : 'waiting for review verdict'
+            const fixAction = fixJob ? openJob(fixJob) : null
+
+            // DoD step state (PR Workflow only) — uses 'mark-dod' job kind
+            const dodState: StepState = stateOf(dodJob)
+            const dodHint = dodJob?.status === 'running' ? 'DoD verification in progress — click to open terminal'
+              : dodJob?.exit_code === 0 ? 'DoD verified — click to view log'
+              : dodJob && dodJob.exit_code !== 0 ? 'DoD verification failed — click to view log'
+              : reviewPassed ? 'waiting for push'
+              : 'waiting for LGTM review'
+            const dodAction = dodJob ? openJob(dodJob) : null
+
             const hasChanges = project.totalChanges > 0
             const unpushed = (project.unpushed ?? 0) > 0
             const autoPush = !!config?.auto_push_enabled
@@ -1447,11 +1474,21 @@ export function ProjectDetailPage({
             // so there's no distinct job to observe. We surface failures via
             // `last_push_error` stored on the project after each push attempt.
             const pushError = config?.last_push_error ?? null
-            const pushErrorIsCommit = !!pushError && pushError.startsWith('Commit failed')
+            // Suppress a stale push error when the current pipeline attempt has
+            // advanced past it: if any non-push step (test/review/fix) started
+            // more recently than the last push job, we're in a new release run
+            // that hasn't reached push yet — the old error is irrelevant.
+            const pipelineEpoch = Math.max(
+              testJob?.started_at ?? 0,
+              reviewJob?.started_at ?? 0,
+              fixJob?.started_at ?? 0,
+            )
+            const effectivePushError = pipelineEpoch > priorPushStart ? null : pushError
+            const pushErrorIsCommit = !!effectivePushError && effectivePushError.startsWith('Commit failed')
             const commitState: StepState = pushErrorIsCommit
               ? 'failed'
               : hasChanges ? 'pending' : 'done'
-            const pushState: StepState = pushError && !pushErrorIsCommit
+            const pushState: StepState = effectivePushError && !pushErrorIsCommit
               ? 'failed'
               : !hasChanges && !unpushed ? 'done' : 'pending'
 
@@ -1462,14 +1499,14 @@ export function ProjectDetailPage({
               : testState === 'failed' ? `tests failed (exit ${testJob?.exit_code})`
               : 'tests not run yet'
             const pushHint = pushState === 'failed'
-              ? (pushError ?? 'push failed')
+              ? (effectivePushError ?? 'push failed')
               : pushState === 'done'
                 ? 'nothing to push'
                 : unpushed
                   ? `${project.unpushed} unpushed commit${project.unpushed === 1 ? '' : 's'}${autoPush && reviewPassed ? ' — auto-push pending' : ''}`
                   : `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — need review & commit first`
             const commitHint = commitState === 'failed'
-              ? (pushError ?? 'commit failed')
+              ? (effectivePushError ?? 'commit failed')
               : commitState === 'done'
                 ? 'nothing to commit'
                 : reviewPassed
@@ -1504,8 +1541,13 @@ export function ProjectDetailPage({
             const steps: Array<{ label: string; state: StepState; hint: string; action?: (() => void) | null; retryAction?: (() => void) | null }> = []
             if (hasTestCommand) steps.push({ label: 'test', state: testState, hint: testHint, action: testJob ? () => router.push(`/project/${name}/terminal?job=${encodeURIComponent(testJob.id)}`) : null })
             steps.push({ label: 'review', state: reviewState, hint: reviewHint, action: reviewFixAction })
+            steps.push({ label: 'fix', state: fixState, hint: fixHint, action: fixAction })
             steps.push({ label: 'commit', state: commitStateEffective, hint: commitHint, action: openPushJob })
             steps.push({ label: 'push', state: pushStateEffective, hint: pushHint, action: openPushJob, retryAction: pushStateEffective === 'failed' && !pushErrorIsCommit ? handleRetryPush : null })
+            if (config?.auto_pr_merge_enabled) {
+              steps.push({ label: 'dod', state: dodState, hint: dodHint, action: dodAction })
+              steps.push({ label: 'merge', state: 'pending', hint: 'auto-merge after CI passes', action: null })
+            }
 
             const glyph = (s: StepState) => {
               if (s === 'done') return <span className="text-status-success">✓</span>
