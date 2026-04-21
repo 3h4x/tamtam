@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, schema } from '@/lib/db';
+import { seedDefaultSkills } from '@/lib/default-agent-skills';
+
 export async function GET() {
+  seedDefaultSkills();
   const skills = db.select().from(schema.skills).all();
   return NextResponse.json({ skills });
 }

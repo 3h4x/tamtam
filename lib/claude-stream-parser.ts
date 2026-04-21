@@ -1,3 +1,10 @@
+type ModelUsage = {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+};
+
 export type ParsedEvent =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string }
@@ -9,8 +16,7 @@ export type ParsedEvent =
 // ([{type:"text",text:"..."}, {type:"image",...}]). Dumping the array with
 // JSON.stringify would pollute the terminal with raw JSON — extract the
 // text payload so the user sees readable output.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function toolContentToString(content: any): string {
+function toolContentToString(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
     const parts: string[] = [];
@@ -23,7 +29,8 @@ function toolContentToString(content: any): string {
     return parts.join('\n');
   }
   if (content && typeof content === 'object') {
-    if (typeof content.text === 'string') return content.text;
+    const obj = content as Record<string, unknown>;
+    if (typeof obj.text === 'string') return obj.text;
     return JSON.stringify(content);
   }
   return String(content ?? '');
@@ -40,7 +47,7 @@ export function parseStreamLines(content: string): ParsedEvent[] {
     if (!trimmed) continue;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let parsed: any;
+    let parsed: Record<string, any>;
     try {
       parsed = JSON.parse(trimmed);
     } catch {
@@ -126,7 +133,7 @@ export function parseStreamLines(content: string): ParsedEvent[] {
     if (parsed.type === 'result') {
       let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheCreateTokens = 0;
       if (parsed.modelUsage) {
-        for (const model of Object.values(parsed.modelUsage) as any[]) {
+        for (const model of Object.values(parsed.modelUsage) as ModelUsage[]) {
           inputTokens += model.inputTokens ?? 0;
           outputTokens += model.outputTokens ?? 0;
           cacheReadTokens += model.cacheReadInputTokens ?? 0;

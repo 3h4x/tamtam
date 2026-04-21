@@ -23,8 +23,8 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     model: 'sonnet',
     schedule: '24h',
     runner: 'pm2',
-    prompt: 'Review the uncommitted git diff in this project for security issues: OWASP top 10 vulnerabilities, hardcoded secrets or API keys, SQL injection, XSS, command injection, insecure dependencies. Report findings with severity (critical/high/medium/low) and suggested fixes.',
-    skillIds: [],
+    prompt: 'Execute your role for this project.',
+    skillIds: ['agent-security-review'],
   },
   {
     name: 'dependency-check',
@@ -32,8 +32,8 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     model: 'sonnet',
     schedule: '24h',
     runner: 'pm2',
-    prompt: 'Run npm audit and npm outdated (or the equivalent for this project\'s package manager). Summarize vulnerabilities by severity, list significantly outdated packages, and suggest which to prioritize updating.',
-    skillIds: [],
+    prompt: 'Execute your role for this project.',
+    skillIds: ['agent-dependency-check'],
   },
   {
     name: 'blog',
@@ -41,8 +41,8 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     model: 'sonnet',
     schedule: '24h',
     runner: 'pm2',
-    prompt: 'Read git log --since=yesterday --oneline for this project. Write a concise blog post summarizing what was built or changed. Save it to blog/YYYY-MM-DD.md (use today\'s date). Focus on the "why" and impact. Keep it under 400 words.',
-    skillIds: [],
+    prompt: 'Execute your role for this project.',
+    skillIds: ['agent-blog'],
   },
   {
     name: 'ci-monitor',
@@ -50,8 +50,8 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     model: 'sonnet',
     schedule: '30m',
     runner: 'pm2',
-    prompt: 'Check GitHub Actions CI status with gh run list --limit 5. If the latest run failed, analyze failure logs with gh run view --log-failed and apply fixes for compilation errors, test failures, and linting issues.',
-    skillIds: [],
+    prompt: 'Execute your role for this project.',
+    skillIds: ['agent-ci-monitor'],
   },
   {
     name: 'release-ready',
@@ -59,8 +59,17 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     model: 'sonnet',
     schedule: '24h',
     runner: 'pm2',
-    prompt: 'Check if this project is ready to ship: 1) Run the test suite and report pass/fail. 2) Check git status for uncommitted changes. 3) Check for TODOs or FIXMEs in recently changed files. Output a clear READY / NOT READY verdict with a brief summary of any blockers.',
-    skillIds: [],
+    prompt: 'Execute your role for this project.',
+    skillIds: ['agent-release-ready'],
+  },
+  {
+    name: 'cto',
+    description: 'Thinks from a CTO perspective about product direction and creates prioritized GitHub issues for missing features, gaps, and strategic improvements.',
+    model: 'opus',
+    schedule: '24h',
+    runner: 'pm2',
+    prompt: 'Execute your role for this project.',
+    skillIds: ['agent-cto'],
   },
   {
     name: 'gha-audit',
@@ -68,8 +77,8 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     model: 'sonnet',
     schedule: '24h',
     runner: 'pm2',
-    prompt: 'Audit this project\'s GitHub Actions setup: 1) List existing workflows in .github/workflows/. 2) Check for a CI workflow (runs tests on push/PR) — create one if missing. 3) Check for a release workflow (semantic-release or tag-based) — create one if missing. 4) Check for a PR labeler or label sync workflow — create one if missing. 5) Verify existing workflows reference current action versions (use latest major versions). Report what exists, what was created, and any issues found.',
-    skillIds: [],
+    prompt: 'Execute your role for this project.',
+    skillIds: ['agent-gha-audit'],
   },
   {
     name: 'readme-sync',
@@ -77,8 +86,8 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     model: 'sonnet',
     schedule: '24h',
     runner: 'pm2',
-    prompt: 'Read README.md and compare it against the actual project: package.json scripts, directory structure, and recent git log. Identify any outdated or missing sections (setup steps, commands, env vars, features). Update README.md in-place to reflect the current state. Keep the existing style and tone.',
-    skillIds: [],
+    prompt: 'Execute your role for this project.',
+    skillIds: ['agent-readme-sync'],
   },
 ]
 
@@ -137,9 +146,8 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
 
   const handleToggleEnabled = async (agent: Agent) => {
     try {
-      const result = await updateAgent(agent.id, { enabled: !agent.enabled } as any)
-      const updated = { ...result.agent, skillIds: typeof result.agent.skillIds === 'string' ? JSON.parse(result.agent.skillIds as any) : result.agent.skillIds }
-      setAgents(prev => prev.map(a => a.id === agent.id ? updated : a))
+      const result = await updateAgent(agent.id, { enabled: !agent.enabled })
+      setAgents(prev => prev.map(a => a.id === agent.id ? result.agent : a))
       toast(`Agent ${agent.name} ${!agent.enabled ? 'enabled' : 'disabled'}`, 'success')
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to toggle agent', 'error')
@@ -205,7 +213,7 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
         </h3>
         <button
           className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer"
-          onClick={() => { setCreating(true); setEditing(null); setRunPromptAgent(null) }}
+          onClick={() => { setRecommendedTemplate(null); setCreating(true); setEditing(null); setRunPromptAgent(null) }}
         >
           + New Agent
         </button>
@@ -354,6 +362,7 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
       {/* Agent modal */}
       {(creating || editing) && (
         <AgentModal
+          key={editing?.id || recommendedTemplate?.name || 'new'}
           agent={editing || undefined}
           template={(!editing && recommendedTemplate) || undefined}
           skills={skills}
@@ -395,6 +404,7 @@ function AgentModal({
   const [skillSearch, setSkillSearch] = useState('')
   const [modalTab, setModalTab] = useState<'all' | 'prompt'>('all')
   const nameRef = useRef<HTMLInputElement>(null)
+
   const backdropRef = useRef<HTMLDivElement>(null)
 
   // Merge DB skills + file-based personas into unified list
@@ -413,13 +423,15 @@ function AgentModal({
     : allItems
 
   useEffect(() => {
-    setName(agent?.name || '')
-    setAgentPrompt(agent?.prompt || '')
-    setSelectedSkills(agent?.skillIds || [])
-    setModel(agent?.model || 'sonnet')
-    setSchedule(agent?.schedule || '')
-    setRunner(agent?.runner || 'pm2')
-  }, [agent?.id])
+    const src = agent || template
+    if (!src) return
+    setName(src.name || '')
+    setAgentPrompt(src.prompt || '')
+    setSelectedSkills(src.skillIds || [])
+    setModel(src.model || 'sonnet')
+    setSchedule(src.schedule || '')
+    setRunner(src.runner || 'pm2')
+  }, [agent?.id, template?.name])
 
   useEffect(() => {
     if (!agent) nameRef.current?.focus()

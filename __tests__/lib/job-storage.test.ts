@@ -35,6 +35,13 @@ function createTestDb() {
       context_meta TEXT,
       parent_job_id TEXT
     );
+    CREATE TABLE IF NOT EXISTS gh_issues_cache (
+      project TEXT PRIMARY KEY,
+      repo TEXT NOT NULL,
+      prs TEXT NOT NULL DEFAULT '[]',
+      issues TEXT NOT NULL DEFAULT '[]',
+      fetched_at REAL NOT NULL
+    );
   `);
 
   return { sqlite, db: drizzle(sqlite, { schema }) };
@@ -2245,5 +2252,125 @@ describe('runCompletionHooks – release-after-run', () => {
     startReleaseMock.mockRejectedValue(new Error('release service down'));
     const job = makeJob('run');
     await expect(markDoneFn(job, 0)).resolves.toBeUndefined();
+  });
+});
+
+describe('markDone – ghIssuesCache invalidation', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+
+  function makeJob(project: string, kind = 'run'): JobData {
+    return {
+      id: `${project}-${kind}-cache-test`,
+      project,
+      kind,
+      prompt: null,
+      pid: 0,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    };
+  }
+
+  function insertCacheRow(project: string) {
+    testDb.db.insert(schema.ghIssuesCache).values({
+      project,
+      repo: `owner/${project}`,
+      prs: '[]',
+      issues: '[]',
+      fetchedAt: Date.now() / 1000,
+    }).run();
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/pm2-jobs', () => ({
+      getJobStatus: vi.fn(),
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/proj'),
+    }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({ autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false }),
+    }));
+    vi.doMock('@/lib/start-review', () => ({
+      startProjectReview: vi.fn().mockResolvedValue({ ok: false }),
+    }));
+    vi.doMock('@/lib/start-push', () => ({
+      startProjectPush: vi.fn().mockResolvedValue({ ok: false }),
+    }));
+    vi.doMock('@/lib/start-fix', () => ({
+      startFixFromJob: vi.fn().mockResolvedValue({ ok: false }),
+    }));
+    vi.doMock('@/lib/start-fix-push', () => ({
+      isHookRejection: vi.fn().mockReturnValue(false),
+      startFixPush: vi.fn().mockResolvedValue({ ok: false }),
+    }));
+    vi.doMock('@/lib/start-release', () => ({
+      startRelease: vi.fn().mockResolvedValue({ ok: false }),
+    }));
+
+    const mod = await import('@/lib/job-storage');
+    markDoneFn = mod.markDone;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('deletes the ghIssuesCache row for the job project on markDone', async () => {
+    insertCacheRow('my-proj');
+    const before = testDb.db.select().from(schema.ghIssuesCache).all();
+    expect(before).toHaveLength(1);
+
+    const job = makeJob('my-proj');
+    await markDoneFn(job, 0);
+
+    const after = testDb.db.select().from(schema.ghIssuesCache).all();
+    expect(after).toHaveLength(0);
+  });
+
+  it('does not delete cache rows for other projects', async () => {
+    insertCacheRow('proj-a');
+    insertCacheRow('proj-b');
+
+    const job = makeJob('proj-a');
+    await markDoneFn(job, 0);
+
+    const remaining = testDb.db.select().from(schema.ghIssuesCache).all();
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].project).toBe('proj-b');
+  });
+
+  it('succeeds silently when no cache row exists for the project', async () => {
+    const job = makeJob('no-cache-proj');
+    await expect(markDoneFn(job, 0)).resolves.toBeUndefined();
+  });
+
+  it('invalidates cache regardless of exit code', async () => {
+    insertCacheRow('failing-proj');
+    const job = makeJob('failing-proj');
+    await markDoneFn(job, 1);
+
+    const after = testDb.db.select().from(schema.ghIssuesCache).all();
+    expect(after).toHaveLength(0);
   });
 });

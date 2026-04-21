@@ -716,7 +716,13 @@ export async function updateAgent(agentId: string, updates: Partial<{ name: stri
     const data = await response.json().catch(() => ({}))
     throw new Error(data.detail || 'Failed to update agent')
   }
-  return response.json()
+  const data = await response.json()
+  return {
+    agent: {
+      ...data.agent,
+      skillIds: typeof data.agent.skillIds === 'string' ? JSON.parse(data.agent.skillIds) : (data.agent.skillIds ?? []),
+    },
+  }
 }
 
 export async function deleteAgent(agentId: string): Promise<void> {
