@@ -35,6 +35,8 @@ export async function GET(
     auto_commit_enabled: testCfg?.autoCommitEnabled ?? false,
     auto_push_enabled: testCfg?.autoPushEnabled ?? false,
     release_after_run: testCfg?.releaseAfterRun ?? false,
+    auto_pr_merge_enabled: testCfg?.autoPrMergeEnabled ?? false,
+    issue_auto_branch: testCfg?.issueAutoBranch ?? true,
     last_push_error: pushResult?.lastPushError ?? null,
     last_push_at: pushResult?.lastPushAt ?? null,
   });
@@ -107,6 +109,24 @@ export async function PATCH(
     touched = true;
     const value = body.release_after_run ? '1' : '0';
     const ok = writeProjectFieldYaml(projectName, 'release_after_run', value);
+    if (!ok) {
+      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
+    }
+  }
+
+  if (body.auto_pr_merge_enabled !== undefined) {
+    touched = true;
+    const value = body.auto_pr_merge_enabled ? '1' : '0';
+    const ok = writeProjectFieldYaml(projectName, 'auto_pr_merge_enabled', value);
+    if (!ok) {
+      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
+    }
+  }
+
+  if (body.issue_auto_branch !== undefined) {
+    touched = true;
+    const value = body.issue_auto_branch ? '1' : '0';
+    const ok = writeProjectFieldYaml(projectName, 'issue_auto_branch', value);
     if (!ok) {
       return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
     }

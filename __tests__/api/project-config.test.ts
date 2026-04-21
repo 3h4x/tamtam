@@ -78,6 +78,43 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     expect(data.release_after_run).toBe(false);
   });
 
+  it('returns auto_pr_merge_enabled=false by default', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.auto_pr_merge_enabled).toBe(false);
+  });
+
+  it('returns issue_auto_branch=true by default — Work-on branch provision is on unless explicitly disabled', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.issue_auto_branch).toBe(true);
+  });
+
+  it('surfaces issue_auto_branch=false when the per-project config flips it off', async () => {
+    vi.resetModules();
+    resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
+    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
+    vi.doMock('@/lib/config', () => ({ reloadConfig: vi.fn() }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
+      writeProjectFieldYaml: vi.fn().mockReturnValue(true),
+      getProjectTestConfig: vi.fn().mockReturnValue({
+        testCommand: null, testCronEnabled: false, testCronSchedule: null,
+        autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false, autoPrMergeEnabled: false,
+        issueAutoBranch: false,
+      }),
+      getProjectPushResult: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
+    const { GET: GET2 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
+    const res = await GET2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.issue_auto_branch).toBe(false);
+  });
+
   it('returns auto_push_enabled from config when set', async () => {
     vi.resetModules();
     resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
@@ -285,6 +322,26 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     expect(writeProjectFieldYamlMock).not.toHaveBeenCalled();
   });
 
+  it('persists issue_auto_branch=false', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ issue_auto_branch: false }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'issue_auto_branch', '0');
+  });
+
+  it('persists issue_auto_branch=true (re-enabling Work-on branch provision)', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ issue_auto_branch: true }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'issue_auto_branch', '1');
+  });
+
   it('persists test_cron_schedule and test_cron_enabled', async () => {
     getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: true, testCronSchedule: '1h' });
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
@@ -395,6 +452,36 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/unknown/config', {
       method: 'PATCH',
       body: JSON.stringify({ release_after_run: true }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'unknown' }) });
+    expect(res.status).toBe(404);
+  });
+
+  it('writes auto_pr_merge_enabled=1 when set to true', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ auto_pr_merge_enabled: true }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'auto_pr_merge_enabled', '1');
+  });
+
+  it('writes auto_pr_merge_enabled=0 when set to false', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ auto_pr_merge_enabled: false }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'auto_pr_merge_enabled', '0');
+  });
+
+  it('returns 404 when project not found while writing auto_pr_merge_enabled', async () => {
+    writeProjectFieldYamlMock.mockReturnValue(false);
+    const req = new NextRequest('http://localhost/api/projects/by-project/unknown/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ auto_pr_merge_enabled: true }),
     });
     const res = await PATCH(req, { params: Promise.resolve({ projectName: 'unknown' }) });
     expect(res.status).toBe(404);

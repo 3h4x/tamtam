@@ -275,7 +275,12 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, 'abc1234'));                  // git rev-parse
 
     await startProjectPush('proj');
-    expect(createJobMock).toHaveBeenCalledWith('proj', 'push', expect.any(Number), '');
+    expect(createJobMock).toHaveBeenCalled();
+    const [cjProject, cjKind, cjPid, cjLog] = createJobMock.mock.calls[0];
+    expect(cjProject).toBe('proj');
+    expect(cjKind).toBe('push');
+    expect(cjPid).toEqual(expect.any(Number));
+    expect(cjLog).toBe('');
     const job = createJobMock.mock.results[0].value;
     expect(job.logPath).toMatch(/\.log$/);
     expect(markDoneMock).toHaveBeenCalledWith(job, 0);
@@ -957,7 +962,12 @@ describe('launchProjectPush — fire-and-forget', () => {
   it('creates a job and updates it with logPath before returning', () => {
     execMock.mockResolvedValue(resp(0));
     launchProjectPush('proj');
-    expect(createJobMock).toHaveBeenCalledWith('proj', 'push', expect.any(Number), '');
+    expect(createJobMock).toHaveBeenCalled();
+    const [cjProject, cjKind, cjPid, cjLog] = createJobMock.mock.calls[0];
+    expect(cjProject).toBe('proj');
+    expect(cjKind).toBe('push');
+    expect(cjPid).toEqual(expect.any(Number));
+    expect(cjLog).toBe('');
     expect(updateJobMock).toHaveBeenCalledOnce();
     const updatedJob = updateJobMock.mock.calls[0][0];
     expect(updatedJob.logPath).toMatch(/\.log$/);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveProjectPath } from '@/lib/project-data';
 import { exec } from '@/lib/shell';
+import { getProjectTestConfig } from '@/lib/scheduling';
 
 // Given an issue context (number + title), check out a feature branch
 // `fix/issue-<n>-<slug>` before Claude starts editing so all interim work
@@ -12,6 +13,14 @@ export async function POST(
   const { projectName } = await params;
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
+
+  // Project-level kill switch: when the user unchecks "Create feature branch"
+  // in the Work-on config, this endpoint is a no-op — Claude works on whatever
+  // branch is currently checked out.
+  const cfg = getProjectTestConfig(projectName);
+  if (cfg && cfg.issueAutoBranch === false) {
+    return NextResponse.json({ status: 'skipped', reason: 'issue_auto_branch is disabled for this project' });
+  }
 
   let body: { issue_number?: number; issue_title?: string };
   try { body = await req.json(); }

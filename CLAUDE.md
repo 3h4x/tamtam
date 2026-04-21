@@ -64,6 +64,15 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 
 **Never run `next dev` directly — always use PM2 via the scripts above.**
 
+### Hot reload vs. restart
+
+Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** `pnpm restart` for code changes; it's not only unnecessary, it's a trap: if a stray `next-server` child survives the SIGTERM, the new PM2 process hits `EADDRINUSE`, goes `errored`, and the orphan keeps serving *stale* code. That's the #1 source of "why isn't my edit showing up?" pain in this repo.
+
+- **No restart needed**: component edits, hook edits, utility edits, API route *body* changes, `lib/*` changes — HMR picks them up on the next request.
+- **Restart IS needed**: brand-new route files (Turbopack doesn't always register new `app/**/route.ts` without a restart), new DB migrations in `lib/db/index.ts`, env var changes, `package.json` scripts.
+
+If you do restart and run into the EADDRINUSE loop, see `## Investigating a misbehaving dev server` below.
+
 ## Architecture
 - `app/` — Next.js pages and API route handlers
 - `components/` — React client components

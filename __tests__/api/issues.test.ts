@@ -238,7 +238,13 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
   it('merges a PR successfully and returns status merged', async () => {
     execMock
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git')) // git remote get-url
-      .mockImplementationOnce(() => resp(0, '')); // gh pr merge
+      .mockImplementationOnce(() => resp(0, '')) // gh pr merge
+      // Post-merge cleanup chain (checkout back to main + pull):
+      .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main\n')) // symbolic-ref
+      .mockImplementationOnce(() => resp(0, 'fix/foo\n')) // branch --show-current
+      .mockImplementationOnce(() => resp(0, '')) // status --porcelain (clean)
+      .mockImplementationOnce(() => resp(0, '')) // checkout main
+      .mockImplementationOnce(() => resp(0, '')); // pull --ff-only
 
     const res = await POST(makeReq({ prNumber: 42, action: 'merge', mergeMethod: 'squash' }), { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(200);
@@ -277,7 +283,12 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
     execMock
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
       .mockImplementationOnce(() => resp(1, '', 'required status checks have not passed'))
-      .mockImplementationOnce(() => resp(0, '')); // retry with --auto succeeds
+      .mockImplementationOnce(() => resp(0, '')) // retry with --auto succeeds
+      .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main\n')) // symbolic-ref
+      .mockImplementationOnce(() => resp(0, 'fix/foo\n')) // branch --show-current
+      .mockImplementationOnce(() => resp(0, '')) // status --porcelain
+      .mockImplementationOnce(() => resp(0, '')) // checkout
+      .mockImplementationOnce(() => resp(0, '')); // pull
 
     const res = await POST(makeReq({ prNumber: 9, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(200);
@@ -478,7 +489,7 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
       expect(stashCalls).toHaveLength(0);
     });
 
-    it('restores the stash if checkout fails so uncommitted work is never lost', async () => {
+    it('restores the stash if checkout fails and returns 207 with switchError', async () => {
       execMock
         .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
         .mockImplementationOnce(() => resp(0, ''))
@@ -490,25 +501,28 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
         .mockImplementationOnce(() => resp(0, '')); // stash pop on failure path
 
       const res = await POST(makeReq({ prNumber: 2, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
-      expect(res.status).toBe(200); // merge itself still succeeded
+      expect(res.status).toBe(207); // merged but cleanup failed
       const data = await res.json();
+      expect(data.status).toBe('merged_dirty');
       expect(data.switchedTo).toBeNull();
+      expect(data.switchError).toContain('checkout failed');
 
       const stashPop = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args[2] === 'stash' && args[3] === 'pop');
       expect(stashPop).toBeTruthy();
     });
 
-    it('merge success is not affected when cleanup step throws', async () => {
+    it('returns 207 with switchError when cleanup step throws', async () => {
       execMock
         .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
         .mockImplementationOnce(() => resp(0, '')) // merge ok
         .mockImplementationOnce(() => Promise.reject(new Error('git fork bomb')));
 
       const res = await POST(makeReq({ prNumber: 4, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(207);
       const data = await res.json();
-      expect(data.status).toBe('merged');
+      expect(data.status).toBe('merged_dirty');
       expect(data.switchedTo).toBeNull();
+      expect(data.switchError).toContain('git fork bomb');
     });
 
     it('falls back to "main" when origin/HEAD is not set', async () => {
