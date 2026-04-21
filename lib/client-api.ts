@@ -459,8 +459,9 @@ export interface ProjectConfig {
   test_cron_schedule: string
   auto_commit_enabled?: boolean
   auto_push_enabled?: boolean
-  release_after_run?: boolean
   auto_pr_merge_enabled?: boolean
+  release_after_run?: boolean
+  pr_workflow_enabled?: boolean
   issue_auto_branch?: boolean
   last_push_error?: string | null
   last_push_at?: number | null
@@ -482,8 +483,9 @@ export async function updateProjectConfig(
     test_cron_schedule?: string
     auto_commit_enabled?: boolean
     auto_push_enabled?: boolean
-    release_after_run?: boolean
     auto_pr_merge_enabled?: boolean
+    release_after_run?: boolean
+    pr_workflow_enabled?: boolean
     issue_auto_branch?: boolean
   }
 ): Promise<{ status: string }> {

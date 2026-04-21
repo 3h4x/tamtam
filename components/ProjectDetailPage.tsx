@@ -311,8 +311,9 @@ export function ProjectDetailPage({
   const [testCronScheduleInput, setTestCronScheduleInput] = useState('')
   const [autoCommitEnabledInput, setAutoCommitEnabledInput] = useState(false)
   const [autoPushEnabledInput, setAutoPushEnabledInput] = useState(false)
-  const [releaseAfterRunInput, setReleaseAfterRunInput] = useState(false)
   const [autoPrMergeEnabledInput, setAutoPrMergeEnabledInput] = useState(false)
+  const [releaseAfterRunInput, setReleaseAfterRunInput] = useState(false)
+  const [prWorkflowEnabledInput, setPrWorkflowEnabledInput] = useState(false)
   const [issueAutoBranchInput, setIssueAutoBranchInput] = useState(true)
   const [configSaving, setConfigSaving] = useState(false)
   const [configSaved, setConfigSaved] = useState(false)
@@ -386,8 +387,9 @@ export function ProjectDetailPage({
           setTestCronScheduleInput(configData.test_cron_schedule)
           setAutoCommitEnabledInput(!!configData.auto_commit_enabled)
           setAutoPushEnabledInput(!!configData.auto_push_enabled)
-          setReleaseAfterRunInput(!!configData.release_after_run)
           setAutoPrMergeEnabledInput(!!configData.auto_pr_merge_enabled)
+          setReleaseAfterRunInput(!!configData.release_after_run)
+          setPrWorkflowEnabledInput(!!configData.pr_workflow_enabled)
           setIssueAutoBranchInput(configData.issue_auto_branch ?? true)
           if (actionsData) {
             setEditActions(actionsData.actions)
@@ -584,8 +586,9 @@ export function ProjectDetailPage({
         test_cron_schedule: testCronScheduleInput,
         auto_commit_enabled: autoCommitEnabledInput,
         auto_push_enabled: autoPushEnabledInput,
-        release_after_run: releaseAfterRunInput,
         auto_pr_merge_enabled: autoPrMergeEnabledInput,
+        release_after_run: releaseAfterRunInput,
+        pr_workflow_enabled: prWorkflowEnabledInput,
         issue_auto_branch: issueAutoBranchInput,
       })
       setConfigSaved(true)
@@ -597,8 +600,9 @@ export function ProjectDetailPage({
       setTestCronScheduleInput(data.test_cron_schedule)
       setAutoCommitEnabledInput(!!data.auto_commit_enabled)
       setAutoPushEnabledInput(!!data.auto_push_enabled)
-      setReleaseAfterRunInput(!!data.release_after_run)
       setAutoPrMergeEnabledInput(!!data.auto_pr_merge_enabled)
+      setReleaseAfterRunInput(!!data.release_after_run)
+      setPrWorkflowEnabledInput(!!data.pr_workflow_enabled)
       setIssueAutoBranchInput(data.issue_auto_branch ?? true)
       setTimeout(() => setConfigSaved(false), 3000)
     } catch (err) {
@@ -615,8 +619,9 @@ export function ProjectDetailPage({
       testCronScheduleInput !== config.test_cron_schedule ||
       autoCommitEnabledInput !== !!config.auto_commit_enabled ||
       autoPushEnabledInput !== !!config.auto_push_enabled ||
-      releaseAfterRunInput !== !!config.release_after_run ||
       autoPrMergeEnabledInput !== !!config.auto_pr_merge_enabled ||
+      releaseAfterRunInput !== !!config.release_after_run ||
+      prWorkflowEnabledInput !== !!config.pr_workflow_enabled ||
       issueAutoBranchInput !== (config.issue_auto_branch ?? true))
 
   return (
@@ -906,29 +911,50 @@ export function ProjectDetailPage({
               Loading configuration…
             </div>
           ) : config ? (
-            <div className="flex flex-col gap-4 max-w-2xl">
+            <div className="space-y-4">
+
+              {/* Save bar */}
+              <div className="flex items-center justify-end gap-3">
+                {configDirty && !configSaving && (
+                  <span className="text-xs text-text-tertiary">Unsaved changes</span>
+                )}
+                <button
+                  className={`px-4 py-2 text-white border-none rounded-lg font-semibold text-sm transition-colors ${
+                    configSaved      ? 'bg-status-success cursor-default' :
+                    configDirty      ? 'bg-accent hover:bg-accent-hover cursor-pointer' :
+                                       'bg-accent/40 cursor-default'
+                  } ${configSaving ? 'opacity-50 cursor-wait' : ''}`}
+                  onClick={handleSaveConfig}
+                  disabled={configSaving || !configDirty}
+                >
+                  {configSaving ? 'Saving…' : configSaved ? 'Saved!' : 'Save Config'}
+                </button>
+              </div>
 
               {/* Testing */}
-              <div className="bg-bg-secondary rounded-lg p-5">
-                <h3 className="text-sm font-semibold text-text-primary mb-4">Testing</h3>
-
-                <div className="flex flex-col gap-3">
+              <div className="bg-bg-secondary rounded-lg border border-border">
+                <div className="px-5 py-3 border-b border-border flex items-baseline gap-3">
+                  <h3 className="text-sm font-semibold text-text-primary">Testing</h3>
+                  <p className="text-xs text-text-tertiary">Test command run before every release</p>
+                </div>
+                <div className="px-5 py-4 space-y-4">
                   <div>
-                    <label className="block mb-1.5 text-xs font-medium text-text-secondary uppercase tracking-wider" htmlFor="test-command">
-                      Test command
+                    <label className="block font-medium text-sm text-text-primary mb-1.5" htmlFor="test-command">
+                      Test Command
                     </label>
                     <input
                       id="test-command"
                       type="text"
-                      className="w-full px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary font-mono"
+                      className="w-full px-3 py-2 text-sm bg-bg-primary border border-border rounded-lg text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
                       value={testCommandInput}
                       onChange={(e) => setTestCommandInput(e.target.value)}
                       placeholder={config.detected_test_command || 'e.g. npm test, pytest, forge test'}
                     />
-                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-tertiary">
-                      <span>Auto-detected: <code className="font-mono text-text-secondary">{config.detected_test_command || 'none'}</code></span>
-                      <span>Effective: <code className="font-mono text-accent font-medium">{config.effective_test_command || 'none'}</code></span>
-                    </div>
+                    <p className="text-xs text-text-tertiary mt-1.5">
+                      Auto-detected: <code className="bg-bg-tertiary px-1 rounded">{config.detected_test_command || 'none'}</code>
+                      {' · '}
+                      Effective: <code className="bg-bg-tertiary px-1 rounded text-accent">{config.effective_test_command || 'none'}</code>
+                    </p>
                   </div>
 
                   <div className="pt-3 border-t border-border">
@@ -975,11 +1001,7 @@ export function ProjectDetailPage({
               </div>
 
               {/* "Work on" pipeline — governs what happens when the user
-                  clicks the Work on button on a GitHub issue. Each row maps
-                  to an existing project toggle in the Release Pipeline
-                  section below (except "Create feature branch", which is
-                  this section's own setting). Re-listed here in pipeline
-                  order so the user can see the effective chain at a glance. */}
+                  clicks the Work on button on a GitHub issue. */}
               <div className="bg-bg-secondary rounded-lg p-5">
                 <h3 className="text-sm font-semibold text-text-primary mb-1">When you click <span className="font-mono">Work on</span></h3>
                 <p className="text-xs text-text-tertiary mb-4">
@@ -995,93 +1017,9 @@ export function ProjectDetailPage({
                       onChange={(e) => setIssueAutoBranchInput(e.target.checked)}
                     />
                     <div>
-                      <span className="text-sm font-medium text-text-primary">1. Create feature branch</span>
+                      <span className="text-sm font-medium text-text-primary">Create feature branch</span>
                       <p className="mt-0.5 text-xs text-text-tertiary">
                         Provision <code className="font-mono">fix/issue-&lt;n&gt;-&lt;slug&gt;</code> and check it out before Claude starts editing. Turn off to have Claude work on whatever branch is currently checked out.
-                      </p>
-                    </div>
-                  </label>
-                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                    <input
-                      id="issue-auto-submit-prompt"
-                      type="checkbox"
-                      className="w-4 h-4 mt-0.5 accent-accent opacity-60"
-                      checked
-                      disabled
-                      readOnly
-                    />
-                    <div>
-                      <span className="text-sm font-medium text-text-primary">2. Auto-submit the issue prompt</span>
-                      <p className="mt-0.5 text-xs text-text-tertiary">
-                        Always on. The issue title, URL, and body are sent to Claude as the first message.
-                      </p>
-                    </div>
-                  </label>
-                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                    <input
-                      id="work-on-release-after-run"
-                      type="checkbox"
-                      className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
-                      checked={releaseAfterRunInput}
-                      onChange={(e) => setReleaseAfterRunInput(e.target.checked)}
-                    />
-                    <div>
-                      <span className="text-sm font-medium text-text-primary">3. Run release pipeline when Claude finishes</span>
-                      <p className="mt-0.5 text-xs text-text-tertiary">
-                        After the terminal run exits 0, auto-trigger <code className="font-mono">test → review → mark-dod → commit → push</code>. Same setting as <em>Run release pipeline after each agent run</em> below.
-                      </p>
-                    </div>
-                  </label>
-                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                    <input
-                      id="work-on-auto-commit"
-                      type="checkbox"
-                      className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
-                      checked={autoCommitEnabledInput}
-                      onChange={(e) => {
-                        const next = e.target.checked
-                        setAutoCommitEnabledInput(next)
-                        if (!next) setAutoPushEnabledInput(false)
-                      }}
-                    />
-                    <div>
-                      <span className="text-sm font-medium text-text-primary">4. Auto-commit on LGTM</span>
-                      <p className="mt-0.5 text-xs text-text-tertiary">
-                        When review verdict is <code className="font-mono">LGTM</code>, stage &amp; commit automatically with a Claude-generated message. Same as <em>Auto-commit when review passes</em> below.
-                      </p>
-                    </div>
-                  </label>
-                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                    <input
-                      id="work-on-auto-push"
-                      type="checkbox"
-                      className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
-                      checked={autoPushEnabledInput}
-                      onChange={(e) => {
-                        const next = e.target.checked
-                        setAutoPushEnabledInput(next)
-                        if (next) setAutoCommitEnabledInput(true)
-                      }}
-                    />
-                    <div>
-                      <span className="text-sm font-medium text-text-primary">5. Auto-push &amp; open PR</span>
-                      <p className="mt-0.5 text-xs text-text-tertiary">
-                        After commit, push the feature branch and <code className="font-mono">gh pr create</code> with <code className="font-mono">Closes #&lt;n&gt;</code>. Implies auto-commit. Same as <em>Auto-push after committing</em> below.
-                      </p>
-                    </div>
-                  </label>
-                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                    <input
-                      id="work-on-auto-merge"
-                      type="checkbox"
-                      className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
-                      checked={autoPrMergeEnabledInput}
-                      onChange={(e) => setAutoPrMergeEnabledInput(e.target.checked)}
-                    />
-                    <div>
-                      <span className="text-sm font-medium text-text-primary">6. Auto-merge PR &amp; verify DoD</span>
-                      <p className="mt-0.5 text-xs text-text-tertiary">
-                        Poll CI checks and auto-merge once they pass; tick verified acceptance-criteria checkboxes on the issue. Same as <em>Auto-merge PR after push</em> below.
                       </p>
                     </div>
                   </label>
@@ -1101,118 +1039,154 @@ export function ProjectDetailPage({
               </div>
 
               {/* Release Pipeline */}
-              <div className="bg-bg-secondary rounded-lg p-5">
-                <h3 className="text-sm font-semibold text-text-primary mb-4">Release Pipeline</h3>
-
-                <div className="space-y-4">
-                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                    <input
-                      id="auto-commit-enabled"
-                      type="checkbox"
-                      className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
-                      checked={autoCommitEnabledInput}
-                      onChange={(e) => {
-                        const next = e.target.checked
-                        setAutoCommitEnabledInput(next)
-                        if (!next) setAutoPushEnabledInput(false)
-                      }}
-                    />
-                    <div>
-                      <span className="text-sm font-medium text-text-primary">Auto-commit when review passes</span>
-                      <p className="mt-0.5 text-xs text-text-tertiary">
-                        On <code className="font-mono">LGTM</code> verdict, stage and commit changes automatically — without pushing.
-                      </p>
+              <div className="bg-bg-secondary rounded-lg border border-border">
+                <div className="px-5 py-3 border-b border-border">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-baseline gap-3">
+                      <h3 className="text-sm font-semibold text-text-primary">Release Pipeline</h3>
+                      <p className="text-xs text-text-tertiary">Automation that runs after every review</p>
                     </div>
-                  </label>
-
-                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                    <input
-                      id="auto-push-enabled"
-                      type="checkbox"
-                      className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
-                      checked={autoPushEnabledInput}
-                      onChange={(e) => {
-                        const next = e.target.checked
-                        setAutoPushEnabledInput(next)
-                        if (next) setAutoCommitEnabledInput(true)
-                      }}
-                    />
-                    <div>
-                      <span className="text-sm font-medium text-text-primary">Auto-push after committing</span>
-                      <p className="mt-0.5 text-xs text-text-tertiary">
-                        After auto-commit, also push to origin. Implies auto-commit.
-                      </p>
+                    {/* Pipeline flow strip */}
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {[
+                        { label: 'test', active: !!(config.effective_test_command) },
+                        { label: 'review', active: true },
+                        { label: 'fix', active: true },
+                        { label: 'commit', active: autoCommitEnabledInput },
+                        { label: 'push', active: autoPushEnabledInput },
+                        ...(prWorkflowEnabledInput ? [
+                          { label: 'dod', active: true },
+                          { label: 'merge', active: autoPrMergeEnabledInput },
+                        ] : []),
+                      ].map((step, i, arr) => (
+                        <span key={step.label} className="flex items-center gap-1">
+                          <span className={`px-1.5 py-0.5 text-xs rounded font-mono ${step.active ? 'bg-accent/15 text-accent border border-accent/30' : 'bg-bg-tertiary text-text-tertiary border border-border'}`}>
+                            {step.label}
+                          </span>
+                          {i < arr.length - 1 && <span className="text-text-tertiary text-xs">→</span>}
+                        </span>
+                      ))}
                     </div>
-                  </label>
-
-                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                    <input
-                      id="release-after-run"
-                      type="checkbox"
-                      className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
-                      checked={releaseAfterRunInput}
-                      onChange={(e) => setReleaseAfterRunInput(e.target.checked)}
-                    />
-                    <div>
-                      <span className="text-sm font-medium text-text-primary">Run release pipeline after each agent run</span>
-                      <p className="mt-0.5 text-xs text-text-tertiary">
-                        When a terminal or agent run finishes successfully, automatically trigger the full release pipeline (test → review → commit → push).
-                      </p>
-                    </div>
-                  </label>
-
-                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                    <input
-                      id="auto-pr-merge-enabled"
-                      type="checkbox"
-                      className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
-                      checked={autoPrMergeEnabledInput}
-                      onChange={(e) => setAutoPrMergeEnabledInput(e.target.checked)}
-                    />
-                    <div>
-                      <span className="text-sm font-medium text-text-primary">Auto-merge PR after push</span>
-                      <p className="mt-0.5 text-xs text-text-tertiary">
-                        When an issue-driven push creates a PR, poll CI checks and auto-merge once they pass. Verifies DoD checkboxes on the linked issue post-merge.
-                      </p>
-                    </div>
-                  </label>
+                  </div>
                 </div>
 
-                <div className="mt-4 flex items-center gap-3">
-                  <button
-                    className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={handleSaveConfig}
-                    disabled={configSaving || !configDirty}
-                  >
-                    {configSaving ? 'Saving…' : configSaved ? 'Saved' : 'Save'}
-                  </button>
-                  {configDirty && !configSaving && (
-                    <span className="text-xs text-text-tertiary">Unsaved changes</span>
-                  )}
+                {/* Mode selector */}
+                <div className="px-5 pt-4 pb-3 border-b border-border">
+                  <div className="flex gap-1 p-1 bg-bg-tertiary rounded-lg border border-border w-fit">
+                    <button
+                      type="button"
+                      onClick={() => { setPrWorkflowEnabledInput(false); setAutoPrMergeEnabledInput(false) }}
+                      className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${!prWorkflowEnabledInput ? 'bg-bg-secondary text-text-primary shadow-sm border border-border' : 'text-text-tertiary hover:text-text-secondary'}`}
+                    >
+                      Direct Branch
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPrWorkflowEnabledInput(true)}
+                      className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${prWorkflowEnabledInput ? 'bg-bg-secondary text-text-primary shadow-sm border border-border' : 'text-text-tertiary hover:text-text-secondary'}`}
+                    >
+                      PR Workflow
+                    </button>
+                  </div>
+                  <p className="text-xs text-text-tertiary mt-2">
+                    {prWorkflowEnabledInput
+                      ? 'Changes are pushed to a feature/issue branch and reviewed via pull request. DoD checkboxes from the linked GitHub issue are verified before merge.'
+                      : 'Changes are committed and pushed directly to the current branch. No pull request is created.'}
+                  </p>
+                </div>
+
+                {/* Options */}
+                <div className="px-5 py-2">
+                  {[
+                    {
+                      id: 'auto-commit-enabled',
+                      checked: autoCommitEnabledInput,
+                      onChange: (next: boolean) => {
+                        setAutoCommitEnabledInput(next)
+                        if (!next) { setAutoPushEnabledInput(false); setAutoPrMergeEnabledInput(false) }
+                      },
+                      label: 'Auto-commit when review passes',
+                      description: <>On <code className="bg-bg-tertiary px-1 rounded">LGTM</code> verdict, stage and commit changes automatically — without pushing.</>,
+                    },
+                    {
+                      id: 'auto-push-enabled',
+                      checked: autoPushEnabledInput,
+                      onChange: (next: boolean) => {
+                        setAutoPushEnabledInput(next)
+                        if (next) setAutoCommitEnabledInput(true)
+                        if (!next) setAutoPrMergeEnabledInput(false)
+                      },
+                      label: prWorkflowEnabledInput ? 'Auto-push to PR branch' : 'Auto-push after committing',
+                      description: prWorkflowEnabledInput
+                        ? 'Push the commit to the feature/issue branch, creating a pull request if one does not exist. Enables auto-commit automatically.'
+                        : 'Push to origin after auto-commit. Enables auto-commit automatically.',
+                    },
+                    ...(prWorkflowEnabledInput ? [{
+                      id: 'auto-pr-merge-enabled',
+                      checked: autoPrMergeEnabledInput,
+                      onChange: (next: boolean) => {
+                        setAutoPrMergeEnabledInput(next)
+                        if (next) { setAutoCommitEnabledInput(true); setAutoPushEnabledInput(true) }
+                      },
+                      label: 'Auto-merge PR',
+                      description: 'After DoD verification passes, poll CI checks and merge the PR automatically. When disabled, the PR is left open for manual merge. Enables auto-push automatically.',
+                    }] : []),
+                    {
+                      id: 'release-after-run',
+                      checked: releaseAfterRunInput,
+                      onChange: (next: boolean) => setReleaseAfterRunInput(next),
+                      label: 'Trigger pipeline after each agent run',
+                      description: 'When a terminal or agent run finishes successfully, automatically start the release pipeline.',
+                    },
+                  ].map(({ id, checked, onChange, label, description }) => (
+                    <label key={id} className="flex items-start gap-3 p-3 rounded-lg hover:bg-bg-tertiary/50 cursor-pointer transition-colors select-none -mx-3">
+                      <input
+                        id={id}
+                        type="checkbox"
+                        className="w-4 h-4 accent-accent rounded mt-0.5 shrink-0 cursor-pointer"
+                        checked={checked}
+                        onChange={(e) => onChange(e.target.checked)}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm text-text-primary">{label}</div>
+                        <div className="text-xs text-text-tertiary">{description}</div>
+                      </div>
+                    </label>
+                  ))}
                 </div>
               </div>
 
               {/* Custom Actions */}
-              <div className="bg-bg-secondary rounded-lg p-5">
-                <h3 className="text-sm font-semibold text-text-primary mb-1">Custom Actions</h3>
-                <p className="text-xs text-text-tertiary mb-4">
-                  Bash commands that appear as buttons on the project page, run in the project directory.
-                </p>
+              <div className="bg-bg-secondary rounded-lg border border-border">
+                <div className="px-5 py-3 border-b border-border flex items-center justify-between gap-3">
+                  <div className="flex items-baseline gap-3">
+                    <h3 className="text-sm font-semibold text-text-primary">Custom Actions</h3>
+                    <p className="text-xs text-text-tertiary">Bash commands that appear as buttons on the project page</p>
+                  </div>
+                  <button
+                    className="px-3 py-1.5 text-xs bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer transition-colors"
+                    onClick={() => setEditActions([...editActions, { name: '', command: '', color: '#6366f1' }])}
+                  >
+                    + Add Action
+                  </button>
+                </div>
 
-                {editActions.length > 0 && (
-                  <div className="mb-3">
-                    <div className="grid gap-x-2 mb-1.5 px-1" style={{ gridTemplateColumns: '8rem 1fr 2.5rem 2rem' }}>
-                      <span className="text-xs font-medium text-text-tertiary uppercase tracking-wider">Label</span>
-                      <span className="text-xs font-medium text-text-tertiary uppercase tracking-wider">Command</span>
-                      <span className="text-xs font-medium text-text-tertiary uppercase tracking-wider">Color</span>
-                      <span />
-                    </div>
-                    <div className="flex flex-col gap-2">
+                <div className="px-5 py-4">
+                  {editActions.length === 0 ? (
+                    <p className="text-sm text-text-tertiary text-center py-4">No custom actions yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="grid gap-x-2 px-1 mb-1" style={{ gridTemplateColumns: '9rem 1fr 2.5rem 2rem' }}>
+                        <span className="text-xs font-medium text-text-tertiary">Label</span>
+                        <span className="text-xs font-medium text-text-tertiary">Command</span>
+                        <span className="text-xs font-medium text-text-tertiary">Color</span>
+                        <span />
+                      </div>
                       {editActions.map((action, i) => (
-                        <div key={i} className="grid items-center gap-2" style={{ gridTemplateColumns: '8rem 1fr 2.5rem 2rem' }}>
+                        <div key={i} className="grid items-center gap-2" style={{ gridTemplateColumns: '9rem 1fr 2.5rem 2rem' }}>
                           <input
                             type="text"
-                            className="px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary"
+                            className="px-3 py-2 text-sm bg-bg-primary border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
                             value={action.name}
                             onChange={(e) => {
                               const next = [...editActions]
@@ -1223,7 +1197,7 @@ export function ProjectDetailPage({
                           />
                           <input
                             type="text"
-                            className="px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary font-mono"
+                            className="px-3 py-2 text-sm bg-bg-primary border border-border rounded-lg text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
                             value={action.command}
                             onChange={(e) => {
                               const next = [...editActions]
@@ -1234,7 +1208,7 @@ export function ProjectDetailPage({
                           />
                           <input
                             type="color"
-                            className="w-10 h-9 p-0.5 bg-bg-tertiary border border-border rounded-md cursor-pointer"
+                            className="w-10 h-9 p-0.5 bg-bg-primary border border-border rounded-lg cursor-pointer"
                             value={action.color || '#6366f1'}
                             onChange={(e) => {
                               const next = [...editActions]
@@ -1244,7 +1218,7 @@ export function ProjectDetailPage({
                             title="Button color"
                           />
                           <button
-                            className="flex items-center justify-center h-9 w-8 text-text-tertiary hover:text-status-error hover:bg-status-error/10 rounded-md cursor-pointer transition-colors"
+                            className="flex items-center justify-center h-9 w-8 text-text-tertiary hover:text-status-error hover:bg-status-error/10 rounded-lg cursor-pointer transition-colors"
                             onClick={() => setEditActions(editActions.filter((_, j) => j !== i))}
                             title="Remove"
                           >
@@ -1253,23 +1227,19 @@ export function ProjectDetailPage({
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
+                  )}
 
-                <div className="flex items-center gap-2 mt-2">
-                  <button
-                    className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
-                    onClick={() => setEditActions([...editActions, { name: '', command: '', color: '#6366f1' }])}
-                  >
-                    + Add Action
-                  </button>
-                  <button
-                    className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={handleSaveActions}
-                    disabled={actionsSaving}
-                  >
-                    {actionsSaving ? 'Saving…' : actionsSaved ? 'Saved' : 'Save Actions'}
-                  </button>
+                  <div className="flex justify-end mt-4">
+                    <button
+                      className={`px-4 py-2 text-white border-none rounded-lg font-semibold text-sm transition-colors ${
+                        actionsSaved ? 'bg-status-success cursor-default' : 'bg-accent hover:bg-accent-hover cursor-pointer'
+                      } ${actionsSaving ? 'opacity-50 cursor-wait' : ''}`}
+                      onClick={handleSaveActions}
+                      disabled={actionsSaving}
+                    >
+                      {actionsSaving ? 'Saving…' : actionsSaved ? 'Saved!' : 'Save Actions'}
+                    </button>
+                  </div>
                 </div>
               </div>
 

@@ -34,8 +34,9 @@ export async function GET(
     test_cron_schedule: testCfg?.testCronSchedule ?? '',
     auto_commit_enabled: testCfg?.autoCommitEnabled ?? false,
     auto_push_enabled: testCfg?.autoPushEnabled ?? false,
-    release_after_run: testCfg?.releaseAfterRun ?? false,
     auto_pr_merge_enabled: testCfg?.autoPrMergeEnabled ?? false,
+    release_after_run: testCfg?.releaseAfterRun ?? false,
+    pr_workflow_enabled: testCfg?.prWorkflowEnabled ?? false,
     issue_auto_branch: testCfg?.issueAutoBranch ?? true,
     last_push_error: pushResult?.lastPushError ?? null,
     last_push_at: pushResult?.lastPushAt ?? null,
@@ -105,6 +106,15 @@ export async function PATCH(
     }
   }
 
+  if (body.auto_pr_merge_enabled !== undefined) {
+    touched = true;
+    const value = body.auto_pr_merge_enabled ? '1' : '0';
+    const ok = writeProjectFieldYaml(projectName, 'auto_pr_merge_enabled', value);
+    if (!ok) {
+      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
+    }
+  }
+
   if (body.release_after_run !== undefined) {
     touched = true;
     const value = body.release_after_run ? '1' : '0';
@@ -114,10 +124,10 @@ export async function PATCH(
     }
   }
 
-  if (body.auto_pr_merge_enabled !== undefined) {
+  if (body.pr_workflow_enabled !== undefined) {
     touched = true;
-    const value = body.auto_pr_merge_enabled ? '1' : '0';
-    const ok = writeProjectFieldYaml(projectName, 'auto_pr_merge_enabled', value);
+    const value = body.pr_workflow_enabled ? '1' : '0';
+    const ok = writeProjectFieldYaml(projectName, 'pr_workflow_enabled', value);
     if (!ok) {
       return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
     }

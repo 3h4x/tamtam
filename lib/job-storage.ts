@@ -190,7 +190,7 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
   }
 }
 
-async function getProjectPipelineConfig(projectName: string): Promise<{ autoCommitEnabled: boolean; autoPushEnabled: boolean; releaseAfterRun: boolean; autoPrMergeEnabled: boolean }> {
+async function getProjectPipelineConfig(projectName: string): Promise<{ autoCommitEnabled: boolean; autoPushEnabled: boolean; releaseAfterRun: boolean; autoPrMergeEnabled: boolean; prWorkflowEnabled: boolean }> {
   try {
     const { getProjectTestConfig } = await import('./scheduling');
     const cfg = getProjectTestConfig(projectName);
@@ -199,9 +199,10 @@ async function getProjectPipelineConfig(projectName: string): Promise<{ autoComm
       autoPushEnabled: !!cfg?.autoPushEnabled,
       releaseAfterRun: !!cfg?.releaseAfterRun,
       autoPrMergeEnabled: !!cfg?.autoPrMergeEnabled,
+      prWorkflowEnabled: !!cfg?.prWorkflowEnabled,
     };
   } catch {
-    return { autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false, autoPrMergeEnabled: false };
+    return { autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false, autoPrMergeEnabled: false, prWorkflowEnabled: false };
   }
 }
 
