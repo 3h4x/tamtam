@@ -4,13 +4,13 @@ import { resolveProjectPath, clearProjectDataCache } from './project-data';
 import { invalidateProject } from './gh-status';
 import { exec } from './shell';
 import { getSettings } from './config';
-import { getImproveConfig, setProjectPushResult } from './scheduling';
+import { getImproveConfig, setProjectPushResult, getProjectTestConfig } from './scheduling';
 import { buildDiffContext } from './diff-context';
 import { createJob, markDone, updateJob, listJobs } from './job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 
 export type PushResult =
-  | { ok: true; commitSha: string; message: string }
+  | { ok: true; commitSha: string; message: string; prUrl?: string }
   | { ok: false; status: number; detail: string; blockingJobId?: string };
 
 // Matches any conventional commit title with a non-trivial description (3+ chars).
@@ -147,6 +147,10 @@ export async function startProjectPush(projectName: string, opts: { commitOnly?:
     setProjectPushResult(projectName, result.ok ? null : result.detail);
   } catch {}
   if (result.ok) {
+    if (result.prUrl) {
+      job.contextMeta = JSON.stringify({ prUrl: result.prUrl });
+      updateJob(job);
+    }
     invalidateProject(projectName);
     clearProjectDataCache();
     append(`\n# push ok — ${'commitSha' in result && result.commitSha ? result.commitSha : 'no-op'}\n${result.message}\n`);
@@ -217,16 +221,20 @@ async function runPush(
   log: (s: string) => void,
   opts: { commitOnly?: boolean } = {},
 ): Promise<PushResult> {
-  // If we have issue context and are currently on the default branch, switch
-  // to a feature branch BEFORE committing. Otherwise the commit lands on main,
+  // If we have issue context or PR pipeline mode is on, ensure we're on a
+  // feature branch BEFORE committing. Otherwise the commit lands on main,
   // the subsequent PR attempt produces an empty diff, and GH rejects it.
   const issueCtx = findIssueContext(projectName);
-  if (issueCtx) {
+  const projectConfig = getProjectTestConfig(projectName);
+  // PR pipeline only applies when there's no issue context (issue context has its own branch logic)
+  const prPipeline = !issueCtx && (projectConfig?.prPipeline ?? false);
+
+  if (issueCtx || prPipeline) {
     const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
     const currentBranch = branchR.stdout.trim();
     const mainBranch = await detectMainBranch(projPath);
     if (!currentBranch || currentBranch === mainBranch) {
-      const featureBranch = issueBranchName(issueCtx);
+      const featureBranch = issueCtx ? issueBranchName(issueCtx) : prPipelineBranchName();
       log(`\n# on ${currentBranch || '(detached)'} — switching to ${featureBranch} before commit\n`);
       const coR = await exec('git', ['-C', projPath, 'checkout', '-b', featureBranch], { timeout: 10000 });
       if (coR.stdout) log(coR.stdout);
@@ -237,7 +245,7 @@ async function runPush(
         if (coExistingR.stdout) log(coExistingR.stdout);
         if (coExistingR.stderr) log(coExistingR.stderr);
         if (coExistingR.exitCode !== 0) {
-          return { ok: false, status: 500, detail: `Failed to create issue branch ${featureBranch}: ${coR.stderr || coR.stdout}` };
+          return { ok: false, status: 500, detail: `Failed to create feature branch ${featureBranch}: ${coR.stderr || coR.stdout}` };
         }
       }
     }
@@ -378,7 +386,13 @@ async function runPush(
   // If this session was started from a GitHub issue, create a PR that closes it
   if (issueCtx) {
     const prUrl = await createIssuePR(projPath, log, issueCtx);
-    return { ok: true, commitSha, message: prUrl ? `PR created: ${prUrl}` : 'pushed (PR creation failed — see log)' };
+    return { ok: true, commitSha, prUrl: prUrl ?? undefined, message: prUrl ? `PR created: ${prUrl}` : 'pushed (PR creation failed — see log)' };
+  }
+
+  // PR pipeline mode: create a PR from the feature branch into main
+  if (prPipeline) {
+    const prUrl = await createPipelinePR(projPath, log);
+    return { ok: true, commitSha, prUrl: prUrl ?? undefined, message: prUrl ? `PR created: ${prUrl}` : 'pushed (PR creation failed — see log)' };
   }
 
   return { ok: true, commitSha, message: 'pushed' };
@@ -426,7 +440,7 @@ async function createIssuePR(
   }
 
   // Create the PR via gh cli
-  const prTitle = `Fix: ${issue.title}`;
+  const prTitle = buildPrTitle(issue.title);
   const prBody = `Closes #${issue.number}\n\nImplemented via TamTam from issue [#${issue.number}](https://github.com/${issue.repo}/issues/${issue.number}).`;
   log(`\n# creating PR for issue #${issue.number}: "${prTitle}"\n`);
 
@@ -448,7 +462,61 @@ async function createIssuePR(
   // gh pr create prints the URL on stdout
   const prUrl = prR.stdout.trim().split('\n').find(l => l.startsWith('https://')) ?? prR.stdout.trim();
   log(`\n# PR created: ${prUrl}\n`);
+
+  // Return to main branch so the project isn't left on the feature branch
+  log(`\n# checking out ${mainBranch}\n`);
+  const coR = await exec('git', ['-C', projPath, 'checkout', mainBranch], { timeout: 10000 });
+  if (coR.stdout) log(coR.stdout);
+  if (coR.stderr) log(coR.stderr);
+
   return prUrl || null;
+}
+
+function prPipelineBranchName(): string {
+  const ts = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+  return `tamtam/${ts}`;
+}
+
+async function createPipelinePR(projPath: string, log: (s: string) => void): Promise<string | null> {
+  const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+  const currentBranch = branchR.stdout.trim();
+  const mainBranch = await detectMainBranch(projPath);
+
+  // Derive PR title from the most recent commit subject
+  const logR = await exec('git', ['-C', projPath, 'log', '-1', '--pretty=%s'], { timeout: 5000 });
+  const subject = logR.stdout.trim() || 'chore: tamtam update';
+  const prTitle = buildPrTitle(subject);
+  const prBody = `Automated PR created by TamTam from branch \`${currentBranch}\`.`;
+  log(`\n# creating PR: "${prTitle}"\n`);
+
+  const prR = await exec('gh', ['pr', 'create', '--title', prTitle, '--body', prBody, '--base', mainBranch], { cwd: projPath, timeout: 30000 });
+  if (prR.stdout) log(prR.stdout);
+  if (prR.stderr) log(prR.stderr);
+
+  if (prR.exitCode !== 0) {
+    log(`\n# PR creation failed\n`);
+    return null;
+  }
+
+  const prUrl = prR.stdout.trim().split('\n').find(l => l.startsWith('https://')) ?? prR.stdout.trim();
+  log(`\n# PR created: ${prUrl}\n`);
+
+  // Return to main branch so the project isn't left on the feature branch
+  log(`\n# checking out ${mainBranch}\n`);
+  const coR = await exec('git', ['-C', projPath, 'checkout', mainBranch], { timeout: 10000 });
+  if (coR.stdout) log(coR.stdout);
+  if (coR.stderr) log(coR.stderr);
+
+  return prUrl || null;
+}
+
+function buildPrTitle(issueTitle: string): string {
+  const trimmed = issueTitle.trim();
+  // If the issue title is already a valid conventional commit, use it as-is
+  if (CONV_RE.test(trimmed)) return trimmed;
+  // Strip any existing broken type prefix (e.g. "Fix: ", "Feat: ") and re-apply
+  const stripped = trimmed.replace(/^[A-Za-z]+:\s*/, '');
+  return `fix: ${stripped}`;
 }
 
 async function detectMainBranch(projPath: string): Promise<string> {

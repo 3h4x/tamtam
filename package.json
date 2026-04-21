@@ -7,6 +7,7 @@
     "predev": "pm2 delete tamtam 2>/dev/null; lsof -ti:1337 | xargs kill -9 2>/dev/null; true",
     "dev": "pm2 start 'next dev --port 1337' --name tamtam --cwd . && pm2 logs tamtam",
     "stop": "pm2 stop tamtam",
+    "prerestart": "lsof -ti:1337 | xargs -I {} ps -p {} -o pid=,command= 2>/dev/null | awk '/next-server/ {print $1}' | xargs kill -9 2>/dev/null; true",
     "restart": "pm2 restart tamtam",
     "logs": "pm2 logs tamtam",
     "build": "NODE_ENV=production next build",

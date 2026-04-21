@@ -1325,6 +1325,9 @@ export function ProjectDetailPage({
                   : `${project.totalChanges} uncommitted change${project.totalChanges === 1 ? '' : 's'} — need LGTM review to proceed`
 
             const openPushJob = pushJob ? () => router.push(`/project/${name}/terminal?job=${encodeURIComponent(pushJob.id)}`) : null
+            const pushPrUrl: string | null = (() => {
+              try { return pushJob?.context_meta ? (JSON.parse(pushJob.context_meta) as { prUrl?: string }).prUrl ?? null : null } catch { return null }
+            })()
             // If a push job is running, show commit/push as running and let
             // clicking either step open its log — it's a single tracked job
             // that does both git commit and git push.
@@ -1397,6 +1400,18 @@ export function ProjectDetailPage({
                         >
                           {retryingPush ? '…' : '↻'}
                         </button>
+                      )}
+                      {s.label === 'push' && pushPrUrl && (
+                        <a
+                          href={pushPrUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] px-1.5 py-0.5 rounded border border-accent/40 text-accent hover:bg-accent/10 font-mono leading-none"
+                          title={`Open PR: ${pushPrUrl}`}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          PR ↗
+                        </a>
                       )}
                       {i < steps.length - 1 && <span className="text-text-tertiary mx-1">→</span>}
                     </div>

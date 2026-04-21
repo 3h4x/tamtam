@@ -32,6 +32,7 @@ describe('startProjectPush — push result tracking', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,
@@ -117,6 +118,7 @@ describe('startProjectPush — push result tracking', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,
@@ -456,6 +458,7 @@ describe('startProjectPush — push result tracking', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,
@@ -481,6 +484,7 @@ describe('startProjectPush — push result tracking', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,
@@ -515,6 +519,7 @@ describe('startProjectPush — push result tracking', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,
@@ -550,6 +555,7 @@ describe('startProjectPush — push result tracking', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,
@@ -581,7 +587,8 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, 'abc1234'))                   // git rev-parse
       .mockImplementationOnce(() => resp(0, 'fix/issue-42-fix-login-bug')) // git branch --show-current (in createIssuePR)
       .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main'))  // git symbolic-ref (in createIssuePR)
-      .mockImplementationOnce(() => resp(0, 'https://github.com/owner/repo/pull/99\n')); // gh pr create
+      .mockImplementationOnce(() => resp(0, 'https://github.com/owner/repo/pull/99\n')) // gh pr create
+      .mockImplementationOnce(() => resp(0));                              // git checkout main
 
     const { startProjectPush: fn } = await import('@/lib/start-push');
     const r = await fn('proj');
@@ -629,6 +636,7 @@ describe('generateCommitMessage', () => {
     vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     ({ generateCommitMessage } = await import('@/lib/start-push'));
   });
@@ -787,6 +795,7 @@ describe('generateCommitMessage', () => {
     }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     const { generateCommitMessage: fn } = await import('@/lib/start-push');
 
@@ -865,6 +874,7 @@ describe('launchProjectPush — fire-and-forget', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp/test-logs' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,
@@ -965,5 +975,222 @@ describe('launchProjectPush — fire-and-forget', () => {
     execMock.mockResolvedValue(resp(0));
     launchProjectPush('proj');
     expect(mkdirSyncMock).toHaveBeenCalledWith('/tmp/test-logs', { recursive: true });
+  });
+});
+
+describe('startProjectPush — PR pipeline mode', () => {
+  let startProjectPush: typeof import('@/lib/start-push').startProjectPush;
+  let execMock: ReturnType<typeof vi.fn>;
+  let setProjectPushResultMock: ReturnType<typeof vi.fn>;
+  let createJobMock: ReturnType<typeof vi.fn>;
+  let markDoneMock: ReturnType<typeof vi.fn>;
+  let updateJobMock: ReturnType<typeof vi.fn>;
+
+  function resp(exitCode: number, stdout = '', stderr = '') {
+    return Promise.resolve({ exitCode, stdout, stderr });
+  }
+
+  function setupMocks(prPipeline: boolean, listJobsReturn: unknown[] = []) {
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+      clearProjectDataCache: vi.fn(),
+    }));
+    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue({
+        testCommand: null, testCronEnabled: false, testCronSchedule: null,
+        autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false,
+        prPipeline,
+      }),
+    }));
+    vi.doMock('@/lib/job-storage', () => ({
+      createJob: createJobMock,
+      markDone: markDoneMock,
+      updateJob: updateJobMock,
+      listJobs: vi.fn().mockReturnValue(listJobsReturn),
+    }));
+    vi.doMock('@/lib/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    execMock = vi.fn();
+    setProjectPushResultMock = vi.fn();
+    createJobMock = vi.fn().mockImplementation((project: string, kind: string, pid: number) => ({
+      id: `${project}-${kind}-test-id`, project, kind, pid, logPath: null, prompt: null,
+      startedAt: 0, finishedAt: null, exitCode: null, seen: false,
+      durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+      contextMeta: null, userPrompt: null,
+    }));
+    markDoneMock = vi.fn().mockResolvedValue(undefined);
+    updateJobMock = vi.fn();
+  });
+
+  afterEach(() => { vi.resetModules(); });
+
+  it('creates a feature branch and PR when pr_pipeline is on and currently on main', async () => {
+    setupMocks(true);
+    ({ startProjectPush } = await import('@/lib/start-push'));
+
+    execMock
+      .mockImplementationOnce(() => resp(0, 'master'))                     // git branch --show-current (pre-commit branch check)
+      .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/master')) // git symbolic-ref (detectMainBranch)
+      .mockImplementationOnce(() => resp(0))                               // git checkout -b tamtam/<ts>
+      .mockImplementationOnce(() => resp(0))                               // git add -A
+      .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))                // git diff --cached --name-status (hasStaged)
+      .mockImplementationOnce(() => resp(0, 'M\tfoo.ts\n'))                // git diff --cached --stat (commit msg)
+      .mockImplementationOnce(() => resp(0, 'diff --git a/foo.ts'))        // git diff --cached --no-color (commit msg)
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))          // claude commit msg
+      .mockImplementationOnce(() => resp(0))                               // git commit
+      .mockImplementationOnce(() => resp(0, '# branch.head tamtam/20260421\n# branch.ab +0 -0\n')) // behind check
+      .mockImplementationOnce(() => resp(0))                               // git push
+      .mockImplementationOnce(() => resp(0, 'abc1234'))                    // git rev-parse
+      .mockImplementationOnce(() => resp(0, 'tamtam/20260421'))            // git branch --show-current (createPipelinePR)
+      .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/master')) // git symbolic-ref (createPipelinePR detectMainBranch)
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))          // git log -1 --pretty=%s
+      .mockImplementationOnce(() => resp(0, 'https://github.com/o/r/pull/7\n')) // gh pr create
+      .mockImplementationOnce(() => resp(0));                              // git checkout master
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.message).toContain('PR created');
+      expect(r.message).toContain('https://github.com/o/r/pull/7');
+    }
+    const checkoutCalls = execMock.mock.calls.filter(
+      ([cmd, args]: any) => cmd === 'git' && args.includes('checkout')
+    );
+    // First checkout creates the feature branch (-b), second returns to master
+    expect(checkoutCalls.length).toBeGreaterThanOrEqual(2);
+    const returnToMain = checkoutCalls.find(([, args]: any) => args.includes('master') && !args.includes('-b'));
+    expect(returnToMain).toBeTruthy();
+  });
+
+  it('does not create a feature branch when already on a feature branch in pr_pipeline mode', async () => {
+    setupMocks(true);
+    ({ startProjectPush } = await import('@/lib/start-push'));
+
+    execMock
+      .mockImplementationOnce(() => resp(0, 'tamtam/20260421123456'))       // git branch --show-current (already on feature branch)
+      .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/master'))  // detectMainBranch
+      .mockImplementationOnce(() => resp(0))                                // git add -A
+      .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))                 // git diff --cached --name-status
+      .mockImplementationOnce(() => resp(0, 'M\tfoo.ts\n'))                 // git diff --cached --stat
+      .mockImplementationOnce(() => resp(0, 'diff --git a/foo.ts'))         // git diff --cached --no-color
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))           // claude commit msg
+      .mockImplementationOnce(() => resp(0))                                // git commit
+      .mockImplementationOnce(() => resp(0, '# branch.ab +0 -0\n'))         // behind check
+      .mockImplementationOnce(() => resp(0))                                // git push
+      .mockImplementationOnce(() => resp(0, 'abc1234'))                     // git rev-parse
+      .mockImplementationOnce(() => resp(0, 'tamtam/20260421123456'))       // git branch --show-current (createPipelinePR)
+      .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/master'))  // detectMainBranch (createPipelinePR)
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))           // git log -1 --pretty=%s
+      .mockImplementationOnce(() => resp(0, 'https://github.com/o/r/pull/8\n')) // gh pr create
+      .mockImplementationOnce(() => resp(0));                               // git checkout master
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.message).toContain('PR created');
+
+    // No checkout -b should have been called (we were already on the feature branch)
+    const createBranchCalls = execMock.mock.calls.filter(
+      ([cmd, args]: any) => cmd === 'git' && args.includes('-b')
+    );
+    expect(createBranchCalls).toHaveLength(0);
+  });
+
+  it('returns ok with degraded message when PR creation fails in pr_pipeline mode', async () => {
+    setupMocks(true);
+    ({ startProjectPush } = await import('@/lib/start-push'));
+
+    execMock
+      .mockImplementationOnce(() => resp(0, 'master'))                     // git branch --show-current
+      .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/master')) // detectMainBranch
+      .mockImplementationOnce(() => resp(0))                               // git checkout -b
+      .mockImplementationOnce(() => resp(0))                               // git add -A
+      .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))                // git diff --cached
+      .mockImplementationOnce(() => resp(0, 'M\tfoo.ts\n'))                // git diff --stat
+      .mockImplementationOnce(() => resp(0, 'diff --git a/foo.ts'))        // git diff content
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))          // claude commit msg
+      .mockImplementationOnce(() => resp(0))                               // git commit
+      .mockImplementationOnce(() => resp(0, '# branch.ab +0 -0\n'))        // behind check
+      .mockImplementationOnce(() => resp(0))                               // git push
+      .mockImplementationOnce(() => resp(0, 'abc1234'))                    // git rev-parse
+      .mockImplementationOnce(() => resp(0, 'tamtam/20260421'))            // git branch --show-current (createPipelinePR)
+      .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/master')) // detectMainBranch (createPipelinePR)
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))          // git log -1
+      .mockImplementationOnce(() => resp(1, '', 'gh: not authenticated')); // gh pr create fails
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.message).toContain('PR creation failed');
+  });
+
+  it('does not create a PR when pr_pipeline is off (direct push)', async () => {
+    setupMocks(false);
+    ({ startProjectPush } = await import('@/lib/start-push'));
+
+    execMock
+      .mockImplementationOnce(() => resp(0))                              // git add -A
+      .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))               // git diff --cached
+      .mockImplementationOnce(() => resp(0, 'M\tfoo.ts\n'))               // git diff --stat
+      .mockImplementationOnce(() => resp(0, 'diff --git a/foo.ts'))       // git diff content
+      .mockImplementationOnce(() => resp(0, 'feat: add feature'))         // claude commit msg
+      .mockImplementationOnce(() => resp(0))                              // git commit
+      .mockImplementationOnce(() => resp(0, '# branch.ab +0 -0\n'))       // behind check
+      .mockImplementationOnce(() => resp(0))                              // git push
+      .mockImplementationOnce(() => resp(0, 'abc1234'));                  // git rev-parse
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.message).toBe('pushed');
+
+    const ghCalls = execMock.mock.calls.filter(([cmd]: any) => cmd === 'gh');
+    expect(ghCalls).toHaveLength(0);
+  });
+
+  it('issue context takes precedence over pr_pipeline — uses issue branch name', async () => {
+    setupMocks(true, [{
+      id: 'run-job-1', project: 'proj', kind: 'run', startedAt: Date.now() / 1000,
+      ghIssueNumber: 55, ghIssueRepo: 'owner/repo', ghIssueTitle: 'Fix navbar',
+    }]);
+    ({ startProjectPush } = await import('@/lib/start-push'));
+
+    execMock
+      .mockImplementationOnce(() => resp(0, 'master'))                     // git branch --show-current (pre-commit)
+      .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/master')) // detectMainBranch
+      .mockImplementationOnce(() => resp(0))                               // git checkout -b fix/issue-55-fix-navbar
+      .mockImplementationOnce(() => resp(0))                               // git add -A
+      .mockImplementationOnce(() => resp(0, 'A\tfoo.ts\n'))                // git diff --cached
+      .mockImplementationOnce(() => resp(0, 'M\tfoo.ts\n'))                // git diff --stat
+      .mockImplementationOnce(() => resp(0, 'diff --git a/foo.ts'))        // git diff content
+      .mockImplementationOnce(() => resp(0, 'fix: navbar issue'))          // claude commit msg
+      .mockImplementationOnce(() => resp(0))                               // git commit
+      .mockImplementationOnce(() => resp(0, '# branch.ab +0 -0\n'))        // behind check
+      .mockImplementationOnce(() => resp(0))                               // git push
+      .mockImplementationOnce(() => resp(0, 'abc1234'))                    // git rev-parse
+      .mockImplementationOnce(() => resp(0, 'fix/issue-55-fix-navbar'))    // git branch --show-current (createIssuePR)
+      .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/master')) // detectMainBranch (createIssuePR)
+      .mockImplementationOnce(() => resp(0, 'https://github.com/owner/repo/pull/55\n')) // gh pr create
+      .mockImplementationOnce(() => resp(0));                              // git checkout master
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.message).toContain('PR created');
+
+    // Branch name should be the issue branch, not a tamtam/ timestamp branch
+    const checkoutNewBranch = execMock.mock.calls.find(
+      ([cmd, args]: any) => cmd === 'git' && args.includes('-b')
+    );
+    expect(checkoutNewBranch![1]).toContain('fix/issue-55-fix-navbar');
   });
 });

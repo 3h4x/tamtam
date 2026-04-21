@@ -174,6 +174,9 @@ try {
 try {
   sqlite.exec('ALTER TABLE projects ADD COLUMN release_after_run INTEGER DEFAULT 0');
 } catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN pr_pipeline INTEGER DEFAULT 0');
+} catch {}
 
 // Migrate: add GitHub issue linking columns to jobs
 try {

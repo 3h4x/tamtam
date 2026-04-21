@@ -111,6 +111,55 @@ Per-project boolean flag on the `projects` table (off by default).
 
 ---
 
+## `pr_pipeline` — Protected Branch Mode
+
+Per-project boolean flag on the `projects` table (off by default). Controls whether the **push** step commits directly to the default branch or routes changes through a pull request.
+
+### Direct push (default, `pr_pipeline = false`)
+
+```
+test → review → commit → git push → done
+```
+
+Changes are committed and pushed straight to the current branch (usually `main`/`master`). Suitable for small repos or repos without branch protection.
+
+### PR pipeline (`pr_pipeline = true`)
+
+```
+test → review → commit → push feature branch → gh pr create → checkout main → done
+```
+
+When a push is triggered and the project has `pr_pipeline` enabled:
+
+1. **Branch**: If currently on the default branch (`main`/`master`), a timestamped feature branch `tamtam/<yyyymmddHHMMSS>` is created. If already on a feature branch, it is reused.
+2. **Commit**: Changes are committed to the feature branch exactly as in direct-push mode (AI-generated conventional commit message).
+3. **Push**: The feature branch is pushed to the remote (with `-u origin <branch>` if no upstream exists).
+4. **PR**: `gh pr create` opens a PR from the feature branch into the default branch. The PR title is derived from the most recent commit subject and validated against the conventional commits format.
+5. **Checkout**: After PR creation, the local repo is checked out back to the default branch so the project is never left on a stale feature branch.
+
+### Issue context takes precedence
+
+When a run was started from a GitHub issue (the job has `ghIssueNumber` set), issue-context branching (`fix/issue-N-title`) and PR creation always apply regardless of the `pr_pipeline` flag. The flag only changes behavior for regular (non-issue) push runs.
+
+### Push result
+
+On success, `PushResult.message` contains `PR created: <url>`. If PR creation fails (e.g. `gh` not authenticated), the result is still `ok: true` with message `pushed (PR creation failed — see log)` — the commits and push succeeded; only the PR step failed.
+
+### Configuration
+
+Set via `PATCH /api/projects/by-project/[name]/config`:
+```json
+{ "pr_pipeline": true }
+```
+
+Or toggle in the project config UI (Project → Config tab).
+
+### Required tooling
+
+`gh` (GitHub CLI) must be installed and authenticated (`gh auth login`) for PR creation to work. The pipeline does not fail if `gh` is missing — PR creation is best-effort; a degraded message is returned.
+
+---
+
 ## Hook rejection detection (`isHookRejection`)
 
 Checks the push job log for strings from husky, lint-staged, eslint, pre-commit hooks, and pre-push hooks. If matched, the push failure triggers `fix-push` instead of a hard release failure.

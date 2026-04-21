@@ -116,6 +116,7 @@ These live on the `projects` table row, accessed via `GET/PATCH /api/projects/by
 |-------|------|---------|--------|
 | `testCommand` | string | `''` | Command run by the test step; auto-detected from `package.json`/`Makefile`/etc. if blank |
 | `autoPushEnabled` | boolean | `false` | Enables pipeline chaining (test→review→fix→push) outside of a formal Release run |
+| `prPipeline` | boolean | `false` | When true, the push step creates a feature branch + PR instead of pushing directly to main. See `docs/PIPELINE.md` → PR pipeline mode |
 | `testCronEnabled` | boolean | `false` | Scheduled test runs |
 | `testCronSchedule` | string | `''` | Cron interval for scheduled tests |
 | `customActions` | JSON | `[]` | Per-project buttons (name, command, color) shown in the UI |
@@ -128,6 +129,7 @@ These live on the `projects` table row, accessed via `GET/PATCH /api/projects/by
 
 | Goal | Setting(s) to change |
 |------|----------------------|
+| Protect main branch — route pushes through PRs | `prPipeline = true` on the project |
 | Point to a different workspace | `workspace_path` |
 | Use a different Claude binary | `claude_bin` |
 | Make reviews more lenient | `review_verdict_rules` — soften NEEDS ATTENTION criteria |

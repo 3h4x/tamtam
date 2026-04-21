@@ -15,7 +15,7 @@ Each step is pluggable per project and coordinated by completion hooks in `lib/j
 - **test** — runs the project's test command (auto-detected from `package.json`/`pyproject.toml`/`Package.swift`/`Cargo.toml`/`go.mod`/`Makefile:test` or user-configured). Skipped if none. If tests pass and there are no uncommitted changes, the pipeline short-circuits directly to push (skipping review).
 - **review** — Claude reads the uncommitted diff and emits a verdict: `LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP` (verdict rules are configurable in Settings).
 - **fix** — on `NEEDS ATTENTION` / `DO NOT SHIP`, Claude resumes the review session and applies fixes. Capped at 3 iterations per 30-minute window to prevent loops. On success it chains back to review.
-- **commit + push** — on `LGTM`, staged changes are committed with a Claude-generated message (respecting the `commit_style` setting) and pushed. Only tracked file modifications are staged automatically (untracked files are left alone to avoid sweeping up secrets).
+- **commit + push** — on `LGTM`, staged changes are committed with a Claude-generated message (respecting the `commit_style` setting) and pushed. When `pr_pipeline` is on (per-project config, off by default), the push step creates a timestamped feature branch, pushes it, opens a PR via `gh pr create`, then checks out main — instead of pushing directly to the default branch. Useful for repos with protected main branches.
 
 The **🚀 Release** button triggers the pipeline at the right starting step. When `auto_push_enabled` is on (per-project config, off by default), the chain continues automatically from one step to the next. The pipeline strip in the Terminal tab shows the live state of each step (`○` pending, spinner running, `✓` done, `!` needs attention, `✗` failed); clicking a step re-triggers or opens its log.
 
@@ -61,12 +61,35 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 
 **Never run `next dev` directly — always use PM2 via the scripts above.**
 
+## Investigating a misbehaving dev server
+
+The server runs as a PM2-managed `next dev` on port 1337. When it misbehaves (stale code, 500s, "already running" lies, release pipeline hangs), work through this in order:
+
+1. **Is the pm2 entry actually the process serving requests?**
+   ```sh
+   pm2 info tamtam | grep -E "status|uptime|restarts"
+   lsof -ti :1337 | xargs -I {} ps -p {} -o pid,ppid,command
+   ```
+   If `pm2 info` shows `errored` / high `restarts` but `/api/health` returns 200, there is an **orphaned `next-server`** (PPID = PM2 god daemon) serving stale code. `pm2 restart` will fail with `EADDRINUSE` in a loop until the orphan is killed. Fix: `kill <orphan-pid>` (just the orphan, not the god daemon), then `pm2 restart tamtam` — port is free, pm2 boots fresh code. `pm2 delete tamtam` + `pnpm dev` also works but removes the entry.
+
+2. **Are logs actually reaching you?** `pm2 logs tamtam --nostream --raw --lines 500` dumps without ANSI escapes. EADDRINUSE and `Unexpected end of JSON input` loops drown out real errors — grep them out (`grep -vE "EADDRINUSE|Unexpected end of JSON|^\s*at |listen \:\:\:1337"`) to surface the underlying throw.
+
+3. **Schema drift** — `no such column: "<x>"` means `lib/db/schema.ts` has a field that `lib/db/index.ts` never added via `ALTER TABLE`. Every DB-hitting route 500s until the migration is appended. Add `try { sqlite.exec('ALTER TABLE <t> ADD COLUMN <x> <TYPE> DEFAULT <v>'); } catch {}` (the `try/catch` makes it idempotent), then restart.
+
+4. **Stale caches after DB edits via `sqlite3` CLI** — `job-storage.ts` loads the jobs table into `jobsCache` once (`loaded` flag gates re-reads). Direct DB writes don't invalidate it, so APIs keep seeing the pre-edit state until the server restarts. Restart after any manual `sqlite3 data/db/tamtam.db "UPDATE …"`.
+
+5. **Stuck release / pipeline** — check the lock and any unfinished pipeline jobs:
+   ```sh
+   sqlite3 data/db/tamtam.db "SELECT * FROM pipeline_locks; SELECT id, kind, started_at, finished_at FROM jobs WHERE finished_at IS NULL AND kind IN ('release','test','review','fix','push','fix-push');"
+   ```
+   A lock pointing at a finished job is stale (30 min recovery is automatic but slow). To force-release: `DELETE FROM pipeline_locks WHERE project='<name>';` and `UPDATE jobs SET finished_at=strftime('%s','now'), exit_code=1 WHERE id='<stuck-id>';` — then restart so `jobsCache` reloads (see #4). Also `pm2 delete <stuck-release-pm2-name>` if the release monitor script is still online.
+
 ## Architecture
 - `app/` — Next.js pages and API route handlers
 - `components/` — React client components
 - `hooks/` — Custom React hooks
 - `lib/` — Server-side business logic
-- `lib/db/` — Drizzle schema and connection (tables: settings, projects, jobs, gh_status, gh_issues_cache, skills, agents)
+- `lib/db/` — Drizzle schema and connection (tables: settings, projects, jobs, gh_status, gh_issues_cache, skills, agents, pipeline_locks)
 - `skills/` — claude-skills submodule
 - `data/` — SQLite database (gitignored)
 - `__tests__/` — vitest unit tests

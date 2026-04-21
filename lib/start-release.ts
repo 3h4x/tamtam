@@ -9,7 +9,7 @@ import { listJobs, probeJobStatus, createJob, updateJob, getVerdict, markDone } 
 import { isReviewed } from './git-utils';
 import { exec } from './shell';
 import { getImproveConfig } from './scheduling';
-import { acquireLock, getLock } from './pipeline-lock';
+import { acquireLock, getLock, releaseLock } from './pipeline-lock';
 
 const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push', 'release']);
 
@@ -177,10 +177,21 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
   // single button while still being smart about what to do.
   const skipToPush = await hasFreshLgtm(projectName, projPath);
 
+  // If any of the step-launchers below fails, we already own the lock and
+  // the release meta-job — both must be torn down or they'll linger as
+  // "running" until the 30min stale-recovery kicks in, blocking retries.
+  const abortRelease = async () => {
+    try {
+      const jobRow = listJobs().find(j => j.id === releaseJobId);
+      if (jobRow && jobRow.finishedAt === null) await markDone(jobRow, 1);
+    } catch {}
+    try { releaseLock(projectName, releaseJobId); } catch {}
+  };
+
   // Fresh LGTM or only unpushed commits (nothing to test/review) — push directly.
   if (skipToPush || !changes) {
     const r = await startProjectPush(projectName);
-    if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+    if (!r.ok) { await abortRelease(); return { ok: false, status: r.status, detail: r.detail }; }
     return { ok: true, step: 'push', releaseJobId, message: r.message };
   }
 
@@ -188,12 +199,12 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
   const testCmd = detectTestCommand(projPath, projectName);
   if (testCmd) {
     const r = await startProjectTest(projectName);
-    if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+    if (!r.ok) { await abortRelease(); return { ok: false, status: r.status, detail: r.detail }; }
     return { ok: true, step: 'test', jobId: r.jobId, releaseJobId, message: `Running tests (${r.testCmd})` };
   }
 
   const r = await startProjectReview(projectName);
-  if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+  if (!r.ok) { await abortRelease(); return { ok: false, status: r.status, detail: r.detail }; }
   return { ok: true, step: 'review', jobId: r.jobId, releaseJobId, message: 'Running review' };
 }
 

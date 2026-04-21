@@ -8,6 +8,7 @@ import {
   resolveTargets,
   writePriorityYaml,
   writeProjectFieldYaml,
+  getProjectTestConfig,
 } from '@/lib/scheduling';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
@@ -34,6 +35,7 @@ function createTestDb() {
       auto_commit_enabled INTEGER DEFAULT 0,
       auto_push_enabled INTEGER DEFAULT 0,
       release_after_run INTEGER DEFAULT 0,
+      pr_pipeline INTEGER DEFAULT 0,
       last_push_error TEXT,
       last_push_at REAL
     );
@@ -260,6 +262,93 @@ describe('writeProjectFieldYaml', () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
     const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling');
     expect(fn('proj1', 'unknown_field', 'value')).toBe(true);
+  });
+
+  it('updates pr_pipeline to true when value is "1"', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling');
+    expect(fn('proj1', 'pr_pipeline', '1')).toBe(true);
+    const row = testDb.db.select().from(schema.projects).get();
+    expect(row?.prPipeline).toBe(true);
+  });
+
+  it('updates pr_pipeline to true when value is "true"', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling');
+    expect(fn('proj1', 'pr_pipeline', 'true')).toBe(true);
+    const row = testDb.db.select().from(schema.projects).get();
+    expect(row?.prPipeline).toBe(true);
+  });
+
+  it('updates pr_pipeline to false when value is "0"', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, prPipeline: true }).run();
+    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling');
+    expect(fn('proj1', 'pr_pipeline', '0')).toBe(true);
+    const row = testDb.db.select().from(schema.projects).get();
+    expect(row?.prPipeline).toBe(false);
+  });
+});
+
+describe('getProjectTestConfig', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/config', () => ({
+      getSettings: vi.fn().mockReturnValue({
+        workspace_path: '/workspace',
+        github_owner: '',
+        claude_bin: '~/.local/bin/claude',
+        log_dir: '~/logs',
+        frequency: '1h',
+        daytime: false,
+        weekends: false,
+        launchagent_prefix: 'com.tamtam',
+      }),
+    }));
+  });
+
+  afterEach(() => { vi.resetModules(); });
+
+  it('returns null when project does not exist', async () => {
+    const { getProjectTestConfig: fn } = await import('@/lib/scheduling');
+    expect(fn('nonexistent')).toBeNull();
+  });
+
+  it('returns prPipeline=false by default', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { getProjectTestConfig: fn } = await import('@/lib/scheduling');
+    const cfg = fn('proj1');
+    expect(cfg).not.toBeNull();
+    expect(cfg!.prPipeline).toBe(false);
+  });
+
+  it('returns prPipeline=true when set', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, prPipeline: true }).run();
+    const { getProjectTestConfig: fn } = await import('@/lib/scheduling');
+    const cfg = fn('proj1');
+    expect(cfg!.prPipeline).toBe(true);
+  });
+
+  it('includes all expected fields', async () => {
+    testDb.db.insert(schema.projects).values({
+      name: 'proj1', path: '/p', enabled: true,
+      testCommand: 'pnpm test', testCronEnabled: true, testCronSchedule: '1h',
+      autoCommitEnabled: true, autoPushEnabled: true, releaseAfterRun: true, prPipeline: true,
+    }).run();
+    const { getProjectTestConfig: fn } = await import('@/lib/scheduling');
+    const cfg = fn('proj1');
+    expect(cfg).toEqual(expect.objectContaining({
+      testCommand: 'pnpm test',
+      testCronEnabled: true,
+      testCronSchedule: '1h',
+      autoCommitEnabled: true,
+      autoPushEnabled: true,
+      releaseAfterRun: true,
+      prPipeline: true,
+    }));
   });
 });
 

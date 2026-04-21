@@ -64,6 +64,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
       getLock: vi.fn().mockReturnValue(null),
+      releaseLock: vi.fn(),
     }));
 
     ({ startRelease } = await import('@/lib/start-release'));
@@ -404,5 +405,128 @@ describe('startRelease — release pipeline entry decision tree', () => {
       expect(r.detail).toContain('already running');
       expect(r.blockingJobId).toBe('blocking-job-42');
     }
+  });
+});
+
+describe('startRelease — abortRelease cleanup on step failure', () => {
+  function makeJob(id: string, project: string) {
+    return {
+      id, project, kind: 'release', pid: 0, logPath: '',
+      prompt: null, startedAt: 0, finishedAt: null, exitCode: null, seen: false,
+      durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+      contextMeta: null, userPrompt: null,
+    };
+  }
+
+  async function setup(opts: {
+    startProjectPushResult?: object;
+    startProjectTestResult?: object;
+    startProjectReviewResult?: object;
+    detectTestCommandResult?: string | null;
+    gitStatus?: string;
+    gitAhead?: string;
+  }) {
+    vi.resetModules();
+
+    const markDoneMock = vi.fn().mockResolvedValue(undefined);
+    const releaseLockMock = vi.fn();
+    const releaseJob = makeJob('release-job-1', 'proj');
+    const createJobMock = vi.fn().mockReturnValue(releaseJob);
+    const listJobsMock = vi.fn().mockReturnValue([releaseJob]);
+    const execMock = vi.fn().mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args.includes('status')) return Promise.resolve({ exitCode: 0, stdout: opts.gitStatus ?? ' M foo.ts\n', stderr: '' });
+      if (cmd === 'git' && args.includes('rev-list')) return Promise.resolve({ exitCode: 0, stdout: opts.gitAhead ?? '0', stderr: '' });
+      if (cmd === 'pm2' && args[0] === 'start') return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+      if (cmd === 'pm2' && args[0] === 'jlist') return Promise.resolve({ exitCode: 0, stdout: '[]', stderr: '' });
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj') }));
+    vi.doMock('@/lib/job-storage', () => ({
+      listJobs: listJobsMock,
+      probeJobStatus: vi.fn().mockResolvedValue('finished'),
+      createJob: createJobMock,
+      updateJob: vi.fn(),
+      getVerdict: vi.fn().mockReturnValue(null),
+      markDone: markDoneMock,
+    }));
+    vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
+    }));
+    vi.doMock('@/lib/start-test', () => ({
+      startProjectTest: vi.fn().mockResolvedValue(opts.startProjectTestResult ?? { ok: true, jobId: 'test-1', testCmd: 'pnpm test' }),
+      detectTestCommand: vi.fn().mockReturnValue(opts.detectTestCommandResult ?? null),
+    }));
+    vi.doMock('@/lib/start-review', () => ({
+      startProjectReview: vi.fn().mockResolvedValue(opts.startProjectReviewResult ?? { ok: true, jobId: 'review-1' }),
+    }));
+    vi.doMock('@/lib/start-push', () => ({
+      startProjectPush: vi.fn().mockResolvedValue(opts.startProjectPushResult ?? { ok: true, commitSha: 'abc', message: 'pushed' }),
+    }));
+    vi.doMock('@/lib/pipeline-lock', () => ({
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj', lockedByJobId: 'release-job-1', acquiredAt: Date.now() / 1000 } }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+      getLock: vi.fn().mockReturnValue(null),
+      releaseLock: releaseLockMock,
+    }));
+
+    const { startRelease: fn } = await import('@/lib/start-release');
+    return { fn, markDoneMock, releaseLockMock };
+  }
+
+  afterEach(() => { vi.resetModules(); });
+
+  it('calls markDone and releaseLock when startProjectPush fails on push-only path', async () => {
+    const { fn, markDoneMock, releaseLockMock } = await setup({
+      gitStatus: '',        // no uncommitted changes → push-only path
+      gitAhead: '1',        // has unpushed commits
+      startProjectPushResult: { ok: false, status: 502, detail: 'remote rejected' },
+    });
+
+    const r = await fn('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(502);
+    expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'release-job-1' }), 1);
+    expect(releaseLockMock).toHaveBeenCalledWith('proj', 'release-job-1');
+  });
+
+  it('calls markDone and releaseLock when startProjectTest fails', async () => {
+    const { fn, markDoneMock, releaseLockMock } = await setup({
+      detectTestCommandResult: 'pnpm test',
+      startProjectTestResult: { ok: false, status: 409, detail: 'tests already running' },
+    });
+
+    const r = await fn('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(409);
+    expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'release-job-1' }), 1);
+    expect(releaseLockMock).toHaveBeenCalledWith('proj', 'release-job-1');
+  });
+
+  it('calls markDone and releaseLock when startProjectReview fails', async () => {
+    const { fn, markDoneMock, releaseLockMock } = await setup({
+      detectTestCommandResult: null,
+      startProjectReviewResult: { ok: false, status: 500, detail: 'review spawn failed' },
+    });
+
+    const r = await fn('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(500);
+    expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'release-job-1' }), 1);
+    expect(releaseLockMock).toHaveBeenCalledWith('proj', 'release-job-1');
+  });
+
+  it('does NOT call releaseLock when step succeeds', async () => {
+    const { fn, releaseLockMock } = await setup({
+      detectTestCommandResult: null,
+      startProjectReviewResult: { ok: true, jobId: 'review-1' },
+    });
+
+    const r = await fn('proj');
+    expect(r.ok).toBe(true);
+    expect(releaseLockMock).not.toHaveBeenCalled();
   });
 });

@@ -35,6 +35,7 @@ export async function GET(
     auto_commit_enabled: testCfg?.autoCommitEnabled ?? false,
     auto_push_enabled: testCfg?.autoPushEnabled ?? false,
     release_after_run: testCfg?.releaseAfterRun ?? false,
+    pr_pipeline: testCfg?.prPipeline ?? false,
     last_push_error: pushResult?.lastPushError ?? null,
     last_push_at: pushResult?.lastPushAt ?? null,
   });
@@ -107,6 +108,15 @@ export async function PATCH(
     touched = true;
     const value = body.release_after_run ? '1' : '0';
     const ok = writeProjectFieldYaml(projectName, 'release_after_run', value);
+    if (!ok) {
+      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
+    }
+  }
+
+  if (body.pr_pipeline !== undefined) {
+    touched = true;
+    const value = body.pr_pipeline ? '1' : '0';
+    const ok = writeProjectFieldYaml(projectName, 'pr_pipeline', value);
     if (!ok) {
       return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
     }

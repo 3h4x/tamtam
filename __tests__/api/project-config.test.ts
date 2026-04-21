@@ -78,6 +78,13 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     expect(data.release_after_run).toBe(false);
   });
 
+  it('returns pr_pipeline=false by default', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.pr_pipeline).toBe(false);
+  });
+
   it('returns auto_push_enabled from config when set', async () => {
     vi.resetModules();
     resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
@@ -86,7 +93,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
       writeProjectFieldYaml: vi.fn().mockReturnValue(true),
-      getProjectTestConfig: vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: true, autoPushEnabled: true, releaseAfterRun: true }),
+      getProjectTestConfig: vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: true, autoPushEnabled: true, releaseAfterRun: true, prPipeline: false }),
       getProjectPushResult: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
@@ -97,6 +104,26 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     expect(data.auto_commit_enabled).toBe(true);
     expect(data.auto_push_enabled).toBe(true);
     expect(data.release_after_run).toBe(true);
+    expect(data.pr_pipeline).toBe(false);
+  });
+
+  it('returns pr_pipeline=true when set in config', async () => {
+    vi.resetModules();
+    resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
+    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
+    vi.doMock('@/lib/config', () => ({ reloadConfig: vi.fn() }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
+      writeProjectFieldYaml: vi.fn().mockReturnValue(true),
+      getProjectTestConfig: vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false, prPipeline: true }),
+      getProjectPushResult: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
+    const { GET: GET3 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
+    const res = await GET3(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.pr_pipeline).toBe(true);
   });
 
   it('detects pnpm test when package.json has test script and pnpm-lock.yaml exists', async () => {
@@ -395,6 +422,36 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/unknown/config', {
       method: 'PATCH',
       body: JSON.stringify({ release_after_run: true }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'unknown' }) });
+    expect(res.status).toBe(404);
+  });
+
+  it('writes pr_pipeline=1 when set to true', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ pr_pipeline: true }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'pr_pipeline', '1');
+  });
+
+  it('writes pr_pipeline=0 when set to false', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ pr_pipeline: false }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'pr_pipeline', '0');
+  });
+
+  it('returns 404 when project not found while writing pr_pipeline', async () => {
+    writeProjectFieldYamlMock.mockReturnValue(false);
+    const req = new NextRequest('http://localhost/api/projects/by-project/unknown/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ pr_pipeline: true }),
     });
     const res = await PATCH(req, { params: Promise.resolve({ projectName: 'unknown' }) });
     expect(res.status).toBe(404);

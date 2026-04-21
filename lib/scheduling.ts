@@ -174,6 +174,8 @@ export function writeProjectFieldYaml(
     db.update(schema.projects).set({ autoPushEnabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
   } else if (fieldName === 'release_after_run') {
     db.update(schema.projects).set({ releaseAfterRun: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
+  } else if (fieldName === 'pr_pipeline') {
+    db.update(schema.projects).set({ prPipeline: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
   }
   return true;
 }
@@ -203,6 +205,7 @@ export function getProjectTestConfig(projName: string): {
   autoCommitEnabled: boolean;
   autoPushEnabled: boolean;
   releaseAfterRun: boolean;
+  prPipeline: boolean;
 } | null {
   const row = db
     .select()
@@ -217,6 +220,7 @@ export function getProjectTestConfig(projName: string): {
     autoCommitEnabled: !!row.autoCommitEnabled,
     autoPushEnabled: !!row.autoPushEnabled,
     releaseAfterRun: !!row.releaseAfterRun,
+    prPipeline: !!row.prPipeline,
   };
 }
 

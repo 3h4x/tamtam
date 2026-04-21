@@ -18,6 +18,7 @@ export const projects = sqliteTable('projects', {
   autoCommitEnabled: integer('auto_commit_enabled', { mode: 'boolean' }).default(false),
   autoPushEnabled: integer('auto_push_enabled', { mode: 'boolean' }).default(false),
   releaseAfterRun: integer('release_after_run', { mode: 'boolean' }).default(false),
+  prPipeline: integer('pr_pipeline', { mode: 'boolean' }).default(false),
   lastPushError: text('last_push_error'),
   lastPushAt: real('last_push_at'),
 });
