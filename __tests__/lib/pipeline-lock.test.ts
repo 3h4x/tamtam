@@ -33,7 +33,8 @@ function createTestDb() {
       parent_job_id TEXT,
       gh_issue_number INTEGER,
       gh_issue_repo TEXT,
-      gh_issue_title TEXT
+      gh_issue_title TEXT,
+      log_pruned INTEGER DEFAULT 0
     );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };

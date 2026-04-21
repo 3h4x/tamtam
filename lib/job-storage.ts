@@ -28,6 +28,7 @@ export interface JobData {
   ghIssueNumber?: number | null;
   ghIssueRepo?: string | null;
   ghIssueTitle?: string | null;
+  logPruned?: boolean | null;
 }
 
 const jobsCache = new Map<string, JobData>();
@@ -61,6 +62,7 @@ function loadFromDb(): void {
         ghIssueNumber: row.ghIssueNumber ?? null,
         ghIssueRepo: row.ghIssueRepo ?? null,
         ghIssueTitle: row.ghIssueTitle ?? null,
+        logPruned: row.logPruned ?? false,
       });
     }
     loaded = true;
@@ -94,6 +96,7 @@ function saveToDb(job: JobData): void {
         ghIssueNumber: job.ghIssueNumber ?? null,
         ghIssueRepo: job.ghIssueRepo ?? null,
         ghIssueTitle: job.ghIssueTitle ?? null,
+        logPruned: job.logPruned ?? false,
       })
       .onConflictDoUpdate({
         target: schema.jobs.id,
@@ -111,6 +114,7 @@ function saveToDb(job: JobData): void {
           sessionId: job.sessionId,
           contextMeta: job.contextMeta,
           userPrompt: job.userPrompt,
+          logPruned: job.logPruned ?? false,
         },
       })
       .run();
@@ -508,6 +512,14 @@ async function runCompletionHooks(job: JobData): Promise<void> {
       console.log(`[release-after-run] error for ${job.project}:`, e);
     }
   }
+
+  // Log retention: prune old log files for this project now that a new run completed.
+  try {
+    const { pruneProjectLogs } = await import('./retention');
+    pruneProjectLogs(job.project);
+  } catch (e) {
+    console.error(`[retention] pruneProjectLogs failed for ${job.project}:`, e);
+  }
 }
 
 async function retryFixCi(projectName: string): Promise<void> {
@@ -630,6 +642,7 @@ export function jobToDict(job: JobData): Record<string, unknown> {
     context_meta: job.contextMeta ?? null,
     user_prompt: job.userPrompt ?? null,
   };
+  d.log_pruned = job.logPruned ?? false;
   const verdict = getVerdict(job);
   if (verdict !== null) d.verdict = verdict;
   return d;

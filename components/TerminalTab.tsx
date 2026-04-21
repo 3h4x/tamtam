@@ -291,8 +291,12 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         completedMatches.forEach((m, i) => {
           const prompt = m.user_prompt || m.prompt
           if (prompt) entries.push({ role: 'user', text: prompt })
-          const log = logData[i]?.log
-          if (log) entries.push({ role: 'assistant', text: log })
+          const jobEntry = logData[i]
+          if (jobEntry?.log) {
+            entries.push({ role: 'assistant', text: jobEntry.log })
+          } else if (jobEntry?.log_pruned) {
+            entries.push({ role: 'status', text: 'Log file deleted by retention policy' })
+          }
         })
 
         if (lastIsRunning) {
@@ -384,7 +388,11 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           terminalStore.update(projectName, () => ({ history: entries }))
           terminalStore.startStream(projectName, jobParam, true)
         } else {
-          if (data.log) entries.push({ role: 'raw', text: data.log })
+          if (data.log) {
+            entries.push({ role: 'raw', text: data.log })
+          } else if (data.log_pruned) {
+            entries.push({ role: 'status', text: 'Log file deleted by retention policy' })
+          }
           const exitCode = data.exit_code
           if (exitCode !== undefined && exitCode !== null) {
             const ok = exitCode === 0

@@ -55,6 +55,14 @@ All three are read live on each job (not cached), so changing them takes effect 
 | `fix_ci_retry_window_seconds` | number | `120` | Sliding window for counting retry attempts |
 | `fix_ci_fast_crash_ms` | number | `5000` | Jobs that exit in under this many ms are considered boot failures and retried; jobs over this are surfaced as real errors |
 
+### Log & History Retention
+
+| Key | Type | Default | Effect |
+|-----|------|---------|--------|
+| `log_retention_count` | number | `200` | Keep log files for the last N finished runs per project. On each run completion, the oldest log files beyond this count are deleted and the DB row is flagged `log_pruned`. Set to `0` to disable count-based pruning. |
+| `log_retention_days` | number | `30` | Delete log files older than this many days (per project, evaluated on each run completion). Set to `0` to disable age-based pruning. |
+| `job_row_retention_days` | number | `180` | Nightly cleanup: delete finished `jobs` DB rows older than this many days. Set to `0` to disable. Run rows older than this threshold are permanently removed. |
+
 ### System
 
 | Key | Type | Default | Effect |
@@ -94,7 +102,8 @@ github_owner, claude_bin, log_dir, frequency, daytime, weekends,
 launchagent_prefix, workspace_path, base_prompt, default_model,
 permission_mode, commit_style, review_verdict_rules,
 fix_ci_max_retries, fix_ci_retry_window_seconds, fix_ci_fast_crash_ms,
-agent_templates
+agent_templates,
+log_retention_count, log_retention_days, job_row_retention_days
 ```
 
 ---

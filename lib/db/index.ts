@@ -186,5 +186,10 @@ try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN gh_issue_title TEXT');
 } catch {}
 
+// Migrate: add log_pruned flag for retention
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN log_pruned INTEGER DEFAULT 0');
+} catch {}
+
 export const db = drizzle(sqlite, { schema });
 export { schema };

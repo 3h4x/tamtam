@@ -516,6 +516,7 @@ export interface JobInfo {
   session_id?: string | null
   user_prompt?: string | null
   context_meta?: string | null
+  log_pruned?: boolean | null
 }
 
 export async function fetchJobs(project?: string): Promise<{ jobs: JobInfo[] }> {

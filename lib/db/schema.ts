@@ -45,6 +45,7 @@ export const jobs = sqliteTable('jobs', {
   ghIssueNumber: integer('gh_issue_number'),
   ghIssueRepo: text('gh_issue_repo'),
   ghIssueTitle: text('gh_issue_title'),
+  logPruned: integer('log_pruned', { mode: 'boolean' }).default(false),
 });
 
 export const skills = sqliteTable('skills', {
