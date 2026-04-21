@@ -171,5 +171,44 @@ export async function POST(
     .where(eq(schema.ghIssuesCache.project, projectName))
     .run();
 
-  return NextResponse.json({ status: 'merged', pr: prNumber, repo });
+  // Post-merge cleanup: return the working tree to the default branch and
+  // pull so the next task starts clean. Stash any uncommitted work first so
+  // checkout doesn't fail on dirty trees, then restore it afterwards.
+  // Non-fatal — the merge already succeeded, don't fail the response if this
+  // hiccups.
+  const switchedBranch = await (async () => {
+    try {
+      const symR = await exec('git', ['-C', expanded, 'symbolic-ref', 'refs/remotes/origin/HEAD'], { timeout: 5000 });
+      let mainBranch = 'main';
+      if (symR.exitCode === 0) {
+        const m = symR.stdout.trim().match(/refs\/remotes\/origin\/(.+)/);
+        if (m) mainBranch = m[1];
+      }
+      const curR = await exec('git', ['-C', expanded, 'branch', '--show-current'], { timeout: 5000 });
+      if (curR.stdout.trim() === mainBranch) {
+        // Already on the default branch — just pull.
+        await exec('git', ['-C', expanded, 'pull', '--ff-only', 'origin', mainBranch], { timeout: 30000 });
+        return mainBranch;
+      }
+      const statusR = await exec('git', ['-C', expanded, 'status', '--porcelain'], { timeout: 5000 });
+      const dirty = statusR.stdout.trim().length > 0;
+      let stashed = false;
+      if (dirty) {
+        const stashR = await exec('git', ['-C', expanded, 'stash', 'push', '-u', '-m', `tamtam: pre-merge-switch ${Date.now()}`], { timeout: 10000 });
+        stashed = stashR.exitCode === 0 && !/No local changes/i.test(stashR.stdout);
+      }
+      const coR = await exec('git', ['-C', expanded, 'checkout', mainBranch], { timeout: 10000 });
+      if (coR.exitCode !== 0) {
+        if (stashed) await exec('git', ['-C', expanded, 'stash', 'pop'], { timeout: 10000 });
+        return null;
+      }
+      await exec('git', ['-C', expanded, 'pull', '--ff-only', 'origin', mainBranch], { timeout: 30000 });
+      if (stashed) await exec('git', ['-C', expanded, 'stash', 'pop'], { timeout: 10000 });
+      return mainBranch;
+    } catch {
+      return null;
+    }
+  })();
+
+  return NextResponse.json({ status: 'merged', pr: prNumber, repo, switchedTo: switchedBranch });
 }
