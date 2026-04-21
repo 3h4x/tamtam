@@ -523,7 +523,7 @@ export function ProjectDetailPage({
         router.push(`/project/${name}/terminal?job=${encodeURIComponent(jobIdToOpen)}`)
       }
     } catch (err) {
-      const error = err as any
+      const error = err as Error & { isPipelineLocked?: boolean; blockingJobId?: string }
       if (error.isPipelineLocked) {
         const msg = error.blockingJobId
           ? `Pipeline is running (job ${error.blockingJobId}). Click the job to watch its progress.`

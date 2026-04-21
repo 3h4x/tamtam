@@ -1,0 +1,160 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { NextRequest } from 'next/server';
+
+describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
+  let POST: (req: NextRequest, ctx: { params: Promise<{ projectName: string }> }) => Promise<Response>;
+  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
+  let execMock: ReturnType<typeof vi.fn>;
+
+  function makeExecResult(overrides: { exitCode?: number; stdout?: string; stderr?: string } = {}) {
+    return { exitCode: 0, stdout: '', stderr: '', ...overrides };
+  }
+
+  function makeRequest(body: unknown) {
+    return new NextRequest('http://localhost/api/projects/by-project/myproj/issue-branch', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+
+    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/project');
+    execMock = vi.fn().mockResolvedValue(makeExecResult());
+
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: resolveProjectPathMock,
+    }));
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+
+    const mod = await import('@/app/api/projects/by-project/[projectName]/issue-branch/route');
+    POST = mod.POST;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('returns 404 when project not found', async () => {
+    resolveProjectPathMock.mockReturnValue(null);
+    const res = await POST(makeRequest({ issue_number: 1 }), {
+      params: Promise.resolve({ projectName: 'unknown' }),
+    });
+    expect(res.status).toBe(404);
+    const data = await res.json();
+    expect(data.detail).toBe('project not found');
+  });
+
+  it('returns 400 when body is invalid JSON', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issue-branch', {
+      method: 'POST',
+      body: 'not json',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toBe('invalid JSON');
+  });
+
+  it('returns 400 when issue_number is missing', async () => {
+    const res = await POST(makeRequest({}), { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toBe('issue_number required');
+  });
+
+  it('returns 400 when issue_number is zero', async () => {
+    const res = await POST(makeRequest({ issue_number: 0 }), {
+      params: Promise.resolve({ projectName: 'myproj' }),
+    });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toBe('issue_number required');
+  });
+
+  it('returns 400 when issue_number is negative', async () => {
+    const res = await POST(makeRequest({ issue_number: -5 }), {
+      params: Promise.resolve({ projectName: 'myproj' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns already-on-branch when already on correct branch', async () => {
+    execMock.mockResolvedValue(makeExecResult({ stdout: 'fix/issue-7-my-bug\n' }));
+    const res = await POST(makeRequest({ issue_number: 7, issue_title: 'My Bug' }), {
+      params: Promise.resolve({ projectName: 'myproj' }),
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('already-on-branch');
+    expect(data.branch).toBe('fix/issue-7-my-bug');
+  });
+
+  it('returns created when checkout -b succeeds', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));
+    const res = await POST(makeRequest({ issue_number: 42, issue_title: 'Add feature' }), {
+      params: Promise.resolve({ projectName: 'myproj' }),
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('created');
+    expect(data.branch).toBe('fix/issue-42-add-feature');
+  });
+
+  it('returns reused when checkout -b fails but checkout succeeds', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 128, stderr: 'branch already exists' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));
+    const res = await POST(makeRequest({ issue_number: 3, issue_title: 'fix bug' }), {
+      params: Promise.resolve({ projectName: 'myproj' }),
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('reused');
+    expect(data.branch).toBe('fix/issue-3-fix-bug');
+  });
+
+  it('returns 500 when both checkouts fail', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 128, stderr: 'branch exists' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'error' }));
+    const res = await POST(makeRequest({ issue_number: 5 }), {
+      params: Promise.resolve({ projectName: 'myproj' }),
+    });
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.detail).toContain('Failed to checkout');
+  });
+
+  it('slugifies the title correctly', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));
+    const res = await POST(
+      makeRequest({ issue_number: 10, issue_title: 'Fix: Handle NULL values & edge cases!' }),
+      { params: Promise.resolve({ projectName: 'myproj' }) },
+    );
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.branch).toBe('fix/issue-10-fix-handle-null-values-edge-cases');
+  });
+
+  it('uses branch without slug when title is empty', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));
+    const res = await POST(makeRequest({ issue_number: 99 }), {
+      params: Promise.resolve({ projectName: 'myproj' }),
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.branch).toBe('fix/issue-99');
+  });
+});

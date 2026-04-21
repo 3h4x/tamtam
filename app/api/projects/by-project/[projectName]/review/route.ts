@@ -8,7 +8,7 @@ export async function POST(
   const { projectName } = await params;
   const result = await startProjectReview(projectName);
   if (!result.ok) {
-    const errorBody: any = { detail: result.detail };
+    const errorBody: { detail: string; blocking_job_id?: string } = { detail: result.detail };
     if (result.blockingJobId) errorBody.blocking_job_id = result.blockingJobId;
     return NextResponse.json(errorBody, { status: result.status });
   }
