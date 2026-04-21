@@ -7,7 +7,11 @@ export async function POST(
 ) {
   const { projectName } = await params;
   const r = await startRelease(projectName);
-  if (!r.ok) return NextResponse.json({ detail: r.detail }, { status: r.status });
+  if (!r.ok) {
+    const errorBody: any = { detail: r.detail };
+    if (r.blockingJobId) errorBody.blocking_job_id = r.blockingJobId;
+    return NextResponse.json(errorBody, { status: r.status });
+  }
   return NextResponse.json({
     status: 'started',
     step: r.step,

@@ -25,6 +25,10 @@ export interface JobData {
   contextMeta?: string | null;
   userPrompt?: string | null;
   parentJobId?: string | null;
+  ghIssueNumber?: number | null;
+  ghIssueRepo?: string | null;
+  ghIssueTitle?: string | null;
+  logPruned?: boolean | null;
 }
 
 const jobsCache = new Map<string, JobData>();
@@ -55,6 +59,10 @@ function loadFromDb(): void {
         contextMeta: row.contextMeta ?? null,
         userPrompt: row.userPrompt ?? null,
         parentJobId: row.parentJobId ?? null,
+        ghIssueNumber: row.ghIssueNumber ?? null,
+        ghIssueRepo: row.ghIssueRepo ?? null,
+        ghIssueTitle: row.ghIssueTitle ?? null,
+        logPruned: row.logPruned ?? false,
       });
     }
     loaded = true;
@@ -85,6 +93,10 @@ function saveToDb(job: JobData): void {
         sessionId: job.sessionId,
         contextMeta: job.contextMeta,
         userPrompt: job.userPrompt,
+        ghIssueNumber: job.ghIssueNumber ?? null,
+        ghIssueRepo: job.ghIssueRepo ?? null,
+        ghIssueTitle: job.ghIssueTitle ?? null,
+        logPruned: job.logPruned ?? false,
       })
       .onConflictDoUpdate({
         target: schema.jobs.id,
@@ -102,6 +114,7 @@ function saveToDb(job: JobData): void {
           sessionId: job.sessionId,
           contextMeta: job.contextMeta,
           userPrompt: job.userPrompt,
+          logPruned: job.logPruned ?? false,
         },
       })
       .run();
@@ -272,6 +285,11 @@ async function finalizeReleaseJob(release: JobData, exitCode: number): Promise<v
     }
   } catch {}
   await markDone(release, exitCode);
+  // Release the pipeline lock
+  try {
+    const { releaseLock } = await import('./pipeline-lock');
+    releaseLock(release.project, release.id);
+  } catch {}
 }
 
 async function runCompletionHooks(job: JobData): Promise<void> {
@@ -446,6 +464,12 @@ async function runCompletionHooks(job: JobData): Promise<void> {
     if (release) {
       const exitCode = (job.exitCode === 0) ? 0 : 1;
       await finalizeReleaseJob(release, exitCode);
+    } else {
+      // No active release job — still need to release the lock if this was a standalone pipeline job
+      try {
+        const { releaseLock } = await import('./pipeline-lock');
+        releaseLock(job.project, job.id);
+      } catch {}
     }
   }
 
@@ -487,6 +511,14 @@ async function runCompletionHooks(job: JobData): Promise<void> {
     } catch (e) {
       console.log(`[release-after-run] error for ${job.project}:`, e);
     }
+  }
+
+  // Log retention: prune old log files for this project now that a new run completed.
+  try {
+    const { pruneProjectLogs } = await import('./retention');
+    pruneProjectLogs(job.project);
+  } catch (e) {
+    console.error(`[retention] pruneProjectLogs failed for ${job.project}:`, e);
   }
 }
 
@@ -610,6 +642,7 @@ export function jobToDict(job: JobData): Record<string, unknown> {
     context_meta: job.contextMeta ?? null,
     user_prompt: job.userPrompt ?? null,
   };
+  d.log_pruned = job.logPruned ?? false;
   const verdict = getVerdict(job);
   if (verdict !== null) d.verdict = verdict;
   return d;
@@ -671,7 +704,10 @@ export function createJob(
   logPath: string,
   prompt?: string,
   contextMeta?: string,
-  userPrompt?: string
+  userPrompt?: string,
+  ghIssueNumber?: number | null,
+  ghIssueRepo?: string | null,
+  ghIssueTitle?: string | null,
 ): JobData {
   loadFromDb();
   let timestamp = Math.floor(Date.now() * 1000);
@@ -699,6 +735,9 @@ export function createJob(
     sessionId: null,
     contextMeta: contextMeta ?? null,
     userPrompt: userPrompt ?? null,
+    ghIssueNumber: ghIssueNumber ?? null,
+    ghIssueRepo: ghIssueRepo ?? null,
+    ghIssueTitle: ghIssueTitle ?? null,
   };
   jobsCache.set(jobId, job);
   saveToDb(job);
@@ -734,6 +773,9 @@ export function getJob(jobId: string): JobData | null {
     sessionId: row.sessionId ?? null,
     contextMeta: row.contextMeta ?? null,
     userPrompt: row.userPrompt ?? null,
+    ghIssueNumber: row.ghIssueNumber ?? null,
+    ghIssueRepo: row.ghIssueRepo ?? null,
+    ghIssueTitle: row.ghIssueTitle ?? null,
   };
   jobsCache.set(jobId, job);
   return job;

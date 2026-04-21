@@ -119,6 +119,10 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const router = useRouter()
   const searchParams = useSearchParams()
   const jobParam = searchParams.get('job')
+  const promptParam = searchParams.get('prompt')
+  const issueNumberParam = searchParams.get('issue_number')
+  const issueRepoParam = searchParams.get('issue_repo')
+  const issueTitleParam = searchParams.get('issue_title')
 
   // Subscribe to the module-level session store. Survives component unmounts.
   const state = useSyncExternalStore(
@@ -174,6 +178,10 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   })
   const [historyIdx, setHistoryIdx] = useState<number | null>(null)
   const draftBeforeHistoryRef = useRef<string>('')
+  // Issue context captured from URL params — only used on the first submission of a new session
+  const issueContextRef = useRef<{ number: number; repo: string; title: string } | null>(
+    issueNumberParam ? { number: Number(issueNumberParam), repo: issueRepoParam ?? '', title: issueTitleParam ?? '' } : null
+  )
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const [autoScroll, setAutoScroll] = useState(true)
   const [elapsedMs, setElapsedMs] = useState(0)
@@ -208,6 +216,13 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   useEffect(() => {
     if (initialSessionId || jobParam) return
     loadSessions()
+  }, [])
+
+  // Auto-submit prompt from ?prompt= query param (e.g. opened from Issues tab)
+  useEffect(() => {
+    if (!promptParam || initialSessionId || jobParam) return
+    terminalStore.update(projectName, () => ({ pendingAutoSubmit: promptParam }))
+    router.replace(`/project/${projectName}/terminal`)
   }, [])
 
   // Restore session from URL param. Skipped if store already holds state for
@@ -276,8 +291,12 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         completedMatches.forEach((m, i) => {
           const prompt = m.user_prompt || m.prompt
           if (prompt) entries.push({ role: 'user', text: prompt })
-          const log = logData[i]?.log
-          if (log) entries.push({ role: 'assistant', text: log })
+          const jobEntry = logData[i]
+          if (jobEntry?.log) {
+            entries.push({ role: 'assistant', text: jobEntry.log })
+          } else if (jobEntry?.log_pruned) {
+            entries.push({ role: 'status', text: 'Log file deleted by retention policy' })
+          }
         })
 
         if (lastIsRunning) {
@@ -356,6 +375,12 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           } catch {}
         }
 
+        // Loading a fresh job into the terminal — drop any lingering session
+        // state from a previous run. Otherwise a follow-up message in this
+        // terminal resumes the OLD session (with stale context) instead of
+        // chatting against the new job's log.
+        terminalStore.reset(projectName)
+
         if (isClaudeJob) {
           terminalStore.update(projectName, () => ({ history: entries }))
           terminalStore.startStream(projectName, jobParam)
@@ -363,7 +388,11 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           terminalStore.update(projectName, () => ({ history: entries }))
           terminalStore.startStream(projectName, jobParam, true)
         } else {
-          if (data.log) entries.push({ role: 'raw', text: data.log })
+          if (data.log) {
+            entries.push({ role: 'raw', text: data.log })
+          } else if (data.log_pruned) {
+            entries.push({ role: 'status', text: 'Log file deleted by retention policy' })
+          }
           const exitCode = data.exit_code
           if (exitCode !== undefined && exitCode !== null) {
             const ok = exitCode === 0
@@ -632,6 +661,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         }
       }
 
+      const issueCtx = !sessionId ? issueContextRef.current : null
       const result = await runProject(
         projectName, fullPrompt,
         imageFiles.length > 0 ? imageFiles : undefined,
@@ -640,7 +670,10 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         model,
         sessionId || undefined,
         contextMetaStr,
-        text
+        text,
+        issueCtx?.number ?? undefined,
+        issueCtx?.repo ?? undefined,
+        issueCtx?.title ?? undefined,
       )
       terminalStore.startStream(projectName, result.job_id)
     } catch (err) {

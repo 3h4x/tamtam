@@ -523,7 +523,15 @@ export function ProjectDetailPage({
         router.push(`/project/${name}/terminal?job=${encodeURIComponent(jobIdToOpen)}`)
       }
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to start release', 'error')
+      const error = err as any
+      if (error.isPipelineLocked) {
+        const msg = error.blockingJobId
+          ? `Pipeline is running (job ${error.blockingJobId}). Click the job to watch its progress.`
+          : 'Pipeline is already running. Wait for it to complete before starting another release.'
+        toast(msg, 'info')
+      } else {
+        toast(error instanceof Error ? error.message : 'Failed to start release', 'error')
+      }
     } finally {
       setReleasing(false)
     }
@@ -1187,14 +1195,26 @@ export function ProjectDetailPage({
             // previously-done steps as ✓ instead of blank ○. The prior LGTM
             // is what authorized the ship, so it belongs on the strip.
             const dayAgo = Date.now() / 1000 - 24 * 60 * 60
-            const latestOfKind = (kind: string) => projectJobs
+            const latestOfKind = (kind: string): JobInfo | undefined => projectJobs
               .filter(j => j.kind === kind && j.started_at >= dayAgo)
               .sort((a, b) => (b.started_at || 0) - (a.started_at || 0))[0]
 
             const testJob = latestOfKind('test')
-            const reviewJob = latestOfKind('review')
-            const fixJob = latestOfKind('fix')
-            const pushJob = latestOfKind('push')
+            let reviewJob = latestOfKind('review')
+            let fixJob = latestOfKind('fix')
+            let pushJob = latestOfKind('push')
+
+            // When the latest test failed, downstream jobs from a PRIOR
+            // release are stale — they didn't run in this pipeline attempt.
+            // Showing them as ✓ misleads (e.g. "✗ test → ✓ review" suggests
+            // review ran and passed for this failing attempt). Drop any
+            // downstream job older than the failing test.
+            if (testJob && testJob.status === 'done' && testJob.exit_code !== 0) {
+              const testStart = testJob.started_at ?? 0
+              if (reviewJob && (reviewJob.started_at ?? 0) < testStart) reviewJob = undefined
+              if (fixJob && (fixJob.started_at ?? 0) < testStart) fixJob = undefined
+              if (pushJob && (pushJob.started_at ?? 0) < testStart) pushJob = undefined
+            }
 
             const stateOf = (job: JobInfo | undefined): StepState => {
               if (!job) return 'pending'

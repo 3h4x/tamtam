@@ -6,10 +6,11 @@ import { getImproveConfig } from './scheduling';
 import { resolveProjectPath } from './project-data';
 import { getJob, createJob, readLog, probeJobStatus, updateJob, markDone } from './job-storage';
 import { getPermissionModeFlag } from './config';
+import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 
 export type StartFixResult =
   | { ok: true; jobId: string; pid: number }
-  | { ok: false; status: number; detail: string };
+  | { ok: false; status: number; detail: string; blockingJobId?: string };
 
 export async function startFixFromJob(sourceJobId: string): Promise<StartFixResult> {
   const sourceJob = getJob(sourceJobId);
@@ -76,6 +77,15 @@ Do not commit — just make the code changes.
   job.pid = proc.pid ?? 0;
   proc.unref();
   updateJob(job);
+
+  // Acquire pipeline lock — skip under parent release lock.
+  if (!isLockOwnedByActiveRelease(projectName)) {
+    try {
+      await acquireLock(projectName, job.id);
+    } catch (e) {
+      console.log(`[start-fix] failed to acquire pipeline lock for ${projectName}:`, e);
+    }
+  }
 
   try {
     proc.stdin?.write(prompt);
