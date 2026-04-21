@@ -157,4 +157,18 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
     const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(res.status).toBe(200);
   });
+
+  it('persists job failure when startJob throws', async () => {
+    startJobMock.mockRejectedValue(new Error('pm2 unavailable'));
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/fix-ci', { method: 'POST' });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.detail).toContain('pm2 unavailable');
+    // Job must be persisted as failed so it doesn't stay "running" in the DB
+    expect(updateJobMock).toHaveBeenCalledOnce();
+    const savedJob = updateJobMock.mock.calls[0][0];
+    expect(savedJob.exitCode).toBe(-1);
+    expect(savedJob.finishedAt).not.toBeNull();
+  });
 });

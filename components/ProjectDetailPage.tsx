@@ -624,6 +624,18 @@ export function ProjectDetailPage({
       prWorkflowEnabledInput !== !!config.pr_workflow_enabled ||
       issueAutoBranchInput !== (config.issue_auto_branch ?? true))
 
+  const actionsDirty = JSON.stringify(editActions) !== JSON.stringify(customActions)
+  const anyDirty = configDirty || actionsDirty
+  const anySaving = configSaving || actionsSaving
+  const allSaved = configSaved && actionsSaved
+
+  const handleSaveAll = async () => {
+    await Promise.all([
+      configDirty ? handleSaveConfig() : Promise.resolve(),
+      actionsDirty ? handleSaveActions() : Promise.resolve(),
+    ])
+  }
+
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
@@ -915,19 +927,19 @@ export function ProjectDetailPage({
 
               {/* Save bar */}
               <div className="flex items-center justify-end gap-3">
-                {configDirty && !configSaving && (
+                {anyDirty && !anySaving && (
                   <span className="text-xs text-text-tertiary">Unsaved changes</span>
                 )}
                 <button
                   className={`px-4 py-2 text-white border-none rounded-lg font-semibold text-sm transition-colors ${
-                    configSaved      ? 'bg-status-success cursor-default' :
-                    configDirty      ? 'bg-accent hover:bg-accent-hover cursor-pointer' :
-                                       'bg-accent/40 cursor-default'
-                  } ${configSaving ? 'opacity-50 cursor-wait' : ''}`}
-                  onClick={handleSaveConfig}
-                  disabled={configSaving || !configDirty}
+                    allSaved    ? 'bg-status-success cursor-default' :
+                    anyDirty    ? 'bg-accent hover:bg-accent-hover cursor-pointer' :
+                                  'bg-accent/40 cursor-default'
+                  } ${anySaving ? 'opacity-50 cursor-wait' : ''}`}
+                  onClick={handleSaveAll}
+                  disabled={anySaving || !anyDirty}
                 >
-                  {configSaving ? 'Saving…' : configSaved ? 'Saved!' : 'Save Config'}
+                  {anySaving ? 'Saving…' : allSaved ? 'Saved!' : 'Save'}
                 </button>
               </div>
 
@@ -986,18 +998,6 @@ export function ProjectDetailPage({
                   </div>
                 </div>
 
-                <div className="mt-4 flex items-center gap-3">
-                  <button
-                    className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={handleSaveConfig}
-                    disabled={configSaving || !configDirty}
-                  >
-                    {configSaving ? 'Saving…' : configSaved ? 'Saved' : 'Save'}
-                  </button>
-                  {configDirty && !configSaving && (
-                    <span className="text-xs text-text-tertiary">Unsaved changes</span>
-                  )}
-                </div>
               </div>
 
               {/* "Work on" pipeline — governs what happens when the user
@@ -1023,18 +1023,6 @@ export function ProjectDetailPage({
                       </p>
                     </div>
                   </label>
-                </div>
-                <div className="mt-4 flex items-center gap-3">
-                  <button
-                    className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={handleSaveConfig}
-                    disabled={configSaving || !configDirty}
-                  >
-                    {configSaving ? 'Saving…' : configSaved ? 'Saved' : 'Save'}
-                  </button>
-                  {configDirty && !configSaving && (
-                    <span className="text-xs text-text-tertiary">Unsaved changes</span>
-                  )}
                 </div>
               </div>
 
@@ -1229,17 +1217,6 @@ export function ProjectDetailPage({
                     </div>
                   )}
 
-                  <div className="flex justify-end mt-4">
-                    <button
-                      className={`px-4 py-2 text-white border-none rounded-lg font-semibold text-sm transition-colors ${
-                        actionsSaved ? 'bg-status-success cursor-default' : 'bg-accent hover:bg-accent-hover cursor-pointer'
-                      } ${actionsSaving ? 'opacity-50 cursor-wait' : ''}`}
-                      onClick={handleSaveActions}
-                      disabled={actionsSaving}
-                    >
-                      {actionsSaving ? 'Saving…' : actionsSaved ? 'Saved!' : 'Save Actions'}
-                    </button>
-                  </div>
                 </div>
               </div>
 
@@ -1277,70 +1254,40 @@ export function ProjectDetailPage({
               projectJobs.some(j => j.kind === 'test' && j.started_at >= (Date.now() / 1000 - 60 * 60))
             )
             type StepState = 'pending' | 'running' | 'done' | 'warning' | 'failed'
-            // Show strip only while the release pipeline is actively running,
-            // or when a step just failed/needs attention (so the user can see
-            // why). At rest, hide it — stale ✓s from a past release are noise.
-            const recentCutoff = Date.now() / 1000 - 60 * 60
-            const pipelineKinds = ['test', 'review', 'fix', 'push']
+            // Show strip only while the release pipeline is actively running.
+            const pipelineKinds = ['test', 'review', 'fix', 'push', 'mark-dod']
             const pipelineRunning = projectJobs.some(
               j => pipelineKinds.includes(j.kind) && j.status === 'running'
             )
-            const hasPushError = !!config?.last_push_error
-            const recentFailedJob = projectJobs.some(
-              j => pipelineKinds.includes(j.kind)
-                && j.status === 'done'
-                && j.exit_code !== 0
-                && j.started_at >= recentCutoff
-            )
-            // Review done but verdict isn't LGTM — this includes "unknown"
-            // (verdict undefined/empty because getVerdict returned null).
-            // The user needs to see ✗ with the hint, so the strip must stay
-            // visible.
-            const recentReviewNotLgtm = projectJobs.some(
-              j => j.kind === 'review'
-                && j.status === 'done'
-                && j.started_at >= recentCutoff
-                && j.verdict !== 'LGTM'
-            )
-            // LGTM verdict but the pipeline hasn't actually finished shipping
-            // (changes still uncommitted or commits still unpushed). Keep the
-            // strip up so the user can tell the release is mid-flight.
-            const recentLgtmWithWorkRemaining = projectJobs.some(
-              j => j.kind === 'review'
-                && j.status === 'done'
-                && j.verdict === 'LGTM'
-                && j.started_at >= recentCutoff
-            ) && (project.totalChanges > 0 || (project.unpushed ?? 0) > 0)
-            if (!pipelineRunning && !hasPushError && !recentFailedJob && !recentReviewNotLgtm && !recentLgtmWithWorkRemaining) return null
+            if (!pipelineRunning) return null
 
-            // Look back 24h so Ship-path (skips test+review) still shows the
-            // previously-done steps as ✓ instead of blank ○. The prior LGTM
-            // is what authorized the ship, so it belongs on the strip.
-            const dayAgo = Date.now() / 1000 - 24 * 60 * 60
-            const latestOfKind = (kind: string): JobInfo | undefined => projectJobs
-              .filter(j => j.kind === kind && j.started_at >= dayAgo)
-              .sort((a, b) => (b.started_at || 0) - (a.started_at || 0))[0]
+            // Each release is a clean slate. Find the currently-running step
+            // and use its start time as the anchor.
+            // - Steps AFTER the running step in sequence → always pending (haven't run yet).
+            // - Steps BEFORE the running step → only valid if they started within
+            //   MAX_PIPELINE_DURATION seconds of the running step (i.e. same run).
+            //   Anything older is from a previous release and must not carry its ✓ forward.
+            const pipelineSequence = ['test', 'review', 'fix', 'push', 'mark-dod']
+            const runningJob = projectJobs.find(j => pipelineKinds.includes(j.kind) && j.status === 'running')
+            const runningIdx = runningJob ? pipelineSequence.indexOf(runningJob.kind) : -1
+            const MAX_PIPELINE_DURATION = 30 * 60 // seconds — longer than any realistic test run
+            const releaseWindowStart = runningJob ? (runningJob.started_at ?? 0) - MAX_PIPELINE_DURATION : 0
+
+            const latestOfKind = (kind: string): JobInfo | undefined => {
+              const idx = pipelineSequence.indexOf(kind)
+              // Steps after the currently-running step haven't executed in this release.
+              if (runningIdx >= 0 && idx > runningIdx) return undefined
+              return projectJobs
+                .filter(j => j.kind === kind && (j.started_at ?? 0) >= releaseWindowStart)
+                .sort((a, b) => (b.started_at || 0) - (a.started_at || 0))[0]
+            }
 
             const testJob = latestOfKind('test')
-            let reviewJob = latestOfKind('review')
-            let fixJob = latestOfKind('fix')
-            let pushJob = latestOfKind('push')
-            let dodJob = latestOfKind('mark-dod')
-            // Capture before nulling — needed to detect stale push errors below.
+            const reviewJob = latestOfKind('review')
+            const fixJob = latestOfKind('fix')
+            const pushJob = latestOfKind('push')
+            const dodJob = latestOfKind('mark-dod')
             const priorPushStart = pushJob?.started_at ?? 0
-
-            // When the latest test failed, downstream jobs from a PRIOR
-            // release are stale — they didn't run in this pipeline attempt.
-            // Showing them as ✓ misleads (e.g. "✗ test → ✓ review" suggests
-            // review ran and passed for this failing attempt). Drop any
-            // downstream job older than the failing test.
-            if (testJob && testJob.status === 'done' && testJob.exit_code !== 0) {
-              const testStart = testJob.started_at ?? 0
-              if (reviewJob && (reviewJob.started_at ?? 0) < testStart) reviewJob = undefined
-              if (fixJob && (fixJob.started_at ?? 0) < testStart) fixJob = undefined
-              if (pushJob && (pushJob.started_at ?? 0) < testStart) pushJob = undefined
-              if (dodJob && (dodJob.started_at ?? 0) < testStart) dodJob = undefined
-            }
 
             const stateOf = (job: JobInfo | undefined): StepState => {
               if (!job) return 'pending'
