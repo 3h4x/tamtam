@@ -321,6 +321,18 @@ async function runCompletionHooks(job: JobData): Promise<void> {
       if (job.exitCode === 0 && (inRelease || pipelineCfg.autoPushEnabled || pipelineCfg.autoCommitEnabled)) {
         const verdict = getVerdict(job);
         if (verdict === 'LGTM') {
+          // Verify the linked issue's acceptance criteria against the
+          // codebase (Claude with tools) and tick only the ones actually
+          // implemented. Best-effort, non-fatal.
+          try {
+            const { startMarkDod } = await import('./start-mark-dod');
+            const md = await startMarkDod(job.project);
+            if (md.ok) {
+              console.log(`[release] DoD verification for #${md.issueNumber}: ${md.verified}/${md.total} verified${md.changed ? ' (issue updated)' : ''}`);
+            }
+          } catch (e) {
+            console.log(`[release] mark-dod error for ${job.project}:`, e);
+          }
           const { startProjectPush } = await import('./start-push');
           const commitOnly = !inRelease && pipelineCfg.autoCommitEnabled && !pipelineCfg.autoPushEnabled;
           const r = await startProjectPush(job.project, { commitOnly });
