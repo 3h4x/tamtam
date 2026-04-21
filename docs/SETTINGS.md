@@ -45,6 +45,27 @@ All settings stored in the `settings` table (key-value, both TEXT). Accessed via
 | `commit_style` | string | Conventional commits guide | Injected into the push commit-message generation prompt |
 | `review_verdict_rules` | string | Pragmatic rules | Injected into review prompts; drives LGTM / NEEDS ATTENTION / DO NOT SHIP decisions |
 
+### Notifications
+
+Outbound webhooks for release pipeline events. Never blocks pipeline progress — deliverability is best-effort with 3 retries.
+
+| Key | Type | Default | Effect |
+|-----|------|---------|--------|
+| `notification_webhook_url` | string | `''` | Webhook endpoint URL. Supports Slack (`hooks.slack.com`), Discord (`discord.com/api/webhooks`), ntfy, and generic JSON POST endpoints. Leave blank to disable notifications. |
+| `notification_webhook_secret` | string | `''` | Optional secret for HMAC-SHA256 signature verification. If set, payloads include `X-TamTam-Signature` header. |
+| `notification_on_release_success` | boolean | `false` | Stored as `'true'`/`'false'`. Notify when a release pipeline completes successfully. |
+| `notification_on_release_fail` | boolean | `false` | Notify when a release pipeline fails. |
+| `notification_on_fix_loop_exhausted` | boolean | `false` | Notify when the fix loop reaches its maximum iteration count (prevents infinite review→fix cycles). |
+| `notification_on_review_do_not_ship` | boolean | `false` | Notify when a code review verdict is "DO NOT SHIP". |
+| `notification_on_agent_run_fail` | boolean | `false` | Notify when an agent run fails. |
+
+**Payload format:** 
+- **Slack**: Formatted as block kit with event, project, status, verdict (if review), cost (if available), and a log link.
+- **Discord**: Embedded message with event details and a timestamp.
+- **Generic**: JSON POST with `{ event, project, job_id, status, verdict?, agent?, cost_usd?, log_url?, timestamp }`.
+
+**Test notification:** Use the "Send Test" button in the Notifications tab to verify webhook connectivity before enabling production events.
+
 ### Fix-CI Auto-Retry
 
 All three are read live on each job (not cached), so changing them takes effect immediately.
@@ -69,6 +90,56 @@ All three are read live on each job (not cached), so changing them takes effect 
 |-----|------|---------|--------|
 | `log_dir` | string | `./data/logs` | Directory where job log files are written |
 | `launchagent_prefix` | string | `com.tamtam` | Prefix for macOS LaunchAgent plist filenames |
+
+### Notifications
+
+Outbound webhook fired when the release pipeline reaches a terminal state. Supports Slack incoming webhooks, Discord webhooks, and any generic HTTP receiver (e.g. ntfy).
+
+| Key | Type | Default | Effect |
+|-----|------|---------|--------|
+| `notification_webhook_url` | string | `''` | Destination URL; auto-detected as Slack / Discord / generic by URL pattern |
+| `notification_webhook_secret` | string | `''` | If set, every POST includes an `X-TamTam-Signature` HMAC-SHA256 hex header over the JSON body |
+| `notification_on_release_success` | boolean | `false` | Fire when the full release pipeline completes with exit 0 |
+| `notification_on_release_fail` | boolean | `false` | Fire when any pipeline step fails and the pipeline halts |
+| `notification_on_fix_loop_exhausted` | boolean | `false` | Fire when the fix-iteration cap (3/30 min) is reached without achieving LGTM |
+| `notification_on_review_do_not_ship` | boolean | `false` | Fire when a review returns a DO NOT SHIP verdict |
+| `notification_on_agent_run_fail` | boolean | `false` | Fire when any scheduled agent job exits non-zero |
+
+**Payload shape** (generic JSON POST):
+
+```typescript
+{
+  event: 'release_success' | 'release_fail' | 'fix_loop_exhausted' | 'review_do_not_ship' | 'agent_run_fail';
+  project: string;
+  agent?: string;         // set for agent_run_fail events
+  job_id: string;
+  status: 'success' | 'failed';
+  verdict?: string;       // set for review events
+  cost_usd?: number;
+  log_url?: string;       // link to /project/<name>/history; driven by TAMTAM_BASE_URL env
+  message?: string;
+  timestamp: number;      // ms since epoch
+}
+```
+
+**Signature verification** (when `notification_webhook_secret` is set):
+
+```js
+const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
+const isValid = timingSafeEqual(Buffer.from(expected), Buffer.from(req.headers['x-tamtam-signature']));
+```
+
+**Adapter detection** (automatic, based on URL):
+
+| URL pattern | Format |
+|-------------|--------|
+| `hooks.slack.com` | Slack Block Kit |
+| `discord.com/api/webhooks` | Discord embed |
+| anything else | Raw JSON (works for ntfy, custom receivers) |
+
+**Retry**: 3 attempts, exponential backoff (1s → 2s → 4s). Failures are logged and never block pipeline progress.
+
+**Test button**: Settings → Notifications tab → "Send Test" fires a synthetic `release_success` payload immediately.
 
 ### Templates
 
@@ -103,8 +174,14 @@ launchagent_prefix, workspace_path, base_prompt, default_model,
 permission_mode, commit_style, review_verdict_rules,
 fix_ci_max_retries, fix_ci_retry_window_seconds, fix_ci_fast_crash_ms,
 agent_templates,
-log_retention_count, log_retention_days, job_row_retention_days
+log_retention_count, log_retention_days, job_row_retention_days,
+notification_webhook_url, notification_webhook_secret,
+notification_on_release_success, notification_on_release_fail,
+notification_on_fix_loop_exhausted, notification_on_review_do_not_ship,
+notification_on_agent_run_fail
 ```
+
+**POST `/api/settings/test-notification`** — sends a test notification to verify webhook connectivity. Request body: `{ webhook_url: string, webhook_secret?: string }`. Response: `{ ok: boolean, error?: string }`.
 
 ---
 

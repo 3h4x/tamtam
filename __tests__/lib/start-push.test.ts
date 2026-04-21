@@ -581,7 +581,10 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, 'abc1234'))                   // git rev-parse
       .mockImplementationOnce(() => resp(0, 'fix/issue-42-fix-login-bug')) // git branch --show-current (in createIssuePR)
       .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main'))  // git symbolic-ref (in createIssuePR)
-      .mockImplementationOnce(() => resp(0, 'https://github.com/owner/repo/pull/99\n')); // gh pr create
+      .mockImplementationOnce(() => resp(0, 'https://github.com/owner/repo/pull/99\n')) // gh pr create
+      .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main'))  // git symbolic-ref (detectMainBranch for post-PR cleanup)
+      .mockImplementationOnce(() => resp(0))                              // git checkout main
+      .mockImplementationOnce(() => resp(0));                             // git pull --ff-only origin main
 
     const { startProjectPush: fn } = await import('@/lib/start-push');
     const r = await fn('proj');

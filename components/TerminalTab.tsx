@@ -218,11 +218,29 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     loadSessions()
   }, [])
 
-  // Auto-submit prompt from ?prompt= query param (e.g. opened from Issues tab)
+  // Auto-submit prompt from ?prompt= query param (e.g. opened from Issues tab).
+  // When issue params are present, provision the feature branch BEFORE handing
+  // off to Claude — otherwise interim edits land on the default branch.
   useEffect(() => {
     if (!promptParam || initialSessionId || jobParam) return
-    terminalStore.update(projectName, () => ({ pendingAutoSubmit: promptParam }))
-    router.replace(`/project/${projectName}/terminal`)
+    const submit = promptParam
+    const run = async () => {
+      if (issueNumberParam) {
+        try {
+          await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/issue-branch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              issue_number: Number(issueNumberParam),
+              issue_title: issueTitleParam ?? '',
+            }),
+          })
+        } catch {}
+      }
+      terminalStore.update(projectName, () => ({ pendingAutoSubmit: submit }))
+      router.replace(`/project/${projectName}/terminal`)
+    }
+    run()
   }, [])
 
   // Restore session from URL param. Skipped if store already holds state for

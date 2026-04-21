@@ -375,9 +375,23 @@ async function runPush(
   const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
   const commitSha = shaR.exitCode === 0 ? shaR.stdout.trim() : '';
 
-  // If this session was started from a GitHub issue, create a PR that closes it
+  // If this session was started from a GitHub issue, create a PR that closes it,
+  // then return to the default branch and pull so the working copy is ready for
+  // the next task. Failures here are non-fatal — the PR is already out.
   if (issueCtx) {
     const prUrl = await createIssuePR(projPath, log, issueCtx);
+    if (prUrl) {
+      const mainBranch = await detectMainBranch(projPath);
+      log(`\n# switching back to ${mainBranch} and pulling\n`);
+      const coR = await exec('git', ['-C', projPath, 'checkout', mainBranch], { timeout: 10000 });
+      if (coR.stdout) log(coR.stdout);
+      if (coR.stderr) log(coR.stderr);
+      if (coR.exitCode === 0) {
+        const pullR = await exec('git', ['-C', projPath, 'pull', '--ff-only', 'origin', mainBranch], { timeout: 30000 });
+        if (pullR.stdout) log(pullR.stdout);
+        if (pullR.stderr) log(pullR.stderr);
+      }
+    }
     return { ok: true, commitSha, message: prUrl ? `PR created: ${prUrl}` : 'pushed (PR creation failed — see log)' };
   }
 

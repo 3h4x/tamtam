@@ -25,6 +25,13 @@ export interface TamTamConfig {
   log_retention_count: number;
   log_retention_days: number;
   job_row_retention_days: number;
+  notification_webhook_url: string;
+  notification_webhook_secret: string;
+  notification_on_release_success: boolean;
+  notification_on_release_fail: boolean;
+  notification_on_fix_loop_exhausted: boolean;
+  notification_on_review_do_not_ship: boolean;
+  notification_on_agent_run_fail: boolean;
 }
 
 const DEFAULTS: TamTamConfig = {
@@ -52,6 +59,13 @@ const DEFAULTS: TamTamConfig = {
   log_retention_count: 200,
   log_retention_days: 30,
   job_row_retention_days: 180,
+  notification_webhook_url: '',
+  notification_webhook_secret: '',
+  notification_on_release_success: false,
+  notification_on_release_fail: false,
+  notification_on_fix_loop_exhausted: false,
+  notification_on_review_do_not_ship: false,
+  notification_on_agent_run_fail: false,
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
@@ -85,6 +99,13 @@ export function getSettings(): TamTamConfig {
     log_retention_count: parseIntOr(map.log_retention_count, DEFAULTS.log_retention_count),
     log_retention_days: parseIntOr(map.log_retention_days, DEFAULTS.log_retention_days),
     job_row_retention_days: parseIntOr(map.job_row_retention_days, DEFAULTS.job_row_retention_days),
+    notification_webhook_url: map.notification_webhook_url ?? DEFAULTS.notification_webhook_url,
+    notification_webhook_secret: map.notification_webhook_secret ?? DEFAULTS.notification_webhook_secret,
+    notification_on_release_success: map.notification_on_release_success === 'true',
+    notification_on_release_fail: map.notification_on_release_fail === 'true',
+    notification_on_fix_loop_exhausted: map.notification_on_fix_loop_exhausted === 'true',
+    notification_on_review_do_not_ship: map.notification_on_review_do_not_ship === 'true',
+    notification_on_agent_run_fail: map.notification_on_agent_run_fail === 'true',
   };
 
   _cache = { config, time: now };
