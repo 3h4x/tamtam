@@ -20,6 +20,8 @@ export async function register() {
     }
   }
 
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
+
   // Nightly DB cleanup: delete job rows older than job_row_retention_days.
   // Run once at startup (catches drift from long downtimes) then every 24 h.
   const runCleanup = async () => {
