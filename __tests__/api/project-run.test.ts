@@ -276,4 +276,43 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     expect(fullPrompt).toContain('BASE-PROMPT-SENTINEL');
     expect(fullPrompt).toContain('first message');
   });
+
+  it('passes ghIssue fields to createJob from JSON body', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({
+        prompt: 'fix the bug',
+        ghIssueNumber: 42,
+        ghIssueRepo: 'owner/repo',
+        ghIssueTitle: 'Fix login bug',
+      }),
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(createJobMock).toHaveBeenCalledWith(
+      'proj1', 'run', 0, '',
+      expect.stringContaining('fix the bug'),
+      undefined,
+      undefined,
+      42,
+      'owner/repo',
+      'Fix login bug',
+    );
+  });
+
+  it('stores null ghIssue fields when not provided in request body', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(createJobMock).toHaveBeenCalledWith(
+      'proj1', 'run', 0, '',
+      expect.stringContaining('do something'),
+      undefined,
+      undefined,
+      null,
+      null,
+      null,
+    );
+  });
 });

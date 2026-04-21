@@ -19,4 +19,18 @@ export async function register() {
       console.error(`[scheduler] failed to reinstall ${agent.id}:`, err);
     }
   }
+
+  // Nightly DB cleanup: delete job rows older than job_row_retention_days.
+  // Run once at startup (catches drift from long downtimes) then every 24 h.
+  const runCleanup = async () => {
+    try {
+      const { runNightlyCleanup } = await import('./lib/retention');
+      runNightlyCleanup();
+      console.log('[retention] nightly cleanup completed');
+    } catch (err) {
+      console.error('[retention] nightly cleanup error:', err);
+    }
+  };
+  runCleanup();
+  setInterval(runCleanup, 24 * 60 * 60 * 1000);
 }

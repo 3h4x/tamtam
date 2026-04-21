@@ -92,6 +92,7 @@ interface Entry {
   navJobId: string
   navSessionId: string | null
   verdict?: JobInfo['verdict']
+  logPruned: boolean
 }
 
 function truncate(s: string, n: number): string {
@@ -170,6 +171,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       navJobId: j.id,
       navSessionId: j.session_id ?? null,
       verdict: j.verdict,
+      logPruned: !!j.log_pruned,
     }
     if (j.session_id) sessionGroup.set(j.session_id, entry)
     entries.push(entry)
@@ -443,6 +445,11 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-text-tertiary text-[11px]">{formatAgo(e.lastActivityAt)}</span>
+                    {e.logPruned && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium bg-text-tertiary/15 text-text-tertiary" title="Log file deleted by retention policy">
+                        pruned
+                      </span>
+                    )}
                     <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium ${
                       isRunning ? 'bg-status-warning/15 text-status-warning' :
                       isFailed ? 'bg-status-error/15 text-status-error' :

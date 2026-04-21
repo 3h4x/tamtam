@@ -21,6 +21,9 @@ interface SettingsMap {
   fix_ci_retry_window_seconds: string
   fix_ci_fast_crash_ms: string
   agent_templates: string
+  log_retention_count: string
+  log_retention_days: string
+  job_row_retention_days: string
 }
 
 export interface AgentTemplateRecord {
@@ -55,6 +58,9 @@ const DEFAULTS: SettingsMap = {
   fix_ci_retry_window_seconds: '120',
   fix_ci_fast_crash_ms: '5000',
   agent_templates: '',
+  log_retention_count: '200',
+  log_retention_days: '30',
+  job_row_retention_days: '180',
 }
 
 interface FieldDef {
@@ -170,6 +176,24 @@ const FIELDS: Record<keyof SettingsMap, FieldDef> = {
     help: 'JSON array of custom agent templates (managed via the Templates tab)',
     group: 'behavior',
     span: 2,
+  },
+  log_retention_count: {
+    label: 'Log Retention (runs)',
+    help: 'Keep log files for the last N finished runs per project. Older log files are deleted; the run row stays in history.',
+    group: 'behavior',
+    span: 1,
+  },
+  log_retention_days: {
+    label: 'Log Retention (days)',
+    help: 'Delete log files for runs older than this many days. Set to 0 to disable age-based pruning.',
+    group: 'behavior',
+    span: 1,
+  },
+  job_row_retention_days: {
+    label: 'Run History Retention (days)',
+    help: 'Nightly cleanup: delete run DB rows older than this many days. Set to 0 to disable.',
+    group: 'behavior',
+    span: 1,
   },
 }
 

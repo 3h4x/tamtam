@@ -8,7 +8,9 @@ export async function POST(
   const { projectName } = await params;
   const result = await startProjectReview(projectName);
   if (!result.ok) {
-    return NextResponse.json({ detail: result.detail }, { status: result.status });
+    const errorBody: any = { detail: result.detail };
+    if (result.blockingJobId) errorBody.blocking_job_id = result.blockingJobId;
+    return NextResponse.json(errorBody, { status: result.status });
   }
   return NextResponse.json({
     status: 'started',

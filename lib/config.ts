@@ -22,6 +22,9 @@ export interface TamTamConfig {
   fix_ci_max_retries: number;
   fix_ci_retry_window_seconds: number;
   fix_ci_fast_crash_ms: number;
+  log_retention_count: number;
+  log_retention_days: number;
+  job_row_retention_days: number;
 }
 
 const DEFAULTS: TamTamConfig = {
@@ -46,6 +49,9 @@ const DEFAULTS: TamTamConfig = {
   fix_ci_max_retries: 2,
   fix_ci_retry_window_seconds: 120,
   fix_ci_fast_crash_ms: 5000,
+  log_retention_count: 200,
+  log_retention_days: 30,
+  job_row_retention_days: 180,
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
@@ -76,6 +82,9 @@ export function getSettings(): TamTamConfig {
     fix_ci_max_retries: parseIntOr(map.fix_ci_max_retries, DEFAULTS.fix_ci_max_retries),
     fix_ci_retry_window_seconds: parseIntOr(map.fix_ci_retry_window_seconds, DEFAULTS.fix_ci_retry_window_seconds),
     fix_ci_fast_crash_ms: parseIntOr(map.fix_ci_fast_crash_ms, DEFAULTS.fix_ci_fast_crash_ms),
+    log_retention_count: parseIntOr(map.log_retention_count, DEFAULTS.log_retention_count),
+    log_retention_days: parseIntOr(map.log_retention_days, DEFAULTS.log_retention_days),
+    job_row_retention_days: parseIntOr(map.job_row_retention_days, DEFAULTS.job_row_retention_days),
   };
 
   _cache = { config, time: now };

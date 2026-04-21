@@ -28,6 +28,9 @@ export async function POST(
   let resumeSessionId = '';
   let contextMeta = '';
   let userPrompt = '';
+  let ghIssueNumber: number | null = null;
+  let ghIssueRepo = '';
+  let ghIssueTitle = '';
   const ALLOWED_MODELS = ['haiku', 'sonnet', 'opus'];
 
   const contentType = request.headers.get('content-type') ?? '';
@@ -46,6 +49,12 @@ export async function POST(
     if (formContextMeta) contextMeta = formContextMeta;
     const formUserPrompt = form.get('userPrompt') as string;
     if (formUserPrompt) userPrompt = formUserPrompt;
+    const formIssueNumber = form.get('ghIssueNumber') as string;
+    if (formIssueNumber) ghIssueNumber = parseInt(formIssueNumber, 10) || null;
+    const formIssueRepo = form.get('ghIssueRepo') as string;
+    if (formIssueRepo) ghIssueRepo = formIssueRepo;
+    const formIssueTitle = form.get('ghIssueTitle') as string;
+    if (formIssueTitle) ghIssueTitle = formIssueTitle;
 
     const attachDir = join(process.cwd(), 'data', 'attachments');
     mkdirSync(attachDir, { recursive: true });
@@ -70,6 +79,9 @@ export async function POST(
     if (body.resumeSessionId) resumeSessionId = body.resumeSessionId;
     if (body.contextMeta) contextMeta = body.contextMeta;
     if (body.userPrompt) userPrompt = body.userPrompt;
+    if (body.ghIssueNumber != null) ghIssueNumber = Number(body.ghIssueNumber) || null;
+    if (body.ghIssueRepo) ghIssueRepo = body.ghIssueRepo;
+    if (body.ghIssueTitle) ghIssueTitle = body.ghIssueTitle;
   }
 
   if (!prompt.trim() && attachmentPaths.length === 0) {
@@ -103,7 +115,7 @@ export async function POST(
     for (const p of attachmentPaths) prompt += `- ${p}\n`;
   }
 
-  const job = createJob(projectName, 'run', 0, '', prompt, contextMeta || undefined, userPrompt || undefined);
+  const job = createJob(projectName, 'run', 0, '', prompt, contextMeta || undefined, userPrompt || undefined, ghIssueNumber, ghIssueRepo || null, ghIssueTitle || null);
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
 

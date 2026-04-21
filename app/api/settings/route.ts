@@ -20,6 +20,9 @@ const SETTING_KEYS = [
   'fix_ci_retry_window_seconds',
   'fix_ci_fast_crash_ms',
   'agent_templates',
+  'log_retention_count',
+  'log_retention_days',
+  'job_row_retention_days',
 ] as const;
 
 export async function GET() {

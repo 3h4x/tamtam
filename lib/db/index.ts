@@ -140,6 +140,15 @@ sqlite.exec(`
   );
 `);
 
+// pipeline_locks table
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS pipeline_locks (
+    project TEXT PRIMARY KEY,
+    locked_by_job_id TEXT NOT NULL,
+    acquired_at REAL NOT NULL
+  );
+`);
+
 // Migrate: add token/duration/session columns to jobs if missing
 try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN duration_ms INTEGER');
@@ -164,6 +173,22 @@ try {
 } catch {}
 try {
   sqlite.exec('ALTER TABLE projects ADD COLUMN release_after_run INTEGER DEFAULT 0');
+} catch {}
+
+// Migrate: add GitHub issue linking columns to jobs
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN gh_issue_number INTEGER');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN gh_issue_repo TEXT');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN gh_issue_title TEXT');
+} catch {}
+
+// Migrate: add log_pruned flag for retention
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN log_pruned INTEGER DEFAULT 0');
 } catch {}
 
 export const db = drizzle(sqlite, { schema });

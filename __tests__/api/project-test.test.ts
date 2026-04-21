@@ -94,6 +94,12 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
       };
     });
 
+    vi.doMock('@/lib/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj1', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+
     const mod = await import('@/app/api/projects/by-project/[projectName]/test/route');
     POST = mod.POST;
   });
@@ -179,5 +185,45 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
     const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     const data = await res.json();
     expect(data.test_cmd).toBe('npm test');
+  });
+
+  it('returns 409 with blocking_job_id when pipeline is locked', async () => {
+    vi.resetModules();
+    const newProjDir = mkdtempSync(join(tmpdir(), 'tamtam-locked-proj-'));
+    writeFileSync(join(newProjDir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
+
+    try {
+      const mockProc = makeMockProcess();
+      vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(newProjDir) }));
+      vi.doMock('@/lib/scheduling', () => ({
+        getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: join(tempDir, 'logs'), projects: {} }),
+      }));
+      vi.doMock('@/lib/job-storage', () => ({
+        createJob: vi.fn().mockImplementation(() => makeJob()),
+        updateJob: vi.fn(),
+        listJobs: vi.fn().mockReturnValue([]),
+        probeJobStatus: vi.fn().mockResolvedValue('done'),
+      }));
+      vi.doMock('child_process', async () => {
+        const actual = await vi.importActual('child_process');
+        return { ...actual, spawn: vi.fn().mockReturnValue(mockProc) };
+      });
+      vi.doMock('@/lib/pipeline-lock', () => ({
+        getLock: vi.fn().mockReturnValue({ project: 'proj1', lockedByJobId: 'blocker-123', acquiredAt: Date.now() / 1000 }),
+        acquireLock: vi.fn().mockResolvedValue({ acquired: false, lock: {}, blockingJobId: 'blocker-123' }),
+        isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+      }));
+
+      const mod = await import('@/app/api/projects/by-project/[projectName]/test/route');
+      const lockedPOST = mod.POST;
+
+      const req = new NextRequest('http://localhost/api/projects/by-project/proj1/test', { method: 'POST' });
+      const res = await lockedPOST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+      expect(res.status).toBe(409);
+      const data = await res.json();
+      expect(data.blocking_job_id).toBe('blocker-123');
+    } finally {
+      rmSync(newProjDir, { recursive: true, force: true });
+    }
   });
 });

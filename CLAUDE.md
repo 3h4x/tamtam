@@ -137,6 +137,13 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - Follow existing test patterns (in-memory SQLite, mocked shell/PM2 calls)
 - Run `pnpm test` after writing tests to verify they pass
 
+## Definition of Done for UI/Frontend Changes
+- Dev server must be running (`pnpm dev`) before testing frontend changes
+- Use Chrome DevTools MCP (`mcp__plugin_chrome-devtools-mcp_chrome-devtools__*`) to navigate to the relevant page and take a screenshot verifying the UI renders correctly
+- Test the golden path and key edge cases visually in the browser
+- Check for regressions in adjacent features
+- Do NOT claim frontend work is complete without the Chrome MCP screenshot step
+
 ## Key Patterns
 - All config stored in DB (`settings`, `projects`, `skills`, `agents` tables)
 - Workspace path configured in Settings UI, projects discovered by scanning for git repos

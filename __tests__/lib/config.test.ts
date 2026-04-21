@@ -67,6 +67,9 @@ describe('config', () => {
         fix_ci_max_retries: 2,
         fix_ci_retry_window_seconds: 120,
         fix_ci_fast_crash_ms: 5000,
+        log_retention_count: 200,
+        log_retention_days: 30,
+        job_row_retention_days: 180,
       });
     });
 
