@@ -11,7 +11,7 @@ import { exec } from './shell';
 import { getImproveConfig } from './scheduling';
 import { acquireLock, getLock } from './pipeline-lock';
 
-const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push', 'release']);
+const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push', 'pr-wait', 'mark-dod', 'release']);
 
 async function isReleasePipelineRunning(projectName: string): Promise<boolean> {
   const candidates = listJobs().filter(

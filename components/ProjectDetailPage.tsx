@@ -312,6 +312,8 @@ export function ProjectDetailPage({
   const [autoCommitEnabledInput, setAutoCommitEnabledInput] = useState(false)
   const [autoPushEnabledInput, setAutoPushEnabledInput] = useState(false)
   const [releaseAfterRunInput, setReleaseAfterRunInput] = useState(false)
+  const [autoPrMergeEnabledInput, setAutoPrMergeEnabledInput] = useState(false)
+  const [issueAutoBranchInput, setIssueAutoBranchInput] = useState(true)
   const [configSaving, setConfigSaving] = useState(false)
   const [configSaved, setConfigSaved] = useState(false)
 
@@ -385,6 +387,8 @@ export function ProjectDetailPage({
           setAutoCommitEnabledInput(!!configData.auto_commit_enabled)
           setAutoPushEnabledInput(!!configData.auto_push_enabled)
           setReleaseAfterRunInput(!!configData.release_after_run)
+          setAutoPrMergeEnabledInput(!!configData.auto_pr_merge_enabled)
+          setIssueAutoBranchInput(configData.issue_auto_branch ?? true)
           if (actionsData) {
             setEditActions(actionsData.actions)
             setActionsLoaded(true)
@@ -581,6 +585,8 @@ export function ProjectDetailPage({
         auto_commit_enabled: autoCommitEnabledInput,
         auto_push_enabled: autoPushEnabledInput,
         release_after_run: releaseAfterRunInput,
+        auto_pr_merge_enabled: autoPrMergeEnabledInput,
+        issue_auto_branch: issueAutoBranchInput,
       })
       setConfigSaved(true)
       // Reload config to show effective command
@@ -592,6 +598,8 @@ export function ProjectDetailPage({
       setAutoCommitEnabledInput(!!data.auto_commit_enabled)
       setAutoPushEnabledInput(!!data.auto_push_enabled)
       setReleaseAfterRunInput(!!data.release_after_run)
+      setAutoPrMergeEnabledInput(!!data.auto_pr_merge_enabled)
+      setIssueAutoBranchInput(data.issue_auto_branch ?? true)
       setTimeout(() => setConfigSaved(false), 3000)
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to save config', 'error')
@@ -607,7 +615,9 @@ export function ProjectDetailPage({
       testCronScheduleInput !== config.test_cron_schedule ||
       autoCommitEnabledInput !== !!config.auto_commit_enabled ||
       autoPushEnabledInput !== !!config.auto_push_enabled ||
-      releaseAfterRunInput !== !!config.release_after_run)
+      releaseAfterRunInput !== !!config.release_after_run ||
+      autoPrMergeEnabledInput !== !!config.auto_pr_merge_enabled ||
+      issueAutoBranchInput !== (config.issue_auto_branch ?? true))
 
   return (
     <div className="p-6">
@@ -964,6 +974,132 @@ export function ProjectDetailPage({
                 </div>
               </div>
 
+              {/* "Work on" pipeline — governs what happens when the user
+                  clicks the Work on button on a GitHub issue. Each row maps
+                  to an existing project toggle in the Release Pipeline
+                  section below (except "Create feature branch", which is
+                  this section's own setting). Re-listed here in pipeline
+                  order so the user can see the effective chain at a glance. */}
+              <div className="bg-bg-secondary rounded-lg p-5">
+                <h3 className="text-sm font-semibold text-text-primary mb-1">When you click <span className="font-mono">Work on</span></h3>
+                <p className="text-xs text-text-tertiary mb-4">
+                  Each step of the issue-driven pipeline. Toggle what should fire when you click <span className="font-mono">Work on</span> on a GitHub issue.
+                </p>
+                <div className="space-y-4">
+                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input
+                      id="issue-auto-branch"
+                      type="checkbox"
+                      className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
+                      checked={issueAutoBranchInput}
+                      onChange={(e) => setIssueAutoBranchInput(e.target.checked)}
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-text-primary">1. Create feature branch</span>
+                      <p className="mt-0.5 text-xs text-text-tertiary">
+                        Provision <code className="font-mono">fix/issue-&lt;n&gt;-&lt;slug&gt;</code> and check it out before Claude starts editing. Turn off to have Claude work on whatever branch is currently checked out.
+                      </p>
+                    </div>
+                  </label>
+                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input
+                      id="issue-auto-submit-prompt"
+                      type="checkbox"
+                      className="w-4 h-4 mt-0.5 accent-accent opacity-60"
+                      checked
+                      disabled
+                      readOnly
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-text-primary">2. Auto-submit the issue prompt</span>
+                      <p className="mt-0.5 text-xs text-text-tertiary">
+                        Always on. The issue title, URL, and body are sent to Claude as the first message.
+                      </p>
+                    </div>
+                  </label>
+                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input
+                      id="work-on-release-after-run"
+                      type="checkbox"
+                      className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
+                      checked={releaseAfterRunInput}
+                      onChange={(e) => setReleaseAfterRunInput(e.target.checked)}
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-text-primary">3. Run release pipeline when Claude finishes</span>
+                      <p className="mt-0.5 text-xs text-text-tertiary">
+                        After the terminal run exits 0, auto-trigger <code className="font-mono">test → review → mark-dod → commit → push</code>. Same setting as <em>Run release pipeline after each agent run</em> below.
+                      </p>
+                    </div>
+                  </label>
+                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input
+                      id="work-on-auto-commit"
+                      type="checkbox"
+                      className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
+                      checked={autoCommitEnabledInput}
+                      onChange={(e) => {
+                        const next = e.target.checked
+                        setAutoCommitEnabledInput(next)
+                        if (!next) setAutoPushEnabledInput(false)
+                      }}
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-text-primary">4. Auto-commit on LGTM</span>
+                      <p className="mt-0.5 text-xs text-text-tertiary">
+                        When review verdict is <code className="font-mono">LGTM</code>, stage &amp; commit automatically with a Claude-generated message. Same as <em>Auto-commit when review passes</em> below.
+                      </p>
+                    </div>
+                  </label>
+                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input
+                      id="work-on-auto-push"
+                      type="checkbox"
+                      className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
+                      checked={autoPushEnabledInput}
+                      onChange={(e) => {
+                        const next = e.target.checked
+                        setAutoPushEnabledInput(next)
+                        if (next) setAutoCommitEnabledInput(true)
+                      }}
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-text-primary">5. Auto-push &amp; open PR</span>
+                      <p className="mt-0.5 text-xs text-text-tertiary">
+                        After commit, push the feature branch and <code className="font-mono">gh pr create</code> with <code className="font-mono">Closes #&lt;n&gt;</code>. Implies auto-commit. Same as <em>Auto-push after committing</em> below.
+                      </p>
+                    </div>
+                  </label>
+                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input
+                      id="work-on-auto-merge"
+                      type="checkbox"
+                      className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
+                      checked={autoPrMergeEnabledInput}
+                      onChange={(e) => setAutoPrMergeEnabledInput(e.target.checked)}
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-text-primary">6. Auto-merge PR &amp; verify DoD</span>
+                      <p className="mt-0.5 text-xs text-text-tertiary">
+                        Poll CI checks and auto-merge once they pass; tick verified acceptance-criteria checkboxes on the issue. Same as <em>Auto-merge PR after push</em> below.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+                <div className="mt-4 flex items-center gap-3">
+                  <button
+                    className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleSaveConfig}
+                    disabled={configSaving || !configDirty}
+                  >
+                    {configSaving ? 'Saving…' : configSaved ? 'Saved' : 'Save'}
+                  </button>
+                  {configDirty && !configSaving && (
+                    <span className="text-xs text-text-tertiary">Unsaved changes</span>
+                  )}
+                </div>
+              </div>
+
               {/* Release Pipeline */}
               <div className="bg-bg-secondary rounded-lg p-5">
                 <h3 className="text-sm font-semibold text-text-primary mb-4">Release Pipeline</h3>
@@ -1021,6 +1157,22 @@ export function ProjectDetailPage({
                       <span className="text-sm font-medium text-text-primary">Run release pipeline after each agent run</span>
                       <p className="mt-0.5 text-xs text-text-tertiary">
                         When a terminal or agent run finishes successfully, automatically trigger the full release pipeline (test → review → commit → push).
+                      </p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input
+                      id="auto-pr-merge-enabled"
+                      type="checkbox"
+                      className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
+                      checked={autoPrMergeEnabledInput}
+                      onChange={(e) => setAutoPrMergeEnabledInput(e.target.checked)}
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-text-primary">Auto-merge PR after push</span>
+                      <p className="mt-0.5 text-xs text-text-tertiary">
+                        When an issue-driven push creates a PR, poll CI checks and auto-merge once they pass. Verifies DoD checkboxes on the linked issue post-merge.
                       </p>
                     </div>
                   </label>

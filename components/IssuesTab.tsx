@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { fetchIssuesAndPRs, mergePR, approvePR, reviewPR } from '@/lib/client-api'
-import type { GhPullRequest, GhIssue, GhLabel } from '@/lib/client-api'
+import { fetchIssuesAndPRs, fetchProjectConfig, mergePR, approvePR, reviewPR } from '@/lib/client-api'
+import type { GhPullRequest, GhIssue, GhLabel, ProjectConfig } from '@/lib/client-api'
 import { formatAgo } from '@/lib/format'
 
 interface IssuesTabProps {
@@ -369,7 +369,24 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
   )
 }
 
-function IssueRow({ issue, projectName }: { issue: GhIssue; projectName: string }) {
+// Build the hover tooltip for the "Work on" button — an ordered list of
+// steps that will actually fire, with skipped ones marked "(off)". Kept in
+// sync with the Config → When you click Work on section.
+function workOnChainSummary(cfg: ProjectConfig | null): string {
+  const on = (b: boolean | undefined) => b === true
+  const step = (label: string, enabled: boolean) => `${enabled ? '✓' : '○'} ${label}${enabled ? '' : ' (off)'}`
+  const parts = [
+    step('branch', cfg ? on(cfg.issue_auto_branch) : true),
+    '✓ prompt',
+    step('release chain', on(cfg?.release_after_run)),
+    step('auto-commit', on(cfg?.auto_commit_enabled)),
+    step('auto-push + PR', on(cfg?.auto_push_enabled)),
+    step('auto-merge + DoD', on(cfg?.auto_pr_merge_enabled)),
+  ]
+  return `Work-on pipeline:\n${parts.join('\n')}\n\nChange these in Config → When you click Work on.`
+}
+
+function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; projectName: string; projectCfg: ProjectConfig | null }) {
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
 
@@ -418,9 +435,9 @@ function IssueRow({ issue, projectName }: { issue: GhIssue; projectName: string 
           <button
             className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
             onClick={openInTerminal}
-            title="Open in Terminal"
+            title={workOnChainSummary(projectCfg)}
           >
-            Terminal
+            Work on
           </button>
           <a
             href={issue.url}
@@ -451,6 +468,18 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
   const [ghError, setGhError] = useState<string | null>(null)
   const [cachedAt, setCachedAt] = useState<number | null>(null)
   const [fromCache, setFromCache] = useState(false)
+  const [projectCfg, setProjectCfg] = useState<ProjectConfig | null>(null)
+
+  // Preload project config so the "Work on" tooltip can show the effective
+  // pipeline chain. Swallowed on error — the tooltip just falls back to a
+  // generic description.
+  useEffect(() => {
+    let cancelled = false
+    fetchProjectConfig(projectName)
+      .then(cfg => { if (!cancelled) setProjectCfg(cfg) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [projectName])
 
   const load = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
     if (mode === 'refresh') setRefreshing(true)
@@ -544,7 +573,7 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
           </div>
           <div className="border border-border rounded-lg overflow-hidden bg-bg-secondary">
             {issues.map((issue) => (
-              <IssueRow key={issue.number} issue={issue} projectName={projectName} />
+              <IssueRow key={issue.number} issue={issue} projectName={projectName} projectCfg={projectCfg} />
             ))}
           </div>
         </div>

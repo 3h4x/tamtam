@@ -5,6 +5,7 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
   let POST: (req: NextRequest, ctx: { params: Promise<{ projectName: string }> }) => Promise<Response>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
+  let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
 
   function makeExecResult(overrides: { exitCode?: number; stdout?: string; stderr?: string } = {}) {
     return { exitCode: 0, stdout: '', stderr: '', ...overrides };
@@ -23,11 +24,16 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
 
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/project');
     execMock = vi.fn().mockResolvedValue(makeExecResult());
+    // Default: no per-project row → issueAutoBranch defaults to ON (legacy).
+    getProjectTestConfigMock = vi.fn().mockReturnValue(null);
 
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getProjectTestConfig: getProjectTestConfigMock,
+    }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/issue-branch/route');
     POST = mod.POST;
@@ -156,5 +162,43 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.branch).toBe('fix/issue-99');
+  });
+
+  it('returns skipped and runs NO git commands when issue_auto_branch is disabled for the project', async () => {
+    // User unchecked "Create feature branch" in Config → When you click Work on.
+    // The endpoint must short-circuit without touching the working tree so the
+    // terminal flow falls through to prompt auto-submit on whatever branch the
+    // user is currently on.
+    getProjectTestConfigMock.mockReturnValue({
+      testCommand: null, testCronEnabled: false, testCronSchedule: null,
+      autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false,
+      autoPrMergeEnabled: false, issueAutoBranch: false,
+    });
+    const res = await POST(makeRequest({ issue_number: 42, issue_title: 'x' }), {
+      params: Promise.resolve({ projectName: 'myproj' }),
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('skipped');
+    expect(execMock).not.toHaveBeenCalled();
+  });
+
+  it('still creates the branch when issue_auto_branch is true', async () => {
+    getProjectTestConfigMock.mockReturnValue({
+      testCommand: null, testCronEnabled: false, testCronSchedule: null,
+      autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false,
+      autoPrMergeEnabled: false, issueAutoBranch: true,
+    });
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));
+    const res = await POST(makeRequest({ issue_number: 11, issue_title: 'Something' }), {
+      params: Promise.resolve({ projectName: 'myproj' }),
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('created');
+    expect(data.branch).toBe('fix/issue-11-something');
+    expect(execMock).toHaveBeenCalled();
   });
 });
