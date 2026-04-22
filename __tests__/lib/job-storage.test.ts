@@ -2425,3 +2425,115 @@ describe('markDone – ghIssuesCache invalidation', () => {
     expect(after).toHaveLength(0);
   });
 });
+
+describe('markDone – metadata extraction skipped for release kind', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+  let tempDir: string;
+
+  const resultLine = '{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"session_id":"ses-abc","result":"ok","modelUsage":{"claude-sonnet":{"inputTokens":100,"outputTokens":50,"cacheReadInputTokens":10,"cacheCreationInputTokens":5}}}';
+
+  function makeJob(kind: string, logPath: string | null): JobData {
+    return {
+      id: `${kind.replace(':', '-')}-meta-test`,
+      project: 'meta-proj',
+      kind,
+      prompt: null,
+      pid: 1,
+      logPath,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    };
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-meta-'));
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/pm2-jobs', () => ({
+      getJobStatus: vi.fn(),
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({ autoPushEnabled: false }),
+    }));
+    vi.doMock('@/lib/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/start-review', () => ({
+      startProjectReview: vi.fn().mockResolvedValue({ ok: false }),
+    }));
+    vi.doMock('@/lib/start-push', () => ({
+      startProjectPush: vi.fn().mockResolvedValue({ ok: false }),
+    }));
+    vi.doMock('@/lib/start-fix-push', () => ({
+      isHookRejection: vi.fn().mockReturnValue(false),
+      startFixPush: vi.fn().mockResolvedValue({ ok: false }),
+    }));
+
+    const mod = await import('@/lib/job-storage');
+    markDoneFn = mod.markDone;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('does NOT populate sessionId/tokens for release kind even when log has a result line', async () => {
+    const logFile = join(tempDir, 'release.log');
+    writeFileSync(logFile, resultLine + '\n');
+    const job = makeJob('release', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(job.sessionId).toBeNull();
+    expect(job.inputTokens).toBeNull();
+    expect(job.outputTokens).toBeNull();
+    expect(job.cacheReadTokens).toBeNull();
+    expect(job.cacheCreateTokens).toBeNull();
+    expect(job.durationMs).toBeNull();
+  });
+
+  it('DOES populate sessionId/tokens for non-release kinds (review)', async () => {
+    const logFile = join(tempDir, 'review.log');
+    writeFileSync(logFile, resultLine + '\n');
+    const job = makeJob('review', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(job.sessionId).toBe('ses-abc');
+    expect(job.inputTokens).toBe(100);
+    expect(job.outputTokens).toBe(50);
+    expect(job.cacheReadTokens).toBe(10);
+    expect(job.cacheCreateTokens).toBe(5);
+    expect(job.durationMs).toBe(1234);
+  });
+
+  it('DOES populate metadata for commit kind (non-release Claude job)', async () => {
+    const logFile = join(tempDir, 'commit.log');
+    writeFileSync(logFile, resultLine + '\n');
+    const job = makeJob('commit', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(job.sessionId).toBe('ses-abc');
+    expect(job.durationMs).toBe(1234);
+  });
+});

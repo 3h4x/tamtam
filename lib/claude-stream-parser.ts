@@ -16,7 +16,7 @@ export type ParsedEvent =
 // ([{type:"text",text:"..."}, {type:"image",...}]). Dumping the array with
 // JSON.stringify would pollute the terminal with raw JSON — extract the
 // text payload so the user sees readable output.
-function toolContentToString(content: unknown): string {
+export function toolContentToString(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
     const parts: string[] = [];
@@ -36,11 +36,34 @@ function toolContentToString(content: unknown): string {
   return String(content ?? '');
 }
 
-export function parseStreamLines(content: string): ParsedEvent[] {
+// Mutable state that can be shared across parseStreamLines calls so that
+// tool_use blocks spanning multiple chunks (start on one read, stop on the
+// next) still emit, and the inter-text-block newline guard works correctly
+// when input is fed one line at a time.
+export interface ParseState {
+  currentToolName: string;
+  currentToolInput: string;
+  inToolUse: boolean;
+  hasEmitted: boolean;
+}
+
+export function createParseState(): ParseState {
+  return { currentToolName: '', currentToolInput: '', inToolUse: false, hasEmitted: false };
+}
+
+export interface ParseOptions {
+  state?: ParseState;
+  // Called for each non-empty line that is not parseable as JSON. Receives the
+  // line with any PM2 timestamp prefix stripped (or the original line if no
+  // prefix was present). Used by passthrough-mode callers to surface plain
+  // shell output interleaved with NDJSON.
+  onRawLine?: (line: string) => void;
+}
+
+export function parseStreamLines(content: string, options: ParseOptions = {}): ParsedEvent[] {
+  const state = options.state ?? createParseState();
   const events: ParsedEvent[] = [];
-  let currentToolName = '';
-  let currentToolInput = '';
-  let inToolUse = false;
+  const push = (e: ParsedEvent) => { events.push(e); state.hasEmitted = true; };
 
   // PM2 can be configured to prepend an ISO timestamp to every line
   // (PM2_LOG_DATE_FORMAT / pm2 set). Strip it so JSON.parse sees a valid object.
@@ -58,6 +81,7 @@ export function parseStreamLines(content: string): ParsedEvent[] {
     try {
       parsed = JSON.parse(trimmed);
     } catch {
+      options.onRawLine?.(m ? trimmed : line);
       continue;
     }
 
@@ -69,7 +93,7 @@ export function parseStreamLines(content: string): ParsedEvent[] {
         evt?.type === 'content_block_delta' &&
         evt?.delta?.type === 'thinking_delta'
       ) {
-        events.push({ type: 'thinking', text: evt.delta.thinking });
+        push({ type: 'thinking', text: evt.delta.thinking });
       }
 
       // Text deltas from assistant
@@ -77,7 +101,7 @@ export function parseStreamLines(content: string): ParsedEvent[] {
         evt?.type === 'content_block_delta' &&
         evt?.delta?.type === 'text_delta'
       ) {
-        events.push({ type: 'text', text: evt.delta.text });
+        push({ type: 'text', text: evt.delta.text });
       }
 
       // Tool use start — capture tool name
@@ -85,9 +109,9 @@ export function parseStreamLines(content: string): ParsedEvent[] {
         evt?.type === 'content_block_start' &&
         evt?.content_block?.type === 'tool_use'
       ) {
-        inToolUse = true;
-        currentToolName = evt.content_block.name ?? '';
-        currentToolInput = '';
+        state.inToolUse = true;
+        state.currentToolName = evt.content_block.name ?? '';
+        state.currentToolInput = '';
       }
 
       // Tool input JSON delta
@@ -95,24 +119,26 @@ export function parseStreamLines(content: string): ParsedEvent[] {
         evt?.type === 'content_block_delta' &&
         evt?.delta?.type === 'input_json_delta'
       ) {
-        currentToolInput += evt.delta.partial_json ?? '';
+        state.currentToolInput += evt.delta.partial_json ?? '';
       }
 
       // Content block stop — emit tool_use if we were in one
-      if (evt?.type === 'content_block_stop' && inToolUse) {
-        events.push({ type: 'tool_use', name: currentToolName, input: currentToolInput });
-        inToolUse = false;
-        currentToolName = '';
-        currentToolInput = '';
+      if (evt?.type === 'content_block_stop' && state.inToolUse) {
+        push({ type: 'tool_use', name: state.currentToolName, input: state.currentToolInput });
+        state.inToolUse = false;
+        state.currentToolName = '';
+        state.currentToolInput = '';
       }
 
-      // New text block — add separator between content blocks
+      // New text block — add separator between content blocks. Uses
+      // state.hasEmitted (not events.length) so the guard still works when
+      // input is fed one line at a time via shared state.
       if (
         evt?.type === 'content_block_start' &&
         evt?.content_block?.type === 'text' &&
-        events.length > 0
+        state.hasEmitted
       ) {
-        events.push({ type: 'text', text: '\n' });
+        push({ type: 'text', text: '\n' });
       }
     }
 
@@ -123,7 +149,7 @@ export function parseStreamLines(content: string): ParsedEvent[] {
     ) {
       const content = parsed.content ?? parsed.output ?? '';
       if (content) {
-        events.push({ type: 'tool_result', content: toolContentToString(content) });
+        push({ type: 'tool_result', content: toolContentToString(content) });
       }
     }
 
@@ -131,7 +157,7 @@ export function parseStreamLines(content: string): ParsedEvent[] {
     if (parsed.type === 'user' && parsed.message?.content) {
       for (const block of Array.isArray(parsed.message.content) ? parsed.message.content : []) {
         if (block.type === 'tool_result' && block.content) {
-          events.push({ type: 'tool_result', content: toolContentToString(block.content) });
+          push({ type: 'tool_result', content: toolContentToString(block.content) });
         }
       }
     }
@@ -148,7 +174,7 @@ export function parseStreamLines(content: string): ParsedEvent[] {
         }
       }
       const errorText = parsed.is_error && typeof parsed.result === 'string' ? parsed.result : undefined;
-      events.push({
+      push({
         type: 'done',
         result: {
           duration: parsed.duration_ms ?? 0,

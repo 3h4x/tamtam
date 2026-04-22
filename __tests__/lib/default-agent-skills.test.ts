@@ -38,7 +38,17 @@ describe('seedDefaultSkills', () => {
   it('inserts all default skills on first call', () => {
     seedFn();
     const skills = testDb.db.select().from(schema.skills).all();
-    expect(skills.length).toBeGreaterThanOrEqual(8);
+    expect(skills.length).toBeGreaterThanOrEqual(9);
+  });
+
+  it('inserts agent-self-improve with correct fields', () => {
+    seedFn();
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-self-improve');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:self-improve');
+    expect(skill!.content).toContain('http://localhost:1337');
+    expect(skill!.content).toContain('/api/agents/by-name');
+    expect(skill!.description).toContain('TamTam');
   });
 
   it('inserts agent-cto with correct fields', () => {

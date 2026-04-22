@@ -342,6 +342,7 @@ describe('GET /api/streaming/[jobId]', () => {
 
     vi.doMock('@/lib/claude-stream-parser', () => ({
       parseStreamLines: vi.fn().mockReturnValue([]),
+      createParseState: vi.fn().mockReturnValue({ currentToolName: '', currentToolInput: '', inToolUse: false, hasEmitted: false }),
     }));
 
     const mod = await import('@/app/api/streaming/[jobId]/route');

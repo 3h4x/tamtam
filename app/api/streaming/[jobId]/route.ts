@@ -3,7 +3,7 @@ import { existsSync, readFileSync, watch } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { getJob, probeJobStatus } from '@/lib/job-storage';
-import { parseStreamLines } from '@/lib/claude-stream-parser';
+import { parseStreamLines, createParseState, type ParseState } from '@/lib/claude-stream-parser';
 import { errMsg } from '@/lib/types';
 
 function getLogPath(jobId: string): string {
@@ -20,6 +20,9 @@ export async function GET(
   const logPath = getLogPath(jobId);
   const encoder = new TextEncoder();
   const raw = request.nextUrl.searchParams.get('raw') === '1';
+  // passthrough mode: non-JSON lines → `raw` SSE events (monospace), JSON lines → parsed Claude events.
+  // Used for aggregate logs like release that mix plain shell output with NDJSON review sections.
+  const passthrough = !raw && request.nextUrl.searchParams.get('passthrough') === '1';
 
   const stream = new ReadableStream({
     start(controller) {
@@ -36,6 +39,49 @@ export async function GET(
       function sseEncode(data: string, event?: string): string {
         const lines = data.split('\n').map(line => `data: ${line}`).join('\n');
         return event ? `event: ${event}\n${lines}\n\n` : `${lines}\n\n`;
+      }
+
+      // Passthrough mode: non-JSON lines → `raw` SSE events (monospace in terminal),
+      // JSON lines → parsed Claude events via parseStreamLines. `done` events from
+      // the parser are suppressed — the server emits its own done so the terminal
+      // doesn't close prematurely on an embedded child result.
+      //
+      // parseState is shared across calls so tool_use blocks that start on one
+      // fs.watch batch and stop on the next still emit; passPending holds an
+      // incomplete trailing line at a chunk boundary so it isn't fragmented
+      // into two raw events.
+      const parseState: ParseState = createParseState();
+      let passPending = '';
+
+      function sendPassthroughContent(text: string) {
+        const combined = passPending + text;
+        const nl = combined.lastIndexOf('\n');
+        if (nl === -1) {
+          // No newline at all — the whole thing is incomplete, buffer it
+          passPending = combined;
+          return;
+        }
+        const processable = combined.slice(0, nl);
+        passPending = combined.slice(nl + 1);
+
+        const events = parseStreamLines(processable, {
+          state: parseState,
+          onRawLine: (line) => {
+            controller.enqueue(encoder.encode(sseEncode(line, 'raw')));
+          },
+        });
+        for (const event of events) {
+          if (event.type === 'text') {
+            controller.enqueue(encoder.encode(sseEncode(event.text)));
+          } else if (event.type === 'thinking') {
+            controller.enqueue(encoder.encode(sseEncode(event.text, 'thinking')));
+          } else if (event.type === 'tool_use') {
+            controller.enqueue(encoder.encode(sseEncode(JSON.stringify({ name: event.name, input: event.input }), 'tool_use')));
+          } else if (event.type === 'tool_result') {
+            controller.enqueue(encoder.encode(sseEncode(JSON.stringify({ content: event.content }), 'tool_result')));
+          }
+          // `done` events from parser suppressed — server emits its own for passthrough
+        }
       }
 
       function sendParsedEvents(text: string) {
@@ -57,7 +103,7 @@ export async function GET(
         }
       }
 
-      const sendContent = raw ? sendRawLines : sendParsedEvents;
+      const sendContent = raw ? sendRawLines : passthrough ? sendPassthroughContent : sendParsedEvents;
 
       function closeStream(watcher: ReturnType<typeof watch> | null) {
         watcher?.close();
@@ -96,7 +142,19 @@ export async function GET(
         }
       }
 
+      // Flush any incomplete trailing line held in passPending so the final
+      // line of a log isn't swallowed at stream end. Reuses sendPassthroughContent
+      // by appending a synthetic newline, which lets parseStreamLines handle
+      // TS-prefix stripping / JSON vs raw classification uniformly.
+      function flushPassthroughPending() {
+        if (!passthrough || !passPending) return;
+        const tail = passPending;
+        passPending = '';
+        sendPassthroughContent(tail + '\n');
+      }
+
       function emitDone(watcher: ReturnType<typeof watch> | null, exitCode?: number | null) {
+        flushPassthroughPending();
         try {
           const payload: Record<string, unknown> = { exitCode: exitCode ?? null };
           if ((exitCode ?? 0) !== 0) {
@@ -120,7 +178,8 @@ export async function GET(
       // If job is already finished, close immediately (non-Claude jobs have no NDJSON done event)
       const jobRecord = getJob(jobId);
       if (jobRecord?.finishedAt) {
-        if (raw) {
+        if (raw || passthrough) {
+          // raw: no NDJSON done; passthrough: suppresses result events — always emit synthetic done
           emitDone(null, jobRecord.exitCode);
         } else {
           // Only emit synthetic done if parseStreamLines didn't already produce one
@@ -164,7 +223,7 @@ export async function GET(
           }
           const job = getJob(jobId);
           if (!job?.finishedAt) return false;
-          if (raw) {
+          if (raw || passthrough) {
             emitDoneAndCleanup(job.exitCode);
           } else {
             const fullContent = existsSync(logPath) ? readFileSync(logPath, 'utf-8') : '';
@@ -181,6 +240,7 @@ export async function GET(
       }
 
       function emitDoneAndCleanup(exitCode?: number | null) {
+        flushPassthroughPending();
         try {
           const payload: Record<string, unknown> = { exitCode: exitCode ?? null };
           if ((exitCode ?? 0) !== 0) {
