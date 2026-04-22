@@ -195,4 +195,164 @@ describe('built-in step behavior', () => {
     expect(direct).toMatch(/origin/);
     expect(pr).toMatch(/feature\/issue branch/);
   });
+
+  // isActive coverage for steps that had no explicit test
+
+  it('commit isActive reflects auto_commit_enabled', () => {
+    const commit = BUILT_IN_STEPS.find(s => s.id === 'commit')!;
+    expect(commit.isActive(makeCtx({ auto_commit_enabled: true }))).toBe(true);
+    expect(commit.isActive(makeCtx({ auto_commit_enabled: false }))).toBe(false);
+    expect(commit.isActive(makeCtx({}))).toBe(false);
+  });
+
+  it('push isActive reflects auto_push_enabled', () => {
+    const push = BUILT_IN_STEPS.find(s => s.id === 'push')!;
+    expect(push.isActive(makeCtx({ auto_push_enabled: true }))).toBe(true);
+    expect(push.isActive(makeCtx({ auto_push_enabled: false }))).toBe(false);
+    expect(push.isActive(makeCtx({}))).toBe(false);
+  });
+
+  it('review isActive is true when review_disabled is false or absent', () => {
+    const review = BUILT_IN_STEPS.find(s => s.id === 'review')!;
+    expect(review.isActive(makeCtx({}))).toBe(true);
+    expect(review.isActive(makeCtx({ review_disabled: false }))).toBe(true);
+    expect(review.isActive(makeCtx({ review_disabled: true }))).toBe(false);
+  });
+
+  it('dod isActive always returns true', () => {
+    const dod = BUILT_IN_STEPS.find(s => s.id === 'dod')!;
+    expect(dod.isActive(makeCtx({}))).toBe(true);
+    expect(dod.isActive(makeCtx({ review_disabled: true, tests_disabled: true }))).toBe(true);
+  });
+
+  it('merge isActive reflects auto_pr_merge_enabled', () => {
+    const merge = BUILT_IN_STEPS.find(s => s.id === 'merge')!;
+    expect(merge.isActive(makeCtx({ auto_pr_merge_enabled: true }))).toBe(true);
+    expect(merge.isActive(makeCtx({ auto_pr_merge_enabled: false }))).toBe(false);
+    expect(merge.isActive(makeCtx({}))).toBe(false);
+  });
+
+  // commit toggle: enabling (off → on) must not cascade push/merge
+
+  it('commit toggle enabling from off does not touch push or merge', () => {
+    const commit = BUILT_IN_STEPS.find(s => s.id === 'commit')!;
+    const calls: Record<string, boolean[]> = { commit: [], push: [], merge: [] };
+    const ctx = makeCtx({ auto_commit_enabled: false });
+    ctx.setters.setAutoCommit = v => calls.commit.push(v);
+    ctx.setters.setAutoPush = v => calls.push.push(v);
+    ctx.setters.setAutoMerge = v => calls.merge.push(v);
+    commit.onToggle!(ctx);
+    expect(calls.commit).toEqual([true]);
+    expect(calls.push).toEqual([]);
+    expect(calls.merge).toEqual([]);
+  });
+
+  // merge toggle: disabling must not touch commit or push
+
+  it('merge toggle disabling does not cascade to commit or push', () => {
+    const merge = BUILT_IN_STEPS.find(s => s.id === 'merge')!;
+    const calls: Record<string, boolean[]> = { commit: [], push: [], merge: [] };
+    const ctx = makeCtx({ auto_pr_merge_enabled: true });
+    ctx.setters.setAutoCommit = v => calls.commit.push(v);
+    ctx.setters.setAutoPush = v => calls.push.push(v);
+    ctx.setters.setAutoMerge = v => calls.merge.push(v);
+    merge.onToggle!(ctx);
+    expect(calls.merge).toEqual([false]);
+    expect(calls.commit).toEqual([]);
+    expect(calls.push).toEqual([]);
+  });
+
+  // description() branch coverage
+
+  it('test description: disabled → re-enable message', () => {
+    const test = BUILT_IN_STEPS.find(s => s.id === 'test')!;
+    const d = test.description(makeCtx({ tests_disabled: true }));
+    expect(d).toMatch(/disabled/i);
+    expect(d).toMatch(/re-enable/i);
+  });
+
+  it('test description: command set and enabled → includes command and "disable"', () => {
+    const test = BUILT_IN_STEPS.find(s => s.id === 'test')!;
+    const d = test.description(makeCtx({ effective_test_command: 'pnpm test', tests_disabled: false }));
+    expect(d).toContain('pnpm test');
+    expect(d).toMatch(/disable/i);
+  });
+
+  it('test description: no command → configure message', () => {
+    const test = BUILT_IN_STEPS.find(s => s.id === 'test')!;
+    const d = test.description(makeCtx({ effective_test_command: '', tests_disabled: false }));
+    expect(d).toMatch(/No test command/i);
+  });
+
+  it('fix description: review enabled → mentions iterations', () => {
+    const fix = BUILT_IN_STEPS.find(s => s.id === 'fix')!;
+    const d = fix.description(makeCtx({ review_disabled: false }));
+    expect(d).toMatch(/NEEDS ATTENTION|DO NOT SHIP/i);
+  });
+
+  it('fix description: review disabled → skipped message', () => {
+    const fix = BUILT_IN_STEPS.find(s => s.id === 'fix')!;
+    const d = fix.description(makeCtx({ review_disabled: true }));
+    expect(d).toMatch(/skipped/i);
+  });
+
+  it('commit description: enabled → includes "automatically" and "disable"', () => {
+    const commit = BUILT_IN_STEPS.find(s => s.id === 'commit')!;
+    const d = commit.description(makeCtx({ auto_commit_enabled: true }));
+    expect(d).toMatch(/automatically/i);
+    expect(d).toMatch(/disable/i);
+  });
+
+  it('commit description: disabled → includes "enable"', () => {
+    const commit = BUILT_IN_STEPS.find(s => s.id === 'commit')!;
+    const d = commit.description(makeCtx({ auto_commit_enabled: false }));
+    expect(d).toMatch(/enable/i);
+  });
+
+  it('review description: enabled → mentions verdict options', () => {
+    const review = BUILT_IN_STEPS.find(s => s.id === 'review')!;
+    const d = review.description(makeCtx({ review_disabled: false }));
+    expect(d).toMatch(/LGTM/);
+    expect(d).toMatch(/disable/i);
+  });
+
+  it('review description: disabled → re-enable message', () => {
+    const review = BUILT_IN_STEPS.find(s => s.id === 'review')!;
+    const d = review.description(makeCtx({ review_disabled: true }));
+    expect(d).toMatch(/disabled/i);
+    expect(d).toMatch(/re-enable/i);
+  });
+
+  it('dod description is a fixed string mentioning Definition-of-Done', () => {
+    const dod = BUILT_IN_STEPS.find(s => s.id === 'dod')!;
+    const d = dod.description(makeCtx({}));
+    expect(d).toMatch(/Definition.of.Done|acceptance.criteria/i);
+  });
+
+  it('merge description: enabled → mentions CI and "disable"', () => {
+    const merge = BUILT_IN_STEPS.find(s => s.id === 'merge')!;
+    const d = merge.description(makeCtx({ auto_pr_merge_enabled: true }));
+    expect(d).toMatch(/CI/i);
+    expect(d).toMatch(/disable/i);
+  });
+
+  it('merge description: disabled → mentions "enable"', () => {
+    const merge = BUILT_IN_STEPS.find(s => s.id === 'merge')!;
+    const d = merge.description(makeCtx({ auto_pr_merge_enabled: false }));
+    expect(d).toMatch(/enable/i);
+  });
+
+  it('push description disabled direct-branch → mentions "enable" and "commit"', () => {
+    const push = BUILT_IN_STEPS.find(s => s.id === 'push')!;
+    const d = push.description(makeCtx({ auto_push_enabled: false, pr_workflow_enabled: false }));
+    expect(d).toMatch(/enable/i);
+    expect(d).toMatch(/commit/i);
+  });
+
+  it('push description disabled pr-workflow → mentions feature/issue branch and "enable"', () => {
+    const push = BUILT_IN_STEPS.find(s => s.id === 'push')!;
+    const d = push.description(makeCtx({ auto_push_enabled: false, pr_workflow_enabled: true }));
+    expect(d).toMatch(/feature\/issue branch/i);
+    expect(d).toMatch(/enable/i);
+  });
 });
