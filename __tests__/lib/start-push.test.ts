@@ -918,3 +918,139 @@ describe('launchProjectPush — fire-and-forget', () => {
     expect(mkdirSyncMock).toHaveBeenCalledWith('/tmp/test-logs', { recursive: true });
   });
 });
+
+describe('pushCurrentBranch', () => {
+  let pushCurrentBranch: typeof import('@/lib/start-push').pushCurrentBranch;
+  let execMock: ReturnType<typeof vi.fn>;
+
+  const resp = (exitCode: number, stdout = '', stderr = '') => ({ exitCode, stdout, stderr });
+
+  beforeEach(async () => {
+    vi.resetModules();
+    execMock = vi.fn();
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn(), clearProjectDataCache: vi.fn() }));
+    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/scheduling', () => ({ getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }), setProjectPushResult: vi.fn() }));
+    vi.doMock('@/lib/job-storage', () => ({ createJob: vi.fn(), markDone: vi.fn(), updateJob: vi.fn(), listJobs: vi.fn().mockReturnValue([]) }));
+    vi.doMock('@/lib/pipeline-lock', () => ({ getLock: vi.fn(), acquireLock: vi.fn(), isLockOwnedByActiveRelease: vi.fn() }));
+    vi.doMock('@/lib/start-commit', () => ({ generateCommitMessage: vi.fn(), findIssueContext: vi.fn(), detectMainBranch: vi.fn(), issueBranchName: vi.fn() }));
+    vi.doMock('@/lib/notifications', () => ({ notify: vi.fn() }));
+
+    const mod = await import('@/lib/start-push');
+    pushCurrentBranch = mod.pushCurrentBranch;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('returns ok with commitSha on clean push', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0))
+      .mockResolvedValueOnce(resp(0, 'abc1234\n'));
+
+    const result = await pushCurrentBranch('/repo');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.commitSha).toBe('abc1234');
+  });
+
+  it('returns empty commitSha when rev-parse fails', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0))
+      .mockResolvedValueOnce(resp(1, ''));
+
+    const result = await pushCurrentBranch('/repo');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.commitSha).toBe('');
+  });
+
+  it('retries with -u origin <branch> on "no upstream" error', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(1, '', 'error: The current branch has no upstream branch'))
+      .mockResolvedValueOnce(resp(0, 'feat/x\n'))
+      .mockResolvedValueOnce(resp(0))
+      .mockResolvedValueOnce(resp(0, 'def5678\n'));
+
+    const result = await pushCurrentBranch('/repo');
+    expect(result.ok).toBe(true);
+    const upstreamCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'git' && args.includes('-u')
+    );
+    expect(upstreamCall).toBeTruthy();
+    expect(upstreamCall![1]).toContain('feat/x');
+  });
+
+  it('retries with -u origin <branch> on "set-upstream" error', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(1, '', 'fatal: The current branch has no upstream. To push the current branch and set the remote as upstream, use --set-upstream'))
+      .mockResolvedValueOnce(resp(0, 'fix/issue-5\n'))
+      .mockResolvedValueOnce(resp(0))
+      .mockResolvedValueOnce(resp(0, 'aaa0001\n'));
+
+    const result = await pushCurrentBranch('/repo');
+    expect(result.ok).toBe(true);
+  });
+
+  it('skips upstream retry when git branch returns empty (detached HEAD)', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(1, '', 'error: no upstream branch'))
+      .mockResolvedValueOnce(resp(0, '\n'));
+
+    const result = await pushCurrentBranch('/repo');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.detail).toContain('Push failed');
+    // Only 2 exec calls — no third push attempt since branch name is empty
+    expect(execMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns ok: false with detail when push fails for a non-upstream reason', async () => {
+    execMock.mockResolvedValueOnce(resp(1, '', 'remote: permission denied'));
+
+    const result = await pushCurrentBranch('/repo');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.detail).toContain('Push failed');
+      expect(result.detail).toContain('permission denied');
+    }
+  });
+
+  it('falls back to stdout in error detail when stderr is empty', async () => {
+    execMock.mockResolvedValueOnce(resp(1, 'some stdout error', ''));
+
+    const result = await pushCurrentBranch('/repo');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.detail).toContain('some stdout error');
+  });
+
+  it('uses generic exit-code message when both stdout and stderr are empty', async () => {
+    execMock.mockResolvedValueOnce(resp(2, '', ''));
+
+    const result = await pushCurrentBranch('/repo');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.detail).toContain('exited 2');
+  });
+
+  it('calls the log callback with push command and stdout', async () => {
+    const logs: string[] = [];
+    execMock
+      .mockResolvedValueOnce(resp(0, 'branch info\n', ''))
+      .mockResolvedValueOnce(resp(0, 'sha123\n'));
+
+    await pushCurrentBranch('/repo', (s) => logs.push(s));
+    expect(logs.some((l) => l.includes('git push'))).toBe(true);
+    expect(logs.some((l) => l.includes('branch info'))).toBe(true);
+  });
+
+  it('passes the project path via -C to all git invocations', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0))
+      .mockResolvedValueOnce(resp(0, 'sha\n'));
+
+    await pushCurrentBranch('/my/custom/path');
+    for (const [cmd, args] of execMock.mock.calls as [string, string[]][]) {
+      if (cmd === 'git') expect(args).toContain('/my/custom/path');
+    }
+  });
+});

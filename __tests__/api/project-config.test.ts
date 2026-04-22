@@ -608,6 +608,36 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     const res = await PATCH(req, { params: Promise.resolve({ projectName: 'unknown' }) });
     expect(res.status).toBe(404);
   });
+
+  it('writes pr_workflow_enabled=1 when set to true', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ pr_workflow_enabled: true }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'pr_workflow_enabled', '1');
+  });
+
+  it('writes pr_workflow_enabled=0 when set to false', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ pr_workflow_enabled: false }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'pr_workflow_enabled', '0');
+  });
+
+  it('returns 404 when project not found while writing pr_workflow_enabled', async () => {
+    writeProjectFieldYamlMock.mockReturnValue(false);
+    const req = new NextRequest('http://localhost/api/projects/by-project/missing/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ pr_workflow_enabled: true }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'missing' }) });
+    expect(res.status).toBe(404);
+  });
 });
 
 describe('parseTestScheduleToCron', () => {
