@@ -30,6 +30,7 @@ The **🚀 Release** button triggers the pipeline at the right starting step. Wh
 - `lib/start-release.ts` → `startRelease` (pipeline entry point)
 - `lib/start-pr-review.ts` → `startPrReview` (AI review of a GitHub PR)
 - `lib/start-mark-dod.ts` → `startMarkDod` (DoD verification + GitHub issue checkbox update)
+- `lib/start-pr-wait.ts` → `launchPrWait` (background PR poller: polls CI checks, auto-merges once they pass, switches working copy back to default branch, then runs mark-dod)
 - `lib/notifications.ts` → `notify` / `sendTestNotification` (outbound webhook delivery)
 
 Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars** of the parsed Claude log and looks for an explicit "Verdict: X" marker or a bare token on the final line — deliberately lenient across markdown formatting (`## Verdict\n**NEEDS ATTENTION**`) but robust against false positives from code snippets higher up in the log.
