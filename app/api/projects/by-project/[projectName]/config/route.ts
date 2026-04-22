@@ -52,14 +52,13 @@ export async function PATCH(
   const { projectName } = await params;
   const body = await request.json();
   let touched = false;
+  const notFound = () =>
+    NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
 
   if (body.test_command !== undefined) {
     touched = true;
     const value = body.test_command?.trim() || null;
-    const ok = writeProjectFieldYaml(projectName, 'test_command', value);
-    if (!ok) {
-      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
-    }
+    if (!writeProjectFieldYaml(projectName, 'test_command', value)) return notFound();
   }
 
   if (body.test_cron_schedule !== undefined) {
@@ -75,90 +74,19 @@ export async function PATCH(
         );
       }
     }
-    const ok = writeProjectFieldYaml(projectName, 'test_cron_schedule', value);
-    if (!ok) {
-      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
-    }
+    if (!writeProjectFieldYaml(projectName, 'test_cron_schedule', value)) return notFound();
   }
 
-  if (body.test_cron_enabled !== undefined) {
-    touched = true;
-    const value = body.test_cron_enabled ? '1' : '0';
-    const ok = writeProjectFieldYaml(projectName, 'test_cron_enabled', value);
-    if (!ok) {
-      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
-    }
-  }
+  const booleanFields = [
+    'test_cron_enabled', 'auto_commit_enabled', 'auto_push_enabled',
+    'auto_pr_merge_enabled', 'release_after_run', 'pr_workflow_enabled',
+    'tests_disabled', 'review_disabled', 'issue_auto_branch',
+  ] as const;
 
-  if (body.auto_commit_enabled !== undefined) {
-    touched = true;
-    const value = body.auto_commit_enabled ? '1' : '0';
-    const ok = writeProjectFieldYaml(projectName, 'auto_commit_enabled', value);
-    if (!ok) {
-      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
-    }
-  }
-
-  if (body.auto_push_enabled !== undefined) {
-    touched = true;
-    const value = body.auto_push_enabled ? '1' : '0';
-    const ok = writeProjectFieldYaml(projectName, 'auto_push_enabled', value);
-    if (!ok) {
-      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
-    }
-  }
-
-  if (body.auto_pr_merge_enabled !== undefined) {
-    touched = true;
-    const value = body.auto_pr_merge_enabled ? '1' : '0';
-    const ok = writeProjectFieldYaml(projectName, 'auto_pr_merge_enabled', value);
-    if (!ok) {
-      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
-    }
-  }
-
-  if (body.release_after_run !== undefined) {
-    touched = true;
-    const value = body.release_after_run ? '1' : '0';
-    const ok = writeProjectFieldYaml(projectName, 'release_after_run', value);
-    if (!ok) {
-      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
-    }
-  }
-
-  if (body.pr_workflow_enabled !== undefined) {
-    touched = true;
-    const value = body.pr_workflow_enabled ? '1' : '0';
-    const ok = writeProjectFieldYaml(projectName, 'pr_workflow_enabled', value);
-    if (!ok) {
-      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
-    }
-  }
-
-  if (body.tests_disabled !== undefined) {
-    touched = true;
-    const value = body.tests_disabled ? '1' : '0';
-    const ok = writeProjectFieldYaml(projectName, 'tests_disabled', value);
-    if (!ok) {
-      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
-    }
-  }
-
-  if (body.review_disabled !== undefined) {
-    touched = true;
-    const value = body.review_disabled ? '1' : '0';
-    const ok = writeProjectFieldYaml(projectName, 'review_disabled', value);
-    if (!ok) {
-      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
-    }
-  }
-
-  if (body.issue_auto_branch !== undefined) {
-    touched = true;
-    const value = body.issue_auto_branch ? '1' : '0';
-    const ok = writeProjectFieldYaml(projectName, 'issue_auto_branch', value);
-    if (!ok) {
-      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
+  for (const field of booleanFields) {
+    if (body[field] !== undefined) {
+      touched = true;
+      if (!writeProjectFieldYaml(projectName, field, body[field] ? '1' : '0')) return notFound();
     }
   }
 
