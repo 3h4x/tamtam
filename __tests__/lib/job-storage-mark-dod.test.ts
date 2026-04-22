@@ -90,7 +90,27 @@ describe('runCompletionHooks – mark-dod integration', () => {
     startProjectPushMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'pushed' });
     startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' });
     startFixFromJobMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-job' });
-    getProjectTestConfigMock = vi.fn().mockReturnValue({ autoPushEnabled: true, autoCommitEnabled: false });
+    // Default: PR Workflow on + auto-push on — the conditions under which
+    // mark-dod should run. Individual tests override as needed.
+    getProjectTestConfigMock = vi.fn().mockReturnValue({
+      autoPushEnabled: true,
+      autoCommitEnabled: false,
+      prWorkflowEnabled: true,
+    });
+
+    // Seed an issue-linked "run" job so hasIssueContext is true.
+    testDb.db.insert(schema.jobs).values({
+      id: 'run-with-issue',
+      project: 'my-proj',
+      kind: 'run',
+      pid: 0,
+      startedAt: Date.now() / 1000 - 60,
+      finishedAt: Date.now() / 1000 - 30,
+      exitCode: 0,
+      ghIssueNumber: 7,
+      ghIssueRepo: 'owner/repo',
+      ghIssueTitle: 'sample',
+    }).run();
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     vi.doMock('@/lib/pm2-jobs', () => ({
@@ -192,7 +212,7 @@ describe('runCompletionHooks – mark-dod integration', () => {
   });
 
   it('does not call startMarkDod when auto-push is disabled (no pipeline active)', async () => {
-    getProjectTestConfigMock.mockReturnValue({ autoPushEnabled: false, autoCommitEnabled: false });
+    getProjectTestConfigMock.mockReturnValue({ autoPushEnabled: false, autoCommitEnabled: false, prWorkflowEnabled: true });
     const logFile = join(tempDir, 'lgtm-off.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
     await markDoneFn(makeReviewJob(logFile), 0);
@@ -201,12 +221,39 @@ describe('runCompletionHooks – mark-dod integration', () => {
     expect(startProjectCommitMock).not.toHaveBeenCalled();
   });
 
-  it('calls startMarkDod when autoCommitEnabled is true (no autoPush)', async () => {
-    getProjectTestConfigMock.mockReturnValue({ autoPushEnabled: false, autoCommitEnabled: true });
+  it('calls startMarkDod when autoCommitEnabled is true (no autoPush) in PR Workflow', async () => {
+    getProjectTestConfigMock.mockReturnValue({ autoPushEnabled: false, autoCommitEnabled: true, prWorkflowEnabled: true });
     const logFile = join(tempDir, 'lgtm-commit.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
     await markDoneFn(makeReviewJob(logFile), 0);
     expect(startMarkDodMock).toHaveBeenCalled();
+  });
+
+  it('does NOT call startMarkDod on direct-branch release (pr_workflow_enabled=false)', async () => {
+    // DoD verification only makes sense when publishing via a PR against an
+    // issue. On direct-branch releases there are no acceptance-criteria
+    // checkboxes to tick and running Claude inline would stall the chain.
+    getProjectTestConfigMock.mockReturnValue({ autoPushEnabled: true, autoCommitEnabled: false, prWorkflowEnabled: false });
+    const logFile = join(tempDir, 'lgtm-direct.log');
+    writeFileSync(logFile, 'Verdict: LGTM\n');
+    await markDoneFn(makeReviewJob(logFile), 0);
+    expect(startMarkDodMock).not.toHaveBeenCalled();
+    expect(startProjectCommitMock).toHaveBeenCalled();
+  });
+
+  it('does NOT call startMarkDod when there is no linked issue, even in PR Workflow', async () => {
+    // Drop the seeded issue-linked run so hasIssueContext is false.
+    testDb.db.delete(schema.jobs).where(
+      (testDb.db as unknown as { $(q: string): { run: () => void } })
+        ? undefined as never : undefined as never
+    );
+    // Simpler: clear the table.
+    testDb.sqlite.exec("DELETE FROM jobs");
+    const logFile = join(tempDir, 'lgtm-noissue.log');
+    writeFileSync(logFile, 'Verdict: LGTM\n');
+    await markDoneFn(makeReviewJob(logFile), 0);
+    expect(startMarkDodMock).not.toHaveBeenCalled();
+    expect(startProjectCommitMock).toHaveBeenCalled();
   });
 });
 
