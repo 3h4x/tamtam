@@ -77,6 +77,41 @@ describe('startProjectReview', () => {
 
   afterEach(() => vi.resetModules());
 
+  it('returns 400 when review_disabled is set for the project', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+    }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      getProjectTestConfig: () => ({ reviewDisabled: true }),
+    }));
+    vi.doMock('@/lib/job-storage', () => ({
+      createJob: createJobMock, updateJob: updateJobMock,
+      listJobs: vi.fn().mockReturnValue([]), probeJobStatus: probeJobStatusMock,
+    }));
+    vi.doMock('@/lib/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/config', () => ({
+      getSettings: () => ({ review_verdict_rules: '' }),
+      withBasePrompt: (s: string) => s,
+      getPermissionModeFlag: () => '--dangerously-skip-permissions',
+    }));
+    vi.doMock('@/lib/pipeline-lock', () => ({
+      getLock: getLockMock, acquireLock: acquireLockMock,
+      isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
+    }));
+    vi.doMock('@/lib/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/code-reviewer.md' }));
+    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn() }));
+    const { startProjectReview: fn } = await import('@/lib/start-review');
+    const r = await fn('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(400);
+      expect(r.detail).toContain('disabled');
+    }
+  });
+
   it('returns 404 when project path cannot be resolved', async () => {
     vi.resetModules();
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));

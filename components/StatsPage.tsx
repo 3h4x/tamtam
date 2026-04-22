@@ -48,12 +48,12 @@ function Bar({ value, max }: { value: number; max: number }) {
   )
 }
 
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function StatCard({ label, value, sub, noPrivate }: { label: string; value: string; sub?: string; noPrivate?: boolean }) {
   return (
     <div className="rounded-lg border border-border bg-bg-secondary p-4">
       <div className="text-xs text-text-tertiary uppercase tracking-wide">{label}</div>
-      <div className="text-2xl font-semibold text-text-primary mt-1 tabular-nums" data-private>{value}</div>
-      {sub && <div className="text-xs text-text-tertiary mt-1" data-private>{sub}</div>}
+      <div className="text-2xl font-semibold text-text-primary mt-1 tabular-nums" {...(!noPrivate ? { 'data-private': true } : {})}>{value}</div>
+      {sub && <div className="text-xs text-text-tertiary mt-1" {...(!noPrivate ? { 'data-private': true } : {})}>{sub}</div>}
     </div>
   )
 }
@@ -197,11 +197,13 @@ export function StatsPage() {
           label="Total tokens"
           value={fmtTokens(data.totals.totalTokens)}
           sub={`${fmtTokens(data.totals.inputTokens)} in / ${fmtTokens(data.totals.outputTokens)} out`}
+          noPrivate
         />
         <StatCard
           label="Cache reads"
           value={fmtTokens(data.totals.cacheReadTokens)}
           sub={`saved ~${fmtUsd((data.totals.cacheReadTokens * (data.pricing.input - data.pricing.cacheRead)) / 1_000_000)}`}
+          noPrivate
         />
         <StatCard
           label="Runs"
@@ -234,47 +236,50 @@ export function StatsPage() {
                   </td>
                 </tr>
               )}
-              {sorted.map((r: ProjectUsageRow) => (
-                <tr
-                  key={r.project}
-                  className="border-b border-border/40 last:border-b-0 hover:bg-bg-tertiary/40 transition-colors"
-                >
-                  <td className="px-3 py-2.5">
-                    <Link
-                      href={`/project/${encodeURIComponent(r.project)}`}
-                      className="font-medium text-text-primary hover:text-accent no-underline"
-                      data-private
-                    >
-                      {r.project}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">{r.runs.toLocaleString()}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums font-medium text-text-primary" data-private>
-                    {fmtTokens(r.totalTokens)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-xs text-text-tertiary" data-private>
-                    {fmtTokens(r.inputTokens)} / {fmtTokens(r.outputTokens)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-xs text-text-tertiary" data-private>
-                    {fmtTokens(r.cacheReadTokens)} / {fmtTokens(r.cacheCreateTokens)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-accent" data-private>
-                    {fmtUsd(r.costUsd)}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <Bar value={r.costUsd} max={maxCost} />
-                  </td>
-                  <td className="px-3 py-2.5 text-right text-xs text-text-tertiary tabular-nums">
-                    {fmtAgo(r.lastRunAt)}
-                  </td>
-                </tr>
-              ))}
+              {sorted.map((r: ProjectUsageRow) => {
+                const privateAttr = r.project === 'tamtam' ? {} : { 'data-private': true };
+                return (
+                  <tr
+                    key={r.project}
+                    className="border-b border-border/40 last:border-b-0 hover:bg-bg-tertiary/40 transition-colors"
+                  >
+                    <td className="px-3 py-2.5">
+                      <Link
+                        href={`/project/${encodeURIComponent(r.project)}`}
+                        className="font-medium text-text-primary hover:text-accent no-underline"
+                        {...privateAttr}
+                      >
+                        {r.project}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary" {...privateAttr}>{r.runs.toLocaleString()}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums font-medium text-text-primary" {...privateAttr}>
+                      {fmtTokens(r.totalTokens)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-xs text-text-tertiary" {...privateAttr}>
+                      {fmtTokens(r.inputTokens)} / {fmtTokens(r.outputTokens)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-xs text-text-tertiary" {...privateAttr}>
+                      {fmtTokens(r.cacheReadTokens)} / {fmtTokens(r.cacheCreateTokens)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-accent" {...privateAttr}>
+                      {fmtUsd(r.costUsd)}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <Bar value={r.costUsd} max={maxCost} />
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-xs text-text-tertiary tabular-nums">
+                      {fmtAgo(r.lastRunAt)}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
             {sorted.length > 0 && (
               <tfoot className="bg-bg-tertiary border-t border-border">
                 <tr>
                   <td className="px-3 py-2.5 text-xs font-medium text-text-secondary uppercase tracking-wide">Total</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-text-primary font-medium">{data.totals.runs.toLocaleString()}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-text-primary font-medium" data-private>{data.totals.runs.toLocaleString()}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums text-text-primary font-medium" data-private>{fmtTokens(data.totals.totalTokens)}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums text-xs text-text-tertiary" data-private>
                     {fmtTokens(data.totals.inputTokens)} / {fmtTokens(data.totals.outputTokens)}

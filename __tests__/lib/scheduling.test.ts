@@ -8,6 +8,7 @@ import {
   resolveTargets,
   writePriorityYaml,
   writeProjectFieldYaml,
+  getProjectTestConfig,
 } from '@/lib/scheduling';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
@@ -29,6 +30,8 @@ function createTestDb() {
       priority TEXT,
       custom_actions TEXT,
       test_command TEXT,
+      tests_disabled INTEGER DEFAULT 0,
+      review_disabled INTEGER DEFAULT 0,
       test_cron_enabled INTEGER DEFAULT 0,
       test_cron_schedule TEXT,
       auto_commit_enabled INTEGER DEFAULT 0,
@@ -263,6 +266,103 @@ describe('writeProjectFieldYaml', () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
     const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling');
     expect(fn('proj1', 'unknown_field', 'value')).toBe(true);
+  });
+
+  it('sets tests_disabled=true when value is "1"', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling');
+    expect(fn('proj1', 'tests_disabled', '1')).toBe(true);
+    const row = testDb.db.select().from(schema.projects).get();
+    expect(row?.testsDisabled).toBe(true);
+  });
+
+  it('clears tests_disabled when value is "0"', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, testsDisabled: true }).run();
+    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling');
+    expect(fn('proj1', 'tests_disabled', '0')).toBe(true);
+    const row = testDb.db.select().from(schema.projects).get();
+    expect(row?.testsDisabled).toBeFalsy();
+  });
+
+  it('sets review_disabled=true when value is "1"', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling');
+    expect(fn('proj1', 'review_disabled', '1')).toBe(true);
+    const row = testDb.db.select().from(schema.projects).get();
+    expect(row?.reviewDisabled).toBe(true);
+  });
+
+  it('clears review_disabled when value is "0"', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, reviewDisabled: true }).run();
+    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling');
+    expect(fn('proj1', 'review_disabled', '0')).toBe(true);
+    const row = testDb.db.select().from(schema.projects).get();
+    expect(row?.reviewDisabled).toBeFalsy();
+  });
+});
+
+describe('getProjectTestConfig — testsDisabled / reviewDisabled', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/config', () => ({
+      getSettings: vi.fn().mockReturnValue({
+        workspace_path: '/workspace',
+        github_owner: '',
+        claude_bin: '~/.local/bin/claude',
+        log_dir: '~/logs',
+        frequency: '1h',
+        daytime: false,
+        weekends: false,
+        launchagent_prefix: 'com.tamtam',
+      }),
+    }));
+  });
+
+  afterEach(() => { vi.resetModules(); });
+
+  it('returns null for unknown project', async () => {
+    const { getProjectTestConfig: fn } = await import('@/lib/scheduling');
+    expect(fn('ghost')).toBeNull();
+  });
+
+  it('defaults testsDisabled to false when column is NULL', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { getProjectTestConfig: fn } = await import('@/lib/scheduling');
+    const cfg = fn('proj1');
+    expect(cfg?.testsDisabled).toBe(false);
+  });
+
+  it('returns testsDisabled=true when column is set', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, testsDisabled: true }).run();
+    const { getProjectTestConfig: fn } = await import('@/lib/scheduling');
+    const cfg = fn('proj1');
+    expect(cfg?.testsDisabled).toBe(true);
+  });
+
+  it('defaults reviewDisabled to false when column is NULL', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { getProjectTestConfig: fn } = await import('@/lib/scheduling');
+    const cfg = fn('proj1');
+    expect(cfg?.reviewDisabled).toBe(false);
+  });
+
+  it('returns reviewDisabled=true when column is set', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, reviewDisabled: true }).run();
+    const { getProjectTestConfig: fn } = await import('@/lib/scheduling');
+    const cfg = fn('proj1');
+    expect(cfg?.reviewDisabled).toBe(true);
+  });
+
+  it('returns both flags independently — testsDisabled=true, reviewDisabled=false', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, testsDisabled: true, reviewDisabled: false }).run();
+    const { getProjectTestConfig: fn } = await import('@/lib/scheduling');
+    const cfg = fn('proj1');
+    expect(cfg?.testsDisabled).toBe(true);
+    expect(cfg?.reviewDisabled).toBe(false);
   });
 });
 

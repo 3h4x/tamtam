@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { existsSync, readFileSync, watch } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { getJob } from '@/lib/job-storage';
+import { getJob, probeJobStatus } from '@/lib/job-storage';
 import { parseStreamLines } from '@/lib/claude-stream-parser';
 import { errMsg } from '@/lib/types';
 
@@ -198,7 +198,20 @@ export async function GET(
 
       // Poll every 1s as a safety net — fs.watch can miss the finishedAt
       // transition if the last log write happens before the job's exit handler runs.
-      pollTimer = setInterval(() => { checkFinished(); }, 1000);
+      // Probe PM2/process status less often (every ~5s) — probeJobStatus shells
+      // out `pm2 jlist` for claude-backed jobs, which is expensive to run per-second
+      // per open SSE client.
+      let tick = 0;
+      pollTimer = setInterval(() => {
+        tick++;
+        if (tick % 5 === 0) {
+          const jobForProbe = getJob(jobId);
+          if (jobForProbe && !jobForProbe.finishedAt) {
+            probeJobStatus(jobForProbe).catch(() => {});
+          }
+        }
+        checkFinished();
+      }, 1000);
 
       // Clean up on abort
       request.signal.addEventListener('abort', () => { cleanup(); });

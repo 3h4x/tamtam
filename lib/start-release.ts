@@ -9,7 +9,7 @@ import { startProjectCommit } from './start-commit';
 import { listJobs, probeJobStatus, createJob, updateJob, getVerdict, markDone } from './job-storage';
 import { isReviewed } from './git-utils';
 import { exec } from './shell';
-import { getImproveConfig } from './scheduling';
+import { getImproveConfig, getProjectTestConfig } from './scheduling';
 import { acquireLock, getLock } from './pipeline-lock';
 
 const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push', 'pr-wait', 'mark-dod', 'release']);
@@ -25,7 +25,7 @@ async function isReleasePipelineRunning(projectName: string): Promise<boolean> {
 }
 
 export type ReleaseResult =
-  | { ok: true; step: 'test' | 'review' | 'push'; jobId?: string; releaseJobId?: string; message: string }
+  | { ok: true; step: 'test' | 'review' | 'commit' | 'push'; jobId?: string; releaseJobId?: string; message: string }
   | { ok: false; status: number; detail: string; blockingJobId?: string };
 
 // Create a meta "release" job and start a PM2 monitor process for it.
@@ -204,6 +204,17 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
     const r = await startProjectTest(projectName);
     if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
     return { ok: true, step: 'test', jobId: r.jobId, releaseJobId, message: `Running tests (${r.testCmd})` };
+  }
+
+  // If review is disabled per-project, short-circuit to commit — treat the
+  // agent's own prompt as the review step. No autoCommit gating needed: we're
+  // already inside an explicit release, which implies commit intent (same reason
+  // job-storage.ts's completion hook lets `inRelease` bypass autoCommitEnabled).
+  const reviewDisabled = !!getProjectTestConfig(projectName)?.reviewDisabled;
+  if (reviewDisabled) {
+    const r = await startProjectCommit(projectName);
+    if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+    return { ok: true, step: 'commit', releaseJobId, message: r.message };
   }
 
   const r = await startProjectReview(projectName);

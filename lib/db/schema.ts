@@ -13,6 +13,8 @@ export const projects = sqliteTable('projects', {
   priority: text('priority'),
   customActions: text('custom_actions'),
   testCommand: text('test_command'),
+  testsDisabled: integer('tests_disabled', { mode: 'boolean' }).default(false),
+  reviewDisabled: integer('review_disabled', { mode: 'boolean' }).default(false),
   testCronEnabled: integer('test_cron_enabled', { mode: 'boolean' }).default(false),
   testCronSchedule: text('test_cron_schedule'),
   autoCommitEnabled: integer('auto_commit_enabled', { mode: 'boolean' }).default(false),

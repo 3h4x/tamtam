@@ -461,6 +461,8 @@ export interface ProjectConfig {
   release_after_run?: boolean
   pr_workflow_enabled?: boolean
   issue_auto_branch?: boolean
+  tests_disabled?: boolean
+  review_disabled?: boolean
   last_push_error?: string | null
   last_push_at?: number | null
 }
@@ -485,6 +487,8 @@ export async function updateProjectConfig(
     release_after_run?: boolean
     pr_workflow_enabled?: boolean
     issue_auto_branch?: boolean
+    tests_disabled?: boolean
+    review_disabled?: boolean
   }
 ): Promise<{ status: string }> {
   const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/config`, {

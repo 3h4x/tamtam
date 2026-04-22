@@ -180,6 +180,10 @@ export function writeProjectFieldYaml(
     db.update(schema.projects).set({ prWorkflowEnabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
   } else if (fieldName === 'issue_auto_branch') {
     db.update(schema.projects).set({ issueAutoBranch: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
+  } else if (fieldName === 'tests_disabled') {
+    db.update(schema.projects).set({ testsDisabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
+  } else if (fieldName === 'review_disabled') {
+    db.update(schema.projects).set({ reviewDisabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
   }
   return true;
 }
@@ -212,6 +216,8 @@ export function getProjectTestConfig(projName: string): {
   releaseAfterRun: boolean;
   prWorkflowEnabled: boolean;
   issueAutoBranch: boolean;
+  testsDisabled: boolean;
+  reviewDisabled: boolean;
 } | null {
   const row = db
     .select()
@@ -231,6 +237,8 @@ export function getProjectTestConfig(projName: string): {
     // Default ON — matches pre-existing behavior for any project that hasn't
     // been touched since the column was added.
     issueAutoBranch: row.issueAutoBranch == null ? true : !!row.issueAutoBranch,
+    testsDisabled: !!row.testsDisabled,
+    reviewDisabled: !!row.reviewDisabled,
   };
 }
 

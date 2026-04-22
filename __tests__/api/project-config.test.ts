@@ -85,6 +85,20 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     expect(data.auto_pr_merge_enabled).toBe(false);
   });
 
+  it('returns tests_disabled=false by default', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.tests_disabled).toBe(false);
+  });
+
+  it('returns review_disabled=false by default', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.review_disabled).toBe(false);
+  });
+
   it('returns issue_auto_branch=true by default — Work-on branch provision is on unless explicitly disabled', async () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
@@ -113,6 +127,54 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     const res = await GET2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     const data = await res.json();
     expect(data.issue_auto_branch).toBe(false);
+  });
+
+  it('surfaces tests_disabled=true when config has it set', async () => {
+    vi.resetModules();
+    resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
+    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
+    vi.doMock('@/lib/config', () => ({ reloadConfig: vi.fn() }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
+      writeProjectFieldYaml: vi.fn().mockReturnValue(true),
+      getProjectTestConfig: vi.fn().mockReturnValue({
+        testCommand: null, testCronEnabled: false, testCronSchedule: null,
+        autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false,
+        testsDisabled: true, reviewDisabled: false,
+      }),
+      getProjectPushResult: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
+    const { GET: GET2 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
+    const res = await GET2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.tests_disabled).toBe(true);
+    expect(data.review_disabled).toBe(false);
+  });
+
+  it('surfaces review_disabled=true when config has it set', async () => {
+    vi.resetModules();
+    resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
+    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
+    vi.doMock('@/lib/config', () => ({ reloadConfig: vi.fn() }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
+      writeProjectFieldYaml: vi.fn().mockReturnValue(true),
+      getProjectTestConfig: vi.fn().mockReturnValue({
+        testCommand: null, testCronEnabled: false, testCronSchedule: null,
+        autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false,
+        testsDisabled: false, reviewDisabled: true,
+      }),
+      getProjectPushResult: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
+    const { GET: GET2 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
+    const res = await GET2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.tests_disabled).toBe(false);
+    expect(data.review_disabled).toBe(true);
   });
 
   it('returns auto_push_enabled from config when set', async () => {
@@ -340,6 +402,66 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(res.status).toBe(200);
     expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'issue_auto_branch', '1');
+  });
+
+  it('persists tests_disabled=true', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ tests_disabled: true }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'tests_disabled', '1');
+  });
+
+  it('persists tests_disabled=false (re-enabling tests)', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ tests_disabled: false }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'tests_disabled', '0');
+  });
+
+  it('returns 404 when tests_disabled is set but project not found', async () => {
+    writeProjectFieldYamlMock.mockReturnValue(false);
+    const req = new NextRequest('http://localhost/api/projects/by-project/missing/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ tests_disabled: true }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'missing' }) });
+    expect(res.status).toBe(404);
+  });
+
+  it('persists review_disabled=true', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ review_disabled: true }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'review_disabled', '1');
+  });
+
+  it('persists review_disabled=false (re-enabling review)', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ review_disabled: false }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'review_disabled', '0');
+  });
+
+  it('returns 404 when review_disabled is set but project not found', async () => {
+    writeProjectFieldYamlMock.mockReturnValue(false);
+    const req = new NextRequest('http://localhost/api/projects/by-project/missing/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ review_disabled: true }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'missing' }) });
+    expect(res.status).toBe(404);
   });
 
   it('persists test_cron_schedule and test_cron_enabled', async () => {

@@ -397,6 +397,13 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         const isClaudeJob = isClaudeJobKind(data.kind)
         entries.push({ role: 'status', text: kind })
 
+        // Show the prompt that was sent so the user can see what kicked off the run
+        // (especially important for agent runs with a custom prompt).
+        const jobPrompt = data.user_prompt || data.prompt
+        if (jobPrompt) {
+          entries.push({ role: 'user', text: jobPrompt })
+        }
+
         // Populate toolbar chips from contextMeta if the job recorded them (agents do this).
         if (data.context_meta) {
           try {

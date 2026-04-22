@@ -38,6 +38,8 @@ export async function GET(
     release_after_run: testCfg?.releaseAfterRun ?? false,
     pr_workflow_enabled: testCfg?.prWorkflowEnabled ?? false,
     issue_auto_branch: testCfg?.issueAutoBranch ?? true,
+    tests_disabled: testCfg?.testsDisabled ?? false,
+    review_disabled: testCfg?.reviewDisabled ?? false,
     last_push_error: pushResult?.lastPushError ?? null,
     last_push_at: pushResult?.lastPushAt ?? null,
   });
@@ -128,6 +130,24 @@ export async function PATCH(
     touched = true;
     const value = body.pr_workflow_enabled ? '1' : '0';
     const ok = writeProjectFieldYaml(projectName, 'pr_workflow_enabled', value);
+    if (!ok) {
+      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
+    }
+  }
+
+  if (body.tests_disabled !== undefined) {
+    touched = true;
+    const value = body.tests_disabled ? '1' : '0';
+    const ok = writeProjectFieldYaml(projectName, 'tests_disabled', value);
+    if (!ok) {
+      return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
+    }
+  }
+
+  if (body.review_disabled !== undefined) {
+    touched = true;
+    const value = body.review_disabled ? '1' : '0';
+    const ok = writeProjectFieldYaml(projectName, 'review_disabled', value);
     if (!ok) {
       return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
     }

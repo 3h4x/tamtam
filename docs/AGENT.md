@@ -223,9 +223,9 @@ pm2 cron "0 */1 * * *" --name tamtam-{project}-agent-{agentName} \
   "curl -s -X POST http://localhost:1337/api/agents/{agentId}/run -H 'Content-Type: application/json' -d @{promptFile}"
 ```
 
-The prompt is stored in `~/logs/agent-scripts/{agentId}.prompt.json` and passed to the run endpoint.
+The prompt is stored in `./data/logs/agent-scripts/{agentId}.prompt.json` and passed to the run endpoint.
 
-Log output goes to `~/logs/agent-scheduler-{agentId}.log`.
+Log output goes to `./data/logs/agent-scheduler-{agentId}.log`.
 
 ### LaunchAgent (macOS)
 
@@ -245,9 +245,9 @@ When `runner: "launchctl"`, a `.plist` file is created in `~/Library/LaunchAgent
   <key>StartInterval</key>
   <integer>{intervalInSeconds}</integer>
   <key>StandardOutPath</key>
-  <string>~/logs/agent-scheduler-{agentId}.log</string>
+  <string>./data/logs/agent-scheduler-{agentId}.log</string>
   <key>StandardErrorPath</key>
-  <string>~/logs/agent-scheduler-{agentId}.log</string>
+  <string>./data/logs/agent-scheduler-{agentId}.log</string>
   <key>RunAtLoad</key>
   <true/>
 </dict>

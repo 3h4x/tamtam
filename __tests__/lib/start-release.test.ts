@@ -56,6 +56,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
+      getProjectTestConfig: () => null,
     }));
     vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
     vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
@@ -165,6 +166,48 @@ describe('startRelease — release pipeline entry decision tree', () => {
     expect(startProjectTestMock).not.toHaveBeenCalled();
   });
 
+  it('skips review and commits directly when review_disabled is set for the project', async () => {
+    vi.resetModules();
+    detectTestCommandMock = vi.fn().mockReturnValue(null);
+    const startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' });
+    execMock = vi.fn()
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'pm2') return Promise.resolve({ exitCode: 0, stdout: '[]', stderr: '' });
+        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+      });
+
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/job-storage', () => ({
+      listJobs: listJobsMock, probeJobStatus: probeJobStatusMock,
+      createJob: createJobMock, updateJob: updateJobMock,
+      getVerdict: vi.fn().mockReturnValue(null), markDone: vi.fn(),
+    }));
+    vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
+      getProjectTestConfig: () => ({ reviewDisabled: true }),
+    }));
+    vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
+    vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
+    vi.doMock('@/lib/pipeline-lock', () => ({
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+      getLock: vi.fn().mockReturnValue(null),
+    }));
+
+    const { startRelease: fn } = await import('@/lib/start-release');
+    const r = await fn('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.step).toBe('commit');
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+    expect(startProjectCommitMock).toHaveBeenCalledTimes(1);
+  });
+
   it('pushes directly when there are no changes but unpushed commits exist', async () => {
     detectTestCommandMock.mockReturnValue(null);
     execMock
@@ -254,6 +297,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/git-utils', () => ({ isReviewed: isReviewedTrue }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
+      getProjectTestConfig: () => null,
     }));
     vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
     vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
@@ -300,6 +344,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
+      getProjectTestConfig: () => null,
     }));
     vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
     vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
@@ -391,6 +436,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
+      getProjectTestConfig: () => null,
     }));
     vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
     vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));

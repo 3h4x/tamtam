@@ -35,15 +35,18 @@ describe('GET /api/streaming/[jobId]', () => {
   let tempDir: string;
   let GET: any;
   let getJobMock: ReturnType<typeof vi.fn>;
+  let probeJobStatusMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-streaming-test-'));
     vi.resetModules();
 
     getJobMock = vi.fn().mockReturnValue(null);
+    probeJobStatusMock = vi.fn().mockResolvedValue('running');
 
     vi.doMock('@/lib/job-storage', () => ({
       getJob: getJobMock,
+      probeJobStatus: probeJobStatusMock,
     }));
 
     // Mock claude-stream-parser to use the real implementation
@@ -297,6 +300,28 @@ describe('GET /api/streaming/[jobId]', () => {
     expect(combined).toContain('"exitCode":0');
   });
 
+  it('does not probe job status once finishedAt is set', async () => {
+    const logFile = join(tempDir, 'probe-stop.log');
+    writeFileSync(logFile, 'done output\n');
+    // Job is already finished before the poller gets a chance to probe.
+    getJobMock.mockReturnValue({
+      logPath: logFile,
+      finishedAt: Date.now() / 1000,
+      exitCode: 0,
+    } as any);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-probe-stop?raw=1', {
+      signal: ac.signal,
+    });
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-probe-stop' }) });
+    await collectSSEStream(response, ac, 200);
+
+    // Finished-at path short-circuits before the poller ever starts,
+    // so probeJobStatus must never be called.
+    expect(probeJobStatusMock).not.toHaveBeenCalled();
+  });
+
   it('uses fallback path from homedir when job has no logPath', async () => {
     getJobMock.mockReturnValue(null);
 
@@ -322,7 +347,10 @@ describe('GET /api/streaming/[jobId] – extractLogDetail in done event', () => 
     vi.resetModules();
 
     getJobMock = vi.fn().mockReturnValue(null);
-    vi.doMock('@/lib/job-storage', () => ({ getJob: getJobMock }));
+    vi.doMock('@/lib/job-storage', () => ({
+      getJob: getJobMock,
+      probeJobStatus: vi.fn().mockResolvedValue('running'),
+    }));
 
     const { parseStreamLines } = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
       '@/lib/claude-stream-parser'
@@ -456,7 +484,10 @@ describe('GET /api/streaming/[jobId] – tool_result SSE event', () => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-streaming-tr-test-'));
     vi.resetModules();
     getJobMock = vi.fn().mockReturnValue(null);
-    vi.doMock('@/lib/job-storage', () => ({ getJob: getJobMock }));
+    vi.doMock('@/lib/job-storage', () => ({
+      getJob: getJobMock,
+      probeJobStatus: vi.fn().mockResolvedValue('running'),
+    }));
 
     const { parseStreamLines } = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
       '@/lib/claude-stream-parser'
