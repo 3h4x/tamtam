@@ -8,6 +8,21 @@ describe('claude-stream-parser', () => {
     expect(events).toEqual([{ type: 'text', text: 'Hello' }]);
   });
 
+  it('strips PM2 ISO timestamp prefix before parsing', () => {
+    // PM2 with PM2_LOG_DATE_FORMAT set prepends `YYYY-MM-DDTHH:MM:SS: ` to every line.
+    // The parser must strip it; otherwise getVerdict sees an empty log and the
+    // release pipeline stalls at review.
+    const line = '2026-04-22T12:51:05: {"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"LGTM"}}}';
+    const events = parseStreamLines(line);
+    expect(events).toEqual([{ type: 'text', text: 'LGTM' }]);
+  });
+
+  it('strips timestamp with fractional seconds and timezone', () => {
+    const line = '2026-04-22T12:51:05.123Z: {"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}}';
+    const events = parseStreamLines(line);
+    expect(events).toEqual([{ type: 'text', text: 'ok' }]);
+  });
+
   it('extracts thinking from thinking_delta', () => {
     const line = '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think about this"}},"session_id":"abc"}';
     const events = parseStreamLines(line);
