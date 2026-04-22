@@ -132,6 +132,36 @@ export function launchProjectPush(projectName: string): { jobId: string } | { er
   return { jobId: job.id };
 }
 
+// Push-only: just push existing commits, with the same set-upstream fallback
+// used by the release pipeline. Shared by runPush(pushOnly) and the
+// Create-PR endpoint so both get the same resilience semantics.
+export async function pushCurrentBranch(
+  projPath: string,
+  log: (s: string) => void = () => {},
+): Promise<{ ok: true; commitSha: string } | { ok: false; detail: string }> {
+  const PUSH_TIMEOUT = 25 * 60 * 1000;
+  const tryPush = async (extraArgs: string[] = []) => {
+    const args = ['-C', projPath, 'push', ...extraArgs];
+    log(`\n$ git push${extraArgs.length ? ' ' + extraArgs.join(' ') : ''}\n`);
+    const r = await exec('git', args, { timeout: PUSH_TIMEOUT, killProcessGroup: true });
+    if (r.stdout) log(r.stdout);
+    if (r.stderr) log(r.stderr);
+    return r;
+  };
+  let pushR = await tryPush();
+  if (pushR.exitCode !== 0 && (pushR.stderr.includes('no upstream') || pushR.stderr.includes('set-upstream'))) {
+    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+    const branch = branchR.stdout.trim();
+    if (branch) pushR = await tryPush(['-u', 'origin', branch]);
+  }
+  if (pushR.exitCode !== 0) {
+    const detail = (pushR.stderr.trim() || pushR.stdout.trim() || `git push exited ${pushR.exitCode}`).slice(0, 2000);
+    return { ok: false, detail: `Push failed: ${detail}` };
+  }
+  const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
+  return { ok: true, commitSha: shaR.exitCode === 0 ? shaR.stdout.trim() : '' };
+}
+
 async function runPush(
   projectName: string,
   projPath: string,
@@ -141,27 +171,9 @@ async function runPush(
 ): Promise<PushResult> {
   // pushOnly: skip all staging/committing/PR logic — just push existing commits.
   if (pushOnly) {
-    const PUSH_TIMEOUT = 25 * 60 * 1000;
-    const tryPush = async (extraArgs: string[] = []) => {
-      const args = ['-C', projPath, 'push', ...extraArgs];
-      log(`\n$ git push${extraArgs.length ? ' ' + extraArgs.join(' ') : ''}\n`);
-      const r = await exec('git', args, { timeout: PUSH_TIMEOUT, killProcessGroup: true });
-      if (r.stdout) log(r.stdout);
-      if (r.stderr) log(r.stderr);
-      return r;
-    };
-    let pushR = await tryPush();
-    if (pushR.exitCode !== 0 && (pushR.stderr.includes('no upstream') || pushR.stderr.includes('set-upstream'))) {
-      const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
-      const branch = branchR.stdout.trim();
-      if (branch) pushR = await tryPush(['-u', 'origin', branch]);
-    }
-    if (pushR.exitCode !== 0) {
-      const detail = (pushR.stderr.trim() || pushR.stdout.trim() || `git push exited ${pushR.exitCode}`).slice(0, 2000);
-      return { ok: false, status: 502, detail: `Push failed: ${detail}` };
-    }
-    const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
-    return { ok: true, commitSha: shaR.exitCode === 0 ? shaR.stdout.trim() : '', message: 'pushed' };
+    const r = await pushCurrentBranch(projPath, log);
+    if (!r.ok) return { ok: false, status: 502, detail: r.detail };
+    return { ok: true, commitSha: r.commitSha, message: 'pushed' };
   }
 
   // Resolve issue context if not passed in (e.g. called from launchProjectPush).

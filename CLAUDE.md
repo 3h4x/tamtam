@@ -129,12 +129,14 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - `/api/projects/by-project/[name]/changes` — Uncommitted changes summary (GET); git pull with configurable strategy (POST: ff-only/merge/rebase)
 - `/api/projects/by-project/[name]/changes/diff` — Full git diff content (GET)
 - `/api/projects/by-project/[name]/push` — Push changes to git (POST); sub-routes: `/preview`, `/execute`, `/generate`
+- `/api/projects/by-project/[name]/create-pr` — Push current branch + create GitHub PR via `gh pr create --fill` (POST); returns `{ url }` — refuses if on default branch
 - `/api/projects/by-project/[name]/release` — Trigger release pipeline (POST)
 - `/api/projects/by-project/[name]/issues` — GitHub PRs and issues for the project (GET, POST to force refresh); merge POST switches working copy to default branch after merge
 - `/api/projects/by-project/[name]/issue-branch` — Create or checkout `fix/issue-<n>-<slug>` before Claude edits (POST); called automatically from TerminalTab when opening from an issue
 - `/api/projects/by-project/[name]/mark-dod` — Run DoD verification for latest issue-linked run (POST); also triggered automatically after review→LGTM
 - `/api/projects/by-project/[name]/pr-branch` — Fetch and checkout a PR's head branch so Terminal opens on the right branch (POST: `{ branch }`)
 - `/api/projects/by-project/[name]/pr-gates` — TamTam-side gate state for a PR: tests/review/DoD badges (GET); used by IssuesTab
+- `/api/projects/by-project/[name]/branch` — Current branch name + default branch (GET); returns `{ branch, defaultBranch }`
 - `/api/projects/by-project/[name]/behind` — Ahead/behind commit counts vs remote (GET)
 - `/api/projects/by-project/[name]/logs` — Project run log files (GET)
 - `/api/projects/by-project/[name]/docs` — Project documentation files (GET)

@@ -6,6 +6,7 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
   let detectMainBranchMock: ReturnType<typeof vi.fn>;
+  let pushCurrentBranchMock: ReturnType<typeof vi.fn>;
 
   function makeExecResult(overrides: { exitCode?: number; stdout?: string; stderr?: string } = {}) {
     return { exitCode: 0, stdout: '', stderr: '', ...overrides };
@@ -23,12 +24,14 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/project');
     execMock = vi.fn();
     detectMainBranchMock = vi.fn().mockResolvedValue('main');
+    pushCurrentBranchMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123' });
 
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/start-commit', () => ({ detectMainBranch: detectMainBranchMock }));
+    vi.doMock('@/lib/start-push', () => ({ pushCurrentBranch: pushCurrentBranchMock }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/create-pr/route');
     POST = mod.POST;
@@ -75,9 +78,8 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
   });
 
   it('returns 500 when git push fails', async () => {
-    execMock
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/my-branch\n' }))
-      .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'auth denied' }));
+    execMock.mockResolvedValueOnce(makeExecResult({ stdout: 'feat/my-branch\n' }));
+    pushCurrentBranchMock.mockResolvedValue({ ok: false, detail: 'Push failed: auth denied' });
     const res = await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(500);
     const data = await res.json();
@@ -88,8 +90,7 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
   it('returns 500 when gh pr create fails', async () => {
     execMock
       .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/my-branch\n' })) // branch
-      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }))                  // push
-      .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'gh: not authenticated' }));
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'gh: not authenticated' })); // gh pr create
     const res = await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(500);
     const data = await res.json();
@@ -99,7 +100,6 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
   it('extracts the PR URL from gh output and returns it', async () => {
     execMock
       .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/my-branch\n' }))
-      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }))
       .mockResolvedValueOnce(makeExecResult({
         stdout: 'Creating pull request for feat/my-branch into main in owner/repo\n\nhttps://github.com/owner/repo/pull/42\n',
       }));
@@ -114,7 +114,6 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
     // PR in the commit body); the newly-created PR link is always last.
     execMock
       .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/my-branch\n' }))
-      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }))
       .mockResolvedValueOnce(makeExecResult({
         stdout: 'Refs https://github.com/owner/repo/pull/1\nhttps://github.com/owner/repo/pull/7\n',
       }));
@@ -126,7 +125,6 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
   it('returns null url when gh output does not contain a PR link', async () => {
     execMock
       .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/my-branch\n' }))
-      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }))
       .mockResolvedValueOnce(makeExecResult({ stdout: 'something unexpected\n' }));
     const res = await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(200);
@@ -134,16 +132,13 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
     expect(data.url).toBeNull();
   });
 
-  it('pushes with -u origin HEAD from the resolved project path', async () => {
+  it('delegates push to the shared helper with the resolved project path', async () => {
     resolveProjectPathMock.mockReturnValue('/custom/repo');
     execMock
       .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/x\n' }))
-      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }))
       .mockResolvedValueOnce(makeExecResult({ stdout: 'https://github.com/o/r/pull/1\n' }));
     await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
 
-    const pushCall = execMock.mock.calls[1];
-    expect(pushCall[0]).toBe('git');
-    expect(pushCall[1]).toEqual(['-C', '/custom/repo', 'push', '-u', 'origin', 'HEAD']);
+    expect(pushCurrentBranchMock).toHaveBeenCalledWith('/custom/repo');
   });
 });
