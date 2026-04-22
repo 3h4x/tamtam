@@ -402,7 +402,6 @@ function AgentModal({
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [skillSearch, setSkillSearch] = useState('')
-  const [modalTab, setModalTab] = useState<'all' | 'prompt'>('all')
   const nameRef = useRef<HTMLInputElement>(null)
 
   const backdropRef = useRef<HTMLDivElement>(null)

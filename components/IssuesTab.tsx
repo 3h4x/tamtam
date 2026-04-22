@@ -106,13 +106,6 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
     return () => { cancelled = true }
   }, [projectName, pr.number, pr.url, pr.body])
 
-  const reviewColor =
-    pr.reviewDecision === 'APPROVED'
-      ? 'text-status-success'
-      : pr.reviewDecision === 'CHANGES_REQUESTED'
-      ? 'text-status-error'
-      : 'text-text-tertiary'
-
   const reviewLabel =
     pr.reviewDecision === 'APPROVED'
       ? 'Approved'

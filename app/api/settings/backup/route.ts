@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import { join } from 'path';
 import { errMsg } from '@/lib/types';
 
-export async function POST(request: NextRequest) {
+export async function POST(_request: NextRequest) {
   const dbDir = join(process.cwd(), 'data', 'db');
   const dbPath = join(dbDir, 'tamtam.db');
 

@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject, fetchIssuesAndPRs, pushProject } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
-import { getAggregateCi, formatDuration } from '@/lib/statusConstants'
+import { getAggregateCi } from '@/lib/statusConstants'
 import { formatAgo } from '@/lib/format'
 import { TerminalTab } from '@/components/TerminalTab'
 import { AgentsTab } from '@/components/AgentsTab'
@@ -268,19 +268,11 @@ function StatusStrip({
 
 interface ProjectDetailPageProps {
   fleet: FleetHealth
-  priorities: string[]
-  onPriorityChange: (taskId: string, priority: string) => Promise<void>
-  onPause: (taskId: string) => Promise<void>
-  onResume: (taskId: string) => Promise<void>
   onRefresh: () => Promise<void>
 }
 
 export function ProjectDetailPage({
   fleet,
-  priorities,
-  onPriorityChange,
-  onPause,
-  onResume,
   onRefresh,
 }: ProjectDetailPageProps) {
   const params = useParams<{ name: string; tab?: string; sessionId?: string }>()

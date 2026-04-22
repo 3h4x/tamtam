@@ -1,4 +1,4 @@
-import type { Task, ProjectsResponse } from './types'
+import type { ProjectsResponse } from './types'
 
 export type { Task, ProjectsResponse } from './types'
 
