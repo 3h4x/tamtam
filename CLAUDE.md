@@ -73,8 +73,6 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - **No restart needed**: component edits, hook edits, utility edits, API route *body* changes, `lib/*` changes — HMR picks them up on the next request.
 - **Restart IS needed**: brand-new route files (Turbopack doesn't always register new `app/**/route.ts` without a restart), new DB migrations in `lib/db/index.ts`, env var changes, `package.json` scripts.
 
-If you do restart and run into the EADDRINUSE loop, see `## Investigating a misbehaving dev server` below.
-
 ## Architecture
 - `app/` — Next.js pages and API route handlers
 - `components/` — React client components
@@ -151,6 +149,7 @@ If you do restart and run into the EADDRINUSE loop, see `## Investigating a misb
 - `/api/settings/backup` — SQLite hot backup (POST)
 - `/api/health` — Health check (GET)
 - `/api/monitoring` — Prometheus + Loki status aggregation (GET); env: `PROMETHEUS_URL`, `LOKI_URL`
+- `/api/monitoring/pm2-logs` — Tail tamtam PM2 log files (error + out from `~/.pm2/logs/`), last 64 KB; accepts `?limit=` (max 500) and `?out=0` to suppress stdout log (GET)
 - `/api/stats/usage` — Token usage statistics per project (GET, accepts `?window=24h|7d|30d|all`)
 
 ## Testing Requirements

@@ -19,7 +19,7 @@ All Claude runs (terminal, review, fix, test, push) share the same streaming inf
 ```
 API route (any kind)
   → createJob(project, kind, ...)       — insert into jobs table, status='running'
-  → PM2 spawns process                  — writes NDJSON to ~/logs/<jobId>.log (or custom logPath)
+  → PM2 spawns process                  — writes NDJSON to ./data/logs/<jobId>.log (or custom logPath)
   → returns { job_id }
 
 Client
@@ -201,9 +201,9 @@ Verdict detection (`getVerdict`) reads the **last 2000 chars** of the parsed log
 ### Log file locations
 
 ```
-~/logs/<jobId>.log          — standard job log (NDJSON or plain text)
-~/logs/agent-scripts/       — agent prompt files
-~/logs/agent-scheduler-<id>.log — scheduled agent output
+./data/logs/<jobId>.log          — standard job log (NDJSON or plain text)
+./data/logs/agent-scripts/       — agent prompt files
+./data/logs/agent-scheduler-<id>.log — scheduled agent output
 ```
 
 ### Diagnose a stuck stream
@@ -213,7 +213,7 @@ Verdict detection (`getVerdict`) reads the **last 2000 chars** of the parsed log
 curl http://localhost:1337/api/jobs/<jobId>
 
 # Tail the raw log file
-tail -f ~/logs/<jobId>.log
+tail -f ./data/logs/<jobId>.log
 
 # Check PM2 process list
 pm2 list

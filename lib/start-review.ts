@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { getImproveConfig } from './scheduling';
+import { getImproveConfig, getProjectTestConfig } from './scheduling';
 import { resolveProjectPath } from './project-data';
 import { createJob, listJobs, probeJobStatus, updateJob } from './job-storage';
 import { startJob } from './pm2-jobs';
@@ -36,6 +36,13 @@ function loadReviewPrompt(): string {
 
 /** Start a code review for the given project. Returns the new job id or a structured error. */
 export async function startProjectReview(projectName: string): Promise<StartReviewResult> {
+  // Per-project off-switch — used when the agent prompt already performs review.
+  try {
+    if (getProjectTestConfig(projectName)?.reviewDisabled) {
+      return { ok: false, status: 400, detail: `Review is disabled for ${projectName}` };
+    }
+  } catch { /* ignore — test env without DB */ }
+
   // Check for existing pipeline lock — but allow running under a parent
   // release job's lock (this step was kicked off by the release pipeline).
   const underRelease = isLockOwnedByActiveRelease(projectName);

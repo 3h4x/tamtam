@@ -2,12 +2,20 @@ import { existsSync, readFileSync, writeFileSync, chmodSync, mkdirSync, openSync
 import { join } from 'path';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
-import { getImproveConfig } from './scheduling';
+import { getImproveConfig, getProjectTestConfig } from './scheduling';
 import { resolveProjectPath } from './project-data';
 import { createJob, listJobs, probeJobStatus, updateJob, markDone } from './job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 
 export function detectTestCommand(projPath: string, projectName?: string): string | null {
+  // Explicit off-switch — overrides user/auto-detected command. Wrapped in
+  // try/catch so callers that mock only `getImproveConfig` don't crash on the
+  // DB-backed `getProjectTestConfig` lookup.
+  if (projectName) {
+    try {
+      if (getProjectTestConfig(projectName)?.testsDisabled) return null;
+    } catch { /* ignore — test env without DB */ }
+  }
   if (projectName) {
     const { projects } = getImproveConfig();
     for (const cfg of Object.values(projects)) {

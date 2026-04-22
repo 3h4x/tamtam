@@ -207,5 +207,18 @@ try {
   sqlite.exec('ALTER TABLE projects ADD COLUMN issue_auto_branch INTEGER DEFAULT 1');
 } catch {}
 
+// Migrate: add tests_disabled to projects — explicit off-switch for the test step
+// in the release pipeline. When true, the test step is skipped even if a test
+// command would otherwise be auto-detected.
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN tests_disabled INTEGER DEFAULT 0');
+} catch {}
+
+// Migrate: add review_disabled to projects — off-switch for the AI review step,
+// e.g. when the agent prompt itself already performs review.
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN review_disabled INTEGER DEFAULT 0');
+} catch {}
+
 export const db = drizzle(sqlite, { schema });
 export { schema };

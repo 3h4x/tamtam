@@ -1703,6 +1703,18 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     expect(startProjectPushMock).not.toHaveBeenCalled();
   });
 
+  it('auto-chains test→commit (skips review) when autoCommitEnabled=true, reviewDisabled=true, and there are uncommitted changes', async () => {
+    getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: true, autoPushEnabled: false, releaseAfterRun: false, reviewDisabled: true });
+    execMock.mockResolvedValueOnce({ exitCode: 0, stdout: 'M foo.ts\n', stderr: '' });
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectCommitMock).toHaveBeenCalledWith('my-proj');
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+    expect(startProjectPushMock).not.toHaveBeenCalled();
+  });
+
   describe('fix-ci auto-retry on fast crash', () => {
     beforeEach(() => {
       vi.useFakeTimers();

@@ -432,13 +432,27 @@ async function runCompletionHooks(job: JobData): Promise<void> {
         const hasUncommittedChanges = changesR?.exitCode === 0 && changesR.stdout.trim().length > 0;
 
         if (hasUncommittedChanges) {
-          const { startProjectReview } = await import('./start-review');
-          const r = await startProjectReview(job.project);
-          if (r.ok) {
-            console.log(`[release] tests passed → started review ${r.jobId} for ${job.project}`);
-            chainedNext = true;
+          // Review disabled → skip straight to commit (agent prompt covers review).
+          const { getProjectTestConfig } = await import('./scheduling');
+          const reviewDisabled = !!getProjectTestConfig(job.project)?.reviewDisabled;
+          if (reviewDisabled) {
+            const { startProjectCommit } = await import('./start-commit');
+            const r = await startProjectCommit(job.project);
+            if (r.ok) {
+              console.log(`[release] tests passed + review disabled → commit for ${job.project}`);
+              chainedNext = true;
+            } else {
+              console.log(`[release] test→commit skipped for ${job.project}: ${r.detail}`);
+            }
           } else {
-            console.log(`[release] test→review skipped for ${job.project}: ${r.detail}`);
+            const { startProjectReview } = await import('./start-review');
+            const r = await startProjectReview(job.project);
+            if (r.ok) {
+              console.log(`[release] tests passed → started review ${r.jobId} for ${job.project}`);
+              chainedNext = true;
+            } else {
+              console.log(`[release] test→review skipped for ${job.project}: ${r.detail}`);
+            }
           }
         } else {
           // Tests passed and nothing to commit — push existing commits directly.

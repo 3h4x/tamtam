@@ -17,6 +17,8 @@ function createTestDb() {
       priority TEXT,
       custom_actions TEXT,
       test_command TEXT,
+      tests_disabled INTEGER DEFAULT 0,
+      review_disabled INTEGER DEFAULT 0,
       test_cron_enabled INTEGER DEFAULT 0,
       test_cron_schedule TEXT,
       auto_commit_enabled INTEGER DEFAULT 0,

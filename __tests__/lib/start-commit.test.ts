@@ -249,10 +249,10 @@ describe('generateCommitMessage', () => {
   });
 
   it('includes commit style guide in prompt when configured', async () => {
-    vi.resetModules();
-    execMock = vi.fn();
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doUnmock('@/lib/config');
     vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: 'Use imperative mood' }) }));
+    vi.resetModules();
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
     }));

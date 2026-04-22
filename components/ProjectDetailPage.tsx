@@ -15,6 +15,7 @@ import { IssuesTab } from '@/components/IssuesTab'
 import { DocsTab } from '@/components/DocsTab'
 import { useToast } from '@/components/Toast'
 import { isPipelineBusy } from '@/lib/pipeline-status'
+import { getPipelineSteps, type StepToggleContext } from '@/lib/pipeline-steps'
 
 type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs'
 
@@ -315,6 +316,8 @@ export function ProjectDetailPage({
   const [releaseAfterRunInput, setReleaseAfterRunInput] = useState(false)
   const [prWorkflowEnabledInput, setPrWorkflowEnabledInput] = useState(false)
   const [issueAutoBranchInput, setIssueAutoBranchInput] = useState(true)
+  const [testsDisabledInput, setTestsDisabledInput] = useState(false)
+  const [reviewDisabledInput, setReviewDisabledInput] = useState(false)
   const [configSaving, setConfigSaving] = useState(false)
   const [configSaved, setConfigSaved] = useState(false)
 
@@ -391,6 +394,8 @@ export function ProjectDetailPage({
           setReleaseAfterRunInput(!!configData.release_after_run)
           setPrWorkflowEnabledInput(!!configData.pr_workflow_enabled)
           setIssueAutoBranchInput(configData.issue_auto_branch ?? true)
+          setTestsDisabledInput(!!configData.tests_disabled)
+          setReviewDisabledInput(!!configData.review_disabled)
           if (actionsData) {
             setEditActions(actionsData.actions)
             setActionsLoaded(true)
@@ -590,6 +595,8 @@ export function ProjectDetailPage({
         release_after_run: releaseAfterRunInput,
         pr_workflow_enabled: prWorkflowEnabledInput,
         issue_auto_branch: issueAutoBranchInput,
+        tests_disabled: testsDisabledInput,
+        review_disabled: reviewDisabledInput,
       })
       setConfigSaved(true)
       // Reload config to show effective command
@@ -604,6 +611,8 @@ export function ProjectDetailPage({
       setReleaseAfterRunInput(!!data.release_after_run)
       setPrWorkflowEnabledInput(!!data.pr_workflow_enabled)
       setIssueAutoBranchInput(data.issue_auto_branch ?? true)
+      setTestsDisabledInput(!!data.tests_disabled)
+      setReviewDisabledInput(!!data.review_disabled)
       setTimeout(() => setConfigSaved(false), 3000)
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to save config', 'error')
@@ -622,7 +631,9 @@ export function ProjectDetailPage({
       autoPrMergeEnabledInput !== !!config.auto_pr_merge_enabled ||
       releaseAfterRunInput !== !!config.release_after_run ||
       prWorkflowEnabledInput !== !!config.pr_workflow_enabled ||
-      issueAutoBranchInput !== (config.issue_auto_branch ?? true))
+      issueAutoBranchInput !== (config.issue_auto_branch ?? true) ||
+      testsDisabledInput !== !!config.tests_disabled ||
+      reviewDisabledInput !== !!config.review_disabled)
 
   const actionsDirty = JSON.stringify(editActions) !== JSON.stringify(customActions)
   const anyDirty = configDirty || actionsDirty
@@ -1029,32 +1040,9 @@ export function ProjectDetailPage({
               {/* Release Pipeline */}
               <div className="bg-bg-secondary rounded-lg border border-border">
                 <div className="px-5 py-3 border-b border-border">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-baseline gap-3">
-                      <h3 className="text-sm font-semibold text-text-primary">Release Pipeline</h3>
-                      <p className="text-xs text-text-tertiary">Automation that runs after every review</p>
-                    </div>
-                    {/* Pipeline flow strip */}
-                    <div className="flex items-center gap-1 flex-wrap">
-                      {[
-                        { label: 'test', active: !!(config.effective_test_command) },
-                        { label: 'review', active: true },
-                        { label: 'fix', active: true },
-                        { label: 'commit', active: autoCommitEnabledInput },
-                        { label: 'push', active: autoPushEnabledInput },
-                        ...(prWorkflowEnabledInput ? [
-                          { label: 'dod', active: true },
-                          { label: 'merge', active: autoPrMergeEnabledInput },
-                        ] : []),
-                      ].map((step, i, arr) => (
-                        <span key={step.label} className="flex items-center gap-1">
-                          <span className={`px-1.5 py-0.5 text-xs rounded font-mono ${step.active ? 'bg-accent/15 text-accent border border-accent/30' : 'bg-bg-tertiary text-text-tertiary border border-border'}`}>
-                            {step.label}
-                          </span>
-                          {i < arr.length - 1 && <span className="text-text-tertiary text-xs">→</span>}
-                        </span>
-                      ))}
-                    </div>
+                  <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                    <h3 className="text-sm font-semibold text-text-primary">Release Pipeline</h3>
+                    <p className="text-xs text-text-tertiary">Click a step to toggle. Fix is gated by review.{prWorkflowEnabledInput ? ' dod always runs in PR Workflow.' : ''}</p>
                   </div>
                 </div>
 
@@ -1083,64 +1071,108 @@ export function ProjectDetailPage({
                   </p>
                 </div>
 
-                {/* Options */}
+                {/* Clickable pipeline flow strip — authoritative control for per-step toggles */}
+                <div className="px-5 py-4 border-b border-border">
+                  {(() => {
+                    const stepCtx: StepToggleContext = {
+                      config: {
+                        effective_test_command: config.effective_test_command,
+                        tests_disabled: testsDisabledInput,
+                        review_disabled: reviewDisabledInput,
+                        auto_commit_enabled: autoCommitEnabledInput,
+                        auto_push_enabled: autoPushEnabledInput,
+                        auto_pr_merge_enabled: autoPrMergeEnabledInput,
+                        pr_workflow_enabled: prWorkflowEnabledInput,
+                      },
+                      setters: {
+                        setAutoCommit: setAutoCommitEnabledInput,
+                        setAutoPush: setAutoPushEnabledInput,
+                        setAutoMerge: setAutoPrMergeEnabledInput,
+                        setTestsDisabled: setTestsDisabledInput,
+                        setReviewDisabled: setReviewDisabledInput,
+                      },
+                      focusElement: (id: string) => {
+                        const el = document.getElementById(id) as HTMLElement | null
+                        if (el) {
+                          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                          el.focus()
+                        }
+                      },
+                    }
+                    const steps = getPipelineSteps(prWorkflowEnabledInput ? 'pr' : 'direct')
+                    return (
+                      <>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {steps.map((step, i) => {
+                            const active = step.isActive(stepCtx)
+                            const toggleable = !!step.onToggle && !step.mandatory
+                            const title = step.description(stepCtx)
+                            const baseChip = 'px-2 py-1 text-xs rounded font-mono border transition-colors'
+                            const chipClass = active
+                              ? 'bg-accent/15 text-accent border-accent/30 hover:bg-accent/25'
+                              : 'bg-bg-tertiary text-text-tertiary border-border hover:bg-bg-primary hover:text-text-secondary'
+                            const cursorClass = toggleable ? 'cursor-pointer' : 'cursor-default'
+                            return (
+                              <span key={step.id} className="flex items-center gap-1.5">
+                                {toggleable ? (
+                                  <button
+                                    type="button"
+                                    title={title}
+                                    onClick={() => step.onToggle!(stepCtx)}
+                                    className={`${baseChip} ${chipClass} ${cursorClass}`}
+                                  >
+                                    {step.label}
+                                  </button>
+                                ) : (
+                                  <span
+                                    title={title}
+                                    aria-disabled
+                                    className={`${baseChip} ${chipClass} ${cursorClass} opacity-90`}
+                                  >
+                                    {step.mandatory
+                                      ? null
+                                      : <span className="mr-1 text-[10px] opacity-60">↻</span>}
+                                    {step.label}
+                                  </span>
+                                )}
+                                {i < steps.length - 1 && <span className="text-text-tertiary text-xs">→</span>}
+                              </span>
+                            )
+                          })}
+                        </div>
+                        {/* Inline per-step descriptions — keeps cascade/tooltip copy
+                            visible without relying on hover (touch devices, accessibility). */}
+                        <ul className="mt-3 space-y-1">
+                          {steps.map((step) => {
+                            const active = step.isActive(stepCtx)
+                            return (
+                              <li key={step.id} className="flex items-start gap-2 text-xs text-text-tertiary">
+                                <span className={`font-mono shrink-0 w-14 ${active ? 'text-accent' : 'text-text-tertiary'}`}>{step.label}</span>
+                                <span className="flex-1">{step.description(stepCtx)}</span>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </>
+                    )
+                  })()}
+                </div>
+
+                {/* Trigger cadence — WHEN the pipeline starts, not WHICH steps run. */}
                 <div className="px-5 py-2">
-                  {[
-                    {
-                      id: 'auto-commit-enabled',
-                      checked: autoCommitEnabledInput,
-                      onChange: (next: boolean) => {
-                        setAutoCommitEnabledInput(next)
-                        if (!next) { setAutoPushEnabledInput(false); setAutoPrMergeEnabledInput(false) }
-                      },
-                      label: 'Auto-commit when review passes',
-                      description: <>On <code className="bg-bg-tertiary px-1 rounded">LGTM</code> verdict, stage and commit changes automatically — without pushing.</>,
-                    },
-                    {
-                      id: 'auto-push-enabled',
-                      checked: autoPushEnabledInput,
-                      onChange: (next: boolean) => {
-                        setAutoPushEnabledInput(next)
-                        if (next) setAutoCommitEnabledInput(true)
-                        if (!next) setAutoPrMergeEnabledInput(false)
-                      },
-                      label: prWorkflowEnabledInput ? 'Auto-push to PR branch' : 'Auto-push after committing',
-                      description: prWorkflowEnabledInput
-                        ? 'Push the commit to the feature/issue branch, creating a pull request if one does not exist. Enables auto-commit automatically.'
-                        : 'Push to origin after auto-commit. Enables auto-commit automatically.',
-                    },
-                    ...(prWorkflowEnabledInput ? [{
-                      id: 'auto-pr-merge-enabled',
-                      checked: autoPrMergeEnabledInput,
-                      onChange: (next: boolean) => {
-                        setAutoPrMergeEnabledInput(next)
-                        if (next) { setAutoCommitEnabledInput(true); setAutoPushEnabledInput(true) }
-                      },
-                      label: 'Auto-merge PR',
-                      description: 'After DoD verification passes, poll CI checks and merge the PR automatically. When disabled, the PR is left open for manual merge. Enables auto-push automatically.',
-                    }] : []),
-                    {
-                      id: 'release-after-run',
-                      checked: releaseAfterRunInput,
-                      onChange: (next: boolean) => setReleaseAfterRunInput(next),
-                      label: 'Trigger pipeline after each agent run',
-                      description: 'When a terminal or agent run finishes successfully, automatically start the release pipeline.',
-                    },
-                  ].map(({ id, checked, onChange, label, description }) => (
-                    <label key={id} className="flex items-start gap-3 p-3 rounded-lg hover:bg-bg-tertiary/50 cursor-pointer transition-colors select-none -mx-3">
-                      <input
-                        id={id}
-                        type="checkbox"
-                        className="w-4 h-4 accent-accent rounded mt-0.5 shrink-0 cursor-pointer"
-                        checked={checked}
-                        onChange={(e) => onChange(e.target.checked)}
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-sm text-text-primary">{label}</div>
-                        <div className="text-xs text-text-tertiary">{description}</div>
-                      </div>
-                    </label>
-                  ))}
+                  <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-bg-tertiary/50 cursor-pointer transition-colors select-none -mx-3">
+                    <input
+                      id="release-after-run"
+                      type="checkbox"
+                      className="w-4 h-4 accent-accent rounded mt-0.5 shrink-0 cursor-pointer"
+                      checked={releaseAfterRunInput}
+                      onChange={(e) => setReleaseAfterRunInput(e.target.checked)}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm text-text-primary">Trigger pipeline after each agent run</div>
+                      <div className="text-xs text-text-tertiary">When a terminal or agent run finishes successfully, automatically start the release pipeline.</div>
+                    </div>
+                  </label>
                 </div>
               </div>
 
