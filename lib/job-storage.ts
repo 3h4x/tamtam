@@ -542,7 +542,14 @@ async function runCompletionHooks(job: JobData): Promise<void> {
   // If this is a pipeline step and we didn't chain to another step, the
   // release job reached a natural endpoint — finalize it. Exit code mirrors
   // this step's outcome.
-  if (['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod'].includes(job.kind) && !chainedNext) {
+  //
+  // `mark-dod` is explicitly excluded: it is a best-effort side-step invoked
+  // synchronously by the review hook. Treating it as an endpoint here
+  // finalizes the release BEFORE the review hook gets to call
+  // `startProjectCommit`, so commit/push never fire. Mark-dod's outcome is
+  // purely advisory (issue checkbox updates); the release continues via its
+  // invoker regardless of mark-dod's exit code.
+  if (['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait'].includes(job.kind) && !chainedNext) {
     const release = findActiveReleaseJob(job.project);
     if (release) {
       const exitCode = (job.exitCode === 0) ? 0 : 1;
