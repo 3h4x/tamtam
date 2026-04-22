@@ -323,13 +323,23 @@ async function runCompletionHooks(job: JobData): Promise<void> {
       if (job.exitCode === 0 && (inRelease || pipelineCfg.autoPushEnabled || pipelineCfg.autoCommitEnabled)) {
         const verdict = getVerdict(job);
         if (verdict === 'LGTM') {
-          // When auto_pr_merge_enabled + issue context exist, defer DoD
-          // verification to launchPrWait (post-merge). Otherwise verify now.
+          // DoD verification only makes sense in PR Workflow mode AND when we
+          // have a linked GitHub issue. On a direct-branch release (no PR, no
+          // issue) there are no acceptance-criteria checkboxes to tick, so
+          // running mark-dod just burns Claude calls and risks stalling the
+          // release on an inline claude-cli invocation.
+          //
+          // When PR Workflow + auto_pr_merge + issue are all set, defer DoD
+          // to launchPrWait (post-merge) so verification reflects the merged
+          // state. Otherwise (PR Workflow + issue but no auto-merge) run it
+          // now so the review can tick boxes before manual merge.
           const hasIssueContext = listJobs().some(
             j => j.project === job.project && j.kind === 'run' && j.ghIssueNumber != null,
           );
-          const shouldDeferDod = pipelineCfg.autoPrMergeEnabled && hasIssueContext;
-          if (!shouldDeferDod) {
+          const prWorkflow = !!pipelineCfg.prWorkflowEnabled;
+          const shouldRunDod = prWorkflow && hasIssueContext;
+          const shouldDeferDod = shouldRunDod && pipelineCfg.autoPrMergeEnabled;
+          if (shouldRunDod && !shouldDeferDod) {
             try {
               const { startMarkDod } = await import('./start-mark-dod');
               const md = await startMarkDod(job.project);
@@ -339,8 +349,10 @@ async function runCompletionHooks(job: JobData): Promise<void> {
             } catch (e) {
               console.log(`[release] mark-dod error for ${job.project}:`, e);
             }
-          } else {
+          } else if (shouldDeferDod) {
             console.log(`[release] deferring mark-dod to post-merge for ${job.project} (auto_pr_merge_enabled)`);
+          } else {
+            console.log(`[release] skipping mark-dod for ${job.project} (pr_workflow_enabled=${prWorkflow}, hasIssueContext=${hasIssueContext})`);
           }
           const { startProjectCommit } = await import('./start-commit');
           const r = await startProjectCommit(job.project);
