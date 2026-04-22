@@ -180,7 +180,7 @@ describe('startProjectReview', () => {
     expect(startJobMock).toHaveBeenCalled();
   });
 
-  it('returns 500 and does not update job when pm2-jobs throws', async () => {
+  it('persists job failure when startJob throws', async () => {
     startJobMock.mockRejectedValueOnce(new Error('spawn failed'));
     execMock.mockResolvedValueOnce(resp(0, 'M lib/foo.ts'));
     const r = await startProjectReview('proj');
@@ -189,6 +189,11 @@ describe('startProjectReview', () => {
       expect(r.status).toBe(500);
       expect(r.detail).toContain('Failed to start review');
     }
+    // Job must be persisted as failed so it doesn't stay "running" in the DB
+    expect(updateJobMock).toHaveBeenCalledOnce();
+    const savedJob = updateJobMock.mock.calls[0][0];
+    expect(savedJob.exitCode).toBe(-1);
+    expect(savedJob.finishedAt).not.toBeNull();
   });
 
   it('acquires pipeline lock after successful job start when not under release', async () => {

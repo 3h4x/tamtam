@@ -88,6 +88,7 @@ export async function startProjectReview(projectName: string): Promise<StartRevi
   } catch (e: unknown) {
     job.finishedAt = Date.now() / 1000;
     job.exitCode = -1;
+    updateJob(job);
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, status: 500, detail: `Failed to start review: ${msg}` };
   }

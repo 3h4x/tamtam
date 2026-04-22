@@ -431,6 +431,22 @@ describe('startProjectCommit', () => {
     expect(markDoneMock).toHaveBeenCalledWith(expect.anything(), 0);
   });
 
+  it('returns ok "Nothing to commit (already ahead)" when nothing is staged but commits exist unpushed', async () => {
+    setupMocks();
+    listJobsMock.mockReturnValue([]);
+    execMock
+      .mockResolvedValueOnce(resp(0))        // git add -A
+      .mockResolvedValueOnce(resp(0, ''))    // git diff --cached --name-status → empty
+      .mockResolvedValueOnce(resp(0, '3\n')) // git rev-list --count @{u}..HEAD → 3 ahead
+    ;
+
+    const { startProjectCommit } = await import('@/lib/start-commit');
+    const r = await startProjectCommit('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.message).toContain('already ahead');
+    expect(markDoneMock).toHaveBeenCalledWith(expect.anything(), 0);
+  });
+
   it('marks job done with exit 1 when git commit fails', async () => {
     setupMocks();
     listJobsMock.mockReturnValue([]);
