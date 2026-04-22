@@ -209,3 +209,141 @@ describe('runCompletionHooks – mark-dod integration', () => {
     expect(startMarkDodMock).toHaveBeenCalled();
   });
 });
+
+describe('runCompletionHooks – mark-dod excluded from pipeline endpoint', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+  let notifyMock: ReturnType<typeof vi.fn>;
+
+  function insertReleaseJob(db: ReturnType<typeof createTestDb>['db'], id: string) {
+    const now = Date.now() / 1000;
+    db.insert(schema.jobs).values({
+      id,
+      project: 'my-proj',
+      kind: 'release',
+      prompt: null,
+      pid: 1,
+      logPath: null,
+      startedAt: now - 10,
+      finishedAt: null,
+      exitCode: null,
+      seen: 0,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    } as any).run();
+  }
+
+  function makeJob(kind: string, exitCodeOverride?: number): JobData {
+    return {
+      id: `${kind}-job`,
+      project: 'my-proj',
+      kind,
+      prompt: null,
+      pid: 0,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: exitCodeOverride ?? null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    };
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    notifyMock = vi.fn().mockResolvedValue(undefined);
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/pm2-jobs', () => ({
+      getJobStatus: vi.fn(),
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+    }));
+    vi.doMock('@/lib/start-mark-dod', () => ({
+      startMarkDod: vi.fn().mockResolvedValue({ ok: false, detail: 'no issue' }),
+    }));
+    vi.doMock('@/lib/start-push', () => ({
+      startProjectPush: vi.fn().mockResolvedValue({ ok: false, detail: 'no remote' }),
+    }));
+    vi.doMock('@/lib/start-commit', () => ({
+      startProjectCommit: vi.fn().mockResolvedValue({ ok: false, detail: 'nothing to commit' }),
+    }));
+    vi.doMock('@/lib/start-fix', () => ({
+      startFixFromJob: vi.fn().mockResolvedValue({ ok: false, detail: 'no' }),
+    }));
+    vi.doMock('@/lib/start-review', () => ({
+      startProjectReview: vi.fn().mockResolvedValue({ ok: false, detail: 'no' }),
+    }));
+    vi.doMock('@/lib/start-test', () => ({
+      startProjectTest: vi.fn().mockResolvedValue({ ok: false, detail: 'no' }),
+    }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({ autoPushEnabled: false, autoCommitEnabled: false }),
+    }));
+    vi.doMock('@/lib/notifications', () => ({ notify: notifyMock }));
+    vi.doMock('@/lib/pipeline-lock', () => ({ releaseLock: vi.fn() }));
+
+    const mod = await import('@/lib/job-storage');
+    markDoneFn = mod.markDone;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('does not finalize the active release job when mark-dod completes with exit 0', async () => {
+    insertReleaseJob(testDb.db, 'release-dod-0');
+    await markDoneFn(makeJob('mark-dod'), 0);
+    const row = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-dod-0');
+    expect(row?.finishedAt).toBeNull();
+    expect(row?.exitCode).toBeNull();
+  });
+
+  it('does not finalize the active release job when mark-dod completes with exit 1', async () => {
+    insertReleaseJob(testDb.db, 'release-dod-1');
+    await markDoneFn(makeJob('mark-dod'), 1);
+    const row = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-dod-1');
+    expect(row?.finishedAt).toBeNull();
+    expect(row?.exitCode).toBeNull();
+  });
+
+  it('does not send a notification when mark-dod completes', async () => {
+    insertReleaseJob(testDb.db, 'release-dod-notify');
+    await markDoneFn(makeJob('mark-dod'), 0);
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('pr-wait still finalizes the active release job with exit 0 (regression)', async () => {
+    insertReleaseJob(testDb.db, 'release-prwait-0');
+    await markDoneFn(makeJob('pr-wait'), 0);
+    const row = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-prwait-0');
+    expect(row?.finishedAt).not.toBeNull();
+    expect(row?.exitCode).toBe(0);
+  });
+
+  it('pr-wait still finalizes the active release job with exit 1 (regression)', async () => {
+    insertReleaseJob(testDb.db, 'release-prwait-1');
+    await markDoneFn(makeJob('pr-wait'), 1);
+    const row = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-prwait-1');
+    expect(row?.finishedAt).not.toBeNull();
+    expect(row?.exitCode).toBe(1);
+  });
+});
