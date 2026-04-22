@@ -255,6 +255,23 @@ describe('runCompletionHooks – mark-dod integration', () => {
     expect(startMarkDodMock).not.toHaveBeenCalled();
     expect(startProjectCommitMock).toHaveBeenCalled();
   });
+
+  it('defers mark-dod (does NOT call it inline) when auto_pr_merge_enabled is true', async () => {
+    // PR Workflow + issue context + auto-merge → shouldDeferDod=true → mark-dod
+    // is left to launchPrWait post-merge. The release chain must still proceed
+    // to commit/push so the PR gets created.
+    getProjectTestConfigMock.mockReturnValue({
+      autoPushEnabled: true,
+      autoCommitEnabled: false,
+      prWorkflowEnabled: true,
+      autoPrMergeEnabled: true,
+    });
+    const logFile = join(tempDir, 'lgtm-defer.log');
+    writeFileSync(logFile, 'Verdict: LGTM\n');
+    await markDoneFn(makeReviewJob(logFile), 0);
+    expect(startMarkDodMock).not.toHaveBeenCalled();
+    expect(startProjectCommitMock).toHaveBeenCalled();
+  });
 });
 
 describe('runCompletionHooks – mark-dod excluded from pipeline endpoint', () => {
