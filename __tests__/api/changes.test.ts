@@ -15,6 +15,7 @@ describe('GET /api/projects/by-project/[projectName]/changes', () => {
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
   let statSyncMock: ReturnType<typeof vi.fn>;
+  let detectMainBranchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -22,11 +23,13 @@ describe('GET /api/projects/by-project/[projectName]/changes', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn().mockResolvedValue(makeExecResult());
     statSyncMock = vi.fn().mockReturnValue({ size: 1024 });
+    detectMainBranchMock = vi.fn().mockResolvedValue('main');
 
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/start-commit', () => ({ detectMainBranch: detectMainBranchMock }));
     vi.doMock('fs', () => ({ statSync: statSyncMock }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/changes/route');
@@ -62,6 +65,7 @@ describe('GET /api/projects/by-project/[projectName]/changes', () => {
       .mockResolvedValueOnce(makeExecResult({ stdout: '10\t2\tsrc/a.ts\n5\t0\tsrc/b.ts\n' })) // numstat
       .mockResolvedValueOnce(makeExecResult({ stdout: '' })) // untracked
       .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head master\n# branch.ab +0 -0\n' })); // porcelain
+    detectMainBranchMock.mockResolvedValue('master');
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -72,6 +76,7 @@ describe('GET /api/projects/by-project/[projectName]/changes', () => {
     expect(data.totalAdditions).toBe(15);
     expect(data.totalDeletions).toBe(2);
     expect(data.branch).toBe('master');
+    expect(data.defaultBranch).toBe('master');
   });
 
   it('marks files as binary when numstat reports -/-', async () => {
