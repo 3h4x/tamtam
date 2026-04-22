@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { resolveProjectPath } from '@/lib/project-data';
 import { exec } from '@/lib/shell';
 import { detectMainBranch } from '@/lib/start-commit';
+import { pushCurrentBranch } from '@/lib/start-push';
 
 export async function POST(
   _request: NextRequest,
@@ -25,10 +26,11 @@ export async function POST(
     return NextResponse.json({ detail: `On default branch (${defaultBranch}) — switch to a feature branch first` }, { status: 400 });
   }
 
-  // Push current branch to origin first (gh pr create requires an upstream)
-  const pushR = await exec('git', ['-C', projPath, 'push', '-u', 'origin', 'HEAD'], { timeout: 120000 });
-  if (pushR.exitCode !== 0) {
-    return NextResponse.json({ detail: `Push failed: ${pushR.stderr || pushR.stdout}` }, { status: 500 });
+  // Push current branch via the shared release-pipeline helper so upstream
+  // fallback and error formatting behave consistently with the rest of the app.
+  const pushR = await pushCurrentBranch(projPath);
+  if (!pushR.ok) {
+    return NextResponse.json({ detail: pushR.detail }, { status: 500 });
   }
 
   // Create PR with title/body auto-filled from commits. Pass an explicit --base

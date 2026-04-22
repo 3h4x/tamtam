@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject, fetchIssuesAndPRs, pushProject, fetchChanges, createProjectPR } from '@/lib/client-api'
+import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject, fetchIssuesAndPRs, pushProject, fetchBranch, createProjectPR } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
 import { getAggregateCi } from '@/lib/statusConstants'
@@ -344,26 +344,25 @@ export function ProjectDetailPage({
     fetchCustomActions(name).then((data) => setCustomActions(data.actions)).catch(() => {})
   }, [name])
 
-  useEffect(() => {
-    if (!name) return
-    fetchIssuesAndPRs(name).then((data) => {
-      setIssueCount({ prs: data.prs.length, issues: data.issues.length })
-      setOpenPrBranches(data.prs.map(pr => pr.headRefName))
-    }).catch(() => {})
-  }, [name])
-
-  // Poll current/default branch so the Create PR button stays in sync with
-  // external branch switches (issue checkout, merge-back-to-default, etc.).
+  // Poll issues/PRs + current/default branch together so the Create PR button
+  // stays in sync with external branch switches and externally-closed PRs.
   useEffect(() => {
     if (!name) return
     let active = true
     const poll = async () => {
-      try {
-        const data = await fetchChanges(name)
-        if (!active) return
-        setCurrentBranch(data.branch)
-        setDefaultBranch(data.defaultBranch)
-      } catch { /* ignore */ }
+      const [issuesRes, branchRes] = await Promise.allSettled([
+        fetchIssuesAndPRs(name),
+        fetchBranch(name),
+      ])
+      if (!active) return
+      if (issuesRes.status === 'fulfilled') {
+        setIssueCount({ prs: issuesRes.value.prs.length, issues: issuesRes.value.issues.length })
+        setOpenPrBranches(issuesRes.value.prs.map(pr => pr.headRefName))
+      }
+      if (branchRes.status === 'fulfilled') {
+        setCurrentBranch(branchRes.value.branch)
+        setDefaultBranch(branchRes.value.defaultBranch)
+      }
     }
     poll()
     const interval = setInterval(poll, 10000)

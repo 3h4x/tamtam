@@ -389,7 +389,6 @@ export interface ChangesResponse {
   totalAdditions: number
   totalDeletions: number
   branch: string | null
-  defaultBranch: string | null
   behind: number
   ahead: number
 }
@@ -406,6 +405,12 @@ export async function fetchChanges(projectName: string): Promise<ChangesResponse
 export async function fetchBehind(projectName: string): Promise<{ behind: number; ahead: number }> {
   const response = await fetch(`${API_BASE}/by-project/${projectName}/behind`)
   if (!response.ok) return { behind: 0, ahead: 0 }
+  return response.json()
+}
+
+export async function fetchBranch(projectName: string): Promise<{ branch: string | null; defaultBranch: string }> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/branch`)
+  if (!response.ok) throw new Error('Failed to fetch branch')
   return response.json()
 }
 
