@@ -422,6 +422,139 @@ describe('launchPrWait', () => {
     }, { timeout: 3000 });
   });
 
+  it('falls back to main when symbolic-ref fails (non-zero exit)', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, JSON.stringify({
+        state: 'OPEN',
+        mergeable: 'MERGEABLE',
+        statusCheckRollup: [],
+      })))
+      .mockResolvedValueOnce(resp(0, 'merged'))
+      // switchToDefault: symbolic-ref fails → mainBranch stays 'main'
+      .mockResolvedValueOnce(resp(1, '', 'not a git repo'))  // symbolic-ref fails
+      .mockResolvedValueOnce(resp(0, 'fix/issue-20\n'))       // show-current → feature branch
+      .mockResolvedValueOnce(resp(0, ''))                     // status --porcelain (clean)
+      .mockResolvedValueOnce(resp(0, ''))                     // checkout main
+      .mockResolvedValueOnce(resp(0, ''));                    // pull --ff-only
+
+    launchPrWait('myproj', 60, 'owner/repo', 'https://github.com/owner/repo/pull/60');
+
+    await vi.waitFor(() => {
+      const checkoutCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args.includes('checkout'));
+      expect(checkoutCalls.length).toBe(1);
+      expect(checkoutCalls[0][1]).toContain('main');
+      expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 0);
+    }, { timeout: 3000 });
+  });
+
+  it('does not call stash pop when stash reports "No local changes"', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, JSON.stringify({
+        state: 'OPEN',
+        mergeable: 'MERGEABLE',
+        statusCheckRollup: [],
+      })))
+      .mockResolvedValueOnce(resp(0, 'merged'))
+      // switchToDefault: symbolic-ref, show-current (feature branch), status (dirty),
+      // stash → "No local changes" → stashed=false → no stash pop
+      .mockResolvedValueOnce(resp(0, 'refs/remotes/origin/main\n'))
+      .mockResolvedValueOnce(resp(0, 'fix/issue-21\n'))
+      .mockResolvedValueOnce(resp(0, 'M  src/bar.ts\n'))                   // dirty
+      .mockResolvedValueOnce(resp(0, 'No local changes to save'))           // stash push → nothing stashed
+      .mockResolvedValueOnce(resp(0, ''))                                   // checkout main
+      .mockResolvedValueOnce(resp(0, ''));                                  // pull --ff-only
+
+    launchPrWait('myproj', 61, 'owner/repo', 'https://github.com/owner/repo/pull/61');
+
+    await vi.waitFor(() => {
+      const stashPopCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args.includes('stash') && args.includes('pop'));
+      expect(stashPopCalls.length).toBe(0);
+      expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 0);
+    }, { timeout: 3000 });
+  });
+
+  it('pops stash after checkout failure when working tree was dirty', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, JSON.stringify({
+        state: 'OPEN',
+        mergeable: 'MERGEABLE',
+        statusCheckRollup: [],
+      })))
+      .mockResolvedValueOnce(resp(0, 'merged'))
+      // switchToDefault: symbolic-ref, show-current (feature branch), status (dirty),
+      // stash succeeds, checkout fails → stash pop to restore
+      .mockResolvedValueOnce(resp(0, 'refs/remotes/origin/main\n'))
+      .mockResolvedValueOnce(resp(0, 'fix/issue-22\n'))
+      .mockResolvedValueOnce(resp(0, 'M  src/baz.ts\n'))               // dirty
+      .mockResolvedValueOnce(resp(0, 'Saved working directory'))        // stash push
+      .mockResolvedValueOnce(resp(1, '', 'checkout failed'));            // checkout fails → stash pop
+
+    launchPrWait('myproj', 62, 'owner/repo', 'https://github.com/owner/repo/pull/62');
+
+    await vi.waitFor(() => {
+      const stashPopCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args.includes('stash') && args.includes('pop'));
+      expect(stashPopCalls.length).toBe(1);
+      expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 1);
+    }, { timeout: 3000 });
+  });
+
+  it('returns null from getPrStatus when JSON.parse throws, then retries on next poll', async () => {
+    execMock
+      // First poll: gh pr view exits 0 but returns invalid JSON → parse throws → null → retry
+      .mockResolvedValueOnce(resp(0, 'not-json-at-all'))
+      // Second poll: PR already merged
+      .mockResolvedValueOnce(resp(0, JSON.stringify({
+        state: 'MERGED', mergeable: 'MERGEABLE', statusCheckRollup: [],
+      })));
+    mockCleanupSuccess();
+
+    launchPrWait('myproj', 63, 'owner/repo', 'https://github.com/owner/repo/pull/63');
+
+    await vi.waitFor(() => {
+      expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 0);
+    }, { timeout: 3000 });
+  });
+
+  it('triggers auto-merge fallback when "mergeable" keyword appears in stderr', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, JSON.stringify({
+        state: 'OPEN',
+        mergeable: 'MERGEABLE',
+        statusCheckRollup: [],
+      })))
+      .mockResolvedValueOnce(resp(1, '', 'branch is not mergeable yet'))  // "mergeable" in stderr
+      .mockResolvedValueOnce(resp(0, 'Auto-merge enabled'));               // --auto succeeds
+    mockCleanupSuccess();
+
+    launchPrWait('myproj', 64, 'owner/repo', 'https://github.com/owner/repo/pull/64');
+
+    await vi.waitFor(() => {
+      const autoCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('--auto'));
+      expect(autoCalls.length).toBeGreaterThanOrEqual(1);
+      expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 0);
+    }, { timeout: 3000 });
+  });
+
+  it('triggers auto-merge fallback when "pending" keyword appears in stderr', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, JSON.stringify({
+        state: 'OPEN',
+        mergeable: 'MERGEABLE',
+        statusCheckRollup: [],
+      })))
+      .mockResolvedValueOnce(resp(1, '', 'merge blocked: pending review'))  // "pending" in stderr
+      .mockResolvedValueOnce(resp(0, 'Auto-merge enabled'));                 // --auto succeeds
+    mockCleanupSuccess();
+
+    launchPrWait('myproj', 65, 'owner/repo', 'https://github.com/owner/repo/pull/65');
+
+    await vi.waitFor(() => {
+      const autoCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('--auto'));
+      expect(autoCalls.length).toBeGreaterThanOrEqual(1);
+      expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 0);
+    }, { timeout: 3000 });
+  });
+
   describe('timeout', () => {
     let launchPrWaitT: typeof import('@/lib/start-pr-wait').launchPrWait;
     let execT: ReturnType<typeof vi.fn>;

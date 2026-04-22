@@ -42,8 +42,16 @@ export function parseStreamLines(content: string): ParsedEvent[] {
   let currentToolInput = '';
   let inToolUse = false;
 
+  // PM2 can be configured to prepend an ISO timestamp to every line
+  // (PM2_LOG_DATE_FORMAT / pm2 set). Strip it so JSON.parse sees a valid object.
+  // Example prefix: `2026-04-22T12:51:05: {...}` (note the `: ` separator).
+  const TS_PREFIX_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?:\s/;
+
   for (const line of content.split('\n')) {
-    const trimmed = line.trim();
+    let trimmed = line.trim();
+    if (!trimmed) continue;
+    const m = trimmed.match(TS_PREFIX_RE);
+    if (m) trimmed = trimmed.slice(m[0].length);
     if (!trimmed) continue;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
