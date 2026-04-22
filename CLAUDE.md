@@ -61,8 +61,11 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `pnpm start` — start production server via PM2
 - `pnpm test` — run unit tests
 - `pnpm test:e2e` — run Playwright e2e tests (requires dev server running)
+- `pnpm lint` — ESLint on app, components, lib, hooks
 - `pnpm type-check` — TypeScript check
 - `pnpm check` — lint + type-check + test (all in one)
+- `pnpm db:generate` — generate Drizzle migration files from schema changes
+- `pnpm db:migrate` — apply pending Drizzle migrations
 
 **Never run `next dev` directly — always use PM2 via the scripts above.**
 
