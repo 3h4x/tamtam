@@ -14,7 +14,7 @@ Steps are pluggable per project and coordinated by completion hooks in `lib/job-
 - **test** — runs the project's test command (auto-detected from `package.json`/`pyproject.toml`/`Package.swift`/`Cargo.toml`/`go.mod`/`Makefile:test` or user-configured). Skipped if none. If tests pass and there are no uncommitted changes, the pipeline short-circuits directly to push (skipping review).
 - **review** — Claude reads the uncommitted diff and emits a verdict: `LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP` (verdict rules are configurable in Settings).
 - **fix** — on `NEEDS ATTENTION` / `DO NOT SHIP`, Claude resumes the review session and applies fixes. Capped at 3 iterations per 30-minute window to prevent loops. On success it chains back to review.
-- **commit + push** — on `LGTM`, staged changes are committed with a Claude-generated message (respecting the `commit_style` setting) and pushed. Only tracked file modifications are staged automatically (untracked files are left alone to avoid sweeping up secrets).
+- **commit + push** — on `LGTM`, staged changes are committed with a Claude-generated message (respecting the `commit_style` setting) and pushed. All changes (including untracked files) are staged via `git add -A`; `.gitignore` is trusted to exclude secrets.
 - **mark-dod** *(PR Workflow only)* — after push, Claude inspects the codebase with tool access (Read/Grep/Glob) to verify which acceptance-criteria checkboxes in the linked GitHub issue are actually implemented, then ticks only the verified ones. Best-effort and non-fatal.
 - **merge** *(PR Workflow + auto-merge enabled)* — polls CI checks on the PR and merges once they pass. After merge, the working copy is returned to the default branch.
 
@@ -25,6 +25,7 @@ The **🚀 Release** button triggers the pipeline at the right starting step. Wh
 - `lib/start-review.ts` → `startProjectReview`
 - `lib/start-fix.ts` → `startFixFromJob`
 - `lib/start-fix-push.ts` → `startFixPush` (pre-commit/pre-push hook failure recovery)
+- `lib/start-commit.ts` → `startProjectCommit` (stage all changes + generate commit message via Claude; also exports `generateCommitMessage`, `issueBranchName`, `findIssueContext`, `detectMainBranch`)
 - `lib/start-push.ts` → `startProjectPush`
 - `lib/start-release.ts` → `startRelease` (pipeline entry point)
 - `lib/start-pr-review.ts` → `startPrReview` (AI review of a GitHub PR)
@@ -97,6 +98,7 @@ If you do restart and run into the EADDRINUSE loop, see `## Investigating a misb
 - `/project/[name]/task/[task]` — Task detail view
 - `/agents` — Agents management page
 - `/monitoring` — Prometheus + Loki health dashboard (alerts, service up/down, log errors)
+- `/stats` — Token usage dashboard (runs, input/output/cache tokens, cost per project, filterable by 24h/7d/30d/all)
 - `/runs` — All runs across projects (replaces `/jobs`, which now redirects here)
 - `/logs` — Log viewer
 - `/skills` — Skill editor (CRUD for DB-backed skills)
@@ -148,6 +150,7 @@ If you do restart and run into the EADDRINUSE loop, see `## Investigating a misb
 - `/api/settings/backup` — SQLite hot backup (POST)
 - `/api/health` — Health check (GET)
 - `/api/monitoring` — Prometheus + Loki status aggregation (GET); env: `PROMETHEUS_URL`, `LOKI_URL`
+- `/api/stats/usage` — Token usage statistics per project (GET, accepts `?window=24h|7d|30d|all`)
 
 ## Testing Requirements
 - **All new API routes must have vitest tests** in `__tests__/`
