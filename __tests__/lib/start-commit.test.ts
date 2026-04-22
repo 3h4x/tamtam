@@ -521,6 +521,64 @@ describe('startProjectCommit', () => {
     expect(checkoutCall).toBeTruthy();
   });
 
+  it('checks out existing branch when checkout -b fails (branch already exists)', async () => {
+    setupMocks();
+    listJobsMock.mockReturnValue([{
+      id: 'j1', project: 'proj', kind: 'run', ghIssueNumber: 8,
+      ghIssueRepo: '', ghIssueTitle: 'Existing feature', startedAt: 1000,
+    }]);
+    // On main branch → tries checkout -b → fails (already exists) → checkout existing succeeds
+    execMock
+      .mockResolvedValueOnce(resp(0, 'main\n'))                        // git branch --show-current
+      .mockResolvedValueOnce(resp(0, 'refs/remotes/origin/main\n'))   // detectMainBranch
+      .mockResolvedValueOnce(resp(1, '', 'already exists'))            // git checkout -b → fails
+      .mockResolvedValueOnce(resp(0))                                   // git checkout existing → succeeds
+      .mockResolvedValueOnce(resp(0))                                   // git add -A
+      .mockResolvedValueOnce(resp(0, 'M\tlib/x.ts'))                  // git diff --cached --name-status
+      .mockResolvedValueOnce(resp(0, 'lib/x.ts | 1 +'))               // generateCommitMessage: stat
+      .mockResolvedValueOnce(resp(0, '+x'))                            // generateCommitMessage: diff
+      .mockResolvedValueOnce(resp(0, 'feat: existing feature'))        // generateCommitMessage: claude
+      .mockResolvedValueOnce(resp(0, 'ok'))                            // git commit
+      .mockResolvedValueOnce(resp(0, 'abc'))                           // git rev-parse
+    ;
+
+    const { startProjectCommit } = await import('@/lib/start-commit');
+    const r = await startProjectCommit('proj');
+    expect(r.ok).toBe(true);
+    // Both checkout calls were made
+    const checkoutCalls = execMock.mock.calls.filter(
+      ([cmd, args]: any) => cmd === 'git' && Array.isArray(args) && args.includes('checkout')
+    );
+    expect(checkoutCalls.length).toBe(2);
+    // Second checkout was without -b (existing branch)
+    const existingCheckout = checkoutCalls[1];
+    expect(existingCheckout[1]).not.toContain('-b');
+  });
+
+  it('returns 500 when both checkout -b and checkout existing fail', async () => {
+    setupMocks();
+    listJobsMock.mockReturnValue([{
+      id: 'j1', project: 'proj', kind: 'run', ghIssueNumber: 9,
+      ghIssueRepo: '', ghIssueTitle: 'Broken branch', startedAt: 1000,
+    }]);
+    execMock
+      .mockResolvedValueOnce(resp(0, 'main\n'))                        // git branch --show-current
+      .mockResolvedValueOnce(resp(0, 'refs/remotes/origin/main\n'))   // detectMainBranch
+      .mockResolvedValueOnce(resp(1, '', 'checkout -b failed'))        // git checkout -b → fails
+      .mockResolvedValueOnce(resp(1, '', 'checkout also failed'))      // git checkout existing → also fails
+    ;
+
+    const { startProjectCommit } = await import('@/lib/start-commit');
+    const r = await startProjectCommit('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(500);
+      expect(r.detail).toContain('Failed to create issue branch');
+    }
+    const job = createJobMock.mock.results[0].value;
+    expect(markDoneMock).toHaveBeenCalledWith(job, 1);
+  });
+
   it('does not switch branch when already on a feature branch', async () => {
     setupMocks();
     listJobsMock.mockReturnValue([{
