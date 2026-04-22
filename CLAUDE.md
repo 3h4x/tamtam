@@ -107,9 +107,10 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - `/settings` — Workspace path, frequency, claude binary, DB backup
 
 ## API Routes
-- `/api/agents` — CRUD for agents (GET, POST)
+- `/api/agents` — CRUD for agents (GET: accepts `?project=` and `?name=` filters, POST)
 - `/api/agents/[agentId]` — Agent detail (GET, PATCH, DELETE)
 - `/api/agents/[agentId]/run` — Run agent (POST) — composes skills into prompt
+- `/api/agents/by-name` — Update agent by project+name without knowing its UUID (PATCH: `{ project, name, ...fields }`) — enables agents to self-improve
 - `/api/skills` — CRUD for skills (GET, POST)
 - `/api/skills/[skillId]` — Skill detail (GET, PATCH, DELETE)
 - `/api/projects` — All projects list (GET)
