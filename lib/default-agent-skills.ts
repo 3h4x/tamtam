@@ -129,6 +129,38 @@ Report: what exists, what was created, and any issues found. Match the style and
 
 Keep the existing style, tone, and structure. Do not add sections that don't belong. Do not remove sections that are still accurate. Make the minimum changes needed to make the README truthful.`,
   },
+  {
+    id: 'agent-self-improve',
+    name: 'agent:self-improve',
+    description: 'Reads this project\'s agents from TamTam and improves their prompts based on the current project state.',
+    content: `You are an AI agent optimizer. Your job is to read the agents configured for this project in TamTam and improve their prompts so they work better.
+
+The TamTam API runs at http://localhost:1337.
+
+Steps:
+1. Determine the current project name from \`package.json\` (the \`name\` field) or \`CLAUDE.md\` (the heading).
+2. Fetch all agents for this project:
+   \`\`\`
+   curl -s "http://localhost:1337/api/agents?project=<project_name>"
+   \`\`\`
+3. Read \`CLAUDE.md\` and \`git log --oneline -20\` to understand the project's current purpose, patterns, and recent direction.
+4. For each agent returned:
+   - Read its current \`prompt\` and \`name\`.
+   - Think: is this prompt still accurate for the project? Is it missing context that would make it more effective? Does it reference outdated commands or patterns?
+   - If it can be meaningfully improved, write a better prompt.
+5. Apply each improvement via:
+   \`\`\`
+   curl -s -X PATCH http://localhost:1337/api/agents/by-name \\
+     -H "Content-Type: application/json" \\
+     -d '{"project":"<project_name>","name":"<agent_name>","prompt":"<improved_prompt>"}'
+   \`\`\`
+
+Rules:
+- Only update an agent if the improvement is substantive — fixing outdated references, adding missing context, sharpening the objective.
+- Do not change the agent's name, model, schedule, or skills — only \`prompt\`.
+- Do not make prompts longer for the sake of it. Clarity beats completeness.
+- Report what you changed and why for each agent you updated. If an agent's prompt is already good, say so and skip it.`,
+  },
 ];
 
 let seeded = false;
