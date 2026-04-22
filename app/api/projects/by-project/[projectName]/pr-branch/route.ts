@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveProjectPath } from '@/lib/project-data';
+import { resolveProjectPath, clearProjectDataCache } from '@/lib/project-data';
 import { exec } from '@/lib/shell';
 
 // Fetch and checkout a PR's head branch so Terminal opens on the right branch.
@@ -34,6 +34,7 @@ export async function POST(
   // Try local checkout first (branch may already exist), then track from origin.
   const checkoutR = await exec('git', ['-C', projPath, 'checkout', branch], { timeout: 10000 });
   if (checkoutR.exitCode === 0) {
+    clearProjectDataCache();
     return NextResponse.json({ status: 'switched', branch });
   }
 
@@ -42,6 +43,7 @@ export async function POST(
     { timeout: 10000 },
   );
   if (trackR.exitCode === 0) {
+    clearProjectDataCache();
     return NextResponse.json({ status: 'created', branch });
   }
 

@@ -30,6 +30,7 @@ describe('POST /api/projects/by-project/[projectName]/pr-branch', () => {
 
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
+      clearProjectDataCache: vi.fn(),
     }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
 
