@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
-import { resolveProjectPath } from '@/lib/project-data';
+import { resolveProjectPath, clearProjectDataCache } from '@/lib/project-data';
 import { exec } from '@/lib/shell';
 import { db, schema } from '@/lib/db';
 import { homedir } from 'os';
@@ -210,6 +210,8 @@ export async function POST(
   } catch (e) {
     switchError = `Post-merge checkout error: ${e instanceof Error ? e.message : String(e)}`;
   }
+
+  clearProjectDataCache();
 
   if (switchError) {
     return NextResponse.json({ status: 'merged_dirty', pr: prNumber, repo, switchedTo: null, switchError }, { status: 207 });

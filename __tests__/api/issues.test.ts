@@ -33,6 +33,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
 
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
+      clearProjectDataCache: vi.fn(),
     }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
@@ -183,6 +184,7 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
 
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
+      clearProjectDataCache: vi.fn(),
     }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));

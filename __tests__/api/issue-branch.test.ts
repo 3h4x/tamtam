@@ -29,6 +29,7 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
 
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
+      clearProjectDataCache: vi.fn(),
     }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/scheduling', () => ({

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveProjectPath } from '@/lib/project-data';
+import { resolveProjectPath, clearProjectDataCache } from '@/lib/project-data';
 import { exec } from '@/lib/shell';
 import { getProjectTestConfig } from '@/lib/scheduling';
 
@@ -45,10 +45,12 @@ export async function POST(
   // touching the index — `git checkout -b` carries the working tree across.
   const createR = await exec('git', ['-C', projPath, 'checkout', '-b', branch], { timeout: 10000 });
   if (createR.exitCode === 0) {
+    clearProjectDataCache();
     return NextResponse.json({ status: 'created', branch });
   }
   const existingR = await exec('git', ['-C', projPath, 'checkout', branch], { timeout: 10000 });
   if (existingR.exitCode === 0) {
+    clearProjectDataCache();
     return NextResponse.json({ status: 'reused', branch });
   }
   return NextResponse.json(
