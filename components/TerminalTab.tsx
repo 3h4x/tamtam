@@ -17,8 +17,12 @@ import {
 
 // Exported for unit testing — determines whether a job kind uses Claude's
 // stream-json output format (parsed path) vs raw log output.
+// Notably EXCLUDES `release`: the release log is an aggregation of child logs
+// (plain test output + NDJSON review + plain commit/push), so stream-json
+// parsing would silently drop every non-NDJSON line. Render it raw so the
+// user sees the full aggregated pipeline output.
 export function isClaudeJobKind(kind: string | undefined): boolean {
-  return ['run', 'review', 'fix', 'fix-ci', 'fix-push', 'release'].includes(kind ?? '') ||
+  return ['run', 'review', 'fix', 'fix-ci', 'fix-push'].includes(kind ?? '') ||
     (typeof kind === 'string' && kind.startsWith('agent:'))
 }
 
@@ -384,16 +388,20 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         // restore path sets claudeSessionId — follow-up chats then resume the
         // session and group with the original run (agent/review/fix/etc.)
         // instead of starting a brand-new thread.
-        if (data.session_id) {
+        // Release jobs may have a leaked session_id from a child in their
+        // aggregated log — never promote; we want the raw release log, not
+        // the session-grouped view of some embedded child.
+        if (data.session_id && data.kind !== 'release') {
           router.replace(`/project/${projectName}/terminal/${data.session_id}`)
           return
         }
         const entries: TermEntry[] = []
         const kind = data.kind || jobParam.split('-').slice(1, -1).join('-')
-        // 'release' and 'fix-push' both carry stream-json (release aggregates
-        // its children's logs; fix-push spawns Claude itself), so they MUST
-        // stream through the parsed path — otherwise the terminal dumps raw
-        // JSON for the review/fix-push sections.
+        // `fix-push` spawns Claude directly, so its log is pure stream-json
+        // and takes the parsed path. `release` is deliberately excluded from
+        // isClaudeJobKind: its log is an aggregate of child logs (plain test
+        // output + NDJSON review + plain commit/push), and stream-json parsing
+        // would silently drop every non-NDJSON section — render it raw instead.
         const isClaudeJob = isClaudeJobKind(data.kind)
         entries.push({ role: 'status', text: kind })
 

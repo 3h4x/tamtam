@@ -113,6 +113,7 @@ describe('GET /api/jobs/[jobId]', () => {
   let probeJobStatusMock: ReturnType<typeof vi.fn>;
   let jobToDictMock: ReturnType<typeof vi.fn>;
   let readParsedLogMock: ReturnType<typeof vi.fn>;
+  let readLogMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -122,15 +123,18 @@ describe('GET /api/jobs/[jobId]', () => {
     jobToDictMock = vi.fn().mockImplementation((j: JobData) => ({
       id: j.id,
       project: j.project,
+      kind: j.kind,
       status: j.finishedAt ? 'done' : 'running',
     }));
-    readParsedLogMock = vi.fn().mockReturnValue('log content');
+    readParsedLogMock = vi.fn().mockReturnValue('parsed log content');
+    readLogMock = vi.fn().mockReturnValue('raw log content');
 
     vi.doMock('@/lib/job-storage', () => ({
       getJob: getJobMock,
       probeJobStatus: probeJobStatusMock,
       jobToDict: jobToDictMock,
       readParsedLog: readParsedLogMock,
+      readLog: readLogMock,
     }));
 
     const mod = await import('@/app/api/jobs/[jobId]/route');
@@ -149,7 +153,7 @@ describe('GET /api/jobs/[jobId]', () => {
     expect(data.detail).toContain('nonexistent');
   });
 
-  it('returns job data with log', async () => {
+  it('returns job data with parsed log for Claude-kind jobs', async () => {
     const job = makeJob({ id: 'job-123', finishedAt: 2000, exitCode: 0 });
     getJobMock.mockReturnValue(job);
 
@@ -158,7 +162,24 @@ describe('GET /api/jobs/[jobId]', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.id).toBe('job-123');
-    expect(data.log).toBe('log content');
+    expect(data.log).toBe('parsed log content');
+    expect(readLogMock).not.toHaveBeenCalled();
+  });
+
+  it('returns RAW log for release jobs (aggregated pipeline output)', async () => {
+    // Release log is an aggregate of child logs (plain test output + NDJSON
+    // review + plain commit/push). readParsedLog would silently drop the
+    // plain-text sections; the API must serve raw so the terminal shows
+    // the full pipeline output.
+    const job = makeJob({ id: 'rel-1', kind: 'release', finishedAt: 2000, exitCode: 0 });
+    getJobMock.mockReturnValue(job);
+
+    const req = new NextRequest('http://localhost/api/jobs/rel-1');
+    const res = await GET(req, { params: Promise.resolve({ jobId: 'rel-1' }) });
+    const data = await res.json();
+    expect(data.log).toBe('raw log content');
+    expect(readLogMock).toHaveBeenCalledWith(job);
+    expect(readParsedLogMock).not.toHaveBeenCalled();
   });
 
   it('calls probeJobStatus before returning', async () => {

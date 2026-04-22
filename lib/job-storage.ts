@@ -128,9 +128,15 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
   if (job.finishedAt !== null) return;
   job.finishedAt = Date.now() / 1000;
   job.exitCode = exitCode;
-  // Extract result metadata (tokens, duration, session) from log
-  const rawLog = readLog(job, 50_000);
-  const events = parseStreamLines(rawLog);
+  // Extract result metadata (tokens, duration, session) from log.
+  // NOTE: we skip this for `release` meta-jobs. Their log is an aggregate of
+  // child logs, so parseStreamLines would find the *child's* session_id and
+  // falsely assign it to the release — later the UI would treat release +
+  // review as the same session, merge them, and shrink the release's
+  // apparent window (hiding commit/push from release grouping).
+  const shouldExtractMetadata = job.kind !== 'release';
+  const rawLog = shouldExtractMetadata ? readLog(job, 50_000) : '';
+  const events = shouldExtractMetadata ? parseStreamLines(rawLog) : [];
   const doneEvent = events.find(e => e.type === 'done');
   if (doneEvent && doneEvent.type === 'done') {
     job.durationMs = doneEvent.result.duration;
