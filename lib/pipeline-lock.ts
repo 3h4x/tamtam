@@ -23,8 +23,6 @@ export function isLockOwnedByActiveRelease(projectName: string): boolean {
   }
 }
 
-const STALE_LOCK_TIMEOUT_SECONDS = 30 * 60; // 30 minutes
-
 export interface PipelineLock {
   project: string;
   lockedByJobId: string;

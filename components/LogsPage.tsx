@@ -4,12 +4,6 @@ import { useState, useEffect } from 'react'
 import { fetchProjects, fetchProjectLogs } from '@/lib/client-api'
 import type { LogEntry } from '@/lib/client-api'
 
-interface ProjectLogs {
-  project: string
-  logs: LogEntry[]
-  loading: boolean
-}
-
 export function LogsPage() {
   const [projects, setProjects] = useState<string[]>([])
   const [selectedProject, setSelectedProject] = useState<string | null>(null)

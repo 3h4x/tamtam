@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { readdirSync, readFileSync, statSync } from 'fs';
-import { join, relative, dirname } from 'path';
+import { readdirSync, readFileSync } from 'fs';
+import { join } from 'path';
 import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills';
 import { existsSync } from 'fs';
 

@@ -1,6 +1,4 @@
-import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
+import { existsSync } from 'fs';
 import { eq } from 'drizzle-orm';
 import { db, schema } from './db';
 import {

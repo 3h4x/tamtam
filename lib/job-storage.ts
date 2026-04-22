@@ -206,10 +206,6 @@ async function getProjectPipelineConfig(projectName: string): Promise<{ autoComm
   }
 }
 
-async function isAutoPushEnabled(projectName: string): Promise<boolean> {
-  return (await getProjectPipelineConfig(projectName)).autoPushEnabled;
-}
-
 // Cap runaway review→fix→review loops when auto-push is on. Override via
 // TAMTAM_MAX_FIX_ITERATIONS / TAMTAM_FIX_WINDOW_SECONDS for debugging or tuning
 // per-environment without a code change.

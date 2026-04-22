@@ -5,7 +5,7 @@ import { ProjectTablePage } from '@/components/ProjectTablePage'
 import { LoadingState } from '@/components/LoadingState'
 
 export default function Home() {
-  const { tasks, loading, fleet, loadProjects, startFastPolling, issueCounts } = useProjects()
+  const { tasks, loading, fleet, loadProjects, issueCounts } = useProjects()
 
   if (loading && tasks.length === 0) return <LoadingState />
   if (tasks.length === 0) {

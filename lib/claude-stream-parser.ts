@@ -54,7 +54,6 @@ export function parseStreamLines(content: string): ParsedEvent[] {
     if (m) trimmed = trimmed.slice(m[0].length);
     if (!trimmed) continue;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let parsed: Record<string, any>;
     try {
       parsed = JSON.parse(trimmed);
