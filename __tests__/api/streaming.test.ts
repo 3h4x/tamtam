@@ -50,10 +50,10 @@ describe('GET /api/streaming/[jobId]', () => {
     }));
 
     // Mock claude-stream-parser to use the real implementation
-    const { parseStreamLines } = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
+    const actualParser = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
       '@/lib/claude-stream-parser'
     );
-    vi.doMock('@/lib/claude-stream-parser', () => ({ parseStreamLines }));
+    vi.doMock('@/lib/claude-stream-parser', () => actualParser);
 
     const mod = await import('@/app/api/streaming/[jobId]/route');
     GET = mod.GET;
@@ -352,10 +352,10 @@ describe('GET /api/streaming/[jobId] – extractLogDetail in done event', () => 
       probeJobStatus: vi.fn().mockResolvedValue('running'),
     }));
 
-    const { parseStreamLines } = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
+    const actualParser = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
       '@/lib/claude-stream-parser'
     );
-    vi.doMock('@/lib/claude-stream-parser', () => ({ parseStreamLines }));
+    vi.doMock('@/lib/claude-stream-parser', () => actualParser);
 
     const mod = await import('@/app/api/streaming/[jobId]/route');
     GET = mod.GET;
@@ -475,6 +475,145 @@ describe('GET /api/streaming/[jobId] – extractLogDetail in done event', () => 
   });
 });
 
+describe('GET /api/streaming/[jobId] – passthrough mode', () => {
+  let tempDir: string;
+  let GET: any;
+  let getJobMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-streaming-pt-test-'));
+    vi.resetModules();
+    getJobMock = vi.fn().mockReturnValue(null);
+    vi.doMock('@/lib/job-storage', () => ({
+      getJob: getJobMock,
+      probeJobStatus: vi.fn().mockResolvedValue('running'),
+    }));
+
+    const actualParser = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
+      '@/lib/claude-stream-parser'
+    );
+    vi.doMock('@/lib/claude-stream-parser', () => actualParser);
+
+    const mod = await import('@/app/api/streaming/[jobId]/route');
+    GET = mod.GET;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('emits non-JSON lines as raw SSE events', async () => {
+    const logFile = join(tempDir, 'pt.log');
+    writeFileSync(logFile, 'plain shell output\nmore shell output\n');
+    getJobMock.mockReturnValue({
+      logPath: logFile,
+      finishedAt: Date.now() / 1000,
+      exitCode: 0,
+    } as any);
+
+    const ac = new AbortController();
+    const req = new NextRequest('http://localhost/api/streaming/job-pt?passthrough=1', { signal: ac.signal });
+    const response = await GET(req, { params: Promise.resolve({ jobId: 'job-pt' }) });
+    const events = await collectSSEStream(response, ac, 300);
+    const combined = events.join('');
+
+    expect(combined).toContain('event: raw\ndata: plain shell output');
+    expect(combined).toContain('event: raw\ndata: more shell output');
+  });
+
+  it('parses JSON stream_event text_delta while passing raw lines through', async () => {
+    const logFile = join(tempDir, 'pt-mixed.log');
+    const textLine = '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello from claude"}}}';
+    writeFileSync(logFile, 'shell line before\n' + textLine + '\nshell line after\n');
+    getJobMock.mockReturnValue({
+      logPath: logFile,
+      finishedAt: Date.now() / 1000,
+      exitCode: 0,
+    } as any);
+
+    const ac = new AbortController();
+    const req = new NextRequest('http://localhost/api/streaming/job-pt-mix?passthrough=1', { signal: ac.signal });
+    const response = await GET(req, { params: Promise.resolve({ jobId: 'job-pt-mix' }) });
+    const events = await collectSSEStream(response, ac, 300);
+    const combined = events.join('');
+
+    expect(combined).toContain('event: raw\ndata: shell line before');
+    expect(combined).toContain('data: Hello from claude');
+    expect(combined).toContain('event: raw\ndata: shell line after');
+  });
+
+  it('suppresses embedded result events and emits synthetic done once job is finished', async () => {
+    const logFile = join(tempDir, 'pt-result.log');
+    const resultLine = '{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"session_id":"s","result":"ok"}';
+    writeFileSync(logFile, 'tests pass\n' + resultLine + '\n');
+    getJobMock.mockReturnValue({
+      logPath: logFile,
+      finishedAt: Date.now() / 1000,
+      exitCode: 0,
+    } as any);
+
+    const ac = new AbortController();
+    const req = new NextRequest('http://localhost/api/streaming/job-pt-res?passthrough=1', { signal: ac.signal });
+    const response = await GET(req, { params: Promise.resolve({ jobId: 'job-pt-res' }) });
+    const events = await collectSSEStream(response, ac, 300);
+    const combined = events.join('');
+
+    // Exactly one done event (synthetic), carrying the server exitCode — not the embedded result
+    const doneMatches = combined.match(/event: done/g) || [];
+    expect(doneMatches.length).toBe(1);
+    expect(combined).toContain('"exitCode":0');
+    // Result payload fields must NOT have leaked through
+    expect(combined).not.toContain('"duration":1');
+  });
+
+  it('emits tool_use event when start and stop arrive in a single read', async () => {
+    const logFile = join(tempDir, 'pt-tool.log');
+    const toolStart = '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"Bash","input":{}}}}';
+    const inputDelta = '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"cmd\\":\\"ls\\"}"}}}';
+    const toolStop = '{"type":"stream_event","event":{"type":"content_block_stop","index":0}}';
+    writeFileSync(logFile, toolStart + '\n' + inputDelta + '\n' + toolStop + '\n');
+    getJobMock.mockReturnValue({
+      logPath: logFile,
+      finishedAt: Date.now() / 1000,
+      exitCode: 0,
+    } as any);
+
+    const ac = new AbortController();
+    const req = new NextRequest('http://localhost/api/streaming/job-pt-tool?passthrough=1', { signal: ac.signal });
+    const response = await GET(req, { params: Promise.resolve({ jobId: 'job-pt-tool' }) });
+    const events = await collectSSEStream(response, ac, 300);
+    const combined = events.join('');
+
+    expect(combined).toContain('event: tool_use');
+    expect(combined).toContain('"name":"Bash"');
+    expect(combined).toContain('ls');
+  });
+
+  it('holds an incomplete trailing line across reads and flushes it on done', async () => {
+    // Simulate partial-line write: content ends without a newline. The
+    // passthrough handler must NOT split "partial-" and "line" into two
+    // separate raw events; it buffers the tail and emits the full line
+    // on done.
+    const logFile = join(tempDir, 'pt-partial.log');
+    writeFileSync(logFile, 'complete-line\npartial-line-no-newline');
+    getJobMock.mockReturnValue({
+      logPath: logFile,
+      finishedAt: Date.now() / 1000,
+      exitCode: 0,
+    } as any);
+
+    const ac = new AbortController();
+    const req = new NextRequest('http://localhost/api/streaming/job-pt-partial?passthrough=1', { signal: ac.signal });
+    const response = await GET(req, { params: Promise.resolve({ jobId: 'job-pt-partial' }) });
+    const events = await collectSSEStream(response, ac, 300);
+    const combined = events.join('');
+
+    expect(combined).toContain('event: raw\ndata: complete-line');
+    expect(combined).toContain('event: raw\ndata: partial-line-no-newline');
+  });
+});
+
 describe('GET /api/streaming/[jobId] – tool_result SSE event', () => {
   let tempDir: string;
   let GET: any;
@@ -489,10 +628,10 @@ describe('GET /api/streaming/[jobId] – tool_result SSE event', () => {
       probeJobStatus: vi.fn().mockResolvedValue('running'),
     }));
 
-    const { parseStreamLines } = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
+    const actualParser = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
       '@/lib/claude-stream-parser'
     );
-    vi.doMock('@/lib/claude-stream-parser', () => ({ parseStreamLines }));
+    vi.doMock('@/lib/claude-stream-parser', () => actualParser);
 
     const mod = await import('@/app/api/streaming/[jobId]/route');
     GET = mod.GET;

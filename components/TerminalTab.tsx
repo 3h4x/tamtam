@@ -155,6 +155,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     history,
     streamBuffer,
     thinkingBuffer,
+    rawBuffer,
     streamTools,
     streaming,
     streamIsRaw,
@@ -434,21 +435,21 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         if (isClaudeJob) {
           terminalStore.update(projectName, () => ({ history: entries }))
           terminalStore.startStream(projectName, jobParam)
-        } else if (data.status === 'running' || data.finished_at === null) {
-          terminalStore.update(projectName, () => ({ history: entries }))
-          terminalStore.startStream(projectName, jobParam, true)
-        } else {
-          if (data.log) {
-            entries.push({ role: 'raw', text: data.log })
-          } else if (data.log_pruned) {
-            entries.push({ role: 'status', text: 'Log file deleted by retention policy' })
-          }
+        } else if (data.log_pruned) {
+          // Log was deleted — show what we know statically
+          entries.push({ role: 'status', text: 'Log file deleted by retention policy' })
           const exitCode = data.exit_code
           if (exitCode !== undefined && exitCode !== null) {
             const ok = exitCode === 0
             entries.push({ role: ok ? 'status' : 'error', text: ok ? 'exit 0 — ok' : `exit ${exitCode}` })
           }
           terminalStore.update(projectName, () => ({ history: entries }))
+        } else {
+          // Running or finished non-Claude job (release, test, push, commit):
+          // use passthrough streaming so non-JSON lines render as monospace and
+          // NDJSON sections (e.g. review) render as parsed Claude output.
+          terminalStore.update(projectName, () => ({ history: entries }))
+          terminalStore.startStream(projectName, jobParam, false, true)
         }
       } catch {}
     }
@@ -1189,6 +1190,15 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
             </div>
             )
           ))}
+
+          {/* Live raw lines from passthrough streaming (test output, section headers, etc.) */}
+          {streaming && rawBuffer && (
+            <div className="px-4 py-2 text-[#c0c0c0] font-mono text-xs whitespace-pre-wrap">
+              {hasAnsi(rawBuffer)
+                ? <pre className="whitespace-pre-wrap font-mono text-xs m-0 inline">{renderAnsi(collapseCarriageReturns(rawBuffer))}</pre>
+                : collapseCarriageReturns(rawBuffer)}
+            </div>
+          )}
 
           {/* Live streamed assistant text */}
           {streaming && streamBuffer && (

@@ -46,6 +46,7 @@ export interface SessionState {
   // live stream buffers
   streamBuffer: string
   thinkingBuffer: string
+  rawBuffer: string  // accumulates non-JSON lines from passthrough streaming
   streamTools: ToolEntry[]
   streaming: boolean
   streamIsRaw: boolean
@@ -67,6 +68,7 @@ const emptyState = (): SessionState => ({
   history: [],
   streamBuffer: '',
   thinkingBuffer: '',
+  rawBuffer: '',
   streamTools: [],
   streaming: false,
   streamIsRaw: false,
@@ -150,7 +152,9 @@ class TerminalStore {
   }
 
   // Start streaming a jobId. Closes any prior stream for this project.
-  startStream(projectName: string, jobId: string, raw = false): void {
+  // passthrough=true uses ?passthrough=1: non-JSON log lines → `raw` history entries,
+  // NDJSON lines → parsed Claude events. Used for release logs.
+  startStream(projectName: string, jobId: string, raw = false, passthrough = false): void {
     this.closeStream(projectName)
     this.update(projectName, () => ({
       currentJobId: jobId,
@@ -159,32 +163,80 @@ class TerminalStore {
       streamStartedAt: Date.now(),
       streamBuffer: '',
       thinkingBuffer: '',
+      rawBuffer: '',
       streamTools: [],
       lastStats: null,
     }))
 
-    const url = raw ? `/api/streaming/${jobId}?raw=1` : `/api/streaming/${jobId}`
+    const url = raw ? `/api/streaming/${jobId}?raw=1`
+      : passthrough ? `/api/streaming/${jobId}?passthrough=1`
+      : `/api/streaming/${jobId}`
     const es = new EventSource(url)
     this.esMap.set(projectName, es)
 
-    es.onmessage = (event) => {
-      this.update(projectName, (s) => ({ streamBuffer: s.streamBuffer + event.data }))
+    // Flush rawBuffer to history — called when a non-raw event arrives so the
+    // pending raw lines land in history *before* the new Claude content.
+    const flushRaw = (s: SessionState): Partial<SessionState> => {
+      if (!s.rawBuffer) return {}
+      return {
+        history: [...s.history, { role: 'raw' as const, text: s.rawBuffer }],
+        rawBuffer: '',
+      }
     }
+
+    // Flush pending assistant/thinking/tool buffers to history — called when a
+    // raw event arrives so the raw line lands *after* Claude content that
+    // arrived before it. Without this, interleaved shell output in a passthrough
+    // stream (e.g. release log) would render in the wrong order.
+    const flushClaudeBuffers = (s: SessionState): Partial<SessionState> => {
+      const entries: TermEntry[] = []
+      if (s.thinkingBuffer) entries.push({ role: 'thinking', text: s.thinkingBuffer })
+      for (const t of s.streamTools) entries.push({ role: 'tool', text: '', tool: t })
+      if (s.streamBuffer) entries.push({ role: 'assistant', text: s.streamBuffer })
+      if (entries.length === 0) return {}
+      return {
+        history: [...s.history, ...entries],
+        streamBuffer: '',
+        thinkingBuffer: '',
+        streamTools: [],
+      }
+    }
+
+    es.onmessage = (event) => {
+      this.update(projectName, (s) => ({
+        ...flushRaw(s),
+        streamBuffer: s.streamBuffer + event.data,
+      }))
+    }
+
+    es.addEventListener('raw', (event) => {
+      const line = (event as MessageEvent).data
+      this.update(projectName, (s) => ({
+        ...flushClaudeBuffers(s),
+        rawBuffer: s.rawBuffer + line + '\n',
+      }))
+    })
 
     es.addEventListener('thinking', (event) => {
       const data = (event as MessageEvent).data
-      this.update(projectName, (s) => ({ thinkingBuffer: s.thinkingBuffer + data }))
+      this.update(projectName, (s) => ({
+        ...flushRaw(s),
+        thinkingBuffer: s.thinkingBuffer + data,
+      }))
     })
 
     es.addEventListener('tool_use', (event) => {
       try {
         const data = JSON.parse((event as MessageEvent).data)
         this.update(projectName, (s) => {
+          const rawFlush = flushRaw(s)
+          const baseHistory = rawFlush.history ?? s.history
           const flushHistory = s.streamBuffer
-            ? [...s.history, { role: 'assistant' as const, text: s.streamBuffer }]
-            : s.history
+            ? [...baseHistory, { role: 'assistant' as const, text: s.streamBuffer }]
+            : baseHistory
           const tool: ToolEntry = { name: data.name, input: data.input }
           return {
+            ...rawFlush,
             history: flushHistory,
             streamBuffer: '',
             streamTools: [...s.streamTools, tool],
@@ -223,6 +275,8 @@ class TerminalStore {
       this.closeStream(projectName)
       this.update(projectName, (s) => {
         const newEntries: TermEntry[] = []
+        // Flush any remaining raw lines (from passthrough mode) before final Claude output
+        if (s.rawBuffer) newEntries.push({ role: 'raw', text: s.rawBuffer })
         if (s.thinkingBuffer) newEntries.push({ role: 'thinking', text: s.thinkingBuffer })
         for (const t of s.streamTools) newEntries.push({ role: 'tool', text: '', tool: t })
         if (s.streamBuffer) newEntries.push({ role: 'assistant', text: s.streamBuffer })
@@ -275,6 +329,7 @@ class TerminalStore {
           history: [...s.history, ...newEntries],
           streamBuffer: '',
           thinkingBuffer: '',
+          rawBuffer: '',
           streamTools: [],
           streaming: false,
           streamStartedAt: null,
