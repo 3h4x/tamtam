@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getJob, jobToDict, readParsedLog, probeJobStatus, updateJob } from '@/lib/job-storage';
+import { getJob, jobToDict, readParsedLog, readLog, probeJobStatus, updateJob } from '@/lib/job-storage';
 import { exec } from '@/lib/shell';
 
 export async function GET(
@@ -13,7 +13,11 @@ export async function GET(
   }
   await probeJobStatus(job);
   const data = jobToDict(job);
-  data.log = readParsedLog(job);
+  // Release logs are aggregates of child output (plain text + NDJSON mixed).
+  // readParsedLog silently drops every non-NDJSON line, which hides test
+  // output / commit / push details. Serve the raw aggregate instead so
+  // "open terminal on a release" shows the full pipeline output verbatim.
+  data.log = job.kind === 'release' ? readLog(job) : readParsedLog(job);
   return NextResponse.json(data);
 }
 

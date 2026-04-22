@@ -20,8 +20,10 @@ export function clearAgentsCache() {
 
 export async function GET(request: NextRequest) {
   const project = request.nextUrl.searchParams.get('project');
+  const name = request.nextUrl.searchParams.get('name');
   const agents = getAllAgentsCached();
-  const result = project ? agents.filter(a => a.project === project) : agents;
+  let result = project ? agents.filter(a => a.project === project) : agents;
+  if (name) result = result.filter(a => a.name === name);
   return NextResponse.json({ agents: result });
 }
 

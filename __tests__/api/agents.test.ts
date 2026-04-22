@@ -33,6 +33,7 @@ describe('agents API', () => {
   let GET: any;
   let POST: any;
   let PATCH: any;
+  let PATCH_BY_NAME: any;
   let DELETE: any;
   let installAgentScheduleMock: ReturnType<typeof vi.fn>;
   let uninstallAgentScheduleMock: ReturnType<typeof vi.fn>;
@@ -61,6 +62,9 @@ describe('agents API', () => {
     const agentDetailRoute = await import('@/app/api/agents/[agentId]/route');
     PATCH = agentDetailRoute.PATCH;
     DELETE = agentDetailRoute.DELETE;
+
+    const byNameRoute = await import('@/app/api/agents/by-name/route');
+    PATCH_BY_NAME = byNameRoute.PATCH;
   });
 
   afterEach(() => {
@@ -115,6 +119,34 @@ describe('agents API', () => {
       expect(data.agents).toHaveLength(2);
       expect(data.agents[0].id).toBe('agent-1');
       expect(data.agents[1].id).toBe('agent-2');
+    });
+
+    it('filters agents by name', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents).values({ id: 'agent-1', name: 'Alpha', project: 'proj1', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now }).run();
+      db.insert(schema.agents).values({ id: 'agent-2', name: 'Beta', project: 'proj1', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now }).run();
+
+      const request = new NextRequest('http://localhost/api/agents?name=Alpha');
+      const response = await GET(request);
+      const data = await response.json();
+
+      expect(data.agents).toHaveLength(1);
+      expect(data.agents[0].id).toBe('agent-1');
+    });
+
+    it('filters agents by project and name', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents).values({ id: 'agent-1', name: 'Alpha', project: 'proj1', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now }).run();
+      db.insert(schema.agents).values({ id: 'agent-2', name: 'Alpha', project: 'proj2', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now }).run();
+
+      const request = new NextRequest('http://localhost/api/agents?project=proj1&name=Alpha');
+      const response = await GET(request);
+      const data = await response.json();
+
+      expect(data.agents).toHaveLength(1);
+      expect(data.agents[0].id).toBe('agent-1');
     });
 
     it('filters agents by project', async () => {
@@ -722,6 +754,85 @@ describe('agents API', () => {
 
       expect(uninstallAgentScheduleMock).toHaveBeenCalledOnce();
     });
+
+  describe('PATCH /agents/by-name', () => {
+    function seedAgent(db: ReturnType<typeof createTestDb>['db'], overrides: Partial<typeof schema.agents.$inferInsert> = {}) {
+      const now = Date.now() / 1000;
+      db.insert(schema.agents).values({
+        id: 'agent-bn',
+        name: 'Self',
+        project: 'myproj',
+        skillIds: '[]',
+        model: 'sonnet',
+        prompt: 'original prompt',
+        schedule: null,
+        runner: 'pm2',
+        createdAt: now,
+        updatedAt: now,
+        ...overrides,
+      }).run();
+    }
+
+    it('returns 400 when project or name missing', async () => {
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj' }),
+      }));
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 404 when no agent matches project+name', async () => {
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'Nobody' }),
+      }));
+      expect(res.status).toBe(404);
+    });
+
+    it('updates prompt by project+name', async () => {
+      seedAgent(testDb.db);
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'Self', prompt: 'improved prompt' }),
+      }));
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.agent.prompt).toBe('improved prompt');
+    });
+
+    it('updates model by project+name', async () => {
+      seedAgent(testDb.db);
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'Self', model: 'opus' }),
+      }));
+      const data = await res.json();
+      expect(data.agent.model).toBe('opus');
+    });
+
+    it('does not affect an agent with the same name in a different project', async () => {
+      const now = Date.now() / 1000;
+      seedAgent(testDb.db);
+      testDb.db.insert(schema.agents).values({ id: 'agent-other', name: 'Self', project: 'other', skillIds: '[]', model: 'haiku', prompt: 'other prompt', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now }).run();
+
+      await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'Self', prompt: 'changed' }),
+      }));
+
+      const other = testDb.db.select().from(schema.agents).all().find(a => a.id === 'agent-other');
+      expect(other?.prompt).toBe('other prompt');
+    });
+
+    it('calls installAgentSchedule when prompt+schedule are set and enabled', async () => {
+      seedAgent(testDb.db, { prompt: 'do work', schedule: '1h', enabled: true });
+      await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'Self', prompt: 'updated work' }),
+      }));
+      expect(installAgentScheduleMock).toHaveBeenCalledOnce();
+    });
+  });
 
     it('calls installAgentSchedule when patching enabled to true on agent with schedule and prompt', async () => {
       const db = testDb.db;

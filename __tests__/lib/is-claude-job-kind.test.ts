@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { isClaudeJobKind } from '../../components/TerminalTab';
 
 describe('isClaudeJobKind', () => {
-  it.each(['run', 'review', 'fix', 'fix-ci', 'fix-push', 'release'])(
+  it.each(['run', 'review', 'fix', 'fix-ci', 'fix-push'])(
     'returns true for %s',
     (kind) => {
       expect(isClaudeJobKind(kind)).toBe(true);
@@ -21,6 +21,13 @@ describe('isClaudeJobKind', () => {
     expect(isClaudeJobKind('commit')).toBe(false);
   });
 
+  it('returns false for release — its log is an aggregate of child output', () => {
+    // Release logs are a mix of plain text (test output, commit/push) and
+    // NDJSON (review/fix). Stream-json parsing would drop the plain-text
+    // sections, so the terminal serves them raw. Guard this.
+    expect(isClaudeJobKind('release')).toBe(false);
+  });
+
   it('returns false for undefined', () => {
     expect(isClaudeJobKind(undefined)).toBe(false);
   });
@@ -31,11 +38,5 @@ describe('isClaudeJobKind', () => {
     expect(isClaudeJobKind('release-candidate')).toBe(false);
     // 'notfix-ci' should not match 'fix-ci'
     expect(isClaudeJobKind('notfix-ci')).toBe(false);
-  });
-
-  it('fix-push and release were not matched before — regression guard', () => {
-    // These two are the new additions; ensure they are covered
-    expect(isClaudeJobKind('fix-push')).toBe(true);
-    expect(isClaudeJobKind('release')).toBe(true);
   });
 });

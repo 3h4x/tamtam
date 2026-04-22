@@ -40,38 +40,80 @@ function formatTokens(n: number): string {
 
 // Bucket kinds for filtering + labeling. Anything that doesn't match lands in
 // "other" (covers custom actions, future kinds).
-type KindBucket = 'run' | 'review' | 'test' | 'fix-ci' | 'agent' | 'other'
+type KindBucket =
+  | 'run'
+  | 'release'
+  | 'review'
+  | 'test'
+  | 'fix'
+  | 'fix-ci'
+  | 'fix-push'
+  | 'commit'
+  | 'push'
+  | 'mark-dod'
+  | 'pr-wait'
+  | 'agent'
+  | 'other'
 
 function bucketOf(kind: string): KindBucket {
   if (kind === 'run') return 'run'
+  if (kind === 'release') return 'release'
   if (kind === 'review') return 'review'
   if (kind === 'test') return 'test'
+  if (kind === 'fix') return 'fix'
   if (kind === 'fix-ci') return 'fix-ci'
+  if (kind === 'fix-push') return 'fix-push'
+  if (kind === 'commit') return 'commit'
+  if (kind === 'push') return 'push'
+  if (kind === 'mark-dod') return 'mark-dod'
+  if (kind === 'pr-wait') return 'pr-wait'
   if (kind.startsWith('agent:')) return 'agent'
   return 'other'
 }
 
 const KIND_LABEL: Record<KindBucket, string> = {
   run: 'chat',
+  release: 'release',
   review: 'review',
   test: 'test',
+  fix: 'fix',
   'fix-ci': 'fix-ci',
+  'fix-push': 'fix-push',
+  commit: 'commit',
+  push: 'push',
+  'mark-dod': 'dod',
+  'pr-wait': 'pr-wait',
   agent: 'agent',
   other: 'action',
 }
 
 const KIND_COLOR: Record<KindBucket, string> = {
   run: 'bg-accent/15 text-accent',
+  release: 'bg-accent/20 text-accent border border-accent/40',
   review: 'bg-status-info/15 text-status-info',
   test: 'bg-status-success/15 text-status-success',
+  fix: 'bg-status-warning/15 text-status-warning',
   'fix-ci': 'bg-status-warning/15 text-status-warning',
+  'fix-push': 'bg-status-warning/15 text-status-warning',
+  commit: 'bg-status-success/15 text-status-success',
+  push: 'bg-status-success/15 text-status-success',
+  'mark-dod': 'bg-status-info/15 text-status-info',
+  'pr-wait': 'bg-status-info/15 text-status-info',
   agent: 'bg-purple-500/15 text-purple-400',
   other: 'bg-text-tertiary/15 text-text-secondary',
 }
 
+// Kinds that belong to a release pipeline. When a `release` meta-job is
+// active, any of these jobs started inside its [started_at, finished_at]
+// window is considered a child of that release in the History UI.
+const PIPELINE_CHILD_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'fix-push', 'pr-wait'])
+
 // An entry represents a single row in the history. For `run` jobs with a
 // session_id we collapse every turn of the conversation into one entry so the
 // list reads as "conversations" rather than dozens of identical chat rows.
+// For `release` jobs, `children` is populated by groupReleaseChildren with
+// the pipeline steps (test/review/fix/commit/push/…) that ran inside the
+// release's time window.
 interface Entry {
   key: string
   kind: string
@@ -93,6 +135,7 @@ interface Entry {
   navSessionId: string | null
   verdict?: JobInfo['verdict']
   logPruned: boolean
+  children?: Entry[]
 }
 
 function truncate(s: string, n: number): string {
@@ -103,9 +146,16 @@ function truncate(s: string, n: number): string {
 function titleForJob(job: JobInfo, bucket: KindBucket): string {
   const prompt = job.user_prompt || job.prompt
   if (bucket === 'run') return prompt ? truncate(prompt, 140) : '(empty prompt)'
+  if (bucket === 'release') return 'Release pipeline'
   if (bucket === 'review') return 'Code review'
   if (bucket === 'test') return 'Test run'
+  if (bucket === 'fix') return 'Auto-fix'
   if (bucket === 'fix-ci') return 'Fix CI'
+  if (bucket === 'fix-push') return 'Fix push failure'
+  if (bucket === 'commit') return 'Commit'
+  if (bucket === 'push') return 'Push'
+  if (bucket === 'mark-dod') return 'Mark DoD'
+  if (bucket === 'pr-wait') return 'PR wait (CI + merge)'
   if (bucket === 'agent') return job.kind.replace(/^agent:/, '') || 'agent'
   return job.kind
 }
@@ -134,8 +184,13 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
 
   for (const j of sorted) {
     const bucket = bucketOf(j.kind)
-    if (j.session_id) {
-      const existing = sessionGroup.get(j.session_id)
+    // Release meta-jobs must never session-merge: their aggregate log may
+    // contain a child's session_id, and merging would shrink the release's
+    // apparent window (losing commit/push from grouping). Only real chat-style
+    // jobs (run, review, fix, fix-ci, fix-push, agent:*) should session-group.
+    const canSessionMerge = !!j.session_id && j.kind !== 'release'
+    if (canSessionMerge) {
+      const existing = sessionGroup.get(j.session_id!)
       if (existing) {
         existing.turns += 1
         existing.lastActivityAt = j.started_at
@@ -173,12 +228,77 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       verdict: j.verdict,
       logPruned: !!j.log_pruned,
     }
-    if (j.session_id) sessionGroup.set(j.session_id, entry)
+    if (canSessionMerge) sessionGroup.set(j.session_id!, entry)
     entries.push(entry)
   }
 
   entries.sort((a, b) => b.lastActivityAt - a.lastActivityAt)
   return entries
+}
+
+// Collapse pipeline children (test/review/fix/commit/push/…) under their
+// parent release entry using the release's [startedAt, finishedAt ?? ∞] window.
+// Releases are project-scoped and protected by `pipeline_locks` so at most one
+// release is active per project at a time — a child job's timestamp
+// unambiguously identifies its parent.
+//
+// Exported for unit testing.
+export function groupReleaseChildren(entries: Entry[]): Entry[] {
+  const releases = entries.filter((e) => e.kind === 'release')
+  if (releases.length === 0) return entries
+
+  // Latest-starting containing release wins (in the pathological case two
+  // release windows overlap). Sorted asc so the last assignment wins.
+  const sortedReleases = [...releases].sort((a, b) => a.startedAt - b.startedAt)
+
+  const findContainingRelease = (child: Entry): Entry | null => {
+    if (!PIPELINE_CHILD_KINDS.has(child.kind)) return null
+    let best: Entry | null = null
+    for (const r of sortedReleases) {
+      const end = r.finishedAt ?? Number.POSITIVE_INFINITY
+      if (r.startedAt <= child.startedAt && child.startedAt <= end) best = r
+    }
+    return best
+  }
+
+  const childrenByParent = new Map<string, Entry[]>()
+  const topLevel: Entry[] = []
+  for (const e of entries) {
+    if (e.kind === 'release') continue
+    const parent = findContainingRelease(e)
+    if (parent) {
+      const arr = childrenByParent.get(parent.key) ?? []
+      arr.push(e)
+      childrenByParent.set(parent.key, arr)
+    } else {
+      topLevel.push(e)
+    }
+  }
+
+  const parents: Entry[] = releases.map((r) => {
+    const kids = (childrenByParent.get(r.key) ?? []).sort((a, b) => a.startedAt - b.startedAt)
+    return { ...r, children: kids }
+  })
+
+  const out = [...parents, ...topLevel]
+  out.sort((a, b) => b.lastActivityAt - a.lastActivityAt)
+  return out
+}
+
+// Compact one-line summary built from a release's children, e.g.
+// "test ✓ · review LGTM · commit ✓ · push ✓".
+function buildReleaseSummary(children: Entry[]): string {
+  if (children.length === 0) return '(no steps)'
+  const parts: string[] = []
+  for (const c of children) {
+    const name = c.kind === 'mark-dod' ? 'dod' : c.kind
+    let mark = '…'
+    if (c.status === 'running') mark = '…'
+    else if (c.exitCode === 0) mark = c.kind === 'review' && c.verdict ? c.verdict : '✓'
+    else mark = `✗${c.exitCode ?? ''}`
+    parts.push(`${name} ${mark}`)
+  }
+  return parts.join(' · ')
 }
 
 interface ProjectRunsTabProps {
@@ -202,6 +322,15 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<Filter>({ kind: 'all' })
   const [search, setSearch] = useState('')
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const toggleExpanded = (key: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   useEffect(() => {
     let active = true
@@ -221,10 +350,13 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
 
   const entries = useMemo(() => buildEntries(jobs), [jobs])
 
+  // Counts reflect the flat entry list (pre-grouping) so the chip numbers
+  // match what you'd see if you clicked into that filter.
   const counts = useMemo(() => {
     const c = {
       all: entries.length, running: 0, failed: 0,
-      run: 0, review: 0, test: 0, 'fix-ci': 0, agent: 0, other: 0,
+      run: 0, release: 0, review: 0, test: 0, fix: 0, 'fix-ci': 0, 'fix-push': 0,
+      commit: 0, push: 0, 'mark-dod': 0, 'pr-wait': 0, agent: 0, other: 0,
     } as Record<string, number>
     for (const e of entries) {
       c[e.bucket] += 1
@@ -241,9 +373,19 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
     return e.bucket === f.bucket
   }
 
+  // Grouping applies on tabs where you want a pipeline-level view: the default
+  // "all" tab and the status shortcuts. Kind-specific tabs are flat so clicking
+  // e.g. "test" shows every test run, including those that were release children.
+  const shouldGroup = (f: Filter): boolean => {
+    if (f.kind === 'all' || f.kind === 'running' || f.kind === 'failed') return true
+    if (f.kind === 'bucket' && f.bucket === 'release') return true
+    return false
+  }
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return entries.filter((e) => {
+    const source = shouldGroup(filter) ? groupReleaseChildren(entries) : entries
+    return source.filter((e) => {
       if (!matches(e, filter)) return false
       if (!q) return true
       const hay = `${e.title} ${e.subtitle ?? ''} ${e.model ?? ''} ${e.navSessionId ?? ''} ${e.kind}`.toLowerCase()
@@ -274,7 +416,7 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
   }, [filtered])
 
   const navigate = (e: Entry) => {
-    if (e.bucket === 'run' && e.navSessionId) {
+    if (e.bucket === 'run' && e.navSessionId && e.kind !== 'release') {
       router.push(`/project/${projectName}/terminal/${e.navSessionId}`)
     } else {
       router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(e.navJobId)}`)
@@ -339,7 +481,7 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
           )
         })}
         <span className="h-5 w-px bg-border mx-1" aria-hidden />
-        {(['run', 'review', 'test', 'fix-ci', 'agent', 'other'] as const).map((b) => {
+        {(['run', 'release', 'review', 'test', 'fix', 'fix-ci', 'fix-push', 'commit', 'push', 'mark-dod', 'pr-wait', 'agent', 'other'] as const).map((b) => {
           const count = counts[b] ?? 0
           const active = filter.kind === 'bucket' && filter.bucket === b
           if (count === 0 && !active) return null
@@ -393,74 +535,31 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
               </div>
               <div className="border border-border rounded-lg overflow-hidden bg-bg-secondary">
                 {g.items.map((e) => {
-                  const isRunning = e.status === 'running'
-                  const isFailed = !isRunning && e.exitCode !== 0
-                  const totalTokens = e.inputTokens + e.outputTokens
-                  const accentBorder = isRunning
-                    ? 'border-l-2 border-l-status-warning'
-                    : isFailed
-                    ? 'border-l-2 border-l-status-error'
-                    : 'border-l-2 border-l-transparent'
+                  const isReleaseParent = e.kind === 'release' && (e.children?.length ?? 0) > 0
+                  const isExpanded = expanded.has(e.key)
                   return (
-                    <button
+                    <RunRow
                       key={e.key}
-                      className={`w-full text-left border-b border-border last:border-b-0 hover:bg-bg-tertiary cursor-pointer px-4 py-3 flex items-start gap-3 group ${accentBorder}`}
+                      entry={e}
                       onClick={() => navigate(e)}
+                      expandable={isReleaseParent}
+                      expanded={isExpanded}
+                      onToggleExpand={() => toggleExpanded(e.key)}
+                      summary={isReleaseParent ? buildReleaseSummary(e.children ?? []) : null}
                     >
-                {/* Kind badge */}
-                <span className={`shrink-0 mt-0.5 inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded ${KIND_COLOR[e.bucket]}`}>
-                  {KIND_LABEL[e.bucket]}
-                </span>
-
-                {/* Primary + secondary */}
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm text-text-primary font-medium truncate group-hover:text-accent">
-                    {e.title}
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5 flex-wrap">
-                    {e.turns > 1 && (
-                      <span className="font-mono">{e.turns} turns</span>
-                    )}
-                    {e.model && <span className="font-mono">{e.model}</span>}
-                    {e.navSessionId && (
-                      <span className="font-mono">#{e.navSessionId.slice(0, 8)}</span>
-                    )}
-                    {e.subtitle && <span className="italic truncate">{e.subtitle}</span>}
-                  </div>
-                </div>
-
-                {/* Stats */}
-                <div className="shrink-0 flex flex-col items-end gap-0.5 text-xs">
-                  <div className="flex items-center gap-2">
-                    {totalTokens > 0 && (
-                      <span className="font-mono text-text-tertiary" title="Input / output tokens">
-                        <span className="text-status-success">↑{formatTokens(e.inputTokens)}</span>
-                        {' '}
-                        <span className="text-accent">↓{formatTokens(e.outputTokens)}</span>
-                      </span>
-                    )}
-                    <span className="font-mono text-text-secondary">
-                      {formatDuration(e.startedAt, e.finishedAt)}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-text-tertiary text-[11px]">{formatAgo(e.lastActivityAt)}</span>
-                    {e.logPruned && (
-                      <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium bg-text-tertiary/15 text-text-tertiary" title="Log file deleted by retention policy">
-                        pruned
-                      </span>
-                    )}
-                    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium ${
-                      isRunning ? 'bg-status-warning/15 text-status-warning' :
-                      isFailed ? 'bg-status-error/15 text-status-error' :
-                      'bg-status-success/15 text-status-success'
-                    }`}>
-                      <span className={isRunning ? 'animate-pulse' : ''}>●</span>
-                      {isRunning ? 'running' : isFailed ? `exit ${e.exitCode}` : 'done'}
-                    </span>
-                  </div>
-                </div>
-              </button>
+                      {isReleaseParent && isExpanded && e.children && (
+                        <div className="bg-bg-primary/40">
+                          {e.children.map((c) => (
+                            <RunRow
+                              key={c.key}
+                              entry={c}
+                              onClick={() => navigate(c)}
+                              indent
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </RunRow>
                   )
                 })}
               </div>
@@ -468,6 +567,100 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+interface RunRowProps {
+  entry: Entry
+  onClick: () => void
+  expandable?: boolean
+  expanded?: boolean
+  onToggleExpand?: () => void
+  summary?: string | null
+  indent?: boolean
+  children?: React.ReactNode
+}
+
+function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summary, indent, children }: RunRowProps) {
+  const isRunning = e.status === 'running'
+  const isFailed = !isRunning && e.exitCode !== 0
+  const totalTokens = e.inputTokens + e.outputTokens
+  const accentBorder = isRunning
+    ? 'border-l-2 border-l-status-warning'
+    : isFailed
+    ? 'border-l-2 border-l-status-error'
+    : 'border-l-2 border-l-transparent'
+  const paddingLeft = indent ? 'pl-10' : 'pl-4'
+
+  return (
+    <div className="border-b border-border last:border-b-0">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onClick}
+        onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onClick() } }}
+        className={`w-full text-left hover:bg-bg-tertiary cursor-pointer ${paddingLeft} pr-4 py-3 flex items-start gap-3 group ${accentBorder}`}
+      >
+        {expandable && (
+          <button
+            type="button"
+            className="shrink-0 mt-0.5 w-5 h-5 flex items-center justify-center text-text-tertiary hover:text-text-primary cursor-pointer border-none bg-transparent"
+            onClick={(ev) => { ev.stopPropagation(); onToggleExpand?.() }}
+            title={expanded ? 'Collapse steps' : 'Expand steps'}
+          >
+            <span className={`transition-transform inline-block ${expanded ? 'rotate-90' : ''}`}>▸</span>
+          </button>
+        )}
+
+        <span className={`shrink-0 mt-0.5 inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded ${KIND_COLOR[e.bucket]}`}>
+          {KIND_LABEL[e.bucket]}
+        </span>
+
+        <div className="flex-1 min-w-0">
+          <div className="text-sm text-text-primary font-medium truncate group-hover:text-accent">
+            {e.title}
+          </div>
+          <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5 flex-wrap">
+            {e.turns > 1 && <span className="font-mono">{e.turns} turns</span>}
+            {e.model && <span className="font-mono">{e.model}</span>}
+            {e.navSessionId && <span className="font-mono">#{e.navSessionId.slice(0, 8)}</span>}
+            {summary && <span className="font-mono text-text-secondary">{summary}</span>}
+            {e.subtitle && !summary && <span className="italic truncate">{e.subtitle}</span>}
+          </div>
+        </div>
+
+        <div className="shrink-0 flex flex-col items-end gap-0.5 text-xs">
+          <div className="flex items-center gap-2">
+            {totalTokens > 0 && (
+              <span className="font-mono text-text-tertiary" title="Input / output tokens">
+                <span className="text-status-success">↑{formatTokens(e.inputTokens)}</span>{' '}
+                <span className="text-accent">↓{formatTokens(e.outputTokens)}</span>
+              </span>
+            )}
+            <span className="font-mono text-text-secondary">
+              {formatDuration(e.startedAt, e.finishedAt)}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-text-tertiary text-[11px]">{formatAgo(e.lastActivityAt)}</span>
+            {e.logPruned && (
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium bg-text-tertiary/15 text-text-tertiary" title="Log file deleted by retention policy">
+                pruned
+              </span>
+            )}
+            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium ${
+              isRunning ? 'bg-status-warning/15 text-status-warning' :
+              isFailed ? 'bg-status-error/15 text-status-error' :
+              'bg-status-success/15 text-status-success'
+            }`}>
+              <span className={isRunning ? 'animate-pulse' : ''}>●</span>
+              {isRunning ? 'running' : isFailed ? `exit ${e.exitCode}` : 'done'}
+            </span>
+          </div>
+        </div>
+      </div>
+      {children}
     </div>
   )
 }
