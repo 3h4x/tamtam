@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveProjectPath } from '@/lib/project-data';
 import { exec } from '@/lib/shell';
+import { detectMainBranch } from '@/lib/start-commit';
 import { statSync } from 'fs';
 import { join } from 'path';
 
@@ -50,11 +51,12 @@ export async function GET(
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
 
-  const [nameStatus, numstat, untracked, porcelain] = await Promise.all([
+  const [nameStatus, numstat, untracked, porcelain, defaultBranch] = await Promise.all([
     exec('git', ['-C', projPath, 'diff', 'HEAD', '--name-status'], { timeout: 10000 }),
     exec('git', ['-C', projPath, 'diff', 'HEAD', '--numstat'], { timeout: 10000 }),
     exec('git', ['-C', projPath, 'ls-files', '--others', '--exclude-standard'], { timeout: 10000 }),
     exec('git', ['-C', projPath, 'status', '--porcelain=v2', '--branch'], { timeout: 5000 }),
+    detectMainBranch(projPath),
   ]);
 
   const statMap: Record<string, { additions: number; deletions: number; binary: boolean }> = {};
@@ -145,6 +147,7 @@ export async function GET(
     totalAdditions,
     totalDeletions,
     branch: branchName,
+    defaultBranch,
     behind,
     ahead,
   });

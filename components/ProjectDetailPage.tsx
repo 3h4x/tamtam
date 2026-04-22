@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject, fetchIssuesAndPRs, pushProject } from '@/lib/client-api'
+import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject, fetchIssuesAndPRs, pushProject, fetchChanges, createProjectPR } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
 import { getAggregateCi } from '@/lib/statusConstants'
@@ -291,6 +291,10 @@ export function ProjectDetailPage({
   const [retryingPush, setRetryingPush] = useState(false)
   const [projectJobs, setProjectJobs] = useState<JobInfo[]>([])
   const [issueCount, setIssueCount] = useState<{ prs: number; issues: number } | null>(null)
+  const [currentBranch, setCurrentBranch] = useState<string | null>(null)
+  const [defaultBranch, setDefaultBranch] = useState<string | null>(null)
+  const [openPrBranches, setOpenPrBranches] = useState<string[]>([])
+  const [creatingPr, setCreatingPr] = useState(false)
 
   // Custom actions
   const [customActions, setCustomActions] = useState<CustomAction[]>([])
@@ -344,7 +348,26 @@ export function ProjectDetailPage({
     if (!name) return
     fetchIssuesAndPRs(name).then((data) => {
       setIssueCount({ prs: data.prs.length, issues: data.issues.length })
+      setOpenPrBranches(data.prs.map(pr => pr.headRefName))
     }).catch(() => {})
+  }, [name])
+
+  // Poll current/default branch so the Create PR button stays in sync with
+  // external branch switches (issue checkout, merge-back-to-default, etc.).
+  useEffect(() => {
+    if (!name) return
+    let active = true
+    const poll = async () => {
+      try {
+        const data = await fetchChanges(name)
+        if (!active) return
+        setCurrentBranch(data.branch)
+        setDefaultBranch(data.defaultBranch)
+      } catch { /* ignore */ }
+    }
+    poll()
+    const interval = setInterval(poll, 10000)
+    return () => { active = false; clearInterval(interval) }
   }, [name])
 
   const handleCustomAction = async (actionName: string) => {
@@ -540,6 +563,35 @@ export function ProjectDetailPage({
     }
   }
 
+  const handleCreatePr = async () => {
+    if (!name || creatingPr) return
+    // Open a blank tab synchronously inside the click gesture so the later
+    // navigation isn't popup-blocked — push + gh pr create can take several
+    // seconds, and any window.open after an await is treated as non-gesture.
+    const prWindow = typeof window !== 'undefined' ? window.open('about:blank', '_blank') : null
+    setCreatingPr(true)
+    try {
+      const result = await createProjectPR(name)
+      toast('Pull request created', 'success')
+      // Force-refresh PR list (bypass server cache) so the button disappears
+      fetchIssuesAndPRs(name, true).then((data) => {
+        setIssueCount({ prs: data.prs.length, issues: data.issues.length })
+        setOpenPrBranches(data.prs.map(pr => pr.headRefName))
+      }).catch(() => {})
+      if (result.url) {
+        if (prWindow && !prWindow.closed) prWindow.location.href = result.url
+        else window.open(result.url, '_blank')
+      } else if (prWindow && !prWindow.closed) {
+        prWindow.close()
+      }
+    } catch (err) {
+      if (prWindow && !prWindow.closed) prWindow.close()
+      toast(err instanceof Error ? err.message : 'Failed to create PR', 'error')
+    } finally {
+      setCreatingPr(false)
+    }
+  }
+
   const handleFixCi = async () => {
     if (!name || fixingCi) return
     setFixingCi(true)
@@ -683,23 +735,40 @@ export function ProjectDetailPage({
             const chainSuffix = multiStep && !config?.auto_push_enabled && !freshLgtm
               ? ' (enable auto-push in config to auto-chain)'
               : ''
+            // Only show when we know both branches, the current one isn't the default,
+            // the project uses PR Workflow mode, and no PR is already open for this branch.
+            const isOnFeatureBranch = !!currentBranch && !!defaultBranch && currentBranch !== defaultBranch
+            const hasOpenPr = openPrBranches.includes(currentBranch ?? '')
+            const showCreatePr = isOnFeatureBranch && !hasOpenPr && !!config?.pr_workflow_enabled
             return (
-              <button
-                className="px-3 py-1.5 text-sm border border-accent bg-accent/10 text-accent rounded-md hover:bg-accent/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-                onClick={handleRelease}
-                disabled={busy || nothingToRelease}
-                title={
-                  nothingToRelease
-                    ? 'Nothing to release — no changes and no unpushed commits'
-                    : busy
-                      ? 'Release pipeline already running'
-                      : freshLgtm
-                        ? `Ship it — review already LGTM, will commit & push directly (skips test + review)`
-                        : `Release: ${steps.join(' → ')}${chainSuffix}`
-                }
-              >
-                {busy ? 'Releasing…' : freshLgtm ? '🚢 Ship (LGTM)' : '🚀 Release'}
-              </button>
+              <>
+                <button
+                  className="px-3 py-1.5 text-sm border border-accent bg-accent/10 text-accent rounded-md hover:bg-accent/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                  onClick={handleRelease}
+                  disabled={busy || nothingToRelease}
+                  title={
+                    nothingToRelease
+                      ? 'Nothing to release — no changes and no unpushed commits'
+                      : busy
+                        ? 'Release pipeline already running'
+                        : freshLgtm
+                          ? `Ship it — review already LGTM, will commit & push directly (skips test + review)`
+                          : `Release: ${steps.join(' → ')}${chainSuffix}`
+                  }
+                >
+                  {busy ? 'Releasing…' : freshLgtm ? '🚢 Ship (LGTM)' : '🚀 Release'}
+                </button>
+                {showCreatePr && (
+                  <button
+                    className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                    onClick={handleCreatePr}
+                    disabled={creatingPr}
+                    title={`Create pull request for branch ${currentBranch}`}
+                  >
+                    {creatingPr ? 'Creating PR…' : 'Create PR'}
+                  </button>
+                )}
+              </>
             )
           })()}
           {!!(config?.effective_test_command || config?.detected_test_command) && (

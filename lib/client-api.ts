@@ -389,6 +389,7 @@ export interface ChangesResponse {
   totalAdditions: number
   totalDeletions: number
   branch: string | null
+  defaultBranch: string | null
   behind: number
   ahead: number
 }
@@ -406,6 +407,13 @@ export async function fetchBehind(projectName: string): Promise<{ behind: number
   const response = await fetch(`${API_BASE}/by-project/${projectName}/behind`)
   if (!response.ok) return { behind: 0, ahead: 0 }
   return response.json()
+}
+
+export async function createProjectPR(projectName: string): Promise<{ url: string | null }> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/create-pr`, { method: 'POST' })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(data.detail || 'Failed to create PR')
+  return data
 }
 
 export class PullDivergedError extends Error {
