@@ -355,4 +355,123 @@ describe('launchPrWait', () => {
       expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 0);
     }, { timeout: 3000 });
   });
+
+  it('does not attempt merge when checks are pending, retries on next poll', async () => {
+    execMock
+      // First poll: checks still in progress
+      .mockResolvedValueOnce(resp(0, JSON.stringify({
+        state: 'OPEN',
+        mergeable: 'MERGEABLE',
+        statusCheckRollup: [
+          { name: 'ci/test', status: 'IN_PROGRESS', conclusion: null },
+        ],
+      })))
+      // Second poll: already merged (no merge call should have been made on first poll)
+      .mockResolvedValueOnce(resp(0, JSON.stringify({
+        state: 'MERGED', mergeable: 'MERGEABLE', statusCheckRollup: [],
+      })));
+    mockCleanupSuccess();
+
+    launchPrWait('myproj', 50, 'owner/repo', 'https://github.com/owner/repo/pull/50');
+
+    await vi.waitFor(() => {
+      const mergeCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('merge'));
+      expect(mergeCalls.length).toBe(0);
+      expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 0);
+    }, { timeout: 3000 });
+  });
+
+  it('treats NEUTRAL and SKIPPED conclusions as passing and proceeds to merge', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, JSON.stringify({
+        state: 'OPEN',
+        mergeable: 'MERGEABLE',
+        statusCheckRollup: [
+          { name: 'ci/lint', status: 'COMPLETED', conclusion: 'NEUTRAL' },
+          { name: 'ci/docs', status: 'COMPLETED', conclusion: 'SKIPPED' },
+        ],
+      })))
+      .mockResolvedValueOnce(resp(0, 'PR merged'));
+    mockCleanupSuccess();
+
+    launchPrWait('myproj', 51, 'owner/repo', 'https://github.com/owner/repo/pull/51');
+
+    await vi.waitFor(() => {
+      const mergeCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('merge'));
+      expect(mergeCalls.length).toBeGreaterThanOrEqual(1);
+      expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 0);
+    }, { timeout: 3000 });
+  });
+
+  it('"not allowed" in merge error suppresses auto-merge fallback and fails permanently', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, JSON.stringify({
+        state: 'OPEN',
+        mergeable: 'MERGEABLE',
+        statusCheckRollup: [],
+      })))
+      // Matches transient regex but also contains "not allowed" → permanent failure
+      .mockResolvedValueOnce(resp(1, '', 'required status checks: not allowed for this context'));
+
+    launchPrWait('myproj', 52, 'owner/repo', 'https://github.com/owner/repo/pull/52');
+
+    await vi.waitFor(() => {
+      const autoCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('--auto'));
+      expect(autoCalls.length).toBe(0);
+      expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 1);
+    }, { timeout: 3000 });
+  });
+
+  describe('timeout', () => {
+    let launchPrWaitT: typeof import('@/lib/start-pr-wait').launchPrWait;
+    let execT: ReturnType<typeof vi.fn>;
+    let markDoneT: ReturnType<typeof vi.fn>;
+
+    beforeEach(async () => {
+      vi.resetModules();
+      process.env.TAMTAM_PR_WAIT_TIMEOUT_MS = '10'; // override to trigger timeout quickly
+
+      execT = vi.fn();
+      markDoneT = vi.fn().mockResolvedValue(undefined);
+
+      vi.doMock('@/lib/project-data', () => ({
+        resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+      }));
+      vi.doMock('@/lib/shell', () => ({ exec: execT }));
+      vi.doMock('@/lib/scheduling', () => ({
+        getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs' }),
+      }));
+      vi.doMock('@/lib/job-storage', () => ({
+        createJob: vi.fn().mockImplementation((project: string, kind: string) => ({
+          id: `${project}-${kind}-timeout`, project, kind, pid: process.pid, logPath: '',
+          prompt: null, startedAt: Date.now() / 1000, finishedAt: null, exitCode: null, seen: false,
+        })),
+        markDone: markDoneT,
+        updateJob: vi.fn(),
+      }));
+      vi.doMock('@/lib/start-mark-dod', () => ({ startMarkDod: vi.fn() }));
+
+      ({ launchPrWait: launchPrWaitT } = await import('@/lib/start-pr-wait'));
+    });
+
+    afterEach(() => {
+      vi.resetModules();
+      process.env.TAMTAM_PR_WAIT_TIMEOUT_MS = '5000';
+    });
+
+    it('marks job done with exit 1 when deadline is exceeded before PR merges', async () => {
+      // Always return pending checks so the loop never merges
+      execT.mockResolvedValue(resp(0, JSON.stringify({
+        state: 'OPEN',
+        mergeable: 'MERGEABLE',
+        statusCheckRollup: [{ name: 'ci', status: 'IN_PROGRESS', conclusion: null }],
+      })));
+
+      launchPrWaitT('myproj', 999, 'owner/repo', 'https://github.com/owner/repo/pull/999');
+
+      await vi.waitFor(() => {
+        expect(markDoneT).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 1);
+      }, { timeout: 5000 });
+    });
+  });
 });
