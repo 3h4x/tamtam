@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import type { JobData } from '@/lib/job-storage';
-import { costUsd, PRICE_PER_MTOK } from '@/lib/usage-pricing';
+import { costUsd, totalTokens, PRICE_PER_MTOK } from '@/lib/usage-pricing';
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
   return {
@@ -145,5 +145,23 @@ describe('costUsd helper', () => {
     expect(
       costUsd({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreateTokens: 1_000_000 })
     ).toBeCloseTo(PRICE_PER_MTOK.cacheWrite, 6);
+  });
+});
+
+describe('totalTokens helper', () => {
+  it('sums all four token categories', () => {
+    expect(totalTokens({ inputTokens: 100, outputTokens: 200, cacheReadTokens: 300, cacheCreateTokens: 400 }))
+      .toBe(1000);
+  });
+
+  it('returns 0 for all-zero input', () => {
+    expect(totalTokens({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreateTokens: 0 }))
+      .toBe(0);
+  });
+
+  it('handles large values without overflow', () => {
+    const big = 10_000_000;
+    expect(totalTokens({ inputTokens: big, outputTokens: big, cacheReadTokens: big, cacheCreateTokens: big }))
+      .toBe(4 * big);
   });
 });
