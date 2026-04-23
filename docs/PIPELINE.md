@@ -104,6 +104,10 @@ PR-MERGE-WAIT
 
 The release meta-job (`kind='release'`) collects log sections from each step. Its own `finishedAt` is set when any step finalizes without chaining.
 
+### History view — release grouping
+
+In the per-project **History** tab, pipeline children (`test`, `review`, `fix`, `fix-push`, `commit`, `push`, `mark-dod`, `pr-wait`) are folded under their parent `release` row client-side. Grouping is a time-window match: a child whose `startedAt` falls inside a release's `[startedAt, finishedAt ?? ∞]` window attaches to that release. This is safe because the project-scoped `pipeline_locks` table guarantees only one release is active per project at a time, so no `parent_job_id` is needed. Clicking the parent row opens `/terminal?job=<release-id>`, which serves the **raw** aggregated log (not parsed stream-json) because the release log is a mix of plain text (test/commit/push output) and NDJSON (review/fix). See `components/ProjectRunsTab.tsx:groupReleaseChildren`, `components/TerminalTab.tsx:isClaudeJobKind` (deliberately excludes `release`), and `app/api/jobs/[jobId]/route.ts` (branches on `kind === 'release'` to return the raw log).
+
 ---
 
 ## Completion hooks (`runCompletionHooks`)
