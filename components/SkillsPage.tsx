@@ -110,7 +110,7 @@ function SkillRow({ skill, checked, onToggle, onEdit }: SkillRowProps) {
           </span>
         )}
         {recommended && !schedule && (
-          <span className="text-[11px] text-text-tertiary italic">manual</span>
+          <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-bg-primary border border-border text-text-tertiary font-medium whitespace-nowrap">manual</span>
         )}
       </div>
 
