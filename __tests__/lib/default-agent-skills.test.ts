@@ -60,6 +60,17 @@ describe('seedDefaultSkills', () => {
     expect(skill!.description).toContain('GitHub issues');
   });
 
+  it('inserts agent-senior-fullstack with correct fields', () => {
+    seedFn();
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-senior-fullstack');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:senior-fullstack');
+    expect(skill!.description).toContain('Fullstack engineer');
+    expect(skill!.content).toContain('senior fullstack engineer');
+    expect(skill!.content).toContain('Stack Decision Matrix');
+    expect(skill!.content).toContain('npm audit');
+  });
+
   it('does not insert skills on second call (seeded guard)', () => {
     seedFn();
     const countAfterFirst = testDb.db.select().from(schema.skills).all().length;
