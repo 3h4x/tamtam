@@ -71,6 +71,76 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('npm audit');
   });
 
+  it('inserts agent-security-review with correct fields', () => {
+    seedFn();
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-security-review');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:security-review');
+    expect(skill!.description).toContain('OWASP');
+    expect(skill!.content).toContain('senior security engineer');
+    expect(skill!.content).toContain('critical, high, medium, low');
+  });
+
+  it('inserts agent-dependency-check with correct fields', () => {
+    seedFn();
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-dependency-check');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:dependency-check');
+    expect(skill!.description).toContain('outdated');
+    expect(skill!.content).toContain('npm audit');
+    expect(skill!.content).toContain('pip-audit');
+  });
+
+  it('inserts agent-blog with correct fields', () => {
+    seedFn();
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-blog');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:blog');
+    expect(skill!.description).toContain('daily post');
+    expect(skill!.content).toContain('git log');
+    expect(skill!.content).toContain('blog/');
+  });
+
+  it('inserts agent-ci-monitor with correct fields', () => {
+    seedFn();
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-ci-monitor');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:ci-monitor');
+    expect(skill!.description).toContain('GitHub Actions');
+    expect(skill!.content).toContain('gh run list');
+    expect(skill!.content).toContain('gh run view');
+  });
+
+  it('inserts agent-release-ready with correct fields', () => {
+    seedFn();
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-release-ready');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:release-ready');
+    expect(skill!.description).toContain('Pre-flight');
+    expect(skill!.content).toContain('READY');
+    expect(skill!.content).toContain('NOT READY');
+  });
+
+  it('inserts agent-gha-audit with correct fields', () => {
+    seedFn();
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-gha-audit');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:gha-audit');
+    expect(skill!.description).toContain('GitHub Actions');
+    expect(skill!.content).toContain('.github/workflows/');
+    expect(skill!.content).toContain('actions/checkout');
+  });
+
+  it('inserts agent-readme-sync with correct fields', () => {
+    seedFn();
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-readme-sync');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:readme-sync');
+    expect(skill!.description).toContain('README');
+    expect(skill!.content).toContain('README.md');
+    expect(skill!.content).toContain('git log');
+  });
+
   it('does not insert skills on second call (seeded guard)', () => {
     seedFn();
     const countAfterFirst = testDb.db.select().from(schema.skills).all().length;
