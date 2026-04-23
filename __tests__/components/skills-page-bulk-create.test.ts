@@ -47,4 +47,21 @@ describe('partitionSkillsForBulkCreate', () => {
     const { toCreate } = partitionSkillsForBulkCreate(skills, existing)
     expect(toCreate).toHaveLength(1)
   })
+
+  it('returns empty arrays when skills list is empty', () => {
+    const { toCreate, toSkip } = partitionSkillsForBulkCreate([], new Set(['foo', 'bar']))
+    expect(toCreate).toHaveLength(0)
+    expect(toSkip).toHaveLength(0)
+  })
+
+  it('puts all skills in toSkip when all names match existing agents', () => {
+    const skills = [
+      skill('agent-cto', 'agent:cto'),
+      skill('agent-blog', 'agent:blog'),
+    ]
+    const existing = new Set(['cto', 'blog'])
+    const { toCreate, toSkip } = partitionSkillsForBulkCreate(skills, existing)
+    expect(toCreate).toHaveLength(0)
+    expect(toSkip).toHaveLength(2)
+  })
 })

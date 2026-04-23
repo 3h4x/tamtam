@@ -85,6 +85,13 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     expect(data.auto_pr_merge_enabled).toBe(false);
   });
 
+  it('returns auto_push_enabled=false by default', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.auto_push_enabled).toBe(false);
+  });
+
   it('returns tests_disabled=false by default', async () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
@@ -634,6 +641,36 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/missing/config', {
       method: 'PATCH',
       body: JSON.stringify({ pr_workflow_enabled: true }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'missing' }) });
+    expect(res.status).toBe(404);
+  });
+
+  it('writes auto_push_enabled=1 when set to true', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ auto_push_enabled: true }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'auto_push_enabled', '1');
+  });
+
+  it('writes auto_push_enabled=0 when set to false', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ auto_push_enabled: false }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'auto_push_enabled', '0');
+  });
+
+  it('returns 404 when project not found while writing auto_push_enabled', async () => {
+    writeProjectFieldYamlMock.mockReturnValue(false);
+    const req = new NextRequest('http://localhost/api/projects/by-project/missing/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ auto_push_enabled: true }),
     });
     const res = await PATCH(req, { params: Promise.resolve({ projectName: 'missing' }) });
     expect(res.status).toBe(404);
