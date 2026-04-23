@@ -1193,6 +1193,48 @@ describe('probeJobStatus with pm2', () => {
     expect(job.exitCode).toBe(-1);
     expect(job.finishedAt).not.toBeNull();
   });
+
+  it("returns 'running' for a freshly-created pid=-1 job (negative pid within grace)", async () => {
+    // pid can be -1 when createJob writes a placeholder before pm2 start completes.
+    // The grace window applies to all pid<=0, not just pid===0.
+    const job: JobData = {
+      id: 'job-spawn-grace-neg',
+      project: 'proj',
+      kind: 'agent:docs',
+      prompt: null,
+      pid: -1,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('running');
+    expect(job.finishedAt).toBeNull();
+    expect(getJobStatusMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 'done' for a pid=-1 job that exceeds the spawn grace", async () => {
+    const job: JobData = {
+      id: 'job-spawn-grace-neg-expired',
+      project: 'proj',
+      kind: 'agent:docs',
+      prompt: null,
+      pid: -1,
+      logPath: null,
+      startedAt: Date.now() / 1000 - 60,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('done');
+    expect(job.exitCode).toBe(-1);
+    expect(job.finishedAt).not.toBeNull();
+  });
 });
 
 describe('probeJobStatus – test/action kind liveness via process.kill', () => {
