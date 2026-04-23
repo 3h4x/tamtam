@@ -874,7 +874,10 @@ describe('job-storage', () => {
         prompt: null,
         pid: -1,
         logPath: null,
-        startedAt: Date.now() / 1000,
+        // Past the spawn-grace window so pid<=0 is treated as dead, not
+        // still-spawning. A freshly-created pid=0 job (ageSec < 30) is
+        // covered by the spawn-grace tests in `probeJobStatus with pm2`.
+        startedAt: Date.now() / 1000 - 60,
         finishedAt: null,
         exitCode: null,
         seen: false,
@@ -1140,6 +1143,55 @@ describe('probeJobStatus with pm2', () => {
     } finally {
       try { rmSync(logFile); } catch {}
     }
+  });
+
+  // Regression: an `agent:*` job created via createJob(project, kind, 0, '')
+  // would spend hundreds of ms awaiting `pm2 start` before updateJob persisted
+  // the real pid. A concurrent duplicate-check (/api/agents/[id]/run) would
+  // call probeJobStatus on the in-flight sibling, hit the pid<=0 fast-path,
+  // and markDone(-1) — which also pm2-deletes the nascent process. User
+  // symptom: phantom "exit -1 @ 0s" row next to the successful run.
+  it("returns 'running' for a freshly-created pid=0 job (spawn grace)", async () => {
+    const job: JobData = {
+      id: 'job-spawn-grace',
+      project: 'proj',
+      kind: 'agent:docs',
+      prompt: null,
+      pid: 0,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('running');
+    expect(job.finishedAt).toBeNull();
+    expect(job.exitCode).toBeNull();
+    // pm2 getJobStatus must not be consulted — the job hasn't been registered yet.
+    expect(getJobStatusMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 'done' and marks exit -1 once a pid=0 job exceeds the spawn grace", async () => {
+    const job: JobData = {
+      id: 'job-spawn-grace-expired',
+      project: 'proj',
+      kind: 'agent:docs',
+      prompt: null,
+      pid: 0,
+      logPath: null,
+      // 60 s ago — well past the 30 s grace window.
+      startedAt: Date.now() / 1000 - 60,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('done');
+    expect(job.exitCode).toBe(-1);
+    expect(job.finishedAt).not.toBeNull();
   });
 });
 

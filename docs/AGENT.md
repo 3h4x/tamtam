@@ -278,6 +278,10 @@ if (running.length > 0) {
 
 This prevents concurrent runs if a schedule fires faster than the agent completes.
 
+### Spawn-grace in `probeJobStatus`
+
+Job rows are inserted with `pid=0` and the real pid is persisted asynchronously after `pm2 start` returns (hundreds of ms, up to pm2's 15 s timeout). `probeJobStatus` treats `pid<=0` as **still spawning** for the first 30 seconds after `startedAt` — otherwise a concurrent duplicate-check would `markDone(-1)` the sibling mid-spawn **and** `pm2 delete` its Claude process, producing a phantom `exit -1 @ 0s` row next to the real run. After the grace window, `pid<=0` is treated as dead as before. See `lib/job-storage.ts:probeJobStatus`.
+
 ## Example: Set Up a Weekly Review Agent
 
 1. **Create a skill** that provides code review instructions:

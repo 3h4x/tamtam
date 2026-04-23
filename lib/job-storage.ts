@@ -808,7 +808,17 @@ function logHasClaudeResult(job: JobData): boolean {
 
 export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> {
   if (job.finishedAt !== null) return 'done';
+  // Jobs are created with pid=0 and the real pid is persisted asynchronously
+  // after `pm2 start` returns (can take up to pm2's 15 s timeout). During that
+  // window, treat the job as still spawning rather than dead — otherwise a
+  // concurrent probe (e.g. the duplicate-check in /api/agents/[id]/run) would
+  // markDone(-1) mid-spawn AND pm2-delete the nascent Claude process, leaving
+  // a phantom `exit -1 @ 0s` row. Grace is intentionally generous because
+  // `pm2 start` worst-case is ~15 s plus slack for the server's main loop.
+  const PID_SPAWN_GRACE_SEC = 30;
   if (job.pid <= 0) {
+    const ageSec = Date.now() / 1000 - job.startedAt;
+    if (ageSec < PID_SPAWN_GRACE_SEC) return 'running';
     await markDone(job, -1);
     return 'done';
   }
