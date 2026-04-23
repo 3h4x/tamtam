@@ -5,6 +5,26 @@ type ModelUsage = {
   cacheCreationInputTokens?: number;
 };
 
+type StreamEventField = {
+  type?: string;
+  delta?: { type?: string; text?: string; thinking?: string; partial_json?: string };
+  content_block?: { type?: string; name?: string };
+};
+
+type ParsedLine = {
+  type?: string;
+  event?: StreamEventField;
+  subtype?: string;
+  content?: unknown;
+  output?: unknown;
+  message?: { content?: Array<{ type?: string; content?: unknown }> };
+  modelUsage?: Record<string, ModelUsage>;
+  is_error?: boolean;
+  result?: unknown;
+  duration_ms?: number;
+  session_id?: string;
+};
+
 export type ParsedEvent =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string }
@@ -77,9 +97,9 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
     if (m) trimmed = trimmed.slice(m[0].length);
     if (!trimmed) continue;
 
-    let parsed: Record<string, any>;
+    let parsed: ParsedLine;
     try {
-      parsed = JSON.parse(trimmed);
+      parsed = JSON.parse(trimmed) as ParsedLine;
     } catch {
       options.onRawLine?.(m ? trimmed : line);
       continue;
@@ -93,7 +113,7 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
         evt?.type === 'content_block_delta' &&
         evt?.delta?.type === 'thinking_delta'
       ) {
-        push({ type: 'thinking', text: evt.delta.thinking });
+        push({ type: 'thinking', text: evt.delta.thinking ?? '' });
       }
 
       // Text deltas from assistant
@@ -101,7 +121,7 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
         evt?.type === 'content_block_delta' &&
         evt?.delta?.type === 'text_delta'
       ) {
-        push({ type: 'text', text: evt.delta.text });
+        push({ type: 'text', text: evt.delta.text ?? '' });
       }
 
       // Tool use start — capture tool name
