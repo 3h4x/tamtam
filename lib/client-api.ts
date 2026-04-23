@@ -345,8 +345,9 @@ export async function checkoutDefaultBranch(projectName: string): Promise<{ stat
   return data
 }
 
-export async function fetchChanges(projectName: string): Promise<ChangesResponse> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/changes`)
+export async function fetchChanges(projectName: string, opts?: { checkMerged?: boolean; signal?: AbortSignal }): Promise<ChangesResponse> {
+  const url = `${API_BASE}/by-project/${projectName}/changes${opts?.checkMerged ? '?checkMerged=1' : ''}`
+  const response = await fetch(url, { signal: opts?.signal })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
     throw new Error(data.detail || `Failed to fetch changes: ${response.statusText}`)
