@@ -30,7 +30,7 @@ export type ParsedEvent =
   | { type: 'thinking'; text: string }
   | { type: 'tool_use'; name: string; input: string }
   | { type: 'tool_result'; content: string }
-  | { type: 'done'; result: { duration: number; sessionId: string; error: boolean; errorText?: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreateTokens: number } };
+  | { type: 'done'; result: { duration: number; sessionId: string; error: boolean; errorText?: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreateTokens: number; model: string | null } };
 
 // Tool results arrive as either a string or an array of content blocks
 // ([{type:"text",text:"..."}, {type:"image",...}]). Dumping the array with
@@ -185,12 +185,15 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
     // Final result — extract token usage from modelUsage
     if (parsed.type === 'result') {
       let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheCreateTokens = 0;
+      let model: string | null = null;
       if (parsed.modelUsage) {
-        for (const model of Object.values(parsed.modelUsage) as ModelUsage[]) {
-          inputTokens += model.inputTokens ?? 0;
-          outputTokens += model.outputTokens ?? 0;
-          cacheReadTokens += model.cacheReadInputTokens ?? 0;
-          cacheCreateTokens += model.cacheCreationInputTokens ?? 0;
+        const modelKeys = Object.keys(parsed.modelUsage);
+        model = modelKeys.length > 0 ? modelKeys[0] : null;
+        for (const usage of Object.values(parsed.modelUsage) as ModelUsage[]) {
+          inputTokens += usage.inputTokens ?? 0;
+          outputTokens += usage.outputTokens ?? 0;
+          cacheReadTokens += usage.cacheReadInputTokens ?? 0;
+          cacheCreateTokens += usage.cacheCreationInputTokens ?? 0;
         }
       }
       const errorText = parsed.is_error && typeof parsed.result === 'string' ? parsed.result : undefined;
@@ -205,6 +208,7 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
           outputTokens,
           cacheReadTokens,
           cacheCreateTokens,
+          model,
         },
       });
     }

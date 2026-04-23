@@ -91,13 +91,21 @@ async function createReleaseJob(projectName: string): Promise<{ id: string; logP
       throw new Error(`pm2 start failed: ${pm2Result.stderr}`);
     }
 
-    const jlistR = await exec('pm2', ['jlist'], { timeout: 10000 });
-    const pid = (() => {
+    // Retry jlist a few times — right after `pm2 start` returns, jlist can
+    // still show the new process with pid=0/undefined for up to ~1 s while
+    // PM2 wires it up. Storing pid=0 would later confuse probeJobStatus into
+    // thinking the release monitor died (→ exit_code=-1 for an otherwise
+    // successful release).
+    let pid = 0;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const jlistR = await exec('pm2', ['jlist'], { timeout: 10000 });
       try {
         const procs: Array<{ name: string; pid?: number }> = JSON.parse(jlistR.stdout);
-        return procs.find(p => p.name === job.id)?.pid ?? 0;
-      } catch { return 0; }
-    })();
+        const found = procs.find((p) => p.name === job.id)?.pid ?? 0;
+        if (found > 0) { pid = found; break; }
+      } catch {}
+      await new Promise((r) => setTimeout(r, 200));
+    }
 
     job.pid = pid;
     updateJob(job);

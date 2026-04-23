@@ -42,6 +42,7 @@ describe('GET /api/stats/usage', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.projects).toEqual([]);
+    expect(data.agents).toEqual([]);
     expect(data.totals.runs).toBe(0);
     expect(data.totals.costUsd).toBe(0);
     expect(data.window).toBe('30d');
@@ -117,6 +118,23 @@ describe('GET /api/stats/usage', () => {
     const res = await GET(new NextRequest('http://localhost/api/stats/usage?window=all'));
     const data = await res.json();
     expect(data.projects[0].lastRunAt).toBe(2000);
+  });
+
+  it('returns agents breakdown grouped by kind sorted by cost', async () => {
+    listJobsMock.mockReturnValue([
+      makeJob({ id: 'a', project: 'p1', kind: 'review', outputTokens: 500_000 }),
+      makeJob({ id: 'b', project: 'p1', kind: 'review', outputTokens: 100_000 }),
+      makeJob({ id: 'c', project: 'p2', kind: 'fix', outputTokens: 200_000 }),
+      makeJob({ id: 'd', project: 'p1', kind: 'agent:cto', outputTokens: 1_000_000 }),
+    ]);
+    const res = await GET(new NextRequest('http://localhost/api/stats/usage?window=all'));
+    const data = await res.json();
+    expect(data.agents.length).toBe(3);
+    const kinds = data.agents.map((r: any) => r.kind);
+    expect(kinds[0]).toBe('agent:cto');
+    const reviewRow = data.agents.find((r: any) => r.kind === 'review');
+    expect(reviewRow.runs).toBe(2);
+    expect(reviewRow.outputTokens).toBe(600_000);
   });
 
   it('treats null token fields as zero', async () => {

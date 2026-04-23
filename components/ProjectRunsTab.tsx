@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { fetchJobs } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import { formatAgo } from '@/lib/format'
+import { costUsd as computeCost } from '@/lib/usage-pricing'
 
 function formatDuration(startedAt: number, finishedAt: number | null): string {
   const end = finishedAt || Date.now() / 1000
@@ -36,6 +37,23 @@ function formatTokens(n: number): string {
   if (n < 1000) return `${n}`
   if (n < 1000000) return `${(n / 1000).toFixed(1)}k`
   return `${(n / 1000000).toFixed(1)}M`
+}
+
+function formatCost(usd: number): string {
+  if (usd === 0) return '$0.00'
+  if (usd < 0.0001) return '<$0.0001'
+  if (usd < 0.01) return `$${usd.toFixed(4)}`
+  return `$${usd.toFixed(2)}`
+}
+
+function jobCost(j: JobInfo): number {
+  if (j.cost_usd != null) return j.cost_usd
+  return computeCost({
+    inputTokens: j.input_tokens ?? 0,
+    outputTokens: j.output_tokens ?? 0,
+    cacheReadTokens: j.cache_read_tokens ?? 0,
+    cacheCreateTokens: j.cache_create_tokens ?? 0,
+  })
 }
 
 // Bucket kinds for filtering + labeling. Anything that doesn't match lands in
@@ -129,6 +147,7 @@ interface Entry {
   inputTokens: number
   outputTokens: number
   cacheReadTokens: number
+  costUsd: number
   turns: number
   model: string | null
   navJobId: string
@@ -201,6 +220,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
         existing.inputTokens += j.input_tokens ?? 0
         existing.outputTokens += j.output_tokens ?? 0
         existing.cacheReadTokens += j.cache_read_tokens ?? 0
+        existing.costUsd += jobCost(j)
         existing.navJobId = j.id
         continue
       }
@@ -221,8 +241,9 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       inputTokens: j.input_tokens ?? 0,
       outputTokens: j.output_tokens ?? 0,
       cacheReadTokens: j.cache_read_tokens ?? 0,
+      costUsd: jobCost(j),
       turns: 1,
-      model: modelFromContext(j.context_meta),
+      model: j.model ?? modelFromContext(j.context_meta),
       navJobId: j.id,
       navSessionId: j.session_id ?? null,
       verdict: j.verdict,
@@ -406,14 +427,21 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
   }, [filtered])
 
   const totals = useMemo(() => {
-    let tokens = 0, running = 0, durationMs = 0
+    let tokens = 0, running = 0, durationMs = 0, costUsd = 0
     for (const e of filtered) {
       tokens += e.inputTokens + e.outputTokens
       durationMs += e.durationMs ?? 0
+      costUsd += e.costUsd
       if (e.status === 'running') running += 1
     }
-    return { tokens, running, durationMs }
+    return { tokens, running, durationMs, costUsd }
   }, [filtered])
+
+  const thisMonthCost = useMemo(() => {
+    const now = new Date()
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime() / 1000
+    return entries.reduce((sum, e) => sum + (e.startedAt >= monthStart ? e.costUsd : 0), 0)
+  }, [entries])
 
   const navigate = (e: Entry) => {
     if (e.bucket === 'run' && e.navSessionId && e.kind !== 'release') {
@@ -447,12 +475,20 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
             </button>
           )}
         </div>
-        <div className="text-xs text-text-tertiary font-mono whitespace-nowrap">
-          {filtered.length} {filtered.length === 1 ? 'entry' : 'entries'}
-          {totals.running > 0 && (
-            <> · <span className="text-status-warning">{totals.running} running</span></>
+        <div className="text-xs text-text-tertiary font-mono whitespace-nowrap flex items-center gap-2 flex-wrap">
+          <span>
+            {filtered.length} {filtered.length === 1 ? 'entry' : 'entries'}
+            {totals.running > 0 && (
+              <> · <span className="text-status-warning">{totals.running} running</span></>
+            )}
+            {totals.tokens > 0 && <> · {formatTokens(totals.tokens)} tok</>}
+            {totals.costUsd > 0 && <> · <span className="text-accent">{formatCost(totals.costUsd)}</span></>}
+          </span>
+          {thisMonthCost > 0 && (
+            <span className="text-text-tertiary/60" title="Total cost for all runs this calendar month">
+              this month: <span className="text-text-secondary">{formatCost(thisMonthCost)}</span>
+            </span>
           )}
-          {totals.tokens > 0 && <> · {formatTokens(totals.tokens)} tokens</>}
         </div>
       </div>
 
@@ -636,6 +672,11 @@ function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summa
               <span className="font-mono text-text-tertiary" title="Input / output tokens">
                 <span className="text-status-success">↑{formatTokens(e.inputTokens)}</span>{' '}
                 <span className="text-accent">↓{formatTokens(e.outputTokens)}</span>
+              </span>
+            )}
+            {e.costUsd > 0 && (
+              <span className="font-mono text-accent/70" title="Estimated cost">
+                {formatCost(e.costUsd)}
               </span>
             )}
             <span className="font-mono text-text-secondary">

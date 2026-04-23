@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
-import type { UsageResponse, ProjectUsageRow } from '@/app/api/stats/usage/route'
+import type { UsageResponse, ProjectUsageRow, AgentUsageRow } from '@/app/api/stats/usage/route'
 
 type Window = '24h' | '7d' | '30d' | 'all'
 const WINDOW_LABELS: Record<Window, string> = { '24h': '24 hours', '7d': '7 days', '30d': '30 days', all: 'All time' }
@@ -298,6 +298,42 @@ export function StatsPage() {
           </table>
         </div>
       </div>
+
+      {/* Top agents by kind */}
+      {data.agents.length > 0 && (
+        <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
+          <div className="px-4 py-3 border-b border-border bg-bg-tertiary">
+            <h2 className="text-sm font-medium text-text-primary">Top agents / pipeline steps</h2>
+            <p className="text-xs text-text-tertiary mt-0.5">Cost breakdown by run kind — shows which step burns the most</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead className="border-b border-border">
+                <tr>
+                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-left">Kind</th>
+                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Runs</th>
+                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Tokens</th>
+                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Cost</th>
+                  <th className="px-3 py-2 text-xs font-medium text-text-secondary w-32">Share</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.agents.slice(0, 5).map((r: AgentUsageRow) => (
+                  <tr key={r.kind} className="border-b border-border/40 last:border-b-0 hover:bg-bg-tertiary/40 transition-colors">
+                    <td className="px-3 py-2.5 font-mono text-text-primary">{r.kind}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">{r.runs.toLocaleString()}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">{fmtTokens(r.totalTokens)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-accent">{fmtUsd(r.costUsd)}</td>
+                    <td className="px-3 py-2.5">
+                      <Bar value={r.costUsd} max={data.agents[0]?.costUsd ?? 1} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <p className="text-xs text-text-tertiary">
         Costs are estimates based on a single rate card and do not account for per-model variation.
