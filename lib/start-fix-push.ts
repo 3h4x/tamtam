@@ -3,7 +3,7 @@ import { resolveProjectPath } from './project-data';
 import { getImproveConfig } from './scheduling';
 import { createJob, updateJob } from './job-storage';
 import { startJob } from './pm2-jobs';
-import { getPermissionModeFlag } from './config';
+import { getPermissionModeFlag, getSettings } from './config';
 import { errMsg } from './types';
 import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 
@@ -21,6 +21,7 @@ export async function startFixPush(projectName: string, hookError: string): Prom
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
 
   const { claudeBin, logDir } = getImproveConfig();
+  const { default_model } = getSettings();
   let errorContext = hookError.trim();
   if (errorContext.length > 8000) errorContext = '...(truncated)...\n' + errorContext.slice(-8000);
 
@@ -46,7 +47,7 @@ Please:
   try {
     const pid = await startJob(
       job.id,
-      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()}`,
+      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${default_model} ${getPermissionModeFlag()}`,
       prompt,
       projPath
     );

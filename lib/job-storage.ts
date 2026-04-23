@@ -163,6 +163,14 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
       console.log(`[job ${job.id}] claude result present (is_error=false) but pm2 reported exit ${exitCode}; overriding to 0`);
       job.exitCode = 0;
     }
+    // Opposite direction: claude emitted a result with is_error=true (e.g. 404
+    // on an unavailable model). probeJobStatus calls markDone(job, 0) for any
+    // terminal result line, and pm2's exit_code may also be 0 if the wrapper
+    // swallowed it — but the logical outcome was a failure, so reflect that.
+    if (isClaudeKind && doneEvent.result.error && job.exitCode === 0) {
+      console.log(`[job ${job.id}] claude result present (is_error=true) but exit code is 0; overriding to 1`);
+      job.exitCode = 1;
+    }
   }
   saveToDb(job);
   try {

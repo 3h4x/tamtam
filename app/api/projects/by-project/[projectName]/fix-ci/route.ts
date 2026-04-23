@@ -5,7 +5,7 @@ import { resolveProjectPath } from '@/lib/project-data';
 import { createJob, listJobs, probeJobStatus, updateJob } from '@/lib/job-storage';
 import { startJob } from '@/lib/pm2-jobs';
 import { exec } from '@/lib/shell';
-import { getPermissionModeFlag } from '@/lib/config';
+import { getPermissionModeFlag, getSettings } from '@/lib/config';
 import { errMsg } from '@/lib/types';
 
 export async function POST(
@@ -28,6 +28,7 @@ export async function POST(
   }
 
   const { projects, claudeBin, logDir } = getImproveConfig();
+  const { default_model } = getSettings();
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
 
@@ -84,7 +85,7 @@ Do not commit — just make the code changes.
   try {
     const pid = await startJob(
       job.id,
-      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()}`,
+      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${default_model} ${getPermissionModeFlag()}`,
       prompt,
       projPath
     );

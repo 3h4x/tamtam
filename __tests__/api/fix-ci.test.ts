@@ -62,7 +62,7 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
     }));
     vi.doMock('@/lib/pm2-jobs', () => ({ startJob: startJobMock }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getPermissionModeFlag: vi.fn().mockReturnValue('') }));
+    vi.doMock('@/lib/config', () => ({ getPermissionModeFlag: vi.fn().mockReturnValue(''), getSettings: vi.fn().mockReturnValue({ default_model: 'sonnet' }) }));
     vi.doMock('@/lib/db', () => ({
       db: {
         select: vi.fn().mockReturnValue({
