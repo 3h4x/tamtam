@@ -1995,7 +1995,7 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
     expect(job.exitCode).toBe(-1);
   });
 
-  it('does not override when result has is_error=true', async () => {
+  it('does not override when result has is_error=true and exitCode is non-zero', async () => {
     const errorLine = '{"type":"result","subtype":"error","is_error":true,"duration_ms":100,"total_cost_usd":0,"session_id":"s2","result":""}';
     const logFile = join(tempDir, 'fix-error.log');
     writeFileSync(logFile, errorLine + '\n');
@@ -2004,6 +2004,44 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
     await markDoneFn(job, -1);
 
     expect(job.exitCode).toBe(-1);
+  });
+
+  it('overrides exitCode 0 to 1 when result has is_error=true', async () => {
+    // probeJobStatus calls markDone(job, 0) for any terminal result line; if
+    // is_error=true the logical outcome was a failure and exitCode must become 1.
+    const errorLine = '{"type":"result","subtype":"error","is_error":true,"duration_ms":100,"total_cost_usd":0,"session_id":"s3","result":"404 model unavailable"}';
+    const logFile = join(tempDir, 'fix-error-zero.log');
+    writeFileSync(logFile, errorLine + '\n');
+    const job = makeJob('fix', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(job.exitCode).toBe(1);
+  });
+
+  it.each(['run', 'review', 'fix-ci', 'fix-push', 'agent:my-agent'])(
+    'overrides exitCode 0 to 1 for kind=%s when is_error=true',
+    async (kind) => {
+      const errorLine = '{"type":"result","subtype":"error","is_error":true,"duration_ms":100,"total_cost_usd":0,"session_id":"s4","result":"error"}';
+      const logFile = join(tempDir, `${kind.replace(':', '-')}-err-zero.log`);
+      writeFileSync(logFile, errorLine + '\n');
+      const job = makeJob(kind, logFile);
+
+      await markDoneFn(job, 0);
+
+      expect(job.exitCode).toBe(1);
+    }
+  );
+
+  it('does NOT override exitCode 0 to 1 for non-claude kind (push) with is_error=true', async () => {
+    const errorLine = '{"type":"result","subtype":"error","is_error":true,"duration_ms":100,"total_cost_usd":0,"session_id":"s5","result":"error"}';
+    const logFile = join(tempDir, 'push-err-zero.log');
+    writeFileSync(logFile, errorLine + '\n');
+    const job = makeJob('push', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(job.exitCode).toBe(0);
   });
 });
 
