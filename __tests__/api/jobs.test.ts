@@ -325,6 +325,141 @@ describe('POST /api/jobs/notifications/mark-seen', () => {
   });
 });
 
+describe('DELETE /api/jobs/[jobId]', () => {
+  let DELETE: any;
+  let getJobMock: ReturnType<typeof vi.fn>;
+  let updateJobMock: ReturnType<typeof vi.fn>;
+  let execMock: ReturnType<typeof vi.fn>;
+  let killSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.useFakeTimers();
+
+    getJobMock = vi.fn().mockReturnValue(null);
+    updateJobMock = vi.fn();
+    execMock = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
+
+    vi.doMock('@/lib/job-storage', () => ({
+      getJob: getJobMock,
+      updateJob: updateJobMock,
+    }));
+
+    vi.doMock('@/lib/shell', () => ({
+      exec: execMock,
+    }));
+
+    killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+    const mod = await import('@/app/api/jobs/[jobId]/route');
+    DELETE = mod.DELETE;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.resetModules();
+    killSpy.mockRestore();
+  });
+
+  it('returns 404 for nonexistent job', async () => {
+    const req = new NextRequest('http://localhost/api/jobs/nonexistent', { method: 'DELETE' });
+    const res = await DELETE(req, { params: Promise.resolve({ jobId: 'nonexistent' }) });
+    expect(res.status).toBe(404);
+    const data = await res.json();
+    expect(data.detail).toContain('nonexistent');
+  });
+
+  it('returns 409 for already-finished job', async () => {
+    const job = makeJob({ id: 'done-job', finishedAt: 9999 });
+    getJobMock.mockReturnValue(job);
+
+    const req = new NextRequest('http://localhost/api/jobs/done-job', { method: 'DELETE' });
+    const res = await DELETE(req, { params: Promise.resolve({ jobId: 'done-job' }) });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.detail).toContain('already finished');
+  });
+
+  it('returns cancelled status for running job', async () => {
+    const job = makeJob({ id: 'running-job', finishedAt: null });
+    getJobMock.mockReturnValue(job);
+
+    const req = new NextRequest('http://localhost/api/jobs/running-job', { method: 'DELETE' });
+    const res = await DELETE(req, { params: Promise.resolve({ jobId: 'running-job' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('cancelled');
+  });
+
+  it('calls pm2 stop and delete for running job', async () => {
+    const job = makeJob({ id: 'pm2-job', finishedAt: null });
+    getJobMock.mockReturnValue(job);
+
+    const req = new NextRequest('http://localhost/api/jobs/pm2-job', { method: 'DELETE' });
+    await DELETE(req, { params: Promise.resolve({ jobId: 'pm2-job' }) });
+
+    expect(execMock).toHaveBeenCalledWith('pm2', ['stop', 'pm2-job', '--silent'], { timeout: 5000 });
+    expect(execMock).toHaveBeenCalledWith('pm2', ['delete', 'pm2-job', '--silent'], { timeout: 5000 });
+  });
+
+  it('sends SIGTERM to process by PID', async () => {
+    const job = makeJob({ id: 'pid-job', pid: 5678, finishedAt: null });
+    getJobMock.mockReturnValue(job);
+
+    const req = new NextRequest('http://localhost/api/jobs/pid-job', { method: 'DELETE' });
+    await DELETE(req, { params: Promise.resolve({ jobId: 'pid-job' }) });
+
+    expect(killSpy).toHaveBeenCalledWith(5678, 'SIGTERM');
+  });
+
+  it('sends SIGKILL after 2s timeout', async () => {
+    const job = makeJob({ id: 'kill-job', pid: 9999, finishedAt: null });
+    getJobMock.mockReturnValue(job);
+
+    const req = new NextRequest('http://localhost/api/jobs/kill-job', { method: 'DELETE' });
+    await DELETE(req, { params: Promise.resolve({ jobId: 'kill-job' }) });
+
+    expect(killSpy).not.toHaveBeenCalledWith(9999, 'SIGKILL');
+    vi.advanceTimersByTime(2000);
+    expect(killSpy).toHaveBeenCalledWith(9999, 'SIGKILL');
+  });
+
+  it('sets exitCode -2 and finishedAt on the job', async () => {
+    const job = makeJob({ id: 'update-job', finishedAt: null });
+    getJobMock.mockReturnValue(job);
+
+    const req = new NextRequest('http://localhost/api/jobs/update-job', { method: 'DELETE' });
+    await DELETE(req, { params: Promise.resolve({ jobId: 'update-job' }) });
+
+    expect(job.exitCode).toBe(-2);
+    expect(job.finishedAt).toBeGreaterThan(0);
+    expect(updateJobMock).toHaveBeenCalledWith(job);
+  });
+
+  it('continues cancellation even when pm2 commands fail', async () => {
+    const job = makeJob({ id: 'no-pm2-job', pid: 1111, finishedAt: null });
+    getJobMock.mockReturnValue(job);
+    execMock.mockRejectedValue(new Error('pm2 not found'));
+
+    const req = new NextRequest('http://localhost/api/jobs/no-pm2-job', { method: 'DELETE' });
+    const res = await DELETE(req, { params: Promise.resolve({ jobId: 'no-pm2-job' }) });
+
+    expect(res.status).toBe(200);
+    expect(killSpy).toHaveBeenCalledWith(1111, 'SIGTERM');
+    expect(updateJobMock).toHaveBeenCalled();
+  });
+
+  it('skips kill when pid is 0', async () => {
+    const job = makeJob({ id: 'no-pid-job', pid: 0, finishedAt: null });
+    getJobMock.mockReturnValue(job);
+
+    const req = new NextRequest('http://localhost/api/jobs/no-pid-job', { method: 'DELETE' });
+    await DELETE(req, { params: Promise.resolve({ jobId: 'no-pid-job' }) });
+
+    expect(killSpy).not.toHaveBeenCalled();
+  });
+});
+
 describe('GET /api/streaming/[jobId]', () => {
   let GET: any;
   let getJobMock: ReturnType<typeof vi.fn>;
