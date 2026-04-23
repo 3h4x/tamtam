@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseStreamLines } from '@/lib/claude-stream-parser';
+import { parseStreamLines, toolContentToString, createParseState } from '@/lib/claude-stream-parser';
 
 describe('claude-stream-parser', () => {
   it('extracts text from content_block_delta', () => {
@@ -243,6 +243,20 @@ describe('claude-stream-parser', () => {
       expect(events).toEqual([{ type: 'tool_result', content: '{"foo":"bar","baz":42}' }]);
     });
 
+    it('uses output field as fallback when content is absent in system tool_result', () => {
+      const line = JSON.stringify({
+        type: 'system', subtype: 'tool_result', output: 'output-only value',
+      });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([{ type: 'tool_result', content: 'output-only value' }]);
+    });
+
+    it('emits nothing when both content and output are absent in system tool_result', () => {
+      const line = JSON.stringify({ type: 'system', subtype: 'tool_result' });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([]);
+    });
+
     it('does not emit raw Claude usage/metadata objects as text', () => {
       // This is the shape the user saw dumped as raw JSON in the terminal.
       // parseStreamLines should ignore usage-only message_delta events.
@@ -261,6 +275,113 @@ describe('claude-stream-parser', () => {
       });
       const events = parseStreamLines(line);
       expect(events).toEqual([]);
+    });
+  });
+
+  // Regression: after the type-narrowing refactor, undefined delta fields must
+  // fall back to '' rather than emitting undefined as the text value.
+  describe('?? fallbacks for missing delta fields', () => {
+    it('emits empty string when thinking_delta is missing thinking field', () => {
+      const line = JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta' } },
+      });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([{ type: 'thinking', text: '' }]);
+    });
+
+    it('emits empty string when text_delta is missing text field', () => {
+      const line = JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta' } },
+      });
+      const events = parseStreamLines(line);
+      expect(events).toEqual([{ type: 'text', text: '' }]);
+    });
+
+    it('emits tool_use with empty name when content_block has no name', () => {
+      const lines = [
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } }),
+      ].join('\n');
+      const events = parseStreamLines(lines);
+      expect(events).toEqual([{ type: 'tool_use', name: '', input: '' }]);
+    });
+
+    it('treats missing partial_json in input_json_delta as empty string', () => {
+      const lines = [
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', name: 'Bash' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"cmd":"ls"}' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } }),
+      ].join('\n');
+      const events = parseStreamLines(lines);
+      expect(events).toEqual([{ type: 'tool_use', name: 'Bash', input: '{"cmd":"ls"}' }]);
+    });
+
+    it('strips PM2 timestamp leaving only whitespace — skips the line', () => {
+      // A line that IS a valid timestamp prefix but has nothing after it should
+      // not throw or produce events.
+      const line = '2026-04-22T12:51:05: ';
+      const events = parseStreamLines(line);
+      expect(events).toEqual([]);
+    });
+  });
+
+  describe('toolContentToString', () => {
+    it('returns empty string for null/undefined', () => {
+      expect(toolContentToString(null)).toBe('');
+      expect(toolContentToString(undefined)).toBe('');
+    });
+
+    it('converts numbers to string', () => {
+      expect(toolContentToString(42)).toBe('42');
+    });
+
+    it('converts boolean to string', () => {
+      expect(toolContentToString(false)).toBe('false');
+    });
+
+    it('returns string unchanged', () => {
+      expect(toolContentToString('hello')).toBe('hello');
+    });
+
+    it('joins string elements in array', () => {
+      expect(toolContentToString(['foo', 'bar'])).toBe('foo\nbar');
+    });
+
+    it('JSON stringifies unknown block types in arrays', () => {
+      const result = toolContentToString([{ type: 'video', url: 'x' }]);
+      expect(result).toBe('{"type":"video","url":"x"}');
+    });
+  });
+
+  describe('createParseState', () => {
+    it('returns zeroed state', () => {
+      const state = createParseState();
+      expect(state).toEqual({ currentToolName: '', currentToolInput: '', inToolUse: false, hasEmitted: false });
+    });
+
+    it('shared state accumulates tool input across multiple parseStreamLines calls', () => {
+      const state = createParseState();
+      const opts = { state };
+      parseStreamLines(
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', name: 'Read' } } }),
+        opts,
+      );
+      parseStreamLines(
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"path":' } } }),
+        opts,
+      );
+      parseStreamLines(
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '"x.ts"}' } } }),
+        opts,
+      );
+      const events = parseStreamLines(
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } }),
+        opts,
+      );
+      expect(events).toEqual([{ type: 'tool_use', name: 'Read', input: '{"path":"x.ts"}' }]);
     });
   });
 });
