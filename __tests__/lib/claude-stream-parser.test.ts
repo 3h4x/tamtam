@@ -52,8 +52,39 @@ describe('claude-stream-parser', () => {
     const events = parseStreamLines(line);
     expect(events).toEqual([{
       type: 'done',
-      result: { duration: 2393, sessionId: 'abc-123', error: false, inputTokens: 100, outputTokens: 500, cacheReadTokens: 1000, cacheCreateTokens: 200 },
+      result: { duration: 2393, sessionId: 'abc-123', error: false, inputTokens: 100, outputTokens: 500, cacheReadTokens: 1000, cacheCreateTokens: 200, model: 'claude-sonnet-4-6' },
     }]);
+  });
+
+  it('extracts model name from modelUsage key', () => {
+    const line = JSON.stringify({
+      type: 'result', subtype: 'success', is_error: false, duration_ms: 500,
+      session_id: 'sess-1', result: 'ok',
+      modelUsage: { 'claude-opus-4-7': { inputTokens: 200, outputTokens: 100, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 } },
+    });
+    const events = parseStreamLines(line);
+    expect(events).toHaveLength(1);
+    if (events[0]?.type !== 'done') throw new Error('expected done');
+    expect(events[0].result.model).toBe('claude-opus-4-7');
+    expect(events[0].result.inputTokens).toBe(200);
+    expect(events[0].result.outputTokens).toBe(100);
+  });
+
+  it('sums tokens across multiple models and uses first key as model', () => {
+    const line = JSON.stringify({
+      type: 'result', subtype: 'success', is_error: false, duration_ms: 1000,
+      session_id: 'sess-2', result: 'ok',
+      modelUsage: {
+        'claude-haiku-4-5': { inputTokens: 50, outputTokens: 25, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+        'claude-sonnet-4-6': { inputTokens: 100, outputTokens: 200, cacheReadInputTokens: 300, cacheCreationInputTokens: 0 },
+      },
+    });
+    const events = parseStreamLines(line);
+    if (events[0]?.type !== 'done') throw new Error('expected done');
+    expect(events[0].result.inputTokens).toBe(150);
+    expect(events[0].result.outputTokens).toBe(225);
+    expect(events[0].result.cacheReadTokens).toBe(300);
+    expect(typeof events[0].result.model).toBe('string');
   });
 
   it('extracts done with zero tokens when no modelUsage', () => {
@@ -61,7 +92,7 @@ describe('claude-stream-parser', () => {
     const events = parseStreamLines(line);
     expect(events).toEqual([{
       type: 'done',
-      result: { duration: 100, sessionId: 'abc', error: true, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreateTokens: 0 },
+      result: { duration: 100, sessionId: 'abc', error: true, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreateTokens: 0, model: null },
     }]);
   });
 
@@ -81,6 +112,7 @@ describe('claude-stream-parser', () => {
     const events = parseStreamLines(line);
     if (events[0]?.type !== 'done') throw new Error('expected done');
     expect(events[0].result.errorText).toBeUndefined();
+    expect(events[0].result.model).toBeNull();
   });
 
   it('does not attach errorText when result is empty string even on error', () => {
@@ -88,6 +120,7 @@ describe('claude-stream-parser', () => {
     const events = parseStreamLines(line);
     if (events[0]?.type !== 'done') throw new Error('expected done');
     expect(events[0].result.errorText).toBeUndefined();
+    expect(events[0].result.model).toBeNull();
   });
 
   it('ignores system/init/hook events', () => {

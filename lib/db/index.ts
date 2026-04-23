@@ -220,5 +220,13 @@ try {
   sqlite.exec('ALTER TABLE projects ADD COLUMN review_disabled INTEGER DEFAULT 0');
 } catch {}
 
+// Migrate: add cost_usd and model columns to jobs
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN cost_usd REAL');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN model TEXT');
+} catch {}
+
 export const db = drizzle(sqlite, { schema });
 export { schema };

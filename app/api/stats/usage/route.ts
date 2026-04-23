@@ -23,6 +23,17 @@ export interface ProjectUsageRow {
   lastRunAt: number | null;
 }
 
+export interface AgentUsageRow {
+  kind: string;
+  runs: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
+  totalTokens: number;
+  costUsd: number;
+}
+
 export interface UsageResponse {
   window: Window;
   generatedAt: number;
@@ -37,6 +48,7 @@ export interface UsageResponse {
     costUsd: number;
   };
   projects: ProjectUsageRow[];
+  agents: AgentUsageRow[];
 }
 
 export async function GET(request: NextRequest) {
@@ -49,6 +61,8 @@ export async function GET(request: NextRequest) {
   const jobs = listJobs().filter((j) => j.startedAt >= cutoff);
 
   const byProject = new Map<string, ProjectUsageRow>();
+  const byKind = new Map<string, AgentUsageRow>();
+
   for (const j of jobs) {
     const row = byProject.get(j.project) ?? {
       project: j.project,
@@ -70,6 +84,23 @@ export async function GET(request: NextRequest) {
       row.lastRunAt = j.startedAt;
     }
     byProject.set(j.project, row);
+
+    const agentRow = byKind.get(j.kind) ?? {
+      kind: j.kind,
+      runs: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreateTokens: 0,
+      totalTokens: 0,
+      costUsd: 0,
+    };
+    agentRow.runs += 1;
+    agentRow.inputTokens += j.inputTokens ?? 0;
+    agentRow.outputTokens += j.outputTokens ?? 0;
+    agentRow.cacheReadTokens += j.cacheReadTokens ?? 0;
+    agentRow.cacheCreateTokens += j.cacheCreateTokens ?? 0;
+    byKind.set(j.kind, agentRow);
   }
 
   const projects = Array.from(byProject.values()).map((r) => {
@@ -78,6 +109,13 @@ export async function GET(request: NextRequest) {
     return r;
   });
   projects.sort((a, b) => b.costUsd - a.costUsd);
+
+  const agents = Array.from(byKind.values()).map((r) => {
+    r.totalTokens = r.inputTokens + r.outputTokens + r.cacheReadTokens + r.cacheCreateTokens;
+    r.costUsd = costUsd(r);
+    return r;
+  });
+  agents.sort((a, b) => b.costUsd - a.costUsd);
 
   const totals = projects.reduce(
     (acc, r) => ({
@@ -98,6 +136,7 @@ export async function GET(request: NextRequest) {
     pricing: PRICE_PER_MTOK,
     totals,
     projects,
+    agents,
   };
   return NextResponse.json(body);
 }
