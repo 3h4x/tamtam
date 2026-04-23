@@ -465,4 +465,91 @@ describe('startMarkDod', () => {
     expect(ghArgs).toContain('99');
     expect(ghArgs).toContain('acme/widget');
   });
+
+  // ── PR context (findPrContext fallback) ──────────────────────────────────────
+
+  function makePushJob(contextMeta: string | null, overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'push-job-1',
+      project: 'myproj',
+      kind: 'push',
+      startedAt: Date.now() / 1000,
+      contextMeta,
+      ...overrides,
+    };
+  }
+
+  it('uses PR context when no issue-linked run job exists but a push job has prNumber+prRepo in contextMeta', async () => {
+    listJobsMock.mockReturnValue([
+      makePushJob(JSON.stringify({ prNumber: 99, prRepo: 'owner/repo' })),
+    ]);
+    execMock.mockResolvedValue(resp(1, '', 'gh failed'));
+    const r = await startMarkDod('myproj');
+    // Should attempt gh pr view, not gh issue view
+    const ghArgs: string[] = execMock.mock.calls[0][1];
+    expect(ghArgs).toContain('pr');
+    expect(ghArgs).toContain('view');
+    expect(ghArgs).toContain('99');
+    expect(r.ok).toBe(true); // non-fatal early exit on gh failure
+  });
+
+  it('returns 400 when push job contextMeta has no prNumber', async () => {
+    listJobsMock.mockReturnValue([
+      makePushJob(JSON.stringify({ prRepo: 'owner/repo' })),
+    ]);
+    const r = await startMarkDod('myproj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(400);
+  });
+
+  it('returns 400 when push job contextMeta is malformed JSON', async () => {
+    listJobsMock.mockReturnValue([
+      makePushJob('not-valid-json'),
+    ]);
+    const r = await startMarkDod('myproj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(400);
+  });
+
+  it('prefers issue context over PR context when both exist', async () => {
+    listJobsMock.mockReturnValue([
+      makeRunJob({ ghIssueNumber: 42, ghIssueRepo: 'owner/repo' }),
+      makePushJob(JSON.stringify({ prNumber: 99, prRepo: 'owner/repo' }), { startedAt: Date.now() / 1000 + 10 }),
+    ]);
+    execMock.mockResolvedValue(resp(1, '', 'fail'));
+    await startMarkDod('myproj');
+    // Should use gh issue view (not gh pr view)
+    const ghArgs: string[] = execMock.mock.calls[0][1];
+    expect(ghArgs).toContain('issue');
+    expect(ghArgs).toContain('42');
+  });
+
+  it('PR context happy path: uses gh pr view and gh pr edit to update the PR body', async () => {
+    listJobsMock.mockReturnValue([
+      makePushJob(JSON.stringify({ prNumber: 55, prRepo: 'owner/repo' })),
+    ]);
+    const prJson = JSON.stringify({ title: 'My PR', body: '- [ ] Implement feature\n- [ ] Add tests' });
+    const claudeJson = JSON.stringify({
+      results: [
+        { index: 1, text: 'Implement feature', verified: true, evidence: 'lib/feature.ts' },
+        { index: 2, text: 'Add tests', verified: false, evidence: 'not found' },
+      ],
+    });
+    execMock
+      .mockResolvedValueOnce(resp(0, prJson))     // gh pr view
+      .mockResolvedValueOnce(resp(0, claudeJson)) // claude verify
+      .mockResolvedValueOnce(resp(0, ''));        // gh pr edit
+    const r = await startMarkDod('myproj');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.changed).toBe(true);
+      expect(r.verified).toBe(1);
+      expect(r.issueNumber).toBe(55);
+    }
+    const editCall = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'gh' && args.includes('pr') && args.includes('edit'));
+    expect(editCall).toBeTruthy();
+    const viewCall = execMock.mock.calls[0];
+    expect(viewCall[1]).toContain('pr');
+    expect(viewCall[1]).toContain('view');
+  });
 });

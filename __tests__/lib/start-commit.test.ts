@@ -632,4 +632,89 @@ describe('startProjectCommit', () => {
     );
     expect(checkoutBCalls.length).toBe(0);
   });
+
+  it('creates a feat/release-* branch when prWorkflowEnabled=true and on default branch with no issue context', async () => {
+    vi.resetModules();
+    execMock = vi.fn();
+    setProjectPushResultMock = vi.fn();
+    listJobsMock = vi.fn().mockReturnValue([]); // no issue-linked jobs
+    createJobMock = vi.fn().mockImplementation((project: string, kind: string, pid: number, logPath: string) => ({
+      id: `${project}-${kind}-id`, project, kind, pid, logPath, prompt: null,
+      startedAt: 0, finishedAt: null, exitCode: null, seen: false,
+      durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+      contextMeta: null, userPrompt: null, ghIssueNumber: null,
+      ghIssueRepo: null, ghIssueTitle: null,
+    }));
+    markDoneMock = vi.fn().mockResolvedValue(undefined);
+    updateJobMock = vi.fn();
+
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+      clearProjectDataCache: vi.fn(),
+    }));
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue({ prWorkflowEnabled: true }),
+    }));
+    vi.doMock('@/lib/job-storage', () => ({
+      createJob: createJobMock,
+      markDone: markDoneMock,
+      updateJob: updateJobMock,
+      listJobs: listJobsMock,
+    }));
+    vi.doMock('@/lib/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/diff-context', () => ({
+      buildDiffContext: vi.fn().mockReturnValue({ context: '', truncated: false }),
+    }));
+
+    execMock
+      .mockResolvedValueOnce(resp(0, 'main\n'))             // git branch --show-current (on main)
+      .mockResolvedValueOnce(resp(0, 'refs/remotes/origin/main\n')) // detectMainBranch
+      .mockResolvedValueOnce(resp(0))                        // git checkout -b feat/release-*
+      .mockResolvedValueOnce(resp(0))                        // git add -A
+      .mockResolvedValueOnce(resp(0, 'M\tfile.ts'))          // git diff --cached --name-status
+      .mockResolvedValueOnce(resp(0, 'file.ts | 1 +'))       // generateCommitMessage: stat
+      .mockResolvedValueOnce(resp(0, '+x'))                  // generateCommitMessage: diff
+      .mockResolvedValueOnce(resp(0, 'feat: something'))    // generateCommitMessage: claude
+      .mockResolvedValueOnce(resp(0, 'ok'))                  // git commit
+      .mockResolvedValueOnce(resp(0, 'abc123'))              // git rev-parse
+    ;
+
+    const { startProjectCommit } = await import('@/lib/start-commit');
+    const r = await startProjectCommit('proj');
+    expect(r.ok).toBe(true);
+
+    const checkoutCall = execMock.mock.calls.find(
+      ([cmd, args]: any) => cmd === 'git' && args.includes('checkout') && args.includes('-b')
+    );
+    expect(checkoutCall).toBeTruthy();
+    const branchName: string = checkoutCall![1].find((a: string) => a.startsWith('feat/release-'));
+    expect(branchName).toMatch(/^feat\/release-\d{8}-\d{4}$/);
+  });
+
+  it('does NOT create a feature branch when prWorkflowEnabled=false and no issue context', async () => {
+    setupMocks(); // getProjectTestConfig returns null (not prWorkflowEnabled)
+    listJobsMock.mockReturnValue([]);
+    execMock
+      .mockResolvedValueOnce(resp(0))        // git add -A
+      .mockResolvedValueOnce(resp(0, ''))    // git diff --cached --name-status → empty
+      .mockResolvedValueOnce(resp(0, '0\n')) // git rev-list --count (nothing to push)
+    ;
+
+    const { startProjectCommit } = await import('@/lib/start-commit');
+    const r = await startProjectCommit('proj');
+    expect(r.ok).toBe(true);
+    const checkoutBCalls = execMock.mock.calls.filter(
+      ([cmd, args]: any) => cmd === 'git' && Array.isArray(args) && args.includes('checkout') && args.includes('-b')
+    );
+    expect(checkoutBCalls.length).toBe(0);
+  });
 });

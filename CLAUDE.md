@@ -127,8 +127,9 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - `/api/projects/by-project/[name]/review-pr` — Start AI review of a GitHub PR (POST)
 - `/api/projects/by-project/[name]/fix-ci` — Start AI CI fix run (POST)
 - `/api/projects/by-project/[name]/test` — Run project test command (POST)
-- `/api/projects/by-project/[name]/changes` — Uncommitted changes summary (GET); git pull with configurable strategy (POST: ff-only/merge/rebase)
+- `/api/projects/by-project/[name]/changes` — Uncommitted changes summary (GET, returns `defaultBranch` in addition to `branch`/`ahead`/`behind`/`files`); git pull with configurable strategy (POST: ff-only/merge/rebase)
 - `/api/projects/by-project/[name]/changes/diff` — Full git diff content (GET)
+- `/api/projects/by-project/[name]/checkout-default` — Switch working copy to the project's default branch; refuses if there are uncommitted changes (POST, returns `{ status: 'switched'|'already-on-branch', branch }`)
 - `/api/projects/by-project/[name]/push` — Push changes to git (POST)
 - `/api/projects/by-project/[name]/create-pr` — Push current branch + create GitHub PR via `gh pr create --fill` (POST); returns `{ url }` — refuses if on default branch
 - `/api/projects/by-project/[name]/release` — Trigger release pipeline (POST)
@@ -181,7 +182,7 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - Agent runs compose skill content into the prompt before sending to Claude CLI
 - `commit_style` setting injects a style guide into the commit-message generation prompt; `review_verdict_rules` setting drives LGTM/NEEDS ATTENTION/DO NOT SHIP decisions in code reviews — both configurable in Settings UI (Behavior tab)
 - File-based skills scanned from `skills/docs/skills/` and `data/skills/` (category subdirs, any `.md` file with optional YAML frontmatter: `title`, `description`)
-- DB-backed skills created via `/skills` page or API; a set of built-in agent skills (cto, security-review, dependency-check, blog, ci-monitor, release-ready, gha-audit, readme-sync, self-improve, senior-fullstack) is seeded from `lib/default-agent-skills.ts` on first `GET /api/skills`
+- DB-backed skills created via `/skills` page or API; a set of built-in agent skills (cto, security-review, dependency-check, blog, ci-monitor, release-ready, tests, gha-audit, readme-sync, self-improve, senior-fullstack) is seeded from `lib/default-agent-skills.ts` on first `GET /api/skills`
 - GitHub owner fallback configurable via `GITHUB_OWNER` env var or Settings UI
 - Issue-driven runs auto-checkout `fix/issue-<n>-<slug>` branch before Claude edits (via `issue-branch` route called from TerminalTab); in PR Workflow mode, after the PR is merged the working copy is returned to the default branch
 - Pipeline workflow mode per project: *Direct Branch* (commit+push to current branch) or *PR Workflow* (push to feature branch → DoD → optional auto-merge); configured via project Config tab; `pr_workflow_enabled` + `auto_pr_merge_enabled` flags on the `projects` table
