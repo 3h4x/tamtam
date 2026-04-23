@@ -37,7 +37,9 @@ function createTestDb() {
       gh_issue_number INTEGER,
       gh_issue_repo TEXT,
       gh_issue_title TEXT,
-      log_pruned INTEGER DEFAULT 0
+      log_pruned INTEGER DEFAULT 0,
+      cost_usd REAL,
+      model TEXT
     );
     CREATE TABLE IF NOT EXISTS gh_issues_cache (
       project TEXT PRIMARY KEY,
@@ -1009,7 +1011,7 @@ describe('probeJobStatus with pm2', () => {
     getJobStatusMock = vi.fn();
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/pm2-jobs', () => ({ getJobStatus: getJobStatusMock }));
+    vi.doMock('@/lib/pm2-jobs', () => ({ getJobStatus: getJobStatusMock, getJobPid: vi.fn().mockResolvedValue(null), deleteJob: vi.fn() }));
     vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
 
     const mod = await import('@/lib/job-storage');
@@ -1173,7 +1175,10 @@ describe('probeJobStatus with pm2', () => {
     expect(getJobStatusMock).not.toHaveBeenCalled();
   });
 
-  it("returns 'done' and marks exit -1 once a pid=0 job exceeds the spawn grace", async () => {
+  it("returns 'done' and marks exit -1 once a pid=0 job exceeds the spawn grace and pm2 forgot it", async () => {
+    // pm2 has no record of this job → truly dead.
+    getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
+
     const job: JobData = {
       id: 'job-spawn-grace-expired',
       project: 'proj',
@@ -1216,7 +1221,9 @@ describe('probeJobStatus with pm2', () => {
     expect(getJobStatusMock).not.toHaveBeenCalled();
   });
 
-  it("returns 'done' for a pid=-1 job that exceeds the spawn grace", async () => {
+  it("returns 'done' for a pid=-1 job that exceeds the spawn grace when pm2 forgot it", async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
+
     const job: JobData = {
       id: 'job-spawn-grace-neg-expired',
       project: 'proj',
@@ -1234,6 +1241,54 @@ describe('probeJobStatus with pm2', () => {
     expect(status).toBe('done');
     expect(job.exitCode).toBe(-1);
     expect(job.finishedAt).not.toBeNull();
+  });
+
+  // Regression: long-running release meta-job. pm2 `start` raced pm2 `jlist`
+  // and job.pid stayed 0. After the 30 s spawn grace, the old probe path
+  // unconditionally markDone'd the release with exit -1 — which then surfaced
+  // in the Terminal as red-text "# release finished — exit 0" followed by
+  // "exit -1" plus a wall of raw NDJSON from extractLogDetail.
+  it("pid=0 past grace but pm2 still reports online → stays running (no spurious markDone -1)", async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'running', exitCode: null });
+
+    const job: JobData = {
+      id: 'release-long-running',
+      project: 'proj',
+      kind: 'release',
+      prompt: null,
+      pid: 0,
+      logPath: null,
+      startedAt: Date.now() / 1000 - 120,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('running');
+    expect(job.finishedAt).toBeNull();
+    expect(job.exitCode).toBeNull();
+  });
+
+  it('pid=0 past grace and pm2 reports done 0 → markDone(0), not -1', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
+
+    const job: JobData = {
+      id: 'release-clean-finish',
+      project: 'proj',
+      kind: 'release',
+      prompt: null,
+      pid: 0,
+      logPath: null,
+      startedAt: Date.now() / 1000 - 120,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('done');
+    expect(job.exitCode).toBe(0);
   });
 });
 
@@ -2667,6 +2722,48 @@ describe('markDone – metadata extraction skipped for release kind', () => {
 
     expect(job.sessionId).toBe('ses-abc');
     expect(job.durationMs).toBe(1234);
+  });
+
+  it('populates model and costUsd from modelUsage for non-release kinds', async () => {
+    const logFile = join(tempDir, 'run-cost.log');
+    writeFileSync(logFile, resultLine + '\n');
+    const job = makeJob('run', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(job.model).toBe('claude-sonnet');
+    expect(typeof job.costUsd).toBe('number');
+    expect(job.costUsd).toBeGreaterThan(0);
+  });
+
+  it('persists costUsd and model to DB after markDone', async () => {
+    const logFile = join(tempDir, 'run-db.log');
+    writeFileSync(logFile, resultLine + '\n');
+    const job = makeJob('run', logFile);
+    testDb.db.insert(schema.jobs).values({
+      id: job.id, project: job.project, kind: job.kind,
+      prompt: null, pid: job.pid, logPath: logFile,
+      startedAt: job.startedAt, finishedAt: null, exitCode: null,
+      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+    } as any).run();
+
+    await markDoneFn(job, 0);
+
+    const row = testDb.db.select().from(schema.jobs).all().find(r => r.id === job.id);
+    expect(row?.model).toBe('claude-sonnet');
+    expect(row?.costUsd).toBeGreaterThan(0);
+  });
+
+  it('does NOT populate model or costUsd for release kind', async () => {
+    const logFile = join(tempDir, 'release-cost.log');
+    writeFileSync(logFile, resultLine + '\n');
+    const job = makeJob('release', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(job.model).toBeUndefined();
+    expect(job.costUsd).toBeUndefined();
   });
 });
 

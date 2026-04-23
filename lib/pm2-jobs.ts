@@ -105,3 +105,9 @@ async function getPm2Pid(jobId: string): Promise<number | null> {
   const info = await getPm2Info(jobId);
   return info?.pid ?? null;
 }
+
+// Exposed so probe/backfill callers can refresh a stale pid without needing
+// to parse pm2 jlist themselves.
+export async function getJobPid(jobId: string): Promise<number | null> {
+  return getPm2Pid(jobId);
+}

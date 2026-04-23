@@ -34,7 +34,9 @@ function createTestDb() {
       gh_issue_number INTEGER,
       gh_issue_repo TEXT,
       gh_issue_title TEXT,
-      log_pruned INTEGER DEFAULT 0
+      log_pruned INTEGER DEFAULT 0,
+      cost_usd REAL,
+      model TEXT
     );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };

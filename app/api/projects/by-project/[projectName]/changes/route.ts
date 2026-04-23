@@ -152,6 +152,29 @@ export async function GET(
     defaultBranch = mainR.exitCode === 0 ? 'main' : 'master';
   }
 
+  // Detect "stale feature branch": current branch is not the default AND
+  // every commit on it is already reachable from origin/<default>. Indicates
+  // the PR was merged (manually or otherwise) and the local working copy is
+  // stranded on a dead feature branch. A lightweight fetch is required first
+  // so the local origin/<default> ref reflects GitHub's current HEAD.
+  let branchMerged = false;
+  if (branchName && branchName !== defaultBranch) {
+    await exec(
+      'git',
+      ['-C', projPath, 'fetch', '--quiet', 'origin', defaultBranch],
+      { timeout: 10000 },
+    );
+    const aheadR = await exec(
+      'git',
+      ['-C', projPath, 'rev-list', '--count', `origin/${defaultBranch}..HEAD`],
+      { timeout: 5000 },
+    );
+    if (aheadR.exitCode === 0) {
+      const commitsAhead = parseInt(aheadR.stdout.trim(), 10);
+      branchMerged = Number.isFinite(commitsAhead) && commitsAhead === 0;
+    }
+  }
+
   return NextResponse.json({
     files,
     totalFiles: files.length,
@@ -159,6 +182,7 @@ export async function GET(
     totalDeletions,
     branch: branchName,
     defaultBranch,
+    branchMerged,
     behind,
     ahead,
   });

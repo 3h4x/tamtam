@@ -24,6 +24,14 @@ function formatTokens(job: JobInfo): string | null {
   return `${total} tok`
 }
 
+function formatCost(job: JobInfo): string | null {
+  const c = job.cost_usd
+  if (c == null || c === 0) return null
+  if (c < 0.0001) return '<$0.0001'
+  if (c < 0.01) return `$${c.toFixed(4)}`
+  return `$${c.toFixed(2)}`
+}
+
 function KindBadge({ kind }: { kind: string }) {
   const colors: Record<string, string> = {
     run: 'bg-accent/10 text-accent',
@@ -155,6 +163,7 @@ export function JobsPage() {
               <th className="px-4 py-3">Started</th>
               <th className="px-4 py-3">Duration</th>
               <th className="px-4 py-3">Tokens</th>
+              <th className="px-4 py-3">Cost</th>
             </tr>
           </thead>
           <tbody>
@@ -163,6 +172,7 @@ export function JobsPage() {
               const isFailed = !isRunning && job.exit_code !== 0
               const promptText = job.user_prompt ?? job.prompt ?? null
               const tokens = formatTokens(job)
+              const cost = formatCost(job)
               return (
                 <tr
                   key={job.id}
@@ -195,6 +205,9 @@ export function JobsPage() {
                   </td>
                   <td className="px-4 py-3 text-text-tertiary text-xs whitespace-nowrap">
                     {tokens ?? '—'}
+                  </td>
+                  <td className="px-4 py-3 text-text-tertiary text-xs whitespace-nowrap tabular-nums">
+                    {cost ?? '—'}
                   </td>
                 </tr>
               )

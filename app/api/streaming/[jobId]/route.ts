@@ -125,10 +125,18 @@ export async function GET(
           if (wrapperOnly) {
             return 'claude CLI exited immediately without producing any output. Usually one of: (1) invalid --resume session id, (2) rate-limited (5-hour window), (3) auth expired, or (4) a concurrent claude run in the same project holding the session. Try again, or start a new session without --resume.';
           }
+          // Match parseStreamLines' prefix stripping — aggregate release logs
+          // emit `<ISO-timestamp>: <json>` per line, and without this a JSON.parse
+          // of the raw line fails and the entire stream-json payload gets
+          // classified as "non-JSON" and surfaced as error detail (red text in
+          // the terminal).
+          const TS_PREFIX_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?:\s/;
           const nonJson: string[] = [];
           for (const line of lines) {
             if (line.startsWith('[tamtam]')) continue; // drop wrapper chrome from detail
-            try { JSON.parse(line); } catch { nonJson.push(line); }
+            const tsMatch = line.match(TS_PREFIX_RE);
+            const body = tsMatch ? line.slice(tsMatch[0].length) : line;
+            try { JSON.parse(body); } catch { nonJson.push(line); }
           }
           if (nonJson.length > 0) return nonJson.slice(-20).join('\n');
           // Only JSON in log, no `"type":"result"` — Claude was streaming tokens then died mid-response

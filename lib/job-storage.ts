@@ -4,6 +4,7 @@ import { db, schema } from './db';
 import { getJobStatus } from './pm2-jobs';
 import { markReviewed } from './git-utils';
 import { parseStreamLines } from './claude-stream-parser';
+import { costUsd } from './usage-pricing';
 
 export interface JobData {
   id: string;
@@ -29,6 +30,8 @@ export interface JobData {
   ghIssueRepo?: string | null;
   ghIssueTitle?: string | null;
   logPruned?: boolean | null;
+  costUsd?: number | null;
+  model?: string | null;
 }
 
 const jobsCache = new Map<string, JobData>();
@@ -63,6 +66,8 @@ function loadFromDb(): void {
         ghIssueRepo: row.ghIssueRepo ?? null,
         ghIssueTitle: row.ghIssueTitle ?? null,
         logPruned: row.logPruned ?? false,
+        costUsd: row.costUsd ?? null,
+        model: row.model ?? null,
       });
     }
     loaded = true;
@@ -97,6 +102,8 @@ function saveToDb(job: JobData): void {
         ghIssueRepo: job.ghIssueRepo ?? null,
         ghIssueTitle: job.ghIssueTitle ?? null,
         logPruned: job.logPruned ?? false,
+        costUsd: job.costUsd ?? null,
+        model: job.model ?? null,
       })
       .onConflictDoUpdate({
         target: schema.jobs.id,
@@ -115,6 +122,8 @@ function saveToDb(job: JobData): void {
           contextMeta: job.contextMeta,
           userPrompt: job.userPrompt,
           logPruned: job.logPruned ?? false,
+          costUsd: job.costUsd ?? null,
+          model: job.model ?? null,
         },
       })
       .run();
@@ -145,6 +154,13 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
     job.cacheReadTokens = doneEvent.result.cacheReadTokens;
     job.cacheCreateTokens = doneEvent.result.cacheCreateTokens;
     job.sessionId = doneEvent.result.sessionId;
+    job.model = doneEvent.result.model ?? null;
+    job.costUsd = costUsd({
+      inputTokens: job.inputTokens,
+      outputTokens: job.outputTokens,
+      cacheReadTokens: job.cacheReadTokens,
+      cacheCreateTokens: job.cacheCreateTokens,
+    });
     // Claude completed successfully — override pm2's exit code. Claude CLI
     // frequently hangs for a few seconds after flushing its final result
     // event (flushing stdio, tearing down child processes) and gets killed
@@ -812,6 +828,8 @@ export function jobToDict(job: JobData): Record<string, unknown> {
     session_id: job.sessionId,
     context_meta: job.contextMeta ?? null,
     user_prompt: job.userPrompt ?? null,
+    cost_usd: job.costUsd ?? null,
+    model: job.model ?? null,
   };
   d.log_pruned = job.logPruned ?? false;
   const verdict = getVerdict(job);
@@ -842,6 +860,34 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
   if (job.pid <= 0) {
     const ageSec = Date.now() / 1000 - job.startedAt;
     if (ageSec < PID_SPAWN_GRACE_SEC) return 'running';
+    // Non-PM2 kinds (test/action) have no name to look up in pm2 — dead means dead.
+    if (job.kind === 'test' || job.kind === 'action') {
+      await markDone(job, -1);
+      return 'done';
+    }
+    // PM2-managed kinds: a race between `pm2 start` returning and `pm2 jlist`
+    // reflecting the new process can leave job.pid=0 even though pm2 knows
+    // about the job by name. Ask pm2 directly before declaring it dead —
+    // otherwise we incorrectly markDone(-1) long-running jobs (classic
+    // symptom: release jobs ending with exit_code=-1 despite the pipeline
+    // succeeding and writing `# release finished — exit 0`).
+    const { status, exitCode } = await getJobStatus(job.id);
+    if (status === 'running') {
+      // Opportunistically backfill pid so subsequent probes skip this path.
+      try {
+        const realPid = await (await import('./pm2-jobs')).getJobPid(job.id);
+        if (realPid && realPid > 0) {
+          job.pid = realPid;
+          saveToDb(job);
+        }
+      } catch {}
+      return 'running';
+    }
+    if (status === 'done') {
+      await markDone(job, exitCode ?? -1);
+      return 'done';
+    }
+    // status === 'unknown' — pm2 truly has no record of the job. It's dead.
     await markDone(job, -1);
     return 'done';
   }
@@ -965,6 +1011,9 @@ export function getJob(jobId: string): JobData | null {
     ghIssueNumber: row.ghIssueNumber ?? null,
     ghIssueRepo: row.ghIssueRepo ?? null,
     ghIssueTitle: row.ghIssueTitle ?? null,
+    logPruned: row.logPruned ?? false,
+    costUsd: row.costUsd ?? null,
+    model: row.model ?? null,
   };
   jobsCache.set(jobId, job);
   return job;

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { fetchChanges, fetchChangeDiff, pullProject, pushProject, PullDivergedError, checkoutDefaultBranch } from '@/lib/client-api'
 import type { ChangeFile, ChangeStatus, ChangesResponse } from '@/lib/client-api'
@@ -161,6 +161,19 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
     load('initial')
   }, [load])
 
+  // Auto-switch to the default branch when TamTam detects the current feature
+  // branch is merged upstream AND the working copy is clean. Avoids stranding
+  // the user on a dead branch (fix/issue-N-...) after a PR is merged.
+  const autoSwitchFiredRef = useRef(false)
+  useEffect(() => {
+    if (!data || autoSwitchFiredRef.current) return
+    if (!data.branchMerged) return
+    if (data.files.length > 0) return
+    if (!data.branch || !data.defaultBranch || data.branch === data.defaultBranch) return
+    autoSwitchFiredRef.current = true
+    doSwitchDefault()
+  }, [data])
+
   const toggleExpand = async (file: ChangeFile) => {
     const key = file.filename
     const prev = diffs[key]
@@ -210,7 +223,7 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
         {data?.branch && (
           <p className="text-xs text-text-tertiary mt-1">on branch <code className="font-mono">{data.branch}</code></p>
         )}
-        {onNonDefault && (data?.ahead ?? 0) === 0 && (
+        {onNonDefault && (
           <div className="mt-3 flex flex-col items-center gap-2">
             <button
               className="px-4 py-1.5 text-sm border border-status-info/60 bg-status-info/10 text-status-info rounded-md hover:bg-status-info/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
@@ -220,6 +233,9 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
             >
               {switching ? 'Switching…' : `Switch to ${data!.defaultBranch}`}
             </button>
+            {data?.branchMerged && (
+              <p className="text-xs text-text-tertiary">Feature branch is already merged into <code className="font-mono">{data.defaultBranch}</code>.</p>
+            )}
             {switchError && <p className="text-xs text-status-error">{switchError}</p>}
           </div>
         )}
@@ -260,6 +276,19 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
           <div className="flex items-center gap-2 text-sm">
             <span className="text-text-secondary text-xs uppercase tracking-wider font-medium">Branch</span>
             <code className="font-mono text-xs bg-bg-tertiary px-1.5 py-0.5 rounded text-text-primary">{data.branch}</code>
+            {data.defaultBranch && data.branch !== data.defaultBranch && (
+              <button
+                className="px-2 py-1 text-xs border border-status-info/60 bg-status-info/10 text-status-info rounded-md hover:bg-status-info/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                onClick={doSwitchDefault}
+                disabled={switching || data.totalFiles > 0}
+                title={data.totalFiles > 0
+                  ? 'Commit or stash uncommitted changes before switching'
+                  : `git checkout ${data.defaultBranch}`}
+              >
+                {switching ? 'Switching…' : `Switch to ${data.defaultBranch}`}
+              </button>
+            )}
+            {switchError && <span className="text-xs text-status-error">{switchError}</span>}
           </div>
         )}
         {data.ahead > 0 && (
