@@ -230,11 +230,8 @@ export async function fetchProjectData(): Promise<{
     ghStatusLookup(projects).catch(() => ({} as Record<string, GhStatusEntry>)),
   ]);
 
-  const changesMap: Record<string, number> = {};
-  for (const [sid, val] of changesResults) changesMap[sid] = val;
-
-  const infoMap: Record<string, LaunchctlInfo> = {};
-  for (const [sid, val] of infoResults) infoMap[sid] = val;
+  const changesMap = Object.fromEntries(changesResults) as Record<string, number>;
+  const infoMap = Object.fromEntries(infoResults) as Record<string, LaunchctlInfo>;
 
   // Group by project name
   const projectTasks: Record<string, Task[]> = {};
