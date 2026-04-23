@@ -224,4 +224,95 @@ describe('startPrReview', () => {
     expect(savedJob.pid).toBe(9999);
     expect(savedJob.logPath).toMatch(/\.log$/);
   });
+
+  it('returns 400 when gh pr diff exits non-zero with no stdout', async () => {
+    execMock.mockResolvedValueOnce(resp(1, '', 'gh: not found'));
+    const r = await startPrReview('proj', 5, 'Title', 'feat/5', 'main');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(400);
+      expect(r.detail).toContain('No diff found for PR #5');
+    }
+  });
+});
+
+describe('loadReviewPrompt — skill file handling', () => {
+  let startPrReview: typeof import('@/lib/start-pr-review').startPrReview;
+  let execMock: ReturnType<typeof vi.fn>;
+  let startJobMock: ReturnType<typeof vi.fn>;
+  let existsSyncMock: ReturnType<typeof vi.fn>;
+  let readFileSyncMock: ReturnType<typeof vi.fn>;
+
+  function resp(exitCode: number, stdout = '', stderr = '') {
+    return Promise.resolve({ exitCode, stdout, stderr });
+  }
+
+  async function setup(fileContent: string | null) {
+    vi.resetModules();
+    execMock = vi.fn().mockResolvedValue(resp(0, 'diff --git a/foo.ts b/foo.ts'));
+    startJobMock = vi.fn().mockResolvedValue(1234);
+    existsSyncMock = vi.fn().mockReturnValue(fileContent !== null);
+    readFileSyncMock = vi.fn().mockReturnValue(fileContent ?? '');
+
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/proj'),
+    }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+    }));
+    vi.doMock('@/lib/job-storage', () => ({
+      createJob: vi.fn().mockImplementation((project: string, kind: string) => ({
+        id: `${project}-${kind}-id`, project, kind, pid: 0, logPath: '',
+        prompt: null, startedAt: 0, finishedAt: null, exitCode: null, seen: false,
+      })),
+      updateJob: vi.fn(),
+      listJobs: vi.fn().mockReturnValue([]),
+      probeJobStatus: vi.fn().mockResolvedValue('done'),
+    }));
+    vi.doMock('@/lib/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/config', () => ({
+      getSettings: () => ({ review_verdict_rules: 'VERDICT_RULES' }),
+      withBasePrompt: (s: string) => s,
+      getPermissionModeFlag: () => '',
+    }));
+    vi.doMock('@/lib/skills', () => ({ CODE_REVIEWER_SKILL: '/skill/code-reviewer.md' }));
+    vi.doMock('fs', () => ({ existsSync: existsSyncMock, readFileSync: readFileSyncMock }));
+
+    ({ startPrReview } = await import('@/lib/start-pr-review'));
+  }
+
+  afterEach(() => vi.resetModules());
+
+  it('includes skill file content in the prompt when the file exists (no frontmatter)', async () => {
+    await setup('This is the review skill content.');
+    await startPrReview('proj', 1, 'Title', 'feat/1', 'main');
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('This is the review skill content.');
+  });
+
+  it('strips YAML frontmatter when skill file starts with ---', async () => {
+    await setup('---\ntitle: Code Reviewer\ndescription: Reviews code\n---\n\nActual skill body here.');
+    await startPrReview('proj', 1, 'Title', 'feat/1', 'main');
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('Actual skill body here.');
+    expect(prompt).not.toContain('title: Code Reviewer');
+    expect(prompt).not.toContain('description: Reviews code');
+  });
+
+  it('keeps the full content when file starts with --- but has no closing ---', async () => {
+    const content = '---\ntitle: Incomplete frontmatter\nno closing fence';
+    await setup(content);
+    await startPrReview('proj', 1, 'Title', 'feat/1', 'main');
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('---\ntitle: Incomplete frontmatter\nno closing fence');
+  });
+
+  it('produces no skill content in prompt when file does not exist', async () => {
+    await setup(null);
+    await startPrReview('proj', 1, 'Title', 'feat/1', 'main');
+    const prompt: string = startJobMock.mock.calls[0][2];
+    // Prompt starts with the static template (no skill preamble before the ---\n\n separator)
+    expect(prompt.trimStart()).toMatch(/^---\s*\n/);
+  });
 });
