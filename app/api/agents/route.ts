@@ -57,8 +57,10 @@ export async function POST(request: NextRequest) {
   db.insert(schema.agents).values(agent).run();
   clearAgentsCache();
 
-  // Install schedule if configured (uses pm2 or launchctl based on runner)
-  if (agent.schedule && agent.prompt && agent.enabled) {
+  // Install schedule if configured (uses pm2 or launchctl based on runner).
+  // Runs only need either a prompt or skills to produce meaningful output.
+  const hasSkills = (skillIds || []).length > 0;
+  if (agent.schedule && agent.enabled && (agent.prompt || hasSkills)) {
     try {
       await installAgentSchedule(id, agent.schedule, agent.prompt, agent.runner, agent.project, agent.name);
     } catch (e: unknown) {

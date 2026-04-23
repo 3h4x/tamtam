@@ -124,7 +124,7 @@ describe('POST /api/projects/by-project/[projectName]/checkout-default', () => {
     expect(data.branch).toBe('master');
 
     const checkoutCall = execMock.mock.calls.find(
-      ([cmd, args]: [string, string[]]) => cmd === 'git' && args.includes('checkout') && args.includes('master'),
+      (call) => call[0] === 'git' && Array.isArray(call[1]) && call[1].includes('checkout') && call[1].includes('master'),
     );
     expect(checkoutCall).toBeTruthy();
   });

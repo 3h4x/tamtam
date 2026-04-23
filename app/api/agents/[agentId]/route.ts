@@ -41,7 +41,8 @@ export async function PATCH(
   // Update schedule (uses pm2 or launchctl based on runner)
   if (agent) {
     try {
-      if (agent.schedule && agent.prompt && agent.enabled) {
+      const hasSkills = JSON.parse(agent.skillIds || '[]').length > 0;
+      if (agent.schedule && agent.enabled && (agent.prompt || hasSkills)) {
         await installAgentSchedule(agentId, agent.schedule, agent.prompt, agent.runner, agent.project, agent.name);
       } else {
         await uninstallAgentSchedule(agentId, agent.runner, agent.project, agent.name);

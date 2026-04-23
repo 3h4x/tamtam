@@ -122,7 +122,7 @@ function SkillRow({ skill, checked, onToggle, onEdit }: SkillRowProps) {
       {/* Edit */}
       {onEdit ? (
         <button
-          className="px-2 py-1 text-xs border border-border rounded text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 transition-opacity"
+          className="px-2 py-1 text-xs border border-border rounded text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary cursor-pointer"
           onClick={e => { e.preventDefault(); e.stopPropagation(); onEdit() }}
         >
           Edit
