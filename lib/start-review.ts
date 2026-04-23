@@ -64,6 +64,7 @@ export async function startProjectReview(projectName: string): Promise<StartRevi
   }
 
   const { claudeBin, logDir } = getImproveConfig();
+  const { default_model } = getSettings();
   const projPath = resolveProjectPath(projectName);
   if (!projPath) {
     return { ok: false, status: 404, detail: `project '${projectName}' not found` };
@@ -87,7 +88,7 @@ export async function startProjectReview(projectName: string): Promise<StartRevi
   try {
     const pid = await startJob(
       job.id,
-      `${claudeBin} --print --output-format stream-json --verbose --include-partial-messages ${getPermissionModeFlag()}`,
+      `${claudeBin} --print --output-format stream-json --verbose --include-partial-messages --model ${default_model} ${getPermissionModeFlag()}`,
       prompt,
       projPath
     );

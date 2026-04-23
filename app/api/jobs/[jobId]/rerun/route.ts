@@ -5,7 +5,7 @@ import { getImproveConfig } from '@/lib/scheduling';
 import { resolveProjectPath } from '@/lib/project-data';
 import { getJob, createJob, updateJob } from '@/lib/job-storage';
 import { startJob } from '@/lib/pm2-jobs';
-import { getPermissionModeFlag } from '@/lib/config';
+import { getPermissionModeFlag, getSettings } from '@/lib/config';
 import { errMsg } from '@/lib/types';
 
 export async function POST(
@@ -22,6 +22,7 @@ export async function POST(
   const projectName = sourceJob.project;
   const jobKind = sourceJob.kind;
   const { claudeBin, logDir } = getImproveConfig();
+  const { default_model } = getSettings();
 
   const projPath = resolveProjectPath(projectName);
   if (!projPath) {
@@ -54,7 +55,7 @@ export async function POST(
   try {
     const pid = await startJob(
       job.id,
-      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()}`,
+      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${default_model} ${getPermissionModeFlag()}`,
       prompt,
       projPath
     );

@@ -315,63 +315,6 @@ export async function pushProject(projectName: string): Promise<{ status: string
   return response.json()
 }
 
-// Smart Push API
-export interface PushFile {
-  status: string
-  filename: string
-  stats: string
-}
-
-export interface PushPreviewResponse {
-  files: PushFile[]
-  summary: string
-}
-
-export async function fetchPushPreview(projectName: string): Promise<PushPreviewResponse> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/push/preview`)
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}))
-    throw new Error(data.detail || `Failed to fetch push preview: ${response.statusText}`)
-  }
-  return response.json()
-}
-
-export interface PushGenerateResponse {
-  options: string[]
-  model: string
-  error?: string
-}
-
-export async function generateCommitMessages(projectName: string): Promise<PushGenerateResponse> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/push/generate`, {
-    method: 'POST',
-  })
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}))
-    throw new Error(data.detail || `Failed to generate commit messages: ${response.statusText}`)
-  }
-  return response.json()
-}
-
-export interface PushExecuteResponse {
-  status: string
-  message: string
-  commit_sha: string
-}
-
-export async function executeSmartPush(projectName: string, message: string): Promise<PushExecuteResponse> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/push/execute`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message }),
-  })
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}))
-    throw new Error(data.detail || `Failed to push: ${response.statusText}`)
-  }
-  return response.json()
-}
-
 // Changes API
 export type ChangeStatus = 'M' | 'A' | 'D' | 'R' | 'C' | 'U' | 'T'
 
@@ -549,36 +492,6 @@ export async function fetchJobs(project?: string): Promise<{ jobs: JobInfo[] }> 
   const response = await fetch(url)
   if (!response.ok) {
     throw new Error(`Failed to fetch jobs: ${response.statusText}`)
-  }
-  return response.json()
-}
-
-export async function fetchJob(jobId: string): Promise<JobInfo> {
-  const response = await fetch(`${JOBS_BASE}/${jobId}`)
-  if (!response.ok) {
-    throw new Error(`Failed to fetch job: ${response.statusText}`)
-  }
-  return response.json()
-}
-
-export async function fixFromJob(jobId: string): Promise<{ status: string; job_id: string; pid: number }> {
-  const response = await fetch(`${JOBS_BASE}/${jobId}/fix`, {
-    method: 'POST',
-  })
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}))
-    throw new Error(data.detail || `Failed to start fix: ${response.statusText}`)
-  }
-  return response.json()
-}
-
-export async function rerunJob(jobId: string): Promise<{ status: string; job_id: string; pid: number }> {
-  const response = await fetch(`${JOBS_BASE}/${jobId}/rerun`, {
-    method: 'POST',
-  })
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}))
-    throw new Error(data.detail || `Failed to rerun job: ${response.statusText}`)
   }
   return response.json()
 }

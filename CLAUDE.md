@@ -60,6 +60,7 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `pnpm build` — production build
 - `pnpm start` — start production server via PM2
 - `pnpm test` — run unit tests
+- `pnpm test:watch` — run vitest in watch mode
 - `pnpm test:e2e` — run Playwright e2e tests (requires dev server running)
 - `pnpm lint` — ESLint on app, components, lib, hooks
 - `pnpm type-check` — TypeScript check
@@ -128,7 +129,7 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - `/api/projects/by-project/[name]/test` — Run project test command (POST)
 - `/api/projects/by-project/[name]/changes` — Uncommitted changes summary (GET); git pull with configurable strategy (POST: ff-only/merge/rebase)
 - `/api/projects/by-project/[name]/changes/diff` — Full git diff content (GET)
-- `/api/projects/by-project/[name]/push` — Push changes to git (POST); sub-routes: `/preview`, `/execute`, `/generate`
+- `/api/projects/by-project/[name]/push` — Push changes to git (POST)
 - `/api/projects/by-project/[name]/create-pr` — Push current branch + create GitHub PR via `gh pr create --fill` (POST); returns `{ url }` — refuses if on default branch
 - `/api/projects/by-project/[name]/release` — Trigger release pipeline (POST)
 - `/api/projects/by-project/[name]/issues` — GitHub PRs and issues for the project (GET, POST to force refresh); merge POST switches working copy to default branch after merge

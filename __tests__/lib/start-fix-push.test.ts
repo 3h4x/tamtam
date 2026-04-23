@@ -70,7 +70,7 @@ describe('startFixPush', () => {
     }));
     vi.doMock('@/lib/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock }));
     vi.doMock('@/lib/pm2-jobs', () => ({ startJob: startJobMock }));
-    vi.doMock('@/lib/config', () => ({ getPermissionModeFlag: vi.fn().mockReturnValue('--dangerously-skip-permissions') }));
+    vi.doMock('@/lib/config', () => ({ getPermissionModeFlag: vi.fn().mockReturnValue('--dangerously-skip-permissions'), getSettings: vi.fn().mockReturnValue({ default_model: 'sonnet' }) }));
 
     ({ startFixPush } = await import('@/lib/start-fix-push'));
   });
@@ -83,7 +83,7 @@ describe('startFixPush', () => {
     vi.doMock('@/lib/scheduling', () => ({ getImproveConfig: () => ({ logDir: '/tmp', claudeBin: 'claude', projects: {} }) }));
     vi.doMock('@/lib/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock }));
     vi.doMock('@/lib/pm2-jobs', () => ({ startJob: startJobMock }));
-    vi.doMock('@/lib/config', () => ({ getPermissionModeFlag: vi.fn().mockReturnValue('') }));
+    vi.doMock('@/lib/config', () => ({ getPermissionModeFlag: vi.fn().mockReturnValue(''), getSettings: vi.fn().mockReturnValue({ default_model: 'sonnet' }) }));
     const { startFixPush: fn } = await import('@/lib/start-fix-push');
 
     const r = await fn('missing-proj', 'pre-commit hook failed');

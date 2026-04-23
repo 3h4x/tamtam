@@ -5,7 +5,7 @@ import { mkdirSync, openSync, closeSync } from 'fs';
 import { getImproveConfig } from './scheduling';
 import { resolveProjectPath } from './project-data';
 import { getJob, createJob, readLog, probeJobStatus, updateJob, markDone } from './job-storage';
-import { getPermissionModeFlag } from './config';
+import { getPermissionModeFlag, getSettings } from './config';
 import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 
 export type StartFixResult =
@@ -53,11 +53,13 @@ Do not commit — just make the code changes.
   job.logPath = logPath;
   if (resumeSessionId) job.sessionId = resumeSessionId;
 
+  const { default_model } = getSettings();
   const claudeArgs = [
     '--print',
     '--output-format', 'stream-json',
     '--include-partial-messages',
     '--verbose',
+    '--model', default_model,
     ...getPermissionModeFlag().split(' '),
   ];
   if (resumeSessionId) claudeArgs.push('--resume', resumeSessionId);
