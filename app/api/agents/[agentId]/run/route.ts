@@ -47,9 +47,10 @@ export async function POST(
   }
 
   const body = await request.json();
-  const taskPrompt = body.prompt?.trim();
-  if (!taskPrompt) {
-    return NextResponse.json({ detail: 'prompt is required' }, { status: 400 });
+  const taskPrompt = body.prompt?.trim() ?? '';
+  const hasSkills = JSON.parse(agent.skillIds || '[]').length > 0;
+  if (!taskPrompt && !hasSkills) {
+    return NextResponse.json({ detail: 'agent has no prompt and no skills to run' }, { status: 400 });
   }
 
   const projPath = resolveProjectPath(agent.project);
@@ -113,7 +114,9 @@ export async function POST(
   const cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()} ${modelFlag}`;
 
   const fullPrompt = withBasePrompt(
-    systemPrompt ? `${systemPrompt}\n\n---\n\n${taskPrompt}` : taskPrompt
+    systemPrompt && taskPrompt
+      ? `${systemPrompt}\n\n---\n\n${taskPrompt}`
+      : (systemPrompt || taskPrompt)
   );
 
   const job = createJob(agent.project, `agent:${agent.name}`, 0, '', taskPrompt, contextMeta, taskPrompt);

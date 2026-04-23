@@ -23,7 +23,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     model: 'sonnet',
     schedule: '24h',
     runner: 'pm2',
-    prompt: 'Execute your role for this project.',
+    prompt: '',
     skillIds: ['agent-security-review'],
   },
   {
@@ -32,7 +32,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     model: 'sonnet',
     schedule: '24h',
     runner: 'pm2',
-    prompt: 'Execute your role for this project.',
+    prompt: '',
     skillIds: ['agent-dependency-check'],
   },
   {
@@ -41,7 +41,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     model: 'sonnet',
     schedule: '30m',
     runner: 'pm2',
-    prompt: 'Execute your role for this project.',
+    prompt: '',
     skillIds: ['agent-ci-monitor'],
   },
   {
@@ -50,7 +50,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     model: 'sonnet',
     schedule: '24h',
     runner: 'pm2',
-    prompt: 'Execute your role for this project.',
+    prompt: '',
     skillIds: ['agent-release-ready'],
   },
   {
@@ -59,7 +59,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     model: 'sonnet',
     schedule: '24h',
     runner: 'pm2',
-    prompt: 'Execute your role for this project.',
+    prompt: '',
     skillIds: ['agent-tests'],
   },
   {
@@ -68,7 +68,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     model: 'opus',
     schedule: '24h',
     runner: 'pm2',
-    prompt: 'Execute your role for this project.',
+    prompt: '',
     skillIds: ['agent-cto'],
   },
   {
@@ -77,7 +77,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     model: 'sonnet',
     schedule: '24h',
     runner: 'pm2',
-    prompt: 'Execute your role for this project.',
+    prompt: '',
     skillIds: ['agent-gha-audit'],
   },
   {
@@ -86,7 +86,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     model: 'sonnet',
     schedule: '24h',
     runner: 'pm2',
-    prompt: 'Execute your role for this project.',
+    prompt: '',
     skillIds: ['agent-readme-sync'],
   },
 ]
@@ -662,15 +662,26 @@ function AgentModal({
 
           {/* Right column: prompt */}
           <div className="flex-1 px-6 py-5 flex flex-col" style={{ maxHeight: '70vh' }}>
-            <label htmlFor="agent-prompt" className="block mb-1.5 text-sm font-medium text-text-primary">Prompt</label>
+            <label htmlFor="agent-prompt" className="block mb-1.5 text-sm font-medium text-text-primary">
+              Prompt
+              {selectedSkills.length > 0 && (
+                <span className="ml-2 text-xs font-normal text-text-tertiary">optional — skills provide the default behavior</span>
+              )}
+            </label>
             <textarea
               id="agent-prompt"
               className="flex-1 w-full px-3 py-2.5 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors font-mono resize-none"
               value={agentPrompt}
               onChange={(e) => setAgentPrompt(e.target.value)}
-              placeholder="What should this agent do when it runs?"
+              placeholder={selectedSkills.length > 0
+                ? 'Optional: repo-specific hints to append to the skill (e.g. "focus on lib/auth").'
+                : 'What should this agent do when it runs?'}
             />
-            <p className="text-xs text-text-tertiary mt-1.5">Combined with selected skills as context on every run.</p>
+            <p className="text-xs text-text-tertiary mt-1.5">
+              {selectedSkills.length > 0
+                ? 'Appended after the skill content. Leave blank to run the skill as-is.'
+                : 'Combined with selected skills as context on every run.'}
+            </p>
           </div>
         </div>
 
