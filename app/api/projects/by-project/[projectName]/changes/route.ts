@@ -139,12 +139,26 @@ export async function GET(
     if (m) { ahead = parseInt(m[1], 10); behind = parseInt(m[2], 10); }
   }
 
+  // Detect default branch via origin/HEAD, falling back to main/master.
+  // Inlined here (instead of importing from lib/start-commit) so this route
+  // stays DB-free — the route's unit tests mock fs narrowly.
+  let defaultBranch = 'master';
+  const symR = await exec('git', ['-C', projPath, 'symbolic-ref', 'refs/remotes/origin/HEAD'], { timeout: 3000 });
+  const symMatch = symR.exitCode === 0 ? symR.stdout.trim().match(/refs\/remotes\/origin\/(.+)/) : null;
+  if (symMatch) {
+    defaultBranch = symMatch[1];
+  } else {
+    const mainR = await exec('git', ['-C', projPath, 'rev-parse', '--verify', 'main'], { timeout: 3000 });
+    defaultBranch = mainR.exitCode === 0 ? 'main' : 'master';
+  }
+
   return NextResponse.json({
     files,
     totalFiles: files.length,
     totalAdditions,
     totalDeletions,
     branch: branchName,
+    defaultBranch,
     behind,
     ahead,
   });

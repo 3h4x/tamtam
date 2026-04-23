@@ -332,8 +332,16 @@ export interface ChangesResponse {
   totalAdditions: number
   totalDeletions: number
   branch: string | null
+  defaultBranch?: string
   behind: number
   ahead: number
+}
+
+export async function checkoutDefaultBranch(projectName: string): Promise<{ status: string; branch: string }> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/checkout-default`, { method: 'POST' })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(data.detail || 'Failed to switch branch')
+  return data
 }
 
 export async function fetchChanges(projectName: string): Promise<ChangesResponse> {
@@ -638,7 +646,7 @@ export async function fetchAgents(project?: string): Promise<{ agents: Agent[] }
   }
 }
 
-export async function createAgent(agent: { name: string; project: string; skillIds: string[]; model: string; prompt?: string; schedule?: string | null; runner?: string }): Promise<{ agent: Agent }> {
+export async function createAgent(agent: { name: string; project: string; skillIds: string[]; model: string; prompt?: string; schedule?: string | null; runner?: string; enabled?: boolean }): Promise<{ agent: Agent }> {
   const response = await fetch('/api/agents', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

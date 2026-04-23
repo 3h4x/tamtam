@@ -26,6 +26,7 @@ const SUGGESTED_SCHEDULES: Record<string, string> = {
   'agent-cto': '',
   'agent-gha-audit': '24h',
   'agent-readme-sync': '24h',
+  'agent-tests': '24h',
   'agent-self-improve': '',
   'agent-senior-fullstack': '',
 }
@@ -49,6 +50,8 @@ function SkillIcon({ id, className = 'w-4 h-4' }: { id: string; className?: stri
       return <svg {...props}><path d="M13 3a3 3 0 0 1-4 4L5.5 10.5A1.5 1.5 0 1 0 7.5 12.5L11 9a3 3 0 0 1 4-4L13.5 6.5 11 4z"/></svg>
     case 'agent-readme-sync':
       return <svg {...props}><path d="M9.5 2H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V6.5L9.5 2z"/><path d="M9.5 2V6.5H14"/><path d="M5 9.5h6M5 12h4"/></svg>
+    case 'agent-tests':
+      return <svg {...props}><path d="M5.5 2h5v3L13 8.5V13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8.5L5.5 5z"/><path d="M6.5 9.5l1.2 1.2L10 8.3"/></svg>
     case 'agent-self-improve':
       return <svg {...props}><path d="M8 1.5L9.5 5h3.5l-2.8 2 1 3.5L8 8.5 4.8 10.5l1-3.5L3 5h3.5z"/></svg>
     case 'agent-senior-fullstack':

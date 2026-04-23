@@ -543,6 +543,213 @@ describe('startProjectPush — push result tracking', () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.message).toBe('pushed');
   });
+
+  it('creates a generic PR and switches to main when prWorkflowEnabled and on a feature branch', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+      clearProjectDataCache: vi.fn(),
+    }));
+    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue({ prWorkflowEnabled: true }),
+    }));
+    vi.doMock('@/lib/job-storage', () => ({
+      createJob: createJobMock,
+      markDone: markDoneMock,
+      updateJob: updateJobMock,
+      listJobs: vi.fn().mockReturnValue([]),
+    }));
+    vi.doMock('@/lib/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/start-commit', () => ({
+      generateCommitMessage: vi.fn().mockResolvedValue('feat: test'),
+      findIssueContext: vi.fn().mockResolvedValue(null),
+      detectMainBranch: vi.fn().mockResolvedValue('main'),
+      issueBranchName: vi.fn(),
+    }));
+
+    execMock
+      .mockImplementationOnce(() => resp(0, '1\n'))                               // git rev-list --count
+      .mockImplementationOnce(() => resp(0, '# branch.head feat/x\n# branch.ab +0 -0\n')) // behind check
+      .mockImplementationOnce(() => resp(0))                                       // git push
+      .mockImplementationOnce(() => resp(0, 'abc1234'))                            // git rev-parse
+      .mockImplementationOnce(() => resp(0, 'feat/my-feature'))                    // git branch --show-current (createGenericPR)
+      .mockImplementationOnce(() => resp(1, '', 'no pr'))                          // gh pr view (no existing PR)
+      .mockImplementationOnce(() => resp(0, 'https://github.com/owner/repo/pull/42\n')) // gh pr create
+      .mockImplementationOnce(() => resp(0, 'owner/repo'))                         // gh repo view
+      .mockImplementationOnce(() => resp(0))                                       // git checkout main
+      .mockImplementationOnce(() => resp(0));                                      // git pull --ff-only
+
+    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const r = await fn('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.message).toContain('PR created');
+      expect(r.message).toContain('https://github.com/owner/repo/pull/42');
+      expect(r.prNumber).toBe(42);
+      expect(r.prRepo).toBe('owner/repo');
+    }
+    const prCreateCall = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'gh' && args.includes('pr') && args.includes('create'));
+    expect(prCreateCall).toBeTruthy();
+  });
+
+  it('returns existing PR url without creating a new one when prWorkflowEnabled and PR already exists', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+      clearProjectDataCache: vi.fn(),
+    }));
+    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue({ prWorkflowEnabled: true }),
+    }));
+    vi.doMock('@/lib/job-storage', () => ({
+      createJob: createJobMock,
+      markDone: markDoneMock,
+      updateJob: updateJobMock,
+      listJobs: vi.fn().mockReturnValue([]),
+    }));
+    vi.doMock('@/lib/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/start-commit', () => ({
+      generateCommitMessage: vi.fn().mockResolvedValue('feat: test'),
+      findIssueContext: vi.fn().mockResolvedValue(null),
+      detectMainBranch: vi.fn().mockResolvedValue('main'),
+      issueBranchName: vi.fn(),
+    }));
+
+    const existingUrl = 'https://github.com/owner/repo/pull/7';
+    execMock
+      .mockImplementationOnce(() => resp(0, '1\n'))                               // git rev-list --count
+      .mockImplementationOnce(() => resp(0, '# branch.head feat/x\n# branch.ab +0 -0\n')) // behind check
+      .mockImplementationOnce(() => resp(0))                                       // git push
+      .mockImplementationOnce(() => resp(0, 'abc1234'))                            // git rev-parse
+      .mockImplementationOnce(() => resp(0, 'feat/my-feature'))                    // git branch --show-current
+      .mockImplementationOnce(() => resp(0, JSON.stringify({ url: existingUrl }))) // gh pr view (existing PR)
+      .mockImplementationOnce(() => resp(0, 'owner/repo'))                         // gh repo view
+      .mockImplementationOnce(() => resp(0))                                       // git checkout main
+      .mockImplementationOnce(() => resp(0));                                      // git pull --ff-only
+
+    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const r = await fn('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.message).toContain(existingUrl);
+      expect(r.prNumber).toBe(7);
+    }
+    // Must NOT call gh pr create since one already exists
+    const prCreateCall = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'gh' && args.includes('pr') && args.includes('create'));
+    expect(prCreateCall).toBeUndefined();
+  });
+
+  it('returns "pushed (PR creation failed)" when prWorkflowEnabled but gh pr create fails', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+      clearProjectDataCache: vi.fn(),
+    }));
+    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue({ prWorkflowEnabled: true }),
+    }));
+    vi.doMock('@/lib/job-storage', () => ({
+      createJob: createJobMock,
+      markDone: markDoneMock,
+      updateJob: updateJobMock,
+      listJobs: vi.fn().mockReturnValue([]),
+    }));
+    vi.doMock('@/lib/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/start-commit', () => ({
+      generateCommitMessage: vi.fn().mockResolvedValue('feat: test'),
+      findIssueContext: vi.fn().mockResolvedValue(null),
+      detectMainBranch: vi.fn().mockResolvedValue('main'),
+      issueBranchName: vi.fn(),
+    }));
+
+    execMock
+      .mockImplementationOnce(() => resp(0, '1\n'))                               // git rev-list --count
+      .mockImplementationOnce(() => resp(0, '# branch.head feat/x\n# branch.ab +0 -0\n')) // behind check
+      .mockImplementationOnce(() => resp(0))                                       // git push
+      .mockImplementationOnce(() => resp(0, 'abc1234'))                            // git rev-parse
+      .mockImplementationOnce(() => resp(0, 'feat/my-feature'))                    // git branch --show-current
+      .mockImplementationOnce(() => resp(1, '', 'no pr'))                          // gh pr view (no existing PR)
+      .mockImplementationOnce(() => resp(1, '', 'pr create failed'));              // gh pr create fails
+
+    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const r = await fn('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.message).toContain('PR creation failed');
+  });
+
+  it('skips PR creation when prWorkflowEnabled but currently on the default branch', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+      clearProjectDataCache: vi.fn(),
+    }));
+    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue({ prWorkflowEnabled: true }),
+    }));
+    vi.doMock('@/lib/job-storage', () => ({
+      createJob: createJobMock,
+      markDone: markDoneMock,
+      updateJob: updateJobMock,
+      listJobs: vi.fn().mockReturnValue([]),
+    }));
+    vi.doMock('@/lib/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/start-commit', () => ({
+      generateCommitMessage: vi.fn().mockResolvedValue('feat: test'),
+      findIssueContext: vi.fn().mockResolvedValue(null),
+      detectMainBranch: vi.fn().mockResolvedValue('main'),
+      issueBranchName: vi.fn(),
+    }));
+
+    execMock
+      .mockImplementationOnce(() => resp(0, '1\n'))                               // git rev-list --count
+      .mockImplementationOnce(() => resp(0, '# branch.head main\n# branch.ab +0 -0\n')) // behind check
+      .mockImplementationOnce(() => resp(0))                                       // git push
+      .mockImplementationOnce(() => resp(0, 'abc1234'))                            // git rev-parse
+      .mockImplementationOnce(() => resp(0, 'main'));                              // git branch --show-current (=main → skips PR)
+
+    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const r = await fn('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.message).toBe('pushed');
+    const prCreateCall = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'gh' && args.includes('pr') && args.includes('create'));
+    expect(prCreateCall).toBeUndefined();
+  });
 });
 
 describe('generateCommitMessage', () => {

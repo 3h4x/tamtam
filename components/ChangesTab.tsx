@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { fetchChanges, fetchChangeDiff, pullProject, pushProject, PullDivergedError } from '@/lib/client-api'
+import { fetchChanges, fetchChangeDiff, pullProject, pushProject, PullDivergedError, checkoutDefaultBranch } from '@/lib/client-api'
 import type { ChangeFile, ChangeStatus, ChangesResponse } from '@/lib/client-api'
 
 const STATUS_LABEL: Record<ChangeStatus, string> = {
@@ -96,6 +96,8 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
   const [diverged, setDiverged] = useState(false)
   const [pushing, setPushing] = useState(false)
   const [pushError, setPushError] = useState<string | null>(null)
+  const [switching, setSwitching] = useState(false)
+  const [switchError, setSwitchError] = useState<string | null>(null)
 
   const load = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
     if (mode === 'refresh') setRefreshing(true)
@@ -126,6 +128,19 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
       }
     } finally {
       setPulling(false)
+    }
+  }
+
+  const doSwitchDefault = async () => {
+    setSwitching(true)
+    setSwitchError(null)
+    try {
+      await checkoutDefaultBranch(projectName)
+      await load('refresh')
+    } catch (err) {
+      setSwitchError(err instanceof Error ? err.message : 'Failed to switch branch')
+    } finally {
+      setSwitching(false)
     }
   }
 
@@ -188,11 +203,25 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
   }
 
   if (!data || data.files.length === 0) {
+    const onNonDefault = !!(data?.branch && data.defaultBranch && data.branch !== data.defaultBranch)
     return (
       <div className="p-6 text-center text-text-secondary">
         <p className="text-sm">No uncommitted changes.</p>
         {data?.branch && (
           <p className="text-xs text-text-tertiary mt-1">on branch <code className="font-mono">{data.branch}</code></p>
+        )}
+        {onNonDefault && (data?.ahead ?? 0) === 0 && (
+          <div className="mt-3 flex flex-col items-center gap-2">
+            <button
+              className="px-4 py-1.5 text-sm border border-status-info/60 bg-status-info/10 text-status-info rounded-md hover:bg-status-info/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+              onClick={doSwitchDefault}
+              disabled={switching}
+              title={`git checkout ${data!.defaultBranch}`}
+            >
+              {switching ? 'Switching…' : `Switch to ${data!.defaultBranch}`}
+            </button>
+            {switchError && <p className="text-xs text-status-error">{switchError}</p>}
+          </div>
         )}
         {(data?.ahead ?? 0) > 0 && (
           <div className="mt-3 flex flex-col items-center gap-2">

@@ -36,15 +36,6 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     skillIds: ['agent-dependency-check'],
   },
   {
-    name: 'blog',
-    description: 'Generates a daily post from recent git commits and writes it to blog/YYYY-MM-DD.md.',
-    model: 'sonnet',
-    schedule: '24h',
-    runner: 'pm2',
-    prompt: 'Execute your role for this project.',
-    skillIds: ['agent-blog'],
-  },
-  {
     name: 'ci-monitor',
     description: 'Checks GitHub Actions status and applies fixes when the latest run fails.',
     model: 'sonnet',
@@ -61,6 +52,15 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     runner: 'pm2',
     prompt: 'Execute your role for this project.',
     skillIds: ['agent-release-ready'],
+  },
+  {
+    name: 'tests',
+    description: 'Adds missing tests for recently changed code and fills gaps in coverage.',
+    model: 'sonnet',
+    schedule: '24h',
+    runner: 'pm2',
+    prompt: 'Execute your role for this project.',
+    skillIds: ['agent-tests'],
   },
   {
     name: 'cto',
@@ -173,7 +173,7 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
 
   const closeModal = () => { setEditing(null); setCreating(false); setRecommendedTemplate(null) }
 
-  const handleSaveAgent = async (data: { name: string; prompt: string; skillIds: string[]; model: string; schedule: string | null; runner: string }) => {
+  const handleSaveAgent = async (data: { name: string; prompt: string; skillIds: string[]; model: string; schedule: string | null; runner: string; enabled: boolean }) => {
     const parseAgent = (a: Agent & { skillIds: string | string[] }): Agent => ({
       ...a,
       skillIds: typeof a.skillIds === 'string' ? JSON.parse(a.skillIds) : a.skillIds,
@@ -389,7 +389,7 @@ function AgentModal({
   template?: AgentTemplateRecord
   skills: Skill[]
   personas: Persona[]
-  onSave: (data: { name: string; prompt: string; skillIds: string[]; model: string; schedule: string | null; runner: string }) => Promise<void>
+  onSave: (data: { name: string; prompt: string; skillIds: string[]; model: string; schedule: string | null; runner: string; enabled: boolean }) => Promise<void>
   onDelete?: () => void
   onClose: () => void
 }) {
@@ -399,6 +399,7 @@ function AgentModal({
   const [model, setModel] = useState(agent?.model || template?.model || 'sonnet')
   const [schedule, setSchedule] = useState(agent?.schedule || template?.schedule || '')
   const [runner, setRunner] = useState(agent?.runner || template?.runner || 'pm2')
+  const [enabled, setEnabled] = useState<boolean>(agent ? agent.enabled : true)
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [skillSearch, setSkillSearch] = useState('')
@@ -430,6 +431,7 @@ function AgentModal({
     setModel(src.model || 'sonnet')
     setSchedule(src.schedule || '')
     setRunner(src.runner || 'pm2')
+    if (agent) setEnabled(agent.enabled)
   }, [agent?.id, template?.name])
 
   useEffect(() => {
@@ -455,7 +457,7 @@ function AgentModal({
     if (!name.trim() || saving) return
     setSaving(true)
     try {
-      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, model, schedule: schedule || null, runner })
+      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, model, schedule: schedule || null, runner, enabled })
     } catch {}
     setSaving(false)
   }
@@ -566,6 +568,20 @@ function AgentModal({
               </select>
             </div>
           </div>
+
+          {/* Enabled toggle */}
+          <label className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border border-border bg-bg-secondary cursor-pointer">
+            <div>
+              <div className="text-sm font-medium text-text-primary">Enabled</div>
+              <div className="text-xs text-text-tertiary">If off, scheduled runs are skipped and the agent can only be triggered manually.</div>
+            </div>
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-accent cursor-pointer"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+            />
+          </label>
 
           {/* Skills */}
           <div>

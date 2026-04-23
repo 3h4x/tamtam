@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { name, project, skillIds, model, prompt, schedule, runner } = body;
+  const { name, project, skillIds, model, prompt, schedule, runner, enabled } = body;
 
   if (!name?.trim()) {
     return NextResponse.json({ detail: 'name is required' }, { status: 400 });
@@ -49,6 +49,7 @@ export async function POST(request: NextRequest) {
     prompt: prompt || '',
     schedule: schedule || null,
     runner: runner || 'pm2',
+    enabled: enabled !== false,
     createdAt: now,
     updatedAt: now,
   };
@@ -57,7 +58,7 @@ export async function POST(request: NextRequest) {
   clearAgentsCache();
 
   // Install schedule if configured (uses pm2 or launchctl based on runner)
-  if (agent.schedule && agent.prompt) {
+  if (agent.schedule && agent.prompt && agent.enabled) {
     try {
       await installAgentSchedule(id, agent.schedule, agent.prompt, agent.runner, agent.project, agent.name);
     } catch (e: unknown) {

@@ -2669,3 +2669,116 @@ describe('markDone – metadata extraction skipped for release kind', () => {
     expect(job.durationMs).toBe(1234);
   });
 });
+
+describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let startMarkDodMock: ReturnType<typeof vi.fn>;
+  let launchPrWaitMock: ReturnType<typeof vi.fn>;
+  let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
+  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+  let tempDir: string;
+
+  function makeJob(kind: string, overrides: Partial<JobData> = {}): JobData {
+    return {
+      id: `${kind}-job`,
+      project: 'my-proj',
+      kind,
+      prompt: null,
+      pid: 1,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-push-dod-test-'));
+    startMarkDodMock = vi.fn().mockResolvedValue({ ok: true, verified: 2, total: 2, changed: true, issueNumber: 55 });
+    getProjectTestConfigMock = vi.fn().mockReturnValue({
+      prWorkflowEnabled: true,
+      autoPrMergeEnabled: false,
+      autoPushEnabled: false,
+    });
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/pm2-jobs', () => ({
+      getJobStatus: vi.fn(),
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
+    vi.doMock('@/lib/git-utils', () => ({ markReviewed: vi.fn().mockResolvedValue(undefined) }));
+    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue('/proj') }));
+    vi.doMock('@/lib/start-review', () => ({ startProjectReview: vi.fn() }));
+    vi.doMock('@/lib/start-test', () => ({ startProjectTest: vi.fn() }));
+    vi.doMock('@/lib/start-push', () => ({ startProjectPush: vi.fn() }));
+    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: vi.fn() }));
+    vi.doMock('@/lib/start-fix', () => ({ startFixFromJob: vi.fn() }));
+    vi.doMock('@/lib/scheduling', () => ({ getProjectTestConfig: getProjectTestConfigMock }));
+    vi.doMock('@/lib/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
+    launchPrWaitMock = vi.fn().mockReturnValue({ jobId: 'prwait-1' });
+    vi.doMock('@/lib/start-pr-wait', () => ({ launchPrWait: launchPrWaitMock }));
+
+    const mod = await import('@/lib/job-storage');
+    markDoneFn = mod.markDone;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('calls startMarkDod when push succeeds with prWorkflowEnabled=true and contextMeta has prNumber', async () => {
+    const job = makeJob('push', { contextMeta: JSON.stringify({ prNumber: 55, prRepo: 'owner/repo', prUrl: 'https://github.com/owner/repo/pull/55' }) });
+    await markDoneFn(job, 0);
+    expect(startMarkDodMock).toHaveBeenCalledWith('my-proj');
+  });
+
+  it('does not call startMarkDod when push fails', async () => {
+    const job = makeJob('push', { contextMeta: JSON.stringify({ prNumber: 55, prRepo: 'owner/repo' }) });
+    await markDoneFn(job, 1);
+    expect(startMarkDodMock).not.toHaveBeenCalled();
+  });
+
+  it('does not call startMarkDod when prWorkflowEnabled=false', async () => {
+    getProjectTestConfigMock.mockReturnValue({ prWorkflowEnabled: false, autoPrMergeEnabled: false });
+    const job = makeJob('push', { contextMeta: JSON.stringify({ prNumber: 55, prRepo: 'owner/repo' }) });
+    await markDoneFn(job, 0);
+    expect(startMarkDodMock).not.toHaveBeenCalled();
+  });
+
+  it('does not call startMarkDod when autoPrMergeEnabled=true (launchPrWait handles DoD post-merge)', async () => {
+    getProjectTestConfigMock.mockReturnValue({ prWorkflowEnabled: true, autoPrMergeEnabled: true });
+    const job = makeJob('push', { contextMeta: JSON.stringify({ prNumber: 55, prRepo: 'owner/repo', prUrl: 'https://github.com/owner/repo/pull/55' }) });
+    await markDoneFn(job, 0);
+    expect(startMarkDodMock).not.toHaveBeenCalled();
+  });
+
+  it('does not call startMarkDod when contextMeta has no prNumber', async () => {
+    const job = makeJob('push', { contextMeta: JSON.stringify({ prRepo: 'owner/repo' }) });
+    await markDoneFn(job, 0);
+    expect(startMarkDodMock).not.toHaveBeenCalled();
+  });
+
+  it('does not call startMarkDod when contextMeta is null', async () => {
+    const job = makeJob('push', { contextMeta: null });
+    await markDoneFn(job, 0);
+    expect(startMarkDodMock).not.toHaveBeenCalled();
+  });
+
+  it('continues gracefully when startMarkDod throws', async () => {
+    startMarkDodMock.mockRejectedValue(new Error('dod failed'));
+    const job = makeJob('push', { contextMeta: JSON.stringify({ prNumber: 55, prRepo: 'owner/repo' }) });
+    await expect(markDoneFn(job, 0)).resolves.not.toThrow();
+  });
+});

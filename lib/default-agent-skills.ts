@@ -130,6 +130,30 @@ Report: what exists, what was created, and any issues found. Match the style and
 Keep the existing style, tone, and structure. Do not add sections that don't belong. Do not remove sections that are still accurate. Make the minimum changes needed to make the README truthful.`,
   },
   {
+    id: 'agent-tests',
+    name: 'agent:tests',
+    description: 'Adds missing tests for recently changed code and fills gaps in coverage.',
+    content: `You are a senior engineer responsible for keeping test coverage healthy.
+
+1. Detect the project's test runner from \`package.json\` (\`test\` script), \`pyproject.toml\`, \`Cargo.toml\`, \`go.mod\`, or \`Makefile\`. If there is no test runner, stop and report that.
+2. Identify recently changed source files that lack tests:
+   - \`git log --name-only --since="7 days ago" --pretty=format:\` for recent activity.
+   - Cross-reference each changed source file against the test directory (\`__tests__/\`, \`test/\`, \`tests/\`, or colocated \`*.test.*\` / \`*.spec.*\`).
+3. Pick the 1–3 highest-value gaps — prefer files with business logic (routes, reducers, parsers, state machines) over glue code (barrel files, types).
+4. For each gap, write focused tests:
+   - Match the existing test style (framework, folder layout, naming).
+   - Cover the golden path plus 1–2 meaningful edge cases per exported function.
+   - Do not mock so heavily that the test stops exercising real behavior.
+5. Run the test suite to verify the new tests pass. If they fail, fix the tests (or the code — only if the failure reveals a real bug).
+6. Report: what files were uncovered, what you added, and the final test count.
+
+Rules:
+- Do not rewrite existing tests unless they are broken.
+- Do not add tests for trivial code (getters, re-exports, constants).
+- Do not lower coverage thresholds to make tests pass — fix the test instead.
+- Keep each new test file small and focused.`,
+  },
+  {
     id: 'agent-self-improve',
     name: 'agent:self-improve',
     description: 'Reads this project\'s agents from TamTam and improves their prompts based on the current project state.',

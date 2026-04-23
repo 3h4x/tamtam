@@ -311,23 +311,28 @@ async function runPush(
       }
       return { ok: true, commitSha, message: `PR created: ${prResult.prUrl}`, prUrl: prResult.prUrl, prNumber, prRepo: prResult.prRepo };
     }
+    if (prResult === false) {
+      return { ok: true, commitSha, message: 'pushed' };
+    }
     return { ok: true, commitSha, message: 'pushed (PR creation failed — see log)' };
   }
 
   return { ok: true, commitSha, message: 'pushed' };
 }
 
+// Returns the PR info on success, false when intentionally skipped (already on
+// default branch), or null when gh pr create actually failed.
 async function createGenericPR(
   projPath: string,
   log: (s: string) => void,
-): Promise<{ prUrl: string; prRepo: string } | null> {
+): Promise<{ prUrl: string; prRepo: string } | false | null> {
   const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
   const currentBranch = branchR.stdout.trim();
   const mainBranch = await detectMainBranch(projPath);
 
   if (!currentBranch || currentBranch === mainBranch) {
     log(`\n# PR Workflow: on default branch — skipping PR creation\n`);
-    return null;
+    return false;
   }
 
   // Check if a PR already exists for this branch to avoid duplicates.
