@@ -270,9 +270,10 @@ async function runPush(
   const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
   const commitSha = shaR.exitCode === 0 ? shaR.stdout.trim() : '';
 
-  // If this session was started from a GitHub issue, create a PR that closes it,
-  // then return to the default branch and pull so the working copy is ready for
-  // the next task. Failures here are non-fatal — the PR is already out.
+  // If this session was started from a GitHub issue, create a PR that closes it.
+  // Otherwise in PR Workflow mode, create a generic PR for the feature branch.
+  // In both cases, return to the default branch so the working copy is clean.
+  // Failures here are non-fatal — the push already succeeded.
   if (issueCtx) {
     const prUrl = await createIssuePR(projPath, log, issueCtx);
     if (prUrl) {
@@ -292,7 +293,71 @@ async function runPush(
     return { ok: true, commitSha, message: 'pushed (PR creation failed — see log)' };
   }
 
+  // Non-issue PR Workflow: create a PR if pr_workflow_enabled.
+  const { getProjectTestConfig } = await import('./scheduling');
+  if (getProjectTestConfig(projectName)?.prWorkflowEnabled) {
+    const prResult = await createGenericPR(projPath, log);
+    if (prResult) {
+      const prNumber = parseInt(prResult.prUrl.split('/').pop() ?? '0', 10) || undefined;
+      const mainBranch = await detectMainBranch(projPath);
+      log(`\n# switching back to ${mainBranch} and pulling\n`);
+      const coR = await exec('git', ['-C', projPath, 'checkout', mainBranch], { timeout: 10000 });
+      if (coR.stdout) log(coR.stdout);
+      if (coR.stderr) log(coR.stderr);
+      if (coR.exitCode === 0) {
+        const pullR = await exec('git', ['-C', projPath, 'pull', '--ff-only', 'origin', mainBranch], { timeout: 30000 });
+        if (pullR.stdout) log(pullR.stdout);
+        if (pullR.stderr) log(pullR.stderr);
+      }
+      return { ok: true, commitSha, message: `PR created: ${prResult.prUrl}`, prUrl: prResult.prUrl, prNumber, prRepo: prResult.prRepo };
+    }
+    return { ok: true, commitSha, message: 'pushed (PR creation failed — see log)' };
+  }
+
   return { ok: true, commitSha, message: 'pushed' };
+}
+
+async function createGenericPR(
+  projPath: string,
+  log: (s: string) => void,
+): Promise<{ prUrl: string; prRepo: string } | null> {
+  const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+  const currentBranch = branchR.stdout.trim();
+  const mainBranch = await detectMainBranch(projPath);
+
+  if (!currentBranch || currentBranch === mainBranch) {
+    log(`\n# PR Workflow: on default branch — skipping PR creation\n`);
+    return null;
+  }
+
+  // Check if a PR already exists for this branch to avoid duplicates.
+  const existingR = await exec('gh', ['pr', 'view', '--json', 'url'], { cwd: projPath, timeout: 10000 });
+  if (existingR.exitCode === 0 && existingR.stdout.trim()) {
+    try {
+      const existing = JSON.parse(existingR.stdout.trim()) as { url?: string };
+      if (existing.url) {
+        log(`\n# PR already exists: ${existing.url}\n`);
+        const repoR = await exec('gh', ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], { cwd: projPath, timeout: 10000 });
+        return { prUrl: existing.url, prRepo: repoR.stdout.trim() };
+      }
+    } catch {}
+  }
+
+  log(`\n# PR Workflow — creating PR for branch ${currentBranch}\n`);
+  const prR = await exec('gh', ['pr', 'create', '--fill', '--base', mainBranch], { cwd: projPath, timeout: 30000 });
+  if (prR.stdout) log(prR.stdout);
+  if (prR.stderr) log(prR.stderr);
+  if (prR.exitCode !== 0) {
+    log(`\n# PR creation failed\n`);
+    return null;
+  }
+
+  const prUrl = prR.stdout.trim().split('\n').find(l => l.startsWith('https://')) ?? prR.stdout.trim();
+  if (!prUrl) return null;
+
+  const repoR = await exec('gh', ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], { cwd: projPath, timeout: 10000 });
+  log(`\n# PR created: ${prUrl}\n`);
+  return { prUrl, prRepo: repoR.stdout.trim() };
 }
 
 async function createIssuePR(

@@ -32,6 +32,7 @@ describe('startProjectPush — push result tracking', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,
@@ -97,6 +98,7 @@ describe('startProjectPush — push result tracking', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,
@@ -183,6 +185,7 @@ describe('startProjectPush — push result tracking', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,
@@ -320,6 +323,7 @@ describe('startProjectPush — push result tracking', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,
@@ -351,6 +355,7 @@ describe('startProjectPush — push result tracking', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,
@@ -391,6 +396,7 @@ describe('startProjectPush — push result tracking', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,
@@ -430,6 +436,7 @@ describe('startProjectPush — push result tracking', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,
@@ -487,6 +494,7 @@ describe('startProjectPush — push result tracking', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,
@@ -554,6 +562,7 @@ describe('generateCommitMessage', () => {
     vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       listJobs: vi.fn().mockReturnValue([]),
@@ -724,6 +733,7 @@ describe('generateCommitMessage', () => {
     }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       listJobs: vi.fn().mockReturnValue([]),
@@ -813,6 +823,7 @@ describe('launchProjectPush — fire-and-forget', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp/test-logs' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,
