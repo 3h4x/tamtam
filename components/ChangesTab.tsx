@@ -99,17 +99,29 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
   const [switching, setSwitching] = useState(false)
   const [switchError, setSwitchError] = useState<string | null>(null)
 
-  const load = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
+  const load = useCallback(async (mode: 'initial' | 'refresh' = 'initial', signal?: AbortSignal) => {
     if (mode === 'refresh') setRefreshing(true)
     setError(null)
     try {
-      const res = await fetchChanges(projectName)
+      const res = await fetchChanges(projectName, { signal })
+      if (signal?.aborted) return
       setData(res)
+      // Two-phase merge check: only fetch from remote when the branch looks like
+      // it could be merged (no unpushed commits and on a non-default branch).
+      // This keeps the initial load fast and avoids a git fetch on every tab open.
+      if (res.branch && res.defaultBranch && res.branch !== res.defaultBranch && res.ahead === 0) {
+        const checked = await fetchChanges(projectName, { checkMerged: true, signal })
+        if (signal?.aborted) return
+        setData(checked)
+      }
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return
       setError(err instanceof Error ? err.message : 'Failed to load changes')
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (!signal?.aborted) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [projectName])
 
@@ -131,7 +143,7 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
     }
   }
 
-  const doSwitchDefault = async () => {
+  const doSwitchDefault = useCallback(async () => {
     setSwitching(true)
     setSwitchError(null)
     try {
@@ -142,7 +154,7 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
     } finally {
       setSwitching(false)
     }
-  }
+  }, [projectName, load])
 
   const doPush = async () => {
     setPushing(true)
@@ -158,7 +170,9 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
   }
 
   useEffect(() => {
-    load('initial')
+    const controller = new AbortController()
+    load('initial', controller.signal)
+    return () => controller.abort()
   }, [load])
 
   // Auto-switch to the default branch when TamTam detects the current feature
@@ -172,7 +186,7 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
     if (!data.branch || !data.defaultBranch || data.branch === data.defaultBranch) return
     autoSwitchFiredRef.current = true
     doSwitchDefault()
-  }, [data])
+  }, [data, doSwitchDefault])
 
   const toggleExpand = async (file: ChangeFile) => {
     const key = file.filename
