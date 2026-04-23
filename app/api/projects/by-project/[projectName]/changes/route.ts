@@ -157,8 +157,12 @@ export async function GET(
   // the PR was merged (manually or otherwise) and the local working copy is
   // stranded on a dead feature branch. A lightweight fetch is required first
   // so the local origin/<default> ref reflects GitHub's current HEAD.
+  // Gated behind ?checkMerged=1 because the fetch adds 500ms–2s of network
+  // latency on every request — callers opt in only when they have reason to
+  // believe the branch may have been merged (e.g. ahead === 0).
+  const checkMerged = request.nextUrl.searchParams.get('checkMerged') === '1';
   let branchMerged = false;
-  if (branchName && branchName !== defaultBranch) {
+  if (checkMerged && branchName && branchName !== defaultBranch) {
     await exec(
       'git',
       ['-C', projPath, 'fetch', '--quiet', 'origin', defaultBranch],
