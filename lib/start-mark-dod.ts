@@ -19,6 +19,18 @@ function findIssueContext(projectName: string): { number: number; repo: string }
   return { number: job.ghIssueNumber, repo: job.ghIssueRepo };
 }
 
+function findPrContext(projectName: string): { number: number; repo: string } | null {
+  const job = listJobs()
+    .filter(j => j.project === projectName && j.kind === 'push' && j.contextMeta != null)
+    .sort((a, b) => b.startedAt - a.startedAt)[0];
+  if (!job?.contextMeta) return null;
+  try {
+    const meta = JSON.parse(job.contextMeta) as { prNumber?: number; prRepo?: string };
+    if (meta.prNumber && meta.prRepo) return { number: meta.prNumber, repo: meta.prRepo };
+  } catch {}
+  return null;
+}
+
 // Extract acceptance criteria (unchecked checkbox lines) from issue body.
 export function extractCriteria(body: string): Array<{ raw: string; text: string }> {
   const out: Array<{ raw: string; text: string }> = [];
@@ -61,7 +73,10 @@ export async function startMarkDod(projectName: string): Promise<MarkDodResult> 
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
 
   const issueCtx = findIssueContext(projectName);
-  if (!issueCtx) return { ok: false, status: 400, detail: 'no issue context on latest run' };
+  const prCtx = !issueCtx ? findPrContext(projectName) : null;
+  const ctx = issueCtx ?? prCtx;
+  const isPr = !issueCtx && !!prCtx;
+  if (!ctx) return { ok: false, status: 400, detail: 'no issue or PR context on latest run' };
 
   const { logDir, claudeBin } = getImproveConfig();
   mkdirSync(logDir, { recursive: true });
@@ -73,15 +88,19 @@ export async function startMarkDod(projectName: string): Promise<MarkDodResult> 
   job.logPath = logPath;
   const log = (s: string) => { try { appendFileSync(logPath, s); } catch {} };
 
-  log(`# mark-dod start — ${new Date().toISOString()}\n# issue: ${issueCtx.repo}#${issueCtx.number}\n`);
+  const ctxLabel = isPr ? `PR` : `issue`;
+  log(`# mark-dod start — ${new Date().toISOString()}\n# ${ctxLabel}: ${ctx.repo}#${ctx.number}\n`);
 
   try {
-    // 1. Fetch the issue body.
-    const viewR = await exec('gh', ['issue', 'view', String(issueCtx.number), '--repo', issueCtx.repo, '--json', 'body,title'], { cwd: projPath, timeout: 15000 });
+    // 1. Fetch the body (issue or PR).
+    const viewArgs = isPr
+      ? ['pr', 'view', String(ctx.number), '--repo', ctx.repo, '--json', 'body,title']
+      : ['issue', 'view', String(ctx.number), '--repo', ctx.repo, '--json', 'body,title'];
+    const viewR = await exec('gh', viewArgs, { cwd: projPath, timeout: 15000 });
     if (viewR.exitCode !== 0) {
-      log(`# gh issue view failed: ${viewR.stderr}\n`);
+      log(`# gh ${ctxLabel} view failed: ${viewR.stderr}\n`);
       await markDone(job, 1);
-      return { ok: true, jobId: job.id, issueNumber: issueCtx.number, verified: 0, total: 0, changed: false };
+      return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: 0, total: 0, changed: false };
     }
     let parsed: { body?: string; title?: string } = {};
     try { parsed = JSON.parse(viewR.stdout); } catch {}
@@ -91,7 +110,7 @@ export async function startMarkDod(projectName: string): Promise<MarkDodResult> 
     if (criteria.length === 0) {
       log(`# no unchecked DoD boxes — nothing to verify\n`);
       await markDone(job, 0);
-      return { ok: true, jobId: job.id, issueNumber: issueCtx.number, verified: 0, total: 0, changed: false };
+      return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: 0, total: 0, changed: false };
     }
     log(`# found ${criteria.length} unchecked criteria to verify\n`);
 
@@ -102,7 +121,7 @@ export async function startMarkDod(projectName: string): Promise<MarkDodResult> 
     const prompt = `You are verifying whether each acceptance criterion below is ACTUALLY IMPLEMENTED on the current branch of this repository (cwd). Do not take claims at face value — check the code, tests, config, etc. For each criterion either confirm it against concrete evidence (file paths, symbol names, test names) or mark it unverified.
 
 Repository: ${projectName}
-Issue #${issueCtx.number}: ${title}
+${isPr ? 'PR' : 'Issue'} #${ctx.number}: ${title}
 
 Acceptance criteria:
 ${criteriaList}
@@ -137,7 +156,7 @@ JSON schema:
     if (claudeR.exitCode !== 0 || !claudeR.stdout.trim()) {
       log(`# claude verification failed: ${claudeR.stderr || 'empty output'}\n`);
       await markDone(job, 1);
-      return { ok: true, jobId: job.id, issueNumber: issueCtx.number, verified: 0, total: criteria.length, changed: false };
+      return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: 0, total: criteria.length, changed: false };
     }
 
     // Pull the first JSON object out of Claude's output (tolerant of stray
@@ -159,7 +178,7 @@ JSON schema:
     } catch (e) {
       log(`# could not parse claude JSON: ${e}\n--- raw output ---\n${raw.slice(0, 2000)}\n`);
       await markDone(job, 1);
-      return { ok: true, jobId: job.id, issueNumber: issueCtx.number, verified: 0, total: criteria.length, changed: false };
+      return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: 0, total: criteria.length, changed: false };
     }
 
     const verifiedTexts = new Set(
@@ -172,9 +191,9 @@ JSON schema:
     log(`# summary: ${verifiedTexts.size} / ${criteria.length} verified\n`);
 
     if (verifiedTexts.size === 0) {
-      log(`# no criteria verified — leaving issue body unchanged\n`);
+      log(`# no criteria verified — leaving ${ctxLabel} body unchanged\n`);
       await markDone(job, 0);
-      return { ok: true, jobId: job.id, issueNumber: issueCtx.number, verified: 0, total: criteria.length, changed: false };
+      return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: 0, total: criteria.length, changed: false };
     }
 
     // 3. Tick only the verified boxes and push the updated body to GitHub.
@@ -182,23 +201,26 @@ JSON schema:
     if (ticked === 0 || updated === body) {
       log(`# claude's verified texts didn't match any checkbox exactly — skipping edit\n`);
       await markDone(job, 0);
-      return { ok: true, jobId: job.id, issueNumber: issueCtx.number, verified: verifiedTexts.size, total: criteria.length, changed: false };
+      return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: verifiedTexts.size, total: criteria.length, changed: false };
     }
 
-    const tmpFile = join(tmpdir(), `tamtam-issue-${issueCtx.number}-${Date.now()}.md`);
+    const tmpFile = join(tmpdir(), `tamtam-${ctxLabel}-${ctx.number}-${Date.now()}.md`);
     writeFileSync(tmpFile, updated);
     try {
-      const editR = await exec('gh', ['issue', 'edit', String(issueCtx.number), '--repo', issueCtx.repo, '--body-file', tmpFile], { cwd: projPath, timeout: 15000 });
+      const editArgs = isPr
+        ? ['pr', 'edit', String(ctx.number), '--repo', ctx.repo, '--body-file', tmpFile]
+        : ['issue', 'edit', String(ctx.number), '--repo', ctx.repo, '--body-file', tmpFile];
+      const editR = await exec('gh', editArgs, { cwd: projPath, timeout: 15000 });
       if (editR.stdout) log(editR.stdout);
       if (editR.stderr) log(editR.stderr);
       if (editR.exitCode !== 0) {
-        log(`# gh issue edit failed\n`);
+        log(`# gh ${ctxLabel} edit failed\n`);
         await markDone(job, 1);
-        return { ok: true, jobId: job.id, issueNumber: issueCtx.number, verified: verifiedTexts.size, total: criteria.length, changed: false };
+        return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: verifiedTexts.size, total: criteria.length, changed: false };
       }
-      log(`# DoD updated on ${issueCtx.repo}#${issueCtx.number}: ticked ${ticked} of ${criteria.length}\n`);
+      log(`# DoD updated on ${ctx.repo}#${ctx.number}: ticked ${ticked} of ${criteria.length}\n`);
       await markDone(job, 0);
-      return { ok: true, jobId: job.id, issueNumber: issueCtx.number, verified: verifiedTexts.size, total: criteria.length, changed: true };
+      return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: verifiedTexts.size, total: criteria.length, changed: true };
     } finally {
       try { unlinkSync(tmpFile); } catch {}
     }

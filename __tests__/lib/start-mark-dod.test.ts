@@ -207,7 +207,7 @@ describe('startMarkDod', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.status).toBe(400);
-      expect(r.detail).toContain('no issue context');
+      expect(r.detail).toContain('no issue or PR context');
     }
   });
 

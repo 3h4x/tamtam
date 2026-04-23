@@ -497,7 +497,7 @@ async function runCompletionHooks(job: JobData): Promise<void> {
   // launch a pr-wait job that polls checks and merges once they pass.
   if (job.kind === 'push' && job.exitCode === 0) {
     try {
-      const { autoPrMergeEnabled } = await getProjectPipelineConfig(job.project);
+      const { autoPrMergeEnabled, prWorkflowEnabled } = await getProjectPipelineConfig(job.project);
       if (autoPrMergeEnabled && job.contextMeta) {
         const meta = JSON.parse(job.contextMeta) as { prUrl?: string; prNumber?: number; prRepo?: string };
         if (meta.prUrl && meta.prNumber && meta.prRepo) {
@@ -508,6 +508,21 @@ async function runCompletionHooks(job: JobData): Promise<void> {
             chainedNext = true;
           } else {
             console.log(`[push→pr-wait] failed to start pr-wait: ${r.error}`);
+          }
+        }
+      } else if (prWorkflowEnabled && !autoPrMergeEnabled && job.contextMeta) {
+        // PR Workflow without auto-merge: run DoD against the PR body now that
+        // the PR exists. The auto-merge path defers this to post-merge in launchPrWait.
+        const meta = JSON.parse(job.contextMeta) as { prNumber?: number };
+        if (meta.prNumber) {
+          try {
+            const { startMarkDod } = await import('./start-mark-dod');
+            const md = await startMarkDod(job.project);
+            if (md.ok) {
+              console.log(`[push→dod] PR #${meta.prNumber} DoD: ${md.verified}/${md.total} verified${md.changed ? ' (PR updated)' : ''}`);
+            }
+          } catch (e) {
+            console.log(`[push→dod] mark-dod error for ${job.project}:`, e);
           }
         }
       }

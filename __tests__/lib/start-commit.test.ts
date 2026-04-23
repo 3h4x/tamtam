@@ -191,6 +191,7 @@ describe('generateCommitMessage', () => {
     vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/diff-context', () => ({
       buildDiffContext: vi.fn().mockReturnValue({ context: 'diff context here', truncated: false }),
@@ -255,6 +256,7 @@ describe('generateCommitMessage', () => {
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/diff-context', () => ({
       buildDiffContext: vi.fn().mockReturnValue({ context: 'diff context here', truncated: false }),
@@ -310,6 +312,7 @@ describe('startProjectCommit', () => {
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,
@@ -589,7 +592,7 @@ describe('startProjectCommit', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.status).toBe(500);
-      expect(r.detail).toContain('Failed to create issue branch');
+      expect(r.detail).toContain('Failed to create feature branch');
     }
     const job = createJobMock.mock.results[0].value;
     expect(markDoneMock).toHaveBeenCalledWith(job, 1);

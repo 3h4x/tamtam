@@ -158,12 +158,27 @@ async function runCommit(
   // to a feature branch BEFORE committing. Otherwise the commit lands on main,
   // the subsequent PR attempt produces an empty diff, and GH rejects it.
   if (issueCtx === undefined) issueCtx = await findIssueContext(projectName, projPath);
-  if (issueCtx) {
+
+  // Determine if we need to switch off the default branch before committing.
+  // Required for issue-linked runs (so the PR diff isn't empty) AND for
+  // PR Workflow mode in general (changes must land on a feature branch, not main).
+  const needsBranch = !!issueCtx || await (async () => {
+    const { getProjectTestConfig } = await import('./scheduling');
+    return !!getProjectTestConfig(projectName)?.prWorkflowEnabled;
+  })();
+
+  if (needsBranch) {
     const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
     const currentBranch = branchR.stdout.trim();
     const mainBranch = await detectMainBranch(projPath);
     if (!currentBranch || currentBranch === mainBranch) {
-      const featureBranch = issueBranchName(issueCtx);
+      const featureBranch = issueCtx
+        ? issueBranchName(issueCtx)
+        : (() => {
+            const ts = new Date();
+            const d = `${ts.getFullYear()}${String(ts.getMonth() + 1).padStart(2, '0')}${String(ts.getDate()).padStart(2, '0')}-${String(ts.getHours()).padStart(2, '0')}${String(ts.getMinutes()).padStart(2, '0')}`;
+            return `feat/release-${d}`;
+          })();
       log(`\n# on ${currentBranch || '(detached)'} — switching to ${featureBranch} before commit\n`);
       const coR = await exec('git', ['-C', projPath, 'checkout', '-b', featureBranch], { timeout: 10000 });
       if (coR.stdout) log(coR.stdout);
@@ -174,7 +189,7 @@ async function runCommit(
         if (coExistingR.stdout) log(coExistingR.stdout);
         if (coExistingR.stderr) log(coExistingR.stderr);
         if (coExistingR.exitCode !== 0) {
-          return { ok: false, status: 500, detail: `Failed to create issue branch ${featureBranch}: ${coR.stderr || coR.stdout}` };
+          return { ok: false, status: 500, detail: `Failed to create feature branch ${featureBranch}: ${coR.stderr || coR.stdout}` };
         }
       }
     }
