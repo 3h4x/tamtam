@@ -1,7 +1,14 @@
 import { db, schema } from '@/lib/db';
 
+export type AgentRow = typeof schema.agents.$inferSelect;
+export type NormalizedAgent = Omit<AgentRow, 'skillIds'> & { skillIds: string[] };
+
+export function normalizeAgent(row: AgentRow): NormalizedAgent {
+  return { ...row, skillIds: JSON.parse(row.skillIds || '[]') };
+}
+
 const AGENTS_CACHE_TTL = 10; // seconds
-let _agentsCache: { agents: typeof schema.agents.$inferSelect[]; time: number } | null = null;
+let _agentsCache: { agents: AgentRow[]; time: number } | null = null;
 
 export function getAllAgentsCached() {
   const now = Date.now() / 1000;

@@ -85,7 +85,8 @@ async function switchToDefault(projPath: string, log: (s: string) => void): Prom
     }
 
     const curR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
-    if (curR.stdout.trim() === mainBranch) {
+    const featureBranch = curR.stdout.trim();
+    if (featureBranch === mainBranch) {
       const pullR = await exec('git', ['-C', projPath, 'pull', '--ff-only', 'origin', mainBranch], { timeout: 30000 });
       if (pullR.stdout) log(pullR.stdout);
       if (pullR.stderr) log(pullR.stderr);
@@ -112,6 +113,22 @@ async function switchToDefault(projPath: string, log: (s: string) => void): Prom
     if (pullR.stdout) log(pullR.stdout);
     if (pullR.stderr) log(pullR.stderr);
     if (stashed) await exec('git', ['-C', projPath, 'stash', 'pop'], { timeout: 10000 });
+
+    // Delete the local feature branch. `gh pr merge --delete-branch` handles
+    // the remote ref, but the local ref lingers — and if it stays around,
+    // a subsequent issue-branch call for the same issue will silently re-check
+    // it out, piling new commits on top of an already-merged branch. Use -D
+    // because squash-merges leave the local branch looking "not merged" from
+    // git's view even though GitHub confirmed the merge.
+    if (featureBranch && featureBranch !== mainBranch) {
+      const delR = await exec('git', ['-C', projPath, 'branch', '-D', featureBranch], { timeout: 5000 });
+      if (delR.exitCode === 0) {
+        log(`\n# deleted local branch ${featureBranch}\n`);
+      } else if (delR.stderr) {
+        log(`\n# warning: could not delete local branch ${featureBranch}: ${delR.stderr.trim()}\n`);
+      }
+    }
+
     return { ok: true, branch: mainBranch };
   } catch (e) {
     log(`\n# post-merge checkout error: ${e instanceof Error ? e.message : String(e)}\n`);

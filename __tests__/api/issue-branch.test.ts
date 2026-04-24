@@ -115,9 +115,11 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
 
   it('returns reused when checkout -b fails but checkout succeeds', async () => {
     execMock
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))
-      .mockResolvedValueOnce(makeExecResult({ exitCode: 128, stderr: 'branch already exists' }))
-      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))                       // branch --show-current
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'refs/remotes/origin/master\n' }))   // symbolic-ref
+      .mockResolvedValueOnce(makeExecResult({ stdout: '  master\n  other\n' }))            // branch --merged (no match)
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 128, stderr: 'branch already exists' })) // checkout -b
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));                             // checkout
     const res = await POST(makeRequest({ issue_number: 3, issue_title: 'fix bug' }), {
       params: Promise.resolve({ projectName: 'myproj' }),
     });
@@ -130,6 +132,8 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
   it('returns 500 when both checkouts fail', async () => {
     execMock
       .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'refs/remotes/origin/master\n' }))
+      .mockResolvedValueOnce(makeExecResult({ stdout: '  master\n' }))
       .mockResolvedValueOnce(makeExecResult({ exitCode: 128, stderr: 'branch exists' }))
       .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'error' }));
     const res = await POST(makeRequest({ issue_number: 5 }), {
@@ -138,6 +142,26 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
     expect(res.status).toBe(500);
     const data = await res.json();
     expect(data.detail).toContain('Failed to checkout');
+  });
+
+  it('skips checkout when branch is already merged into default', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))                                  // branch --show-current
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'refs/remotes/origin/master\n' }))              // symbolic-ref
+      .mockResolvedValueOnce(makeExecResult({ stdout: '  master\n  fix/issue-9-already-merged\n' })); // branch --merged
+    const res = await POST(
+      makeRequest({ issue_number: 9, issue_title: 'already merged' }),
+      { params: Promise.resolve({ projectName: 'myproj' }) },
+    );
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('skipped');
+    expect(data.reason).toContain('already merged');
+    // The checkout must not have been attempted.
+    const checkoutCall = execMock.mock.calls.find(
+      (c) => c[0] === 'git' && Array.isArray(c[1]) && c[1].includes('checkout'),
+    );
+    expect(checkoutCall).toBeUndefined();
   });
 
   it('slugifies the title correctly', async () => {

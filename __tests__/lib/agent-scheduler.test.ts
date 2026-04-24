@@ -71,16 +71,13 @@ describe('agent-scheduler', () => {
       expect(deleteIdx).toBeLessThan(startIdx);
     });
 
-    it('stops the process immediately after start to prevent initial execution', async () => {
+    it('registers with --no-autostart to prevent initial execution', async () => {
       await installAgentSchedule('agent-abc', '1h', 'hello', 'pm2');
-      const startIdx = execMock.mock.calls.findIndex(
+      const startCall = execMock.mock.calls.find(
         ([cmd, args]: any) => cmd === 'pm2' && args[0] === 'start'
       );
-      const stopIdx = execMock.mock.calls.findIndex(
-        ([cmd, args]: any) => cmd === 'pm2' && args[0] === 'stop'
-      );
-      expect(stopIdx).toBeGreaterThan(startIdx);
-      expect(execMock.mock.calls[stopIdx][1]).toContain('tamtam-agent-agent-abc');
+      expect(startCall).toBeTruthy();
+      expect(startCall![1]).toContain('--no-autostart');
     });
 
     it('writes script file to disk', async () => {

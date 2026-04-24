@@ -143,11 +143,11 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
     }
   }
 
-  const doSwitchDefault = useCallback(async () => {
+  const doSwitchDefault = useCallback(async (opts?: { carryChanges?: boolean }) => {
     setSwitching(true)
     setSwitchError(null)
     try {
-      await checkoutDefaultBranch(projectName)
+      await checkoutDefaultBranch(projectName, opts)
       await load('refresh')
     } catch (err) {
       setSwitchError(err instanceof Error ? err.message : 'Failed to switch branch')
@@ -241,7 +241,7 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
           <div className="mt-3 flex flex-col items-center gap-2">
             <button
               className="px-4 py-1.5 text-sm border border-status-info/60 bg-status-info/10 text-status-info rounded-md hover:bg-status-info/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-              onClick={doSwitchDefault}
+              onClick={() => doSwitchDefault()}
               disabled={switching}
               title={`git checkout ${data!.defaultBranch}`}
             >
@@ -275,6 +275,30 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
 
   return (
     <div className="mt-2">
+      {data.branchMerged && data.branch && data.defaultBranch && data.branch !== data.defaultBranch && (
+        <div className="bg-status-warning/10 border border-status-warning/40 rounded-lg p-4 mb-3 flex items-start gap-3 flex-wrap">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-status-warning">
+              Stranded on a merged branch
+            </p>
+            <p className="text-xs text-text-secondary mt-1">
+              <code className="font-mono">{data.branch}</code> is already merged into{' '}
+              <code className="font-mono">{data.defaultBranch}</code>. Move your {data.totalFiles} uncommitted
+              change{data.totalFiles !== 1 ? 's' : ''} to <code className="font-mono">{data.defaultBranch}</code>{' '}
+              and delete the dead local branch.
+            </p>
+            {switchError && <p className="text-xs text-status-error mt-1">{switchError}</p>}
+          </div>
+          <button
+            className="px-3 py-1.5 text-sm border border-status-warning/60 bg-status-warning/15 text-status-warning rounded-md hover:bg-status-warning/25 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium shrink-0"
+            onClick={() => doSwitchDefault({ carryChanges: true })}
+            disabled={switching}
+            title={`git stash → git checkout ${data.defaultBranch} → git branch -D ${data.branch} → git stash pop`}
+          >
+            {switching ? 'Moving…' : `Move to ${data.defaultBranch}`}
+          </button>
+        </div>
+      )}
       <div className="bg-bg-secondary rounded-lg p-4 mb-3 flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-2">
           <span className="text-text-secondary text-xs uppercase tracking-wider font-medium">Changes</span>
@@ -293,7 +317,7 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
             {data.defaultBranch && data.branch !== data.defaultBranch && (
               <button
                 className="px-2 py-1 text-xs border border-status-info/60 bg-status-info/10 text-status-info rounded-md hover:bg-status-info/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-                onClick={doSwitchDefault}
+                onClick={() => doSwitchDefault()}
                 disabled={switching || data.totalFiles > 0}
                 title={data.totalFiles > 0
                   ? 'Commit or stash uncommitted changes before switching'

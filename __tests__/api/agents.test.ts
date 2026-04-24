@@ -266,7 +266,7 @@ describe('agents API', () => {
       expect(data.agent.prompt).toBe('Do something');
       expect(data.agent.schedule).toBe('30m');
       expect(data.agent.runner).toBe('launchctl');
-      expect(JSON.parse(data.agent.skillIds)).toEqual(['skill1', 'skill2']);
+      expect(data.agent.skillIds).toEqual(['skill1', 'skill2']);
     });
 
     it('stores agent in database', async () => {
@@ -441,7 +441,7 @@ describe('agents API', () => {
       });
 
       const data = await response.json();
-      expect(JSON.parse(data.agent.skillIds)).toEqual(['skill1', 'skill2']);
+      expect(data.agent.skillIds).toEqual(['skill1', 'skill2']);
     });
 
     it('clears schedule when empty string provided', async () => {

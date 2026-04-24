@@ -1,36 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
-// Isolate only the updateAgent skillIds normalisation — avoid importing the full
-// client-api module (which references browser globals) by extracting the logic
-// under test into a local helper that mirrors the implementation exactly.
-function normaliseSkillIds(raw: unknown): string[] {
-  if (typeof raw === 'string') return JSON.parse(raw) as string[];
-  return (raw as string[] | null | undefined) ?? [];
-}
-
-describe('updateAgent – skillIds normalisation', () => {
-  it('parses a JSON string into an array', () => {
-    expect(normaliseSkillIds('["skill-a","skill-b"]')).toEqual(['skill-a', 'skill-b']);
-  });
-
-  it('returns an array as-is when the server already returns one', () => {
-    expect(normaliseSkillIds(['skill-a', 'skill-b'])).toEqual(['skill-a', 'skill-b']);
-  });
-
-  it('returns an empty array when skillIds is null', () => {
-    expect(normaliseSkillIds(null)).toEqual([]);
-  });
-
-  it('returns an empty array when skillIds is undefined', () => {
-    expect(normaliseSkillIds(undefined)).toEqual([]);
-  });
-
-  it('parses an empty JSON array string', () => {
-    expect(normaliseSkillIds('[]')).toEqual([]);
-  });
-});
-
-// Integration: test the full updateAgent fetch path with a mocked fetch.
+// skillIds normalisation now happens server-side in lib/agents-cache.ts (normalizeAgent).
+// The updateAgent client function passes the server response through unchanged.
 describe('updateAgent – fetch integration', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -49,23 +20,16 @@ describe('updateAgent – fetch integration', () => {
     return updateAgent('agent-1', { name: 'My Agent' });
   }
 
-  it('returns skillIds as array when server returns JSON string', async () => {
-    const result = await callUpdateAgent({
-      agent: { id: 'agent-1', name: 'My Agent', skillIds: '["s1","s2"]' },
-    });
-    expect(result.agent.skillIds).toEqual(['s1', 's2']);
-  });
-
-  it('returns skillIds as array when server already returns array', async () => {
+  it('returns the server response as-is', async () => {
     const result = await callUpdateAgent({
       agent: { id: 'agent-1', name: 'My Agent', skillIds: ['s1', 's2'] },
     });
     expect(result.agent.skillIds).toEqual(['s1', 's2']);
   });
 
-  it('returns empty array when server returns null skillIds', async () => {
+  it('returns empty array when server returns empty skillIds', async () => {
     const result = await callUpdateAgent({
-      agent: { id: 'agent-1', name: 'My Agent', skillIds: null },
+      agent: { id: 'agent-1', name: 'My Agent', skillIds: [] },
     });
     expect(result.agent.skillIds).toEqual([]);
   });

@@ -338,8 +338,15 @@ export interface ChangesResponse {
   ahead: number
 }
 
-export async function checkoutDefaultBranch(projectName: string): Promise<{ status: string; branch: string }> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/checkout-default`, { method: 'POST' })
+export async function checkoutDefaultBranch(
+  projectName: string,
+  opts?: { carryChanges?: boolean },
+): Promise<{ status: string; branch: string; deletedBranch?: string | null }> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/checkout-default`, {
+    method: 'POST',
+    headers: opts?.carryChanges ? { 'Content-Type': 'application/json' } : undefined,
+    body: opts?.carryChanges ? JSON.stringify({ carryChanges: true }) : undefined,
+  })
   const data = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(data.detail || 'Failed to switch branch')
   return data
@@ -642,12 +649,7 @@ export async function fetchAgents(project?: string): Promise<{ agents: Agent[] }
   const response = await fetch(url)
   if (!response.ok) return { agents: [] }
   const data = await response.json()
-  return {
-    agents: data.agents.map((a: Agent & { skillIds: string | string[] }) => ({
-      ...a,
-      skillIds: typeof a.skillIds === 'string' ? JSON.parse(a.skillIds) : a.skillIds,
-    })),
-  }
+  return { agents: data.agents }
 }
 
 export async function createAgent(agent: { name: string; project: string; skillIds: string[]; model: string; prompt?: string; schedule?: string | null; runner?: string; enabled?: boolean }): Promise<{ agent: Agent }> {
@@ -673,13 +675,7 @@ export async function updateAgent(agentId: string, updates: Partial<{ name: stri
     const data = await response.json().catch(() => ({}))
     throw new Error(data.detail || 'Failed to update agent')
   }
-  const data = await response.json()
-  return {
-    agent: {
-      ...data.agent,
-      skillIds: typeof data.agent.skillIds === 'string' ? JSON.parse(data.agent.skillIds) : (data.agent.skillIds ?? []),
-    },
-  }
+  return response.json()
 }
 
 export async function deleteAgent(agentId: string): Promise<void> {
