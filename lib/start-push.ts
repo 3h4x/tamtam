@@ -290,11 +290,14 @@ async function runPush(
   const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
   const commitSha = shaR.exitCode === 0 ? shaR.stdout.trim() : '';
 
-  // If this session was started from a GitHub issue, create a PR that closes it.
-  // Otherwise in PR Workflow mode, create a generic PR for the feature branch.
-  // In both cases, return to the default branch so the working copy is clean.
-  // Failures here are non-fatal — the push already succeeded.
-  if (issueCtx) {
+  // PR creation is gated on pr_workflow_enabled. Issue-linked runs on a
+  // Direct Branch project commit + push directly to the feature branch with
+  // no PR — the issue context is only used for the commit message trailer.
+  const { getProjectTestConfig } = await import('./scheduling');
+  const prWorkflowEnabled = !!getProjectTestConfig(projectName)?.prWorkflowEnabled;
+
+  // PR Workflow + issue: create a PR that closes the issue.
+  if (issueCtx && prWorkflowEnabled) {
     const prUrl = await createIssuePR(projPath, log, issueCtx);
     if (prUrl) {
       const prNumber = parseInt(prUrl.split('/').pop() ?? '0', 10) || undefined;
@@ -313,9 +316,8 @@ async function runPush(
     return { ok: true, commitSha, message: 'pushed (PR creation failed — see log)' };
   }
 
-  // Non-issue PR Workflow: create a PR if pr_workflow_enabled.
-  const { getProjectTestConfig } = await import('./scheduling');
-  if (getProjectTestConfig(projectName)?.prWorkflowEnabled) {
+  // PR Workflow without issue context: create a generic PR for the feature branch.
+  if (prWorkflowEnabled) {
     const prResult = await createGenericPR(projPath, log);
     if (prResult) {
       const prNumber = parseInt(prResult.prUrl.split('/').pop() ?? '0', 10) || undefined;
