@@ -52,7 +52,7 @@ pnpm build && pnpm start  # production
 
 ## Configuration
 
-All config lives in the SQLite database (`data/tamtam.db`). Nothing to edit by hand.
+All config lives in the SQLite database (`data/db/tamtam.db`). Nothing to edit by hand.
 
 | Setting | Where |
 |---|---|

@@ -14,7 +14,7 @@ Each project has a mode selector in its Config tab:
 ### Direct Branch
 
 ```
-test → review → fix loop → commit → push
+test → [fix loop] → review → [fix loop] → commit → push
 ```
 
 Changes are committed and pushed straight to whatever branch is currently checked out. No pull request is created.
@@ -22,7 +22,7 @@ Changes are committed and pushed straight to whatever branch is currently checke
 ### PR Workflow
 
 ```
-test → review → fix loop → commit → push → dod → merge (optional)
+test → [fix loop] → review → [fix loop] → commit → push → dod → merge (optional)
 ```
 
 Changes are pushed to the current feature/issue branch. A pull request is created (or updated) automatically. After push:
@@ -60,7 +60,8 @@ startRelease()
 
 TEST
   ├─ exit 0  → completion hook → start REVIEW
-  └─ exit ≠0 → completion hook → finalize release (exit 1)
+  └─ exit ≠0 → completion hook → start FIX (if iterations < 3 per 30 min)
+                                 → otherwise finalize release (exit 1)
 
 REVIEW
   ├─ exit 0  → completion hook → extract verdict

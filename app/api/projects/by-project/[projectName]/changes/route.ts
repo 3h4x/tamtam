@@ -157,12 +157,10 @@ export async function GET(
   // the PR was merged (manually or otherwise) and the local working copy is
   // stranded on a dead feature branch. A lightweight fetch is required first
   // so the local origin/<default> ref reflects GitHub's current HEAD.
-  // Gated behind ?checkMerged=1 because the fetch adds 500ms–2s of network
-  // latency on every request — callers opt in only when they have reason to
-  // believe the branch may have been merged (e.g. ahead === 0).
-  const checkMerged = request.nextUrl.searchParams.get('checkMerged') === '1';
+  // Gated behind ahead === 0: if the branch has unpushed commits it can't be
+  // fully merged, so skip the 500ms–2s git fetch on the common case.
   let branchMerged = false;
-  if (checkMerged && branchName && branchName !== defaultBranch) {
+  if (branchName && branchName !== defaultBranch && ahead === 0) {
     await exec(
       'git',
       ['-C', projPath, 'fetch', '--quiet', 'origin', defaultBranch],
@@ -179,6 +177,28 @@ export async function GET(
     }
   }
 
+  // Detect an existing open PR for the current branch so the UI can hide
+  // "Create PR" (gh would refuse anyway with a confusing error) and show a
+  // "View PR ↗" link instead. Only checked for non-default branches — the
+  // button isn't shown on main/master in any case, so the `gh pr list` call
+  // would be wasted. Network-bound, so wrapped in try/catch: a `gh` failure
+  // shouldn't break the changes page.
+  let openPrUrl: string | null = null;
+  if (branchName && branchName !== defaultBranch) {
+    try {
+      const prR = await exec(
+        'gh', ['pr', 'list', '--head', branchName, '--state', 'open', '--json', 'url', '--limit', '1'],
+        { cwd: projPath, timeout: 5000 },
+      );
+      if (prR.exitCode === 0 && prR.stdout.trim()) {
+        const arr = JSON.parse(prR.stdout) as Array<{ url?: string }>;
+        if (Array.isArray(arr) && arr[0]?.url) openPrUrl = arr[0].url;
+      }
+    } catch {
+      /* gh unreachable or JSON parse failed — leave openPrUrl null */
+    }
+  }
+
   return NextResponse.json({
     files,
     totalFiles: files.length,
@@ -189,6 +209,7 @@ export async function GET(
     branchMerged,
     behind,
     ahead,
+    openPrUrl,
   });
 }
 

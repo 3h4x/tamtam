@@ -259,6 +259,76 @@ describe('GET /api/projects/by-project/[projectName]/changes — defaultBranch a
     expect(data.ahead).toBe(5);
     expect(data.behind).toBe(2);
   });
+
+  it('openPrUrl is set when gh pr list returns an open PR (ahead > 0 branch)', async () => {
+    setupEmptyConcurrentCalls('# branch.head feature/my-feature\n# branch.ab +1 -0\n');
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'refs/remotes/origin/main\n' })) // symbolic-ref
+      // ahead=1 → no fetch/rev-list, next call is gh pr list
+      .mockResolvedValueOnce(makeExecResult({
+        stdout: JSON.stringify([{ url: 'https://github.com/owner/repo/pull/42' }]),
+      }));
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.openPrUrl).toBe('https://github.com/owner/repo/pull/42');
+  });
+
+  it('openPrUrl is null when gh pr list returns an empty array', async () => {
+    setupEmptyConcurrentCalls('# branch.head feature/my-feature\n# branch.ab +1 -0\n');
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'refs/remotes/origin/main\n' })) // symbolic-ref
+      .mockResolvedValueOnce(makeExecResult({ stdout: '[]' })); // gh pr list: no open PRs
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.openPrUrl).toBeNull();
+  });
+
+  it('openPrUrl is null and response succeeds when gh pr list throws', async () => {
+    setupEmptyConcurrentCalls('# branch.head feature/my-feature\n# branch.ab +1 -0\n');
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'refs/remotes/origin/main\n' })) // symbolic-ref
+      .mockRejectedValueOnce(new Error('gh: command not found')); // gh pr list throws
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.openPrUrl).toBeNull();
+  });
+
+  it('openPrUrl is set on ahead=0 branch with open PR (after merge check)', async () => {
+    setupEmptyConcurrentCalls('# branch.head feature/my-feature\n# branch.ab +0 -0\n');
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'refs/remotes/origin/main\n' })) // symbolic-ref
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })) // fetch
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0, stdout: '2\n' })) // rev-list: 2 ahead of origin → not merged
+      .mockResolvedValueOnce(makeExecResult({ // gh pr list
+        stdout: JSON.stringify([{ url: 'https://github.com/owner/repo/pull/5' }]),
+      }));
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.openPrUrl).toBe('https://github.com/owner/repo/pull/5');
+    expect(data.branchMerged).toBe(false);
+  });
+
+  it('openPrUrl is not checked on the default branch', async () => {
+    setupEmptyConcurrentCalls('# branch.head main\n# branch.ab +0 -0\n');
+    execMock.mockResolvedValueOnce(makeExecResult({ stdout: 'refs/remotes/origin/main\n' })); // symbolic-ref
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.openPrUrl).toBeNull();
+    // gh pr list should never have been called — only symbolic-ref after the 4 setup calls
+    // execMock call count: 4 (setup) + 1 (symbolic-ref) = 5
+    expect(execMock).toHaveBeenCalledTimes(5);
+  });
 });
 
 describe('POST /api/projects/by-project/[projectName]/changes', () => {

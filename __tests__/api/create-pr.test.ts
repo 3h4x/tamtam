@@ -22,7 +22,12 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
     vi.resetModules();
 
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/project');
-    execMock = vi.fn();
+    // Default to a safe no-op exec result so tests only have to mock the
+    // calls they care about. The route calls `exec` many times (branch lookup,
+    // git-log scans for conventional-commit type detection, gh issue view,
+    // git-log for PR body) and chaining `.mockResolvedValueOnce` for each one
+    // in every test is both brittle and uninformative.
+    execMock = vi.fn().mockResolvedValue(makeExecResult());
     detectMainBranchMock = vi.fn().mockResolvedValue('main');
     pushCurrentBranchMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123' });
 
@@ -87,10 +92,27 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
     expect(data.detail).toContain('auth denied');
   });
 
+  // Dispatch mock keyed by command — the route makes many git/gh calls to
+  // derive a conventional-commits-flavored title; these tests only care about
+  // `branch --show-current` and `gh pr create`. Other calls fall through to
+  // the default empty result.
+  function mockByCmd(handlers: { branch?: string; ghCreate?: ReturnType<typeof makeExecResult> }) {
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'git' && args.includes('branch') && args.includes('--show-current')) {
+        return makeExecResult({ stdout: handlers.branch ?? '' });
+      }
+      if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'create') {
+        return handlers.ghCreate ?? makeExecResult();
+      }
+      return makeExecResult();
+    });
+  }
+
   it('returns 500 when gh pr create fails', async () => {
-    execMock
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/my-branch\n' })) // branch
-      .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'gh: not authenticated' })); // gh pr create
+    mockByCmd({
+      branch: 'feat/my-branch\n',
+      ghCreate: makeExecResult({ exitCode: 1, stderr: 'gh: not authenticated' }),
+    });
     const res = await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(500);
     const data = await res.json();
@@ -98,11 +120,12 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
   });
 
   it('extracts the PR URL from gh output and returns it', async () => {
-    execMock
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/my-branch\n' }))
-      .mockResolvedValueOnce(makeExecResult({
+    mockByCmd({
+      branch: 'feat/my-branch\n',
+      ghCreate: makeExecResult({
         stdout: 'Creating pull request for feat/my-branch into main in owner/repo\n\nhttps://github.com/owner/repo/pull/42\n',
-      }));
+      }),
+    });
     const res = await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(200);
     const data = await res.json();
@@ -110,22 +133,22 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
   });
 
   it('picks the trailing PR URL when preamble references another PR', async () => {
-    // gh may emit preamble lines containing other pull URLs (e.g. a referenced
-    // PR in the commit body); the newly-created PR link is always last.
-    execMock
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/my-branch\n' }))
-      .mockResolvedValueOnce(makeExecResult({
+    mockByCmd({
+      branch: 'feat/my-branch\n',
+      ghCreate: makeExecResult({
         stdout: 'Refs https://github.com/owner/repo/pull/1\nhttps://github.com/owner/repo/pull/7\n',
-      }));
+      }),
+    });
     const res = await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
     const data = await res.json();
     expect(data.url).toBe('https://github.com/owner/repo/pull/7');
   });
 
   it('returns null url when gh output does not contain a PR link', async () => {
-    execMock
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/my-branch\n' }))
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'something unexpected\n' }));
+    mockByCmd({
+      branch: 'feat/my-branch\n',
+      ghCreate: makeExecResult({ stdout: 'something unexpected\n' }),
+    });
     const res = await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(200);
     const data = await res.json();

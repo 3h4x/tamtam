@@ -44,7 +44,7 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 
 ## Tech Stack
 - **Framework**: Next.js 16 (App Router) — both frontend and backend
-- **Database**: Drizzle ORM + better-sqlite3, WAL mode, DB at `data/tamtam.db` (gitignored)
+- **Database**: Drizzle ORM + better-sqlite3, WAL mode, DB at `data/db/tamtam.db` (gitignored)
 - **Streaming**: SSE via route handlers for real-time run output
 - **Styling**: Tailwind CSS v4
 - **Skills**: `skills/` submodule (claude-skills) — engineering skills scanned from `skills/docs/skills/`; user-defined skills in `data/skills/`

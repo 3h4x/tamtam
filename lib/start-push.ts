@@ -179,12 +179,32 @@ async function runPush(
   // Resolve issue context if not passed in (e.g. called from launchProjectPush).
   if (issueCtx === undefined) issueCtx = await findIssueContext(projectName, projPath);
 
-  // Check if there's anything to push (any commits ahead of remote).
+  // Check if there's anything to push. `rev-list @{u}..HEAD` fails with a
+  // non-zero exit when @{u} is unresolvable — which happens on a fresh
+  // branch that was never pushed, OR when the remote ref was deleted after
+  // a squash-merge (classic zombie branch). Silently treating that as
+  // "No changes to push" marooned commit ee3b5a5 on seo-tools. Distinguish:
+  //   - exit 0, count > 0 → push
+  //   - exit 0, count 0   → genuinely no changes
+  //   - exit != 0         → no upstream; fall through to tryPush, which
+  //                         retries with `--set-upstream` via the existing
+  //                         fallback at lines ~245-249 when push fails with
+  //                         "no upstream" / "set-upstream" stderr.
   const aheadR = await exec('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
   log(`\n$ git rev-list --count @{u}..HEAD\n${aheadR.stdout}`);
   const ahead = parseInt(aheadR.stdout.trim(), 10);
-  if (!aheadR.stdout.trim() || aheadR.exitCode !== 0 || isNaN(ahead) || ahead === 0) {
+  const hasUpstream = aheadR.exitCode === 0;
+  if (hasUpstream && (!aheadR.stdout.trim() || isNaN(ahead) || ahead === 0)) {
     return { ok: true, commitSha: '', message: 'No changes to push' };
+  }
+  if (!hasUpstream) {
+    // Guard against an empty HEAD (brand-new repo with no commits yet).
+    const hasCommitsR = await exec('git', ['-C', projPath, 'rev-list', '--count', 'HEAD'], { timeout: 5000 });
+    const hasCommits = hasCommitsR.exitCode === 0 && (parseInt(hasCommitsR.stdout.trim(), 10) || 0) > 0;
+    if (!hasCommits) {
+      return { ok: true, commitSha: '', message: 'No changes to push' };
+    }
+    log(`\n# no upstream configured — push will --set-upstream origin <branch>\n`);
   }
 
   // Pre-push hooks (e.g. borged's full CI pipeline) can take 15-20 minutes.

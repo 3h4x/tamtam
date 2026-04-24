@@ -334,6 +334,7 @@ export interface ChangesResponse {
   branch: string | null
   defaultBranch?: string
   branchMerged?: boolean
+  openPrUrl?: string | null
   behind: number
   ahead: number
 }
@@ -352,8 +353,8 @@ export async function checkoutDefaultBranch(
   return data
 }
 
-export async function fetchChanges(projectName: string, opts?: { checkMerged?: boolean; signal?: AbortSignal }): Promise<ChangesResponse> {
-  const url = `${API_BASE}/by-project/${projectName}/changes${opts?.checkMerged ? '?checkMerged=1' : ''}`
+export async function fetchChanges(projectName: string, opts?: { signal?: AbortSignal }): Promise<ChangesResponse> {
+  const url = `${API_BASE}/by-project/${projectName}/changes`
   const response = await fetch(url, { signal: opts?.signal })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
