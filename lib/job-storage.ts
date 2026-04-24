@@ -595,6 +595,34 @@ async function runCompletionHooks(job: JobData): Promise<void> {
     }
   }
 
+  // Test failed: kick off a fix job using the test log. The fix→review hook
+  // will then chain to review → commit → push. Bounded by the same fix cap
+  // as review→fix so a persistently-broken test can't spin Claude forever.
+  if (job.kind === 'test' && job.exitCode !== null && job.exitCode !== 0) {
+    try {
+      const { autoCommitEnabled, autoPushEnabled } = await getProjectPipelineConfig(job.project);
+      const inRelease = !!findActiveReleaseJob(job.project);
+      if (inRelease || autoPushEnabled || autoCommitEnabled) {
+        const count = recentFixCount(job.project);
+        if (count < MAX_FIX_ITERATIONS) {
+          const { startFixFromJob } = await import('./start-fix');
+          const r = await startFixFromJob(job.id);
+          if (r.ok) {
+            console.log(`[release] test failed → started fix ${r.jobId} (iter ${count + 1})`);
+            chainedNext = true;
+          } else {
+            console.log(`[release] test→fix skipped for ${job.project}: ${r.detail}`);
+          }
+        } else {
+          console.log(`[release] test→fix cap reached for ${job.project} (${count}/${MAX_FIX_ITERATIONS}) — stopping`);
+          notificationEvent = 'fix_loop_exhausted';
+        }
+      }
+    } catch (e) {
+      console.log(`[release] test-fail hook error for ${job.project}:`, e);
+    }
+  }
+
   // Auto-merge: when a push succeeds with a PR and auto_pr_merge_enabled is on,
   // launch a pr-wait job that polls checks and merges once they pass.
   if (job.kind === 'push' && job.exitCode === 0) {
