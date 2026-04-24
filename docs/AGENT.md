@@ -227,6 +227,18 @@ The prompt is stored in `./data/logs/agent-scripts/{agentId}.prompt.json` and pa
 
 Log output goes to `./data/logs/agent-scheduler-{agentId}.log`.
 
+#### PM2 boot-storm gotcha
+
+`pm2 start <script> --cron <expr>` registers the cron **and synchronously executes the script once** — PM2 has no "register without running" behavior by default. A naïve `pm2 start` followed by `pm2 stop` does not prevent the initial invocation; the curl in the script reaches `/api/agents/{id}/run` before `pm2 stop` lands, spawning a real agent run. With N scheduled agents, every `reinstallAgents()` pass produces N unintended runs (visible as `<project>-agent:<name>-<epoch>` PM2 processes alongside the `tamtam-<project>-agent-<name>` schedule entries).
+
+The fix is `--no-autostart` on `pm2 start`. This flag is accepted by `pm2 start` on v6.x (even though `pm2 start --help` doesn't list it) and registers the process in `stopped` state so the script only runs when the cron fires. It should be paired with `--no-autorestart` so a completed run doesn't immediately respawn.
+
+```
+pm2 start <scriptPath> --name <name> --no-autostart --no-autorestart --cron <cronExpr>
+```
+
+If the flag is ever removed upstream, the fallback is ecosystem config with `autostart: false`; the previous `pm2 start` → `pm2 stop` sequence is not a working substitute.
+
 ### LaunchAgent (macOS)
 
 When `runner: "launchctl"`, a `.plist` file is created in `~/Library/LaunchAgents/`:
@@ -339,6 +351,29 @@ Job rows are inserted with `pid=0` and the real pid is persisted asynchronously 
 | `lib/agent-scheduler.ts` | Install/uninstall PM2 cron and LaunchAgent |
 | `lib/pm2-jobs.ts` | PM2 process lifecycle |
 | `components/AgentsTab.tsx` | UI for agent management |
+| `instrumentation.ts` | Next.js register hook; calls `reinstallAgents()` on server boot |
+
+### Instrumentation edge-runtime constraint
+
+Next.js compiles `instrumentation.ts` for **both** the Node and Edge runtimes. Anything the file imports — even transitively, and even through `await import(...)` — is traced into the Edge bundle. `lib/db` uses `path`, `fs`, and `better-sqlite3`, none of which exist on Edge, so a direct import produces:
+
+```
+A Node.js module is loaded ('path' at line 4) which is not supported in the Edge Runtime.
+Import trace:  Edge Instrumentation: ./lib/db/index.ts → ./instrumentation.ts
+```
+
+A runtime guard (`if (process.env.NEXT_RUNTIME !== 'nodejs') return`) prevents execution on Edge but **does not prevent bundling**. To keep Node-only code out of the Edge bundle, split it into a sibling file (e.g. `instrumentation-node.ts`) and dynamic-import that file from inside the runtime branch:
+
+```ts
+// instrumentation.ts
+export async function register() {
+  if (process.env.NEXT_RUNTIME !== 'nodejs') return;
+  const { registerNode } = await import('./instrumentation-node');
+  await registerNode();
+}
+```
+
+The dynamic import target is only referenced under the Node branch, so Turbopack's Edge pass doesn't trace it. Put `reinstallAgents()`, `runNightlyCleanup`, and any other Node-only logic in the sibling file. The same rule applies to `middleware.ts` and any route handler with `export const runtime = 'edge'`.
 
 ## Tests
 

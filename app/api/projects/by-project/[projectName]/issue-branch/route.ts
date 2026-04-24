@@ -41,6 +41,35 @@ export async function POST(
     return NextResponse.json({ status: 'already-on-branch', branch });
   }
 
+  // Detect a zombie branch: the issue was already closed/merged, but the local
+  // ref is still around. Checking it out would resurrect dead work and pile
+  // new commits on top of an already-merged branch. Resolve the default branch
+  // (prefer the remote HEAD symref) and skip if the issue branch is fully
+  // merged into it.
+  const defaultR = await exec(
+    'git',
+    ['-C', projPath, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'],
+    { timeout: 5000 },
+  );
+  const defaultBranch = (defaultR.stdout.trim().split('/').pop() || 'master').trim();
+  const mergedR = await exec(
+    'git',
+    ['-C', projPath, 'branch', '--merged', defaultBranch],
+    { timeout: 5000 },
+  );
+  const mergedBranches = mergedR.stdout
+    .split('\n')
+    .map((l) => l.replace(/^\*?\s+/, '').trim())
+    .filter(Boolean);
+  if (mergedBranches.includes(branch)) {
+    return NextResponse.json({
+      status: 'skipped',
+      reason: `branch ${branch} already merged into ${defaultBranch}`,
+      branch,
+      currentBranch,
+    });
+  }
+
   // Create-or-checkout. We deliberately preserve uncommitted work by not
   // touching the index — `git checkout -b` carries the working tree across.
   const createR = await exec('git', ['-C', projPath, 'checkout', '-b', branch], { timeout: 10000 });

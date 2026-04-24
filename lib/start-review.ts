@@ -30,7 +30,14 @@ function loadReviewPrompt(): string {
     'There are uncommitted changes in this repository. Use git and any other tools ' +
     'you need to inspect the changes yourself (git status, git diff, read files, ' +
     'etc.), then review them.\n\n' +
-    'End with a verdict: LGTM / NEEDS ATTENTION / DO NOT SHIP\n\n' +
+    'You MUST end your response with a line in this exact format, on its own line, ' +
+    'as the final non-empty line of your output:\n\n' +
+    '    Verdict: LGTM\n\n' +
+    'or:\n\n' +
+    '    Verdict: NEEDS ATTENTION\n\n' +
+    '    Verdict: DO NOT SHIP\n\n' +
+    'No other text may follow the verdict line. If you omit it, the release ' +
+    'pipeline will treat the review as NEEDS ATTENTION and run a fix loop.\n\n' +
     review_verdict_rules;
 }
 

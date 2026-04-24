@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db, schema } from '@/lib/db';
 import { installAgentSchedule } from '@/lib/agent-scheduler';
 import { errMsg } from '@/lib/types';
-import { getAllAgentsCached, clearAgentsCache } from '@/lib/agents-cache';
+import { getAllAgentsCached, clearAgentsCache, normalizeAgent } from '@/lib/agents-cache';
 
 export async function GET(request: NextRequest) {
   const project = request.nextUrl.searchParams.get('project');
@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   const agents = getAllAgentsCached();
   let result = project ? agents.filter(a => a.project === project) : agents;
   if (name) result = result.filter(a => a.name === name);
-  return NextResponse.json({ agents: result });
+  return NextResponse.json({ agents: result.map(normalizeAgent) });
 }
 
 export async function POST(request: NextRequest) {
@@ -54,5 +54,5 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ agent }, { status: 201 });
+  return NextResponse.json({ agent: normalizeAgent(agent) }, { status: 201 });
 }
