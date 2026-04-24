@@ -130,6 +130,97 @@ describe('GET /api/projects/by-project/[projectName]/changes', () => {
     const data = await res.json();
     expect(data.files[0]).toMatchObject({ filename: 'big.bin', binary: true });
   });
+
+  // openPrUrl detection — dispatches by command so tests are stable regardless
+  // of how many git calls happen before the gh pr list check.
+  function mockByCmd(handlers: {
+    porcelain?: string;
+    symref?: string;
+    ghPrList?: ReturnType<typeof makeExecResult>;
+  }) {
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'git' && args.includes('--porcelain=v2') && args.includes('--branch')) {
+        return makeExecResult({ stdout: handlers.porcelain ?? '# branch.head main\n# branch.ab +0 -0\n' });
+      }
+      if (cmd === 'git' && args.includes('symbolic-ref')) {
+        return makeExecResult({ stdout: handlers.symref ?? 'refs/remotes/origin/main\n' });
+      }
+      if (cmd === 'gh' && args.includes('pr') && args.includes('list')) {
+        return handlers.ghPrList ?? makeExecResult({ stdout: '[]' });
+      }
+      return makeExecResult();
+    });
+  }
+
+  it('includes openPrUrl in response for non-default branch', async () => {
+    mockByCmd({
+      porcelain: '# branch.head feat/my-feature\n# branch.ab +2 -0\n',
+      symref: 'refs/remotes/origin/main\n',
+      ghPrList: makeExecResult({ stdout: '[{"url":"https://github.com/owner/repo/pull/42"}]' }),
+    });
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.openPrUrl).toBe('https://github.com/owner/repo/pull/42');
+  });
+
+  it('sets openPrUrl to null when on default branch (gh pr list not called)', async () => {
+    mockByCmd({
+      porcelain: '# branch.head main\n# branch.ab +0 -0\n',
+      symref: 'refs/remotes/origin/main\n',
+    });
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.openPrUrl).toBeNull();
+    const ghCall = execMock.mock.calls.find(([cmd]: any) => cmd === 'gh');
+    expect(ghCall).toBeUndefined();
+  });
+
+  it('sets openPrUrl to null when gh pr list returns empty array', async () => {
+    mockByCmd({
+      porcelain: '# branch.head feat/x\n# branch.ab +1 -0\n',
+      ghPrList: makeExecResult({ stdout: '[]' }),
+    });
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.openPrUrl).toBeNull();
+  });
+
+  it('sets openPrUrl to null when gh pr list fails (non-zero exit)', async () => {
+    mockByCmd({
+      porcelain: '# branch.head feat/x\n# branch.ab +1 -0\n',
+      ghPrList: makeExecResult({ exitCode: 1, stderr: 'gh: not authenticated' }),
+    });
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.openPrUrl).toBeNull();
+  });
+
+  it('sets openPrUrl to null when gh pr list returns invalid JSON', async () => {
+    mockByCmd({
+      porcelain: '# branch.head feat/x\n# branch.ab +1 -0\n',
+      ghPrList: makeExecResult({ stdout: 'not json' }),
+    });
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.openPrUrl).toBeNull();
+  });
+
+  it('passes the current branch name to gh pr list --head', async () => {
+    mockByCmd({
+      porcelain: '# branch.head fix/issue-5-my-bug\n# branch.ab +1 -0\n',
+      ghPrList: makeExecResult({ stdout: '[]' }),
+    });
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
+    await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const ghCall = execMock.mock.calls.find(([cmd]: any) => cmd === 'gh');
+    expect(ghCall).toBeTruthy();
+    expect(ghCall![1]).toContain('fix/issue-5-my-bug');
+  });
 });
 
 describe('GET /api/projects/by-project/[projectName]/changes/diff', () => {

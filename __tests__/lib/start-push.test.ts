@@ -86,6 +86,45 @@ describe('startProjectPush — push result tracking', () => {
     expect(setProjectPushResultMock).toHaveBeenCalledWith('proj', expect.stringContaining('Push failed'));
   });
 
+  // Upstream-detection tests — verifies the fix for the zombie-branch bug where
+  // a non-zero exit from `rev-list @{u}..HEAD` (no upstream configured) was
+  // silently treated as "no changes", marooning commits on the local branch.
+  it('falls through to push when no upstream exists but branch has commits', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(1, ''))       // git rev-list @{u}..HEAD → non-zero = no upstream
+      .mockImplementationOnce(() => resp(0, '3\n'))    // git rev-list --count HEAD → 3 commits
+      .mockImplementationOnce(() => resp(0, '# branch.head feat/x\n# branch.ab +0 -0\n')) // behind check
+      .mockImplementationOnce(() => resp(0))            // git push
+      .mockImplementationOnce(() => resp(0, 'abc1234')); // git rev-parse
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.message).not.toBe('No changes to push');
+    // Verify git push was actually attempted
+    const pushCall = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args.includes('push'));
+    expect(pushCall).toBeTruthy();
+  });
+
+  it('returns "No changes to push" when no upstream and no commits on HEAD', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(1, ''))   // git rev-list @{u}..HEAD → no upstream
+      .mockImplementationOnce(() => resp(0, '0\n')); // git rev-list --count HEAD → 0 commits
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.message).toBe('No changes to push');
+  });
+
+  it('returns "No changes to push" when no upstream and rev-list HEAD also fails', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(1, ''))  // git rev-list @{u}..HEAD → no upstream
+      .mockImplementationOnce(() => resp(1, '')); // git rev-list --count HEAD → fails too
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.message).toBe('No changes to push');
+  });
+
   it('returns 404 when project path cannot be resolved', async () => {
     vi.resetModules();
     vi.doMock('@/lib/project-data', () => ({

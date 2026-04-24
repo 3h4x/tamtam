@@ -564,27 +564,19 @@ export function ProjectDetailPage({
 
   const handleCreatePr = async () => {
     if (!name || creatingPr) return
-    // Open a blank tab synchronously inside the click gesture so the later
-    // navigation isn't popup-blocked — push + gh pr create can take several
-    // seconds, and any window.open after an await is treated as non-gesture.
-    const prWindow = typeof window !== 'undefined' ? window.open('about:blank', '_blank') : null
     setCreatingPr(true)
     try {
       const result = await createProjectPR(name)
-      toast('Pull request created', 'success')
+      // Confirmation only — do NOT auto-open a new tab. The user already sees
+      // the button flip from "Create PR" to "View PR" once the PR list refresh
+      // completes, and the toast links to the PR if they want to navigate.
+      toast(result.url ? `Pull request created: ${result.url}` : 'Pull request created', 'success')
       // Force-refresh PR list (bypass server cache) so the button disappears
       fetchIssuesAndPRs(name, true).then((data) => {
         setIssueCount({ prs: data.prs.length, issues: data.issues.length })
         setOpenPrBranches(data.prs.map(pr => pr.headRefName))
       }).catch(() => {})
-      if (result.url) {
-        if (prWindow && !prWindow.closed) prWindow.location.href = result.url
-        else window.open(result.url, '_blank')
-      } else if (prWindow && !prWindow.closed) {
-        prWindow.close()
-      }
     } catch (err) {
-      if (prWindow && !prWindow.closed) prWindow.close()
       toast(err instanceof Error ? err.message : 'Failed to create PR', 'error')
     } finally {
       setCreatingPr(false)
@@ -734,11 +726,13 @@ export function ProjectDetailPage({
             const chainSuffix = multiStep && !config?.auto_push_enabled && !freshLgtm
               ? ' (enable auto-push in config to auto-chain)'
               : ''
-            // Only show when we know both branches, the current one isn't the default,
-            // the project uses PR Workflow mode, and no PR is already open for this branch.
+            // Show whenever we're on a non-default branch with no open PR for it.
+            // Not gated by pr_workflow_enabled — in Direct Branch mode the user
+            // may still want an ad-hoc PR (e.g. to unstick commits marooned on a
+            // local branch whose upstream was deleted post-merge).
             const isOnFeatureBranch = !!currentBranch && !!defaultBranch && currentBranch !== defaultBranch
             const hasOpenPr = openPrBranches.includes(currentBranch ?? '')
-            const showCreatePr = isOnFeatureBranch && !hasOpenPr && !!config?.pr_workflow_enabled
+            const showCreatePr = isOnFeatureBranch && !hasOpenPr
             return (
               <>
                 <button

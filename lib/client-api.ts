@@ -334,6 +334,7 @@ export interface ChangesResponse {
   branch: string | null
   defaultBranch?: string
   branchMerged?: boolean
+  openPrUrl?: string | null
   behind: number
   ahead: number
 }

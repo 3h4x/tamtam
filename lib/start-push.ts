@@ -183,8 +183,25 @@ async function runPush(
   const aheadR = await exec('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
   log(`\n$ git rev-list --count @{u}..HEAD\n${aheadR.stdout}`);
   const ahead = parseInt(aheadR.stdout.trim(), 10);
-  if (!aheadR.stdout.trim() || aheadR.exitCode !== 0 || isNaN(ahead) || ahead === 0) {
+
+  // Distinguish "no upstream" from "no changes". When the branch has no
+  // upstream (fresh branch, or the remote ref was deleted after a squash
+  // merge), `rev-list @{u}..HEAD` exits non-zero with an empty stdout.
+  // Silently treating that as "no changes" marooned commit ee3b5a5 on a
+  // zombie branch. When HEAD has commits but upstream is missing, fall
+  // through to tryPush; the --set-upstream fallback below (line ~245)
+  // creates the remote ref.
+  const hasUpstream = aheadR.exitCode === 0;
+  if (hasUpstream && (!aheadR.stdout.trim() || isNaN(ahead) || ahead === 0)) {
     return { ok: true, commitSha: '', message: 'No changes to push' };
+  }
+  if (!hasUpstream) {
+    const hasCommitsR = await exec('git', ['-C', projPath, 'rev-list', '--count', 'HEAD'], { timeout: 5000 });
+    const hasCommits = hasCommitsR.exitCode === 0 && (parseInt(hasCommitsR.stdout.trim(), 10) || 0) > 0;
+    if (!hasCommits) {
+      return { ok: true, commitSha: '', message: 'No changes to push' };
+    }
+    log(`\n# no upstream configured — push will --set-upstream origin <branch>\n`);
   }
 
   // Pre-push hooks (e.g. borged's full CI pipeline) can take 15-20 minutes.

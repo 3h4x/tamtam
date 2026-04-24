@@ -179,6 +179,24 @@ export async function GET(
     }
   }
 
+  // Detect an existing open PR for the current branch so the UI can hide the
+  // "Create PR" button (gh would refuse anyway with a confusing error). Only
+  // checked for non-default branches to avoid a wasted `gh pr list` call on
+  // main/master — the button isn't shown there in any case.
+  let openPrUrl: string | null = null;
+  if (branchName && branchName !== defaultBranch) {
+    const prR = await exec(
+      'gh', ['pr', 'list', '--head', branchName, '--state', 'open', '--json', 'url', '--limit', '1'],
+      { cwd: projPath, timeout: 5000 },
+    );
+    if (prR.exitCode === 0) {
+      try {
+        const arr = JSON.parse(prR.stdout) as Array<{ url?: string }>;
+        if (Array.isArray(arr) && arr[0]?.url) openPrUrl = arr[0].url;
+      } catch {}
+    }
+  }
+
   return NextResponse.json({
     files,
     totalFiles: files.length,
@@ -189,6 +207,7 @@ export async function GET(
     branchMerged,
     behind,
     ahead,
+    openPrUrl,
   });
 }
 

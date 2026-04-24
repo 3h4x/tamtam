@@ -239,14 +239,27 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
         )}
         {onNonDefault && (
           <div className="mt-3 flex flex-col items-center gap-2">
-            <button
-              className="px-4 py-1.5 text-sm border border-status-info/60 bg-status-info/10 text-status-info rounded-md hover:bg-status-info/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-              onClick={() => doSwitchDefault()}
-              disabled={switching}
-              title={`git checkout ${data!.defaultBranch}`}
-            >
-              {switching ? 'Switching…' : `Switch to ${data!.defaultBranch}`}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                className="px-4 py-1.5 text-sm border border-status-info/60 bg-status-info/10 text-status-info rounded-md hover:bg-status-info/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                onClick={() => doSwitchDefault()}
+                disabled={switching}
+                title={`git checkout ${data!.defaultBranch}`}
+              >
+                {switching ? 'Switching…' : `Switch to ${data!.defaultBranch}`}
+              </button>
+              {data?.openPrUrl && (
+                <a
+                  className="px-4 py-1.5 text-sm border border-border bg-bg-secondary text-text-primary rounded-md hover:bg-bg-tertiary cursor-pointer font-medium"
+                  href={data.openPrUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={`Open existing PR: ${data.openPrUrl}`}
+                >
+                  View PR ↗
+                </a>
+              )}
+            </div>
             {data?.branchMerged && (
               <p className="text-xs text-text-tertiary">Feature branch is already merged into <code className="font-mono">{data.defaultBranch}</code>.</p>
             )}
@@ -315,16 +328,29 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
             <span className="text-text-secondary text-xs uppercase tracking-wider font-medium">Branch</span>
             <code className="font-mono text-xs bg-bg-tertiary px-1.5 py-0.5 rounded text-text-primary">{data.branch}</code>
             {data.defaultBranch && data.branch !== data.defaultBranch && (
-              <button
-                className="px-2 py-1 text-xs border border-status-info/60 bg-status-info/10 text-status-info rounded-md hover:bg-status-info/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-                onClick={() => doSwitchDefault()}
-                disabled={switching || data.totalFiles > 0}
-                title={data.totalFiles > 0
-                  ? 'Commit or stash uncommitted changes before switching'
-                  : `git checkout ${data.defaultBranch}`}
-              >
-                {switching ? 'Switching…' : `Switch to ${data.defaultBranch}`}
-              </button>
+              <>
+                <button
+                  className="px-2 py-1 text-xs border border-status-info/60 bg-status-info/10 text-status-info rounded-md hover:bg-status-info/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                  onClick={() => doSwitchDefault()}
+                  disabled={switching || data.totalFiles > 0}
+                  title={data.totalFiles > 0
+                    ? 'Commit or stash uncommitted changes before switching'
+                    : `git checkout ${data.defaultBranch}`}
+                >
+                  {switching ? 'Switching…' : `Switch to ${data.defaultBranch}`}
+                </button>
+                {data.openPrUrl && (
+                  <a
+                    className="px-2 py-1 text-xs border border-border bg-bg-secondary text-text-primary rounded-md hover:bg-bg-tertiary cursor-pointer font-medium"
+                    href={data.openPrUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={`Open existing PR: ${data.openPrUrl}`}
+                  >
+                    View PR ↗
+                  </a>
+                )}
+              </>
             )}
             {switchError && <span className="text-xs text-status-error">{switchError}</span>}
           </div>
