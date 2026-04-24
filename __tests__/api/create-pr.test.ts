@@ -165,3 +165,224 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
     expect(pushCurrentBranchMock).toHaveBeenCalledWith('/custom/repo');
   });
 });
+
+describe('POST /api/projects/by-project/[projectName]/create-pr — title generation', () => {
+  let POST: (req: NextRequest, ctx: { params: Promise<{ projectName: string }> }) => Promise<Response>;
+  let execMock: ReturnType<typeof vi.fn>;
+  let detectMainBranchMock: ReturnType<typeof vi.fn>;
+  let pushCurrentBranchMock: ReturnType<typeof vi.fn>;
+
+  function makeExecResult(overrides: { exitCode?: number; stdout?: string; stderr?: string } = {}) {
+    return { exitCode: 0, stdout: '', stderr: '', ...overrides };
+  }
+
+  function makeRequest() {
+    return new NextRequest('http://localhost/api/projects/by-project/myproj/create-pr', { method: 'POST' });
+  }
+
+  // Dispatch exec calls by cmd+args pattern so each test only declares what it cares about.
+  function buildExecDispatch(handlers: {
+    branch?: string;
+    logSubjects?: string;     // git log main..HEAD --pretty=%s
+    issueView?: { exitCode?: number; stdout?: string }; // gh issue view
+    logBullets?: string;      // git log main..HEAD --pretty=- %s (body)
+    ghCreate?: { exitCode?: number; stdout?: string; stderr?: string };
+  }) {
+    return async (cmd: string, args: string[]) => {
+      if (cmd === 'git' && args.includes('branch') && args.includes('--show-current')) {
+        return makeExecResult({ stdout: handlers.branch ?? 'feat/my-feature\n' });
+      }
+      if (cmd === 'git' && args.includes('log') && args.includes('--pretty=%s')) {
+        return makeExecResult({ stdout: handlers.logSubjects ?? '' });
+      }
+      if (cmd === 'git' && args.includes('log') && args.includes('--pretty=- %s')) {
+        return makeExecResult({ stdout: handlers.logBullets ?? '- some commit' });
+      }
+      if (cmd === 'gh' && args[0] === 'issue' && args[1] === 'view') {
+        return makeExecResult(handlers.issueView ?? { exitCode: 1, stdout: '' });
+      }
+      if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'create') {
+        return makeExecResult(handlers.ghCreate ?? { stdout: 'https://github.com/o/r/pull/1\n' });
+      }
+      return makeExecResult();
+    };
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    execMock = vi.fn();
+    detectMainBranchMock = vi.fn().mockResolvedValue('main');
+    pushCurrentBranchMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123' });
+
+    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue('/repo') }));
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/start-commit', () => ({ detectMainBranch: detectMainBranchMock }));
+    vi.doMock('@/lib/start-push', () => ({ pushCurrentBranch: pushCurrentBranchMock }));
+
+    const mod = await import('@/app/api/projects/by-project/[projectName]/create-pr/route');
+    POST = mod.POST;
+  });
+
+  afterEach(() => { vi.resetModules(); });
+
+  it('uses feat: type when a commit subject starts with feat:', async () => {
+    execMock.mockImplementation(buildExecDispatch({
+      logSubjects: 'feat: add dark mode\nfix: correct typo\n',
+    }));
+    await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    const prCreateCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'create',
+    );
+    expect(prCreateCall).toBeTruthy();
+    const titleIdx = prCreateCall![1].indexOf('--title');
+    expect(titleIdx).toBeGreaterThan(-1);
+    expect(prCreateCall![1][titleIdx + 1]).toMatch(/^feat:/);
+  });
+
+  it('prefers feat over fix in CC priority ordering', async () => {
+    execMock.mockImplementation(buildExecDispatch({
+      logSubjects: 'fix: patch one\nfeat: add feature\nchore: update deps\n',
+    }));
+    await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    const prCreateCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'create',
+    );
+    const titleIdx = prCreateCall![1].indexOf('--title');
+    expect(prCreateCall![1][titleIdx + 1]).toMatch(/^feat:/);
+  });
+
+  it('defaults to chore type when no commit has a CC prefix', async () => {
+    execMock.mockImplementation(buildExecDispatch({
+      logSubjects: 'update readme\nadd docs\n',
+    }));
+    await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    const prCreateCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'create',
+    );
+    const titleIdx = prCreateCall![1].indexOf('--title');
+    expect(prCreateCall![1][titleIdx + 1]).toMatch(/^chore:/);
+  });
+
+  it('uses commit subject summary as PR title when branch is not an issue branch', async () => {
+    execMock.mockImplementation(buildExecDispatch({
+      branch: 'feat/dark-mode\n',
+      logSubjects: 'feat: implement dark mode toggle\n',
+    }));
+    await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    const prCreateCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'create',
+    );
+    const titleIdx = prCreateCall![1].indexOf('--title');
+    expect(prCreateCall![1][titleIdx + 1]).toBe('feat: implement dark mode toggle');
+  });
+
+  it('strips CC prefix from commit subject to avoid double-prefixing', async () => {
+    execMock.mockImplementation(buildExecDispatch({
+      branch: 'feat/dark-mode\n',
+      logSubjects: 'fix: correct the off-by-one error\n',
+    }));
+    await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    const prCreateCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'create',
+    );
+    const titleIdx = prCreateCall![1].indexOf('--title');
+    const title: string = prCreateCall![1][titleIdx + 1];
+    // Should be "fix: correct the off-by-one error" (type detected from commit) — NOT "fix: fix: correct..."
+    expect(title).not.toMatch(/^fix: fix:/);
+    expect(title).toBe('fix: correct the off-by-one error');
+  });
+
+  it('fetches issue title from gh when branch matches fix/issue-N-... pattern', async () => {
+    execMock.mockImplementation(buildExecDispatch({
+      branch: 'fix/issue-42-add-login\n',
+      logSubjects: 'fix: implement login\n',
+      issueView: { exitCode: 0, stdout: JSON.stringify({ title: 'Add login page' }) },
+    }));
+    await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    const issueViewCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'gh' && args[0] === 'issue' && args[1] === 'view' && args[2] === '42',
+    );
+    expect(issueViewCall).toBeTruthy();
+    const prCreateCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'create',
+    );
+    const titleIdx = prCreateCall![1].indexOf('--title');
+    expect(prCreateCall![1][titleIdx + 1]).toBe('fix: add login page');
+  });
+
+  it('includes Closes #N in PR body for issue branches', async () => {
+    execMock.mockImplementation(buildExecDispatch({
+      branch: 'fix/issue-7-bugfix\n',
+      logSubjects: 'fix: patch the bug\n',
+      issueView: { exitCode: 0, stdout: JSON.stringify({ title: 'Fix the bug' }) },
+      logBullets: '- fix: patch the bug',
+    }));
+    await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    const prCreateCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'create',
+    );
+    const bodyIdx = prCreateCall![1].indexOf('--body');
+    const body: string = prCreateCall![1][bodyIdx + 1];
+    expect(body).toContain('Closes #7');
+    expect(body).toContain('- fix: patch the bug');
+  });
+
+  it('falls back to --fill when no commits exist and branch is not an issue branch', async () => {
+    execMock.mockImplementation(buildExecDispatch({
+      logSubjects: '', // no commits on branch
+    }));
+    await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    const prCreateCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'create',
+    );
+    expect(prCreateCall![1]).toContain('--fill');
+    expect(prCreateCall![1]).not.toContain('--title');
+  });
+
+  it('falls back to commit subject when issue view fails', async () => {
+    execMock.mockImplementation(buildExecDispatch({
+      branch: 'fix/issue-99-broken-thing\n',
+      logSubjects: 'fix: repair broken thing\n',
+      issueView: { exitCode: 1, stdout: '' }, // gh issue view fails
+    }));
+    await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    const prCreateCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'create',
+    );
+    const titleIdx = prCreateCall![1].indexOf('--title');
+    expect(prCreateCall![1][titleIdx + 1]).toBe('fix: repair broken thing');
+    // Body should NOT have Closes # since we couldn't confirm the issue
+    const bodyIdx = prCreateCall![1].indexOf('--body');
+    expect(prCreateCall![1][bodyIdx + 1]).not.toContain('Closes');
+  });
+
+  it('strips CC prefix from issue title to avoid double-prefixing', async () => {
+    execMock.mockImplementation(buildExecDispatch({
+      branch: 'fix/issue-5-auth-fix\n',
+      logSubjects: 'fix: correct auth token\n',
+      issueView: { exitCode: 0, stdout: JSON.stringify({ title: 'fix: Correct auth token expiry' }) },
+    }));
+    await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    const prCreateCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'create',
+    );
+    const titleIdx = prCreateCall![1].indexOf('--title');
+    const title: string = prCreateCall![1][titleIdx + 1];
+    expect(title).not.toMatch(/^fix: fix:/i);
+    expect(title).toBe('fix: correct auth token expiry');
+  });
+
+  it('lowercases first char of issue title used as summary', async () => {
+    execMock.mockImplementation(buildExecDispatch({
+      branch: 'fix/issue-3-something\n',
+      logSubjects: 'feat: do something\n',
+      issueView: { exitCode: 0, stdout: JSON.stringify({ title: 'Capitalised issue title' }) },
+    }));
+    await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    const prCreateCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'create',
+    );
+    const titleIdx = prCreateCall![1].indexOf('--title');
+    expect(prCreateCall![1][titleIdx + 1]).toBe('feat: capitalised issue title');
+  });
+});
