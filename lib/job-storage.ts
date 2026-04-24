@@ -135,6 +135,17 @@ function saveToDb(job: JobData): void {
 export async function markDone(job: JobData, exitCode: number): Promise<void> {
   // Idempotent: if already finalized, don't double-fire hooks or rewrite DB.
   if (job.finishedAt !== null) return;
+  // Also check the DB — probeJobStatus may have finalized this job via a
+  // different object instance (e.g. the fresh copy from listJobs() in
+  // /api/jobs polling), leaving the closure object's finishedAt stale.
+  // better-sqlite3 is synchronous so this check+write is atomic w.r.t. the
+  // JS event loop; no await means no other markDone can interleave here.
+  const dbRow = db.select({ finishedAt: schema.jobs.finishedAt })
+    .from(schema.jobs).where(eq(schema.jobs.id, job.id)).get();
+  if (dbRow?.finishedAt != null) {
+    job.finishedAt = dbRow.finishedAt; // keep in-memory object in sync
+    return;
+  }
   job.finishedAt = Date.now() / 1000;
   job.exitCode = exitCode;
   // Extract result metadata (tokens, duration, session) from log.

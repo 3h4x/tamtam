@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { installAgentSchedule, uninstallAgentSchedule } from '@/lib/agent-scheduler';
 import { errMsg } from '@/lib/types';
-import { clearAgentsCache } from '@/app/api/agents/route';
+import { clearAgentsCache } from '@/lib/agents-cache';
 
 export async function GET(
   _request: NextRequest,

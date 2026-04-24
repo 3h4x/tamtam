@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { installAgentSchedule, uninstallAgentSchedule } from '@/lib/agent-scheduler';
 import { errMsg } from '@/lib/types';
-import { clearAgentsCache } from '@/app/api/agents/route';
+import { clearAgentsCache } from '@/lib/agents-cache';
 
 // PATCH /api/agents/by-name
 // Lets an agent update itself by project+name without knowing its UUID.
