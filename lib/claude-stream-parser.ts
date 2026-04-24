@@ -187,11 +187,19 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
       let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheCreateTokens = 0;
       let model: string | null = null;
       if (parsed.modelUsage) {
-        const modelKeys = Object.keys(parsed.modelUsage);
-        model = modelKeys.length > 0 ? modelKeys[0] : null;
-        for (const usage of Object.values(parsed.modelUsage) as ModelUsage[]) {
+        // Pick the primary model by output tokens. Claude CLI reports a
+        // bundle of models (e.g. a tiny haiku subagent for tool orchestration
+        // alongside the real sonnet/opus workhorse); taking Object.keys()[0]
+        // mislabels the run as whichever model Claude inserted first.
+        let primaryOutputTokens = -1;
+        for (const [key, usage] of Object.entries(parsed.modelUsage) as [string, ModelUsage][]) {
+          const out = usage.outputTokens ?? 0;
+          if (out > primaryOutputTokens) {
+            primaryOutputTokens = out;
+            model = key;
+          }
           inputTokens += usage.inputTokens ?? 0;
-          outputTokens += usage.outputTokens ?? 0;
+          outputTokens += out;
           cacheReadTokens += usage.cacheReadInputTokens ?? 0;
           cacheCreateTokens += usage.cacheCreationInputTokens ?? 0;
         }

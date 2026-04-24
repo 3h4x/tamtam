@@ -70,7 +70,10 @@ describe('claude-stream-parser', () => {
     expect(events[0].result.outputTokens).toBe(100);
   });
 
-  it('sums tokens across multiple models and uses first key as model', () => {
+  it('sums tokens across multiple models and picks primary by output tokens', () => {
+    // Claude CLI reports a tiny haiku subagent alongside the real sonnet
+    // workhorse. Taking the first key mislabels the run — pick the model
+    // with the most output tokens instead.
     const line = JSON.stringify({
       type: 'result', subtype: 'success', is_error: false, duration_ms: 1000,
       session_id: 'sess-2', result: 'ok',
@@ -84,7 +87,7 @@ describe('claude-stream-parser', () => {
     expect(events[0].result.inputTokens).toBe(150);
     expect(events[0].result.outputTokens).toBe(225);
     expect(events[0].result.cacheReadTokens).toBe(300);
-    expect(typeof events[0].result.model).toBe('string');
+    expect(events[0].result.model).toBe('claude-sonnet-4-6');
   });
 
   it('extracts done with zero tokens when no modelUsage', () => {
