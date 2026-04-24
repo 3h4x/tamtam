@@ -2879,3 +2879,171 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
     await expect(markDoneFn(job, 0)).resolves.not.toThrow();
   });
 });
+
+describe('markDone – DB-level idempotency guard', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+  let startProjectReviewMock: ReturnType<typeof vi.fn>;
+  let startProjectPushMock: ReturnType<typeof vi.fn>;
+  let tempDir: string;
+
+  function makeJob(id: string, kind = 'push'): JobData {
+    return {
+      id,
+      project: 'guard-proj',
+      kind,
+      prompt: null,
+      pid: 999,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    };
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-db-guard-'));
+
+    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: false, detail: 'guard' });
+    startProjectPushMock = vi.fn().mockResolvedValue({ ok: false, detail: 'guard' });
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/pm2-jobs', () => ({
+      getJobStatus: vi.fn(),
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({ autoPushEnabled: false }),
+    }));
+    vi.doMock('@/lib/start-review', () => ({
+      startProjectReview: startProjectReviewMock,
+    }));
+    vi.doMock('@/lib/start-push', () => ({
+      startProjectPush: startProjectPushMock,
+    }));
+    vi.doMock('@/lib/start-commit', () => ({
+      startProjectCommit: vi.fn().mockResolvedValue({ ok: false, detail: 'guard' }),
+    }));
+    vi.doMock('@/lib/start-fix', () => ({
+      startFixFromJob: vi.fn().mockResolvedValue({ ok: false, detail: 'guard' }),
+    }));
+    vi.doMock('@/lib/start-fix-push', () => ({
+      isHookRejection: vi.fn().mockReturnValue(false),
+      startFixPush: vi.fn().mockResolvedValue({ ok: false, detail: 'guard' }),
+    }));
+
+    const mod = await import('@/lib/job-storage');
+    markDoneFn = mod.markDone;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('returns early and syncs finishedAt when DB row is already finalized', async () => {
+    const alreadyFinishedAt = Date.now() / 1000 - 60;
+    testDb.db.insert(schema.jobs).values({
+      id: 'db-guard-job-1', project: 'guard-proj', kind: 'push',
+      prompt: null, pid: 1, logPath: null,
+      startedAt: alreadyFinishedAt - 10,
+      finishedAt: alreadyFinishedAt,
+      exitCode: 0,
+      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+    } as any).run();
+
+    const job = makeJob('db-guard-job-1');
+    // Stale in-memory object: finishedAt is null even though DB says it's done
+    expect(job.finishedAt).toBeNull();
+
+    await markDoneFn(job, 0);
+
+    // job.finishedAt must be synced from DB
+    expect(job.finishedAt).toBe(alreadyFinishedAt);
+    // No completion hooks should fire (no push/review triggered)
+    expect(startProjectPushMock).not.toHaveBeenCalled();
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite the DB finishedAt when returning early from DB guard', async () => {
+    const alreadyFinishedAt = Date.now() / 1000 - 60;
+    testDb.db.insert(schema.jobs).values({
+      id: 'db-guard-job-2', project: 'guard-proj', kind: 'push',
+      prompt: null, pid: 1, logPath: null,
+      startedAt: alreadyFinishedAt - 10,
+      finishedAt: alreadyFinishedAt,
+      exitCode: 0,
+      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+    } as any).run();
+
+    const job = makeJob('db-guard-job-2');
+    await markDoneFn(job, 99);
+
+    const row = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'db-guard-job-2');
+    // DB row should still have the original finishedAt, not a new one
+    expect(row?.finishedAt).toBe(alreadyFinishedAt);
+    expect(row?.exitCode).toBe(0); // not overwritten with 99
+  });
+
+  it('proceeds normally when DB row has finishedAt = null', async () => {
+    testDb.db.insert(schema.jobs).values({
+      id: 'db-guard-job-3', project: 'guard-proj', kind: 'push',
+      prompt: null, pid: 1, logPath: null,
+      startedAt: Date.now() / 1000 - 5,
+      finishedAt: null,
+      exitCode: null,
+      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+    } as any).run();
+
+    const job = makeJob('db-guard-job-3');
+    await markDoneFn(job, 0);
+
+    expect(job.finishedAt).not.toBeNull();
+    const row = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'db-guard-job-3');
+    expect(row?.finishedAt).not.toBeNull();
+    expect(row?.exitCode).toBe(0);
+  });
+
+  it('proceeds normally when no DB row exists (new job not yet persisted)', async () => {
+    // Job exists only in memory (no DB row inserted yet)
+    const job = makeJob('db-guard-no-row');
+    await markDoneFn(job, 0);
+
+    // Should have finalized as normal
+    expect(job.finishedAt).not.toBeNull();
+    expect(job.exitCode).toBe(0);
+  });
+
+  it('in-memory guard still fires before the DB check (finishedAt already set)', async () => {
+    const job = makeJob('db-guard-inmem');
+    job.finishedAt = Date.now() / 1000 - 5; // already finalized in memory
+
+    const snapshotFinishedAt = job.finishedAt;
+    await markDoneFn(job, 99);
+
+    // In-memory guard should have returned before any DB interaction
+    expect(job.finishedAt).toBe(snapshotFinishedAt); // unchanged
+    expect(job.exitCode).toBeNull(); // not overwritten
+  });
+});

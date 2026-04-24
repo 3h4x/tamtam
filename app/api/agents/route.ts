@@ -2,21 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db, schema } from '@/lib/db';
 import { installAgentSchedule } from '@/lib/agent-scheduler';
 import { errMsg } from '@/lib/types';
-
-const AGENTS_CACHE_TTL = 10; // seconds
-let _agentsCache: { agents: typeof schema.agents.$inferSelect[]; time: number } | null = null;
-
-function getAllAgentsCached() {
-  const now = Date.now() / 1000;
-  if (_agentsCache && now - _agentsCache.time < AGENTS_CACHE_TTL) return _agentsCache.agents;
-  const agents = db.select().from(schema.agents).all();
-  _agentsCache = { agents, time: now };
-  return agents;
-}
-
-export function clearAgentsCache() {
-  _agentsCache = null;
-}
+import { getAllAgentsCached, clearAgentsCache } from '@/lib/agents-cache';
 
 export async function GET(request: NextRequest) {
   const project = request.nextUrl.searchParams.get('project');
