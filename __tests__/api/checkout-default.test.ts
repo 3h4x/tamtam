@@ -133,9 +133,11 @@ describe('POST /api/projects/by-project/[projectName]/checkout-default', () => {
 
   it('returns 500 when git checkout fails', async () => {
     execMock
-      .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/x\n' }))
-      .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'error: cannot switch branch' }));
+      .mockResolvedValueOnce(makeExecResult({ stdout: '' }))                      // status
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/x\n' }))              // branch --show-current
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }))                     // fetch
+      .mockResolvedValueOnce(makeExecResult({ stdout: '1\n' }))                   // rev-list (ahead)
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'error: cannot switch branch' })); // checkout
     detectMainBranchMock.mockResolvedValue('main');
 
     const res = await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -149,7 +151,9 @@ describe('POST /api/projects/by-project/[projectName]/checkout-default', () => {
     execMock
       .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
       .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/x\n' }))
-      .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'fail' }));
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }))                     // fetch
+      .mockResolvedValueOnce(makeExecResult({ stdout: '1\n' }))                   // rev-list (ahead)
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'fail' }));    // checkout
     detectMainBranchMock.mockResolvedValue('main');
 
     await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });

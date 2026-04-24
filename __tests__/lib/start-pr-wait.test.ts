@@ -53,14 +53,15 @@ describe('launchPrWait', () => {
     return Promise.resolve({ exitCode, stdout, stderr });
   }
 
-  // Mock a successful post-merge branch switch (symbolic-ref + show-current + status + checkout + pull)
+  // Mock a successful post-merge branch switch (symbolic-ref + show-current + status + checkout + pull + branch -D)
   function mockCleanupSuccess() {
     execMock
       .mockResolvedValueOnce(resp(0, 'refs/remotes/origin/main\n')) // symbolic-ref
       .mockResolvedValueOnce(resp(0, 'fix/issue-5\n')) // branch --show-current
       .mockResolvedValueOnce(resp(0, '')) // status --porcelain (clean)
       .mockResolvedValueOnce(resp(0, '')) // checkout main
-      .mockResolvedValueOnce(resp(0, '')); // pull --ff-only
+      .mockResolvedValueOnce(resp(0, '')) // pull --ff-only
+      .mockResolvedValueOnce(resp(0, '')); // branch -D fix/issue-5
   }
 
   it('returns error when project not found', async () => {
@@ -293,14 +294,15 @@ describe('launchPrWait', () => {
         statusCheckRollup: [],
       })))
       .mockResolvedValueOnce(resp(0, 'merged'))
-      // switchToDefault: symbolic-ref, show-current (on feature branch), status (dirty), stash, checkout, pull, stash pop
+      // switchToDefault: symbolic-ref, show-current (on feature branch), status (dirty), stash, checkout, pull, stash pop, branch -D
       .mockResolvedValueOnce(resp(0, 'refs/remotes/origin/main\n'))
       .mockResolvedValueOnce(resp(0, 'fix/issue-10\n'))
       .mockResolvedValueOnce(resp(0, 'M  src/foo.ts\n'))  // dirty
       .mockResolvedValueOnce(resp(0, 'Saved working directory'))  // stash push
       .mockResolvedValueOnce(resp(0, ''))  // checkout main
       .mockResolvedValueOnce(resp(0, ''))  // pull --ff-only
-      .mockResolvedValueOnce(resp(0, ''));  // stash pop
+      .mockResolvedValueOnce(resp(0, ''))  // stash pop
+      .mockResolvedValueOnce(resp(0, ''));  // branch -D fix/issue-10
 
     launchPrWait('myproj', 17, 'owner/repo', 'https://github.com/owner/repo/pull/17');
 
@@ -435,7 +437,8 @@ describe('launchPrWait', () => {
       .mockResolvedValueOnce(resp(0, 'fix/issue-20\n'))       // show-current → feature branch
       .mockResolvedValueOnce(resp(0, ''))                     // status --porcelain (clean)
       .mockResolvedValueOnce(resp(0, ''))                     // checkout main
-      .mockResolvedValueOnce(resp(0, ''));                    // pull --ff-only
+      .mockResolvedValueOnce(resp(0, ''))                     // pull --ff-only
+      .mockResolvedValueOnce(resp(0, ''));                    // branch -D fix/issue-20
 
     launchPrWait('myproj', 60, 'owner/repo', 'https://github.com/owner/repo/pull/60');
 
@@ -462,7 +465,8 @@ describe('launchPrWait', () => {
       .mockResolvedValueOnce(resp(0, 'M  src/bar.ts\n'))                   // dirty
       .mockResolvedValueOnce(resp(0, 'No local changes to save'))           // stash push → nothing stashed
       .mockResolvedValueOnce(resp(0, ''))                                   // checkout main
-      .mockResolvedValueOnce(resp(0, ''));                                  // pull --ff-only
+      .mockResolvedValueOnce(resp(0, ''))                                   // pull --ff-only
+      .mockResolvedValueOnce(resp(0, ''));                                  // branch -D fix/issue-21
 
     launchPrWait('myproj', 61, 'owner/repo', 'https://github.com/owner/repo/pull/61');
 

@@ -134,10 +134,10 @@ async function installPm2Schedule(agentId: string, schedule: string, prompt: str
   const cron = parseScheduleToCron(schedule, agentId);
   const scriptPath = agentScriptPath(agentId);
 
-  await exec('pm2', ['start', scriptPath, '--name', name, '--no-autorestart', '--cron', cron]);
-  // Stop immediately after registering — pm2 start fires the script right away,
-  // but we only want it to run when the cron hits.
-  await exec('pm2', ['stop', name]);
+  // --no-autostart registers the app with PM2 without executing it; without
+  // this flag pm2 start fires the script synchronously before we can stop it,
+  // which triggers a real agent run on every boot.
+  await exec('pm2', ['start', scriptPath, '--name', name, '--no-autostart', '--no-autorestart', '--cron', cron]);
 }
 
 async function uninstallPm2Schedule(agentId: string, project?: string, agentName?: string): Promise<void> {

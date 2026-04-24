@@ -84,7 +84,7 @@ describe('instrumentation', () => {
       ];
       mockDeps(agents);
 
-      const { reinstallAgents } = await import('@/instrumentation');
+      const { reinstallAgents } = await import('@/instrumentation-node');
       await reinstallAgents();
 
       expect(installAgentScheduleMock).toHaveBeenCalledTimes(2);
@@ -95,7 +95,7 @@ describe('instrumentation', () => {
     it('skips agents where schedule is null despite the DB filter', async () => {
       mockDeps([makeAgent({ id: 'no-sched', schedule: null })]);
 
-      const { reinstallAgents } = await import('@/instrumentation');
+      const { reinstallAgents } = await import('@/instrumentation-node');
       await reinstallAgents();
 
       expect(installAgentScheduleMock).not.toHaveBeenCalled();
@@ -105,7 +105,7 @@ describe('instrumentation', () => {
       isAgentScheduleLoadedMock.mockResolvedValue(true);
       mockDeps([makeAgent({ id: 'agent-loaded', schedule: '1h' })]);
 
-      const { reinstallAgents } = await import('@/instrumentation');
+      const { reinstallAgents } = await import('@/instrumentation-node');
       await reinstallAgents();
 
       expect(isAgentScheduleLoadedMock).toHaveBeenCalledOnce();
@@ -122,7 +122,7 @@ describe('instrumentation', () => {
         .mockRejectedValueOnce(new Error('pm2 not found'))
         .mockResolvedValueOnce(undefined);
 
-      const { reinstallAgents } = await import('@/instrumentation');
+      const { reinstallAgents } = await import('@/instrumentation-node');
       await expect(reinstallAgents()).resolves.not.toThrow();
       expect(installAgentScheduleMock).toHaveBeenCalledTimes(2);
     });
@@ -130,7 +130,7 @@ describe('instrumentation', () => {
     it('does nothing when no enabled agents exist', async () => {
       mockDeps([]);
 
-      const { reinstallAgents } = await import('@/instrumentation');
+      const { reinstallAgents } = await import('@/instrumentation-node');
       await reinstallAgents();
 
       expect(installAgentScheduleMock).not.toHaveBeenCalled();

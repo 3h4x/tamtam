@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { installAgentSchedule, uninstallAgentSchedule } from '@/lib/agent-scheduler';
 import { errMsg } from '@/lib/types';
-import { clearAgentsCache } from '@/lib/agents-cache';
+import { clearAgentsCache, normalizeAgent } from '@/lib/agents-cache';
 
 export async function GET(
   _request: NextRequest,
@@ -12,7 +12,7 @@ export async function GET(
   const { agentId } = await params;
   const agent = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
   if (!agent) return NextResponse.json({ detail: 'not found' }, { status: 404 });
-  return NextResponse.json({ agent });
+  return NextResponse.json({ agent: normalizeAgent(agent) });
 }
 
 export async function PATCH(
@@ -41,8 +41,8 @@ export async function PATCH(
   // Update schedule (uses pm2 or launchctl based on runner)
   if (agent) {
     try {
-      const hasSkills = JSON.parse(agent.skillIds || '[]').length > 0;
-      if (agent.schedule && agent.enabled && (agent.prompt || hasSkills)) {
+      const skillIds: string[] = JSON.parse(agent.skillIds || '[]');
+      if (agent.schedule && agent.enabled && (agent.prompt || skillIds.length > 0)) {
         await installAgentSchedule(agentId, agent.schedule, agent.prompt, agent.runner, agent.project, agent.name);
       } else {
         await uninstallAgentSchedule(agentId, agent.runner, agent.project, agent.name);
@@ -52,7 +52,7 @@ export async function PATCH(
     }
   }
 
-  return NextResponse.json({ agent });
+  return NextResponse.json({ agent: agent ? normalizeAgent(agent) : null });
 }
 
 export async function DELETE(

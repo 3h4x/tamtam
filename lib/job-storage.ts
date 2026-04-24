@@ -134,7 +134,10 @@ function saveToDb(job: JobData): void {
 
 export async function markDone(job: JobData, exitCode: number): Promise<void> {
   // Idempotent: if already finalized, don't double-fire hooks or rewrite DB.
-  if (job.finishedAt !== null) return;
+  if (job.finishedAt !== null) {
+    await reconcileStaleRelease(job);
+    return;
+  }
   // Also check the DB — probeJobStatus may have finalized this job via a
   // different object instance (e.g. the fresh copy from listJobs() in
   // /api/jobs polling), leaving the closure object's finishedAt stale.
@@ -144,6 +147,10 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
     .from(schema.jobs).where(eq(schema.jobs.id, job.id)).get();
   if (dbRow?.finishedAt != null) {
     job.finishedAt = dbRow.finishedAt; // keep in-memory object in sync
+    // A concurrent markDone (e.g. another probe) finalized this job first.
+    // Its completion hook may have crashed before finalizing the release
+    // meta-job, leaving the pipeline UI stuck on "running". Reconcile here.
+    await reconcileStaleRelease(job);
     return;
   }
   job.finishedAt = Date.now() / 1000;
@@ -316,6 +323,62 @@ function appendToReleaseLog(release: JobData, kind: string, job: JobData, extra?
   } catch {}
 }
 
+// Safety net: if the given job is a pipeline step, make sure the active
+// release for its project eventually gets finalized. The normal path is
+// via runCompletionHooks, but races (concurrent probes, a throw mid-hook)
+// can leave the release stranded with all its children already done. This
+// runs cheaply on every markDone call and only acts when the release has
+// no running children and its most recent child finished long enough ago
+// that we're confident nothing else is about to chain.
+const PIPELINE_STEP_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod']);
+const RELEASE_RECONCILE_GRACE_MS = 5_000;
+
+// A child is part of a release's chain only if it starts shortly after the
+// release (or shortly after the previous step finished). Beyond this gap we
+// assume an unrelated pipeline job crept in while the release was stuck and
+// should NOT be counted in the finalized exit code.
+const PIPELINE_CHAIN_GAP_SEC = 60;
+
+async function reconcileStaleRelease(job: JobData): Promise<void> {
+  if (!PIPELINE_STEP_KINDS.has(job.kind)) return;
+  const release = findActiveReleaseJob(job.project);
+  if (!release) return;
+  const now = Date.now() / 1000;
+  const releaseStart = release.startedAt || 0;
+  // Candidate children: pipeline-step jobs for this project that started at
+  // or after the release. Sorted by startedAt so we can walk the chain.
+  const candidates = listJobs()
+    .filter((j) => j.project === release.project
+      && PIPELINE_STEP_KINDS.has(j.kind)
+      && (j.startedAt || 0) >= releaseStart - 1)
+    .sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
+  // Walk the chain: accept the first child if it started within the chain
+  // gap of the release start, then each subsequent child if it started within
+  // the gap of the previous child's finish. Break once the chain breaks —
+  // later jobs are unrelated activity.
+  const chain: JobData[] = [];
+  let edge = releaseStart;
+  for (const c of candidates) {
+    if ((c.startedAt || 0) - edge > PIPELINE_CHAIN_GAP_SEC) break;
+    chain.push(c);
+    // If a child is still running, defer: the chain is active.
+    if (c.finishedAt === null) return;
+    edge = c.finishedAt || edge;
+  }
+  if (chain.length === 0) return;
+  if ((now - edge) * 1000 < RELEASE_RECONCILE_GRACE_MS) return;
+  const worstExit = chain.reduce(
+    (acc, c) => (c.exitCode != null && c.exitCode !== 0 ? 1 : acc),
+    0,
+  );
+  try {
+    await finalizeReleaseJob(release, worstExit);
+    console.log(`[release] reconciled stale release ${release.id} (${job.project}) — ${chain.length} chained step${chain.length === 1 ? '' : 's'}, exit ${worstExit}`);
+  } catch (e) {
+    console.log(`[release] reconciler failed for ${release.id}:`, e);
+  }
+}
+
 async function finalizeReleaseJob(release: JobData, exitCode: number): Promise<void> {
   if (release.finishedAt !== null) return;
   try {
@@ -358,7 +421,16 @@ async function runCompletionHooks(job: JobData): Promise<void> {
       const inRelease = !!findActiveReleaseJob(job.project);
       const pipelineCfg = await getProjectPipelineConfig(job.project);
       if (job.exitCode === 0 && (inRelease || pipelineCfg.autoPushEnabled || pipelineCfg.autoCommitEnabled)) {
-        const verdict = getVerdict(job);
+        // Treat a missing verdict as NEEDS ATTENTION rather than silently
+        // finalizing as success. Models sometimes narrate a problem and
+        // propose a fix without emitting the formal "Verdict: X" line —
+        // shipping in that case is dangerous. The fix loop is idempotent
+        // (Claude will re-review and emit LGTM if nothing's broken).
+        const rawVerdict = getVerdict(job);
+        const verdict = rawVerdict ?? 'NEEDS ATTENTION';
+        if (!rawVerdict) {
+          console.log(`[release] review ${job.id} emitted no verdict — defaulting to NEEDS ATTENTION`);
+        }
         if (verdict === 'LGTM') {
           // DoD verification only makes sense in PR Workflow mode AND when we
           // have a linked GitHub issue. On a direct-branch release (no PR, no
@@ -420,7 +492,8 @@ async function runCompletionHooks(job: JobData): Promise<void> {
             notificationEvent = 'fix_loop_exhausted';
           }
         }
-        // else: unknown / no verdict — fall through, release will finalize below
+        // With the default-to-NEEDS-ATTENTION above, verdict is always one of
+        // LGTM / NEEDS ATTENTION / DO NOT SHIP here. No null fallthrough.
       }
     } catch (e) {
       console.log(`[release] review hook error for ${job.project}:`, e);
@@ -859,7 +932,14 @@ function logHasClaudeResult(job: JobData): boolean {
 }
 
 export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> {
-  if (job.finishedAt !== null) return 'done';
+  if (job.finishedAt !== null) {
+    // Belt-and-braces: /api/jobs polls probeJobStatus frequently; use those
+    // ticks to reconcile any stranded release whose children are all done.
+    // Cheap (one listJobs filter) and no-op when the release has already
+    // been finalized by the normal path.
+    await reconcileStaleRelease(job);
+    return 'done';
+  }
   // Jobs are created with pid=0 and the real pid is persisted asynchronously
   // after `pm2 start` returns (can take up to pm2's 15 s timeout). During that
   // window, treat the job as still spawning rather than dead — otherwise a
