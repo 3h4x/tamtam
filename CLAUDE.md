@@ -101,7 +101,7 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - `/project/[name]/task/[task]` — Task detail view
 - `/agents` — Agents management page
 - `/monitoring` — Prometheus + Loki health dashboard (alerts, service up/down, log errors)
-- `/stats` — Token usage dashboard (runs, input/output/cache tokens, cost per project, filterable by 24h/7d/30d/all)
+- `/stats` — Token usage dashboard (runs, input/output/cache tokens, cost per project and per agent kind, filterable by 24h/7d/30d/all)
 - `/runs` — All runs across projects (replaces `/jobs`, which now redirects here)
 - `/logs` — Log viewer
 - `/skills` — Skill editor (CRUD for DB-backed skills)
@@ -158,7 +158,7 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - `/api/health` — Health check (GET)
 - `/api/monitoring` — Prometheus + Loki status aggregation (GET); env: `PROMETHEUS_URL`, `LOKI_URL`
 - `/api/monitoring/pm2-logs` — Tail tamtam PM2 log files (error + out from `~/.pm2/logs/`), last 64 KB; accepts `?limit=` (max 500) and `?out=0` to suppress stdout log (GET)
-- `/api/stats/usage` — Token usage statistics per project (GET, accepts `?window=24h|7d|30d|all`)
+- `/api/stats/usage` — Token usage statistics per project and per agent kind (GET, accepts `?window=24h|7d|30d|all`)
 
 ## Testing Requirements
 - **All new API routes must have vitest tests** in `__tests__/`
