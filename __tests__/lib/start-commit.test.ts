@@ -551,7 +551,9 @@ describe('startProjectCommit', () => {
       .mockResolvedValueOnce(resp(0, 'main\n'))                        // git branch --show-current
       .mockResolvedValueOnce(resp(0, 'refs/remotes/origin/main\n'))   // detectMainBranch
       .mockResolvedValueOnce(resp(1, '', 'already exists'))            // git checkout -b → fails
-      .mockResolvedValueOnce(resp(0))                                   // git checkout existing → succeeds
+      .mockResolvedValueOnce(resp(0, '  main\n  other\n'))            // git branch --merged main (branch NOT merged)
+      .mockResolvedValueOnce(resp(0))                                   // git checkout -m existing → succeeds
+      .mockResolvedValueOnce(resp(0, ''))                              // git diff --diff-filter=U (no conflicts)
       .mockResolvedValueOnce(resp(0))                                   // git add -A
       .mockResolvedValueOnce(resp(0, 'M\tlib/x.ts'))                  // git diff --cached --name-status
       .mockResolvedValueOnce(resp(0, 'lib/x.ts | 1 +'))               // generateCommitMessage: stat
@@ -584,7 +586,8 @@ describe('startProjectCommit', () => {
       .mockResolvedValueOnce(resp(0, 'main\n'))                        // git branch --show-current
       .mockResolvedValueOnce(resp(0, 'refs/remotes/origin/main\n'))   // detectMainBranch
       .mockResolvedValueOnce(resp(1, '', 'checkout -b failed'))        // git checkout -b → fails
-      .mockResolvedValueOnce(resp(1, '', 'checkout also failed'))      // git checkout existing → also fails
+      .mockResolvedValueOnce(resp(0, '  main\n'))                      // git branch --merged main (NOT merged)
+      .mockResolvedValueOnce(resp(1, '', 'checkout also failed'))      // git checkout -m existing → also fails
     ;
 
     const { startProjectCommit } = await import('@/lib/start-commit');
@@ -596,6 +599,67 @@ describe('startProjectCommit', () => {
     }
     const job = createJobMock.mock.results[0].value;
     expect(markDoneMock).toHaveBeenCalledWith(job, 1);
+  });
+
+  it('returns 409 when checkout -m leaves merge conflict markers in working tree', async () => {
+    setupMocks();
+    listJobsMock.mockReturnValue([{
+      id: 'j1', project: 'proj', kind: 'run', ghIssueNumber: 10,
+      ghIssueRepo: '', ghIssueTitle: 'Conflict branch', startedAt: 1000,
+    }]);
+    execMock
+      .mockResolvedValueOnce(resp(0, 'main\n'))                              // git branch --show-current
+      .mockResolvedValueOnce(resp(0, 'refs/remotes/origin/main\n'))         // detectMainBranch
+      .mockResolvedValueOnce(resp(1, '', 'already exists'))                  // git checkout -b → fails
+      .mockResolvedValueOnce(resp(0, '  main\n  other\n'))                  // git branch --merged (NOT merged)
+      .mockResolvedValueOnce(resp(0))                                         // git checkout -m → succeeds
+      .mockResolvedValueOnce(resp(0, 'lib/conflict.ts\n'))                  // git diff --diff-filter=U → conflict
+    ;
+
+    const { startProjectCommit } = await import('@/lib/start-commit');
+    const r = await startProjectCommit('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(409);
+      expect(r.detail).toContain('Merge conflicts');
+      expect(r.detail).toContain('lib/conflict.ts');
+    }
+  });
+
+  it('deletes and recreates the feature branch when it already exists and is merged (zombie)', async () => {
+    setupMocks();
+    listJobsMock.mockReturnValue([{
+      id: 'j1', project: 'proj', kind: 'run', ghIssueNumber: 6,
+      ghIssueRepo: '', ghIssueTitle: 'Zombie branch', startedAt: 1000,
+    }]);
+    execMock
+      .mockResolvedValueOnce(resp(0, 'main\n'))                                // git branch --show-current
+      .mockResolvedValueOnce(resp(0, 'refs/remotes/origin/main\n'))           // detectMainBranch
+      .mockResolvedValueOnce(resp(1, '', 'already exists'))                    // git checkout -b → fails
+      .mockResolvedValueOnce(resp(0, '  main\n  fix/issue-6-zombie-branch\n')) // git branch --merged main (IS merged)
+      .mockResolvedValueOnce(resp(0))                                          // git branch -D
+      .mockResolvedValueOnce(resp(0))                                          // git checkout -b retry → succeeds
+      .mockResolvedValueOnce(resp(0))                                          // git add -A
+      .mockResolvedValueOnce(resp(0, 'M\tlib/x.ts'))                          // git diff --cached --name-status
+      .mockResolvedValueOnce(resp(0, 'lib/x.ts | 1 +'))                       // generateCommitMessage: stat
+      .mockResolvedValueOnce(resp(0, '+x'))                                    // generateCommitMessage: diff
+      .mockResolvedValueOnce(resp(0, 'feat: revive zombie'))                   // generateCommitMessage: claude
+      .mockResolvedValueOnce(resp(0, 'ok'))                                    // git commit
+      .mockResolvedValueOnce(resp(0, 'abc'))                                   // git rev-parse
+    ;
+
+    const { startProjectCommit } = await import('@/lib/start-commit');
+    const r = await startProjectCommit('proj');
+    expect(r.ok).toBe(true);
+    const deleteCall = execMock.mock.calls.find(
+      ([cmd, args]: any) => cmd === 'git' && Array.isArray(args) && args.includes('branch') && args.includes('-D'),
+    );
+    expect(deleteCall).toBeTruthy();
+    // Two checkout -b calls: the initial failure and the post-delete retry.
+    const checkoutBCalls = execMock.mock.calls.filter(
+      ([cmd, args]: any) => cmd === 'git' && Array.isArray(args) && args.includes('checkout') && args.includes('-b'),
+    );
+    expect(checkoutBCalls.length).toBe(2);
   });
 
   it('does not switch branch when already on a feature branch', async () => {

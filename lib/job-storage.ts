@@ -138,11 +138,13 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
     await reconcileStaleRelease(job);
     return;
   }
-  // Also check the DB — probeJobStatus may have finalized this job via a
-  // different object instance (e.g. the fresh copy from listJobs() in
-  // /api/jobs polling), leaving the closure object's finishedAt stale.
-  // better-sqlite3 is synchronous so this check+write is atomic w.r.t. the
-  // JS event loop; no await means no other markDone can interleave here.
+  // Also check the DB — two concurrent probes can each hold a fresh JobData
+  // instance (fetched via separate listJobs() calls), both see finishedAt ===
+  // null, and both run the completion hook, producing double "release
+  // finished" markers, double fix chains, and orphaned child jobs. Consult
+  // the DB so the first writer wins. better-sqlite3 is synchronous so this
+  // check-then-write is atomic w.r.t. the JS event loop; no await means no
+  // other markDone can interleave here.
   const dbRow = db.select({ finishedAt: schema.jobs.finishedAt })
     .from(schema.jobs).where(eq(schema.jobs.id, job.id)).get();
   if (dbRow?.finishedAt != null) {

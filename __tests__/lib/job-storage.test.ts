@@ -1611,6 +1611,31 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     expect(releaseRow?.exitCode).toBe(1);
   });
 
+  it('skips finalization when DB row already has finishedAt set (concurrent probe guard)', async () => {
+    const now = Date.now() / 1000;
+    // Simulate a job that a concurrent probe already finalized in the DB,
+    // but whose in-memory JobData still has finishedAt === null.
+    testDb.db.insert(schema.jobs).values({
+      id: 'run-job', project: 'my-proj', kind: 'run',
+      prompt: null, pid: 1, logPath: null,
+      startedAt: now - 10, finishedAt: now - 1, exitCode: 0,
+      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+    } as any).run();
+
+    const job = makeJob('run', null); // in-memory finishedAt === null
+    expect(job.finishedAt).toBeNull();
+    await markDoneFn(job, 0);
+
+    // The DB-level guard should have synced finishedAt onto the in-memory object...
+    expect(job.finishedAt).not.toBeNull();
+    // ...and should not have fired any hooks (no review, commit, or fix started).
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
+    expect(startFixFromJobMock).not.toHaveBeenCalled();
+    expect(startProjectPushMock).not.toHaveBeenCalled();
+  });
+
   it('does not finalize a release job that is already done (idempotent)', async () => {
     const now = Date.now() / 1000;
     testDb.db.insert(schema.jobs).values({
