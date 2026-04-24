@@ -27,6 +27,29 @@ export async function reinstallAgents(): Promise<void> {
   }
 }
 
+// Periodic probe sweep: Claude CLI sometimes hangs after emitting its final
+// result event. `probeJobStatus` can detect this via the log's terminal
+// result line, but only when *something* polls — the UI, a pipeline hook,
+// or a duplicate-check. If nothing polls (e.g. no one has the history tab
+// open and the agent isn't part of an active release chain), the hung
+// process holds the job "running" indefinitely. A 30-second background
+// sweep fixes that: list running Claude-backed jobs and probe them.
+export async function runProbeSweep(): Promise<void> {
+  try {
+    const { listJobs, probeJobStatus } = await import('./lib/job-storage');
+    const claudeKinds = new Set(['run', 'review', 'fix', 'fix-ci', 'fix-push']);
+    const running = listJobs().filter(j =>
+      j.finishedAt === null
+      && (claudeKinds.has(j.kind) || j.kind.startsWith('agent:'))
+    );
+    for (const job of running) {
+      try { await probeJobStatus(job); } catch {}
+    }
+  } catch (err) {
+    console.error('[probe-sweep] error:', err);
+  }
+}
+
 export async function registerNode(): Promise<void> {
   void reinstallAgents();
 
@@ -45,4 +68,6 @@ export async function registerNode(): Promise<void> {
   };
   runCleanup();
   setInterval(runCleanup, 24 * 60 * 60 * 1000);
+
+  setInterval(runProbeSweep, 30_000);
 }

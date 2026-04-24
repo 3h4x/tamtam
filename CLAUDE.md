@@ -37,7 +37,7 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 
 ## Concepts
 - **Skills** — reusable prompt/instruction blocks (DB-backed + file-based from `skills/docs/skills/`)
-- **Agents** — composed from skills + model + prompt + schedule + runner (pm2/launchctl)
+- **Agents** — composed from skills + model + prompt (optional when skills are set) + schedule + runner (pm2/launchctl)
 - **Runs** — individual executions of an agent (what was previously called "jobs")
 - **Custom Actions** — per-project bash commands (e.g. deploy) with configurable button color
 - **Release Pipeline** — two modes: *Direct Branch* (`test → review → fix → commit → push`) or *PR Workflow* (adds `dod → merge`), driven by Claude and configurable per project
@@ -187,4 +187,6 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - Issue-driven runs auto-checkout `fix/issue-<n>-<slug>` branch before Claude edits (via `issue-branch` route called from TerminalTab); in PR Workflow mode, after the PR is merged the working copy is returned to the default branch
 - Pipeline workflow mode per project: *Direct Branch* (commit+push to current branch) or *PR Workflow* (push to feature branch → DoD → optional auto-merge); configured via project Config tab; `pr_workflow_enabled` + `auto_pr_merge_enabled` flags on the `projects` table
 - Outbound webhook notifications (`lib/notifications.ts`): Slack block kit, Discord embeds, or generic JSON POST; HMAC-SHA256 signed when `notification_webhook_secret` is set; events: `release_success`, `release_fail`, `fix_loop_exhausted`, `review_do_not_ship`, `agent_run_fail`; configured via Settings → Notifications tab; `TAMTAM_BASE_URL` env var sets the log link base
+- Log and row retention (`lib/retention.ts`): `pruneProjectLogs` deletes on-disk log files after each run (controlled by `log_retention_count` and `log_retention_days` settings; defaults 200 / 30 days); `runNightlyCleanup` deletes finished `jobs` DB rows older than `job_row_retention_days` (default 180 days) — called once at startup then every 24h from `instrumentation.ts`
+- Background probe sweep: `instrumentation.ts` runs `runProbeSweep` every 30 seconds — detects Claude CLI processes that hang after emitting their final result event (holding a job "running" indefinitely) and resolves them via `probeJobStatus` in `lib/job-storage.ts`
 - Dependabot with grouped PRs (production deps, dev deps, actions)

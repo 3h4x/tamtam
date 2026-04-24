@@ -136,4 +136,93 @@ describe('instrumentation', () => {
       expect(installAgentScheduleMock).not.toHaveBeenCalled();
     });
   });
+
+  describe('runProbeSweep()', () => {
+    function mockJobStorage(jobs: unknown[], probeJobStatus = vi.fn().mockResolvedValue(undefined)) {
+      vi.doMock('@/lib/job-storage', () => ({ listJobs: () => jobs, probeJobStatus }));
+      return { probeJobStatus };
+    }
+
+    function makeJob(kind: string, finishedAt: number | null = null) {
+      return { id: `job-${kind}`, kind, finishedAt };
+    }
+
+    it('probes all running claude-backed jobs', async () => {
+      const { probeJobStatus } = mockJobStorage([
+        makeJob('run'),
+        makeJob('review'),
+        makeJob('fix'),
+        makeJob('fix-ci'),
+        makeJob('fix-push'),
+        makeJob('agent:my-agent'),
+      ]);
+      mockDeps([]);
+
+      const { runProbeSweep } = await import('@/instrumentation-node');
+      await runProbeSweep();
+
+      expect(probeJobStatus).toHaveBeenCalledTimes(6);
+    });
+
+    it('skips already-finished jobs', async () => {
+      const { probeJobStatus } = mockJobStorage([
+        makeJob('run', 1234567890),
+        makeJob('review', null),
+      ]);
+      mockDeps([]);
+
+      const { runProbeSweep } = await import('@/instrumentation-node');
+      await runProbeSweep();
+
+      expect(probeJobStatus).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips jobs with non-claude kinds', async () => {
+      const { probeJobStatus } = mockJobStorage([
+        makeJob('test'),
+        makeJob('commit'),
+        makeJob('push'),
+        makeJob('run'),
+      ]);
+      mockDeps([]);
+
+      const { runProbeSweep } = await import('@/instrumentation-node');
+      await runProbeSweep();
+
+      expect(probeJobStatus).toHaveBeenCalledTimes(1);
+    });
+
+    it('swallows individual probe errors and continues probing remaining jobs', async () => {
+      const probeJobStatus = vi.fn()
+        .mockRejectedValueOnce(new Error('probe failed'))
+        .mockResolvedValue(undefined);
+      mockJobStorage([makeJob('run'), makeJob('review')], probeJobStatus);
+      mockDeps([]);
+
+      const { runProbeSweep } = await import('@/instrumentation-node');
+      await expect(runProbeSweep()).resolves.not.toThrow();
+      expect(probeJobStatus).toHaveBeenCalledTimes(2);
+    });
+
+    it('swallows top-level errors when listJobs throws', async () => {
+      vi.doMock('@/lib/job-storage', () => ({
+        listJobs: () => { throw new Error('db unavailable'); },
+        probeJobStatus: vi.fn(),
+      }));
+      mockDeps([]);
+
+      const { runProbeSweep } = await import('@/instrumentation-node');
+      await expect(runProbeSweep()).resolves.not.toThrow();
+    });
+
+    it('does nothing when there are no running jobs', async () => {
+      const { probeJobStatus } = mockJobStorage([]);
+      mockDeps([]);
+
+      const { runProbeSweep } = await import('@/instrumentation-node');
+      await runProbeSweep();
+
+      expect(probeJobStatus).not.toHaveBeenCalled();
+    });
+  });
 });

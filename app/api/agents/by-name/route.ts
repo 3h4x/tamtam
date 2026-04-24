@@ -39,7 +39,8 @@ export async function PATCH(request: NextRequest) {
 
   if (agent) {
     try {
-      if (agent.schedule && agent.prompt && agent.enabled) {
+      const hasSkills = JSON.parse(agent.skillIds || '[]').length > 0;
+      if (agent.schedule && agent.enabled && (agent.prompt || hasSkills)) {
         await installAgentSchedule(agent.id, agent.schedule, agent.prompt, agent.runner, agent.project, agent.name);
       } else {
         await uninstallAgentSchedule(agent.id, agent.runner, agent.project, agent.name);

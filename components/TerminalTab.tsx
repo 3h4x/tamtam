@@ -404,7 +404,19 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         // output + NDJSON review + plain commit/push), and stream-json parsing
         // would silently drop every non-NDJSON section — render it raw instead.
         const isClaudeJob = isClaudeJobKind(data.kind)
-        entries.push({ role: 'status', text: kind })
+        // Stamp the "# kind" header with the start time so the user can see
+        // when each section of a multi-step release kicked off. Applies to
+        // every job kind that renders in the terminal — release, test,
+        // review, fix, commit, push, agent runs.
+        const startedAtSec = typeof data.started_at === 'number' ? data.started_at : null
+        const startedLabel = startedAtSec
+          ? new Date(startedAtSec * 1000).toLocaleString(undefined, {
+              month: 'short', day: 'numeric',
+              hour: '2-digit', minute: '2-digit', second: '2-digit',
+              hour12: false,
+            })
+          : null
+        entries.push({ role: 'status', text: startedLabel ? `${kind} · ${startedLabel}` : kind })
 
         // Show the prompt that was sent so the user can see what kicked off the run
         // (especially important for agent runs with a custom prompt).

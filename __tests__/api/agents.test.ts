@@ -662,6 +662,32 @@ describe('agents API', () => {
       expect(installAgentScheduleMock).not.toHaveBeenCalled();
     });
 
+    it('calls installAgentSchedule when creating skills-only agent (no prompt) with schedule', async () => {
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Skills Agent',
+          project: 'proj1',
+          schedule: '1h',
+          skillIds: ['skill1'],
+        }),
+      });
+
+      const response = await POST(request);
+      expect(response.status).toBe(201);
+      expect(installAgentScheduleMock).toHaveBeenCalledOnce();
+    });
+
+    it('does not call installAgentSchedule when creating agent with empty skills, no prompt, and schedule', async () => {
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Agent', project: 'proj1', schedule: '1h', skillIds: [] }),
+      });
+
+      await POST(request);
+      expect(installAgentScheduleMock).not.toHaveBeenCalled();
+    });
+
     it('calls installAgentSchedule when patching schedule on agent with prompt', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
@@ -831,6 +857,44 @@ describe('agents API', () => {
         body: JSON.stringify({ project: 'myproj', name: 'Self', prompt: 'updated work' }),
       }));
       expect(installAgentScheduleMock).toHaveBeenCalledOnce();
+    });
+
+    it('calls installAgentSchedule for skills-only agent (no prompt) when schedule and enabled', async () => {
+      seedAgent(testDb.db, { prompt: '', skillIds: '["skill1"]', schedule: '1h', enabled: true });
+      await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'Self', model: 'opus' }),
+      }));
+      expect(installAgentScheduleMock).toHaveBeenCalledOnce();
+    });
+
+    it('does not call installAgentSchedule when skills-only agent has no schedule', async () => {
+      seedAgent(testDb.db, { prompt: '', skillIds: '["skill1"]', schedule: null, enabled: true });
+      await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'Self', model: 'opus' }),
+      }));
+      expect(installAgentScheduleMock).not.toHaveBeenCalled();
+    });
+
+    it('calls uninstallAgentSchedule (not install) when agent has empty skills, no prompt, but has schedule', async () => {
+      seedAgent(testDb.db, { prompt: '', skillIds: '[]', schedule: '1h', enabled: true });
+      await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'Self', model: 'opus' }),
+      }));
+      expect(installAgentScheduleMock).not.toHaveBeenCalled();
+      expect(uninstallAgentScheduleMock).toHaveBeenCalledOnce();
+    });
+
+    it('calls uninstallAgentSchedule (not install) when skills-only agent is disabled', async () => {
+      seedAgent(testDb.db, { prompt: '', skillIds: '["skill1"]', schedule: '1h', enabled: false });
+      await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'Self', model: 'opus' }),
+      }));
+      expect(installAgentScheduleMock).not.toHaveBeenCalled();
+      expect(uninstallAgentScheduleMock).toHaveBeenCalledOnce();
     });
   });
 

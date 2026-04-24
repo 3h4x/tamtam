@@ -184,12 +184,48 @@ async function runCommit(
       if (coR.stdout) log(coR.stdout);
       if (coR.stderr) log(coR.stderr);
       if (coR.exitCode !== 0) {
-        // Branch may already exist — try checking out existing
-        const coExistingR = await exec('git', ['-C', projPath, 'checkout', featureBranch], { timeout: 10000 });
-        if (coExistingR.stdout) log(coExistingR.stdout);
-        if (coExistingR.stderr) log(coExistingR.stderr);
-        if (coExistingR.exitCode !== 0) {
-          return { ok: false, status: 500, detail: `Failed to create feature branch ${featureBranch}: ${coR.stderr || coR.stdout}` };
+        // Branch already exists locally. If it's already merged into the
+        // default branch (zombie branch — PR merged, remote ref deleted, but
+        // local ref still lingers), blow it away and create a fresh one.
+        // Otherwise, try to reuse it by plain checkout.
+        const mergedR = await exec(
+          'git', ['-C', projPath, 'branch', '--merged', mainBranch],
+          { timeout: 5000 },
+        );
+        const mergedBranches = mergedR.stdout
+          .split('\n')
+          .map(l => l.replace(/^\*?\s+/, '').trim())
+          .filter(Boolean);
+        if (mergedBranches.includes(featureBranch)) {
+          log(`# ${featureBranch} is already merged into ${mainBranch} — deleting zombie ref and recreating\n`);
+          await exec('git', ['-C', projPath, 'branch', '-D', featureBranch], { timeout: 5000 });
+          const retryR = await exec('git', ['-C', projPath, 'checkout', '-b', featureBranch], { timeout: 10000 });
+          if (retryR.stdout) log(retryR.stdout);
+          if (retryR.stderr) log(retryR.stderr);
+          if (retryR.exitCode !== 0) {
+            return { ok: false, status: 500, detail: `Failed to recreate feature branch ${featureBranch}: ${retryR.stderr || retryR.stdout}` };
+          }
+        } else {
+          // Branch exists and is NOT merged — reuse it. `git checkout` would
+          // refuse if uncommitted changes conflict with its tip; carry the
+          // working tree across via `-m` (merge) so the commit still lands on
+          // the feature branch with the user's staged + unstaged work intact.
+          const coExistingR = await exec('git', ['-C', projPath, 'checkout', '-m', featureBranch], { timeout: 10000 });
+          if (coExistingR.stdout) log(coExistingR.stdout);
+          if (coExistingR.stderr) log(coExistingR.stderr);
+          if (coExistingR.exitCode !== 0) {
+            return { ok: false, status: 500, detail: `Failed to create feature branch ${featureBranch}: ${coExistingR.stderr || coExistingR.stdout}` };
+          }
+          // The -m merge may have produced conflict markers if both the feature
+          // branch tip and the working tree edited the same lines. Staging those
+          // markers via `git add -A` would produce a broken commit, so detect
+          // and reject here rather than silently committing garbage.
+          const conflictR = await exec('git', ['-C', projPath, 'diff', '--name-only', '--diff-filter=U'], { timeout: 5000 });
+          const conflicted = conflictR.stdout.trim().split('\n').filter(Boolean);
+          if (conflicted.length > 0) {
+            log(`# Merge conflicts detected in: ${conflicted.join(', ')}\n`);
+            return { ok: false, status: 409, detail: `Merge conflicts when switching to ${featureBranch}: ${conflicted.join(', ')}` };
+          }
         }
       }
     }

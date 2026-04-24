@@ -89,6 +89,8 @@ Agents live at `/agents`. Each agent has:
 - An optional cron schedule
 - A composed set of skills
 
+Prompt is optional when skills are attached — skills alone are enough to run an agent.
+
 Run any agent on demand from the UI, or let the scheduler fire it automatically.
 
 ## Testing
