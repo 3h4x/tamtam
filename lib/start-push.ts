@@ -290,14 +290,19 @@ async function runPush(
   const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
   const commitSha = shaR.exitCode === 0 ? shaR.stdout.trim() : '';
 
-  // PR creation is gated on pr_workflow_enabled. Issue-linked runs on a
-  // Direct Branch project commit + push directly to the feature branch with
-  // no PR — the issue context is only used for the commit message trailer.
+  // PR creation rules:
+  //   - Issue-linked push → ALWAYS create a PR. Clicking "Work on issue N" is
+  //     an explicit opt-in to the issue-driven workflow; the user expects a
+  //     PR that closes the issue regardless of the project's pr_workflow
+  //     setting (which only governs *non-issue* feature branches).
+  //   - Non-issue push + pr_workflow_enabled → create a generic PR for the
+  //     feature branch.
+  //   - Non-issue push without pr_workflow_enabled → push to current branch,
+  //     no PR.
   const { getProjectTestConfig } = await import('./scheduling');
   const prWorkflowEnabled = !!getProjectTestConfig(projectName)?.prWorkflowEnabled;
 
-  // PR Workflow + issue: create a PR that closes the issue.
-  if (issueCtx && prWorkflowEnabled) {
+  if (issueCtx) {
     const prUrl = await createIssuePR(projPath, log, issueCtx);
     if (prUrl) {
       const prNumber = parseInt(prUrl.split('/').pop() ?? '0', 10) || undefined;

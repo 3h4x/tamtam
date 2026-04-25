@@ -558,7 +558,7 @@ describe('startProjectPush — push result tracking', () => {
     expect(prCreateCall).toBeUndefined();
   });
 
-  it('does NOT create a PR for an issue-linked push when prWorkflowEnabled is off', async () => {
+  it('creates a PR for an issue-linked push even when prWorkflowEnabled is off (Work-on opt-in)', async () => {
     vi.resetModules();
     vi.doMock('@/lib/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
@@ -594,17 +594,24 @@ describe('startProjectPush — push result tracking', () => {
     }));
 
     execMock
-      .mockImplementationOnce(() => resp(0, '1\n'))
-      .mockImplementationOnce(() => resp(0, '# branch.head fix/issue-42-fix-login-bug\n# branch.ab +0 -0\n'))
-      .mockImplementationOnce(() => resp(0))
-      .mockImplementationOnce(() => resp(0, 'abc1234'));
+      .mockImplementationOnce(() => resp(0, '1\n'))                                                     // rev-list --count
+      .mockImplementationOnce(() => resp(0, '# branch.head fix/issue-42-fix-login-bug\n# branch.ab +0 -0\n')) // behind check
+      .mockImplementationOnce(() => resp(0))                                                            // git push
+      .mockImplementationOnce(() => resp(0, 'abc1234'))                                                 // git rev-parse
+      .mockImplementationOnce(() => resp(0, 'fix/issue-42-fix-login-bug'))                              // branch --show-current inside createIssuePR
+      .mockImplementationOnce(() => resp(0, 'https://github.com/owner/repo/pull/77\n'))                // gh pr create
+      .mockImplementationOnce(() => resp(0))                                                            // checkout main (post-PR cleanup)
+      .mockImplementationOnce(() => resp(0));                                                           // pull origin main
 
     const { startProjectPush: fn } = await import('@/lib/start-push');
     const r = await fn('proj');
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.message).toBe('pushed');
+    if (r.ok) {
+      expect(r.message).toContain('PR created');
+      expect(r.prUrl).toBe('https://github.com/owner/repo/pull/77');
+    }
     const prCreateCall = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'gh' && args.includes('pr') && args.includes('create'));
-    expect(prCreateCall).toBeUndefined();
+    expect(prCreateCall).toBeTruthy();
   });
 
   it('returns ok with plain "pushed" message when no issue context exists', async () => {

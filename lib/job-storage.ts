@@ -959,6 +959,9 @@ export function jobToDict(job: JobData): Record<string, unknown> {
     user_prompt: job.userPrompt ?? null,
     cost_usd: job.costUsd ?? null,
     model: job.model ?? null,
+    gh_issue_number: job.ghIssueNumber ?? null,
+    gh_issue_repo: job.ghIssueRepo ?? null,
+    gh_issue_title: job.ghIssueTitle ?? null,
   };
   d.log_pruned = job.logPruned ?? false;
   const verdict = getVerdict(job);
