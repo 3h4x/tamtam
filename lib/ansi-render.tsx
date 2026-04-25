@@ -72,7 +72,7 @@ function reflow(text: string): string {
     .replace(/^\n+/, '')
 }
 
-export function renderAnsi(text: string): ReactNode {
+export function renderAnsi(text: string): ReactNode[] {
   text = reflow(text)
   const regex = new RegExp(ANSI_REGEX.source, 'g')
   const parts: ReactNode[] = []

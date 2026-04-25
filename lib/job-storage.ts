@@ -894,10 +894,6 @@ export function updateJob(job: JobData): void {
 // to ~800% with hundreds of historical review jobs.
 const verdictCache = new Map<string, string | null>();
 
-export function __resetVerdictCache(): void {
-  verdictCache.clear();
-}
-
 export function getVerdict(job: JobData): string | null {
   if (job.kind !== 'review' || job.finishedAt === null) return null;
   const cached = verdictCache.get(job.id);

@@ -108,31 +108,3 @@ export function exec(
     });
   });
 }
-
-export function execSync(
-  cmd: string,
-  args: string[],
-  options?: { cwd?: string; timeout?: number }
-): ShellResult {
-  const { execFileSync } = require('child_process');
-  try {
-    const stdout = execFileSync(cmd, args, {
-      cwd: options?.cwd,
-      timeout: options?.timeout ?? 15000,
-      env: {
-        ...cleanEnv(),
-        PATH: enrichPath(),
-        HOME: homedir(),
-      },
-      maxBuffer: 10 * 1024 * 1024,
-    });
-    return { stdout: stdout.toString(), stderr: '', exitCode: 0 };
-  } catch (e: unknown) {
-    const err = e as { stdout?: Buffer; stderr?: Buffer; status?: number };
-    return {
-      stdout: (err.stdout ?? '').toString(),
-      stderr: (err.stderr ?? '').toString(),
-      exitCode: err.status ?? 1,
-    };
-  }
-}
