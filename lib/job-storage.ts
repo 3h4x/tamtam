@@ -525,6 +525,17 @@ async function runCompletionHooks(job: JobData): Promise<void> {
       const { autoCommitEnabled, autoPushEnabled } = await getProjectPipelineConfig(job.project);
       const inRelease = !!findActiveReleaseJob(job.project);
       if (inRelease || autoPushEnabled) {
+        // Release the commit job's pipeline lock before chaining to push —
+        // otherwise startProjectPush sees the lock as held (by us) and 409s.
+        // In-release chains skip the lock dance via isLockOwnedByActiveRelease,
+        // but a standalone commit→push (the "Push to PR" flow) needs the
+        // explicit handoff.
+        if (!inRelease) {
+          try {
+            const { releaseLock } = await import('./pipeline-lock');
+            releaseLock(job.project, job.id);
+          } catch {}
+        }
         const { startProjectPush } = await import('./start-push');
         const r = await startProjectPush(job.project);
         if (r.ok) {
@@ -959,6 +970,9 @@ export function jobToDict(job: JobData): Record<string, unknown> {
     user_prompt: job.userPrompt ?? null,
     cost_usd: job.costUsd ?? null,
     model: job.model ?? null,
+    gh_issue_number: job.ghIssueNumber ?? null,
+    gh_issue_repo: job.ghIssueRepo ?? null,
+    gh_issue_title: job.ghIssueTitle ?? null,
   };
   d.log_pruned = job.logPruned ?? false;
   const verdict = getVerdict(job);
@@ -996,6 +1010,15 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
   if (job.pid <= 0) {
     const ageSec = Date.now() / 1000 - job.startedAt;
     if (ageSec < PID_SPAWN_GRACE_SEC) return 'running';
+    // Inline kinds run inside the next-server itself (pid intentionally 0
+    // so markDone's SIGKILL fallback doesn't kill our own process). They
+    // self-finalize via markDone(job, code) when the inline routine
+    // returns, so probing them here is meaningless — declaring them dead
+    // would race the in-flight Claude call (~30-180 s) and lose work.
+    // Trust their self-finalization; if finishedAt is null, they're alive.
+    if (job.kind === 'mark-dod' || job.kind === 'pr-wait') {
+      return 'running';
+    }
     // Non-PM2 kinds (test/action) have no name to look up in pm2 — dead means dead.
     if (job.kind === 'test' || job.kind === 'action') {
       await markDone(job, -1);

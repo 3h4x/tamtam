@@ -103,6 +103,7 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - `/project/[name]/task/[task]` — Task detail view
 - `/agents` — Agents management page
 - `/monitoring` — Prometheus + Loki health dashboard (alerts, service up/down, log errors)
+- `/pipeline` — Pipeline health metrics dashboard (verdict distribution, fix-loop stats, step durations, MTTR, per-project breakdown; filterable by 24h/7d/30d/all)
 - `/stats` — Token usage dashboard (runs, input/output/cache tokens, cost per project and per agent kind, filterable by 24h/7d/30d/all)
 - `/runs` — All runs across projects (replaces `/jobs`, which now redirects here)
 - `/logs` — Log viewer
@@ -140,7 +141,7 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - `/api/projects/by-project/[name]/mark-dod` — Run DoD verification for latest issue-linked run (POST); also triggered automatically after review→LGTM
 - `/api/projects/by-project/[name]/pr-branch` — Fetch and checkout a PR's head branch so Terminal opens on the right branch (POST: `{ branch }`)
 - `/api/projects/by-project/[name]/pr-gates` — TamTam-side gate state for a PR: tests/review/DoD badges (GET); used by IssuesTab
-- `/api/projects/by-project/[name]/branch` — Current branch name + default branch (GET); returns `{ branch, defaultBranch }`
+- `/api/projects/by-project/[name]/branch` — Current branch name + default branch (GET); returns `{ branch, defaultBranch, commitsAhead }` (`commitsAhead` is the count of local commits not yet in `origin/<default>`, or `null` when on the default branch; no `git fetch` is issued)
 - `/api/projects/by-project/[name]/behind` — Ahead/behind commit counts vs remote (GET)
 - `/api/projects/by-project/[name]/logs` — Project run log files (GET)
 - `/api/projects/by-project/[name]/docs` — Project documentation files (GET)
@@ -161,6 +162,7 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - `/api/monitoring` — Prometheus + Loki status aggregation (GET); env: `PROMETHEUS_URL`, `LOKI_URL`
 - `/api/monitoring/pm2-logs` — Tail tamtam PM2 log files (error + out from `~/.pm2/logs/`), last 64 KB; accepts `?limit=` (max 500) and `?out=0` to suppress stdout log (GET)
 - `/api/stats/usage` — Token usage statistics per project and per agent kind (GET, accepts `?window=24h|7d|30d|all`)
+- `/api/stats/pipeline` — Pipeline health metrics: verdict distribution, fix-loop stats, step durations, MTTR, per-project breakdown (GET, accepts `?window=24h|7d|30d|all` and `?project=`; 60s cache)
 
 ## Testing Requirements
 - **All new API routes must have vitest tests** in `__tests__/api/`; lib logic tests go in `__tests__/lib/` or alongside the file.

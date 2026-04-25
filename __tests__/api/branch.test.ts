@@ -68,6 +68,53 @@ describe('GET /api/projects/by-project/[projectName]/branch', () => {
     expect(data.defaultBranch).toBe('master');
   });
 
+  it('returns commitsAhead when on a feature branch with commits ahead of origin/default', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/x\n' }))   // branch --show-current
+      .mockResolvedValueOnce(makeExecResult({ stdout: '3\n' }));        // rev-list --count
+    detectMainBranchMock.mockResolvedValue('main');
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/branch');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.commitsAhead).toBe(3);
+    // verify rev-list was queried against origin/<default>..HEAD
+    const revCall = execMock.mock.calls.find(([cmd, args]) => cmd === 'git' && args.includes('rev-list'));
+    expect(revCall?.[1]).toContain('origin/main..HEAD');
+  });
+
+  it('returns commitsAhead 0 for a stranded merged branch (no commits ahead of origin)', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'fix/issue-8-stranded\n' }))
+      .mockResolvedValueOnce(makeExecResult({ stdout: '0\n' }));
+    detectMainBranchMock.mockResolvedValue('main');
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/branch');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.commitsAhead).toBe(0);
+  });
+
+  it('returns commitsAhead null when on the default branch (no rev-list call)', async () => {
+    execMock.mockResolvedValueOnce(makeExecResult({ stdout: 'main\n' }));
+    detectMainBranchMock.mockResolvedValue('main');
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/branch');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.commitsAhead).toBeNull();
+    const revCall = execMock.mock.calls.find(([cmd, args]) => cmd === 'git' && args.includes('rev-list'));
+    expect(revCall).toBeUndefined();
+  });
+
+  it('returns commitsAhead null when rev-list fails', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/x\n' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 128, stderr: 'unknown revision' }));
+    detectMainBranchMock.mockResolvedValue('main');
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/branch');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.commitsAhead).toBeNull();
+  });
+
   it('invokes git with the resolved project path', async () => {
     resolveProjectPathMock.mockReturnValue('/custom/repo');
     execMock.mockResolvedValueOnce(makeExecResult({ stdout: 'main\n' }));

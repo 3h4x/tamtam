@@ -4,11 +4,14 @@ import { NextRequest } from 'next/server';
 describe('POST /api/projects/by-project/[projectName]/push', () => {
   let POST: any;
   let launchProjectPushMock: ReturnType<typeof vi.fn>;
+  let startProjectCommitMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
-    launchProjectPushMock = vi.fn().mockReturnValue({ jobId: 'test-job-id' });
+    launchProjectPushMock = vi.fn().mockReturnValue({ jobId: 'push-job-id' });
+    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc1234', message: 'committed', jobId: 'commit-job-id' });
     vi.doMock('@/lib/start-push', () => ({ launchProjectPush: launchProjectPushMock }));
+    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
     const mod = await import('@/app/api/projects/by-project/[projectName]/push/route');
     POST = mod.POST;
   });
@@ -36,9 +39,47 @@ describe('POST /api/projects/by-project/[projectName]/push', () => {
     expect(data.job_id).toBe('abc-123');
   });
 
-  it('calls launchProjectPush with the project name from params', async () => {
+  it('default (no body) routes to push-only via launchProjectPush', async () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/my-repo/push', { method: 'POST' });
     await POST(req, { params: Promise.resolve({ projectName: 'my-repo' }) });
     expect(launchProjectPushMock).toHaveBeenCalledWith('my-repo');
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
+  });
+
+  it('commit:true in body routes to startProjectCommit (Push to PR flow)', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/my-repo/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commit: true }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'my-repo' }) });
+    expect(startProjectCommitMock).toHaveBeenCalledWith('my-repo');
+    expect(launchProjectPushMock).not.toHaveBeenCalled();
+    const data = await res.json();
+    expect(data.job_id).toBe('commit-job-id');
+  });
+
+  it('returns commit failure detail when startProjectCommit returns ok:false', async () => {
+    startProjectCommitMock.mockResolvedValue({ ok: false, status: 409, detail: 'Pipeline is running for my-repo' });
+    const req = new NextRequest('http://localhost/api/projects/by-project/my-repo/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commit: true }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'my-repo' }) });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.detail).toContain('Pipeline is running');
+  });
+
+  it('treats invalid JSON body as default push-only', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/my-repo/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'not-json',
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'my-repo' }) });
+    expect(launchProjectPushMock).toHaveBeenCalledWith('my-repo');
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
   });
 });

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { fetchIssuesAndPRs, fetchProjectConfig, mergePR, approvePR, reviewPR } from '@/lib/client-api'
+import { fetchIssuesAndPRs, fetchProjectConfig, mergePR, approvePR, reviewPR, runMarkDod } from '@/lib/client-api'
 import type { GhPullRequest, GhIssue, GhLabel, ProjectConfig } from '@/lib/client-api'
 import { formatAgo } from '@/lib/format'
 
@@ -62,12 +62,36 @@ const GATE_CLASS: Record<GateState, string> = {
 }
 const GATE_SYMBOL: Record<GateState, string> = { pass: '✓', fail: '✗', warn: '!', none: '○' }
 
-function GateBadge({ label, state, title }: { label: string; state: GateState; title: string }) {
+function GateBadge({
+  label,
+  state,
+  title,
+  onClick,
+  busy,
+}: {
+  label: string
+  state: GateState
+  title: string
+  onClick?: () => void
+  busy?: boolean
+}) {
+  const cls = `inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${GATE_CLASS[state]} ${onClick ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className={cls}
+        title={title}
+        onClick={(e) => { e.stopPropagation(); if (!busy) onClick() }}
+        disabled={busy}
+      >
+        <span>{busy ? '⟳' : GATE_SYMBOL[state]}</span>
+        <span>{label}</span>
+      </button>
+    )
+  }
   return (
-    <span
-      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${GATE_CLASS[state]}`}
-      title={title}
-    >
+    <span className={cls} title={title}>
       <span>{GATE_SYMBOL[state]}</span>
       <span>{label}</span>
     </span>
@@ -87,6 +111,8 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
   const [approved, setApproved] = useState(pr.reviewDecision === 'APPROVED')
   const [reviewing, setReviewing] = useState(false)
   const [gates, setGates] = useState<PrGates | null>(null)
+  const [dodRunning, setDodRunning] = useState(false)
+  const [dodError, setDodError] = useState<string | null>(null)
 
   // Fetch TamTam-side gate state (tests / review / DoD) for this PR.
   useEffect(() => {
@@ -144,6 +170,27 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
     }
     const prompt = `Review pull request #${pr.number}: "${pr.title}" (${pr.url})\n\nBranch: ${pr.headRefName} → ${pr.baseRefName}`
     router.push(`/project/${projectName}/terminal?prompt=${encodeURIComponent(prompt)}`)
+  }
+
+  const runDod = async () => {
+    if (!gates) return
+    setDodRunning(true)
+    setDodError(null)
+    try {
+      const repoMatch = pr.url.match(/github\.com\/([^/]+\/[^/]+)\//)
+      const repo = repoMatch?.[1] ?? ''
+      // Prefer the linked issue (mark-dod ticks issue checkboxes); fall back
+      // to the PR itself when there's no issue ref in the body.
+      const ctx = gates.issueNumber
+        ? { issue_number: gates.issueNumber, repo }
+        : { pr_number: pr.number, repo }
+      const result = await runMarkDod(projectName, ctx)
+      router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(result.jobId)}`)
+    } catch (err) {
+      setDodError(err instanceof Error ? err.message : 'DoD verification failed')
+    } finally {
+      setDodRunning(false)
+    }
   }
 
   const doReview = async () => {
@@ -237,7 +284,17 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
               <>
                 <GateBadge label="tests" state={gates.tests} title={`TamTam tests: ${gates.tests}`} />
                 <GateBadge label="review" state={gates.review} title={`AI review verdict: ${gates.review === 'pass' ? 'LGTM' : gates.review === 'warn' ? 'NEEDS ATTENTION' : gates.review === 'fail' ? 'DO NOT SHIP / failed' : 'not run'}`} />
-                <GateBadge label={gates.dodSummary ?? 'DoD'} state={gates.dod} title={`Acceptance criteria${gates.issueNumber ? ` for #${gates.issueNumber}` : ''}: ${gates.dodSummary ?? gates.dod}`} />
+                <GateBadge
+                  label={gates.dodSummary ?? 'DoD'}
+                  state={gates.dod}
+                  title={
+                    gates.dod === 'none'
+                      ? 'No acceptance criteria found in PR body'
+                      : `Click to verify acceptance criteria${gates.issueNumber ? ` for #${gates.issueNumber}` : ''} (${gates.dodSummary ?? gates.dod})`
+                  }
+                  onClick={gates.dod === 'none' ? undefined : runDod}
+                  busy={dodRunning}
+                />
               </>
             )}
             {ciRollup && ciBadgeClass && (
@@ -287,6 +344,9 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
           )}
           {mergeError && (
             <div className="mt-1 text-xs text-status-error">{mergeError}</div>
+          )}
+          {dodError && (
+            <div className="mt-1 text-xs text-status-error">DoD: {dodError}</div>
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">

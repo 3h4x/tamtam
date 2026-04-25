@@ -56,12 +56,72 @@ describe('POST /api/projects/by-project/{projectName}/mark-dod', () => {
     expect(data.detail).toContain('unexpected db error');
   });
 
-  it('passes projectName from route params to startMarkDod', async () => {
+  it('passes projectName from route params to startMarkDod (no body → no override)', async () => {
     startMarkDodMock.mockResolvedValue({
       ok: true, jobId: 'j', issueNumber: 1, verified: 0, total: 0, changed: false,
     });
     await POST(new Request('http://localhost'), params('specific-project'));
-    expect(startMarkDodMock).toHaveBeenCalledWith('specific-project');
+    expect(startMarkDodMock).toHaveBeenCalledWith('specific-project', undefined);
+  });
+
+  it('forwards explicit issue context from request body as override', async () => {
+    startMarkDodMock.mockResolvedValue({
+      ok: true, jobId: 'j', issueNumber: 8, verified: 1, total: 5, changed: true,
+    });
+    const req = new Request('http://localhost', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issue_number: 8, repo: 'owner/repo' }),
+    });
+    await POST(req, params('myproj'));
+    expect(startMarkDodMock).toHaveBeenCalledWith('myproj', {
+      issueNumber: 8,
+      prNumber: undefined,
+      repo: 'owner/repo',
+    });
+  });
+
+  it('forwards explicit PR context from request body as override', async () => {
+    startMarkDodMock.mockResolvedValue({
+      ok: true, jobId: 'j', issueNumber: 8, verified: 0, total: 5, changed: false,
+    });
+    const req = new Request('http://localhost', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pr_number: 39, repo: 'owner/repo' }),
+    });
+    await POST(req, params('myproj'));
+    expect(startMarkDodMock).toHaveBeenCalledWith('myproj', {
+      issueNumber: undefined,
+      prNumber: 39,
+      repo: 'owner/repo',
+    });
+  });
+
+  it('ignores body without repo (treats as no override)', async () => {
+    startMarkDodMock.mockResolvedValue({
+      ok: true, jobId: 'j', issueNumber: 1, verified: 0, total: 0, changed: false,
+    });
+    const req = new Request('http://localhost', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issue_number: 8 }),
+    });
+    await POST(req, params('myproj'));
+    expect(startMarkDodMock).toHaveBeenCalledWith('myproj', undefined);
+  });
+
+  it('ignores invalid JSON body (treats as no override)', async () => {
+    startMarkDodMock.mockResolvedValue({
+      ok: true, jobId: 'j', issueNumber: 1, verified: 0, total: 0, changed: false,
+    });
+    const req = new Request('http://localhost', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'not-json',
+    });
+    await POST(req, params('myproj'));
+    expect(startMarkDodMock).toHaveBeenCalledWith('myproj', undefined);
   });
 
   it('returns 200 with changed:false when nothing was updated', async () => {
