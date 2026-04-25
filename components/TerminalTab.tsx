@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { runProject, fetchSkills, fetchPersonas } from '@/lib/client-api'
 import type { Skill, Persona } from '@/lib/client-api'
 import Markdown from 'react-markdown'
@@ -207,6 +208,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   )
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const [autoScroll, setAutoScroll] = useState(true)
+  const [currentReleaseId, setCurrentReleaseId] = useState<string | null>(null)
   const [elapsedMs, setElapsedMs] = useState(0)
   const spinnerChars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
@@ -404,6 +406,8 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           router.replace(`/project/${projectName}/terminal/${data.session_id}`)
           return
         }
+        // Track the release this job belongs to (for the trace link in the header)
+        setCurrentReleaseId(data.release_id ?? null)
         const entries: TermEntry[] = []
         const kind = data.kind || jobParam.split('-').slice(1, -1).join('-')
         // `fix-push` spawns Claude directly, so its log is pure stream-json
@@ -975,6 +979,15 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
                 <span className="w-1.5 h-1.5 rounded-full bg-status-warning animate-pulse" />
                 live
               </span>
+            )}
+            {currentReleaseId && (
+              <Link
+                href={`/project/${encodeURIComponent(projectName)}/release/${encodeURIComponent(currentReleaseId)}`}
+                className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-accent hover:text-accent/80 font-mono leading-none flex items-center"
+                title="View unified release trace"
+              >
+                trace ↗
+              </Link>
             )}
           </div>
 

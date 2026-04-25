@@ -1398,6 +1398,11 @@ export function ProjectDetailPage({
             )
             if (!pipelineRunning) return null
 
+            // Find the active release job to link the strip to the trace view.
+            const activeReleaseJob = projectJobs
+              .filter(j => j.kind === 'release' && j.status === 'running')
+              .sort((a, b) => (b.started_at || 0) - (a.started_at || 0))[0]
+
             // Each release is a clean slate. Find the currently-running step
             // and use its start time as the anchor.
             // - Steps AFTER the running step in sequence → always pending (haven't run yet).
@@ -1658,6 +1663,15 @@ export function ProjectDetailPage({
                     </div>
                   )
                 })}
+                {activeReleaseJob && (
+                  <Link
+                    href={`/project/${encodeURIComponent(name)}/release/${encodeURIComponent(activeReleaseJob.id)}`}
+                    className="ml-auto text-[10px] text-accent hover:underline font-mono shrink-0"
+                    title="View unified release trace"
+                  >
+                    trace →
+                  </Link>
+                )}
               </div>
             )
           })()}

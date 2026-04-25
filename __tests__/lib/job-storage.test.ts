@@ -39,7 +39,8 @@ function createTestDb() {
       gh_issue_title TEXT,
       log_pruned INTEGER DEFAULT 0,
       cost_usd REAL,
-      model TEXT
+      model TEXT,
+      release_id TEXT
     );
     CREATE TABLE IF NOT EXISTS gh_issues_cache (
       project TEXT PRIMARY KEY,

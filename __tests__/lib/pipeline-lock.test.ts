@@ -36,7 +36,8 @@ function createTestDb() {
       gh_issue_title TEXT,
       log_pruned INTEGER DEFAULT 0,
       cost_usd REAL,
-      model TEXT
+      model TEXT,
+      release_id TEXT
     );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };
