@@ -89,6 +89,15 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     prompt: '',
     skillIds: ['agent-readme-sync'],
   },
+  {
+    name: 'docs-claude',
+    description: 'Audits CLAUDE.md for completeness — adds missing guidance on security, coding conventions, testing rules, and best patterns so Claude behaves correctly on every run.',
+    model: 'sonnet',
+    schedule: '24h',
+    runner: 'pm2',
+    prompt: '',
+    skillIds: ['agent-docs-claude'],
+  },
 ]
 
 const MODEL_LABELS: Record<string, { label: string; desc: string }> = {
