@@ -887,8 +887,27 @@ export function updateJob(job: JobData): void {
   saveToDb(job);
 }
 
+// Memoize verdict per finished review job. Once a job is finalized its log
+// is immutable, so the verdict can't change. /api/jobs polling (every 5 s)
+// and the per-row jobToDict were re-reading every review log file from disk
+// + re-parsing stream-json on every request — driving the dev server CPU
+// to ~800% with hundreds of historical review jobs.
+const verdictCache = new Map<string, string | null>();
+
+export function __resetVerdictCache(): void {
+  verdictCache.clear();
+}
+
 export function getVerdict(job: JobData): string | null {
   if (job.kind !== 'review' || job.finishedAt === null) return null;
+  const cached = verdictCache.get(job.id);
+  if (cached !== undefined) return cached;
+  const v = computeVerdict(job);
+  verdictCache.set(job.id, v);
+  return v;
+}
+
+function computeVerdict(job: JobData): string | null {
   // Use parsed log — raw stream-json encodes newlines as literal "\n",
   // which breaks word boundaries and masks a trailing verdict token.
   const log = readParsedLog(job, 100_000);

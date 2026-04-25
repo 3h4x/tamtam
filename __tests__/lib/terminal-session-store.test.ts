@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 
 // Minimal EventSource mock — must be set up before importing the store
 let esInstances: MockES[] = [];
@@ -34,6 +34,15 @@ class MockES {
 
 beforeAll(() => {
   vi.stubGlobal('EventSource', MockES);
+  // Run rAF callbacks synchronously by default so the legacy tests that
+  // expect listeners to fire inside update() still pass. Batched-flush
+  // behavior is exercised in the dedicated "notification batching" describe
+  // below by overriding rAF.
+  vi.stubGlobal('requestAnimationFrame', (cb: (t: number) => void) => {
+    cb(0);
+    return 0;
+  });
+  vi.stubGlobal('cancelAnimationFrame', () => {});
 });
 
 afterEach(() => {
@@ -400,5 +409,90 @@ describe('TerminalStore – startStream EventSource integration', () => {
     terminalStore.startStream(p, 'job-second');
     expect(first.closed).toBe(true);
     terminalStore.reset(p);
+  });
+});
+
+describe('TerminalStore – notification batching', () => {
+  let pendingRaf: Array<(t: number) => void> = [];
+  beforeAll(() => {
+    vi.stubGlobal('requestAnimationFrame', (cb: (t: number) => void) => {
+      pendingRaf.push(cb);
+      return pendingRaf.length;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => {
+      pendingRaf[id - 1] = () => {};
+    });
+  });
+  afterAll(() => {
+    // Restore the synchronous-rAF default so any later file (in case of
+    // a re-run) doesn't leak the queueing stub.
+    vi.stubGlobal('requestAnimationFrame', (cb: (t: number) => void) => {
+      cb(0);
+      return 0;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+  });
+
+  afterEach(() => {
+    pendingRaf = [];
+  });
+
+  function runRaf() {
+    const queued = pendingRaf;
+    pendingRaf = [];
+    for (const cb of queued) cb(0);
+  }
+
+  it('coalesces 100 rapid updates into a single listener call', () => {
+    const p = proj();
+    const listener = vi.fn();
+    terminalStore.subscribe(p, listener);
+    for (let i = 0; i < 100; i++) {
+      terminalStore.update(p, (s) => ({ streamBuffer: s.streamBuffer + 'x' }));
+    }
+    expect(listener).not.toHaveBeenCalled();
+    runRaf();
+    expect(listener).toHaveBeenCalledTimes(1);
+    // State writes are still synchronous — the buffer reflects all 100 updates.
+    expect(terminalStore.get(p).streamBuffer.length).toBe(100);
+  });
+
+  it('get() returns the latest state between updates even before flush', () => {
+    const p = proj();
+    terminalStore.update(p, () => ({ streamBuffer: 'a' }));
+    expect(terminalStore.get(p).streamBuffer).toBe('a');
+    terminalStore.update(p, () => ({ streamBuffer: 'ab' }));
+    expect(terminalStore.get(p).streamBuffer).toBe('ab');
+    runRaf();
+  });
+
+  it('coalesces across distinct projects within the same frame', () => {
+    const p1 = proj();
+    const p2 = proj();
+    const l1 = vi.fn();
+    const l2 = vi.fn();
+    terminalStore.subscribe(p1, l1);
+    terminalStore.subscribe(p2, l2);
+    terminalStore.update(p1, () => ({ streaming: true }));
+    terminalStore.update(p2, () => ({ streaming: true }));
+    terminalStore.update(p1, () => ({ streamBuffer: 'q' }));
+    expect(l1).not.toHaveBeenCalled();
+    expect(l2).not.toHaveBeenCalled();
+    runRaf();
+    expect(l1).toHaveBeenCalledTimes(1);
+    expect(l2).toHaveBeenCalledTimes(1);
+  });
+
+  it('__flushNotifications flushes synchronously on demand', () => {
+    const p = proj();
+    const listener = vi.fn();
+    terminalStore.subscribe(p, listener);
+    terminalStore.update(p, () => ({ streamBuffer: 'sync' }));
+    expect(listener).not.toHaveBeenCalled();
+    terminalStore.__flushNotifications();
+    expect(listener).toHaveBeenCalledTimes(1);
+    // Pending rAF should have been cancelled — no second fire on next frame.
+    runRaf();
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 });

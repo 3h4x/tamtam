@@ -87,7 +87,7 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - `data/` — SQLite database (gitignored)
 - `__tests__/` — vitest unit tests
 - `e2e/` — Playwright integration tests
-- `docs/` — architecture docs: `STREAMING.md` (job lifecycle + SSE), `PIPELINE.md` (release pipeline state machine), `DATABASE.md` (schema reference), `SETTINGS.md` (all config keys), `AGENT.md` (agent concepts), `CACHING.md` (layered TTL cache strategy)
+- `docs/` — architecture docs: `STREAMING.md` (job lifecycle + SSE), `PIPELINE.md` (release pipeline state machine), `DATABASE.md` (schema reference), `SETTINGS.md` (all config keys), `AGENT.md` (agent concepts), `CACHING.md` (layered TTL cache strategy), `PROFILING.md` (server / client / Turbopack profiling)
 
 ## Pages
 - `/` — Projects list with status, changes, CI

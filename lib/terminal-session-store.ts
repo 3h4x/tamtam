@@ -87,6 +87,21 @@ class TerminalStore {
   private states = new Map<string, SessionState>()
   private esMap = new Map<string, EventSource>()
   private listeners = new Map<string, Set<Listener>>()
+  // Coalesce notifications across a frame. SSE token deltas arrive at hundreds
+  // of events per second; without batching, every delta forces a full
+  // <Markdown> re-render of the growing streamBuffer — O(n²) work that pegged
+  // a renderer process at ~100% CPU. State writes still happen synchronously
+  // (so reads via get() inside the same tick see the latest); only the
+  // listener fan-out is deferred until the next animation frame.
+  private pendingNotify = new Set<string>()
+  private rafHandle: number | null = null
+  private timerHandle: ReturnType<typeof setTimeout> | null = null
+  // Separate flag from the handles: a synchronous rAF stub (used in tests)
+  // fires the callback BEFORE rAF returns, so the assignment
+  // `rafHandle = requestAnimationFrame(...)` would overwrite the null
+  // that flushNotifications just set, leaving notify() to think a flush is
+  // still pending and silently dropping subsequent notifications.
+  private flushScheduled = false
 
   get(projectName: string): SessionState {
     let s = this.states.get(projectName)
@@ -109,14 +124,54 @@ class TerminalStore {
     }
   }
 
+  private flushNotifications = () => {
+    this.flushScheduled = false
+    this.rafHandle = null
+    this.timerHandle = null
+    const projects = Array.from(this.pendingNotify)
+    this.pendingNotify.clear()
+    for (const projectName of projects) {
+      const set = this.listeners.get(projectName)
+      if (!set) continue
+      set.forEach((l) => {
+        try {
+          l()
+        } catch {}
+      })
+    }
+  }
+
   private notify(projectName: string) {
-    const set = this.listeners.get(projectName)
-    if (!set) return
-    set.forEach((l) => {
-      try {
-        l()
-      } catch {}
-    })
+    this.pendingNotify.add(projectName)
+    if (this.flushScheduled) return
+    this.flushScheduled = true
+    // rAF when visible (paint-aligned, ~60 fps cap). When hidden, fall back
+    // to a coarser timeout so background tabs idle instead of running rAF
+    // (browsers throttle rAF in background tabs but still wake us up).
+    const hidden = typeof document !== 'undefined' && document.hidden
+    if (!hidden && typeof requestAnimationFrame !== 'undefined') {
+      const id = requestAnimationFrame(this.flushNotifications)
+      // Only assign if the callback hasn't already cleared the flag
+      // (synchronous rAF stub in tests).
+      if (this.flushScheduled) this.rafHandle = id
+    } else {
+      const id = setTimeout(this.flushNotifications, hidden ? 250 : 16)
+      if (this.flushScheduled) this.timerHandle = id
+    }
+  }
+
+  // Test hook: synchronously flush any pending notifications. Production
+  // callers should never need this — listeners fire on the next frame.
+  __flushNotifications(): void {
+    if (this.rafHandle !== null) {
+      if (typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(this.rafHandle)
+      this.rafHandle = null
+    }
+    if (this.timerHandle !== null) {
+      clearTimeout(this.timerHandle)
+      this.timerHandle = null
+    }
+    if (this.flushScheduled) this.flushNotifications()
   }
 
   update(projectName: string, updater: (s: SessionState) => Partial<SessionState> | void): void {

@@ -14,6 +14,7 @@ import {
   type SkillItem,
   type DocItem,
 } from '@/lib/terminal-session-store'
+import { useDocumentVisible } from '@/hooks/useDocumentVisible'
 
 // Exported for unit testing — determines whether a job kind uses Claude's
 // stream-json output format (parsed path) vs raw log output.
@@ -532,12 +533,15 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     }
   }
 
-  // Spinner animation during streaming
+  // Spinner animation during streaming. Pause when the tab is hidden — a 12 Hz
+  // re-render loop in a background tab burns ~100% CPU on a renderer process
+  // doing nothing visible.
+  const documentVisible = useDocumentVisible()
   useEffect(() => {
-    if (!streaming) return
+    if (!streaming || !documentVisible) return
     const id = setInterval(() => setSpinnerFrame(f => f + 1), 80)
     return () => clearInterval(id)
-  }, [streaming])
+  }, [streaming, documentVisible])
 
   // Auto-scroll
   useEffect(() => {
@@ -566,11 +570,12 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
       return
     }
     setElapsedMs(Date.now() - streamStartedAt)
+    if (!documentVisible) return
     const id = setInterval(() => {
       setElapsedMs(Date.now() - streamStartedAt)
     }, 100)
     return () => clearInterval(id)
-  }, [streaming, streamStartedAt])
+  }, [streaming, streamStartedAt, documentVisible])
 
   const addImages = useCallback((files: File[]) => {
     const imageFiles = files.filter(f => f.type.startsWith('image/') || IMG_EXT.test(f.name))

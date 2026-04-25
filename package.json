@@ -6,6 +6,10 @@
   "scripts": {
     "predev": "pm2 delete tamtam 2>/dev/null; lsof -ti:1337 | xargs kill -9 2>/dev/null; true",
     "dev": "pm2 start 'next dev --port 1337' --name tamtam --cwd . --time && pm2 logs tamtam",
+    "predev:profile": "pm2 delete tamtam 2>/dev/null; lsof -ti:1337 | xargs kill -9 2>/dev/null; rm -f .next/dev/trace-turbopack; true",
+    "dev:profile": "NEXT_TURBOPACK_TRACING=1 pm2 start 'next dev --port 1337' --name tamtam --cwd . --time --update-env && echo '\\n[dev:profile] reproduce the slow state, then `pnpm stop` to flush the trace to .next/dev/trace-turbopack — view via `npx next internal trace .next/dev/trace-turbopack` then open https://trace.nextjs.org/\\n' && pm2 logs tamtam",
+    "predev:flamegraph": "pm2 delete tamtam 2>/dev/null; lsof -ti:1337 | xargs kill -9 2>/dev/null; mkdir -p .profiles && rm -f .profiles/CPU.*.cpuprofile; true",
+    "dev:flamegraph": "pm2 start node --name tamtam --cwd . --time --update-env --interpreter none -- --cpu-prof --cpu-prof-dir=./.profiles ./node_modules/next/dist/bin/next dev --port 1337 && echo '\\n[dev:flamegraph] reproduce the slow state, then `pnpm stop` to flush the V8 CPU profile to ./.profiles/CPU.*.cpuprofile — open in Chrome DevTools (Performance → Load profile) or drop into https://www.speedscope.app/ for a flamegraph view\\n' && pm2 logs tamtam",
     "stop": "pm2 stop tamtam",
     "restart": "pm2 restart tamtam",
     "logs": "pm2 logs tamtam",

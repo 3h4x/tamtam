@@ -40,3 +40,8 @@ test-results/
 
 # browser mcp screenshots
 /*.png
+
+# profiling artifacts
+.profiles/
+*.cpuprofile
+.next/dev/trace-turbopack
