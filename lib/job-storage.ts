@@ -525,6 +525,17 @@ async function runCompletionHooks(job: JobData): Promise<void> {
       const { autoCommitEnabled, autoPushEnabled } = await getProjectPipelineConfig(job.project);
       const inRelease = !!findActiveReleaseJob(job.project);
       if (inRelease || autoPushEnabled) {
+        // Release the commit job's pipeline lock before chaining to push —
+        // otherwise startProjectPush sees the lock as held (by us) and 409s.
+        // In-release chains skip the lock dance via isLockOwnedByActiveRelease,
+        // but a standalone commit→push (the "Push to PR" flow) needs the
+        // explicit handoff.
+        if (!inRelease) {
+          try {
+            const { releaseLock } = await import('./pipeline-lock');
+            releaseLock(job.project, job.id);
+          } catch {}
+        }
         const { startProjectPush } = await import('./start-push');
         const r = await startProjectPush(job.project);
         if (r.ok) {
