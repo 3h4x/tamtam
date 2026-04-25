@@ -32,6 +32,7 @@ export interface JobData {
   logPruned?: boolean | null;
   costUsd?: number | null;
   model?: string | null;
+  releaseId?: string | null;
 }
 
 const jobsCache = new Map<string, JobData>();
@@ -68,6 +69,7 @@ function loadFromDb(): void {
         logPruned: row.logPruned ?? false,
         costUsd: row.costUsd ?? null,
         model: row.model ?? null,
+        releaseId: row.releaseId ?? null,
       });
     }
     loaded = true;
@@ -104,6 +106,7 @@ function saveToDb(job: JobData): void {
         logPruned: job.logPruned ?? false,
         costUsd: job.costUsd ?? null,
         model: job.model ?? null,
+        releaseId: job.releaseId ?? null,
       })
       .onConflictDoUpdate({
         target: schema.jobs.id,
@@ -124,6 +127,7 @@ function saveToDb(job: JobData): void {
           logPruned: job.logPruned ?? false,
           costUsd: job.costUsd ?? null,
           model: job.model ?? null,
+          releaseId: job.releaseId ?? null,
         },
       })
       .run();
@@ -975,6 +979,7 @@ export function jobToDict(job: JobData): Record<string, unknown> {
     gh_issue_title: job.ghIssueTitle ?? null,
   };
   d.log_pruned = job.logPruned ?? false;
+  d.release_id = job.releaseId ?? null;
   const verdict = getVerdict(job);
   if (verdict !== null) d.verdict = verdict;
   return d;
@@ -1110,6 +1115,10 @@ export function createJob(
     timestamp += 1;
     jobId = `${project}-${kind}-${timestamp}`;
   }
+  // Auto-link to the active release so every pipeline step carries releaseId.
+  // Release jobs themselves get releaseId = their own id, set explicitly by
+  // start-release.ts after creation (kind check here avoids circular reference).
+  const autoReleaseId = kind !== 'release' ? (findActiveReleaseJob(project)?.id ?? null) : null;
   const job: JobData = {
     id: jobId,
     project,
@@ -1132,6 +1141,7 @@ export function createJob(
     ghIssueNumber: ghIssueNumber ?? null,
     ghIssueRepo: ghIssueRepo ?? null,
     ghIssueTitle: ghIssueTitle ?? null,
+    releaseId: autoReleaseId,
   };
   jobsCache.set(jobId, job);
   saveToDb(job);
@@ -1173,6 +1183,7 @@ export function getJob(jobId: string): JobData | null {
     logPruned: row.logPruned ?? false,
     costUsd: row.costUsd ?? null,
     model: row.model ?? null,
+    releaseId: row.releaseId ?? null,
   };
   jobsCache.set(jobId, job);
   return job;

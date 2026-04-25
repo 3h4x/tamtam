@@ -32,7 +32,7 @@ export type ReleaseResult =
 // The monitor polls the release log for the "# release finished" marker
 // written by finalizeReleaseJob() and exits with the embedded exit code,
 // giving the release job a real pid and PM2-managed lifecycle.
-async function createReleaseJob(projectName: string): Promise<{ id: string; logPath: string } | null> {
+async function createReleaseJob(projectName: string): Promise<{ id: string; releaseId: string; logPath: string } | null> {
   try {
     const { logDir } = getImproveConfig();
     mkdirSync(logDir, { recursive: true });
@@ -42,6 +42,9 @@ async function createReleaseJob(projectName: string): Promise<{ id: string; logP
     const scriptPath = join(logDir, `${job.id}.sh`);
     const monitorLogPath = join(logDir, `${job.id}.monitor.log`);
     job.logPath = logPath;
+    // Release job identifies itself: every child step created while this
+    // release is active will auto-inherit this id as its releaseId.
+    job.releaseId = job.id;
 
     appendFileSync(logPath, `# release start — ${new Date().toISOString()}\n# project: ${projectName}\n`);
 
@@ -109,7 +112,7 @@ async function createReleaseJob(projectName: string): Promise<{ id: string; logP
 
     job.pid = pid;
     updateJob(job);
-    return { id: job.id, logPath };
+    return { id: job.id, releaseId: job.id, logPath };
   } catch {
     return null;
   }
