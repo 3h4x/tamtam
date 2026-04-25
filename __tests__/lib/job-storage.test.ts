@@ -1718,6 +1718,89 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     expect(startProjectPushMock).not.toHaveBeenCalled();
   });
 
+  it('starts fix when test fails and autoPushEnabled is on', async () => {
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 1);
+
+    expect(startFixFromJobMock).toHaveBeenCalledWith(job.id);
+  });
+
+  it('starts fix when test fails and only autoCommitEnabled is on', async () => {
+    getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: true, autoPushEnabled: false });
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 1);
+
+    expect(startFixFromJobMock).toHaveBeenCalledWith(job.id);
+  });
+
+  it('does not start fix when test fails and neither auto flag is set', async () => {
+    getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoPushEnabled: false, autoCommitEnabled: false });
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 1);
+
+    expect(startFixFromJobMock).not.toHaveBeenCalled();
+  });
+
+  it('does not start fix when test fails but fix cap is reached', async () => {
+    const now = Date.now() / 1000;
+    for (let i = 0; i < 3; i++) {
+      testDb.db
+        .insert(schema.jobs)
+        .values({
+          id: `testfail-prior-fix-${i}`,
+          project: 'my-proj',
+          kind: 'fix',
+          prompt: null,
+          pid: 200 + i,
+          logPath: null,
+          startedAt: now - 60 * i,
+          finishedAt: now - 60 * i + 5,
+          exitCode: 0,
+          seen: 1,
+          durationMs: null,
+          inputTokens: null,
+          outputTokens: null,
+          cacheReadTokens: null,
+          cacheCreateTokens: null,
+          sessionId: null,
+        } as any)
+        .run();
+    }
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 1);
+
+    expect(startFixFromJobMock).not.toHaveBeenCalled();
+  });
+
+  it('starts fix when test fails during an active release (inRelease=true)', async () => {
+    // Neither auto flag is set, but there's an active release job — should still fix.
+    getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoPushEnabled: false, autoCommitEnabled: false });
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.jobs).values({
+      id: 'active-release-for-testfail', project: 'my-proj', kind: 'release',
+      prompt: null, pid: 1, logPath: null,
+      startedAt: now - 10, finishedAt: null, exitCode: null,
+      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+    } as any).run();
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 1);
+
+    expect(startFixFromJobMock).toHaveBeenCalledWith(job.id);
+  });
+
+  it('continues gracefully when test-fail startFixFromJob throws', async () => {
+    startFixFromJobMock.mockRejectedValueOnce(new Error('spawn error'));
+    const job = makeJob('test', null);
+
+    await expect(markDoneFn(job, 1)).resolves.toBeUndefined();
+  });
+
   it('does not start review when test passes but auto-push is disabled', async () => {
     getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoPushEnabled: false });
     const job = makeJob('test', null);
