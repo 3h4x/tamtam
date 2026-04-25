@@ -266,6 +266,45 @@ Hide it otherwise.
 
 ---
 
+## Metrics
+
+The `/pipeline` page (accessible from the main nav or via the **Pipeline** button on any project page) aggregates historical job data to answer operational questions about the release pipeline.
+
+### Available metrics
+
+| Metric | Description |
+|---|---|
+| **Pipeline success rate** | % of `release` jobs that finished with exit 0 |
+| **Review LGTM rate** | % of completed `review` jobs with a `LGTM` verdict |
+| **Fix loop convergence** | % of releases-with-fixes that eventually succeeded; "hit cap" = 3 fix jobs within 30 min without LGTM |
+| **Median release time** | p50 wall-clock time from `release` start to finish (successful releases only) |
+| **Step durations** | Median and p95 for each pipeline step: `test`, `review`, `fix`, `commit`, `push`, `fix-push`, `mark-dod` |
+| **Verdict distribution** | Stacked breakdown of LGTM / NEEDS ATTENTION / DO NOT SHIP / parse-failed across all reviews |
+
+All metrics support a **24h / 7d / 30d / all-time** filter.
+
+### Per-project drill-down
+
+The global `/pipeline` view shows all projects in a summary table. Clicking a project name (or using the **Pipeline** button on a project page) opens `/pipeline?project=<name>` — the same page scoped to that project's jobs only.
+
+### Tuning guidance
+
+| Metric | What it tells you | Action |
+|---|---|---|
+| LGTM rate < 50% | Reviews consistently block — rules may be too strict | Loosen `review_verdict_rules` in Settings → Behavior |
+| Fix convergence low, hit-cap count high | Fix loop can't resolve issues within 3 iterations | Increase `TAMTAM_MAX_FIX_ITERATIONS` env var or adjust the review prompt |
+| `review` p95 > 5 min | Review jobs are slow | Check model choice; consider switching to Haiku for review |
+| Pipeline success < 80% | Releases failing frequently | Check step durations + History tab for the most recent failures |
+| MTTR high | Long time from start to push | High `fix` median duration or many fix iterations — check fix loop stats |
+
+### API
+
+`GET /api/stats/pipeline?window=30d[&project=name]`
+
+Returns `PipelineResponse` (see `app/api/stats/pipeline/route.ts` for full type). Cached 60 seconds per (window, project) pair.
+
+---
+
 ## Common Issues
 
 | Symptom | Likely Cause | Fix |

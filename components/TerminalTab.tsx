@@ -259,6 +259,13 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
             }),
           })
         } catch {}
+        // When "Work on issue N" arrives, clear any leftover terminal session
+        // for this project. Otherwise a stale `claudeSessionId` makes the
+        // auto-submit look like a follow-up message — the `!sessionId` guard
+        // below drops `issueContextRef`, the run job is stamped without
+        // `gh_issue_number`, and the downstream commit/push pipeline can't
+        // find the issue → branch never gets committed to → no PR.
+        terminalStore.reset(projectName)
       }
       terminalStore.update(projectName, () => ({ pendingAutoSubmit: submit }))
       router.replace(`/project/${projectName}/terminal`)

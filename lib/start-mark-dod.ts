@@ -67,22 +67,45 @@ export function tickCriteria(body: string, verifiedTexts: Set<string>): { body: 
  *
  * Failures are best-effort and never block the pipeline — returns ok:true with
  * changed:false on any recoverable error.
+ *
+ * `override`: when called from the IssuesTab "DoD" badge, the caller already
+ * knows the PR/issue number from the GitHub query and passes it in. This
+ * skips the implicit lookup that requires `ghIssueNumber` to be stamped on a
+ * recent run job — useful for PRs created outside the issue-driven flow
+ * (manual `gh pr create`, /create-pr endpoint, etc.).
  */
-export async function startMarkDod(projectName: string): Promise<MarkDodResult> {
+export async function startMarkDod(
+  projectName: string,
+  override?: { issueNumber?: number; prNumber?: number; repo?: string },
+): Promise<MarkDodResult> {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
 
-  const issueCtx = findIssueContext(projectName);
-  const prCtx = !issueCtx ? findPrContext(projectName) : null;
-  const ctx = issueCtx ?? prCtx;
-  const isPr = !issueCtx && !!prCtx;
+  let ctx: { number: number; repo: string } | null = null;
+  let isPr = false;
+  if (override?.repo && (override.issueNumber || override.prNumber)) {
+    if (override.issueNumber) {
+      ctx = { number: override.issueNumber, repo: override.repo };
+      isPr = false;
+    } else if (override.prNumber) {
+      ctx = { number: override.prNumber, repo: override.repo };
+      isPr = true;
+    }
+  } else {
+    const issueCtx = findIssueContext(projectName);
+    const prCtx = !issueCtx ? findPrContext(projectName) : null;
+    ctx = issueCtx ?? prCtx;
+    isPr = !issueCtx && !!prCtx;
+  }
   if (!ctx) return { ok: false, status: 400, detail: 'no issue or PR context on latest run' };
 
   const { logDir, claudeBin } = getImproveConfig();
   mkdirSync(logDir, { recursive: true });
 
   // pid=0 — inline job with no spawned process; avoids markDone's SIGKILL
-  // fallback taking out our own children (Turbopack workers etc).
+  // fallback (gated on pid>0). probeJobStatus treats `mark-dod` as inline
+  // explicitly so the 30s sweep doesn't declare a healthy in-flight job
+  // dead — see job-storage.ts probeJobStatus.
   const job = createJob(projectName, 'mark-dod', 0, '');
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
@@ -181,9 +204,28 @@ JSON schema:
       return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: 0, total: criteria.length, changed: false };
     }
 
-    const verifiedTexts = new Set(
-      results.filter(r => r.verified === true).map(r => (r.text ?? '').trim()),
-    );
+    // Match verified results back to the original criteria. Prefer index
+    // (Claude already includes it in the JSON schema) over text equality:
+    // Claude routinely strips markdown decoration like backticks/asterisks
+    // when echoing the text, so an exact-string match used to drop every
+    // verified box on the floor.
+    const verifiedTexts = new Set<string>();
+    for (const r of results) {
+      if (r.verified !== true) continue;
+      const idx = typeof (r as { index?: number }).index === 'number'
+        ? (r as { index?: number }).index! - 1
+        : -1;
+      if (idx >= 0 && idx < criteria.length) {
+        verifiedTexts.add(criteria[idx].text);
+        continue;
+      }
+      // Fall back to fuzzy text match: normalize markdown decoration and
+      // whitespace before comparing to the canonical criterion text.
+      const norm = (s: string) => s.replace(/[`*_]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+      const want = norm(r.text ?? '');
+      const hit = criteria.find(c => norm(c.text) === want);
+      if (hit) verifiedTexts.add(hit.text);
+    }
     // Log the per-criterion verdict for operator review.
     for (const r of results) {
       log(`# [${r.verified ? 'VERIFIED' : 'unverified'}] ${(r.text ?? '').slice(0, 120)}\n#   evidence: ${(r.evidence ?? '').slice(0, 300)}\n`);

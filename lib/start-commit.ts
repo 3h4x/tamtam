@@ -9,7 +9,7 @@ import { createJob, markDone, updateJob, listJobs } from './job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 
 export type CommitResult =
-  | { ok: true; commitSha: string; message: string }
+  | { ok: true; commitSha: string; message: string; jobId?: string }
   | { ok: false; status: number; detail: string; blockingJobId?: string };
 
 // Matches any conventional commit title with a non-trivial description (3+ chars).
@@ -336,5 +336,8 @@ export async function startProjectCommit(projectName: string): Promise<CommitRes
   }
 
   await markDone(job, result.ok ? 0 : 1);
+  // Surface the job id so callers (e.g. the "Push to PR" route) can navigate
+  // the user to the commit terminal without re-querying.
+  if (result.ok) return { ...result, jobId: job.id };
   return result;
 }

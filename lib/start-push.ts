@@ -85,7 +85,8 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
 
 // Fire-and-forget variant: creates the job synchronously, runs push in the
 // background, and returns the job ID immediately so callers can stream output.
-// Fire-and-forget push used by the UI Push button — always push-only (no commit, no PR).
+// Always push-only (no commit). The "Push to PR" flow uses startProjectCommit
+// instead, which auto-chains to push via the completion hook.
 export function launchProjectPush(projectName: string): { jobId: string } | { error: string } {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { error: 'project not found' };
@@ -290,14 +291,19 @@ async function runPush(
   const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
   const commitSha = shaR.exitCode === 0 ? shaR.stdout.trim() : '';
 
-  // PR creation is gated on pr_workflow_enabled. Issue-linked runs on a
-  // Direct Branch project commit + push directly to the feature branch with
-  // no PR — the issue context is only used for the commit message trailer.
+  // PR creation rules:
+  //   - Issue-linked push → ALWAYS create a PR. Clicking "Work on issue N" is
+  //     an explicit opt-in to the issue-driven workflow; the user expects a
+  //     PR that closes the issue regardless of the project's pr_workflow
+  //     setting (which only governs *non-issue* feature branches).
+  //   - Non-issue push + pr_workflow_enabled → create a generic PR for the
+  //     feature branch.
+  //   - Non-issue push without pr_workflow_enabled → push to current branch,
+  //     no PR.
   const { getProjectTestConfig } = await import('./scheduling');
   const prWorkflowEnabled = !!getProjectTestConfig(projectName)?.prWorkflowEnabled;
 
-  // PR Workflow + issue: create a PR that closes the issue.
-  if (issueCtx && prWorkflowEnabled) {
+  if (issueCtx) {
     const prUrl = await createIssuePR(projPath, log, issueCtx);
     if (prUrl) {
       const prNumber = parseInt(prUrl.split('/').pop() ?? '0', 10) || undefined;
@@ -417,6 +423,24 @@ async function createIssuePR(
       log(`\n# branch push failed — skipping PR creation\n`);
       return null;
     }
+  }
+
+  // If a PR already exists for the current branch, skip creation — the new
+  // commits we just pushed have already attached to it via gh. Without this
+  // guard the "Push to PR" flow re-hits gh pr create and gets "a PR for
+  // branch X already exists" as an error.
+  const existingR = await exec(
+    'gh', ['pr', 'list', '--head', currentBranch || '', '--state', 'open', '--json', 'url', '--limit', '1'],
+    { cwd: projPath, timeout: 10000 },
+  );
+  if (existingR.exitCode === 0 && existingR.stdout.trim()) {
+    try {
+      const arr = JSON.parse(existingR.stdout) as Array<{ url?: string }>;
+      if (Array.isArray(arr) && arr[0]?.url) {
+        log(`\n# PR already exists: ${arr[0].url}\n`);
+        return arr[0].url;
+      }
+    } catch { /* fall through to create */ }
   }
 
   // Create the PR via gh cli
