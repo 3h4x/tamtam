@@ -17,5 +17,28 @@ export async function GET(
   ]);
 
   const branch = currentR.stdout.trim() || null;
-  return NextResponse.json({ branch, defaultBranch });
+
+  // commitsAhead: how many commits the current branch has that aren't
+  // reachable from origin/<defaultBranch>. 0 means there's nothing for
+  // `gh pr create` to PR, which would fail with "No commits between
+  // base and head". The UI uses this to disable Create PR with a clear
+  // tooltip instead of relying on the user to interpret a 500.
+  // No `git fetch` here — this endpoint is polled every 10s and a network
+  // round-trip per poll is too expensive. Stale local origin/<default>
+  // can produce a false enabled state, which then surfaces the same
+  // gh error as before — no regression vs. today.
+  let commitsAhead: number | null = null;
+  if (branch && branch !== defaultBranch) {
+    const aheadR = await exec(
+      'git',
+      ['-C', projPath, 'rev-list', '--count', `origin/${defaultBranch}..HEAD`],
+      { timeout: 5000 },
+    );
+    if (aheadR.exitCode === 0) {
+      const n = parseInt(aheadR.stdout.trim(), 10);
+      if (Number.isFinite(n)) commitsAhead = n;
+    }
+  }
+
+  return NextResponse.json({ branch, defaultBranch, commitsAhead });
 }

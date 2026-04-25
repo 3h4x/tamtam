@@ -2,6 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject, fetchIssuesAndPRs, pushProject, fetchBranch, createProjectPR } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
@@ -293,6 +294,7 @@ export function ProjectDetailPage({
   const [issueCount, setIssueCount] = useState<{ prs: number; issues: number } | null>(null)
   const [currentBranch, setCurrentBranch] = useState<string | null>(null)
   const [defaultBranch, setDefaultBranch] = useState<string | null>(null)
+  const [branchCommitsAhead, setBranchCommitsAhead] = useState<number | null>(null)
   const [openPrBranches, setOpenPrBranches] = useState<string[]>([])
   const [creatingPr, setCreatingPr] = useState(false)
 
@@ -362,6 +364,7 @@ export function ProjectDetailPage({
       if (branchRes.status === 'fulfilled') {
         setCurrentBranch(branchRes.value.branch)
         setDefaultBranch(branchRes.value.defaultBranch)
+        setBranchCommitsAhead(branchRes.value.commitsAhead)
       }
     }
     poll()
@@ -735,6 +738,15 @@ export function ProjectDetailPage({
             const isOnFeatureBranch = !!currentBranch && !!defaultBranch && currentBranch !== defaultBranch
             const hasOpenPr = openPrBranches.includes(currentBranch ?? '')
             const showCreatePr = isOnFeatureBranch && !hasOpenPr
+            // gh pr create rejects with "No commits between base and head" when
+            // the branch has no commits ahead of origin/<default> — common
+            // after a stranded-on-merged-branch state. Disable the button with
+            // an explanatory tooltip rather than letting the click 500.
+            const noCommitsToPr = isOnFeatureBranch && branchCommitsAhead === 0
+            const createPrDisabled = creatingPr || noCommitsToPr
+            const createPrTitle = noCommitsToPr
+              ? `Branch ${currentBranch} has no commits ahead of origin/${defaultBranch}. Commit your changes (use 🚀 Release) or move them to ${defaultBranch} first.`
+              : `Create pull request for branch ${currentBranch}`
             return (
               <>
                 <button
@@ -757,8 +769,8 @@ export function ProjectDetailPage({
                   <button
                     className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
                     onClick={handleCreatePr}
-                    disabled={creatingPr}
-                    title={`Create pull request for branch ${currentBranch}`}
+                    disabled={createPrDisabled}
+                    title={createPrTitle}
                   >
                     {creatingPr ? 'Creating PR…' : 'Create PR'}
                   </button>
@@ -848,6 +860,14 @@ export function ProjectDetailPage({
             <span className={`text-xs ${pullResult.includes('failed') || pullResult.includes('error') ? 'text-status-error' : 'text-status-success'}`}>
               {pullResult}
             </span>
+          )}
+          {name && (
+            <Link
+              href={`/pipeline?project=${encodeURIComponent(name)}`}
+              className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer inline-flex items-center no-underline"
+            >
+              Pipeline
+            </Link>
           )}
           {githubUrl && (
             <a

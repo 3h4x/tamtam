@@ -392,7 +392,7 @@ export async function fetchBehind(projectName: string): Promise<{ behind: number
   return response.json()
 }
 
-export async function fetchBranch(projectName: string): Promise<{ branch: string | null; defaultBranch: string }> {
+export async function fetchBranch(projectName: string): Promise<{ branch: string | null; defaultBranch: string; commitsAhead: number | null }> {
   const response = await fetch(`${API_BASE}/by-project/${projectName}/branch`)
   if (!response.ok) throw new Error('Failed to fetch branch')
   return response.json()
