@@ -999,6 +999,15 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
   if (job.pid <= 0) {
     const ageSec = Date.now() / 1000 - job.startedAt;
     if (ageSec < PID_SPAWN_GRACE_SEC) return 'running';
+    // Inline kinds run inside the next-server itself (pid intentionally 0
+    // so markDone's SIGKILL fallback doesn't kill our own process). They
+    // self-finalize via markDone(job, code) when the inline routine
+    // returns, so probing them here is meaningless — declaring them dead
+    // would race the in-flight Claude call (~30-180 s) and lose work.
+    // Trust their self-finalization; if finishedAt is null, they're alive.
+    if (job.kind === 'mark-dod' || job.kind === 'pr-wait') {
+      return 'running';
+    }
     // Non-PM2 kinds (test/action) have no name to look up in pm2 — dead means dead.
     if (job.kind === 'test' || job.kind === 'action') {
       await markDone(job, -1);

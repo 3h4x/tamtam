@@ -329,8 +329,20 @@ export async function fetchProjectLogs(projectName: string): Promise<{ logs: Log
   return response.json()
 }
 
-export async function pushProject(projectName: string): Promise<{ status: string; job_id: string }> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/push`, { method: 'POST' })
+// pushProject(name) — push existing commits only (legacy "Push" button).
+// pushProject(name, { commit: true }) — stage everything, generate the
+// commit message via Claude, commit, then auto-chain to push (used by
+// the "Push to PR" button when the branch already has an open PR).
+export async function pushProject(
+  projectName: string,
+  opts: { commit?: boolean } = {},
+): Promise<{ status: string; job_id: string }> {
+  const init: RequestInit = { method: 'POST' }
+  if (opts.commit) {
+    init.headers = { 'Content-Type': 'application/json' }
+    init.body = JSON.stringify({ commit: true })
+  }
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/push`, init)
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
     throw new Error(data.detail || `Failed to push: ${response.statusText}`)
@@ -402,6 +414,33 @@ export async function createProjectPR(projectName: string): Promise<{ url: strin
   const response = await fetch(`${API_BASE}/by-project/${projectName}/create-pr`, { method: 'POST' })
   const data = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(data.detail || 'Failed to create PR')
+  return data
+}
+
+export interface MarkDodResult {
+  ok: true
+  jobId: string
+  issueNumber: number
+  verified: number
+  total: number
+  changed: boolean
+}
+
+// Trigger DoD verification for a specific issue or PR. The IssuesTab DoD
+// badge calls this with the explicit context it already has from GitHub —
+// avoids the implicit "latest run with ghIssueNumber" lookup that fails for
+// PRs created outside the issue-driven flow.
+export async function runMarkDod(
+  projectName: string,
+  ctx: { issue_number?: number; pr_number?: number; repo: string },
+): Promise<MarkDodResult> {
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/mark-dod`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(ctx),
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(data.detail || 'Failed to run DoD verification')
   return data
 }
 

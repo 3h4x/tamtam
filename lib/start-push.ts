@@ -85,7 +85,8 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
 
 // Fire-and-forget variant: creates the job synchronously, runs push in the
 // background, and returns the job ID immediately so callers can stream output.
-// Fire-and-forget push used by the UI Push button — always push-only (no commit, no PR).
+// Always push-only (no commit). The "Push to PR" flow uses startProjectCommit
+// instead, which auto-chains to push via the completion hook.
 export function launchProjectPush(projectName: string): { jobId: string } | { error: string } {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { error: 'project not found' };
@@ -422,6 +423,24 @@ async function createIssuePR(
       log(`\n# branch push failed — skipping PR creation\n`);
       return null;
     }
+  }
+
+  // If a PR already exists for the current branch, skip creation — the new
+  // commits we just pushed have already attached to it via gh. Without this
+  // guard the "Push to PR" flow re-hits gh pr create and gets "a PR for
+  // branch X already exists" as an error.
+  const existingR = await exec(
+    'gh', ['pr', 'list', '--head', currentBranch || '', '--state', 'open', '--json', 'url', '--limit', '1'],
+    { cwd: projPath, timeout: 10000 },
+  );
+  if (existingR.exitCode === 0 && existingR.stdout.trim()) {
+    try {
+      const arr = JSON.parse(existingR.stdout) as Array<{ url?: string }>;
+      if (Array.isArray(arr) && arr[0]?.url) {
+        log(`\n# PR already exists: ${arr[0].url}\n`);
+        return arr[0].url;
+      }
+    } catch { /* fall through to create */ }
   }
 
   // Create the PR via gh cli

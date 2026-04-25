@@ -310,10 +310,12 @@ describe('startMarkDod', () => {
     expect(markDoneMock).toHaveBeenCalledWith(expect.anything(), 0);
   });
 
-  it("returns ok:true changed:false when verified texts don't match any checkbox exactly", async () => {
+  it("returns ok:true changed:false when verified results match neither index nor (fuzzy) text", async () => {
+    // Out-of-range index AND non-matching text → falls through both lookup
+    // paths → no checkbox identified → no edit pushed.
     const mismatch = JSON.stringify({
       results: [
-        { index: 1, text: 'Different text entirely', verified: true, evidence: 'found' },
+        { index: 99, text: 'Completely unrelated text', verified: true, evidence: 'found' },
       ],
     });
     execMock
@@ -322,6 +324,26 @@ describe('startMarkDod', () => {
     const r = await startMarkDod('myproj');
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.changed).toBe(false);
+  });
+
+  it('matches a verified criterion via index even when claude strips markdown decoration from text', async () => {
+    // Claude often returns the criterion text without backticks/asterisks
+    // even though the prompt embeds them. The `index` field is authoritative.
+    const stripped = JSON.stringify({
+      results: [
+        { index: 1, text: 'first criterion sans markdown', verified: true, evidence: 'found' },
+      ],
+    });
+    execMock
+      .mockResolvedValueOnce(resp(0, ISSUE_JSON))                     // gh issue view
+      .mockResolvedValueOnce(resp(0, stripped))                        // claude verify
+      .mockResolvedValueOnce(resp(0, ''));                             // gh issue edit
+    const r = await startMarkDod('myproj');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.changed).toBe(true);
+      expect(r.verified).toBe(1);
+    }
   });
 
   it('returns ok:true changed:false when gh issue edit fails', async () => {

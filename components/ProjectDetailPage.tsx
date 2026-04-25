@@ -296,7 +296,11 @@ export function ProjectDetailPage({
   const [defaultBranch, setDefaultBranch] = useState<string | null>(null)
   const [branchCommitsAhead, setBranchCommitsAhead] = useState<number | null>(null)
   const [openPrBranches, setOpenPrBranches] = useState<string[]>([])
+  // Branch → PR number for branches with open PRs. Used to label the
+  // "Push to PR #N" button when the current branch already has a PR.
+  const [openPrByBranch, setOpenPrByBranch] = useState<Record<string, number>>({})
   const [creatingPr, setCreatingPr] = useState(false)
+  const [pushingToPr, setPushingToPr] = useState(false)
 
   // Custom actions
   const [customActions, setCustomActions] = useState<CustomAction[]>([])
@@ -360,6 +364,7 @@ export function ProjectDetailPage({
       if (issuesRes.status === 'fulfilled') {
         setIssueCount({ prs: issuesRes.value.prs.length, issues: issuesRes.value.issues.length })
         setOpenPrBranches(issuesRes.value.prs.map(pr => pr.headRefName))
+        setOpenPrByBranch(Object.fromEntries(issuesRes.value.prs.map(pr => [pr.headRefName, pr.number])))
       }
       if (branchRes.status === 'fulfilled') {
         setCurrentBranch(branchRes.value.branch)
@@ -565,6 +570,19 @@ export function ProjectDetailPage({
     }
   }
 
+  const handlePushToPr = async () => {
+    if (!name || pushingToPr) return
+    setPushingToPr(true)
+    try {
+      const result = await pushProject(name, { commit: true })
+      router.push(`/project/${name}/terminal?job=${encodeURIComponent(result.job_id)}`)
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to push to PR', 'error')
+    } finally {
+      setPushingToPr(false)
+    }
+  }
+
   const handleCreatePr = async () => {
     if (!name || creatingPr) return
     setCreatingPr(true)
@@ -579,6 +597,7 @@ export function ProjectDetailPage({
       fetchIssuesAndPRs(name, true).then((data) => {
         setIssueCount({ prs: data.prs.length, issues: data.issues.length })
         setOpenPrBranches(data.prs.map(pr => pr.headRefName))
+        setOpenPrByBranch(Object.fromEntries(data.prs.map(pr => [pr.headRefName, pr.number])))
       }).catch(() => {})
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to create PR', 'error')
@@ -773,6 +792,16 @@ export function ProjectDetailPage({
                     title={createPrTitle}
                   >
                     {creatingPr ? 'Creating PR…' : 'Create PR'}
+                  </button>
+                )}
+                {hasOpenPr && project.totalChanges > 0 && (
+                  <button
+                    className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                    onClick={handlePushToPr}
+                    disabled={pushingToPr}
+                    title={`Stage ${project.totalChanges} change${project.totalChanges === 1 ? '' : 's'}, commit (Claude-generated message), push — attaches to existing PR. Skips test + review (use Release for the full pipeline).`}
+                  >
+                    {pushingToPr ? 'Pushing…' : `Push to PR${openPrByBranch[currentBranch ?? ''] ? ` #${openPrByBranch[currentBranch ?? '']}` : ''}`}
                   </button>
                 )}
               </>
