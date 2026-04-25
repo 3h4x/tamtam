@@ -131,7 +131,7 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - `/api/projects/by-project/[name]/changes/diff` — Full git diff content (GET)
 - `/api/projects/by-project/[name]/checkout-default` — Switch working copy to the project's default branch; refuses if there are uncommitted changes (POST, returns `{ status: 'switched'|'already-on-branch', branch }`)
 - `/api/projects/by-project/[name]/push` — Push changes to git (POST)
-- `/api/projects/by-project/[name]/create-pr` — Push current branch + create GitHub PR via `gh pr create --fill` (POST); returns `{ url }` — refuses if on default branch
+- `/api/projects/by-project/[name]/create-pr` — Push current branch + create GitHub PR with a generated title (derived from the linked GitHub issue title or commit log; falls back to `gh pr create --fill`) (POST); returns `{ url }` — refuses if on default branch
 - `/api/projects/by-project/[name]/release` — Trigger release pipeline (POST)
 - `/api/projects/by-project/[name]/issues` — GitHub PRs and issues for the project (GET, POST to force refresh); merge POST switches working copy to default branch after merge
 - `/api/projects/by-project/[name]/issue-branch` — Create or checkout `fix/issue-<n>-<slug>` before Claude edits (POST); called automatically from TerminalTab when opening from an issue
