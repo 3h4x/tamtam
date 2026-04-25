@@ -167,6 +167,12 @@ describe('startMarkDod', () => {
       listJobs: listJobsMock,
       markDone: markDoneMock,
     }));
+    // Default branch-switch to a no-op so the tests' explicit exec mock
+    // chain isn't consumed by the gh pr lookup. Tests that exercise the
+    // branch-switch behavior re-mock this module directly.
+    vi.doMock('@/lib/mark-dod-branch', () => ({
+      ensureBranchForCtx: vi.fn().mockResolvedValue({ switched: false, skipped: 'mocked in tests' }),
+    }));
     vi.doMock('fs', () => ({
       appendFileSync: appendFileSyncMock,
       mkdirSync: mkdirSyncMock,

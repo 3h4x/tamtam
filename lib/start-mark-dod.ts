@@ -6,6 +6,7 @@ import { getImproveConfig } from './scheduling';
 import { exec } from './shell';
 import { getPermissionModeFlag } from './config';
 import { createJob, listJobs, markDone } from './job-storage';
+import { ensureBranchForCtx } from './mark-dod-branch';
 
 export type MarkDodResult =
   | { ok: true; jobId: string; issueNumber: number; verified: number; total: number; changed: boolean }
@@ -114,6 +115,10 @@ export async function startMarkDod(
   const ctxLabel = isPr ? `PR` : `issue`;
   log(`# mark-dod start — ${new Date().toISOString()}\n# ${ctxLabel}: ${ctx.repo}#${ctx.number}\n`);
 
+  // Tracked across the outer try/finally so the working tree is always
+  // restored to its starting branch, regardless of which exit path runs.
+  let restoreBranch: string | null = null;
+
   try {
     // 1. Fetch the body (issue or PR).
     const viewArgs = isPr
@@ -161,6 +166,20 @@ JSON schema:
     { "index": 1, "text": "<exact criterion text>", "verified": true|false, "evidence": "<one sentence — file/symbol/test, or why unverified>" }
   ]
 }`;
+
+    // Make sure we're verifying against the right code. If the issue/PR has
+    // a feature branch and the working tree is clean, fetch + check it out
+    // before asking Claude. Otherwise the verification runs on whatever's
+    // currently checked out (typically master) and finds nothing — every
+    // criterion comes back unverified even when the feature branch has the
+    // implementation.
+    const branchSwitch = await ensureBranchForCtx(projPath, ctx, isPr, log);
+    if (branchSwitch.switched) {
+      restoreBranch = branchSwitch.originalBranch;
+      log(`# checked out ${branchSwitch.targetBranch} (was ${restoreBranch ?? 'detached'}) for verification\n`);
+    } else if (branchSwitch.skipped) {
+      log(`# verification will run on current branch (${branchSwitch.skipped})\n`);
+    }
 
     log(`# asking claude to verify each criterion against the codebase...\n`);
     const claudeR = await exec(
@@ -270,5 +289,15 @@ JSON schema:
     log(`# mark-dod error: ${e instanceof Error ? e.message : String(e)}\n`);
     await markDone(job, 1);
     return { ok: false, status: 500, detail: `mark-dod failed: ${e instanceof Error ? e.message : String(e)}` };
+  } finally {
+    if (restoreBranch) {
+      try {
+        const r = await exec('git', ['-C', projPath, 'checkout', restoreBranch], { timeout: 10000 });
+        log(`# restored branch ${restoreBranch}${r.exitCode === 0 ? '' : ` (warning: ${(r.stderr || r.stdout).slice(0, 200)})`}\n`);
+      } catch (e) {
+        log(`# WARNING: could not restore branch ${restoreBranch}: ${e instanceof Error ? e.message : String(e)}\n`);
+      }
+    }
   }
 }
+
