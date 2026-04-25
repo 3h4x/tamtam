@@ -129,6 +129,32 @@ describe('startProjectPush — push result tracking', () => {
     expect(setProjectPushResultMock).toHaveBeenCalledWith('proj', null);
   });
 
+  it('returns "No changes to push" when no upstream AND repo has no commits (brand-new repo)', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(1, '', 'fatal: no upstream configured'))  // git rev-list @{u}..HEAD → no upstream
+      .mockImplementationOnce(() => resp(0, '0\n'));                              // git rev-list --count HEAD → no commits
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.message).toBe('No changes to push');
+  });
+
+  it('proceeds to push when no upstream but repo has commits', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(1, '', 'fatal: no upstream configured'))  // git rev-list @{u}..HEAD → no upstream
+      .mockImplementationOnce(() => resp(0, '3\n'))                               // git rev-list --count HEAD → 3 commits
+      .mockImplementationOnce(() => resp(0, '# branch.head master\n# branch.ab +0 -0\n')) // behind check
+      .mockImplementationOnce(() => resp(0))                                       // git push
+      .mockImplementationOnce(() => resp(0, 'abc1234\n'));                         // git rev-parse
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(true);
+    const pushCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'git' && args.includes('push'),
+    );
+    expect(pushCall).toBeTruthy();
+  });
+
   it('retries push with -u origin <branch> when "no upstream" error appears', async () => {
     execMock
       .mockImplementationOnce(() => resp(0, '1\n'))                                      // git rev-list --count
