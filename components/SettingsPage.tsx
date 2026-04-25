@@ -80,7 +80,7 @@ const DEFAULTS: SettingsMap = {
 interface FieldDef {
   label: string
   help: string
-  group: 'workspace' | 'scheduling' | 'system' | 'behavior'
+  group: 'workspace' | 'scheduling' | 'behavior'
   advanced?: boolean
   span?: number  // column span within the group grid
 }
@@ -119,19 +119,19 @@ const FIELDS: Record<keyof SettingsMap, FieldDef> = {
   claude_bin: {
     label: 'Claude CLI Path',
     help: 'Absolute path to the Claude CLI binary',
-    group: 'system',
+    group: 'workspace',
     span: 1,
   },
   log_dir: {
     label: 'Log Directory',
     help: 'Directory where job logs are stored',
-    group: 'system',
+    group: 'workspace',
     span: 1,
   },
   launchagent_prefix: {
     label: 'LaunchAgent Prefix',
     help: 'Prefix for macOS LaunchAgent plist labels',
-    group: 'system',
+    group: 'workspace',
     advanced: true,
     span: 1,
   },
@@ -253,7 +253,7 @@ const FIELDS: Record<keyof SettingsMap, FieldDef> = {
   },
 }
 
-type TabId = 'behavior' | 'workspace' | 'scheduling' | 'system' | 'projects' | 'database' | 'templates' | 'notifications'
+type TabId = 'behavior' | 'workspace' | 'scheduling' | 'projects' | 'database' | 'templates' | 'notifications'
 
 const GROUPS: {
   id: TabId
@@ -264,14 +264,12 @@ const GROUPS: {
   { id: 'behavior',   title: 'Agent Behavior', description: 'How Claude agents behave when running',                          cols: 2 },
   { id: 'workspace',  title: 'Workspace',       description: 'Where your projects live and how they connect to GitHub',        cols: 2 },
   { id: 'scheduling', title: 'Scheduling',      description: 'When and how often agents are allowed to run',                  cols: 3 },
-  { id: 'system',     title: 'System',          description: 'Paths and platform-specific configuration',                     cols: 2 },
 ]
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'behavior',   label: 'Behavior' },
   { id: 'workspace',  label: 'Workspace' },
   { id: 'scheduling', label: 'Scheduling' },
-  { id: 'system',     label: 'System' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'projects',   label: 'Projects' },
   { id: 'database',   label: 'Database' },
