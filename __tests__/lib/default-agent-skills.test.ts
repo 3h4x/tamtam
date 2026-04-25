@@ -51,6 +51,17 @@ describe('seedDefaultSkills', () => {
     expect(skill!.description).toContain('TamTam');
   });
 
+  it('inserts agent-docs-claude with correct fields', () => {
+    seedFn();
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-docs-claude');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:docs-claude');
+    expect(skill!.description).toContain('CLAUDE.md');
+    expect(skill!.content).toContain('CLAUDE.md');
+    expect(skill!.content).toContain('package.json');
+    expect(skill!.content).toContain('git log');
+  });
+
   it('inserts agent-cto with correct fields', () => {
     seedFn();
     const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-cto');
