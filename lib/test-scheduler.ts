@@ -69,8 +69,3 @@ export async function uninstallTestSchedule(projectName: string): Promise<void> 
     try { unlinkSync(path); } catch {}
   }
 }
-
-export async function isTestScheduleLoaded(projectName: string): Promise<boolean> {
-  const result = await exec('pm2', ['describe', pm2Name(projectName)]);
-  return result.exitCode === 0;
-}

@@ -96,9 +96,3 @@ export async function launchctlInfo(project: string): Promise<LaunchctlInfo> {
 
   return info;
 }
-
-export async function isLoaded(project: string): Promise<boolean> {
-  const label = launchAgentLabel(project);
-  const result = await exec('launchctl', ['list', label]);
-  return result.exitCode === 0;
-}
