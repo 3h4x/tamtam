@@ -567,6 +567,7 @@ export interface JobInfo {
   log_pruned?: boolean | null
   cost_usd?: number | null
   model?: string | null
+  release_id?: string | null
 }
 
 export async function fetchJobs(project?: string): Promise<{ jobs: JobInfo[] }> {

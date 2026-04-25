@@ -228,5 +228,10 @@ try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN model TEXT');
 } catch {}
 
+// Migrate: add release_id to jobs — links pipeline step jobs to their parent release
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN release_id TEXT');
+} catch {}
+
 export const db = drizzle(sqlite, { schema });
 export { schema };

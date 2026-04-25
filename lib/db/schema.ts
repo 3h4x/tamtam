@@ -53,6 +53,7 @@ export const jobs = sqliteTable('jobs', {
   logPruned: integer('log_pruned', { mode: 'boolean' }).default(false),
   costUsd: real('cost_usd'),
   model: text('model'),
+  releaseId: text('release_id'),
 });
 
 export const skills = sqliteTable('skills', {
