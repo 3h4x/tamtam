@@ -58,18 +58,25 @@ export function JobsPage() {
 
   useEffect(() => {
     let active = true
+    let timeoutId: ReturnType<typeof setTimeout>
+
     const poll = async () => {
       try {
         const data = await fetchJobs(projectFilter || undefined)
-        if (active) {
-          setJobs(data.jobs.sort((a, b) => b.started_at - a.started_at))
-          setLoading(false)
-        }
-      } catch { /* ignore */ }
+        if (!active) return
+        const sorted = data.jobs.sort((a, b) => b.started_at - a.started_at)
+        setJobs(sorted)
+        setLoading(false)
+        // Poll faster while jobs are actively running, back off when idle.
+        const hasRunning = sorted.some(j => j.status === 'running')
+        timeoutId = setTimeout(poll, hasRunning ? 5000 : 15000)
+      } catch {
+        if (active) timeoutId = setTimeout(poll, 15000)
+      }
     }
+
     poll()
-    const interval = setInterval(poll, 5000)
-    return () => { active = false; clearInterval(interval) }
+    return () => { active = false; clearTimeout(timeoutId) }
   }, [projectFilter])
 
   const filtered = jobs.filter((j) => {
