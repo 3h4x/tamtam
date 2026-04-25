@@ -67,6 +67,8 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `pnpm check` — lint + type-check + test (all in one)
 - `pnpm db:generate` — generate Drizzle migration files from schema changes
 - `pnpm db:migrate` — apply pending Drizzle migrations
+- `pnpm dev:profile` — start dev server with Turbopack tracing enabled; stop server to flush trace to `.next/dev/trace-turbopack`, then open via `npx next internal trace` or https://trace.nextjs.org/
+- `pnpm dev:flamegraph` — start dev server with V8 CPU profiling; stop server to flush `.profiles/CPU.*.cpuprofile`, then open in Chrome DevTools or https://www.speedscope.app/
 
 **Never run `next dev` directly — always use PM2 via the scripts above.**
 
@@ -161,9 +163,11 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - `/api/stats/usage` — Token usage statistics per project and per agent kind (GET, accepts `?window=24h|7d|30d|all`)
 
 ## Testing Requirements
-- **All new API routes must have vitest tests** in `__tests__/`
-- Follow existing test patterns (in-memory SQLite, mocked shell/PM2 calls)
-- Run `pnpm test` after writing tests to verify they pass
+- **All new API routes must have vitest tests** in `__tests__/api/`; lib logic tests go in `__tests__/lib/` or alongside the file.
+- Follow existing test patterns (in-memory SQLite, mocked shell/PM2 calls).
+- **Do not mock the database** — use an in-memory `better-sqlite3` instance with the real Drizzle schema instead. Mock only external side-effects: `lib/shell.ts` `exec`, PM2, Claude CLI spawning.
+- Run `pnpm test` after every non-trivial code change, not only after writing new tests. All tests must pass before committing.
+- Test naming: `__tests__/api/<route-name>.test.ts` mirroring `app/api/<route-name>/route.ts`.
 
 ## Definition of Done for UI/Frontend Changes
 - Dev server must be running (`pnpm dev`) before testing frontend changes
@@ -190,3 +194,27 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - Log and row retention (`lib/retention.ts`): `pruneProjectLogs` deletes on-disk log files after each run (controlled by `log_retention_count` and `log_retention_days` settings; defaults 200 / 30 days); `runNightlyCleanup` deletes finished `jobs` DB rows older than `job_row_retention_days` (default 180 days) — called once at startup then every 24h from `instrumentation.ts`
 - Background probe sweep: `instrumentation.ts` runs `runProbeSweep` every 30 seconds — detects Claude CLI processes that hang after emitting their final result event (holding a job "running" indefinitely) and resolves them via `probeJobStatus` in `lib/job-storage.ts`
 - Dependabot with grouped PRs (production deps, dev deps, actions)
+
+## Coding Conventions
+- **Path imports**: always use the `@/` alias (e.g. `import { exec } from '@/lib/shell'`), never relative `../../` paths.
+- **File naming**: kebab-case for all files (`start-fix.ts`, `project-data.ts`); PascalCase only for React component files (`AgentsTab.tsx`).
+- **Components**: PascalCase, one component per file, `.tsx` extension. No class components.
+- **TypeScript**: strict mode is on. Avoid `any`; ESLint allows it but prefer explicit types. Never use `// @ts-ignore` — fix the type instead.
+- **Error handling**: throw exceptions for unexpected failures; return typed result objects (`{ ok, error }`) only where callers need to branch on failure without crashing. Log errors to `console.error` before re-throwing in API routes.
+- **Async**: use `async/await` throughout. No raw `.then()` chains. Parallelise independent async work with `Promise.all`.
+- **Linting**: `pnpm lint` runs ESLint on `app/`, `components/`, `lib/`, `hooks/`. Auto-fix with `--fix` is acceptable. Run after significant edits.
+- **Type checking**: `pnpm type-check` runs `tsc --noEmit`. Run before committing any TypeScript change.
+
+## Dependency & Supply-Chain Security
+- **Lock file**: always commit `pnpm-lock.yaml`. Never install packages with `--no-lockfile` or `--frozen-lockfile` bypassed.
+- **Allowed build scripts**: `package.json` pins `pnpm.onlyBuiltDependencies` to `[better-sqlite3, esbuild, sharp, unrs-resolver]`. Do not add a new package to this list without explicit user approval; postinstall scripts run arbitrary code.
+- **No silent additions**: never add a new dependency not already in `package.json` without explicit user approval. Justify every new dep in the commit message (why it's needed, why no existing dep covers it).
+- **Verify before adding**: check new packages on npmjs.com for download count, publish date, and maintainer history before adding. Prefer packages with >1 M weekly downloads and >1 year of history.
+- **Audit after changes**: run `pnpm audit` after any `pnpm add`/`pnpm remove` and fix or document any high-severity findings before committing.
+
+## Commit & Branch Rules
+- **Conventional commits**: use the format `type(scope): message` — types observed in this repo: `feat`, `fix`, `test`, `docs`, `refactor`, `perf`, `chore`. Keep the subject line under 72 characters.
+- **Direct to master**: this is a solo project; direct commits to `master` are fine. No PR required for local changes.
+- **DB schema changes**: always pair a schema edit in `lib/db/schema.ts` with `pnpm db:generate` (creates migration file) and `pnpm db:migrate` (applies it). Never edit migration files by hand; never delete them.
+- **Never bypass hooks**: do not pass `--no-verify` to `git commit`. If a hook fails, fix the underlying issue.
+- **No secrets in code**: use environment variables for all credentials. Never commit `.env` files or hardcode tokens/keys.
