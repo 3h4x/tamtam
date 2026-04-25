@@ -11,6 +11,9 @@ const WINDOWS = {
 
 type Window = keyof typeof WINDOWS;
 
+const CACHE_TTL_MS = 60_000;
+const cache = new Map<Window, { body: UsageResponse; expiresAt: number }>();
+
 export interface ProjectUsageRow {
   project: string;
   runs: number;
@@ -56,6 +59,11 @@ export async function GET(request: NextRequest) {
   const window: Window = (Object.keys(WINDOWS) as Window[]).includes(param as Window)
     ? (param as Window)
     : '30d';
+
+  const cached = cache.get(window);
+  if (cached && cached.expiresAt > Date.now()) {
+    return NextResponse.json(cached.body);
+  }
 
   const cutoff = window === 'all' ? -Infinity : Date.now() / 1000 - WINDOWS[window] / 1000;
   const jobs = listJobs().filter((j) => j.startedAt >= cutoff);
@@ -138,5 +146,6 @@ export async function GET(request: NextRequest) {
     projects,
     agents,
   };
+  cache.set(window, { body, expiresAt: Date.now() + CACHE_TTL_MS });
   return NextResponse.json(body);
 }
