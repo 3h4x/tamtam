@@ -105,6 +105,65 @@ describe('GET /api/jobs', () => {
     const data = await res.json();
     expect(data.jobs).toEqual([]);
   });
+
+  it('sorts jobs newest-first by startedAt', async () => {
+    const old = makeJob({ id: 'old', startedAt: 100 });
+    const mid = makeJob({ id: 'mid', startedAt: 500 });
+    const newest = makeJob({ id: 'new', startedAt: 900 });
+    listJobsMock.mockReturnValue([old, newest, mid]);
+
+    const req = new NextRequest('http://localhost/api/jobs');
+    const res = await GET(req);
+    const data = await res.json();
+    expect(data.jobs.map((j: any) => j.id)).toEqual(['new', 'mid', 'old']);
+  });
+
+  it('respects explicit limit param', async () => {
+    const jobs = Array.from({ length: 5 }, (_, i) =>
+      makeJob({ id: `job-${i}`, startedAt: i })
+    );
+    listJobsMock.mockReturnValue(jobs);
+
+    const req = new NextRequest('http://localhost/api/jobs?limit=3');
+    const res = await GET(req);
+    const data = await res.json();
+    expect(data.jobs).toHaveLength(3);
+  });
+
+  it('limit applies to newest jobs — oldest are dropped', async () => {
+    const jobs = Array.from({ length: 5 }, (_, i) =>
+      makeJob({ id: `job-${i}`, startedAt: i })
+    );
+    listJobsMock.mockReturnValue(jobs);
+
+    const req = new NextRequest('http://localhost/api/jobs?limit=2');
+    const res = await GET(req);
+    const data = await res.json();
+    expect(data.jobs.map((j: any) => j.id)).toEqual(['job-4', 'job-3']);
+  });
+
+  it('limit=0 returns all jobs', async () => {
+    const jobs = Array.from({ length: 5 }, (_, i) =>
+      makeJob({ id: `job-${i}`, startedAt: i })
+    );
+    listJobsMock.mockReturnValue(jobs);
+
+    const req = new NextRequest('http://localhost/api/jobs?limit=0');
+    const res = await GET(req);
+    const data = await res.json();
+    expect(data.jobs).toHaveLength(5);
+  });
+
+  it('probes only the limited slice of jobs', async () => {
+    const jobs = Array.from({ length: 5 }, (_, i) =>
+      makeJob({ id: `job-${i}`, startedAt: i })
+    );
+    listJobsMock.mockReturnValue(jobs);
+
+    const req = new NextRequest('http://localhost/api/jobs?limit=2');
+    await GET(req);
+    expect(probeJobStatusMock).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('GET /api/jobs/[jobId]', () => {

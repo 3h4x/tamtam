@@ -149,6 +149,84 @@ describe('GET /api/stats/usage', () => {
   });
 });
 
+describe('GET /api/stats/usage — response caching', () => {
+  let GET: any;
+  let listJobsMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2025-01-01T00:00:00Z'));
+    listJobsMock = vi.fn().mockReturnValue([]);
+    vi.doMock('@/lib/job-storage', () => ({ listJobs: listJobsMock }));
+    const mod = await import('@/app/api/stats/usage/route');
+    GET = mod.GET;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.resetModules();
+  });
+
+  it('returns cached response within TTL without re-querying listJobs', async () => {
+    listJobsMock.mockReturnValue([makeJob({ id: 'a', project: 'p1' })]);
+
+    await GET(new NextRequest('http://localhost/api/stats/usage?window=all'));
+    expect(listJobsMock).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(30_000); // still within 60s TTL
+    listJobsMock.mockReturnValue([]); // would return different data if called
+
+    const res = await GET(new NextRequest('http://localhost/api/stats/usage?window=all'));
+    expect(listJobsMock).toHaveBeenCalledTimes(1); // cache hit, not re-queried
+
+    const data = await res.json();
+    expect(data.totals.runs).toBe(1); // stale cached value
+  });
+
+  it('re-queries after 60s TTL expires', async () => {
+    listJobsMock.mockReturnValue([makeJob({ id: 'a', project: 'p1' })]);
+    await GET(new NextRequest('http://localhost/api/stats/usage?window=all'));
+    expect(listJobsMock).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(60_001); // past TTL
+
+    listJobsMock.mockReturnValue([]);
+    const res = await GET(new NextRequest('http://localhost/api/stats/usage?window=all'));
+    expect(listJobsMock).toHaveBeenCalledTimes(2); // re-queried
+
+    const data = await res.json();
+    expect(data.totals.runs).toBe(0); // fresh data
+  });
+
+  it('caches different windows independently', async () => {
+    await GET(new NextRequest('http://localhost/api/stats/usage?window=24h'));
+    await GET(new NextRequest('http://localhost/api/stats/usage?window=7d'));
+    expect(listJobsMock).toHaveBeenCalledTimes(2); // separate cache entries
+
+    await GET(new NextRequest('http://localhost/api/stats/usage?window=24h'));
+    await GET(new NextRequest('http://localhost/api/stats/usage?window=7d'));
+    expect(listJobsMock).toHaveBeenCalledTimes(2); // both hit cache
+  });
+
+  it('first call after expiry updates the cache for subsequent calls', async () => {
+    listJobsMock.mockReturnValue([makeJob({ id: 'a', project: 'p1' })]);
+    await GET(new NextRequest('http://localhost/api/stats/usage?window=all'));
+
+    vi.advanceTimersByTime(60_001); // expire the cache
+
+    listJobsMock.mockReturnValue([makeJob({ id: 'b', project: 'p2' }), makeJob({ id: 'c', project: 'p2' })]);
+    await GET(new NextRequest('http://localhost/api/stats/usage?window=all')); // re-populates cache
+    expect(listJobsMock).toHaveBeenCalledTimes(2);
+
+    // Third call within new TTL should hit cache again
+    const res = await GET(new NextRequest('http://localhost/api/stats/usage?window=all'));
+    expect(listJobsMock).toHaveBeenCalledTimes(2);
+    const data = await res.json();
+    expect(data.totals.runs).toBe(2); // from second population
+  });
+});
+
 describe('costUsd helper', () => {
   it('matches the published rate card', () => {
     expect(
