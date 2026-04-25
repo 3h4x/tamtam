@@ -729,19 +729,17 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
       }
 
       const issueCtx = !sessionId ? issueContextRef.current : null
-      const result = await runProject(
-        projectName, fullPrompt,
-        imageFiles.length > 0 ? imageFiles : undefined,
-        undefined,
-        personaPaths.length > 0 ? personaPaths : undefined,
+      const result = await runProject(projectName, fullPrompt, {
+        files: imageFiles.length > 0 ? imageFiles : undefined,
+        personas: personaPaths.length > 0 ? personaPaths : undefined,
         model,
-        sessionId || undefined,
-        contextMetaStr,
-        text,
-        issueCtx?.number ?? undefined,
-        issueCtx?.repo ?? undefined,
-        issueCtx?.title ?? undefined,
-      )
+        resumeSessionId: sessionId || undefined,
+        contextMeta: contextMetaStr,
+        userPrompt: text,
+        ghIssueNumber: issueCtx?.number ?? undefined,
+        ghIssueRepo: issueCtx?.repo ?? undefined,
+        ghIssueTitle: issueCtx?.title ?? undefined,
+      })
       terminalStore.startStream(projectName, result.job_id)
     } catch (err) {
       terminalStore.update(projectName, (s) => ({
