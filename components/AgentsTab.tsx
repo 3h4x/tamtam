@@ -14,6 +14,7 @@ const SCHEDULES = ['', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h']
 
 interface RecommendedAgent extends AgentTemplateRecord {
   skillIds: string[]
+  essential?: boolean
 }
 
 const RECOMMENDED_AGENTS: RecommendedAgent[] = [
@@ -97,6 +98,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     runner: 'pm2',
     prompt: '',
     skillIds: ['agent-docs-claude'],
+    essential: true,
   },
 ]
 
@@ -340,30 +342,61 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
         ]
         const suggestions = merged.filter(r => !existingNames.has(r.name.toLowerCase()))
         if (suggestions.length === 0) return null
+        const essential = suggestions.filter(r => (r as RecommendedAgent).essential)
+        const regular = suggestions.filter(r => !(r as RecommendedAgent).essential)
+        const addAgent = (rec: AgentTemplateRecord) => { setRecommendedTemplate(rec); setCreating(true); setEditing(null) }
         return (
           <div className="mt-2 flex flex-col gap-2">
-            <h3 className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">Recommended</h3>
-            {suggestions.map(rec => {
-              const isCustom = customNames.has(rec.name.toLowerCase())
-              return (
-              <div
-                key={rec.name}
-                className="p-3 rounded-lg border border-border border-dashed bg-bg-secondary/50 flex items-center justify-between gap-4"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="font-medium text-sm text-text-secondary">{rec.name}</span>
-                  {isCustom && <span className="text-xs px-1.5 py-0.5 rounded bg-accent/10 text-accent shrink-0">custom</span>}
-                  {rec.schedule && <span className="text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-tertiary shrink-0">every {rec.schedule}</span>}
-                  {rec.description && <span className="text-xs text-text-tertiary truncate hidden sm:block">{rec.description}</span>}
-                </div>
-                <button
-                  className="px-3 py-1.5 text-xs border border-border rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors cursor-pointer shrink-0"
-                  onClick={() => { setRecommendedTemplate(rec); setCreating(true); setEditing(null) }}
-                >
-                  Add
-                </button>
-              </div>
-            )})}
+            {essential.length > 0 && (
+              <>
+                <h3 className="text-xs font-semibold text-status-warning/80 uppercase tracking-wider">Essential</h3>
+                {essential.map(rec => (
+                  <div
+                    key={rec.name}
+                    className="p-3 rounded-lg border border-status-warning/40 bg-status-warning/5 flex items-center justify-between gap-4"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="font-medium text-sm text-status-warning">{rec.name}</span>
+                      {rec.schedule && <span className="text-xs px-2 py-0.5 rounded-full bg-status-warning/10 text-status-warning/80 shrink-0">every {rec.schedule}</span>}
+                      {rec.description && <span className="text-xs text-text-tertiary truncate hidden sm:block">{rec.description}</span>}
+                    </div>
+                    <button
+                      className="px-3 py-1.5 text-xs border border-status-warning/50 rounded-md text-status-warning hover:bg-status-warning/10 transition-colors cursor-pointer shrink-0"
+                      onClick={() => addAgent(rec)}
+                    >
+                      Add
+                    </button>
+                  </div>
+                ))}
+              </>
+            )}
+            {regular.length > 0 && (
+              <>
+                <h3 className="text-xs font-semibold text-text-tertiary uppercase tracking-wider mt-1">Recommended</h3>
+                {regular.map(rec => {
+                  const isCustom = customNames.has(rec.name.toLowerCase())
+                  return (
+                    <div
+                      key={rec.name}
+                      className="p-3 rounded-lg border border-border border-dashed bg-bg-secondary/50 flex items-center justify-between gap-4"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="font-medium text-sm text-text-secondary">{rec.name}</span>
+                        {isCustom && <span className="text-xs px-1.5 py-0.5 rounded bg-accent/10 text-accent shrink-0">custom</span>}
+                        {rec.schedule && <span className="text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-tertiary shrink-0">every {rec.schedule}</span>}
+                        {rec.description && <span className="text-xs text-text-tertiary truncate hidden sm:block">{rec.description}</span>}
+                      </div>
+                      <button
+                        className="px-3 py-1.5 text-xs border border-border rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors cursor-pointer shrink-0"
+                        onClick={() => addAgent(rec)}
+                      >
+                        Add
+                      </button>
+                    </div>
+                  )
+                })}
+              </>
+            )}
           </div>
         )
       })()}
