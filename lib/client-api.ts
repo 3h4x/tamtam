@@ -256,7 +256,21 @@ export async function fetchPersonas(): Promise<{ personas: Persona[] }> {
   return response.json()
 }
 
-export async function runProject(projectName: string, prompt: string, files?: File[], persona?: string, personas?: string[], model?: string, resumeSessionId?: string, contextMeta?: string, userPrompt?: string, ghIssueNumber?: number, ghIssueRepo?: string, ghIssueTitle?: string): Promise<{ status: string; job_id: string; pid: number }> {
+export interface RunProjectOptions {
+  files?: File[]
+  persona?: string
+  personas?: string[]
+  model?: string
+  resumeSessionId?: string
+  contextMeta?: string
+  userPrompt?: string
+  ghIssueNumber?: number
+  ghIssueRepo?: string
+  ghIssueTitle?: string
+}
+
+export async function runProject(projectName: string, prompt: string, opts: RunProjectOptions = {}): Promise<{ status: string; job_id: string; pid: number }> {
+  const { files, persona, personas, model, resumeSessionId, contextMeta, userPrompt, ghIssueNumber, ghIssueRepo, ghIssueTitle } = opts
   let response: Response
   if ((files && files.length > 0) || persona) {
     const formData = new FormData()
@@ -280,10 +294,19 @@ export async function runProject(projectName: string, prompt: string, files?: Fi
       body: formData,
     })
   } else {
+    const body: Record<string, unknown> = { prompt }
+    if (personas?.length) body.personas = personas
+    if (model) body.model = model
+    if (resumeSessionId) body.resumeSessionId = resumeSessionId
+    if (contextMeta) body.contextMeta = contextMeta
+    if (userPrompt) body.userPrompt = userPrompt
+    if (ghIssueNumber != null) body.ghIssueNumber = ghIssueNumber
+    if (ghIssueRepo) body.ghIssueRepo = ghIssueRepo
+    if (ghIssueTitle) body.ghIssueTitle = ghIssueTitle
     response = await fetch(`${API_BASE}/by-project/${projectName}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, ...(personas?.length ? { personas } : {}), ...(model ? { model } : {}), ...(resumeSessionId ? { resumeSessionId } : {}), ...(contextMeta ? { contextMeta } : {}), ...(userPrompt ? { userPrompt } : {}), ...(ghIssueNumber != null ? { ghIssueNumber } : {}), ...(ghIssueRepo ? { ghIssueRepo } : {}), ...(ghIssueTitle ? { ghIssueTitle } : {}) }),
+      body: JSON.stringify(body),
     })
   }
   if (!response.ok) {
