@@ -364,6 +364,55 @@ describe('getProjectTestConfig — testsDisabled / reviewDisabled', () => {
     expect(cfg?.testsDisabled).toBe(true);
     expect(cfg?.reviewDisabled).toBe(false);
   });
+
+  it('defaults issueAutoBranch to true when column is NULL', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { getProjectTestConfig: fn } = await import('@/lib/scheduling');
+    const cfg = fn('proj1');
+    expect(cfg?.issueAutoBranch).toBe(true);
+  });
+
+  it('returns issueAutoBranch=false when explicitly set to false', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, issueAutoBranch: false }).run();
+    const { getProjectTestConfig: fn } = await import('@/lib/scheduling');
+    const cfg = fn('proj1');
+    expect(cfg?.issueAutoBranch).toBe(false);
+  });
+
+  it('returns issueAutoBranch=true when explicitly set to true', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, issueAutoBranch: true }).run();
+    const { getProjectTestConfig: fn } = await import('@/lib/scheduling');
+    const cfg = fn('proj1');
+    expect(cfg?.issueAutoBranch).toBe(true);
+  });
+
+  it('defaults autoPushEnabled to false when column is NULL', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { getProjectTestConfig: fn } = await import('@/lib/scheduling');
+    const cfg = fn('proj1');
+    expect(cfg?.autoPushEnabled).toBe(false);
+  });
+
+  it('returns autoPushEnabled=true when set', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, autoPushEnabled: true }).run();
+    const { getProjectTestConfig: fn } = await import('@/lib/scheduling');
+    const cfg = fn('proj1');
+    expect(cfg?.autoPushEnabled).toBe(true);
+  });
+
+  it('defaults prWorkflowEnabled to false when column is NULL', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
+    const { getProjectTestConfig: fn } = await import('@/lib/scheduling');
+    const cfg = fn('proj1');
+    expect(cfg?.prWorkflowEnabled).toBe(false);
+  });
+
+  it('returns prWorkflowEnabled=true when set', async () => {
+    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, prWorkflowEnabled: true }).run();
+    const { getProjectTestConfig: fn } = await import('@/lib/scheduling');
+    const cfg = fn('proj1');
+    expect(cfg?.prWorkflowEnabled).toBe(true);
+  });
 });
 
 describe('getImproveConfig — logDir path expansion', () => {
