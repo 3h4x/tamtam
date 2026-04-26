@@ -54,6 +54,7 @@ export const jobs = sqliteTable('jobs', {
   costUsd: real('cost_usd'),
   model: text('model'),
   releaseId: text('release_id'),
+  abortedAt: real('aborted_at'),
 });
 
 export const skills = sqliteTable('skills', {

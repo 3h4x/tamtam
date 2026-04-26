@@ -29,6 +29,7 @@ export interface TamTamConfig {
   notification_webhook_secret: string;
   notification_on_release_success: boolean;
   notification_on_release_fail: boolean;
+  notification_on_release_aborted: boolean;
   notification_on_fix_loop_exhausted: boolean;
   notification_on_review_do_not_ship: boolean;
   notification_on_agent_run_fail: boolean;
@@ -63,6 +64,7 @@ const DEFAULTS: TamTamConfig = {
   notification_webhook_secret: '',
   notification_on_release_success: false,
   notification_on_release_fail: false,
+  notification_on_release_aborted: false,
   notification_on_fix_loop_exhausted: false,
   notification_on_review_do_not_ship: false,
   notification_on_agent_run_fail: false,
@@ -103,6 +105,7 @@ export function getSettings(): TamTamConfig {
     notification_webhook_secret: map.notification_webhook_secret ?? DEFAULTS.notification_webhook_secret,
     notification_on_release_success: map.notification_on_release_success === 'true',
     notification_on_release_fail: map.notification_on_release_fail === 'true',
+    notification_on_release_aborted: map.notification_on_release_aborted === 'true',
     notification_on_fix_loop_exhausted: map.notification_on_fix_loop_exhausted === 'true',
     notification_on_review_do_not_ship: map.notification_on_review_do_not_ship === 'true',
     notification_on_agent_run_fail: map.notification_on_agent_run_fail === 'true',

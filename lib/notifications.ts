@@ -4,6 +4,7 @@ import { getSettings } from './config';
 export type NotificationEvent =
   | 'release_success'
   | 'release_fail'
+  | 'release_aborted'
   | 'fix_loop_exhausted'
   | 'review_do_not_ship'
   | 'agent_run_fail';
@@ -40,6 +41,9 @@ function getNotificationConfig(event: NotificationEvent): NotificationConfig {
       break;
     case 'release_fail':
       enabled = settings.notification_on_release_fail || false;
+      break;
+    case 'release_aborted':
+      enabled = settings.notification_on_release_aborted || false;
       break;
     case 'fix_loop_exhausted':
       enabled = settings.notification_on_fix_loop_exhausted || false;

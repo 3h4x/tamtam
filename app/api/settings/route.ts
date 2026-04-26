@@ -27,6 +27,7 @@ const SETTING_KEYS = [
   'notification_webhook_secret',
   'notification_on_release_success',
   'notification_on_release_fail',
+  'notification_on_release_aborted',
   'notification_on_fix_loop_exhausted',
   'notification_on_review_do_not_ship',
   'notification_on_agent_run_fail',
