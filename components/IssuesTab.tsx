@@ -469,6 +469,12 @@ function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; projectN
     router.push(`/project/${projectName}/terminal?${params.toString()}`)
   }
 
+  const discussInTerminal = () => {
+    const prompt = `Let's discuss GitHub issue #${issue.number}: "${issue.title}" (${issue.url})\n\n${issue.body || ''}\n\nHelp me think through this issue — the requirements, edge cases, possible approaches, and any open questions.`
+    const params = new URLSearchParams({ prompt })
+    router.push(`/project/${projectName}/terminal?${params.toString()}`)
+  }
+
   return (
     <div className="border-b border-border last:border-b-0">
       <div className="px-3 py-2.5 flex items-start gap-3 hover:bg-bg-tertiary/50">
@@ -498,6 +504,13 @@ function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; projectN
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
+            onClick={discussInTerminal}
+            title="Open a discussion about this issue in the terminal (no branch created)"
+          >
+            Discuss
+          </button>
           <button
             className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
             onClick={openInTerminal}
