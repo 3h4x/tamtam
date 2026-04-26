@@ -474,7 +474,7 @@ export function ProjectDetailPage({
     // both the parent and its active child as separate "running" rows is
     // noisy — collapse to just the release while it's in flight.
     const releaseRunning = running.some(j => j.kind === 'release')
-    const RELEASE_CHILD_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push'])
+    const RELEASE_CHILD_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'mark-dod', 'pr-wait'])
     const filtered = releaseRunning
       ? running.filter(j => !RELEASE_CHILD_KINDS.has(j.kind))
       : running
