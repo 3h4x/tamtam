@@ -128,3 +128,61 @@ describe('renderAnsi', () => {
     expect(strings).toContain('normal');
   });
 });
+
+describe('renderAnsi — reflow (vitest compact output reflowing)', () => {
+  function flatText(result: ReturnType<typeof renderAnsi>): string {
+    return result
+      .map((p) => {
+        if (typeof p === 'string') return p;
+        const s = p as { props?: { children?: string } };
+        return s?.props?.children ?? '';
+      })
+      .join('');
+  }
+
+  it('passes through text that already contains a newline unchanged', () => {
+    const input = 'line one\nline two';
+    const text = flatText(renderAnsi(input));
+    expect(text).toBe('line one\nline two');
+  });
+
+  it('inserts a newline before ANSI green ✓ checkmark on a single-line string', () => {
+    // Simulates vitest compact output: " ✓ test name" following colored text on the same line
+    const input = 'some prefix \x1b[32m ✓ test name\x1b[0m';
+    const text = flatText(renderAnsi(input));
+    expect(text).toContain('\n');
+    const lines = text.split('\n');
+    expect(lines.some((l) => l.includes('✓ test name'))).toBe(true);
+  });
+
+  it('inserts a newline before ANSI red ✗ failure marker on a single-line string', () => {
+    const input = 'some prefix \x1b[31m ✗ failing test\x1b[0m';
+    const text = flatText(renderAnsi(input));
+    expect(text).toContain('\n');
+    const lines = text.split('\n');
+    expect(lines.some((l) => l.includes('✗ failing test'))).toBe(true);
+  });
+
+  it('inserts a newline before "Test Files" summary keyword', () => {
+    const input = 'Duration  1.23s Test Files  5 passed';
+    const text = flatText(renderAnsi(input));
+    expect(text).toContain('\n');
+    const lines = text.split('\n');
+    expect(lines.some((l) => l.startsWith('Test Files'))).toBe(true);
+  });
+
+  it('inserts a newline before "Duration" summary keyword', () => {
+    const input = 'Start at 10:00:00 Duration  1.23s';
+    const text = flatText(renderAnsi(input));
+    expect(text).toContain('\n');
+    const lines = text.split('\n');
+    expect(lines.some((l) => l.startsWith('Duration'))).toBe(true);
+  });
+
+  it('does not add a leading newline (strips leading newlines)', () => {
+    // reflow strips leading newlines produced by the replacements
+    const input = '\x1b[32m ✓ first test';
+    const text = flatText(renderAnsi(input));
+    expect(text.startsWith('\n')).toBe(false);
+  });
+});
