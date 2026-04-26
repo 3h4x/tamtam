@@ -101,6 +101,7 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - `/project/[name]/terminal/[sessionId]` — Interactive Claude runner with model selector (haiku/sonnet/opus), skill picker, and real-time token streaming via SSE (see `docs/STREAMING.md`)
 - `/project/[name]/docs` — Project documentation files viewer
 - `/project/[name]/task/[task]` — Task detail view
+- `/project/[name]/release/[releaseId]` — Release trace view: pipeline steps, per-step verdicts and log excerpts for a specific release run
 - `/agents` — Agents management page
 - `/monitoring` — Prometheus + Loki health dashboard (alerts, service up/down, log errors)
 - `/pipeline` — Pipeline health metrics dashboard (verdict distribution, fix-loop stats, step durations, MTTR, per-project breakdown; filterable by 24h/7d/30d/all)
@@ -136,6 +137,7 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - `/api/projects/by-project/[name]/push` — Push changes to git (POST)
 - `/api/projects/by-project/[name]/create-pr` — Push current branch + create GitHub PR with a generated title (derived from the linked GitHub issue title or commit log; falls back to `gh pr create --fill`) (POST); returns `{ url }` — refuses if on default branch
 - `/api/projects/by-project/[name]/release` — Trigger release pipeline (POST)
+- `/api/projects/by-project/[name]/release/[releaseId]` — Release detail: meta-job + ordered pipeline step jobs with verdicts and log excerpts (GET)
 - `/api/projects/by-project/[name]/issues` — GitHub PRs and issues for the project (GET, POST to force refresh); merge POST switches working copy to default branch after merge
 - `/api/projects/by-project/[name]/issue-branch` — Create or checkout `fix/issue-<n>-<slug>` before Claude edits (POST); called automatically from TerminalTab when opening from an issue
 - `/api/projects/by-project/[name]/mark-dod` — Run DoD verification for latest issue-linked run (POST); also triggered automatically after review→LGTM
@@ -188,7 +190,7 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - Agent runs compose skill content into the prompt before sending to Claude CLI
 - `commit_style` setting injects a style guide into the commit-message generation prompt; `review_verdict_rules` setting drives LGTM/NEEDS ATTENTION/DO NOT SHIP decisions in code reviews — both configurable in Settings UI (Behavior tab)
 - File-based skills scanned from `skills/docs/skills/` and `data/skills/` (category subdirs, any `.md` file with optional YAML frontmatter: `title`, `description`)
-- DB-backed skills created via `/skills` page or API; a set of built-in agent skills (cto, security-review, dependency-check, blog, ci-monitor, release-ready, tests, gha-audit, readme-sync, self-improve, senior-fullstack) is seeded from `lib/default-agent-skills.ts` on first `GET /api/skills`
+- DB-backed skills created via `/skills` page or API; a set of built-in agent skills (cto, security-review, dependency-check, blog, ci-monitor, release-ready, tests, gha-audit, docs-claude, readme-sync, self-improve, senior-fullstack) is seeded from `lib/default-agent-skills.ts` on first `GET /api/skills`
 - GitHub owner fallback configurable via `GITHUB_OWNER` env var or Settings UI
 - Issue-driven runs auto-checkout `fix/issue-<n>-<slug>` branch before Claude edits (via `issue-branch` route called from TerminalTab); in PR Workflow mode, after the PR is merged the working copy is returned to the default branch
 - Pipeline workflow mode per project: *Direct Branch* (commit+push to current branch) or *PR Workflow* (push to feature branch → DoD → optional auto-merge); configured via project Config tab; `pr_workflow_enabled` + `auto_pr_merge_enabled` flags on the `projects` table
