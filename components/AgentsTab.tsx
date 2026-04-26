@@ -15,6 +15,7 @@ const SCHEDULES = ['', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h']
 interface RecommendedAgent extends AgentTemplateRecord {
   skillIds: string[]
   essential?: boolean
+  featured?: boolean
 }
 
 const RECOMMENDED_AGENTS: RecommendedAgent[] = [
@@ -99,6 +100,16 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
     prompt: '',
     skillIds: ['agent-docs-claude'],
     essential: true,
+  },
+  {
+    name: 'manage-agents',
+    description: 'Audits TamTam agents for this project and creates, updates, or removes them to match current project needs.',
+    model: 'sonnet',
+    schedule: '24h',
+    runner: 'pm2',
+    prompt: '',
+    skillIds: ['agent-manage-agents'],
+    featured: true,
   },
 ]
 
@@ -343,7 +354,8 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
         const suggestions = merged.filter(r => !existingNames.has(r.name.toLowerCase()))
         if (suggestions.length === 0) return null
         const essential = suggestions.filter(r => (r as RecommendedAgent).essential)
-        const regular = suggestions.filter(r => !(r as RecommendedAgent).essential)
+        const featured = suggestions.filter(r => (r as RecommendedAgent).featured)
+        const regular = suggestions.filter(r => !(r as RecommendedAgent).essential && !(r as RecommendedAgent).featured)
         const addAgent = (rec: AgentTemplateRecord) => { setRecommendedTemplate(rec); setCreating(true); setEditing(null) }
         return (
           <div className="mt-2 flex flex-col gap-2">
@@ -362,6 +374,29 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
                     </div>
                     <button
                       className="px-3 py-1.5 text-xs border border-status-warning/50 rounded-md text-status-warning hover:bg-status-warning/10 transition-colors cursor-pointer shrink-0"
+                      onClick={() => addAgent(rec)}
+                    >
+                      Add
+                    </button>
+                  </div>
+                ))}
+              </>
+            )}
+            {featured.length > 0 && (
+              <>
+                <h3 className="text-xs font-semibold text-accent/80 uppercase tracking-wider">Featured</h3>
+                {featured.map(rec => (
+                  <div
+                    key={rec.name}
+                    className="p-3 rounded-lg border border-accent/40 bg-accent/5 flex items-center justify-between gap-4"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="font-medium text-sm text-accent">{rec.name}</span>
+                      {rec.schedule && <span className="text-xs px-2 py-0.5 rounded-full bg-accent/10 text-accent/80 shrink-0">every {rec.schedule}</span>}
+                      {rec.description && <span className="text-xs text-text-tertiary truncate hidden sm:block">{rec.description}</span>}
+                    </div>
+                    <button
+                      className="px-3 py-1.5 text-xs border border-accent/50 rounded-md text-accent hover:bg-accent/10 transition-colors cursor-pointer shrink-0"
                       onClick={() => addAgent(rec)}
                     >
                       Add
