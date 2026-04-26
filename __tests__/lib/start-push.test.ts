@@ -682,6 +682,56 @@ describe('startProjectPush — push result tracking', () => {
     if (r.ok) expect(r.message).toBe('pushed');
   });
 
+  it('auto-returns to default branch in Direct Branch mode when on fix/issue-* with no issue context', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+      clearProjectDataCache: vi.fn(),
+    }));
+    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue({ prWorkflowEnabled: false }),
+    }));
+    vi.doMock('@/lib/job-storage', () => ({
+      createJob: createJobMock,
+      markDone: markDoneMock,
+      updateJob: updateJobMock,
+      listJobs: vi.fn().mockReturnValue([]),
+    }));
+    vi.doMock('@/lib/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/start-commit', () => ({
+      generateCommitMessage: vi.fn().mockResolvedValue('feat: test'),
+      findIssueContext: vi.fn().mockResolvedValue(null),
+      detectMainBranch: vi.fn().mockResolvedValue('main'),
+      issueBranchName: vi.fn().mockReturnValue('fix/issue-45-test'),
+    }));
+
+    execMock
+      .mockImplementationOnce(() => resp(0, '1\n'))                                        // git rev-list --count
+      .mockImplementationOnce(() => resp(0, '# branch.head fix/issue-45-test\n# branch.ab +0 -0\n')) // behind check
+      .mockImplementationOnce(() => resp(0))                                               // git push
+      .mockImplementationOnce(() => resp(0, 'abc1234'))                                   // git rev-parse
+      .mockImplementationOnce(() => resp(0, 'fix/issue-45-test\n'))                       // git branch --show-current
+      .mockImplementationOnce(() => resp(0));                                              // git checkout main
+
+    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const r = await fn('proj');
+    expect(r.ok).toBe(true);
+
+    const checkoutCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'git' && args.includes('checkout') && args.includes('main'),
+    );
+    expect(checkoutCall).toBeTruthy();
+  });
+
   it('creates a generic PR and switches to main when prWorkflowEnabled and on a feature branch', async () => {
     vi.resetModules();
     vi.doMock('@/lib/project-data', () => ({

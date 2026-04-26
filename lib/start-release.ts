@@ -11,6 +11,7 @@ import { isReviewed } from './git-utils';
 import { exec } from './shell';
 import { getImproveConfig, getProjectTestConfig } from './scheduling';
 import { acquireLock, getLock } from './pipeline-lock';
+import { detectMainBranch } from './start-commit';
 
 const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push', 'pr-wait', 'mark-dod', 'release']);
 
@@ -145,9 +146,45 @@ async function hasUnpushedCommits(projPath: string): Promise<boolean> {
  *  3. If there are changes → start review
  *  4. If only unpushed commits → push directly
  */
+/**
+ * Returns the current branch name if agent runs should be blocked (Direct Branch
+ * mode + fix/issue-* branch checked out), otherwise null.
+ */
+export async function checkIssueBranchBlock(
+  projectName: string,
+  projPath: string,
+): Promise<string | null> {
+  const cfg = getProjectTestConfig(projectName);
+  if (!cfg || cfg.prWorkflowEnabled) return null;
+  const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+  const branch = branchR.stdout.trim();
+  return branch.startsWith('fix/issue-') ? branch : null;
+}
+
 export async function startRelease(projectName: string): Promise<ReleaseResult> {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
+
+  // In Direct Branch mode, guard against releasing from an unexpected branch.
+  // fix/issue-* branches are "expected" (issue work), but any other non-default
+  // branch indicates the user landed here by accident and the push would go to
+  // the wrong place. Reject early with a clear message rather than silently
+  // pushing to the wrong branch.
+  const releaseCfg = getProjectTestConfig(projectName);
+  if (releaseCfg && !releaseCfg.prWorkflowEnabled) {
+    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+    const currentBranch = branchR.stdout.trim();
+    if (currentBranch && !currentBranch.startsWith('fix/issue-')) {
+      const defaultBranch = await detectMainBranch(projPath);
+      if (currentBranch !== defaultBranch) {
+        return {
+          ok: false,
+          status: 409,
+          detail: `Direct Branch mode: working copy is on '${currentBranch}' (expected '${defaultBranch}' or a fix/issue-* branch). Switch branches before releasing.`,
+        };
+      }
+    }
+  }
 
   if (await isReleasePipelineRunning(projectName)) {
     return { ok: false, status: 409, detail: `Release pipeline already running for ${projectName}` };

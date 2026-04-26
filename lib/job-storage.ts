@@ -642,7 +642,7 @@ async function runCompletionHooks(job: JobData): Promise<void> {
   // launch a pr-wait job that polls checks and merges once they pass.
   if (job.kind === 'push' && job.exitCode === 0) {
     try {
-      const { autoPrMergeEnabled, prWorkflowEnabled } = await getProjectPipelineConfig(job.project);
+      const { autoPrMergeEnabled } = await getProjectPipelineConfig(job.project);
       if (autoPrMergeEnabled && job.contextMeta) {
         const meta = JSON.parse(job.contextMeta) as { prUrl?: string; prNumber?: number; prRepo?: string };
         if (meta.prUrl && meta.prNumber && meta.prRepo) {
@@ -655,9 +655,10 @@ async function runCompletionHooks(job: JobData): Promise<void> {
             console.log(`[push→pr-wait] failed to start pr-wait: ${r.error}`);
           }
         }
-      } else if (prWorkflowEnabled && !autoPrMergeEnabled && job.contextMeta) {
-        // PR Workflow without auto-merge: run DoD against the PR body now that
-        // the PR exists. The auto-merge path defers this to post-merge in launchPrWait.
+      } else if (!autoPrMergeEnabled && job.contextMeta) {
+        // PR exists but no auto-merge (covers both PR Workflow and Direct Branch
+        // issue-linked pushes that create a PR): run DoD now. The auto-merge path
+        // defers this to post-merge in launchPrWait.
         const meta = JSON.parse(job.contextMeta) as { prNumber?: number };
         if (meta.prNumber) {
           try {

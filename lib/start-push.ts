@@ -305,21 +305,37 @@ async function runPush(
 
   if (issueCtx) {
     const prUrl = await createIssuePR(projPath, log, issueCtx);
+    const mainBranch = await detectMainBranch(projPath);
+    log(`\n# switching back to ${mainBranch} and pulling\n`);
+    const coR = await exec('git', ['-C', projPath, 'checkout', mainBranch], { timeout: 10000 });
+    if (coR.stdout) log(coR.stdout);
+    if (coR.stderr) log(coR.stderr);
+    if (coR.exitCode === 0) {
+      const pullR = await exec('git', ['-C', projPath, 'pull', '--ff-only', 'origin', mainBranch], { timeout: 30000 });
+      if (pullR.stdout) log(pullR.stdout);
+      if (pullR.stderr) log(pullR.stderr);
+    }
+    clearProjectDataCache();
     if (prUrl) {
       const prNumber = parseInt(prUrl.split('/').pop() ?? '0', 10) || undefined;
-      const mainBranch = await detectMainBranch(projPath);
-      log(`\n# switching back to ${mainBranch} and pulling\n`);
-      const coR = await exec('git', ['-C', projPath, 'checkout', mainBranch], { timeout: 10000 });
-      if (coR.stdout) log(coR.stdout);
-      if (coR.stderr) log(coR.stderr);
-      if (coR.exitCode === 0) {
-        const pullR = await exec('git', ['-C', projPath, 'pull', '--ff-only', 'origin', mainBranch], { timeout: 30000 });
-        if (pullR.stdout) log(pullR.stdout);
-        if (pullR.stderr) log(pullR.stderr);
-      }
       return { ok: true, commitSha, message: `PR created: ${prUrl}`, prUrl, prNumber, prRepo: issueCtx.repo };
     }
     return { ok: true, commitSha, message: 'pushed (PR creation failed — see log)' };
+  }
+
+  // Direct Branch mode on a fix/issue-* branch (no issue context): auto-return to
+  // default branch after push so the next release targets the right branch.
+  if (!prWorkflowEnabled) {
+    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+    const currentBranch = branchR?.stdout?.trim() ?? '';
+    if (currentBranch.startsWith('fix/issue-')) {
+      const mainBranch = await detectMainBranch(projPath);
+      log(`\n# Direct Branch mode on issue branch — switching back to ${mainBranch}\n`);
+      const coR = await exec('git', ['-C', projPath, 'checkout', mainBranch], { timeout: 10000 });
+      if (coR.stdout) log(coR.stdout);
+      if (coR.stderr) log(coR.stderr);
+      clearProjectDataCache();
+    }
   }
 
   // PR Workflow without issue context: create a generic PR for the feature branch.

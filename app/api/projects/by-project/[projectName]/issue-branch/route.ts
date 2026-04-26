@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/project-data';
 import { exec } from '@/lib/shell';
 import { getProjectTestConfig } from '@/lib/scheduling';
+import { getLock } from '@/lib/pipeline-lock';
+import { listJobs } from '@/lib/job-storage';
 
 // Given an issue context (number + title), check out a feature branch
 // `fix/issue-<n>-<slug>` before Claude starts editing so all interim work
@@ -13,6 +15,20 @@ export async function POST(
   const { projectName } = await params;
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
+
+  // Refuse to switch branches while a pipeline is actively running. A mid-pipeline
+  // checkout would leave the working copy in an inconsistent state (e.g. a test
+  // job finishing on a different branch than it started on).
+  const activeLock = getLock(projectName);
+  if (activeLock) {
+    const holder = listJobs().find(j => j.id === activeLock.lockedByJobId);
+    if (holder && holder.finishedAt === null) {
+      return NextResponse.json(
+        { detail: `Pipeline is running for ${projectName} — wait for it to finish before switching branches`, blockingJobId: activeLock.lockedByJobId },
+        { status: 409 }
+      );
+    }
+  }
 
   // Project-level kill switch: when the user unchecks "Create feature branch"
   // in the Work-on config, this endpoint is a no-op — Claude works on whatever

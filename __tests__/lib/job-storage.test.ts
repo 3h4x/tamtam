@@ -2956,11 +2956,12 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
     expect(startMarkDodMock).not.toHaveBeenCalled();
   });
 
-  it('does not call startMarkDod when prWorkflowEnabled=false', async () => {
+  it('calls startMarkDod in Direct Branch mode (prWorkflowEnabled=false) when push created a PR', async () => {
+    // Issue-linked pushes create a PR even in Direct Branch mode; DoD should run.
     getProjectTestConfigMock.mockReturnValue({ prWorkflowEnabled: false, autoPrMergeEnabled: false });
     const job = makeJob('push', { contextMeta: JSON.stringify({ prNumber: 55, prRepo: 'owner/repo' }) });
     await markDoneFn(job, 0);
-    expect(startMarkDodMock).not.toHaveBeenCalled();
+    expect(startMarkDodMock).toHaveBeenCalledWith('my-proj');
   });
 
   it('does not call startMarkDod when autoPrMergeEnabled=true (launchPrWait handles DoD post-merge)', async () => {
