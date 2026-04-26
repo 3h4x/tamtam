@@ -351,4 +351,220 @@ describe('lib/notifications', () => {
       expect(headers['X-TamTam-Signature']).toBeUndefined();
     });
   });
+
+  describe('formatSlackMessage() shape', () => {
+    async function slackBody(payload: Partial<Parameters<(typeof import('@/lib/notifications'))['notify']>[0]> = {}) {
+      mockGetSettings.mockReturnValue(
+        defaultSettings({ notification_webhook_url: SLACK_URL, notification_on_release_success: true, notification_on_release_fail: true }),
+      );
+      const { notify } = await import('@/lib/notifications');
+      await notify({
+        event: 'release_success',
+        project: 'myapp',
+        job_id: 'j1',
+        status: 'success',
+        timestamp: 1_000_000,
+        ...payload,
+      });
+      await flush();
+      return JSON.parse(mockFetch.mock.calls[0][1].body);
+    }
+
+    it('uses ✅ emoji for success status', async () => {
+      const body = await slackBody({ status: 'success' });
+      const headerText = body.blocks[0].text.text as string;
+      expect(headerText).toMatch(/✅/);
+    });
+
+    it('uses ❌ emoji for failed status', async () => {
+      const body = await slackBody({ status: 'failed', event: 'release_fail' });
+      const headerText = body.blocks[0].text.text as string;
+      expect(headerText).toMatch(/❌/);
+    });
+
+    it('replaces underscores with spaces in event name', async () => {
+      const body = await slackBody();
+      const headerText = body.blocks[0].text.text as string;
+      expect(headerText).toContain('release success');
+      expect(headerText).not.toContain('release_success');
+    });
+
+    it('always includes Event, Project, Status fields', async () => {
+      const body = await slackBody();
+      const fields: Array<{ text: string }> = body.blocks[1].fields;
+      const texts = fields.map((f) => f.text);
+      expect(texts.some((t) => t.includes('release_success'))).toBe(true);
+      expect(texts.some((t) => t.includes('myapp'))).toBe(true);
+      expect(texts.some((t) => t.includes('success'))).toBe(true);
+    });
+
+    it('omits verdict field when not provided', async () => {
+      const body = await slackBody({ verdict: undefined });
+      const fields: Array<{ text: string }> = body.blocks[1].fields;
+      expect(fields.every((f) => !f.text.includes('Verdict'))).toBe(true);
+    });
+
+    it('includes verdict field when provided', async () => {
+      const body = await slackBody({ verdict: 'LGTM' });
+      const fields: Array<{ text: string }> = body.blocks[1].fields;
+      expect(fields.some((f) => f.text.includes('Verdict') && f.text.includes('LGTM'))).toBe(true);
+    });
+
+    it('omits agent field when not provided', async () => {
+      const body = await slackBody({ agent: undefined });
+      const fields: Array<{ text: string }> = body.blocks[1].fields;
+      expect(fields.every((f) => !f.text.includes('Agent'))).toBe(true);
+    });
+
+    it('includes agent field when provided', async () => {
+      const body = await slackBody({ agent: 'my-agent' });
+      const fields: Array<{ text: string }> = body.blocks[1].fields;
+      expect(fields.some((f) => f.text.includes('Agent') && f.text.includes('my-agent'))).toBe(true);
+    });
+
+    it('omits cost field when cost_usd is not provided', async () => {
+      const body = await slackBody({ cost_usd: undefined });
+      const fields: Array<{ text: string }> = body.blocks[1].fields;
+      expect(fields.every((f) => !f.text.includes('Cost'))).toBe(true);
+    });
+
+    it('formats cost_usd to 4 decimal places', async () => {
+      const body = await slackBody({ cost_usd: 0.1 });
+      const fields: Array<{ text: string }> = body.blocks[1].fields;
+      expect(fields.some((f) => f.text.includes('$0.1000'))).toBe(true);
+    });
+
+    it('omits message block when message is not provided', async () => {
+      const body = await slackBody({ message: undefined });
+      const hasMessageBlock = body.blocks.some(
+        (b: { type: string; text?: { text: string } }) => b.type === 'section' && b.text?.text?.startsWith('_'),
+      );
+      expect(hasMessageBlock).toBe(false);
+    });
+
+    it('adds italic message block when message is provided', async () => {
+      const body = await slackBody({ message: 'deploy ok' });
+      const msgBlock = body.blocks.find(
+        (b: { type: string; text?: { text: string } }) => b.type === 'section' && b.text?.text?.includes('deploy ok'),
+      );
+      expect(msgBlock).toBeDefined();
+      expect(msgBlock.text.text).toBe('_deploy ok_');
+    });
+
+    it('omits actions block when log_url is not provided', async () => {
+      const body = await slackBody({ log_url: undefined });
+      expect(body.blocks.every((b: { type: string }) => b.type !== 'actions')).toBe(true);
+    });
+
+    it('adds View Log button when log_url is provided', async () => {
+      const body = await slackBody({ log_url: 'https://example.com/log/123' });
+      const actionsBlock = body.blocks.find((b: { type: string }) => b.type === 'actions');
+      expect(actionsBlock).toBeDefined();
+      expect(actionsBlock.elements[0].url).toBe('https://example.com/log/123');
+    });
+  });
+
+  describe('formatDiscordMessage() shape', () => {
+    async function discordBody(payload: Partial<Parameters<(typeof import('@/lib/notifications'))['notify']>[0]> = {}) {
+      mockGetSettings.mockReturnValue(
+        defaultSettings({ notification_webhook_url: DISCORD_URL, notification_on_release_success: true, notification_on_release_fail: true }),
+      );
+      const { notify } = await import('@/lib/notifications');
+      await notify({
+        event: 'release_success',
+        project: 'myapp',
+        job_id: 'j1',
+        status: 'success',
+        timestamp: 1_000_000,
+        ...payload,
+      });
+      await flush();
+      return JSON.parse(mockFetch.mock.calls[0][1].body).embeds[0];
+    }
+
+    it('uses green color (3066993) for success', async () => {
+      const embed = await discordBody({ status: 'success' });
+      expect(embed.color).toBe(3_066_993);
+    });
+
+    it('uses red color (15158332) for failed', async () => {
+      const embed = await discordBody({ status: 'failed', event: 'release_fail' });
+      expect(embed.color).toBe(15_158_332);
+    });
+
+    it('replaces underscores with spaces in embed title', async () => {
+      const embed = await discordBody();
+      expect(embed.title).toContain('release success');
+      expect(embed.title).not.toContain('release_success');
+    });
+
+    it('always includes Status field', async () => {
+      const embed = await discordBody();
+      expect(embed.fields.some((f: { name: string }) => f.name === 'Status')).toBe(true);
+    });
+
+    it('omits Verdict field when not provided', async () => {
+      const embed = await discordBody({ verdict: undefined });
+      expect(embed.fields.every((f: { name: string }) => f.name !== 'Verdict')).toBe(true);
+    });
+
+    it('includes Verdict field when provided', async () => {
+      const embed = await discordBody({ verdict: 'NEEDS ATTENTION' });
+      const f = embed.fields.find((f: { name: string }) => f.name === 'Verdict');
+      expect(f?.value).toBe('NEEDS ATTENTION');
+    });
+
+    it('formats cost_usd to 4 decimal places', async () => {
+      const embed = await discordBody({ cost_usd: 0.05 });
+      const f = embed.fields.find((f: { name: string }) => f.name === 'Cost');
+      expect(f?.value).toBe('$0.0500');
+    });
+
+    it('sets embed url when log_url is provided', async () => {
+      const embed = await discordBody({ log_url: 'https://example.com/log/456' });
+      expect(embed.url).toBe('https://example.com/log/456');
+    });
+
+    it('omits embed url when log_url is not provided', async () => {
+      const embed = await discordBody({ log_url: undefined });
+      expect(embed.url).toBeUndefined();
+    });
+
+    it('produces a valid ISO timestamp', async () => {
+      const embed = await discordBody({ timestamp: 1_700_000_000_000 });
+      expect(() => new Date(embed.timestamp)).not.toThrow();
+      expect(embed.timestamp).toBe(new Date(1_700_000_000_000).toISOString());
+    });
+  });
+
+  describe('detectWebhookType() edge cases', () => {
+    it('returns generic for an empty string URL', async () => {
+      mockGetSettings.mockReturnValue(
+        defaultSettings({ notification_webhook_url: 'https://ntfy.sh/t', notification_on_release_success: true }),
+      );
+      const { notify } = await import('@/lib/notifications');
+      // Verify generic path (raw payload) is used for a plain URL — already covered,
+      // but also verify an empty-string URL never reaches fetch (config guard)
+      mockGetSettings.mockReturnValue(
+        defaultSettings({ notification_webhook_url: '', notification_on_release_success: true }),
+      );
+      await notify({ event: 'release_success', project: 'p', job_id: 'j', status: 'success', timestamp: 1 });
+      await flush();
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('slack takes precedence when URL contains both slack and discord substrings', async () => {
+      // Constructed edge-case URL that contains both patterns
+      const ambiguousUrl = 'https://hooks.slack.com/services/discord.com/api/webhooks/123';
+      mockGetSettings.mockReturnValue(
+        defaultSettings({ notification_webhook_url: ambiguousUrl, notification_on_release_success: true }),
+      );
+      const { notify } = await import('@/lib/notifications');
+      await notify({ event: 'release_success', project: 'p', job_id: 'j', status: 'success', timestamp: 1 });
+      await flush();
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body).toHaveProperty('blocks');
+      expect(body).not.toHaveProperty('embeds');
+    });
+  });
 });
