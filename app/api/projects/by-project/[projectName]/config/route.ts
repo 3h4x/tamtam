@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getImproveConfig, writeProjectFieldYaml, getProjectTestConfig, getProjectPushResult } from '@/lib/scheduling';
+import { writeProjectFieldYaml, getProjectTestConfig, getProjectPushResult } from '@/lib/scheduling';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/project-data';
 import { reloadConfig } from '@/lib/config';
 import { installTestSchedule, uninstallTestSchedule, parseTestScheduleToCron } from '@/lib/test-scheduler';
 import { detectTestCommand } from '@/lib/start-test';
-import { loadFileConfig } from '@/lib/tamtam-file-config';
+import { loadFileConfig, writeFileConfig } from '@/lib/tamtam-file-config';
 
 export async function GET(
   _request: NextRequest,
@@ -14,14 +14,6 @@ export async function GET(
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
 
-  const { projects } = getImproveConfig();
-  let configuredTestCmd: string | null = null;
-  for (const cfg of Object.values(projects)) {
-    if (cfg.project === projectName) {
-      configuredTestCmd = cfg.test_command;
-      break;
-    }
-  }
   const detectedTestCmd = detectTestCommand(projPath);
   const testCfg = getProjectTestConfig(projectName);
   const pushResult = getProjectPushResult(projectName);
@@ -29,21 +21,22 @@ export async function GET(
 
   return NextResponse.json({
     project: projectName,
-    test_command: fileConfig?.test_command ?? configuredTestCmd ?? '',
+    test_command: fileConfig?.test_command ?? testCfg?.testCommand ?? '',
     detected_test_command: detectedTestCmd ?? '',
-    effective_test_command: fileConfig?.test_command ?? configuredTestCmd ?? detectedTestCmd ?? '',
-    test_cron_enabled: testCfg?.testCronEnabled ?? false,
-    test_cron_schedule: testCfg?.testCronSchedule ?? '',
+    effective_test_command: fileConfig?.test_command ?? testCfg?.testCommand ?? detectedTestCmd ?? '',
+    test_cron_enabled: fileConfig?.test_cron_enabled ?? testCfg?.testCronEnabled ?? false,
+    test_cron_schedule: fileConfig?.test_cron_schedule ?? testCfg?.testCronSchedule ?? '',
     auto_commit_enabled: fileConfig?.auto_commit_enabled ?? testCfg?.autoCommitEnabled ?? false,
     auto_push_enabled: fileConfig?.auto_push_enabled ?? testCfg?.autoPushEnabled ?? false,
     auto_pr_merge_enabled: fileConfig?.auto_pr_merge_enabled ?? testCfg?.autoPrMergeEnabled ?? false,
-    release_after_run: testCfg?.releaseAfterRun ?? false,
+    release_after_run: fileConfig?.release_after_run ?? testCfg?.releaseAfterRun ?? false,
     pr_workflow_enabled: fileConfig?.pr_workflow_enabled ?? testCfg?.prWorkflowEnabled ?? false,
     issue_auto_branch: fileConfig?.issue_auto_branch ?? testCfg?.issueAutoBranch ?? true,
     tests_disabled: fileConfig?.tests_disabled ?? testCfg?.testsDisabled ?? false,
     review_disabled: fileConfig?.review_disabled ?? testCfg?.reviewDisabled ?? false,
     last_push_error: pushResult?.lastPushError ?? null,
     last_push_at: pushResult?.lastPushAt ?? null,
+    // Keys whose values currently come from .tamtam/config.yml
     file_config: fileConfig ? Object.keys(fileConfig) : [],
   });
 }
@@ -53,15 +46,24 @@ export async function PATCH(
   { params }: { params: Promise<{ projectName: string }> }
 ) {
   const { projectName } = await params;
+  const projPath = resolveProjectPath(projectName);
+  if (!projPath) {
+    return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
+  }
+
   const body = await request.json();
   let touched = false;
   const notFound = () =>
     NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
 
+  // Collect all changes for a single file write
+  const fileUpdates: Parameters<typeof writeFileConfig>[1] = {};
+
   if (body.test_command !== undefined) {
     touched = true;
     const value = body.test_command?.trim() || null;
     if (!writeProjectFieldYaml(projectName, 'test_command', value)) return notFound();
+    fileUpdates.test_command = value;
   }
 
   if (body.test_cron_schedule !== undefined) {
@@ -78,6 +80,7 @@ export async function PATCH(
       }
     }
     if (!writeProjectFieldYaml(projectName, 'test_cron_schedule', value)) return notFound();
+    fileUpdates.test_cron_schedule = value;
   }
 
   const booleanFields = [
@@ -90,6 +93,16 @@ export async function PATCH(
     if (body[field] !== undefined) {
       touched = true;
       if (!writeProjectFieldYaml(projectName, field, body[field] ? '1' : '0')) return notFound();
+      fileUpdates[field] = !!body[field];
+    }
+  }
+
+  // Write all changed fields to .tamtam/config.yml in one pass
+  if (Object.keys(fileUpdates).length > 0) {
+    try {
+      writeFileConfig(projPath, fileUpdates);
+    } catch {
+      // Non-fatal: DB write already succeeded, file write is best-effort
     }
   }
 

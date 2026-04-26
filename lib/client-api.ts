@@ -501,6 +501,7 @@ export interface ProjectConfig {
   review_disabled?: boolean
   last_push_error?: string | null
   last_push_at?: number | null
+  file_config?: string[]
 }
 
 export async function fetchProjectConfig(projectName: string): Promise<ProjectConfig> {
