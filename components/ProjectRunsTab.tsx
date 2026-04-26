@@ -173,7 +173,17 @@ function titleForJob(job: JobInfo, bucket: KindBucket): string {
   if (bucket === 'fix-push') return 'Fix push failure'
   if (bucket === 'commit') return 'Commit'
   if (bucket === 'push') return 'Push'
-  if (bucket === 'mark-dod') return 'Mark DoD'
+  if (bucket === 'mark-dod') {
+    try {
+      const meta = JSON.parse(job.context_meta ?? '')
+      if (typeof meta.total === 'number' && meta.total > 0) {
+        const failed = meta.total - (meta.verified ?? 0)
+        if (failed === 0) return `Mark DoD — all ${meta.total} ✓`
+        return `Mark DoD — ${meta.verified}/${meta.total} ✓, ${failed} unverified`
+      }
+    } catch {}
+    return 'Mark DoD'
+  }
   if (bucket === 'pr-wait') return 'PR wait (CI + merge)'
   if (bucket === 'agent') return job.kind.replace(/^agent:/, '') || 'agent'
   return job.kind
