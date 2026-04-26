@@ -53,12 +53,13 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - **Release**: semantic-release on push to master (GitHub releases only, no npm)
 
 ## Commands
-- `pnpm dev` — start dev server via PM2 on port 1337 (streams logs)
-- `pnpm stop` — stop dev server
-- `pnpm restart` — restart dev server
+- `pnpm dev` — start server via PM2 on port 1337 (production mode by default, no HMR; set `TAMTAM_HMR=1` to enable HMR dev mode instead)
+- `pnpm rebuild` — `pnpm build && pnpm dev` — rebuild and restart after code changes
+- `pnpm stop` — stop server
+- `pnpm restart` — restart server (PM2 re-uses the existing command; use `pnpm rebuild` when the build is stale)
 - `pnpm logs` — view PM2 logs
 - `pnpm build` — production build
-- `pnpm start` — start production server via PM2
+- `pnpm start` — start production server via PM2 (alias for `pnpm dev` without the log tail)
 - `pnpm test` — run unit tests
 - `pnpm test:watch` — run vitest in watch mode
 - `pnpm test:e2e` — run Playwright e2e tests (requires dev server running)
@@ -72,12 +73,20 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 
 **Never run `next dev` directly — always use PM2 via the scripts above.**
 
-### Hot reload vs. restart
+### Applying code changes
 
-Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** `pnpm restart` for code changes; it's not only unnecessary, it's a trap: if a stray `next-server` child survives the SIGTERM, the new PM2 process hits `EADDRINUSE`, goes `errored`, and the orphan keeps serving *stale* code. That's the #1 source of "why isn't my edit showing up?" pain in this repo.
+TamTam runs in **production mode** (`next start`) by default — no HMR, no auto-reload. After any code change:
 
-- **No restart needed**: component edits, hook edits, utility edits, API route *body* changes, `lib/*` changes — HMR picks them up on the next request.
-- **Restart IS needed**: brand-new route files (Turbopack doesn't always register new `app/**/route.ts` without a restart), new DB migrations in `lib/db/index.ts`, env var changes, `package.json` scripts.
+1. `pnpm rebuild` — builds and restarts in one step (preferred)
+2. Or: `pnpm build` then `pnpm restart`
+
+To enable HMR for active development (auto-reload on save), set `TAMTAM_HMR=1` before `pnpm dev`:
+
+```
+TAMTAM_HMR=1 pnpm dev
+```
+
+**Never use `TAMTAM_HMR=1` in production** — HMR file watchers can restart the server mid-operation (e.g. while a git push hook runs), orphaning in-flight jobs and marking them `exit -1`.
 
 ## Architecture
 - `app/` — Next.js pages and API route handlers
