@@ -5,7 +5,7 @@ import { resolveProjectPath } from './project-data';
 import { getImproveConfig } from './scheduling';
 import { exec } from './shell';
 import { getPermissionModeFlag } from './config';
-import { createJob, listJobs, markDone } from './job-storage';
+import { createJob, listJobs, markDone, updateJob } from './job-storage';
 import { wrapIfUntrusted, withUntrustedPreamble } from './untrusted';
 import { startJob, getJobStatus, deleteJob } from './pm2-jobs';
 import { ensureBranchForCtx } from './mark-dod-branch';
@@ -229,6 +229,8 @@ JSON schema:
     if (claudeExitCode !== 0 || !claudeOutputStripped) {
       if (!claudeOutputStripped) log(`# claude output: ${claudeOutput.slice(0, 300).trim()}\n`);
       log(`# claude verification failed\n`);
+      job.contextMeta = JSON.stringify({ verified: 0, total: criteria.length });
+      updateJob(job);
       await markDone(job, 1);
       return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: 0, total: criteria.length, changed: false };
     }
@@ -251,6 +253,8 @@ JSON schema:
       if (Array.isArray(parsedResult.results)) results = parsedResult.results;
     } catch (e) {
       log(`# could not parse claude JSON: ${e}\n--- raw output ---\n${raw.slice(0, 2000)}\n`);
+      job.contextMeta = JSON.stringify({ verified: 0, total: criteria.length });
+      updateJob(job);
       await markDone(job, 1);
       return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: 0, total: criteria.length, changed: false };
     }
@@ -282,6 +286,8 @@ JSON schema:
       log(`# [${r.verified ? 'VERIFIED' : 'unverified'}] ${(r.text ?? '').slice(0, 120)}\n#   evidence: ${(r.evidence ?? '').slice(0, 300)}\n`);
     }
     log(`# summary: ${verifiedTexts.size} / ${criteria.length} verified\n`);
+    job.contextMeta = JSON.stringify({ verified: verifiedTexts.size, total: criteria.length });
+    updateJob(job);
 
     if (verifiedTexts.size === 0) {
       log(`# no criteria verified — leaving ${ctxLabel} body unchanged\n`);

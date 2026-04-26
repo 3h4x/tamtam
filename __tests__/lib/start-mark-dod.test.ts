@@ -181,6 +181,7 @@ describe('startMarkDod', () => {
       createJob: createJobMock,
       listJobs: listJobsMock,
       markDone: markDoneMock,
+      updateJob: vi.fn(),
     }));
     // Default branch-switch to a no-op so the tests' explicit exec mock
     // chain isn't consumed by the gh pr lookup. Tests that exercise the
