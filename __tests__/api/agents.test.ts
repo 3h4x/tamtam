@@ -55,6 +55,18 @@ describe('agents API', () => {
       uninstallAgentSchedule: uninstallAgentScheduleMock,
     }));
 
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+      clearProjectDataCache: vi.fn(),
+      getEnabledProjects: vi.fn().mockReturnValue({}),
+    }));
+
+    vi.doMock('@/lib/tamtam-file-agents', () => ({
+      scanFileAgents: vi.fn().mockReturnValue([]),
+      loadFileAgent: vi.fn().mockReturnValue(null),
+      parseFileAgentId: vi.fn().mockReturnValue(null),
+    }));
+
     const agentsRoute = await import('@/app/api/agents/route');
     GET = agentsRoute.GET;
     POST = agentsRoute.POST;

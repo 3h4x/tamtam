@@ -280,9 +280,12 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
                   {agentSkills.map(s => (
                     <span key={s.id} className="text-xs px-2 py-0.5 rounded-full bg-accent/10 text-accent">{s.name}</span>
                   ))}
+                  {agent.source === 'file' && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-tertiary border border-border" title=".tamtam/agents/">file</span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
-                  {agent.schedule && (
+                  {agent.schedule && agent.source !== 'file' && (
                     <button
                       className={`px-3 py-1.5 text-sm border rounded-md cursor-pointer ${
                         agent.enabled
@@ -295,12 +298,14 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
                       {agent.enabled ? 'On' : 'Off'}
                     </button>
                   )}
+                  {agent.source !== 'file' && (
                   <button
                     className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
                     onClick={() => { setEditing(agent); setCreating(false) }}
                   >
                     Edit
                   </button>
+                  )}
                   <button
                     className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={() => handleRun(agent)}
@@ -445,7 +450,7 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
           skills={skills}
           personas={personas}
           onSave={handleSaveAgent}
-          onDelete={editing ? () => handleDelete(editing.id) : undefined}
+          onDelete={editing && editing.source !== 'file' ? () => handleDelete(editing.id) : undefined}
           onClose={closeModal}
         />
       )}

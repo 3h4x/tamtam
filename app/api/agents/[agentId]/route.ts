@@ -4,12 +4,24 @@ import { db, schema } from '@/lib/db';
 import { installAgentSchedule, uninstallAgentSchedule } from '@/lib/agent-scheduler';
 import { errMsg } from '@/lib/types';
 import { clearAgentsCache, normalizeAgent } from '@/lib/agents-cache';
+import { parseFileAgentId, loadFileAgent } from '@/lib/tamtam-file-agents';
+import { resolveProjectPath } from '@/lib/project-data';
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ agentId: string }> }
 ) {
   const { agentId } = await params;
+
+  const parsed = parseFileAgentId(agentId);
+  if (parsed) {
+    const projPath = resolveProjectPath(parsed.project);
+    if (!projPath) return NextResponse.json({ detail: 'not found' }, { status: 404 });
+    const agent = loadFileAgent(projPath, parsed.project, parsed.name);
+    if (!agent) return NextResponse.json({ detail: 'not found' }, { status: 404 });
+    return NextResponse.json({ agent });
+  }
+
   const agent = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
   if (!agent) return NextResponse.json({ detail: 'not found' }, { status: 404 });
   return NextResponse.json({ agent: normalizeAgent(agent) });
@@ -20,6 +32,10 @@ export async function PATCH(
   { params }: { params: Promise<{ agentId: string }> }
 ) {
   const { agentId } = await params;
+
+  if (parseFileAgentId(agentId)) {
+    return NextResponse.json({ detail: 'file-based agents are read-only' }, { status: 405 });
+  }
 
   const existing = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
   if (!existing) return NextResponse.json({ detail: 'not found' }, { status: 404 });
@@ -60,6 +76,11 @@ export async function DELETE(
   { params }: { params: Promise<{ agentId: string }> }
 ) {
   const { agentId } = await params;
+
+  if (parseFileAgentId(agentId)) {
+    return NextResponse.json({ detail: 'file-based agents are read-only' }, { status: 405 });
+  }
+
   // Uninstall schedule before deleting
   const agent = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
   try {
