@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "predev": "pm2 delete tamtam 2>/dev/null; lsof -ti:1337 | xargs kill -9 2>/dev/null; true",
-    "dev": "pm2 start 'next dev --port 1337' --name tamtam --cwd . --time && pm2 logs tamtam",
+    "dev": "if [ \"${TAMTAM_HMR:-0}\" = '1' ]; then pm2 start 'next dev --port 1337' --name tamtam --cwd . --time; else pm2 start 'next start --port 1337' --name tamtam --cwd . --time; fi && pm2 logs tamtam",
+    "rebuild": "pnpm build && pnpm dev",
     "predev:profile": "pm2 delete tamtam 2>/dev/null; lsof -ti:1337 | xargs kill -9 2>/dev/null; rm -f .next/dev/trace-turbopack; true",
     "dev:profile": "NEXT_TURBOPACK_TRACING=1 pm2 start 'next dev --port 1337' --name tamtam --cwd . --time --update-env && echo '\\n[dev:profile] reproduce the slow state, then `pnpm stop` to flush the trace to .next/dev/trace-turbopack — view via `npx next internal trace .next/dev/trace-turbopack` then open https://trace.nextjs.org/\\n' && pm2 logs tamtam",
     "predev:flamegraph": "pm2 delete tamtam 2>/dev/null; lsof -ti:1337 | xargs kill -9 2>/dev/null; mkdir -p .profiles && rm -f .profiles/CPU.*.cpuprofile; true",
