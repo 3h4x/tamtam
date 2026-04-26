@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 export interface FileAgent {
@@ -16,6 +16,18 @@ export interface FileAgent {
   source: 'file';
   filePath: string;
 }
+
+export interface FileAgentUpdates {
+  prompt?: string;
+  model?: string;
+  schedule?: string | null;
+  skillIds?: string[];
+  runner?: string;
+  enabled?: boolean;
+}
+
+// Canonical frontmatter key order for serialization
+const FM_KEY_ORDER = ['model', 'schedule', 'skillIds', 'runner', 'enabled'] as const;
 
 function parseFrontmatter(content: string): { meta: Record<string, string>; body: string } {
   const meta: Record<string, string> = {};
@@ -76,6 +88,33 @@ function buildFileAgent(
   };
 }
 
+function serializeAgent(
+  model: string,
+  schedule: string | null,
+  skillIds: string[],
+  runner: string,
+  enabled: boolean,
+  prompt: string
+): string {
+  const fmLines: string[] = [];
+
+  for (const key of FM_KEY_ORDER) {
+    if (key === 'model') {
+      fmLines.push(`model: ${model}`);
+    } else if (key === 'schedule' && schedule) {
+      fmLines.push(`schedule: ${schedule}`);
+    } else if (key === 'skillIds' && skillIds.length > 0) {
+      fmLines.push(`skillIds: ${JSON.stringify(skillIds)}`);
+    } else if (key === 'runner' && runner !== 'pm2') {
+      fmLines.push(`runner: ${runner}`);
+    } else if (key === 'enabled' && !enabled) {
+      fmLines.push(`enabled: false`);
+    }
+  }
+
+  return `---\n${fmLines.join('\n')}\n---\n\n${prompt}\n`;
+}
+
 export function scanFileAgents(projectPath: string, projectName: string): FileAgent[] {
   const dir = join(projectPath, '.tamtam', 'agents');
   if (!existsSync(dir)) return [];
@@ -110,6 +149,39 @@ export function loadFileAgent(
   } catch {
     return null;
   }
+}
+
+/**
+ * Write (merge) updates into .tamtam/agents/<name>.md.
+ * Creates the file and directory if they don't exist.
+ * Unset fields retain their current values from disk.
+ */
+export function writeFileAgent(
+  projectPath: string,
+  projectName: string,
+  agentName: string,
+  updates: FileAgentUpdates
+): FileAgent {
+  const dir = join(projectPath, '.tamtam', 'agents');
+  mkdirSync(dir, { recursive: true });
+  const filePath = join(dir, `${agentName}.md`);
+
+  // Load current values from disk (if the file exists)
+  const current = existsSync(filePath)
+    ? loadFileAgent(projectPath, projectName, agentName)
+    : null;
+
+  const model = updates.model ?? current?.model ?? 'sonnet';
+  const schedule = updates.schedule !== undefined ? (updates.schedule || null) : (current?.schedule ?? null);
+  const skillIds = updates.skillIds ?? current?.skillIds ?? [];
+  const runner = updates.runner ?? current?.runner ?? 'pm2';
+  const enabled = updates.enabled !== undefined ? updates.enabled : (current?.enabled ?? true);
+  const prompt = updates.prompt ?? current?.prompt ?? '';
+
+  const content = serializeAgent(model, schedule, skillIds, runner, enabled, prompt);
+  writeFileSync(filePath, content);
+
+  return buildFileAgent(filePath, agentName, projectName, content, Date.now() / 1000);
 }
 
 export function parseFileAgentId(agentId: string): { project: string; name: string } | null {
