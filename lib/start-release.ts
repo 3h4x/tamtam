@@ -146,6 +146,21 @@ async function hasUnpushedCommits(projPath: string): Promise<boolean> {
  *  3. If there are changes → start review
  *  4. If only unpushed commits → push directly
  */
+/**
+ * Returns the current branch name if agent runs should be blocked (Direct Branch
+ * mode + fix/issue-* branch checked out), otherwise null.
+ */
+export async function checkIssueBranchBlock(
+  projectName: string,
+  projPath: string,
+): Promise<string | null> {
+  const cfg = getProjectTestConfig(projectName);
+  if (!cfg || cfg.prWorkflowEnabled) return null;
+  const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+  const branch = branchR.stdout.trim();
+  return branch.startsWith('fix/issue-') ? branch : null;
+}
+
 export async function startRelease(projectName: string): Promise<ReleaseResult> {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
