@@ -5,6 +5,7 @@ import { join } from 'path';
 import { db, schema } from '@/lib/db';
 import { resolveProjectPath } from '@/lib/project-data';
 import { getImproveConfig } from '@/lib/scheduling';
+import { checkIssueBranchBlock } from '@/lib/start-release';
 import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills';
 import { createJob, updateJob, listJobs, probeJobStatus } from '@/lib/job-storage';
 import { startJob } from '@/lib/pm2-jobs';
@@ -71,6 +72,17 @@ export async function POST(
   const projPath = resolveProjectPath(agent.project);
   if (!projPath) {
     return NextResponse.json({ detail: `project '${agent.project}' not found` }, { status: 404 });
+  }
+
+  // In Direct Branch mode, block agent runs while a fix/issue-* branch is
+  // checked out. Scheduled agents committing to an issue branch would mix
+  // unrelated work into the issue and push to the wrong branch.
+  const blockedBranch = await checkIssueBranchBlock(agent.project, projPath);
+  if (blockedBranch) {
+    return NextResponse.json(
+      { detail: `Cannot run agent in Direct Branch mode while on issue branch '${blockedBranch}' — finish or abandon issue work first`, branch: blockedBranch },
+      { status: 409 }
+    );
   }
 
   // Compose skills into system prompt. Agent skillIds can be:

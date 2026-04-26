@@ -19,6 +19,18 @@ test → [fix loop] → review → [fix loop] → commit → push
 
 Changes are committed and pushed straight to whatever branch is currently checked out. No pull request is created.
 
+#### Direct Branch + issue-branch interaction
+
+When a user clicks **Work on** for a GitHub issue, TamTam checks out a `fix/issue-<n>-<slug>` branch. In Direct Branch mode this creates a potential conflict with scheduled agents, which are expected to operate on the default branch. The following rules are enforced:
+
+| Situation | Behavior |
+|-----------|----------|
+| Scheduled/manual **agent run** while on `fix/issue-*` in Direct Branch mode | **Refused (409)** — agent must not commit to the issue branch. Finish or abandon issue work first. |
+| `startRelease` (🚀 Release button) while on `fix/issue-*` in Direct Branch mode | **Allowed** — user explicitly triggered it. After a successful push the working copy is automatically returned to the default branch. |
+| `startRelease` while on any other non-default, non-issue branch in Direct Branch mode | **Refused (409)** — unexpected branch; switch to the default branch before releasing. |
+| **Work on** (issue-branch checkout) while a pipeline is actively running | **Refused (409)** — switching branches mid-pipeline would corrupt the working copy. Wait for the pipeline to finish. |
+| Successful push on `fix/issue-*` in Direct Branch mode | Working copy is automatically **returned to the default branch** (mirrors PR Workflow post-merge behavior). |
+
 ### PR Workflow
 
 ```
