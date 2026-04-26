@@ -41,6 +41,21 @@ export async function PATCH(request: NextRequest) {
     const agent = db.select().from(schema.agents).where(eq(schema.agents.id, existing.id)).get();
 
     if (agent) {
+      // Sync to .tamtam/agents/<name>.md for version control
+      const projPath = resolveProjectPath(agent.project);
+      if (projPath) {
+        try {
+          const skillIds: string[] = JSON.parse(agent.skillIds || '[]');
+          writeFileAgent(projPath, agent.project, agent.name, {
+            prompt: agent.prompt,
+            model: agent.model,
+            schedule: agent.schedule,
+            skillIds,
+            runner: agent.runner,
+            enabled: agent.enabled,
+          });
+        } catch { /* non-fatal */ }
+      }
       try {
         const hasSkills = JSON.parse(agent.skillIds || '[]').length > 0;
         if (agent.schedule && agent.enabled && (agent.prompt || hasSkills)) {

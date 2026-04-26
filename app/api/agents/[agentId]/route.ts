@@ -4,7 +4,7 @@ import { db, schema } from '@/lib/db';
 import { installAgentSchedule, uninstallAgentSchedule } from '@/lib/agent-scheduler';
 import { errMsg } from '@/lib/types';
 import { clearAgentsCache, normalizeAgent } from '@/lib/agents-cache';
-import { parseFileAgentId, loadFileAgent, writeFileAgent } from '@/lib/tamtam-file-agents';
+import { parseFileAgentId, loadFileAgent, writeFileAgent, deleteFileAgent } from '@/lib/tamtam-file-agents';
 import { resolveProjectPath } from '@/lib/project-data';
 
 export async function GET(
@@ -82,6 +82,24 @@ export async function PATCH(
   clearAgentsCache();
   const agent = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
 
+  // Sync to .tamtam/agents/<name>.md for version control
+  if (agent) {
+    const projPath = resolveProjectPath(agent.project);
+    if (projPath) {
+      try {
+        const skillIds: string[] = JSON.parse(agent.skillIds || '[]');
+        writeFileAgent(projPath, agent.project, agent.name, {
+          prompt: agent.prompt,
+          model: agent.model,
+          schedule: agent.schedule,
+          skillIds,
+          runner: agent.runner,
+          enabled: agent.enabled,
+        });
+      } catch { /* non-fatal */ }
+    }
+  }
+
   // Update schedule (uses pm2 or launchctl based on runner)
   if (agent) {
     try {
@@ -105,8 +123,12 @@ export async function DELETE(
 ) {
   const { agentId } = await params;
 
-  if (parseFileAgentId(agentId)) {
-    return NextResponse.json({ detail: 'file-based agents are read-only' }, { status: 405 });
+  const parsedFileDel = parseFileAgentId(agentId);
+  if (parsedFileDel) {
+    const projPath = resolveProjectPath(parsedFileDel.project);
+    if (!projPath) return NextResponse.json({ detail: 'not found' }, { status: 404 });
+    deleteFileAgent(projPath, parsedFileDel.name);
+    return NextResponse.json({ status: 'deleted' });
   }
 
   // Uninstall schedule before deleting
@@ -115,6 +137,12 @@ export async function DELETE(
     await uninstallAgentSchedule(agentId, agent?.runner || 'pm2', agent?.project, agent?.name);
   } catch (e: unknown) {
     console.error(`Failed to uninstall schedule for agent ${agentId}:`, errMsg(e));
+  }
+
+  // Also remove .tamtam/agents/<name>.md
+  if (agent) {
+    const projPath = resolveProjectPath(agent.project);
+    if (projPath) deleteFileAgent(projPath, agent.name);
   }
 
   db.delete(schema.agents).where(eq(schema.agents.id, agentId)).run();

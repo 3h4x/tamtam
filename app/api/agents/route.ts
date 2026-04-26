@@ -3,7 +3,7 @@ import { db, schema } from '@/lib/db';
 import { installAgentSchedule } from '@/lib/agent-scheduler';
 import { errMsg } from '@/lib/types';
 import { getAllAgentsCached, clearAgentsCache, normalizeAgent } from '@/lib/agents-cache';
-import { scanFileAgents } from '@/lib/tamtam-file-agents';
+import { scanFileAgents, writeFileAgent } from '@/lib/tamtam-file-agents';
 import { resolveProjectPath } from '@/lib/project-data';
 
 export async function GET(request: NextRequest) {
@@ -62,6 +62,21 @@ export async function POST(request: NextRequest) {
 
   db.insert(schema.agents).values(agent).run();
   clearAgentsCache();
+
+  // Sync to .tamtam/agents/<name>.md for version control
+  const projPath = resolveProjectPath(agent.project);
+  if (projPath) {
+    try {
+      writeFileAgent(projPath, agent.project, agent.name, {
+        prompt: agent.prompt,
+        model: agent.model,
+        schedule: agent.schedule,
+        skillIds: skillIds || [],
+        runner: agent.runner,
+        enabled: agent.enabled,
+      });
+    } catch { /* non-fatal */ }
+  }
 
   // Install schedule if configured (uses pm2 or launchctl based on runner).
   // Runs only need either a prompt or skills to produce meaningful output.
