@@ -100,6 +100,7 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: '/tmp/logs' }),
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
 
     vi.doMock('@/lib/job-storage', () => ({
