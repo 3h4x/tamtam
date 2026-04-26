@@ -192,7 +192,7 @@ JSON schema:
         '--model', 'haiku',
         '-p', prompt,
       ],
-      { cwd: projPath, timeout: 180000 },
+      { cwd: projPath, timeout: 180000, killProcessGroup: true },
     );
     log(`# claude exit ${claudeR.exitCode}\n`);
     if (claudeR.exitCode !== 0 || !claudeR.stdout.trim()) {

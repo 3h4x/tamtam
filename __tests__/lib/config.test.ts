@@ -74,6 +74,7 @@ describe('config', () => {
         notification_webhook_secret: '',
         notification_on_release_success: false,
         notification_on_release_fail: false,
+        notification_on_release_aborted: false,
         notification_on_fix_loop_exhausted: false,
         notification_on_review_do_not_ship: false,
         notification_on_agent_run_fail: false,

@@ -233,5 +233,10 @@ try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN release_id TEXT');
 } catch {}
 
+// Migrate: add aborted_at to jobs — set when a release pipeline is aborted mid-run
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN aborted_at REAL');
+} catch {}
+
 export const db = drizzle(sqlite, { schema });
 export { schema };
