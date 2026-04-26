@@ -199,6 +199,51 @@ Dev is `next dev --port 1337` under PM2 — **Turbopack HMR is on**. Do **not** 
 - Background probe sweep: `instrumentation.ts` runs `runProbeSweep` every 30 seconds — detects Claude CLI processes that hang after emitting their final result event (holding a job "running" indefinitely) and resolves them via `probeJobStatus` in `lib/job-storage.ts`
 - Dependabot with grouped PRs (production deps, dev deps, actions)
 
+## `.tamtam/` Directory (per-project, committed to version control)
+
+Each tracked workspace project can have a `.tamtam/` directory in its root for version-controlled TamTam config. TamTam reads these files on every request; writes from the UI are saved back automatically.
+
+### `.tamtam/config.yml`
+Overrides the project's DB config. File values take precedence over DB on read. All fields are optional.
+
+```yaml
+# .tamtam/config.yml
+test_command: pnpm test           # overrides auto-detected command
+pr_workflow_enabled: false        # Direct Branch (false) or PR Workflow (true)
+auto_commit_enabled: false        # auto-commit after LGTM
+auto_push_enabled: false          # auto-push after commit
+auto_pr_merge_enabled: false      # auto-merge PR once CI passes
+release_after_run: false          # trigger release after every agent run
+test_cron_enabled: false          # run tests on schedule
+test_cron_schedule: 6h            # cron schedule (e.g. 30m, 6h, 1d)
+tests_disabled: false             # skip test step in pipeline
+review_disabled: false            # skip review step in pipeline
+issue_auto_branch: true           # auto-checkout fix/issue-N branch on Work on
+```
+
+Reader: `lib/tamtam-file-config.ts` → `loadFileConfig(projectPath)` / `writeFileConfig(projectPath, updates)`.
+The Config tab shows a banner listing which keys come from the file; saving writes back to `.tamtam/config.yml`.
+
+### `.tamtam/agents/*.md`
+Each `.md` file defines one read-only agent scoped to the project. Filename (minus `.md`) is the agent name. YAML frontmatter sets metadata; body is the prompt.
+
+```markdown
+---
+model: sonnet          # sonnet | opus | haiku
+schedule: 4h           # optional: 15m 30m 1h 2h 4h 8h 12h 24h
+skillIds: ["agent-tests"]   # JSON array or space-separated skill IDs
+runner: pm2            # pm2 | launchctl
+enabled: true
+---
+
+Prompt content here. This is sent verbatim as the agent's task instructions.
+```
+
+File agents appear in the Agents tab with a `file` badge and are read-only — edit/delete are disabled in the UI. To override a file agent, create a DB agent with the same name (DB takes precedence).
+
+Reader: `lib/tamtam-file-agents.ts` → `scanFileAgents(projectPath, projectName)` / `loadFileAgent(...)`.
+File agent IDs use the format `file:<project>:<name>` and are handled transparently in all agent API routes.
+
 ## Coding Conventions
 - **Path imports**: always use the `@/` alias (e.g. `import { exec } from '@/lib/shell'`), never relative `../../` paths.
 - **File naming**: kebab-case for all files (`start-fix.ts`, `project-data.ts`); PascalCase only for React component files (`AgentsTab.tsx`).

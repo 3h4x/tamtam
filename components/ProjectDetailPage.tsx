@@ -1041,6 +1041,16 @@ export function ProjectDetailPage({
           ) : config ? (
             <div className="space-y-4">
 
+              {/* File config banner */}
+              {config.file_config && config.file_config.length > 0 && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-bg-tertiary border border-border text-xs text-text-secondary">
+                  <span className="font-mono text-accent">.tamtam/config.yml</span>
+                  <span>—</span>
+                  <span>overrides: {config.file_config.join(', ')}</span>
+                  <span className="ml-auto text-text-tertiary">saved automatically on change</span>
+                </div>
+              )}
+
               {/* Save bar */}
               <div className="flex items-center justify-end gap-3">
                 {anyDirty && !anySaving && (

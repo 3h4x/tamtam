@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, writeFileSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { loadFileConfig } from '@/lib/tamtam-file-config';
+import { loadFileConfig, writeFileConfig } from '@/lib/tamtam-file-config';
 
 function makeTmpDir(): string {
   const dir = join(tmpdir(), `tamtam-cfg-test-${Date.now()}`);
@@ -32,9 +32,13 @@ describe('loadFileConfig', () => {
     expect(cfg?.test_command).toBe('pnpm test');
   });
 
-  it('parses boolean fields', () => {
+  it('parses all boolean fields', () => {
     writeConfig(tmpDir, `pr_workflow_enabled: true
 auto_push_enabled: false
+auto_commit_enabled: true
+auto_pr_merge_enabled: false
+release_after_run: true
+test_cron_enabled: true
 tests_disabled: true
 review_disabled: false
 issue_auto_branch: true
@@ -42,9 +46,18 @@ issue_auto_branch: true
     const cfg = loadFileConfig(tmpDir);
     expect(cfg?.pr_workflow_enabled).toBe(true);
     expect(cfg?.auto_push_enabled).toBe(false);
+    expect(cfg?.auto_commit_enabled).toBe(true);
+    expect(cfg?.auto_pr_merge_enabled).toBe(false);
+    expect(cfg?.release_after_run).toBe(true);
+    expect(cfg?.test_cron_enabled).toBe(true);
     expect(cfg?.tests_disabled).toBe(true);
     expect(cfg?.review_disabled).toBe(false);
     expect(cfg?.issue_auto_branch).toBe(true);
+  });
+
+  it('parses test_cron_schedule', () => {
+    writeConfig(tmpDir, 'test_cron_schedule: 6h\n');
+    expect(loadFileConfig(tmpDir)?.test_cron_schedule).toBe('6h');
   });
 
   it('ignores comments and blank lines', () => {
@@ -66,7 +79,68 @@ auto_push_enabled: false
 
   it('strips quotes from test_command', () => {
     writeConfig(tmpDir, 'test_command: "pnpm run test"\n');
+    expect(loadFileConfig(tmpDir)?.test_command).toBe('pnpm run test');
+  });
+});
+
+describe('writeFileConfig', () => {
+  let tmpDir: string;
+
+  beforeEach(() => { tmpDir = makeTmpDir(); });
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('creates .tamtam/config.yml when it does not exist', () => {
+    writeFileConfig(tmpDir, { test_command: 'pnpm test' });
+    const configPath = join(tmpDir, '.tamtam', 'config.yml');
+    expect(existsSync(configPath)).toBe(true);
+    const content = readFileSync(configPath, 'utf-8');
+    expect(content).toContain('test_command: pnpm test');
+  });
+
+  it('includes header comment', () => {
+    writeFileConfig(tmpDir, { auto_push_enabled: false });
+    const content = readFileSync(join(tmpDir, '.tamtam', 'config.yml'), 'utf-8');
+    expect(content).toContain('# TamTam project configuration');
+  });
+
+  it('merges into existing config without losing unrelated keys', () => {
+    writeConfig(tmpDir, 'test_command: npm test\nauto_push_enabled: false\n');
+    writeFileConfig(tmpDir, { pr_workflow_enabled: true });
     const cfg = loadFileConfig(tmpDir);
-    expect(cfg?.test_command).toBe('pnpm run test');
+    expect(cfg?.test_command).toBe('npm test');
+    expect(cfg?.auto_push_enabled).toBe(false);
+    expect(cfg?.pr_workflow_enabled).toBe(true);
+  });
+
+  it('updates existing key', () => {
+    writeConfig(tmpDir, 'test_command: npm test\n');
+    writeFileConfig(tmpDir, { test_command: 'pnpm test' });
+    expect(loadFileConfig(tmpDir)?.test_command).toBe('pnpm test');
+  });
+
+  it('removes key when set to null', () => {
+    writeConfig(tmpDir, 'test_command: npm test\nauto_push_enabled: true\n');
+    writeFileConfig(tmpDir, { test_command: null });
+    const cfg = loadFileConfig(tmpDir);
+    expect(cfg?.test_command).toBeUndefined();
+    expect(cfg?.auto_push_enabled).toBe(true);
+  });
+
+  it('writes keys in canonical order', () => {
+    writeFileConfig(tmpDir, {
+      auto_push_enabled: true,
+      test_command: 'pnpm test',
+      pr_workflow_enabled: true,
+    });
+    const content = readFileSync(join(tmpDir, '.tamtam', 'config.yml'), 'utf-8');
+    const lines = content.split('\n').filter(l => l && !l.startsWith('#'));
+    const keyOrder = lines.map(l => l.split(':')[0].trim());
+    expect(keyOrder.indexOf('test_command')).toBeLessThan(keyOrder.indexOf('pr_workflow_enabled'));
+    expect(keyOrder.indexOf('pr_workflow_enabled')).toBeLessThan(keyOrder.indexOf('auto_push_enabled'));
+  });
+
+  it('creates .tamtam dir if not present', () => {
+    writeFileConfig(tmpDir, { tests_disabled: true });
+    expect(existsSync(join(tmpDir, '.tamtam', 'config.yml'))).toBe(true);
   });
 });
