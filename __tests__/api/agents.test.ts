@@ -37,6 +37,10 @@ describe('agents API', () => {
   let DELETE: any;
   let installAgentScheduleMock: ReturnType<typeof vi.fn>;
   let uninstallAgentScheduleMock: ReturnType<typeof vi.fn>;
+  let parseFileAgentIdMock: ReturnType<typeof vi.fn>;
+  let loadFileAgentMock: ReturnType<typeof vi.fn>;
+  let writeFileAgentMock: ReturnType<typeof vi.fn>;
+  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -65,7 +69,16 @@ describe('agents API', () => {
       scanFileAgents: vi.fn().mockReturnValue([]),
       loadFileAgent: vi.fn().mockReturnValue(null),
       parseFileAgentId: vi.fn().mockReturnValue(null),
+      writeFileAgent: vi.fn().mockReturnValue(null),
     }));
+
+    // Capture mock function references so individual tests can override return values
+    const fileAgentsMod = await import('@/lib/tamtam-file-agents');
+    parseFileAgentIdMock = fileAgentsMod.parseFileAgentId as ReturnType<typeof vi.fn>;
+    loadFileAgentMock = fileAgentsMod.loadFileAgent as ReturnType<typeof vi.fn>;
+    writeFileAgentMock = fileAgentsMod.writeFileAgent as ReturnType<typeof vi.fn>;
+    const projectDataMod = await import('@/lib/project-data');
+    resolveProjectPathMock = projectDataMod.resolveProjectPath as ReturnType<typeof vi.fn>;
 
     const agentsRoute = await import('@/app/api/agents/route');
     GET = agentsRoute.GET;
@@ -519,6 +532,95 @@ describe('agents API', () => {
       const data = await response.json();
       expect(data.agent.updatedAt).toBeGreaterThanOrEqual(before);
     });
+
+    it('returns 404 for file agent when project path is unknown', async () => {
+      parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
+      // resolveProjectPath returns null by default
+      const request = new NextRequest('http://localhost/api/agents/file:myproj:my-agent', {
+        method: 'PATCH',
+        body: JSON.stringify({ prompt: 'new prompt' }),
+      });
+      const response = await PATCH(request, { params: Promise.resolve({ agentId: 'file:myproj:my-agent' }) });
+      expect(response.status).toBe(404);
+    });
+
+    it('returns 404 for file agent when the .md file does not exist', async () => {
+      parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      // loadFileAgent returns null by default — file absent
+      const request = new NextRequest('http://localhost/api/agents/file:myproj:my-agent', {
+        method: 'PATCH',
+        body: JSON.stringify({ prompt: 'new prompt' }),
+      });
+      const response = await PATCH(request, { params: Promise.resolve({ agentId: 'file:myproj:my-agent' }) });
+      expect(response.status).toBe(404);
+    });
+
+    it('writes and returns updated file agent', async () => {
+      const fakeAgent = {
+        id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
+        skillIds: [] as string[], model: 'sonnet', prompt: 'new prompt', schedule: null,
+        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+        source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
+      };
+      parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      loadFileAgentMock.mockReturnValueOnce(fakeAgent);
+      writeFileAgentMock.mockReturnValueOnce(fakeAgent);
+
+      const request = new NextRequest('http://localhost/api/agents/file:myproj:my-agent', {
+        method: 'PATCH',
+        body: JSON.stringify({ prompt: 'new prompt' }),
+      });
+      const response = await PATCH(request, { params: Promise.resolve({ agentId: 'file:myproj:my-agent' }) });
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.agent.id).toBe('file:myproj:my-agent');
+      expect(writeFileAgentMock).toHaveBeenCalledOnce();
+    });
+
+    it('calls installAgentSchedule for file agent with schedule, enabled, and prompt', async () => {
+      const fakeAgent = {
+        id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
+        skillIds: [] as string[], model: 'sonnet', prompt: 'do work', schedule: '4h',
+        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+        source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
+      };
+      parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      loadFileAgentMock.mockReturnValueOnce(fakeAgent);
+      writeFileAgentMock.mockReturnValueOnce(fakeAgent);
+
+      const request = new NextRequest('http://localhost/api/agents/file:myproj:my-agent', {
+        method: 'PATCH',
+        body: JSON.stringify({ prompt: 'do work', schedule: '4h' }),
+      });
+      await PATCH(request, { params: Promise.resolve({ agentId: 'file:myproj:my-agent' }) });
+      expect(installAgentScheduleMock).toHaveBeenCalledOnce();
+      expect(installAgentScheduleMock).toHaveBeenCalledWith(
+        'file:myproj:my-agent', '4h', 'do work', 'pm2', 'myproj', 'my-agent'
+      );
+    });
+
+    it('calls uninstallAgentSchedule for file agent when schedule is cleared', async () => {
+      const fakeAgent = {
+        id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
+        skillIds: [] as string[], model: 'sonnet', prompt: 'do work', schedule: null,
+        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+        source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
+      };
+      parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      loadFileAgentMock.mockReturnValueOnce(fakeAgent);
+      writeFileAgentMock.mockReturnValueOnce(fakeAgent);
+
+      const request = new NextRequest('http://localhost/api/agents/file:myproj:my-agent', {
+        method: 'PATCH',
+        body: JSON.stringify({ schedule: '' }),
+      });
+      await PATCH(request, { params: Promise.resolve({ agentId: 'file:myproj:my-agent' }) });
+      expect(uninstallAgentScheduleMock).toHaveBeenCalledOnce();
+    });
   });
 
   describe('DELETE /agents/{agentId}', () => {
@@ -907,6 +1009,60 @@ describe('agents API', () => {
       }));
       expect(installAgentScheduleMock).not.toHaveBeenCalled();
       expect(uninstallAgentScheduleMock).toHaveBeenCalledOnce();
+    });
+
+    it('falls back to file agent when no DB agent matches project+name', async () => {
+      const fakeAgent = {
+        id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
+        skillIds: [] as string[], model: 'sonnet', prompt: 'updated', schedule: null,
+        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+        source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
+      };
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      loadFileAgentMock.mockReturnValueOnce(fakeAgent);
+      writeFileAgentMock.mockReturnValueOnce(fakeAgent);
+
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'my-agent', prompt: 'updated' }),
+      }));
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.agent.id).toBe('file:myproj:my-agent');
+      expect(writeFileAgentMock).toHaveBeenCalledOnce();
+    });
+
+    it('returns 404 when no DB agent and no file agent found', async () => {
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      // loadFileAgent returns null by default — no file agent either
+
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'nonexistent' }),
+      }));
+      expect(res.status).toBe(404);
+    });
+
+    it('calls installAgentSchedule for file agent fallback with schedule, prompt, and enabled', async () => {
+      const fakeAgent = {
+        id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
+        skillIds: [] as string[], model: 'sonnet', prompt: 'do work', schedule: '2h',
+        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+        source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
+      };
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      loadFileAgentMock.mockReturnValueOnce(fakeAgent);
+      writeFileAgentMock.mockReturnValueOnce(fakeAgent);
+
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'my-agent', schedule: '2h' }),
+      }));
+      expect(res.status).toBe(200);
+      expect(installAgentScheduleMock).toHaveBeenCalledOnce();
+      expect(installAgentScheduleMock).toHaveBeenCalledWith(
+        'file:myproj:my-agent', '2h', 'do work', 'pm2', 'myproj', 'my-agent'
+      );
     });
   });
 

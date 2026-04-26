@@ -4,7 +4,7 @@ import { db, schema } from '@/lib/db';
 import { installAgentSchedule, uninstallAgentSchedule } from '@/lib/agent-scheduler';
 import { errMsg } from '@/lib/types';
 import { clearAgentsCache, normalizeAgent } from '@/lib/agents-cache';
-import { parseFileAgentId, loadFileAgent } from '@/lib/tamtam-file-agents';
+import { parseFileAgentId, loadFileAgent, writeFileAgent } from '@/lib/tamtam-file-agents';
 import { resolveProjectPath } from '@/lib/project-data';
 
 export async function GET(
@@ -33,8 +33,36 @@ export async function PATCH(
 ) {
   const { agentId } = await params;
 
-  if (parseFileAgentId(agentId)) {
-    return NextResponse.json({ detail: 'file-based agents are read-only' }, { status: 405 });
+  const parsedFile = parseFileAgentId(agentId);
+  if (parsedFile) {
+    const projPath = resolveProjectPath(parsedFile.project);
+    if (!projPath) return NextResponse.json({ detail: 'not found' }, { status: 404 });
+    if (!loadFileAgent(projPath, parsedFile.project, parsedFile.name)) {
+      return NextResponse.json({ detail: 'not found' }, { status: 404 });
+    }
+    const body = await request.json();
+    try {
+      const updated = writeFileAgent(projPath, parsedFile.project, parsedFile.name, {
+        prompt: body.prompt,
+        model: body.model,
+        schedule: body.schedule,
+        skillIds: body.skillIds,
+        runner: body.runner,
+        enabled: body.enabled,
+      });
+      try {
+        if (updated.schedule && updated.enabled && (updated.prompt || updated.skillIds.length > 0)) {
+          await installAgentSchedule(updated.id, updated.schedule, updated.prompt, updated.runner, updated.project, updated.name);
+        } else {
+          await uninstallAgentSchedule(updated.id, updated.runner, updated.project, updated.name);
+        }
+      } catch (e: unknown) {
+        console.error(`Failed to update schedule for file agent ${updated.id}:`, errMsg(e));
+      }
+      return NextResponse.json({ agent: updated });
+    } catch (e: unknown) {
+      return NextResponse.json({ detail: `Failed to write agent file: ${errMsg(e)}` }, { status: 500 });
+    }
   }
 
   const existing = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();

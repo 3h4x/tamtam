@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, writeFileSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { scanFileAgents, loadFileAgent, parseFileAgentId } from '@/lib/tamtam-file-agents';
+import { scanFileAgents, loadFileAgent, parseFileAgentId, writeFileAgent } from '@/lib/tamtam-file-agents';
 
 function makeTmpDir(): string {
   const dir = join(tmpdir(), `tamtam-test-${Date.now()}`);
@@ -137,5 +137,94 @@ Run pnpm test.`);
     expect(a!.name).toBe('tests');
     expect(a!.model).toBe('haiku');
     expect(a!.prompt).toBe('Run pnpm test.');
+  });
+});
+
+describe('writeFileAgent', () => {
+  let tmpDir: string;
+
+  beforeEach(() => { tmpDir = makeTmpDir(); });
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('creates .tamtam/agents/<name>.md when it does not exist', () => {
+    writeFileAgent(tmpDir, 'proj', 'new-agent', { prompt: 'Do something.', model: 'sonnet' });
+    const filePath = join(tmpDir, '.tamtam', 'agents', 'new-agent.md');
+    expect(existsSync(filePath)).toBe(true);
+  });
+
+  it('returns a FileAgent with source: file', () => {
+    const a = writeFileAgent(tmpDir, 'proj', 'improve', { prompt: 'Fix UI.', model: 'opus' });
+    expect(a.source).toBe('file');
+    expect(a.name).toBe('improve');
+    expect(a.model).toBe('opus');
+    expect(a.prompt).toBe('Fix UI.');
+    expect(a.id).toBe('file:proj:improve');
+  });
+
+  it('merges into existing file without losing unset fields', () => {
+    writeAgent(tmpDir, 'improve', `---
+model: opus
+schedule: 4h
+skillIds: ["agent-tests"]
+---
+Original prompt.`);
+
+    writeFileAgent(tmpDir, 'proj', 'improve', { prompt: 'Updated prompt.' });
+
+    const a = loadFileAgent(tmpDir, 'proj', 'improve');
+    expect(a!.prompt).toBe('Updated prompt.');
+    expect(a!.model).toBe('opus');
+    expect(a!.schedule).toBe('4h');
+    expect(a!.skillIds).toEqual(['agent-tests']);
+  });
+
+  it('updates model when provided', () => {
+    writeAgent(tmpDir, 'agent', `---\nmodel: sonnet\n---\nDo stuff.`);
+    writeFileAgent(tmpDir, 'proj', 'agent', { model: 'haiku' });
+    expect(loadFileAgent(tmpDir, 'proj', 'agent')!.model).toBe('haiku');
+  });
+
+  it('clears schedule when set to null', () => {
+    writeAgent(tmpDir, 'agent', `---\nmodel: sonnet\nschedule: 4h\n---\nDo stuff.`);
+    writeFileAgent(tmpDir, 'proj', 'agent', { schedule: null });
+    expect(loadFileAgent(tmpDir, 'proj', 'agent')!.schedule).toBeNull();
+  });
+
+  it('writes runner only when not pm2', () => {
+    writeFileAgent(tmpDir, 'proj', 'agent', { runner: 'launchctl' });
+    const content = readFileSync(join(tmpDir, '.tamtam', 'agents', 'agent.md'), 'utf-8');
+    expect(content).toContain('runner: launchctl');
+
+    writeFileAgent(tmpDir, 'proj', 'agent2', { runner: 'pm2' });
+    const content2 = readFileSync(join(tmpDir, '.tamtam', 'agents', 'agent2.md'), 'utf-8');
+    expect(content2).not.toContain('runner:');
+  });
+
+  it('writes enabled: false only when disabled', () => {
+    writeFileAgent(tmpDir, 'proj', 'off', { enabled: false });
+    const content = readFileSync(join(tmpDir, '.tamtam', 'agents', 'off.md'), 'utf-8');
+    expect(content).toContain('enabled: false');
+
+    writeFileAgent(tmpDir, 'proj', 'on', { enabled: true });
+    const content2 = readFileSync(join(tmpDir, '.tamtam', 'agents', 'on.md'), 'utf-8');
+    expect(content2).not.toContain('enabled:');
+  });
+
+  it('creates .tamtam/agents dir when missing', () => {
+    writeFileAgent(tmpDir, 'proj', 'x', {});
+    expect(existsSync(join(tmpDir, '.tamtam', 'agents', 'x.md'))).toBe(true);
+  });
+
+  it('round-trips through load', () => {
+    const skillIds = ['persona:engineering-team/senior-fullstack', 'agent-tests'];
+    writeFileAgent(tmpDir, 'proj', 'agent', {
+      model: 'opus', schedule: '8h', skillIds, runner: 'launchctl', prompt: 'Run stuff.',
+    });
+    const a = loadFileAgent(tmpDir, 'proj', 'agent')!;
+    expect(a.model).toBe('opus');
+    expect(a.schedule).toBe('8h');
+    expect(a.skillIds).toEqual(skillIds);
+    expect(a.runner).toBe('launchctl');
+    expect(a.prompt).toBe('Run stuff.');
   });
 });
