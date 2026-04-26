@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 export interface FileAgent {
@@ -182,6 +182,16 @@ export function writeFileAgent(
   writeFileSync(filePath, content);
 
   return buildFileAgent(filePath, agentName, projectName, content, Date.now() / 1000);
+}
+
+/**
+ * Delete .tamtam/agents/<name>.md. No-op if the file doesn't exist.
+ */
+export function deleteFileAgent(projectPath: string, agentName: string): void {
+  const filePath = join(projectPath, '.tamtam', 'agents', `${agentName}.md`);
+  if (existsSync(filePath)) {
+    try { unlinkSync(filePath); } catch {}
+  }
 }
 
 export function parseFileAgentId(agentId: string): { project: string; name: string } | null {

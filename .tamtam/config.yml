@@ -1,0 +1,7 @@
+# TamTam project configuration — committed to version control
+# See .tamtam/agents/ for agent definitions
+
+test_command: pnpm lint && pnpm type-check && pnpm test
+auto_commit_enabled: true
+auto_push_enabled: true
+release_after_run: true
