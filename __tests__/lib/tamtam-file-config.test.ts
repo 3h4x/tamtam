@@ -81,6 +81,42 @@ auto_push_enabled: false
     writeConfig(tmpDir, 'test_command: "pnpm run test"\n');
     expect(loadFileConfig(tmpDir)?.test_command).toBe('pnpm run test');
   });
+
+  it('parses grouped format (indented keys under section headers)', () => {
+    writeConfig(tmpDir, `# TamTam project configuration
+# See .tamtam/agents/ for agent definitions
+
+pipeline:
+  test_command: pnpm lint && pnpm test
+  auto_commit_enabled: true
+  auto_push_enabled: true
+  release_after_run: true
+
+schedule:
+  test_cron_enabled: true
+  test_cron_schedule: 6h
+
+gates:
+  tests_disabled: false
+  review_disabled: true
+  issue_auto_branch: true
+`);
+    const cfg = loadFileConfig(tmpDir);
+    expect(cfg?.test_command).toBe('pnpm lint && pnpm test');
+    expect(cfg?.auto_commit_enabled).toBe(true);
+    expect(cfg?.auto_push_enabled).toBe(true);
+    expect(cfg?.release_after_run).toBe(true);
+    expect(cfg?.test_cron_enabled).toBe(true);
+    expect(cfg?.test_cron_schedule).toBe('6h');
+    expect(cfg?.tests_disabled).toBe(false);
+    expect(cfg?.review_disabled).toBe(true);
+    expect(cfg?.issue_auto_branch).toBe(true);
+  });
+
+  it('returns null for a file containing only group headers', () => {
+    writeConfig(tmpDir, 'pipeline:\nschedule:\ngates:\n');
+    expect(loadFileConfig(tmpDir)).toBeNull();
+  });
 });
 
 describe('writeFileConfig', () => {
@@ -142,5 +178,45 @@ describe('writeFileConfig', () => {
   it('creates .tamtam dir if not present', () => {
     writeFileConfig(tmpDir, { tests_disabled: true });
     expect(existsSync(join(tmpDir, '.tamtam', 'config.yml'))).toBe(true);
+  });
+
+  it('emits grouped sections in output', () => {
+    writeFileConfig(tmpDir, {
+      test_command: 'pnpm test',
+      auto_push_enabled: true,
+      test_cron_enabled: true,
+      tests_disabled: false,
+    });
+    const content = readFileSync(join(tmpDir, '.tamtam', 'config.yml'), 'utf-8');
+    expect(content).toContain('pipeline:');
+    expect(content).toContain('  test_command: pnpm test');
+    expect(content).toContain('  auto_push_enabled: true');
+    expect(content).toContain('schedule:');
+    expect(content).toContain('  test_cron_enabled: true');
+    expect(content).toContain('gates:');
+    expect(content).toContain('  tests_disabled: false');
+  });
+
+  it('round-trips grouped format through write then load', () => {
+    writeFileConfig(tmpDir, {
+      test_command: 'pnpm test',
+      pr_workflow_enabled: true,
+      test_cron_schedule: '4h',
+      review_disabled: true,
+    });
+    const cfg = loadFileConfig(tmpDir);
+    expect(cfg?.test_command).toBe('pnpm test');
+    expect(cfg?.pr_workflow_enabled).toBe(true);
+    expect(cfg?.test_cron_schedule).toBe('4h');
+    expect(cfg?.review_disabled).toBe(true);
+  });
+
+  it('merges grouped format input without losing keys', () => {
+    writeConfig(tmpDir, `pipeline:\n  test_command: npm test\n  auto_push_enabled: false\n`);
+    writeFileConfig(tmpDir, { pr_workflow_enabled: true });
+    const cfg = loadFileConfig(tmpDir);
+    expect(cfg?.test_command).toBe('npm test');
+    expect(cfg?.auto_push_enabled).toBe(false);
+    expect(cfg?.pr_workflow_enabled).toBe(true);
   });
 });

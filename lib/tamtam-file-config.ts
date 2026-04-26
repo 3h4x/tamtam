@@ -2,36 +2,36 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 export interface FileProjectConfig {
-  // Pipeline
   test_command?: string;
   pr_workflow_enabled?: boolean;
   auto_commit_enabled?: boolean;
   auto_push_enabled?: boolean;
   auto_pr_merge_enabled?: boolean;
   release_after_run?: boolean;
-  // Cron
   test_cron_enabled?: boolean;
   test_cron_schedule?: string;
-  // Gates
   tests_disabled?: boolean;
   review_disabled?: boolean;
   issue_auto_branch?: boolean;
 }
 
-// Ordered list of all supported keys — determines write order in YAML
-const ALL_KEYS: (keyof FileProjectConfig)[] = [
-  'test_command',
-  'pr_workflow_enabled',
-  'auto_commit_enabled',
-  'auto_push_enabled',
-  'auto_pr_merge_enabled',
-  'release_after_run',
-  'test_cron_enabled',
-  'test_cron_schedule',
-  'tests_disabled',
-  'review_disabled',
-  'issue_auto_branch',
+// Groups define both the YAML section order and which keys belong to each section.
+const GROUPS: { label: string; keys: (keyof FileProjectConfig)[] }[] = [
+  {
+    label: 'pipeline',
+    keys: ['test_command', 'pr_workflow_enabled', 'auto_commit_enabled', 'auto_push_enabled', 'auto_pr_merge_enabled', 'release_after_run'],
+  },
+  {
+    label: 'schedule',
+    keys: ['test_cron_enabled', 'test_cron_schedule'],
+  },
+  {
+    label: 'gates',
+    keys: ['tests_disabled', 'review_disabled', 'issue_auto_branch'],
+  },
 ];
+
+const ALL_KEYS = GROUPS.flatMap(g => g.keys);
 
 const BOOL_KEYS = new Set<keyof FileProjectConfig>([
   'pr_workflow_enabled',
@@ -62,13 +62,16 @@ export function loadFileConfig(projectPath: string): FileProjectConfig | null {
     const config: FileProjectConfig = {};
 
     for (const raw of readFileSync(configPath, 'utf-8').split('\n')) {
-      const line = raw.trim();
-      if (!line || line.startsWith('#')) continue;
-      const colonIdx = line.indexOf(':');
+      // Accept both flat keys and indented keys under a group header.
+      // Group header lines (e.g. "pipeline:") have no value — skip them.
+      const line = raw.trimEnd();
+      const trimmed = line.trimStart();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const colonIdx = trimmed.indexOf(':');
       if (colonIdx <= 0) continue;
-      const key = line.slice(0, colonIdx).trim() as keyof FileProjectConfig;
-      const rawVal = line.slice(colonIdx + 1).trim();
-      if (!rawVal) continue;
+      const key = trimmed.slice(0, colonIdx).trim() as keyof FileProjectConfig;
+      const rawVal = trimmed.slice(colonIdx + 1).trim();
+      if (!rawVal) continue; // group header or empty value
       const value = parseValue(rawVal);
 
       if (STRING_KEYS.has(key) && typeof value === 'string') {
@@ -85,7 +88,7 @@ export function loadFileConfig(projectPath: string): FileProjectConfig | null {
 }
 
 /**
- * Write (merge) config values into .tamtam/config.yml.
+ * Write (merge) config values into .tamtam/config.yml using grouped sections.
  * Creates the file and directory if they don't exist.
  * Keys set to null/undefined are removed from the file.
  */
@@ -98,15 +101,17 @@ export function writeFileConfig(
 
   mkdirSync(tamtamDir, { recursive: true });
 
-  // Load existing config as a raw map so we preserve unknown keys
+  // Load existing values — read both flat and grouped formats
   const current: Map<string, string> = new Map();
   if (existsSync(configPath)) {
     for (const raw of readFileSync(configPath, 'utf-8').split('\n')) {
-      const line = raw.trim();
-      if (!line || line.startsWith('#')) continue;
-      const colonIdx = line.indexOf(':');
+      const trimmed = raw.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const colonIdx = trimmed.indexOf(':');
       if (colonIdx > 0) {
-        current.set(line.slice(0, colonIdx).trim(), line.slice(colonIdx + 1).trim());
+        const key = trimmed.slice(0, colonIdx).trim();
+        const val = trimmed.slice(colonIdx + 1).trim();
+        if (val) current.set(key, val); // skip group headers (no value)
       }
     }
   }
@@ -120,20 +125,30 @@ export function writeFileConfig(
     }
   }
 
-  // Serialize in canonical key order, unknown keys appended at end
+  // Serialize with grouped sections
   const knownSet = new Set(ALL_KEYS as string[]);
   const lines: string[] = [
     '# TamTam project configuration — committed to version control',
     '# See .tamtam/agents/ for agent definitions',
-    '',
   ];
-  for (const key of ALL_KEYS) {
-    if (current.has(key)) {
-      lines.push(`${key}: ${current.get(key)}`);
+
+  for (const group of GROUPS) {
+    const groupLines = group.keys
+      .filter(k => current.has(k))
+      .map(k => `  ${k}: ${current.get(k)}`);
+    if (groupLines.length > 0) {
+      lines.push('', `${group.label}:`);
+      lines.push(...groupLines);
     }
   }
-  for (const [key, val] of current) {
-    if (!knownSet.has(key)) lines.push(`${key}: ${val}`);
+
+  // Unknown keys appended flat at the end
+  const unknownLines = [...current.entries()]
+    .filter(([k]) => !knownSet.has(k))
+    .map(([k, v]) => `${k}: ${v}`);
+  if (unknownLines.length > 0) {
+    lines.push('', '# custom');
+    lines.push(...unknownLines);
   }
 
   writeFileSync(configPath, lines.join('\n') + '\n');
