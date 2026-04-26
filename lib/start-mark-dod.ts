@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { resolveProjectPath } from './project-data';
@@ -6,6 +6,7 @@ import { getImproveConfig } from './scheduling';
 import { exec } from './shell';
 import { getPermissionModeFlag } from './config';
 import { createJob, listJobs, markDone } from './job-storage';
+import { startJob, getJobStatus, deleteJob } from './pm2-jobs';
 import { ensureBranchForCtx } from './mark-dod-branch';
 
 export type MarkDodResult =
@@ -78,6 +79,7 @@ export function tickCriteria(body: string, verifiedTexts: Set<string>): { body: 
 export async function startMarkDod(
   projectName: string,
   override?: { issueNumber?: number; prNumber?: number; repo?: string },
+  _pollIntervalMs = 2000,
 ): Promise<MarkDodResult> {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
@@ -182,28 +184,43 @@ JSON schema:
     }
 
     log(`# asking claude to verify each criterion against the codebase...\n`);
-    const claudeR = await exec(
-      claudeBin,
-      [
-        '--print',
-        '--system-prompt',
-        'You verify whether acceptance criteria are implemented in a codebase. Use tools to inspect real code. Output strict JSON only.',
-        ...getPermissionModeFlag().split(' '),
-        '--model', 'haiku',
-        '-p', prompt,
-      ],
-      { cwd: projPath, timeout: 180000, killProcessGroup: true },
-    );
-    log(`# claude exit ${claudeR.exitCode}\n`);
-    if (claudeR.exitCode !== 0 || !claudeR.stdout.trim()) {
-      log(`# claude verification failed: ${claudeR.stderr || 'empty output'}\n`);
+    const claudeJobId = `${job.id}-verify`;
+    const claudeLogPath = join(logDir, `${claudeJobId}.log`);
+    const fullPrompt = 'You verify whether acceptance criteria are implemented in a codebase. Use tools to inspect real code. Output strict JSON only.\n\n---\n\n' + prompt;
+    const claudeCommand = `${claudeBin} --print ${getPermissionModeFlag()} --model haiku`;
+
+    let claudeOutput = '';
+    let claudeExitCode = 1;
+    try {
+      await startJob(claudeJobId, claudeCommand, fullPrompt, projPath);
+      const deadline = Date.now() + 180000;
+      while (Date.now() < deadline) {
+        if (_pollIntervalMs > 0) await new Promise(r => setTimeout(r, _pollIntervalMs));
+        const status = await getJobStatus(claudeJobId);
+        if (status.status !== 'running') {
+          claudeExitCode = status.exitCode ?? 1;
+          break;
+        }
+      }
+      if (existsSync(claudeLogPath)) {
+        claudeOutput = readFileSync(claudeLogPath, 'utf-8');
+      }
+    } catch (e) {
+      log(`# failed to start claude PM2 job: ${e instanceof Error ? e.message : String(e)}\n`);
+    } finally {
+      await deleteJob(claudeJobId).catch(() => {});
+    }
+
+    log(`# claude exit ${claudeExitCode}\n`);
+    if (claudeExitCode !== 0 || !claudeOutput.trim()) {
+      log(`# claude verification failed\n`);
       await markDone(job, 1);
       return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: 0, total: criteria.length, changed: false };
     }
 
     // Pull the first JSON object out of Claude's output (tolerant of stray
     // prose or code fences even though the prompt forbids them).
-    const raw = claudeR.stdout;
+    const raw = claudeOutput;
     let jsonText = raw.trim();
     const fenceMatch = jsonText.match(/```(?:json)?\n([\s\S]*?)\n```/);
     if (fenceMatch) jsonText = fenceMatch[1];

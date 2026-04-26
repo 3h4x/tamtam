@@ -377,6 +377,32 @@ async function reconcileStaleRelease(job: JobData): Promise<void> {
   }
   if (chain.length === 0) return;
   if ((now - edge) * 1000 < RELEASE_RECONCILE_GRACE_MS) return;
+  // Belt-and-braces: the in-memory listJobs() snapshot can miss a running
+  // pipeline child if the cache was reloaded mid-job (server restart,
+  // reset, etc.). Before finalizing, query the DB directly for any
+  // pipeline-step job for this project that started at/after the release
+  // and is still running. If we find one, defer — the chain is active even
+  // if the cache says otherwise.
+  // This was the "Release seems broken" bug: a long-running review
+  // (>16 min) wasn't visible in listJobs() at probe time, so the chain
+  // walk found only the test step and finalized the release with exit 0
+  // before review/commit/push had a chance to chain.
+  try {
+    const stillRunning = db
+      .select({ id: schema.jobs.id, kind: schema.jobs.kind, startedAt: schema.jobs.startedAt, finishedAt: schema.jobs.finishedAt })
+      .from(schema.jobs)
+      .where(eq(schema.jobs.project, release.project))
+      .all()
+      .filter(r =>
+        PIPELINE_STEP_KINDS.has(r.kind)
+        && r.finishedAt == null
+        && (r.startedAt ?? 0) >= releaseStart - 1,
+      );
+    if (stillRunning.length > 0) return;
+  } catch {
+    /* DB error → fall through; better to potentially over-finalize than to
+       leave the release "running" forever if the DB is unreachable. */
+  }
   const worstExit = chain.reduce(
     (acc, c) => (c.exitCode != null && c.exitCode !== 0 ? 1 : acc),
     0,
