@@ -28,6 +28,7 @@ interface SettingsMap {
   notification_webhook_secret: string
   notification_on_release_success: string
   notification_on_release_fail: string
+  notification_on_release_aborted: string
   notification_on_fix_loop_exhausted: string
   notification_on_review_do_not_ship: string
   notification_on_agent_run_fail: string
@@ -72,6 +73,7 @@ const DEFAULTS: SettingsMap = {
   notification_webhook_secret: '',
   notification_on_release_success: 'false',
   notification_on_release_fail: 'false',
+  notification_on_release_aborted: 'false',
   notification_on_fix_loop_exhausted: 'false',
   notification_on_review_do_not_ship: 'false',
   notification_on_agent_run_fail: 'false',
@@ -229,6 +231,12 @@ const FIELDS: Record<keyof SettingsMap, FieldDef> = {
   },
   notification_on_release_fail: {
     label: 'Notification on Release Fail',
+    help: 'Not used in FIELDS; handled by NotificationsTab',
+    group: 'notifications' as never,
+    span: 1,
+  },
+  notification_on_release_aborted: {
+    label: 'Notification on Release Aborted',
     help: 'Not used in FIELDS; handled by NotificationsTab',
     group: 'notifications' as never,
     span: 1,
@@ -529,6 +537,7 @@ function NotificationsTab({
   const eventToggles = [
     { key: 'notification_on_release_success' as const, label: 'Release Success', description: 'When a release pipeline completes successfully' },
     { key: 'notification_on_release_fail' as const, label: 'Release Failure', description: 'When a release pipeline fails' },
+    { key: 'notification_on_release_aborted' as const, label: 'Release Aborted', description: 'When a release pipeline is aborted mid-run' },
     { key: 'notification_on_fix_loop_exhausted' as const, label: 'Fix Loop Exhausted', description: 'When the fix loop reaches its retry limit' },
     { key: 'notification_on_review_do_not_ship' as const, label: 'Review: Do Not Ship', description: 'When a review verdict is "DO NOT SHIP"' },
     { key: 'notification_on_agent_run_fail' as const, label: 'Agent Run Failure', description: 'When an agent run fails' },

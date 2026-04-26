@@ -33,6 +33,7 @@ export interface JobData {
   costUsd?: number | null;
   model?: string | null;
   releaseId?: string | null;
+  abortedAt?: number | null;
 }
 
 const jobsCache = new Map<string, JobData>();
@@ -70,6 +71,7 @@ function loadFromDb(): void {
         costUsd: row.costUsd ?? null,
         model: row.model ?? null,
         releaseId: row.releaseId ?? null,
+        abortedAt: row.abortedAt ?? null,
       });
     }
     loaded = true;
@@ -107,6 +109,7 @@ function saveToDb(job: JobData): void {
         costUsd: job.costUsd ?? null,
         model: job.model ?? null,
         releaseId: job.releaseId ?? null,
+        abortedAt: job.abortedAt ?? null,
       })
       .onConflictDoUpdate({
         target: schema.jobs.id,
@@ -128,6 +131,7 @@ function saveToDb(job: JobData): void {
           costUsd: job.costUsd ?? null,
           model: job.model ?? null,
           releaseId: job.releaseId ?? null,
+          abortedAt: job.abortedAt ?? null,
         },
       })
       .run();
@@ -406,6 +410,18 @@ async function runCompletionHooks(job: JobData): Promise<void> {
   if (['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod'].includes(job.kind)) {
     const release = findActiveReleaseJob(job.project);
     if (release) appendToReleaseLog(release, job.kind, job);
+  }
+
+  // If the release was aborted while this step was running, do not chain to
+  // the next step. The abort handler sets finishedAt on the release job, so
+  // findActiveReleaseJob (which filters finishedAt === null) won't find it.
+  // Use job.releaseId + getJob() to check the abortedAt flag directly.
+  if (job.releaseId) {
+    const releaseForAbortCheck = getJob(job.releaseId);
+    if (releaseForAbortCheck?.abortedAt) {
+      console.log(`[release] job ${job.id} (${job.kind}) completed after abort — not chaining`);
+      return;
+    }
   }
 
   // Tracks whether this hook kicked off a downstream step. If not, the
@@ -959,7 +975,8 @@ export function jobToDict(job: JobData): Record<string, unknown> {
     prompt: job.prompt,
     pid: job.pid,
     log_path: job.logPath,
-    status: job.finishedAt !== null ? 'done' : 'running',
+    status: job.abortedAt !== null && job.abortedAt !== undefined ? 'aborted' : job.finishedAt !== null ? 'done' : 'running',
+    aborted_at: job.abortedAt ?? null,
     exit_code: job.exitCode,
     started_at: job.startedAt,
     finished_at: job.finishedAt,
@@ -1184,6 +1201,7 @@ export function getJob(jobId: string): JobData | null {
     costUsd: row.costUsd ?? null,
     model: row.model ?? null,
     releaseId: row.releaseId ?? null,
+    abortedAt: row.abortedAt ?? null,
   };
   jobsCache.set(jobId, job);
   return job;

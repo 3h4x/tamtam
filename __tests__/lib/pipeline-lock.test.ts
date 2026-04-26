@@ -37,7 +37,8 @@ function createTestDb() {
       log_pruned INTEGER DEFAULT 0,
       cost_usd REAL,
       model TEXT,
-      release_id TEXT
+      release_id TEXT,
+      aborted_at REAL
     );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };

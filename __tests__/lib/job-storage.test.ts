@@ -40,7 +40,8 @@ function createTestDb() {
       log_pruned INTEGER DEFAULT 0,
       cost_usd REAL,
       model TEXT,
-      release_id TEXT
+      release_id TEXT,
+      aborted_at REAL
     );
     CREATE TABLE IF NOT EXISTS gh_issues_cache (
       project TEXT PRIMARY KEY,
@@ -3154,5 +3155,115 @@ describe('markDone – DB-level idempotency guard', () => {
     // In-memory guard should have returned before any DB interaction
     expect(job.finishedAt).toBe(snapshotFinishedAt); // unchanged
     expect(job.exitCode).toBeNull(); // not overwritten
+  });
+});
+
+describe('runCompletionHooks – abort short-circuit', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+  let startProjectReviewMock: ReturnType<typeof vi.fn>;
+  let startProjectPushMock: ReturnType<typeof vi.fn>;
+  let startProjectCommitMock: ReturnType<typeof vi.fn>;
+  let startFixFromJobMock: ReturnType<typeof vi.fn>;
+  let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
+
+  function makeJob(kind: string, id?: string, overrides: Partial<JobData> = {}): JobData {
+    return {
+      id: id ?? `${kind}-job`,
+      project: 'abort-proj',
+      kind,
+      prompt: null,
+      pid: 100,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+
+    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-1' });
+    startProjectPushMock = vi.fn().mockResolvedValue({ ok: true });
+    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc' });
+    startFixFromJobMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-1' });
+    getProjectTestConfigMock = vi.fn().mockReturnValue({ autoPushEnabled: true });
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/pm2-jobs', () => ({
+      getJobStatus: vi.fn(),
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/proj'),
+    }));
+    vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
+    vi.doMock('@/lib/start-fix', () => ({ startFixFromJob: startFixFromJobMock }));
+    vi.doMock('@/lib/scheduling', () => ({
+      getProjectTestConfig: getProjectTestConfigMock,
+    }));
+
+    const mod = await import('@/lib/job-storage');
+    markDoneFn = mod.markDone;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('does not chain to next step when active release has abortedAt set', async () => {
+    const now = Date.now() / 1000;
+    // Insert an aborted release job — finishedAt is set (as the abort handler does)
+    testDb.db.insert(schema.jobs).values({
+      id: 'release-aborted', project: 'abort-proj', kind: 'release',
+      prompt: null, pid: 0, logPath: null,
+      startedAt: now - 30, finishedAt: now - 1, exitCode: -3,
+      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+      abortedAt: now - 1,
+    } as any).run();
+
+    // Step job must carry releaseId so the abort check can find the release
+    const reviewJob = makeJob('review', 'review-after-abort', { releaseId: 'release-aborted' });
+    await markDoneFn(reviewJob, 0);
+
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
+    expect(startProjectPushMock).not.toHaveBeenCalled();
+    expect(startFixFromJobMock).not.toHaveBeenCalled();
+  });
+
+  it('does not chain fix→review when active release is aborted', async () => {
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.jobs).values({
+      id: 'release-aborted-2', project: 'abort-proj', kind: 'release',
+      prompt: null, pid: 0, logPath: null,
+      startedAt: now - 30, finishedAt: now - 1, exitCode: -3,
+      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+      abortedAt: now - 1,
+    } as any).run();
+
+    const fixJob = makeJob('fix', 'fix-after-abort', { releaseId: 'release-aborted-2' });
+    await markDoneFn(fixJob, 0);
+
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
   });
 });

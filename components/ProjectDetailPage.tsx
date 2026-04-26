@@ -290,6 +290,7 @@ export function ProjectDetailPage({
   const [fixingCi, setFixingCi] = useState(false)
   const [fixCiResult, setFixCiResult] = useState<string | null>(null)
   const [retryingPush, setRetryingPush] = useState(false)
+  const [aborting, setAborting] = useState(false)
   const [projectJobs, setProjectJobs] = useState<JobInfo[]>([])
   const [issueCount, setIssueCount] = useState<{ prs: number; issues: number } | null>(null)
   const [currentBranch, setCurrentBranch] = useState<string | null>(null)
@@ -1615,6 +1616,26 @@ export function ProjectDetailPage({
               }
             }
 
+            const handleAbortPipeline = async () => {
+              if (aborting) return
+              if (!confirm('Abort the running pipeline? The current step will be killed and no further steps will run.')) return
+              setAborting(true)
+              try {
+                const res = await fetch(`/api/projects/by-project/${encodeURIComponent(name)}/release/abort`, { method: 'POST' })
+                const data = await res.json() as { status: string }
+                if (data.status === 'aborted') {
+                  toast('Pipeline aborted', 'success')
+                } else {
+                  toast('No active pipeline', 'info')
+                }
+                onRefresh()
+              } catch (err) {
+                toast(err instanceof Error ? err.message : 'Abort failed', 'error')
+              } finally {
+                setAborting(false)
+              }
+            }
+
             const steps: Array<{ label: string; state: StepState; hint: string; action?: (() => void) | null; retryAction?: (() => void) | null }> = []
             if (hasTestCommand) steps.push({ label: 'test', state: testState, hint: testHint, action: testJob ? () => router.push(`/project/${name}/terminal?job=${encodeURIComponent(testJob.id)}`) : null })
             steps.push({ label: 'review', state: reviewState, hint: reviewHint, action: reviewFixAction })
@@ -1682,6 +1703,15 @@ export function ProjectDetailPage({
                     trace →
                   </Link>
                 )}
+                <button
+                  type="button"
+                  className="text-[10px] px-2 py-0.5 rounded border border-status-error/50 text-status-error hover:bg-status-error/10 cursor-pointer disabled:opacity-50 font-mono leading-none shrink-0"
+                  onClick={handleAbortPipeline}
+                  disabled={aborting}
+                  title="Abort the running pipeline"
+                >
+                  {aborting ? '…' : 'abort'}
+                </button>
               </div>
             )
           })()}
