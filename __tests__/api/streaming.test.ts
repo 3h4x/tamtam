@@ -83,7 +83,7 @@ describe('GET /api/streaming/[jobId]', () => {
   it('replays existing raw log content when raw=1', async () => {
     const logFile = join(tempDir, 'test.log');
     writeFileSync(logFile, 'line one\nline two\nline three\n');
-    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+    getJobMock.mockReturnValue({ logPath: logFile, finishedAt: Date.now() / 1000, exitCode: 0 } as Partial<JobData>);
 
     const ac = new AbortController();
     const request = new NextRequest('http://localhost/api/streaming/job-1?raw=1', {
@@ -121,7 +121,7 @@ describe('GET /api/streaming/[jobId]', () => {
     const textLine =
       '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello world"}}}';
     writeFileSync(logFile, textLine + '\n');
-    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+    getJobMock.mockReturnValue({ logPath: logFile, finishedAt: Date.now() / 1000, exitCode: 0 } as Partial<JobData>);
 
     const ac = new AbortController();
     const request = new NextRequest('http://localhost/api/streaming/job-1', {
@@ -140,7 +140,7 @@ describe('GET /api/streaming/[jobId]', () => {
     const doneLine =
       '{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"total_cost_usd":0.01,"session_id":"s1","result":"Output"}';
     writeFileSync(logFile, doneLine + '\n');
-    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+    getJobMock.mockReturnValue({ logPath: logFile, finishedAt: Date.now() / 1000, exitCode: 0 } as Partial<JobData>);
 
     const ac = new AbortController();
     const request = new NextRequest('http://localhost/api/streaming/job-1', {
@@ -160,7 +160,7 @@ describe('GET /api/streaming/[jobId]', () => {
     const thinkingLine =
       '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me consider this"}}}';
     writeFileSync(logFile, thinkingLine + '\n');
-    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+    getJobMock.mockReturnValue({ logPath: logFile, finishedAt: Date.now() / 1000, exitCode: 0 } as Partial<JobData>);
 
     const ac = new AbortController();
     const request = new NextRequest('http://localhost/api/streaming/job-1', {
@@ -179,7 +179,7 @@ describe('GET /api/streaming/[jobId]', () => {
     const logFile = join(tempDir, 'multiline.log');
     const line1 = '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"line1\\nline2\\nline3"}}}';
     writeFileSync(logFile, line1 + '\n');
-    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+    getJobMock.mockReturnValue({ logPath: logFile, finishedAt: Date.now() / 1000, exitCode: 0 } as Partial<JobData>);
 
     const ac = new AbortController();
     const request = new NextRequest('http://localhost/api/streaming/job-1', {
@@ -199,7 +199,7 @@ describe('GET /api/streaming/[jobId]', () => {
     const toolStart = '{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"t1","name":"Read","input":{}}}}';
     const toolStop = '{"type":"stream_event","event":{"type":"content_block_stop","index":1}}';
     writeFileSync(logFile, toolStart + '\n' + toolStop + '\n');
-    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+    getJobMock.mockReturnValue({ logPath: logFile, finishedAt: Date.now() / 1000, exitCode: 0 } as Partial<JobData>);
 
     const ac = new AbortController();
     const request = new NextRequest('http://localhost/api/streaming/job-1', {
@@ -230,7 +230,7 @@ describe('GET /api/streaming/[jobId]', () => {
       },
     });
     writeFileSync(logFile, toolResultLine + '\n');
-    getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
+    getJobMock.mockReturnValue({ logPath: logFile, finishedAt: Date.now() / 1000, exitCode: 0 } as Partial<JobData>);
 
     const ac = new AbortController();
     const request = new NextRequest('http://localhost/api/streaming/job-tr', { signal: ac.signal });
@@ -650,7 +650,7 @@ describe('GET /api/streaming/[jobId] – tool_result SSE event', () => {
       content: 'tool output text',
     });
     writeFileSync(logFile, line + '\n');
-    getJobMock.mockReturnValue({ logPath: logFile } as any);
+    getJobMock.mockReturnValue({ logPath: logFile, finishedAt: Date.now() / 1000, exitCode: 0 } as any);
 
     const ac = new AbortController();
     const req = new NextRequest('http://localhost/api/streaming/job-sys-tr', { signal: ac.signal });
@@ -674,7 +674,7 @@ describe('GET /api/streaming/[jobId] – tool_result SSE event', () => {
       },
     });
     writeFileSync(logFile, line + '\n');
-    getJobMock.mockReturnValue({ logPath: logFile } as any);
+    getJobMock.mockReturnValue({ logPath: logFile, finishedAt: Date.now() / 1000, exitCode: 0 } as any);
 
     const ac = new AbortController();
     const req = new NextRequest('http://localhost/api/streaming/job-user-tr', { signal: ac.signal });
@@ -694,7 +694,7 @@ describe('GET /api/streaming/[jobId] – tool_result SSE event', () => {
       content: 'payload content',
     });
     writeFileSync(logFile, line + '\n');
-    getJobMock.mockReturnValue({ logPath: logFile } as any);
+    getJobMock.mockReturnValue({ logPath: logFile, finishedAt: Date.now() / 1000, exitCode: 0 } as any);
 
     const ac = new AbortController();
     const req = new NextRequest('http://localhost/api/streaming/job-tr-payload', { signal: ac.signal });

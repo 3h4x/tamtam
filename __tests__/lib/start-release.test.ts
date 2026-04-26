@@ -38,7 +38,8 @@ describe('startRelease — release pipeline entry decision tree', () => {
         return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
       }
       if (cmd === 'pm2' && args[0] === 'jlist') {
-        return Promise.resolve({ exitCode: 0, stdout: '[]', stderr: '' });
+        // Return a valid process so the pid-retry loop breaks on first attempt (avoids 5×200ms wait)
+        return Promise.resolve({ exitCode: 0, stdout: JSON.stringify([{ name: 'proj-release-rel-id', pid: 1234 }]), stderr: '' });
       }
       return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
     });
@@ -176,7 +177,8 @@ describe('startRelease — release pipeline entry decision tree', () => {
       .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
       .mockImplementationOnce(() => gitAhead('0'))
       .mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'pm2') return Promise.resolve({ exitCode: 0, stdout: '[]', stderr: '' });
+        if (cmd === 'pm2' && args[0] === 'jlist') return Promise.resolve({ exitCode: 0, stdout: JSON.stringify([{ name: 'proj-release-rel-id', pid: 1234 }]), stderr: '' });
+        if (cmd === 'pm2') return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
         return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
       });
 
@@ -287,7 +289,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       // PM2 / jlist calls from createReleaseJob:
       .mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'pm2' && args[0] === 'start') return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-        if (cmd === 'pm2' && args[0] === 'jlist') return Promise.resolve({ exitCode: 0, stdout: '[]', stderr: '' });
+        if (cmd === 'pm2' && args[0] === 'jlist') return Promise.resolve({ exitCode: 0, stdout: JSON.stringify([{ name: 'proj-release-rel-id', pid: 1234 }]), stderr: '' });
         return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
       });
 
@@ -334,7 +336,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       .mockImplementationOnce(() => gitAhead('0'))
       .mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'pm2' && args[0] === 'start') return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-        if (cmd === 'pm2' && args[0] === 'jlist') return Promise.resolve({ exitCode: 0, stdout: '[]', stderr: '' });
+        if (cmd === 'pm2' && args[0] === 'jlist') return Promise.resolve({ exitCode: 0, stdout: JSON.stringify([{ name: 'proj-release-rel-id', pid: 1234 }]), stderr: '' });
         return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
       });
 
@@ -472,7 +474,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       .mockImplementationOnce(() => Promise.resolve({ exitCode: 0, stdout: '0\n', stderr: '' }))                    // rev-list --count (hasUnpushedCommits)
       .mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'pm2' && args[0] === 'start') return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-        if (cmd === 'pm2' && args[0] === 'jlist') return Promise.resolve({ exitCode: 0, stdout: '[]', stderr: '' });
+        if (cmd === 'pm2' && args[0] === 'jlist') return Promise.resolve({ exitCode: 0, stdout: JSON.stringify([{ name: 'proj-release-rel-id', pid: 1234 }]), stderr: '' });
         return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
       });
 
@@ -516,7 +518,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       .mockImplementationOnce(() => Promise.resolve({ exitCode: 0, stdout: '0\n', stderr: '' }))          // hasUnpushedCommits
       .mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'pm2' && args[0] === 'start') return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-        if (cmd === 'pm2' && args[0] === 'jlist') return Promise.resolve({ exitCode: 0, stdout: '[]', stderr: '' });
+        if (cmd === 'pm2' && args[0] === 'jlist') return Promise.resolve({ exitCode: 0, stdout: JSON.stringify([{ name: 'proj-release-rel-id', pid: 1234 }]), stderr: '' });
         return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
       });
 
@@ -558,7 +560,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       .mockImplementationOnce(() => gitStatus(' M foo.ts\n')) // hasChanges
       .mockImplementationOnce(() => gitAhead('0'))            // unpushed
       .mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'pm2' && args[0] === 'jlist') return Promise.resolve({ exitCode: 0, stdout: '[]', stderr: '' });
+        if (cmd === 'pm2' && args[0] === 'jlist') return Promise.resolve({ exitCode: 0, stdout: JSON.stringify([{ name: 'proj-release-rel-id', pid: 1234 }]), stderr: '' });
         if (cmd === 'pm2') return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
         return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
       });
