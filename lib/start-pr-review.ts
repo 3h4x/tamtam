@@ -7,6 +7,7 @@ import { startJob } from './pm2-jobs';
 import { exec } from './shell';
 import { CODE_REVIEWER_SKILL } from './skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings } from './config';
+import { wrapUntrusted, withUntrustedPreamble } from './untrusted';
 
 export type StartPrReviewResult =
   | { ok: true; jobId: string; pid: number; logPath: string }
@@ -63,29 +64,31 @@ export async function startPrReview(
     return { ok: false, status: 400, detail: `No diff found for PR #${prNumber}` };
   }
 
+  // Wrap external GitHub content so injected instructions can't hijack Claude.
   const substitutions: Record<string, string> = {
     '{project}': projectName,
     '{path}': projPath,
     '{prNumber}': String(prNumber),
-    '{prTitle}': prTitle,
-    '{headRef}': headRef,
-    '{baseRef}': baseRef,
-    '{diff}': diffR.stdout,
+    '{prTitle}': wrapUntrusted(prTitle, 'github_pr_title'),
+    '{headRef}': wrapUntrusted(headRef, 'github_pr_ref'),
+    '{baseRef}': wrapUntrusted(baseRef, 'github_pr_ref'),
+    '{diff}': wrapUntrusted(diffR.stdout, 'github_pr_diff'),
   };
   let rendered = loadReviewPrompt();
   for (const [key, value] of Object.entries(substitutions)) {
     rendered = rendered.split(key).join(value);
   }
-  const prompt = withBasePrompt(rendered);
+  const prompt = withUntrustedPreamble(withBasePrompt(rendered));
 
   const job = createJob(projectName, 'review', 0, '');
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
 
   try {
+    // Review only needs to read code — restrict to safe read-only tools.
     const pid = await startJob(
       job.id,
-      `${claudeBin} --print --output-format stream-json --verbose --include-partial-messages --model ${default_model} ${getPermissionModeFlag()}`,
+      `${claudeBin} --print --output-format stream-json --verbose --include-partial-messages --model ${default_model} ${getPermissionModeFlag()} --allowed-tools Read,Grep,Glob`,
       prompt,
       projPath
     );

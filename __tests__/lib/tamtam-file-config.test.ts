@@ -117,6 +117,29 @@ gates:
     writeConfig(tmpDir, 'pipeline:\nschedule:\ngates:\n');
     expect(loadFileConfig(tmpDir)).toBeNull();
   });
+
+  it('parses safe_users inline array', () => {
+    writeConfig(tmpDir, 'security:\n  safe_users: [alice, bob]\n');
+    const cfg = loadFileConfig(tmpDir);
+    expect(cfg?.safe_users).toEqual(['alice', 'bob']);
+  });
+
+  it('parses safe_users block array', () => {
+    writeConfig(tmpDir, 'security:\n  safe_users:\n    - alice\n    - "dependabot[bot]"\n');
+    const cfg = loadFileConfig(tmpDir);
+    expect(cfg?.safe_users).toEqual(['alice', 'dependabot[bot]']);
+  });
+
+  it('ignores safe_users when not an array of strings', () => {
+    writeConfig(tmpDir, 'security:\n  safe_users: not-an-array\n');
+    expect(loadFileConfig(tmpDir)?.safe_users).toBeUndefined();
+  });
+
+  it('parses empty safe_users array', () => {
+    writeConfig(tmpDir, 'security:\n  safe_users: []\n');
+    const cfg = loadFileConfig(tmpDir);
+    expect(cfg?.safe_users).toEqual([]);
+  });
 });
 
 describe('writeFileConfig', () => {
@@ -218,5 +241,43 @@ describe('writeFileConfig', () => {
     expect(cfg?.test_command).toBe('npm test');
     expect(cfg?.auto_push_enabled).toBe(false);
     expect(cfg?.pr_workflow_enabled).toBe(true);
+  });
+
+  it('writes safe_users under security section', () => {
+    writeFileConfig(tmpDir, { safe_users: ['alice', 'bob'] });
+    const content = readFileSync(join(tmpDir, '.tamtam', 'config.yml'), 'utf-8');
+    expect(content).toContain('security:');
+    expect(content).toContain('alice');
+    expect(content).toContain('bob');
+  });
+
+  it('round-trips safe_users through write then load', () => {
+    writeFileConfig(tmpDir, { safe_users: ['owner', 'dependabot[bot]'] });
+    const cfg = loadFileConfig(tmpDir);
+    expect(cfg?.safe_users).toEqual(['owner', 'dependabot[bot]']);
+  });
+
+  it('removes safe_users when set to null', () => {
+    writeConfig(tmpDir, 'security:\n  safe_users:\n    - alice\n');
+    writeFileConfig(tmpDir, { safe_users: null });
+    const cfg = loadFileConfig(tmpDir);
+    expect(cfg?.safe_users).toBeUndefined();
+  });
+
+  it('merges safe_users without losing pipeline keys', () => {
+    writeConfig(tmpDir, 'pipeline:\n  test_command: pnpm test\n');
+    writeFileConfig(tmpDir, { safe_users: ['owner'] });
+    const cfg = loadFileConfig(tmpDir);
+    expect(cfg?.test_command).toBe('pnpm test');
+    expect(cfg?.safe_users).toEqual(['owner']);
+  });
+
+  it('preserves unknown top-level keys through write', () => {
+    writeConfig(tmpDir, 'pipeline:\n  test_command: pnpm test\ncustom_section:\n  foo: bar\n');
+    writeFileConfig(tmpDir, { safe_users: ['owner'] });
+    const content = readFileSync(join(tmpDir, '.tamtam', 'config.yml'), 'utf-8');
+    expect(content).toContain('custom_section');
+    expect(content).toContain('foo');
+    expect(content).toContain('bar');
   });
 });
