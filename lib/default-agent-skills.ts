@@ -264,6 +264,93 @@ Only update when the improvement is substantive. Do not change name, model, sche
 - If an agent's skill already provides the core behavior, the prompt should only add project-specific overrides, not restate the skill.`,
   },
   {
+    id: 'agent-manage-agents',
+    name: 'agent:manage-agents',
+    description: 'Audits agents configured in TamTam for this project and creates, updates, or removes them to match the current project needs.',
+    content: `Audit and manage TamTam agents for this project. The TamTam API runs at http://localhost:1337.
+
+## Step 1 — gather context
+
+1. Read \`CLAUDE.md\` to understand the project's stack, test command, and active conventions.
+2. Run \`git log --oneline -20\` to understand recent activity and momentum.
+3. Fetch the project name:
+   - Node.js: \`jq -r .name package.json\`
+   - Python: check \`pyproject.toml\` or \`CLAUDE.md\` heading.
+   - Fallback: use the current directory name.
+
+## Step 2 — fetch existing agents
+
+\`\`\`bash
+curl -s "http://localhost:1337/api/agents?project=<name>"
+\`\`\`
+
+Parse the \`agents\` array. Each agent has: \`id\`, \`name\`, \`prompt\`, \`skillIds\`, \`model\`, \`schedule\`, \`runner\`, \`enabled\`.
+
+## Step 3 — decide what to change
+
+Compare the current agents against what the project actually needs. Consider:
+
+- **Test agent**: does the project have a test command? If no test agent exists and tests are present, create one that runs them and reports failures.
+- **Review agent**: is there a recurring code-review need?
+- **Stale agents**: agents referencing commands or paths that no longer exist should be updated or removed.
+- **Duplicate purpose**: two agents doing the same thing — consolidate.
+- **Missing schedule**: an agent with no schedule that should run regularly.
+
+Do not create agents for things already covered. Do not create agents for hypothetical future needs.
+
+## Step 4 — create agents
+
+\`\`\`bash
+curl -s -X POST http://localhost:1337/api/agents \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "project": "<name>",
+    "name": "<agent-name>",
+    "prompt": "<task prompt>",
+    "skillIds": [],
+    "model": "sonnet",
+    "schedule": "24h",
+    "runner": "pm2",
+    "enabled": true
+  }'
+\`\`\`
+
+Model guidance: use \`haiku\` for fast/cheap tasks (summary, report), \`sonnet\` for most tasks, \`opus\` only for complex reasoning.
+
+## Step 5 — update existing agents
+
+\`\`\`bash
+curl -s -X PATCH "http://localhost:1337/api/agents/by-name" \\
+  -H "Content-Type: application/json" \\
+  -d '{"project":"<name>","name":"<agent-name>","prompt":"<updated>"}'
+\`\`\`
+
+Only update \`prompt\` unless the user explicitly asks to change model/schedule/runner.
+
+## Step 6 — delete agents
+
+\`\`\`bash
+curl -s -X DELETE "http://localhost:1337/api/agents/<agentId>"
+\`\`\`
+
+Only delete if the agent is clearly stale or broken — when in doubt, update instead.
+
+## Output
+
+Report what you did:
+- Created: list agent names + purpose
+- Updated: list agent names + what changed
+- Deleted: list agent names + reason
+- No change: agents that are fine as-is
+
+## Gotchas
+- The TamTam API is local-only; never call it from a remote context.
+- \`skillIds\` is a JSON array of skill ID strings (e.g. \`["agent-tests"]\`). Use \`[]\` when composing a custom prompt without a built-in skill.
+- Agent \`name\` must be unique per project. Reuse the existing \`id\` when patching via \`/api/agents/<id>\`.
+- Prompt length should be concise — 3–8 sentences covering the task, output format, and one key gotcha. Long prompts slow the model and drift from the skill's core.
+- Do not change another project's agents — filter strictly by this project's name.`,
+  },
+  {
     id: 'agent-docs-claude',
     name: 'agent:docs-claude',
     description: 'Audits CLAUDE.md for completeness — adds missing guidance on security, conventions, testing, and patterns.',
