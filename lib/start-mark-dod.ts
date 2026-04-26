@@ -191,9 +191,10 @@ JSON schema:
 
     let claudeOutput = '';
     let claudeExitCode = 1;
+    let timedOut = false;
     try {
       await startJob(claudeJobId, claudeCommand, fullPrompt, projPath);
-      const deadline = Date.now() + 180000;
+      const deadline = Date.now() + 300000;
       while (Date.now() < deadline) {
         if (_pollIntervalMs > 0) await new Promise(r => setTimeout(r, _pollIntervalMs));
         const status = await getJobStatus(claudeJobId);
@@ -202,6 +203,7 @@ JSON schema:
           break;
         }
       }
+      if (Date.now() >= deadline) timedOut = true;
       if (existsSync(claudeLogPath)) {
         claudeOutput = readFileSync(claudeLogPath, 'utf-8');
       }
@@ -211,8 +213,15 @@ JSON schema:
       await deleteJob(claudeJobId).catch(() => {});
     }
 
-    log(`# claude exit ${claudeExitCode}\n`);
-    if (claudeExitCode !== 0 || !claudeOutput.trim()) {
+    // Strip PM2 wrapper lines before checking whether Claude produced real output.
+    const claudeOutputStripped = claudeOutput.split('\n')
+      .filter(l => !l.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}: \[tamtam\]/))
+      .join('\n')
+      .trim();
+
+    log(`# claude exit ${claudeExitCode}${timedOut ? ' (timed out)' : ''}\n`);
+    if (claudeExitCode !== 0 || !claudeOutputStripped) {
+      if (!claudeOutputStripped) log(`# claude output: ${claudeOutput.slice(0, 300).trim()}\n`);
       log(`# claude verification failed\n`);
       await markDone(job, 1);
       return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: 0, total: criteria.length, changed: false };
@@ -220,7 +229,7 @@ JSON schema:
 
     // Pull the first JSON object out of Claude's output (tolerant of stray
     // prose or code fences even though the prompt forbids them).
-    const raw = claudeOutput;
+    const raw = claudeOutputStripped;
     let jsonText = raw.trim();
     const fenceMatch = jsonText.match(/```(?:json)?\n([\s\S]*?)\n```/);
     if (fenceMatch) jsonText = fenceMatch[1];
