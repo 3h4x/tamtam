@@ -6,6 +6,7 @@ import { getImproveConfig } from './scheduling';
 import { exec } from './shell';
 import { getPermissionModeFlag } from './config';
 import { createJob, listJobs, markDone } from './job-storage';
+import { wrapIfUntrusted, withUntrustedPreamble } from './untrusted';
 import { startJob, getJobStatus, deleteJob } from './pm2-jobs';
 import { ensureBranchForCtx } from './mark-dod-branch';
 
@@ -122,20 +123,21 @@ export async function startMarkDod(
   let restoreBranch: string | null = null;
 
   try {
-    // 1. Fetch the body (issue or PR).
+    // 1. Fetch the body (issue or PR), including author login for trust check.
     const viewArgs = isPr
-      ? ['pr', 'view', String(ctx.number), '--repo', ctx.repo, '--json', 'body,title']
-      : ['issue', 'view', String(ctx.number), '--repo', ctx.repo, '--json', 'body,title'];
+      ? ['pr', 'view', String(ctx.number), '--repo', ctx.repo, '--json', 'body,title,author']
+      : ['issue', 'view', String(ctx.number), '--repo', ctx.repo, '--json', 'body,title,author'];
     const viewR = await exec('gh', viewArgs, { cwd: projPath, timeout: 15000 });
     if (viewR.exitCode !== 0) {
       log(`# gh ${ctxLabel} view failed: ${viewR.stderr}\n`);
       await markDone(job, 1);
       return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: 0, total: 0, changed: false };
     }
-    let parsed: { body?: string; title?: string } = {};
+    let parsed: { body?: string; title?: string; author?: { login?: string } } = {};
     try { parsed = JSON.parse(viewR.stdout); } catch {}
     const body = parsed.body ?? '';
     const title = parsed.title ?? '';
+    const authorLogin = parsed.author?.login;
     const criteria = extractCriteria(body);
     if (criteria.length === 0) {
       log(`# no unchecked DoD boxes — nothing to verify\n`);
@@ -144,20 +146,22 @@ export async function startMarkDod(
     }
     log(`# found ${criteria.length} unchecked criteria to verify\n`);
 
-    // 2. Ask Claude to VERIFY each criterion against the actual codebase. We
-    // let Claude use tools (Read/Grep/Glob/Bash) — verification needs the
-    // ability to probe the repo, not just stare at a diff summary.
-    const criteriaList = criteria.map((c, i) => `${i + 1}. ${c.text}`).join('\n');
+    // 2. Ask Claude to VERIFY each criterion against the actual codebase.
+    // External content (title, criteria from issue body) is wrapped in
+    // <untrusted> tags so injected instructions cannot hijack Claude.
+    const criteriaListRaw = criteria.map((c, i) => `${i + 1}. ${c.text}`).join('\n');
+    const wrappedTitle = wrapIfUntrusted(title, isPr ? 'github_pr_title' : 'github_issue_title', authorLogin, projPath);
+    const wrappedCriteria = wrapIfUntrusted(criteriaListRaw, isPr ? 'github_pr_body' : 'github_issue_body', authorLogin, projPath);
     const prompt = `You are verifying whether each acceptance criterion below is ACTUALLY IMPLEMENTED on the current branch of this repository (cwd). Do not take claims at face value — check the code, tests, config, etc. For each criterion either confirm it against concrete evidence (file paths, symbol names, test names) or mark it unverified.
 
 Repository: ${projectName}
-${isPr ? 'PR' : 'Issue'} #${ctx.number}: ${title}
+${isPr ? 'PR' : 'Issue'} #${ctx.number}: ${wrappedTitle}
 
 Acceptance criteria:
-${criteriaList}
+${wrappedCriteria}
 
 TASK:
-- Use your tools (Read / Grep / Glob / Bash) to inspect the repo as needed.
+- Use your tools (Read / Grep / Glob) to inspect the repo as needed.
 - For each criterion decide: VERIFIED or NOT VERIFIED.
 - A criterion is VERIFIED only if you have seen the concrete implementation — not just intent, not just a TODO, not just "probably".
 - Output a single JSON object and nothing else. No prose, no markdown fences.
@@ -186,8 +190,10 @@ JSON schema:
     log(`# asking claude to verify each criterion against the codebase...\n`);
     const claudeJobId = `${job.id}-verify`;
     const claudeLogPath = join(logDir, `${claudeJobId}.log`);
-    const fullPrompt = 'You verify whether acceptance criteria are implemented in a codebase. Use tools to inspect real code. Output strict JSON only.\n\n---\n\n' + prompt;
-    const claudeCommand = `${claudeBin} --print ${getPermissionModeFlag()} --model haiku`;
+    const basePreamble = 'You verify whether acceptance criteria are implemented in a codebase. Use tools to inspect real code. Output strict JSON only.';
+    const fullPrompt = withUntrustedPreamble(`${basePreamble}\n\n---\n\n${prompt}`);
+    // Restrict to read-only tools — DoD verification never needs to run shell commands.
+    const claudeCommand = `${claudeBin} --print ${getPermissionModeFlag()} --model haiku --allowed-tools Read,Grep,Glob`;
 
     let claudeOutput = '';
     let claudeExitCode = 1;

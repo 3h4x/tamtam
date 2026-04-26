@@ -210,6 +210,7 @@ describe('startMarkDod', () => {
   const ISSUE_JSON = JSON.stringify({
     title: 'Add login feature',
     body: '- [ ] First criterion\n- [ ] Second criterion',
+    author: { login: 'external-user' },
   });
 
   const CLAUDE_JSON = JSON.stringify({
@@ -483,6 +484,47 @@ describe('startMarkDod', () => {
     expect(command).toContain('--model');
     expect(command).toContain('haiku');
     expect(cwd).toBe('/path/to/proj');
+  });
+
+  it('passes --allowed-tools Read,Grep,Glob to restrict DoD to read-only tools', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, ISSUE_JSON))
+      .mockResolvedValueOnce(resp(0, ''));
+    await startMarkDod('myproj', undefined, 0);
+    const [, command] = startJobMock.mock.calls[0];
+    expect(command).toContain('--allowed-tools');
+    expect(command).toContain('Read');
+    expect(command).toContain('Grep');
+    expect(command).toContain('Glob');
+    expect(command).not.toContain('Bash');
+  });
+
+  it('wraps issue title and criteria in untrusted tags for external authors', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, ISSUE_JSON))
+      .mockResolvedValueOnce(resp(0, ''));
+    await startMarkDod('myproj', undefined, 0);
+    const [, , prompt] = startJobMock.mock.calls[0];
+    expect(prompt).toContain('<untrusted');
+    expect(prompt).toContain('Add login feature');
+    expect(prompt).toContain('First criterion');
+  });
+
+  it('prepends untrusted system instruction to the DoD prompt', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, ISSUE_JSON))
+      .mockResolvedValueOnce(resp(0, ''));
+    await startMarkDod('myproj', undefined, 0);
+    const [, , prompt] = startJobMock.mock.calls[0];
+    expect(prompt).toContain('SECURITY:');
+    expect(prompt.indexOf('SECURITY:')).toBeLessThan(prompt.indexOf('Add login feature'));
+  });
+
+  it('fetches author field in gh view call', async () => {
+    execMock.mockResolvedValue(resp(1, '', 'fail'));
+    await startMarkDod('myproj', undefined, 0);
+    const ghArgs: string[] = execMock.mock.calls[0][1];
+    expect(ghArgs.join(' ')).toContain('author');
   });
 
   it('returns ok:false status:500 when an unexpected exception is thrown', async () => {

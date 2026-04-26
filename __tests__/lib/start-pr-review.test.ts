@@ -234,6 +234,50 @@ describe('startPrReview', () => {
       expect(r.detail).toContain('No diff found for PR #5');
     }
   });
+
+  it('passes --allowed-tools Read,Grep,Glob to restrict PR review to read-only tools', async () => {
+    execMock.mockResolvedValueOnce(resp(0, 'diff content'));
+    await startPrReview('proj', 1, 'Title', 'feat/1', 'main');
+    const command: string = startJobMock.mock.calls[0][1];
+    expect(command).toContain('--allowed-tools');
+    expect(command).toContain('Read');
+    expect(command).toContain('Grep');
+    expect(command).toContain('Glob');
+    expect(command).not.toContain('Bash');
+  });
+
+  it('wraps pr title in untrusted tags', async () => {
+    execMock.mockResolvedValueOnce(resp(0, 'diff content'));
+    await startPrReview('proj', 1, 'Malicious PR Title', 'feat/1', 'main');
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('<untrusted source="github_pr_title">');
+    expect(prompt).toContain('Malicious PR Title');
+  });
+
+  it('wraps diff in untrusted tags', async () => {
+    execMock.mockResolvedValueOnce(resp(0, 'diff --git a/foo.ts b/foo.ts'));
+    await startPrReview('proj', 1, 'Title', 'feat/1', 'main');
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('<untrusted source="github_pr_diff">');
+    expect(prompt).toContain('diff --git a/foo.ts b/foo.ts');
+  });
+
+  it('wraps branch refs in untrusted tags', async () => {
+    execMock.mockResolvedValueOnce(resp(0, 'diff content'));
+    await startPrReview('proj', 1, 'Title', 'feat/1', 'main');
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('<untrusted source="github_pr_ref">');
+    expect(prompt).toContain('feat/1');
+    expect(prompt).toContain('main');
+  });
+
+  it('prepends untrusted system instruction to the PR review prompt', async () => {
+    execMock.mockResolvedValueOnce(resp(0, 'diff content'));
+    await startPrReview('proj', 1, 'Title', 'feat/1', 'main');
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('SECURITY:');
+    expect(prompt.indexOf('SECURITY:')).toBeLessThan(prompt.indexOf('feat/1'));
+  });
 });
 
 describe('loadReviewPrompt — skill file handling', () => {
@@ -312,7 +356,9 @@ describe('loadReviewPrompt — skill file handling', () => {
     await setup(null);
     await startPrReview('proj', 1, 'Title', 'feat/1', 'main');
     const prompt: string = startJobMock.mock.calls[0][2];
-    // Prompt starts with the static template (no skill preamble before the ---\n\n separator)
-    expect(prompt.trimStart()).toMatch(/^---\s*\n/);
+    // Prompt starts with the untrusted system instruction (no skill preamble)
+    expect(prompt.trimStart()).toContain('SECURITY:');
+    // No skill body content
+    expect(prompt).not.toContain('This is the review skill content.');
   });
 });
