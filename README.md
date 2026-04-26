@@ -83,8 +83,8 @@ Agents are built by selecting a model, writing a prompt, and attaching any numbe
 ## Agents
 
 Agents live at `/agents`. Each agent has:
-- A name and description
-- A target project (or runs globally)
+- A name and optional prompt
+- A target project
 - A model (haiku / sonnet / opus)
 - An optional cron schedule
 - A composed set of skills
