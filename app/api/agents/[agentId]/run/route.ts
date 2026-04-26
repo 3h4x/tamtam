@@ -10,6 +10,7 @@ import { createJob, updateJob, listJobs, probeJobStatus } from '@/lib/job-storag
 import { startJob } from '@/lib/pm2-jobs';
 import { withBasePrompt, getPermissionModeFlag } from '@/lib/config';
 import { errMsg } from '@/lib/types';
+import { parseFileAgentId, loadFileAgent } from '@/lib/tamtam-file-agents';
 
 export async function POST(
   request: NextRequest,
@@ -17,7 +18,21 @@ export async function POST(
 ) {
   const { agentId } = await params;
 
-  const agent = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
+  // Resolve agent — either a DB row or a file-based agent
+  let agent: { id: string; name: string; project: string; skillIds: string; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean } | null = null;
+
+  const parsedFileId = parseFileAgentId(agentId);
+  if (parsedFileId) {
+    const projPath = resolveProjectPath(parsedFileId.project);
+    if (!projPath) return NextResponse.json({ detail: 'agent not found' }, { status: 404 });
+    const fa = loadFileAgent(projPath, parsedFileId.project, parsedFileId.name);
+    if (!fa) return NextResponse.json({ detail: 'agent not found' }, { status: 404 });
+    agent = { ...fa, skillIds: JSON.stringify(fa.skillIds) };
+  } else {
+    const row = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
+    if (row) agent = row;
+  }
+
   if (!agent) return NextResponse.json({ detail: 'agent not found' }, { status: 404 });
 
   // Reject scheduled triggers for disabled agents. PM2 may still hold stale

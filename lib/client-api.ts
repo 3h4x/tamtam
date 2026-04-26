@@ -706,6 +706,7 @@ export interface Agent {
   enabled: boolean
   createdAt: number
   updatedAt: number
+  source?: 'db' | 'file'
 }
 
 export async function fetchAgents(project?: string): Promise<{ agents: Agent[] }> {

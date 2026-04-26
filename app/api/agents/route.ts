@@ -3,6 +3,8 @@ import { db, schema } from '@/lib/db';
 import { installAgentSchedule } from '@/lib/agent-scheduler';
 import { errMsg } from '@/lib/types';
 import { getAllAgentsCached, clearAgentsCache, normalizeAgent } from '@/lib/agents-cache';
+import { scanFileAgents } from '@/lib/tamtam-file-agents';
+import { resolveProjectPath } from '@/lib/project-data';
 
 export async function GET(request: NextRequest) {
   const project = request.nextUrl.searchParams.get('project');
@@ -10,7 +12,25 @@ export async function GET(request: NextRequest) {
   const agents = getAllAgentsCached();
   let result = project ? agents.filter(a => a.project === project) : agents;
   if (name) result = result.filter(a => a.name === name);
-  return NextResponse.json({ agents: result.map(normalizeAgent) });
+
+  const normalized = result.map(normalizeAgent);
+
+  // Merge file-based agents when filtering by project. DB agents take precedence
+  // over file agents with the same name.
+  if (project) {
+    const projPath = resolveProjectPath(project);
+    if (projPath) {
+      const dbNames = new Set(normalized.map(a => a.name));
+      const fileAgents = scanFileAgents(projPath, project);
+      for (const fa of fileAgents) {
+        if (!dbNames.has(fa.name)) {
+          normalized.push(fa);
+        }
+      }
+    }
+  }
+
+  return NextResponse.json({ agents: normalized });
 }
 
 export async function POST(request: NextRequest) {
