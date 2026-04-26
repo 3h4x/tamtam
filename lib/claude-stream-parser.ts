@@ -105,6 +105,8 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
       continue;
     }
 
+    if (!parsed || typeof parsed !== 'object') continue;
+
     if (parsed.type === 'stream_event') {
       const evt = parsed.event;
 
