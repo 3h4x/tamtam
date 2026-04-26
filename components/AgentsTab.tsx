@@ -121,9 +121,18 @@ const MODEL_LABELS: Record<string, { label: string; desc: string }> = {
 
 interface AgentsTabProps {
   projectName: string
+  currentBranch?: string | null
+  prWorkflowEnabled?: boolean
 }
 
-export function AgentsTab({ projectName }: AgentsTabProps) {
+export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled }: AgentsTabProps) {
+  // Server rejects agent runs in Direct Branch mode while a fix/issue-* branch
+  // is checked out (see app/api/agents/[agentId]/run/route.ts). Mirror that
+  // check on the client so the buttons reflect reality.
+  const agentRunsBlocked = !prWorkflowEnabled && !!currentBranch?.startsWith('fix/issue-')
+  const blockedReason = agentRunsBlocked
+    ? `Direct Branch mode is on while issue branch '${currentBranch}' is checked out — finish or abandon the issue work first.`
+    : ''
   const router = useRouter()
   const { toast } = useToast()
   const [agents, setAgents] = useState<Agent[]>([])
@@ -178,6 +187,10 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
 
   const handleRun = async (agent: Agent, customPrompt?: string) => {
     if (runSubmitting) return
+    if (agentRunsBlocked) {
+      toast(blockedReason, 'error')
+      return
+    }
     const prompt = customPrompt || agent.prompt || `Run agent ${agent.name}`
     setRunSubmitting(agent.id)
     try {
@@ -240,6 +253,12 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
           + New Agent
         </button>
       </div>
+
+      {agentRunsBlocked && (
+        <div className="px-3 py-2 rounded-md border border-status-warning/40 bg-status-warning/5 text-xs text-status-warning">
+          {blockedReason}
+        </div>
+      )}
 
       {/* Agent list */}
       {agents.length === 0 && !creating && (
@@ -309,13 +328,16 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
                   <button
                     className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={() => handleRun(agent)}
-                    disabled={runSubmitting === agent.id}
+                    disabled={runSubmitting === agent.id || agentRunsBlocked}
+                    title={agentRunsBlocked ? blockedReason : undefined}
                   >
                     {runSubmitting === agent.id ? 'Starting...' : 'Run'}
                   </button>
                   <button
-                    className="px-3 py-1.5 text-sm border border-accent text-accent rounded-md hover:bg-accent/10 cursor-pointer"
+                    className="px-3 py-1.5 text-sm border border-accent text-accent rounded-md hover:bg-accent/10 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={() => { setRunPromptAgent(runPromptAgent === agent.id ? null : agent.id); setRunPrompt('') }}
+                    disabled={agentRunsBlocked}
+                    title={agentRunsBlocked ? blockedReason : undefined}
                   >
                     Run with prompt
                   </button>
@@ -337,7 +359,8 @@ export function AgentsTab({ projectName }: AgentsTabProps) {
                   <button
                     className="px-4 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer"
                     onClick={() => handleRun(agent, runPrompt.trim())}
-                    disabled={!runPrompt.trim() || runSubmitting === agent.id}
+                    disabled={!runPrompt.trim() || runSubmitting === agent.id || agentRunsBlocked}
+                    title={agentRunsBlocked ? blockedReason : undefined}
                   >
                     Go
                   </button>

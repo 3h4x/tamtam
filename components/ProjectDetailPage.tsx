@@ -1027,7 +1027,11 @@ export function ProjectDetailPage({
             onOpenJob={(jobId) => router.push(`/project/${name}/terminal?job=${encodeURIComponent(jobId)}`)}
           />
 
-          <AgentsTab projectName={name} />
+          <AgentsTab
+            projectName={name}
+            currentBranch={currentBranch}
+            prWorkflowEnabled={!!config?.pr_workflow_enabled}
+          />
         </>
       )}
 
