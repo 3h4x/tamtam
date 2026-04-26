@@ -317,14 +317,12 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled }: Age
                       {agent.enabled ? 'On' : 'Off'}
                     </button>
                   )}
-                  {agent.source !== 'file' && (
                   <button
                     className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
                     onClick={() => { setEditing(agent); setCreating(false) }}
                   >
                     Edit
                   </button>
-                  )}
                   <button
                     className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={() => handleRun(agent)}
@@ -473,7 +471,7 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled }: Age
           skills={skills}
           personas={personas}
           onSave={handleSaveAgent}
-          onDelete={editing && editing.source !== 'file' ? () => handleDelete(editing.id) : undefined}
+          onDelete={editing ? () => handleDelete(editing.id) : undefined}
           onClose={closeModal}
         />
       )}
