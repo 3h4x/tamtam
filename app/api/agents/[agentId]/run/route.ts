@@ -12,6 +12,7 @@ import { startJob } from '@/lib/pm2-jobs';
 import { withBasePrompt, getPermissionModeFlag } from '@/lib/config';
 import { errMsg } from '@/lib/types';
 import { parseFileAgentId, loadFileAgent } from '@/lib/tamtam-file-agents';
+import { getAgentMemoryDir, getAgentMemoryPath, readAgentMemory, ensureAgentMemoryDir, buildMemoryBlock } from '@/lib/agent-memory';
 
 export async function POST(
   request: NextRequest,
@@ -134,17 +135,23 @@ export async function POST(
 
   const { claudeBin, logDir } = getImproveConfig();
 
+  // Inject agent memory so it can track state across runs.
+  const memDir = getAgentMemoryDir();
+  ensureAgentMemoryDir(memDir, agent.project);
+  const memoryPath = getAgentMemoryPath(memDir, agent.project, agent.name);
+  const currentMemory = readAgentMemory(memDir, agent.project, agent.name);
+  const memoryBlock = buildMemoryBlock(memoryPath, currentMemory);
+
   // Build command. We prepend the composed skills directly to the prompt
   // (stdin) rather than using --append-system-prompt, which requires a value
   // argument and would need escaping for multi-line content.
   const modelFlag = agent.model ? `--model ${agent.model}` : '';
   const cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()} ${modelFlag}`;
 
-  const fullPrompt = withBasePrompt(
-    systemPrompt && taskPrompt
-      ? `${systemPrompt}\n\n---\n\n${taskPrompt}`
-      : (systemPrompt || taskPrompt)
-  );
+  const corePrompt = systemPrompt && taskPrompt
+    ? `${systemPrompt}\n\n---\n\n${taskPrompt}`
+    : (systemPrompt || taskPrompt);
+  const fullPrompt = withBasePrompt(`${corePrompt}\n\n---\n\n${memoryBlock}`);
 
   const job = createJob(agent.project, `agent:${agent.name}`, 0, '', taskPrompt, contextMeta, taskPrompt);
   const logPath = join(logDir, `${job.id}.log`);
