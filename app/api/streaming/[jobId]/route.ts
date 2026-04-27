@@ -46,12 +46,14 @@ export async function GET(
       // the parser are suppressed — the server emits its own done so the terminal
       // doesn't close prematurely on an embedded child result.
       //
-      // parseState is shared across calls so tool_use blocks that start on one
-      // fs.watch batch and stop on the next still emit; passPending holds an
-      // incomplete trailing line at a chunk boundary so it isn't fragmented
-      // into two raw events.
+      // parseState / parsedState are shared across calls so tool_use blocks that
+      // start on one fs.watch batch and stop on the next still emit.
+      // passPending / parsedPending hold an incomplete trailing line at a chunk
+      // boundary so it isn't lost between reads.
       const parseState: ParseState = createParseState();
       let passPending = '';
+      const parsedState: ParseState = createParseState();
+      let parsedPending = '';
 
       function sendPassthroughContent(text: string) {
         const combined = passPending + text;
@@ -85,7 +87,18 @@ export async function GET(
       }
 
       function sendParsedEvents(text: string) {
-        const events = parseStreamLines(text);
+        // Buffer incomplete trailing lines between reads so a JSON event line
+        // that spans two readNewBytes() calls isn't silently dropped.
+        const combined = parsedPending + text;
+        const nl = combined.lastIndexOf('\n');
+        if (nl === -1) {
+          parsedPending = combined;
+          return;
+        }
+        const processable = combined.slice(0, nl);
+        parsedPending = combined.slice(nl + 1);
+
+        const events = parseStreamLines(processable, { state: parsedState });
         for (const event of events) {
           if (event.type === 'text') {
             controller.enqueue(encoder.encode(sseEncode(event.text)));
@@ -150,10 +163,8 @@ export async function GET(
         }
       }
 
-      // Flush any incomplete trailing line held in passPending so the final
-      // line of a log isn't swallowed at stream end. Reuses sendPassthroughContent
-      // by appending a synthetic newline, which lets parseStreamLines handle
-      // TS-prefix stripping / JSON vs raw classification uniformly.
+      // Flush any incomplete trailing line held in passPending / parsedPending so
+      // the final line of a log isn't swallowed at stream end.
       function flushPassthroughPending() {
         if (!passthrough || !passPending) return;
         const tail = passPending;
@@ -161,11 +172,20 @@ export async function GET(
         sendPassthroughContent(tail + '\n');
       }
 
+      function flushParsedPending() {
+        if (raw || passthrough || !parsedPending) return;
+        const tail = parsedPending;
+        parsedPending = '';
+        sendParsedEvents(tail + '\n');
+      }
+
       function emitDone(watcher: ReturnType<typeof watch> | null, exitCode?: number | null) {
         flushPassthroughPending();
+        flushParsedPending();
         try {
           const payload: Record<string, unknown> = { exitCode: exitCode ?? null };
-          if ((exitCode ?? 0) !== 0) {
+          // passthrough jobs already streamed all log content — skip detail to avoid duplicating it as red error text
+          if (!passthrough && (exitCode ?? 0) !== 0) {
             const detail = extractLogDetail();
             if (detail) payload.detail = detail;
           }
@@ -276,9 +296,11 @@ export async function GET(
 
       function emitDoneAndCleanup(exitCode?: number | null) {
         flushPassthroughPending();
+        flushParsedPending();
         try {
           const payload: Record<string, unknown> = { exitCode: exitCode ?? null };
-          if ((exitCode ?? 0) !== 0) {
+          // passthrough jobs already streamed all log content — skip detail to avoid duplicating it as red error text
+          if (!passthrough && (exitCode ?? 0) !== 0) {
             const detail = extractLogDetail();
             if (detail) payload.detail = detail;
           }

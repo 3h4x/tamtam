@@ -232,8 +232,18 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
   // single button while still being smart about what to do.
   const skipToPush = await hasFreshLgtm(projectName, projPath);
 
-  // No uncommitted changes, just push existing commits.
+  const testCmd = detectTestCommand(projPath, projectName);
+  const testsDisabled = !!getProjectTestConfig(projectName)?.testsDisabled;
+
+  // No uncommitted changes — run tests first (if configured + not disabled) to
+  // verify committed code before pushing. Completion hook handles test→push.
+  // If no test command or tests disabled, push the existing commits directly.
   if (!changes) {
+    if (testCmd && !testsDisabled) {
+      const r = await startProjectTest(projectName);
+      if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+      return { ok: true, step: 'test', jobId: r.jobId, releaseJobId, message: `Running tests (${r.testCmd})` };
+    }
     const r = await startProjectPush(projectName);
     if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
     return { ok: true, step: 'push', releaseJobId, message: r.message };
@@ -247,8 +257,7 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
   }
 
   // Has uncommitted changes — run tests first (if configured), then review.
-  const testCmd = detectTestCommand(projPath, projectName);
-  if (testCmd) {
+  if (testCmd && !testsDisabled) {
     const r = await startProjectTest(projectName);
     if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
     return { ok: true, step: 'test', jobId: r.jobId, releaseJobId, message: `Running tests (${r.testCmd})` };

@@ -404,9 +404,24 @@ describe('startRelease — release pipeline entry decision tree', () => {
     if (!r.ok) expect(r.status).toBe(400);
   });
 
-  it('pushes directly when no uncommitted changes exist even if a test command is configured', async () => {
-    // changes=false, unpushed=1 — even with a test command, skip straight to push.
+  it('runs tests before pushing when no uncommitted changes but test command is configured', async () => {
+    // changes=false, unpushed=1 — with a test command, tests run first; hook chains to push.
     detectTestCommandMock.mockReturnValue('pnpm test');
+    execMock
+      .mockImplementationOnce(() => gitStatus(''))   // no uncommitted changes
+      .mockImplementationOnce(() => gitAhead('1'));   // 1 unpushed commit
+    startProjectTestMock.mockResolvedValue({ ok: true, jobId: 'test-1', testCmd: 'pnpm test' });
+
+    const r = await startRelease('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.step).toBe('test');
+    expect(startProjectTestMock).toHaveBeenCalled();
+    expect(startProjectPushMock).not.toHaveBeenCalled();
+  });
+
+  it('pushes directly when no uncommitted changes and no test command', async () => {
+    // changes=false, unpushed=1, no test command — push directly.
+    detectTestCommandMock.mockReturnValue(null);
     execMock
       .mockImplementationOnce(() => gitStatus(''))   // no uncommitted changes
       .mockImplementationOnce(() => gitAhead('1'));   // 1 unpushed commit
@@ -416,7 +431,6 @@ describe('startRelease — release pipeline entry decision tree', () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.step).toBe('push');
     expect(startProjectTestMock).not.toHaveBeenCalled();
-    expect(startProjectReviewMock).not.toHaveBeenCalled();
   });
 
   it('returns 409 in Direct Branch mode when working copy is on an unexpected non-default branch', async () => {
