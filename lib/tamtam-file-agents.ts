@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { getBranchContext, gitLsTreeSync, gitShowSync } from './git-branch';
 
 export interface FileAgent {
   id: string;
@@ -116,11 +117,31 @@ function serializeAgent(
 }
 
 export function scanFileAgents(projectPath: string, projectName: string): FileAgent[] {
+  const ctx = getBranchContext(projectPath);
   const dir = join(projectPath, '.tamtam', 'agents');
+  const now = Date.now() / 1000;
+
+  if (!ctx.isDefaultBranch) {
+    // On a feature/PR branch: only honour agents that exist on origin/<defaultBranch>.
+    // This prevents an attacker's PR from registering new scheduled agents.
+    const ref = `origin/${ctx.defaultBranch}`;
+    const fileNames = gitLsTreeSync(projectPath, ref, '.tamtam/agents');
+    const agents: FileAgent[] = [];
+    for (const fileName of fileNames) {
+      if (!fileName.endsWith('.md')) continue;
+      const name = fileName.slice(0, -3);
+      const filePath = join(dir, fileName);
+      const content = gitShowSync(projectPath, ref, `.tamtam/agents/${fileName}`);
+      if (content === null) continue;
+      agents.push(buildFileAgent(filePath, name, projectName, content, now));
+    }
+    return agents;
+  }
+
+  // On the default branch: read from the working tree as before.
   if (!existsSync(dir)) return [];
 
   const agents: FileAgent[] = [];
-  const now = Date.now() / 1000;
 
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
@@ -140,12 +161,27 @@ export function loadFileAgent(
   projectName: string,
   agentName: string
 ): FileAgent | null {
+  const ctx = getBranchContext(projectPath);
   const filePath = join(projectPath, '.tamtam', 'agents', `${agentName}.md`);
+  const now = Date.now() / 1000;
+
+  if (!ctx.isDefaultBranch) {
+    // On a feature/PR branch: read from origin/<defaultBranch> to avoid loading
+    // agents that only exist on the feature branch.
+    const content = gitShowSync(
+      projectPath,
+      `origin/${ctx.defaultBranch}`,
+      `.tamtam/agents/${agentName}.md`
+    );
+    if (content === null) return null;
+    return buildFileAgent(filePath, agentName, projectName, content, now);
+  }
+
   if (!existsSync(filePath)) return null;
 
   try {
     const content = readFileSync(filePath, 'utf-8');
-    return buildFileAgent(filePath, agentName, projectName, content, Date.now() / 1000);
+    return buildFileAgent(filePath, agentName, projectName, content, now);
   } catch {
     return null;
   }
@@ -166,9 +202,18 @@ export function writeFileAgent(
   mkdirSync(dir, { recursive: true });
   const filePath = join(dir, `${agentName}.md`);
 
-  // Load current values from disk (if the file exists)
+  // Load current values from the working-tree file (if it exists) to preserve unset fields.
+  // We intentionally read from disk here even on a feature branch, because the user may have
+  // edited the agent locally and we want to preserve their changes.
   const current = existsSync(filePath)
-    ? loadFileAgent(projectPath, projectName, agentName)
+    ? (() => {
+        try {
+          const content = readFileSync(filePath, 'utf-8');
+          return buildFileAgent(filePath, agentName, projectName, content, Date.now() / 1000);
+        } catch {
+          return null;
+        }
+      })()
     : null;
 
   const model = updates.model ?? current?.model ?? 'sonnet';

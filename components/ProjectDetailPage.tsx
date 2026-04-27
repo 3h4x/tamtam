@@ -1052,6 +1052,16 @@ export function ProjectDetailPage({
                   <span className="font-mono text-accent">.tamtam/config.yml</span>
                   <span>—</span>
                   <span>overrides: {config.file_config.join(', ')}</span>
+                  {config.file_config_is_default_branch === false && config.current_branch && (
+                    <>
+                      <span>·</span>
+                      <span className="text-amber-400">
+                        showing <span className="font-mono">{config.file_config_branch}</span> config
+                        (you are on <span className="font-mono">{config.current_branch}</span>);
+                        changes take effect after merge
+                      </span>
+                    </>
+                  )}
                   <span className="ml-auto text-text-tertiary">saved automatically on change</span>
                 </div>
               )}
