@@ -116,6 +116,14 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     vi.doMock('@/lib/skills', () => ({ SKILLS_DIR: tempSkillsDir, DATA_SKILLS_DIR: join(tempSkillsDir, 'data-skills') }));
 
+    vi.doMock('@/lib/agent-memory', () => ({
+      getAgentMemoryDir: vi.fn().mockReturnValue('/tmp/tamtam-memory'),
+      ensureAgentMemoryDir: vi.fn(),
+      getAgentMemoryPath: vi.fn().mockReturnValue('/tmp/tamtam-memory/proj1/Test Agent.md'),
+      readAgentMemory: vi.fn().mockReturnValue(null),
+      buildMemoryBlock: vi.fn().mockReturnValue(''),
+    }));
+
     vi.doMock('@/lib/config', () => ({
       withBasePrompt: (p: string) => p,
       getPermissionModeFlag: () => '--dangerously-skip-permissions',
@@ -255,7 +263,8 @@ describe('POST /api/agents/{agentId}/run', () => {
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
     const [, , fullPrompt] = startJobMock.mock.calls[0];
-    expect(fullPrompt).toBe('task prompt');
+    expect(fullPrompt).toContain('task prompt');
+    expect(fullPrompt).not.toContain('## My Skill');
   });
 
   it('returns 500 if startJob throws', async () => {
@@ -358,6 +367,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(res.status).toBe(200);
 
     const [, , fullPrompt] = startJobMock.mock.calls[0];
-    expect(fullPrompt).toBe('task');
+    expect(fullPrompt).toContain('task');
+    expect(fullPrompt).not.toContain('nonexistent');
   });
 });
