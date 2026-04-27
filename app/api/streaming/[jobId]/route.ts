@@ -174,12 +174,38 @@ export async function GET(
         closeStream(watcher);
       }
 
+      // Track whether we've seen a "type":"result" line so we don't re-scan
+      // the full file on every poll once the job finishes.
+      let seenResult = false;
+
+      // Read new bytes from offset using an open fd — avoids re-reading the
+      // whole file on every fs.watch tick (critical for large logs).
+      function readNewBytes(): string {
+        if (!existsSync(logPath)) return '';
+        let fd = -1;
+        try {
+          fd = openSync(logPath, 'r');
+          const size = fstatSync(fd).size;
+          if (size <= offset) return '';
+          const len = size - offset;
+          const buf = Buffer.allocUnsafe(len);
+          const bytesRead = readSync(fd, buf, 0, len, offset);
+          offset += bytesRead;
+          return buf.subarray(0, bytesRead).toString('utf-8');
+        } catch {
+          return '';
+        } finally {
+          if (fd >= 0) try { closeSync(fd); } catch {}
+        }
+      }
+
       // Replay existing content
       if (existsSync(logPath)) {
         try {
           const content = readFileSync(logPath, 'utf-8');
           offset = Buffer.byteLength(content);
           sendContent(content);
+          if (content.includes('"type":"result"')) seenResult = true;
         } catch {}
       }
 
@@ -191,8 +217,7 @@ export async function GET(
           emitDone(null, jobRecord.exitCode);
         } else {
           // Only emit synthetic done if parseStreamLines didn't already produce one
-          const content = existsSync(logPath) ? readFileSync(logPath, 'utf-8') : '';
-          if (!content.includes('"type":"result"')) {
+          if (!seenResult) {
             emitDone(null, jobRecord.exitCode);
           } else {
             try { controller.close(); } catch {}
@@ -222,20 +247,22 @@ export async function GET(
 
       function checkFinished(): boolean {
         try {
-          const content = existsSync(logPath) ? readFileSync(logPath, 'utf-8') : '';
-          const currentSize = Buffer.byteLength(content);
-          if (currentSize > offset) {
-            const newContent = Buffer.from(content).slice(offset).toString('utf-8');
-            offset = currentSize;
+          const newContent = readNewBytes();
+          if (newContent) {
             sendContent(newContent);
+            if (!seenResult && newContent.includes('"type":"result"')) seenResult = true;
           }
           const job = getJob(jobId);
           if (!job?.finishedAt) return false;
           if (raw || passthrough) {
             emitDoneAndCleanup(job.exitCode);
           } else {
-            const fullContent = existsSync(logPath) ? readFileSync(logPath, 'utf-8') : '';
-            if (!fullContent.includes('"type":"result"')) {
+            if (!seenResult) {
+              // One final check in case result landed in a batch we haven't seen
+              const tail = readNewBytes();
+              if (tail) { sendContent(tail); if (tail.includes('"type":"result"')) seenResult = true; }
+            }
+            if (!seenResult) {
               emitDoneAndCleanup(job.exitCode);
             } else {
               cleanup();
