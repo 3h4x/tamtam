@@ -1,5 +1,7 @@
 ---
 model: sonnet
-schedule: 24h
+schedule: 2h
 skillIds: ["agent-tests"]
 ---
+
+
