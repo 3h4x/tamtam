@@ -280,6 +280,18 @@ class TerminalStore {
       }))
     })
 
+    es.addEventListener('compacting', () => {
+      this.update(projectName, (s) => {
+        const flushResult = flushClaudeBuffers(s)
+        const baseHistory = flushResult.history ?? s.history
+        return {
+          ...flushResult,
+          history: [...baseHistory, { role: 'status' as const, text: 'Compacting context…' }],
+          streamBuffer: '',
+        }
+      })
+    })
+
     es.addEventListener('tool_use', (event) => {
       try {
         const data = JSON.parse((event as MessageEvent).data)

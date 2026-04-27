@@ -4,7 +4,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { exec } from './shell';
 
-const REVIEW_DIR = join(homedir(), '.cache', 'z', 'schedule-reviews');
+const REVIEW_DIR = join(homedir(), '.cache', 'tamtam', 'schedule-reviews');
 
 function reviewStatePath(project: string): string {
   return join(REVIEW_DIR, `${project}.hash`);

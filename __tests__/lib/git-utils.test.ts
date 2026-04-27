@@ -89,7 +89,7 @@ describe('git-utils', () => {
     it('stores git status hash for a project', async () => {
       await markReviewed('test-project', join(tempDir, 'clean'));
 
-      const reviewStateFile = join(cacheDir, '.cache', 'z', 'schedule-reviews', 'test-project.hash');
+      const reviewStateFile = join(cacheDir, '.cache', 'tamtam', 'schedule-reviews', 'test-project.hash');
       expect(reviewStateFile).toBeTruthy();
     });
 
@@ -100,7 +100,7 @@ describe('git-utils', () => {
       await markReviewed('test-project', projectPath);
 
       // The hash should be stored in the review state file
-      const reviewStateFile = join(cacheDir, '.cache', 'z', 'schedule-reviews', 'test-project.hash');
+      const reviewStateFile = join(cacheDir, '.cache', 'tamtam', 'schedule-reviews', 'test-project.hash');
       expect(reviewStateFile).toBeTruthy();
     });
 

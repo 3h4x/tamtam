@@ -395,7 +395,7 @@ describe('claude-stream-parser', () => {
   describe('createParseState', () => {
     it('returns zeroed state', () => {
       const state = createParseState();
-      expect(state).toEqual({ currentToolName: '', currentToolInput: '', inToolUse: false, hasEmitted: false });
+      expect(state).toEqual({ currentToolName: '', currentToolInput: '', inToolUse: false, hasEmitted: false, isCompacting: false });
     });
 
     it('shared state accumulates tool input across multiple parseStreamLines calls', () => {

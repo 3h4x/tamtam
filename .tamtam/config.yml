@@ -7,7 +7,7 @@ pipeline:
   auto_commit_enabled: true
   auto_push_enabled: true
   auto_pr_merge_enabled: false
-  release_after_run: false
+  release_after_run: true
 schedule:
   test_cron_enabled: false
 gates:
