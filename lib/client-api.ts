@@ -502,6 +502,9 @@ export interface ProjectConfig {
   last_push_error?: string | null
   last_push_at?: number | null
   file_config?: string[]
+  file_config_branch?: string
+  file_config_is_default_branch?: boolean
+  current_branch?: string
 }
 
 export async function fetchProjectConfig(projectName: string): Promise<ProjectConfig> {

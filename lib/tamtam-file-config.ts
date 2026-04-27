@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { parse as yamlParse, stringify as yamlStringify } from 'yaml';
+import { getBranchContext, gitShowSync } from './git-branch';
 
 export interface FileProjectConfig {
   // pipeline
@@ -42,15 +43,12 @@ const GROUPS: { label: string; keys: (keyof FileProjectConfig)[] }[] = [
 
 const ALL_KEYS = new Set<string>(GROUPS.flatMap(g => g.keys as string[]));
 
-export function loadFileConfig(projectPath: string): FileProjectConfig | null {
-  const configPath = join(projectPath, '.tamtam', 'config.yml');
-  if (!existsSync(configPath)) return null;
-
+function parseConfigYaml(raw: string): FileProjectConfig | null {
   try {
-    const raw = yamlParse(readFileSync(configPath, 'utf-8')) as unknown;
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const parsed = yamlParse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
 
-    const obj = raw as Record<string, unknown>;
+    const obj = parsed as Record<string, unknown>;
 
     // Flatten grouped sections: { pipeline: { test_command: ... } } → { test_command: ... }
     const flat: Record<string, unknown> = {};
@@ -86,8 +84,37 @@ export function loadFileConfig(projectPath: string): FileProjectConfig | null {
   }
 }
 
+export function loadFileConfig(projectPath: string): FileProjectConfig | null {
+  const ctx = getBranchContext(projectPath);
+
+  if (!ctx.isDefaultBranch) {
+    // On a feature/PR branch: read from origin/<defaultBranch> to prevent privilege escalation
+    // from untrusted branches adding malicious .tamtam/ config.
+    const content = gitShowSync(projectPath, `origin/${ctx.defaultBranch}`, '.tamtam/config.yml');
+    if (content === null) return null;
+    return parseConfigYaml(content);
+  }
+
+  // On the default branch: read from the working tree as before.
+  const configPath = join(projectPath, '.tamtam', 'config.yml');
+  if (!existsSync(configPath)) return null;
+
+  try {
+    return parseConfigYaml(readFileSync(configPath, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Returns branch context for a project, for use in API responses / UI banners.
+ * When isDefaultBranch is false, config was read from origin/<defaultBranch>.
+ */
+export { getBranchContext } from './git-branch';
+
 /**
  * Write (merge) config values into .tamtam/config.yml.
+ * Always writes to the working tree so the change is committed on the current branch.
  * Creates the file and directory if they don't exist.
  * Keys set to null/undefined are removed; existing unrelated keys are preserved.
  */
@@ -113,7 +140,25 @@ export function writeFileConfig(
   }
 
   // Flatten recognized keys from the raw doc for mutation, keyed by their leaf name.
-  const current: Record<string, unknown> = { ...(loadFileConfig(projectPath) ?? {}) };
+  const ctx = getBranchContext(projectPath);
+  let baseConfig: FileProjectConfig;
+  if (ctx.isDefaultBranch) {
+    baseConfig = loadFileConfig(projectPath) ?? {};
+  } else {
+    // For writes on a feature branch, start from the working-tree file (if present) so we don't
+    // lose local edits, even though reads come from the default branch.
+    if (existsSync(configPath)) {
+      try {
+        baseConfig = parseConfigYaml(readFileSync(configPath, 'utf-8')) ?? {};
+      } catch {
+        baseConfig = {};
+      }
+    } else {
+      baseConfig = {};
+    }
+  }
+
+  const current: Record<string, unknown> = { ...baseConfig };
 
   for (const [key, value] of Object.entries(updates)) {
     if (value === null || value === undefined) {

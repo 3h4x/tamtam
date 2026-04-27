@@ -4,7 +4,7 @@ import { resolveProjectPath, clearProjectDataCache } from '@/lib/project-data';
 import { reloadConfig } from '@/lib/config';
 import { installTestSchedule, uninstallTestSchedule, parseTestScheduleToCron } from '@/lib/test-scheduler';
 import { detectTestCommand } from '@/lib/start-test';
-import { loadFileConfig, writeFileConfig } from '@/lib/tamtam-file-config';
+import { loadFileConfig, writeFileConfig, getBranchContext } from '@/lib/tamtam-file-config';
 
 export async function GET(
   _request: NextRequest,
@@ -18,6 +18,7 @@ export async function GET(
   const testCfg = getProjectTestConfig(projectName);
   const pushResult = getProjectPushResult(projectName);
   const fileConfig = loadFileConfig(projPath);
+  const branchCtx = getBranchContext(projPath);
 
   return NextResponse.json({
     project: projectName,
@@ -38,6 +39,10 @@ export async function GET(
     last_push_at: pushResult?.lastPushAt ?? null,
     // Keys whose values currently come from .tamtam/config.yml
     file_config: fileConfig ? Object.keys(fileConfig) : [],
+    // Branch the file config was read from (may differ from working tree on PRs)
+    file_config_branch: branchCtx.isDefaultBranch ? branchCtx.currentBranch : branchCtx.defaultBranch,
+    file_config_is_default_branch: branchCtx.isDefaultBranch,
+    current_branch: branchCtx.currentBranch,
   });
 }
 
