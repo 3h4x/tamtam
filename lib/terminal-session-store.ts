@@ -305,8 +305,14 @@ class TerminalStore {
         const data = JSON.parse((event as MessageEvent).data)
         this.update(projectName, (s) => {
           if (s.streamTools.length === 0) return {}
-          const last = { ...s.streamTools[s.streamTools.length - 1], result: data.content }
-          return { streamTools: [...s.streamTools.slice(0, -1), last] }
+          const completed = { ...s.streamTools[s.streamTools.length - 1], result: data.content }
+          const rest = s.streamTools.slice(0, -1)
+          // Flush completed tool+result pair to history immediately so the
+          // live streaming area only ever shows the currently-executing tool.
+          return {
+            history: [...s.history, { role: 'tool' as const, text: '', tool: completed }],
+            streamTools: rest,
+          }
         })
       } catch {}
     })
