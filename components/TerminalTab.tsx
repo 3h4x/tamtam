@@ -96,7 +96,7 @@ const TOOL_COLORS: Record<string, string> = {
   WebSearch: 'text-[#ffd080]',
 }
 
-function ToolBlock({ tool }: { tool: ToolEntry }) {
+function ToolBlock({ tool, executing }: { tool: ToolEntry; executing?: boolean }) {
   const [collapsed, setCollapsed] = useState(true)
 
   let summary = ''
@@ -118,9 +118,12 @@ function ToolBlock({ tool }: { tool: ToolEntry }) {
   return (
     <div className="mx-4 group/tool">
       <div
-        className={`flex items-baseline gap-2 px-2 py-0.5 rounded-sm leading-tight ${clickable ? 'cursor-pointer hover:bg-[#181818]' : ''}`}
+        className={`flex items-center gap-2 px-2 py-0.5 rounded-sm leading-tight ${clickable ? 'cursor-pointer hover:bg-[#181818]' : ''}`}
         onClick={() => clickable && setCollapsed(!collapsed)}
       >
+        {executing && !hasResult && (
+          <span className="w-1.5 h-1.5 rounded-full bg-status-warning animate-pulse shrink-0" />
+        )}
         <span className={`${nameColor} text-xs font-mono shrink-0`}>{tool.name}</span>
         {summary && (
           <span className="text-[#888] text-xs font-mono truncate min-w-0 flex-1">{summary}</span>
@@ -210,6 +213,8 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const [autoScroll, setAutoScroll] = useState(true)
   const [currentReleaseId, setCurrentReleaseId] = useState<string | null>(null)
   const [elapsedMs, setElapsedMs] = useState(0)
+  const [idleSec, setIdleSec] = useState(0)
+  const lastActivityRef = useRef<number>(Date.now())
   const spinnerChars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
   // Skills catalog
@@ -587,6 +592,20 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     }, 100)
     return () => clearInterval(id)
   }, [streaming, streamStartedAt, documentVisible])
+
+  // Track last stream activity for idle display
+  useEffect(() => {
+    lastActivityRef.current = Date.now()
+    setIdleSec(0)
+  }, [streamBuffer, rawBuffer, streamTools.length, history.length])
+
+  useEffect(() => {
+    if (!streaming || !documentVisible) return
+    const id = setInterval(() => {
+      setIdleSec(Math.floor((Date.now() - lastActivityRef.current) / 1000))
+    }, 1000)
+    return () => clearInterval(id)
+  }, [streaming, documentVisible])
 
   const addImages = useCallback((files: File[]) => {
     const imageFiles = files.filter(f => f.type.startsWith('image/') || IMG_EXT.test(f.name))
@@ -1255,24 +1274,39 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
             </div>
           )}
 
-          {streaming && streamTools.length > 0 && streamTools.map((tool, i) => (
-            <ToolBlock key={`stream-tool-${i}`} tool={tool} />
-          ))}
+          {streaming && streamTools.length > 0 && (() => {
+            const lastToolIdx = streamTools.length - 1
+            const lastToolExecuting = !streamTools[lastToolIdx].result
+            return streamTools.map((tool, i) => (
+              <ToolBlock key={`stream-tool-${i}`} tool={tool} executing={i === lastToolIdx && lastToolExecuting} />
+            ))
+          })()}
 
-          {streaming && (
-            <div className="px-4 py-2 flex items-center gap-2">
-              <span className="text-accent font-mono text-sm">{spinnerChars[spinnerFrame % spinnerChars.length]}</span>
-              <span className="text-status-warning text-xs font-mono shrink-0">{(elapsedMs / 1000).toFixed(1)}s</span>
-              <span className="text-[#666] text-xs font-mono truncate flex-1">{lastStreamLine || 'thinking...'}</span>
-              <button
-                className="text-[10px] px-1.5 py-0.5 rounded bg-status-error/20 text-status-error hover:bg-status-error/40 cursor-pointer border-none font-mono leading-none shrink-0"
-                onClick={handleCancel}
-                title="Cancel execution"
-              >
-                cancel
-              </button>
-            </div>
-          )}
+          {streaming && (() => {
+            const pendingTool = streamTools.length > 0 && !streamTools[streamTools.length - 1].result
+              ? streamTools[streamTools.length - 1]
+              : null
+            const label = pendingTool
+              ? `running ${pendingTool.name}…`
+              : (lastStreamLine || 'thinking…')
+            const idleLabel = idleSec >= 5 ? ` · idle ${idleSec}s` : ''
+            return (
+              <div className="px-4 py-2 flex items-center gap-2">
+                <span className="text-accent font-mono text-sm">{spinnerChars[spinnerFrame % spinnerChars.length]}</span>
+                <span className="text-status-warning text-xs font-mono shrink-0">{(elapsedMs / 1000).toFixed(1)}s</span>
+                <span className={`text-xs font-mono truncate flex-1 ${pendingTool ? 'text-status-warning' : 'text-[#666]'}`}>
+                  {label}{idleLabel}
+                </span>
+                <button
+                  className="text-[10px] px-1.5 py-0.5 rounded bg-status-error/20 text-status-error hover:bg-status-error/40 cursor-pointer border-none font-mono leading-none shrink-0"
+                  onClick={handleCancel}
+                  title="Cancel execution"
+                >
+                  cancel
+                </button>
+              </div>
+            )
+          })()}
 
           {messageQueue.length > 0 && (
             <div className="px-4 pb-1">

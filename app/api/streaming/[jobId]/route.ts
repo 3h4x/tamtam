@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { existsSync, readFileSync, watch } from 'fs';
+import { existsSync, readFileSync, watch, openSync, readSync, fstatSync, closeSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { getJob, probeJobStatus } from '@/lib/job-storage';
