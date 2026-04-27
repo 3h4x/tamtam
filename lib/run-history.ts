@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } fr
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 
-const RUNS_FILE = join(homedir(), '.cache', 'z', 'schedule-runs.jsonl');
+const RUNS_FILE = join(homedir(), '.cache', 'tamtam', 'schedule-runs.jsonl');
 
 export interface RunEntry {
   project: string;

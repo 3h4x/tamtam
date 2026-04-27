@@ -9,7 +9,7 @@ import { errMsg } from '@/lib/types';
 function getLogPath(jobId: string): string {
   const job = getJob(jobId);
   if (job?.logPath) return job.logPath;
-  return join(homedir(), '.z', 'jobs', `${jobId}.log`);
+  return join(homedir(), '.tamtam', 'jobs', `${jobId}.log`);
 }
 
 export async function GET(
@@ -81,6 +81,8 @@ export async function GET(
             controller.enqueue(encoder.encode(sseEncode(JSON.stringify({ name: event.name, input: event.input }), 'tool_use')));
           } else if (event.type === 'tool_result') {
             controller.enqueue(encoder.encode(sseEncode(JSON.stringify({ content: event.content }), 'tool_result')));
+          } else if (event.type === 'compacting') {
+            controller.enqueue(encoder.encode(sseEncode('', 'compacting')));
           }
           // `done` events from parser suppressed — server emits its own for passthrough
         }
@@ -108,6 +110,8 @@ export async function GET(
             controller.enqueue(encoder.encode(sseEncode(JSON.stringify({ name: event.name, input: event.input }), 'tool_use')));
           } else if (event.type === 'tool_result') {
             controller.enqueue(encoder.encode(sseEncode(JSON.stringify({ content: event.content }), 'tool_result')));
+          } else if (event.type === 'compacting') {
+            controller.enqueue(encoder.encode(sseEncode('', 'compacting')));
           } else if (event.type === 'done') {
             controller.enqueue(
               encoder.encode(sseEncode(JSON.stringify(event.result), 'done'))

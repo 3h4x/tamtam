@@ -33,7 +33,7 @@ describe('run-history', () => {
     rmSync(homeDir, { recursive: true, force: true });
   });
 
-  const runsFile = () => join(homeDir, '.cache', 'z', 'schedule-runs.jsonl');
+  const runsFile = () => join(homeDir, '.cache', 'tamtam', 'schedule-runs.jsonl');
 
   describe('recordRunStart', () => {
     it('returns a numeric token', () => {

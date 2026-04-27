@@ -30,6 +30,7 @@ export type ParsedEvent =
   | { type: 'thinking'; text: string }
   | { type: 'tool_use'; name: string; input: string }
   | { type: 'tool_result'; content: string }
+  | { type: 'compacting' }
   | { type: 'done'; result: { duration: number; sessionId: string; error: boolean; errorText?: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreateTokens: number; model: string | null } };
 
 // Tool results arrive as either a string or an array of content blocks
@@ -65,10 +66,11 @@ export interface ParseState {
   currentToolInput: string;
   inToolUse: boolean;
   hasEmitted: boolean;
+  isCompacting: boolean;
 }
 
 export function createParseState(): ParseState {
-  return { currentToolName: '', currentToolInput: '', inToolUse: false, hasEmitted: false };
+  return { currentToolName: '', currentToolInput: '', inToolUse: false, hasEmitted: false, isCompacting: false };
 }
 
 export interface ParseOptions {
@@ -107,6 +109,21 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
 
     if (!parsed || typeof parsed !== 'object') continue;
 
+    // Track compaction state. When Claude CLI auto-compacts the context, it emits
+    // {"type":"system","subtype":"status","status":"compacting"} before the compaction
+    // turn and {"type":"system","subtype":"status","status":null} after. Suppress text
+    // deltas during compaction so the raw compaction prompt/summary doesn't leak into
+    // the terminal — emit a single `compacting` marker event instead.
+    if (parsed.type === 'system' && (parsed as Record<string, unknown>).subtype === 'status') {
+      const status = (parsed as Record<string, unknown>).status;
+      if (status === 'compacting' && !state.isCompacting) {
+        state.isCompacting = true;
+        push({ type: 'compacting' });
+      } else if (state.isCompacting && status !== 'compacting') {
+        state.isCompacting = false;
+      }
+    }
+
     if (parsed.type === 'stream_event') {
       const evt = parsed.event;
 
@@ -118,10 +135,11 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
         push({ type: 'thinking', text: evt.delta.thinking ?? '' });
       }
 
-      // Text deltas from assistant
+      // Text deltas from assistant — suppressed during context compaction
       if (
         evt?.type === 'content_block_delta' &&
-        evt?.delta?.type === 'text_delta'
+        evt?.delta?.type === 'text_delta' &&
+        !state.isCompacting
       ) {
         push({ type: 'text', text: evt.delta.text ?? '' });
       }

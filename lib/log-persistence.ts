@@ -10,7 +10,7 @@ export interface LogFrame {
 
 function getLogsDir(baseDir?: string): string {
   const base = baseDir ?? homedir();
-  const logsDir = join(base, '.z', 'jobs');
+  const logsDir = join(base, '.tamtam', 'jobs');
   mkdirSync(logsDir, { recursive: true });
   return logsDir;
 }
