@@ -894,14 +894,14 @@ export function ProjectDetailPage({
           {name && (
             <Link
               href={`/pipeline?project=${encodeURIComponent(name)}`}
-              className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer inline-flex items-center no-underline"
+              className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer inline-flex items-center no-underline font-medium"
             >
               Pipeline
             </Link>
           )}
           {githubUrl && (
             <a
-              className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer inline-flex items-center"
+              className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer inline-flex items-center font-medium"
               href={githubUrl}
               target="_blank"
               rel="noopener noreferrer"
