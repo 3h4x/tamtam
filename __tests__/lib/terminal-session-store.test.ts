@@ -285,7 +285,9 @@ describe('TerminalStore – startStream EventSource integration', () => {
     es.emit('tool_use', JSON.stringify({ name: 'Bash', input: '{}' }));
     es.emit('tool_result', JSON.stringify({ content: 'exit 0' }));
     const s = terminalStore.get(p);
-    expect(s.streamTools[0].result).toBe('exit 0');
+    // tool_result flushes the completed tool to history; streamTools is cleared
+    const toolEntry = s.history.find((e) => e.role === 'tool' && e.tool?.name === 'Bash');
+    expect(toolEntry?.tool?.result).toBe('exit 0');
     terminalStore.reset(p);
   });
 
