@@ -73,7 +73,8 @@ describe('scripts/job-runner.js', () => {
     await new Promise<void>((res, rej) => {
       const t = setTimeout(() => rej(new Error('child never said ready')), 5000);
       const onData = () => {
-        const log = readFileSync(logPath, 'utf-8');
+        let log = '';
+        try { log = readFileSync(logPath, 'utf-8'); } catch { return; }
         if (log.includes('ready')) { clearTimeout(t); clearInterval(poll); res(); }
       };
       const poll = setInterval(onData, 50);
