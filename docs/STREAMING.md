@@ -272,6 +272,8 @@ The `?job=` param is used during live streaming because the session ID isn't kno
 - **+skill** — opens skill picker; selected skills appear as removable tags (e.g. `Senior Fullstack ×`) and are injected as context on the *first* message only
 - **+docs** — injects project `docs/*.md` files into the next submission
 - **model selector** — haiku / sonnet / opus; persists to `default_model` setting
+- **trace ↙** — appears only during an active release pipeline run; links to `/project/[name]/release/[releaseId]` trace view showing per-step verdicts and log excerpts
+- **abort** — appears alongside **trace** during a release; stops the running pipeline step
 
 ### Content rendering
 
