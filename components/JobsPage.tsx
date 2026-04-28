@@ -81,8 +81,8 @@ export function JobsPage() {
 
   const filtered = jobs.filter((j) => {
     if (filter === 'running' && j.status !== 'running') return false
-    if (filter === 'failed' && !(j.status === 'done' && j.exit_code !== 0)) return false
-    if (filter === 'done' && !(j.status === 'done' && j.exit_code === 0)) return false
+    if (filter === 'failed' && !(j.status === 'done' && j.exit_code !== null && j.exit_code !== 0)) return false
+    if (filter === 'done' && !(j.status === 'done' && (j.exit_code === 0 || j.exit_code === null))) return false
     if (search) {
       const q = search.toLowerCase()
       const prompt = (j.user_prompt ?? j.prompt ?? '').toLowerCase()
@@ -92,7 +92,7 @@ export function JobsPage() {
   })
 
   const runningCount = jobs.filter(j => j.status === 'running').length
-  const failedCount = jobs.filter(j => j.status === 'done' && j.exit_code !== 0).length
+  const failedCount = jobs.filter(j => j.status === 'done' && j.exit_code !== null && j.exit_code !== 0).length
   const doneCount = jobs.length - runningCount - failedCount
 
   return (
@@ -176,7 +176,7 @@ export function JobsPage() {
           <tbody>
             {filtered.map((job) => {
               const isRunning = job.status === 'running'
-              const isFailed = !isRunning && job.exit_code !== 0
+              const isFailed = !isRunning && job.exit_code !== null && job.exit_code !== 0
               const promptText = job.user_prompt ?? job.prompt ?? null
               const tokens = formatTokens(job)
               const cost = formatCost(job)

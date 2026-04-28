@@ -232,7 +232,7 @@ export function NotificationBell() {
                     </div>
                   )}
                   {finishedJobs.map(job => {
-                    const success = job.exit_code === 0
+                    const success = job.exit_code === 0 || job.exit_code === null
                     const dur = elapsed(job.started_at, job.finished_at)
                     const ago = job.finished_at ? timeAgo(new Date(job.finished_at * 1000)) : null
 
