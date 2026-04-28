@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq, inArray } from 'drizzle-orm';
 import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { basename, join } from 'path';
 import { db, schema } from '@/lib/db';
 import { resolveProjectPath } from '@/lib/project-data';
 import { getImproveConfig } from '@/lib/scheduling';
@@ -21,7 +21,7 @@ export async function POST(
   const { agentId } = await params;
 
   // Resolve agent — either a DB row or a file-based agent
-  let agent: { id: string; name: string; project: string; skillIds: string; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean } | null = null;
+  let agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean } | null = null;
 
   const parsedFileId = parseFileAgentId(agentId);
   if (parsedFileId) {
@@ -29,7 +29,7 @@ export async function POST(
     if (!projPath) return NextResponse.json({ detail: 'agent not found' }, { status: 404 });
     const fa = loadFileAgent(projPath, parsedFileId.project, parsedFileId.name);
     if (!fa) return NextResponse.json({ detail: 'agent not found' }, { status: 404 });
-    agent = { ...fa, skillIds: JSON.stringify(fa.skillIds) };
+    agent = { ...fa, skillIds: JSON.stringify(fa.skillIds), docPaths: JSON.stringify(fa.docPaths) };
   } else {
     const row = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
     if (row) agent = row;
@@ -95,6 +95,22 @@ export async function POST(
     .filter((id) => id.startsWith('persona:'))
     .map((id) => id.slice('persona:'.length));
 
+  // Load project docs first — they are prepended before skills so skills can reference them.
+  const docPaths: string[] = JSON.parse(agent.docPaths || '[]');
+  const docParts: string[] = [];
+  const metaDocs: Array<{ name: string; path: string }> = [];
+  for (const docPath of docPaths) {
+    const fullPath = join(projPath, docPath);
+    if (!fullPath.startsWith(projPath + '/')) continue;
+    if (existsSync(fullPath)) {
+      try {
+        const content = readFileSync(fullPath, 'utf-8');
+        docParts.push(`## ${basename(docPath)}\n${content}`);
+        metaDocs.push({ name: basename(docPath), path: docPath });
+      } catch {}
+    }
+  }
+
   const parts: string[] = [];
   // contextMeta mirrors the terminal's snapshot so the UI can render toolbar
   // chips for the agent's configured skills when the run is opened.
@@ -130,8 +146,9 @@ export async function POST(
       metaSkills.push({ id: `persona:${p}`, name: fallbackName, description: p, source: 'file' });
     }
   }
-  const systemPrompt = parts.join('\n\n---\n\n');
-  const contextMeta = JSON.stringify({ skills: metaSkills, docs: [] });
+  const allParts = [...docParts, ...parts];
+  const systemPrompt = allParts.join('\n\n---\n\n');
+  const contextMeta = JSON.stringify({ skills: metaSkills, docs: metaDocs });
 
   const { claudeBin, logDir } = getImproveConfig();
 

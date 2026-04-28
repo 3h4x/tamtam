@@ -79,6 +79,7 @@ export async function PATCH(
   const updates: Record<string, unknown> = { updatedAt: Date.now() / 1000 };
   if (body.name !== undefined) updates.name = body.name.trim();
   if (body.skillIds !== undefined) updates.skillIds = JSON.stringify(body.skillIds);
+  if (body.docPaths !== undefined) updates.docPaths = JSON.stringify(body.docPaths);
   if (body.model !== undefined) updates.model = body.model;
   if (body.prompt !== undefined) updates.prompt = body.prompt;
   if (body.schedule !== undefined) updates.schedule = body.schedule || null;

@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { fetchAgents, createAgent, updateAgent, deleteAgent, runAgent, fetchSkills, fetchPersonas } from '@/lib/client-api'
-import type { Agent, Skill, Persona } from '@/lib/client-api'
+import { fetchAgents, createAgent, updateAgent, deleteAgent, runAgent, fetchSkills, fetchPersonas, fetchProjectDocs } from '@/lib/client-api'
+import type { Agent, Skill, Persona, ProjectDoc } from '@/lib/client-api'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { useToast } from '@/components/Toast'
 import { nextFireDisplay } from '@/lib/fire-times'
@@ -208,10 +208,11 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled }: Age
 
   const closeModal = () => { setEditing(null); setCreating(false); setRecommendedTemplate(null) }
 
-  const handleSaveAgent = async (data: { name: string; prompt: string; skillIds: string[]; model: string; schedule: string | null; runner: string; enabled: boolean }) => {
-    const parseAgent = (a: Agent & { skillIds: string | string[] }): Agent => ({
+  const handleSaveAgent = async (data: { name: string; prompt: string; skillIds: string[]; docPaths: string[]; model: string; schedule: string | null; runner: string; enabled: boolean }) => {
+    const parseAgent = (a: Agent & { skillIds: string | string[]; docPaths?: string | string[] }): Agent => ({
       ...a,
       skillIds: typeof a.skillIds === 'string' ? JSON.parse(a.skillIds) : a.skillIds,
+      docPaths: typeof a.docPaths === 'string' ? JSON.parse(a.docPaths) : (a.docPaths ?? []),
     })
     if (editing) {
       const result = await updateAgent(editing.id, data)
@@ -468,6 +469,7 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled }: Age
           key={editing?.id || recommendedTemplate?.name || 'new'}
           agent={editing || undefined}
           template={(!editing && recommendedTemplate) || undefined}
+          project={projectName}
           skills={skills}
           personas={personas}
           onSave={handleSaveAgent}
@@ -482,6 +484,7 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled }: Age
 function AgentModal({
   agent,
   template,
+  project,
   skills,
   personas,
   onSave,
@@ -490,15 +493,19 @@ function AgentModal({
 }: {
   agent?: Agent
   template?: AgentTemplateRecord
+  project: string
   skills: Skill[]
   personas: Persona[]
-  onSave: (data: { name: string; prompt: string; skillIds: string[]; model: string; schedule: string | null; runner: string; enabled: boolean }) => Promise<void>
+  onSave: (data: { name: string; prompt: string; skillIds: string[]; docPaths: string[]; model: string; schedule: string | null; runner: string; enabled: boolean }) => Promise<void>
   onDelete?: () => void
   onClose: () => void
 }) {
   const [name, setName] = useState(agent?.name || template?.name || '')
   const [agentPrompt, setAgentPrompt] = useState(agent?.prompt || template?.prompt || '')
   const [selectedSkills, setSelectedSkills] = useState<string[]>(agent?.skillIds || template?.skillIds || [])
+  const [selectedDocPaths, setSelectedDocPaths] = useState<string[]>(agent?.docPaths || [])
+  const [availableDocs, setAvailableDocs] = useState<ProjectDoc[]>([])
+  const [contextTab, setContextTab] = useState<'skills' | 'docs'>('skills')
   const [model, setModel] = useState(agent?.model || template?.model || 'sonnet')
   const [schedule, setSchedule] = useState(agent?.schedule || template?.schedule || '')
   const [runner, setRunner] = useState(agent?.runner || template?.runner || 'pm2')
@@ -526,11 +533,16 @@ function AgentModal({
     : allItems
 
   useEffect(() => {
+    fetchProjectDocs(project).then(({ docs }) => setAvailableDocs(docs)).catch(() => {})
+  }, [project])
+
+  useEffect(() => {
     const src = agent || template
     if (!src) return
     setName(src.name || '')
     setAgentPrompt(src.prompt || '')
     setSelectedSkills(src.skillIds || [])
+    setSelectedDocPaths((agent?.docPaths) || [])
     setModel(src.model || 'sonnet')
     setSchedule(src.schedule || '')
     setRunner(src.runner || 'pm2')
@@ -556,11 +568,17 @@ function AgentModal({
     )
   }
 
+  const toggleDoc = (path: string) => {
+    setSelectedDocPaths(prev =>
+      prev.includes(path) ? prev.filter(p => p !== path) : [...prev, path]
+    )
+  }
+
   const handleSave = async () => {
     if (!name.trim() || saving) return
     setSaving(true)
     try {
-      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, model, schedule: schedule || null, runner, enabled })
+      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, docPaths: selectedDocPaths, model, schedule: schedule || null, runner, enabled })
     } catch {}
     setSaving(false)
   }
@@ -686,80 +704,134 @@ function AgentModal({
             />
           </label>
 
-          {/* Skills */}
+          {/* Context: Skills + Docs */}
           <div>
-            <label className="block mb-2 text-sm font-medium text-text-primary">
-              Skills
-              {selectedSkills.length > 0 && (
-                <span className="ml-2 text-xs font-normal text-accent">{selectedSkills.length} selected</span>
-              )}
-            </label>
+            {/* Section header with tab switcher */}
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-text-primary">Context</span>
+              <div className="flex items-center gap-0.5 p-0.5 rounded-md bg-bg-tertiary border border-border">
+                <button
+                  type="button"
+                  onClick={() => setContextTab('skills')}
+                  className={`px-2.5 py-1 text-xs rounded transition-colors cursor-pointer ${
+                    contextTab === 'skills'
+                      ? 'bg-bg-primary text-text-primary shadow-sm'
+                      : 'text-text-tertiary hover:text-text-primary'
+                  }`}
+                >
+                  Skills{selectedSkills.length > 0 && <span className="ml-1 text-accent font-semibold">{selectedSkills.length}</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setContextTab('docs')}
+                  className={`px-2.5 py-1 text-xs rounded transition-colors cursor-pointer ${
+                    contextTab === 'docs'
+                      ? 'bg-bg-primary text-text-primary shadow-sm'
+                      : 'text-text-tertiary hover:text-text-primary'
+                  }`}
+                >
+                  Docs{selectedDocPaths.length > 0 && <span className="ml-1 text-status-success font-semibold">{selectedDocPaths.length}</span>}
+                </button>
+              </div>
+            </div>
 
-            {/* Selected skills */}
-            {selectedSkills.length > 0 && (
+            {/* Selected chips — both skills and docs together */}
+            {(selectedSkills.length > 0 || selectedDocPaths.length > 0) && (
               <div className="flex flex-wrap gap-2 mb-2">
                 {selectedSkills.map(id => {
                   const item = allItems.find(i => i.id === id)
                   return (
-                    <span
-                      key={id}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg bg-accent text-white"
-                    >
+                    <span key={id} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg bg-accent text-white">
                       {item?.name || id}
-                      <button
-                        type="button"
-                        className="text-white/70 hover:text-white ml-0.5 cursor-pointer"
-                        onClick={() => toggleSkill(id)}
-                      >
-                        x
-                      </button>
+                      <button type="button" className="text-white/70 hover:text-white ml-0.5 cursor-pointer" onClick={() => toggleSkill(id)}>×</button>
+                    </span>
+                  )
+                })}
+                {selectedDocPaths.map(path => {
+                  const doc = availableDocs.find(d => d.path === path)
+                  return (
+                    <span key={path} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-status-success/40 bg-status-success/10 text-status-success">
+                      {doc?.name || path}
+                      <button type="button" className="text-status-success/60 hover:text-status-success ml-0.5 cursor-pointer" onClick={() => toggleDoc(path)}>×</button>
                     </span>
                   )
                 })}
               </div>
             )}
 
-            {/* Search input */}
-            <input
-              type="text"
-              className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors mb-2"
-              value={skillSearch}
-              onChange={(e) => setSkillSearch(e.target.value)}
-              placeholder="Search skills and personas..."
-            />
+            {/* Skills tab */}
+            {contextTab === 'skills' && (
+              <>
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors mb-2"
+                  value={skillSearch}
+                  onChange={(e) => setSkillSearch(e.target.value)}
+                  placeholder="Search skills and personas..."
+                />
+                <div className="max-h-40 overflow-y-auto rounded-lg border border-border">
+                  {filteredItems.length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-text-tertiary">No matches</div>
+                  ) : (
+                    filteredItems.slice(0, 30).map(item => {
+                      const isSelected = selectedSkills.includes(item.id)
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={`w-full px-3 py-2 text-left text-sm border-none cursor-pointer transition-colors ${
+                            isSelected ? 'bg-accent/10 text-accent' : 'bg-transparent text-text-primary hover:bg-bg-secondary'
+                          }`}
+                          onClick={() => toggleSkill(item.id)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{item.name}</span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${item.source === 'db' ? 'bg-accent/10 text-accent' : 'bg-bg-tertiary text-text-tertiary'}`}>
+                              {item.source === 'db' ? 'custom' : 'file'}
+                            </span>
+                          </div>
+                          {item.description && (
+                            <div className="text-xs text-text-tertiary truncate mt-0.5">{item.description}</div>
+                          )}
+                        </button>
+                      )
+                    })
+                  )}
+                </div>
+              </>
+            )}
 
-            {/* Results */}
-            <div className="max-h-40 overflow-y-auto rounded-lg border border-border">
-              {filteredItems.length === 0 ? (
-                <div className="px-3 py-2 text-xs text-text-tertiary">No matches</div>
-              ) : (
-                filteredItems.slice(0, 30).map(item => {
-                  const isSelected = selectedSkills.includes(item.id)
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={`w-full px-3 py-2 text-left text-sm border-none cursor-pointer transition-colors ${
-                        isSelected
-                          ? 'bg-accent/10 text-accent'
-                          : 'bg-transparent text-text-primary hover:bg-bg-secondary'
-                      }`}
-                      onClick={() => toggleSkill(item.id)}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{item.name}</span>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${item.source === 'db' ? 'bg-accent/10 text-accent' : 'bg-bg-tertiary text-text-tertiary'}`}>
-                          {item.source === 'db' ? 'custom' : 'file'}
-                        </span>
-                      </div>
-                      {item.description && (
-                        <div className="text-xs text-text-tertiary truncate mt-0.5">{item.description}</div>
-                      )}
-                    </button>
-                  )
-                })
-              )}
-            </div>
+            {/* Docs tab */}
+            {contextTab === 'docs' && (
+              <div className="max-h-48 overflow-y-auto rounded-lg border border-border">
+                {availableDocs.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-text-tertiary">No docs found for this project</div>
+                ) : (
+                  availableDocs.map(doc => {
+                    const isSelected = selectedDocPaths.includes(doc.path)
+                    return (
+                      <button
+                        key={doc.path}
+                        type="button"
+                        className={`w-full px-3 py-2.5 text-left text-sm border-none cursor-pointer transition-colors ${
+                          isSelected ? 'bg-status-success/10 text-status-success' : 'bg-transparent text-text-primary hover:bg-bg-secondary'
+                        }`}
+                        onClick={() => toggleDoc(doc.path)}
+                      >
+                        <div className="flex items-center gap-2">
+                          <svg className="w-3.5 h-3.5 shrink-0 text-text-tertiary" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M4 2h6l4 4v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z" />
+                            <path d="M10 2v4h4" />
+                          </svg>
+                          <span className="font-medium">{doc.name}</span>
+                        </div>
+                        <div className="text-xs text-text-tertiary mt-0.5 ml-5.5">{doc.path}</div>
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+            )}
           </div>
           </div>
 

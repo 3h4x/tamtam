@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { name, project, skillIds, model, prompt, schedule, runner, enabled } = body;
+  const { name, project, skillIds, docPaths, model, prompt, schedule, runner, enabled } = body;
 
   if (!name?.trim()) {
     return NextResponse.json({ detail: 'name is required' }, { status: 400 });
@@ -51,6 +51,7 @@ export async function POST(request: NextRequest) {
     name: name.trim(),
     project: project.trim(),
     skillIds: JSON.stringify(skillIds || []),
+    docPaths: JSON.stringify(docPaths || []),
     model: model || 'sonnet',
     prompt: prompt || '',
     schedule: schedule || null,

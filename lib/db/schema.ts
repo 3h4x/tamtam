@@ -76,6 +76,7 @@ export const agents = sqliteTable('agents', {
   schedule: text('schedule'),  // e.g. "1h", "30m", "8h", null = manual only
   runner: text('runner').notNull().default('pm2'),  // "launchctl" or "pm2"
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  docPaths: text('doc_paths').notNull().default('[]'),  // JSON array of project-relative doc paths
   createdAt: real('created_at').notNull(),
   updatedAt: real('updated_at').notNull(),
 });
