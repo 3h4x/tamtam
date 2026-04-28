@@ -1031,13 +1031,28 @@ export function jobToDict(job: JobData): Record<string, unknown> {
   return d;
 }
 
-function logHasClaudeResult(job: JobData): boolean {
-  if (!job.logPath || !existsSync(job.logPath)) return false;
+// Returns the exit code implied by the Claude result line in the job's log:
+//   0  if is_error: false (or the line can't be parsed)
+//   1  if is_error: true
+//   null if no result line exists yet
+function getClaudeResultExitCode(job: JobData): number | null {
+  if (!job.logPath || !existsSync(job.logPath)) return null;
   try {
     const content = readFileSync(job.logPath, 'utf-8');
-    return content.includes('"type":"result"');
+    const marker = '"type":"result"';
+    const lastIdx = content.lastIndexOf(marker);
+    if (lastIdx === -1) return null;
+    const lineStart = content.lastIndexOf('\n', lastIdx) + 1;
+    const lineEnd = content.indexOf('\n', lastIdx);
+    const raw = content.slice(lineStart, lineEnd !== -1 ? lineEnd : undefined).trim();
+    // Aggregate / release logs prepend an ISO timestamp: strip it before parsing.
+    const TS_PREFIX_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?:\s/;
+    const body = raw.replace(TS_PREFIX_RE, '');
+    const parsed = JSON.parse(body);
+    return parsed.is_error ? 1 : 0;
   } catch {
-    return false;
+    // Result line exists but can't be parsed — treat as success.
+    return 0;
   }
 }
 
@@ -1111,8 +1126,9 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
     || job.kind === 'fix-ci'
     || job.kind === 'fix-push'
     || job.kind.startsWith('agent:');
-  if (claudeKind && logHasClaudeResult(job)) {
-    await markDone(job, 0);
+  const resultExitCode = getClaudeResultExitCode(job);
+  if (claudeKind && resultExitCode !== null) {
+    await markDone(job, resultExitCode);
     return 'done';
   }
   // Test/action jobs spawn directly (no PM2) — check liveness via pid only.

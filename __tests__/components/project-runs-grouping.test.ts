@@ -1,13 +1,14 @@
-// Unit tests for the release-grouping helper in ProjectRunsTab.
+// Unit tests for the release-grouping helper and buildEntries in ProjectRunsTab.
 //
 // Time-window grouping: each `release` entry collects any pipeline-kind
 // entry (test/review/fix/commit/push/mark-dod/fix-push/pr-wait) whose
 // startedAt falls inside the release's [startedAt, finishedAt ?? ∞] window.
 //
-// The component rendering is React — we only import the pure helper so
+// The component rendering is React — we only import the pure helpers so
 // Node-only vitest can run this.
 import { describe, it, expect } from 'vitest';
-import { groupReleaseChildren } from '@/components/ProjectRunsTab';
+import { groupReleaseChildren, buildEntries } from '@/components/ProjectRunsTab';
+import type { JobInfo } from '@/lib/client-api';
 
 // Loose entry shape — the real Entry interface lives in ProjectRunsTab but
 // isn't exported. We build enough fields to satisfy the grouping logic.
@@ -141,5 +142,60 @@ describe('groupReleaseChildren', () => {
     ];
     const out = groupReleaseChildren(entries);
     expect(out[0].children!.map((c) => c.kind)).toEqual(['test', 'review', 'commit', 'push']);
+  });
+});
+
+function makeJobInfo(partial: Partial<JobInfo> & { id: string }): JobInfo {
+  return {
+    project: 'proj',
+    kind: 'run',
+    prompt: null,
+    pid: 1234,
+    log_path: '',
+    status: 'done',
+    exit_code: 0,
+    started_at: 1000,
+    finished_at: 2000,
+    seen: true,
+    ...partial,
+  };
+}
+
+describe('buildEntries — null exitCode handling', () => {
+  it('entry with exit_code=null and status=done has exitCode=null (not treated as failed)', () => {
+    const jobs = [makeJobInfo({ id: 'j1', exit_code: null, status: 'done', finished_at: 2000 })];
+    const [entry] = buildEntries(jobs);
+    expect(entry.exitCode).toBeNull();
+    // isFailed logic: not running AND exitCode !== null AND exitCode !== 0
+    // With exitCode=null, isFailed must be false
+    const isRunning = entry.status === 'running';
+    const isFailed = !isRunning && entry.exitCode !== null && entry.exitCode !== 0;
+    expect(isFailed).toBe(false);
+  });
+
+  it('entry with exit_code=0 is not failed', () => {
+    const jobs = [makeJobInfo({ id: 'j2', exit_code: 0, status: 'done' })];
+    const [entry] = buildEntries(jobs);
+    const isFailed = entry.status !== 'running' && entry.exitCode !== null && entry.exitCode !== 0;
+    expect(isFailed).toBe(false);
+  });
+
+  it('entry with exit_code=1 is failed', () => {
+    const jobs = [makeJobInfo({ id: 'j3', exit_code: 1, status: 'done' })];
+    const [entry] = buildEntries(jobs);
+    const isFailed = entry.status !== 'running' && entry.exitCode !== null && entry.exitCode !== 0;
+    expect(isFailed).toBe(true);
+  });
+
+  it('session-grouped entry takes exitCode from latest job in session', () => {
+    const session = 'sess-abc';
+    const jobs = [
+      makeJobInfo({ id: 'j-first', exit_code: 0, status: 'done', session_id: session, started_at: 1000, finished_at: 2000 }),
+      makeJobInfo({ id: 'j-latest', exit_code: 1, status: 'done', session_id: session, started_at: 3000, finished_at: 4000 }),
+    ];
+    const entries = buildEntries(jobs);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].exitCode).toBe(1);
+    expect(entries[0].turns).toBe(2);
   });
 });

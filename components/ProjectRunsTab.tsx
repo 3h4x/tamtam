@@ -392,7 +392,7 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
     for (const e of entries) {
       c[e.bucket] += 1
       if (e.status === 'running') c.running += 1
-      else if (e.exitCode !== 0) c.failed += 1
+      else if (e.exitCode !== null && e.exitCode !== 0) c.failed += 1
     }
     return c
   }, [entries])
@@ -400,7 +400,7 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
   const matches = (e: Entry, f: Filter): boolean => {
     if (f.kind === 'all') return true
     if (f.kind === 'running') return e.status === 'running'
-    if (f.kind === 'failed') return e.status === 'done' && e.exitCode !== 0
+    if (f.kind === 'failed') return e.status === 'done' && e.exitCode !== null && e.exitCode !== 0
     return e.bucket === f.bucket
   }
 
@@ -630,7 +630,7 @@ interface RunRowProps {
 
 function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summary, indent, children }: RunRowProps) {
   const isRunning = e.status === 'running'
-  const isFailed = !isRunning && e.exitCode !== 0
+  const isFailed = !isRunning && e.exitCode !== null && e.exitCode !== 0
   const totalTokens = e.inputTokens + e.outputTokens
   const accentBorder = isRunning
     ? 'border-l-2 border-l-status-warning'

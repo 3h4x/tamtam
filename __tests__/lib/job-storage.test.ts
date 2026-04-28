@@ -1088,7 +1088,7 @@ describe('probeJobStatus with pm2', () => {
     expect(['running', 'done']).toContain(status);
   });
 
-  it('overrides exit code to 0 when log has a clean result and pm2 reports non-zero', async () => {
+  it('overrides exit code to 0 when log has a clean result (is_error:false) and pm2 reports non-zero', async () => {
     getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: -1 });
 
     const logFile = join(tmpdir(), `tamtam-exitcode-override-${Date.now()}.log`);
@@ -1109,10 +1109,69 @@ describe('probeJobStatus with pm2', () => {
     };
 
     try {
-      // logHasClaudeResult fires first: log has "type":"result" → markDone(0)
+      // getClaudeResultExitCode fires first: log has "type":"result" with is_error:false → markDone(0)
       const status = await probeJobStatusFn(job);
       expect(status).toBe('done');
       expect(job.exitCode).toBe(0);
+    } finally {
+      try { rmSync(logFile); } catch {}
+    }
+  });
+
+  it('uses exit code 1 when log result has is_error:true (e.g. API timeout)', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
+
+    const logFile = join(tmpdir(), `tamtam-is-error-${Date.now()}.log`);
+    const resultLine = '{"type":"result","subtype":"error_max_turns","is_error":true,"duration_ms":1000,"total_cost_usd":0,"session_id":"s2","result":"Stream idle timeout"}';
+    writeFileSync(logFile, resultLine + '\n');
+
+    const job: JobData = {
+      id: 'job-is-error',
+      project: 'proj',
+      kind: 'run',
+      prompt: null,
+      pid: 9999,
+      logPath: logFile,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    try {
+      // getClaudeResultExitCode fires first: log has "type":"result" with is_error:true → markDone(1)
+      const status = await probeJobStatusFn(job);
+      expect(status).toBe('done');
+      expect(job.exitCode).toBe(1);
+    } finally {
+      try { rmSync(logFile); } catch {}
+    }
+  });
+
+  it('uses exit code 1 for is_error:true on agent: kind too', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
+
+    const logFile = join(tmpdir(), `tamtam-agent-is-error-${Date.now()}.log`);
+    const resultLine = '{"type":"result","subtype":"error_api","is_error":true,"duration_ms":500,"total_cost_usd":0,"session_id":"s3","result":"Rate limited"}';
+    writeFileSync(logFile, resultLine + '\n');
+
+    const job: JobData = {
+      id: 'job-agent-is-error',
+      project: 'proj',
+      kind: 'agent:my-agent',
+      prompt: null,
+      pid: 9999,
+      logPath: logFile,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    try {
+      const status = await probeJobStatusFn(job);
+      expect(status).toBe('done');
+      expect(job.exitCode).toBe(1);
     } finally {
       try { rmSync(logFile); } catch {}
     }
