@@ -1,19 +1,30 @@
-import { execFileSync } from 'child_process';
+import { execFileSync, ExecFileSyncOptions } from 'child_process';
+
+// All helpers in this file model "succeed or fall back" — we never want git's
+// stderr to leak to our parent stderr (which PM2 captures into the tamtam
+// log and Loki ingests as ERROR). `stdio: ['ignore', 'pipe', 'ignore']`
+// keeps stdout for parsing and silences stderr. Without this, normal
+// fallback paths (e.g. a repo without origin/HEAD set as a symref, or no
+// `main` branch) generate spurious `fatal: ...` errors in /monitoring.
+const SILENT: ExecFileSyncOptions = {
+  encoding: 'utf-8',
+  stdio: ['ignore', 'pipe', 'ignore'],
+};
 
 /** Synchronously resolve origin's default branch (e.g. "main", "master"). */
 export function getDefaultBranchSync(projectPath: string): string {
   try {
     const out = execFileSync('git', ['-C', projectPath, 'symbolic-ref', 'refs/remotes/origin/HEAD'], {
+      ...SILENT,
       timeout: 5000,
-      encoding: 'utf-8',
     });
-    return out.trim().match(/refs\/remotes\/origin\/(.+)/)?.[1] ?? 'main';
+    return out.toString().trim().match(/refs\/remotes\/origin\/(.+)/)?.[1] ?? 'main';
   } catch {
     // Fallback: check if 'main' or 'master' ref exists
     try {
       execFileSync('git', ['-C', projectPath, 'rev-parse', '--verify', 'main'], {
+        ...SILENT,
         timeout: 3000,
-        encoding: 'utf-8',
       });
       return 'main';
     } catch {
@@ -26,9 +37,9 @@ export function getDefaultBranchSync(projectPath: string): string {
 export function getCurrentBranchSync(projectPath: string): string {
   try {
     return execFileSync('git', ['-C', projectPath, 'rev-parse', '--abbrev-ref', 'HEAD'], {
+      ...SILENT,
       timeout: 5000,
-      encoding: 'utf-8',
-    }).trim();
+    }).toString().trim();
   } catch {
     return '';
   }
@@ -38,9 +49,9 @@ export function getCurrentBranchSync(projectPath: string): string {
 export function gitShowSync(projectPath: string, ref: string, relPath: string): string | null {
   try {
     return execFileSync('git', ['-C', projectPath, 'show', `${ref}:${relPath}`], {
+      ...SILENT,
       timeout: 5000,
-      encoding: 'utf-8',
-    });
+    }).toString();
   } catch {
     return null;
   }
@@ -52,9 +63,9 @@ export function gitLsTreeSync(projectPath: string, ref: string, treePath: string
     const out = execFileSync(
       'git',
       ['-C', projectPath, 'ls-tree', '--name-only', `${ref}:${treePath}`],
-      { timeout: 5000, encoding: 'utf-8' }
+      { ...SILENT, timeout: 5000 }
     );
-    return out.split('\n').map(l => l.trim()).filter(Boolean);
+    return out.toString().split('\n').map(l => l.trim()).filter(Boolean);
   } catch {
     return [];
   }

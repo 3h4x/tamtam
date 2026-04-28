@@ -1,5 +1,5 @@
-import { writeFileSync, chmodSync } from 'fs';
-import { join } from 'path';
+import { writeFileSync, existsSync } from 'fs';
+import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { exec } from './shell';
 import { getImproveConfig } from './scheduling';
@@ -10,6 +10,58 @@ function resolveLogDir(): string {
   } catch {
     return join(homedir(), 'logs');
   }
+}
+
+// Locate scripts/job-runner.js relative to the running tamtam process. We
+// can't trust `__dirname` here — Next.js's bundler rewrites it to "/ROOT" in
+// the production build. The tamtam server is always started by
+// `scripts/pm2-start.sh`, which sets cwd to the project root, so cwd is the
+// correct anchor at runtime. `TAMTAM_ROOT` overrides for unusual setups.
+function resolveRunnerPath(): string {
+  const candidates = [
+    process.env.TAMTAM_ROOT && join(process.env.TAMTAM_ROOT, 'scripts', 'job-runner.js'),
+    join(process.cwd(), 'scripts', 'job-runner.js'),
+    resolve(__dirname, '..', 'scripts', 'job-runner.js'), // dev / vitest
+  ].filter(Boolean) as string[];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  throw new Error(
+    `pm2-jobs: cannot locate scripts/job-runner.js — tried: ${candidates.join(', ')}. ` +
+    `Set TAMTAM_ROOT to the project root if running outside the standard layout.`
+  );
+}
+
+/**
+ * Split a shell-like command string into argv.
+ *
+ * Today's call sites only pass space-separated flags + values plus optional
+ * "..." quoting (no $VAR, no | <, no `cmd`), so a tiny tokenizer is enough
+ * and avoids pulling in a shell-parsing dep. If a future caller needs full
+ * POSIX semantics, switch to `shell-quote`.
+ */
+export function splitCommand(line: string): string[] {
+  const out: string[] = [];
+  let buf = '';
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote) {
+      if (ch === '\\' && i + 1 < line.length) { buf += line[++i]; continue; }
+      if (ch === quote) { quote = null; continue; }
+      buf += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch as '"' | "'";
+    } else if (ch === ' ' || ch === '\t') {
+      if (buf) { out.push(buf); buf = ''; }
+    } else if (ch === '\\' && i + 1 < line.length) {
+      buf += line[++i];
+    } else {
+      buf += ch;
+    }
+  }
+  if (buf) out.push(buf);
+  return out;
 }
 
 export async function startJob(
@@ -23,33 +75,26 @@ export async function startJob(
   mkdirSync(LOG_DIR, { recursive: true });
 
   const promptPath = join(LOG_DIR, `${jobId}.prompt`);
-  const scriptPath = join(LOG_DIR, `${jobId}.sh`);
   const logPath = join(LOG_DIR, `${jobId}.log`);
 
+  // app/api/jobs/[jobId]/rerun/route.ts:46-48 reads this file to restore the
+  // original prompt when re-running a job — keep writing it.
   writeFileSync(promptPath, prompt);
 
-  const scriptContent = [
-    '#!/bin/bash',
-    `export PATH="${process.env.PATH || ''}"`,
-    `export HOME="${homedir()}"`,
-    // Echo the exact command + stderr redirect so a silent CLI crash leaves
-    // a breadcrumb in the log instead of zero bytes.
-    `echo "[tamtam] launching: ${command.replace(/"/g, '\\"')}" >&2`,
-    `cat "${promptPath}" | ${command} 2>&1`,
-    `__rc=$?`,
-    `echo "[tamtam] claude exited with code $__rc" >&2`,
-    `exit $__rc`,
-  ].join('\n');
-  writeFileSync(scriptPath, scriptContent);
-  chmodSync(scriptPath, 0o755);
+  const cmdArgv = splitCommand(command);
+  if (cmdArgv.length === 0) {
+    throw new Error(`startJob: empty command string for job ${jobId}`);
+  }
 
   const result = await exec(
     'pm2',
     [
       'start',
-      scriptPath,
+      resolveRunnerPath(),
       '--name',
       jobId,
+      '--interpreter',
+      'node',
       '--no-autorestart',
       '--output',
       logPath,
@@ -58,6 +103,11 @@ export async function startJob(
       '--merge-logs',
       '--cwd',
       cwd,
+      '--',
+      jobId,
+      logPath,
+      promptPath,
+      ...cmdArgv,
     ],
     { timeout: 15000 }
   );

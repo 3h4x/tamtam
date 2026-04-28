@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Idempotent, orphan-safe start for the TamTam Next.js server under PM2.
+#
+# Why this script exists:
+#   `pm2 start 'next start ...' --name tamtam` makes PM2 spawn a `bash -c`
+#   wrapper. PM2 tracks the bash PID — not the next-server child. On
+#   stop/delete/restart, PM2 signals bash; bash exits; the grandchild
+#   next-server survives as an orphan that PM2 no longer knows exists.
+#   That orphan keeps holding port 1337 and serves stale code.
+#
+# What this does:
+#   1. If PM2 already has a `tamtam` entry whose registered script is the
+#      `next` binary directly (no bash wrapper), restart in place.
+#   2. Otherwise: delete any stale `tamtam` entries, reclaim port 1337
+#      from any non-PM2-tracked squatter (the orphan case), then register
+#      a fresh entry that has PM2 spawn `next` directly via `--interpreter
+#      node` so signals propagate cleanly and no orphan can survive.
+
+set -euo pipefail
+
+PORT="${PORT:-1337}"
+HOST="${HOST:-127.0.0.1}"
+NAME="tamtam"
+NEXT_BIN="$PWD/node_modules/next/dist/bin/next"
+
+if [ ! -x "$NEXT_BIN" ] && [ ! -f "$NEXT_BIN" ]; then
+  echo "[pm2-start] next binary not found at $NEXT_BIN — run pnpm install first" >&2
+  exit 1
+fi
+
+start_fresh() {
+  # Wipe any stale `tamtam` entries (legacy bash-wrapped, errored, etc.).
+  pm2 delete "$NAME" >/dev/null 2>&1 || true
+
+  # If something still holds port 1337 after PM2 cleanup, it's an orphan
+  # PM2 lost track of. Kill *only* that PID — never blanket-kill.
+  SQUATTER="$(lsof -ti:"$PORT" -sTCP:LISTEN 2>/dev/null || true)"
+  if [ -n "$SQUATTER" ]; then
+    echo "[pm2-start] reclaiming port $PORT from orphan PID(s): $SQUATTER"
+    kill $SQUATTER 2>/dev/null || true
+    sleep 1
+    SQUATTER="$(lsof -ti:"$PORT" -sTCP:LISTEN 2>/dev/null || true)"
+    if [ -n "$SQUATTER" ]; then
+      echo "[pm2-start] orphan refused SIGTERM; sending SIGKILL to $SQUATTER"
+      kill -9 $SQUATTER 2>/dev/null || true
+      sleep 1
+    fi
+  fi
+
+  # --interpreter node makes PM2 spawn `node next start ...` directly.
+  # No bash wrapper => PM2 tracks the actual server PID => clean lifecycle.
+  pm2 start "$NEXT_BIN" \
+    --name "$NAME" \
+    --cwd . \
+    --time \
+    --interpreter node \
+    -- start --port "$PORT" --hostname "$HOST"
+}
+
+# Already running cleanly? Restart in place.
+if pm2 describe "$NAME" >/dev/null 2>&1; then
+  EXEC_PATH="$(pm2 jlist 2>/dev/null \
+    | python3 -c "import sys,json
+d=json.load(sys.stdin)
+for p in d:
+  if p.get('name')=='$NAME':
+    print(p.get('pm2_env',{}).get('pm_exec_path',''))
+    break" 2>/dev/null || echo "")"
+  case "$EXEC_PATH" in
+    */next/dist/bin/next|*/node_modules/.bin/next)
+      echo "[pm2-start] restarting existing tamtam entry (clean spawn)"
+      exec pm2 restart "$NAME" --update-env
+      ;;
+    *)
+      echo "[pm2-start] existing tamtam entry uses legacy spawn ($EXEC_PATH); re-registering"
+      start_fresh
+      ;;
+  esac
+else
+  start_fresh
+fi

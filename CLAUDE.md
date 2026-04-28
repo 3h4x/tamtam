@@ -37,7 +37,7 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 
 ## Concepts
 - **Skills** — reusable prompt/instruction blocks (DB-backed + file-based from `skills/docs/skills/`)
-- **Agents** — composed from skills + model + prompt (optional when skills are set) + schedule + runner (pm2/launchctl)
+- **Agents** — composed from skills + model + prompt (optional when skills are set) + schedule + runner. Only `pm2` runner is supported; `launchctl` is **deprecated** (legacy DB rows still load with a `[agent-scheduler] launchctl runner is deprecated` warning, but new agents should always use `pm2`).
 - **Runs** — individual executions of an agent (what was previously called "jobs")
 - **Custom Actions** — per-project bash commands (e.g. deploy) with configurable button color
 - **Release Pipeline** — two modes: *Direct Branch* (`test → review → fix → commit → push`) or *PR Workflow* (adds `dod → merge`), driven by Claude and configurable per project
@@ -54,12 +54,12 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 
 ## Commands
 - `pnpm dev` — run `next dev` directly in the foreground on port 1337 (HMR enabled, no PM2). Use only for active local development; never for the long-lived TamTam server.
-- `pnpm start` — start (or idempotently restart) the production server via PM2 on port 1337. This is the canonical way to run TamTam.
-- `pnpm rebuild` — `pnpm build && pnpm start` — rebuild and restart the PM2 server after code changes
-- `pnpm stop` — stop the PM2 server
-- `pnpm restart` — restart the PM2 server (re-uses the existing command; use `pnpm rebuild` when the build is stale)
-- `pnpm logs` — view PM2 logs
-- `pnpm build` — production build
+- `pnpm start` — start (or idempotently restart) the production server via PM2 on port 1337. Delegates to `scripts/pm2-start.sh`, which spawns `next` directly under PM2 (`--interpreter node`, no shell wrapper) so PM2 tracks the actual server PID — no orphans on stop/restart. Self-heals if a previous orphan is still squatting on port 1337. This is the canonical way to run TamTam.
+- `pnpm restart` — `pnpm build && pnpm start` — production mode has no HMR, so restart always rebuilds first to pick up code changes.
+- `pnpm rebuild` — equivalent to `pnpm restart` (legacy alias). Note: bare `pnpm rebuild` (without `run`) invokes pnpm's built-in native-deps rebuild instead — use `pnpm run rebuild` or `pnpm restart`.
+- `pnpm stop` — stop the PM2 server.
+- `pnpm logs` — view PM2 logs.
+- `pnpm build` — production build.
 - `pnpm test` — run unit tests
 - `pnpm test:watch` — run vitest in watch mode
 - `pnpm test:e2e` — run Playwright e2e tests (requires dev server running)
@@ -77,8 +77,8 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 
 TamTam runs in **production mode** (`next start`) under PM2 — no HMR, no auto-reload. After any code change:
 
-1. `pnpm rebuild` — builds and restarts the PM2 server in one step (preferred)
-2. Or: `pnpm build` then `pnpm restart`
+1. `pnpm restart` — builds and restarts the PM2 server in one step (preferred)
+2. Or: `pnpm build` then `pnpm start`
 
 `pnpm start` is idempotent: if a `tamtam` PM2 entry already exists it is restarted in place (no port kill, no dropped in-flight requests); otherwise a new entry is created.
 
@@ -121,6 +121,7 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 - `/api/agents/[agentId]` — Agent detail (GET, PATCH, DELETE)
 - `/api/agents/[agentId]/run` — Run agent (POST) — composes skills into prompt
 - `/api/agents/by-name` — Update agent by project+name without knowing its UUID (PATCH: `{ project, name, ...fields }`) — enables agents to self-improve
+- `/api/agents/scheduler-health` — Verify the internal scheduler matches the DB (GET returns `{ ok, expected, actual, missing, orphans, errors, internal: { started, entries: [{ agentId, project, name, schedule, nextFireMs, lastFireMs, fireCount, errorCount, lastError }] } }`); POST reinstalls anything missing and sweeps legacy PM2 cron orphans, then returns `{ before, after, installed, installFailures }`. Surfaced on the `/monitoring` page.
 - `/api/skills` — CRUD for skills (GET, POST)
 - `/api/skills/[skillId]` — Skill detail (GET, PATCH, DELETE)
 - `/api/projects` — All projects list (GET)
@@ -202,6 +203,8 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 - Outbound webhook notifications (`lib/notifications.ts`): Slack block kit, Discord embeds, or generic JSON POST; HMAC-SHA256 signed when `notification_webhook_secret` is set; events: `release_success`, `release_fail`, `fix_loop_exhausted`, `review_do_not_ship`, `agent_run_fail`; configured via Settings → Notifications tab; `TAMTAM_BASE_URL` env var sets the log link base
 - Log and row retention (`lib/retention.ts`): `pruneProjectLogs` deletes on-disk log files after each run (controlled by `log_retention_count` and `log_retention_days` settings; defaults 200 / 30 days); `runNightlyCleanup` deletes finished `jobs` DB rows older than `job_row_retention_days` (default 180 days) — called once at startup then every 24h from `instrumentation.ts`
 - Background probe sweep: `instrumentation.ts` runs `runProbeSweep` every 30 seconds — detects Claude CLI processes that hang after emitting their final result event (holding a job "running" indefinitely) and resolves them via `probeJobStatus` in `lib/job-storage.ts`
+- **Scheduled agent cron**: handled in-process by `lib/internal-scheduler.ts`, NOT by PM2 cron. PM2's `cron_restart` combined with `--no-autostart` silently no-ops (PM2 updates `pm_uptime` at the cron tick but never starts the stopped process), so registering agents that way leaves them as zombies that never fire — that bug went unnoticed for a long time. The internal scheduler reads enabled agents from the DB on boot (`reinstallAgents` in `instrumentation-node.ts`), arms a `setTimeout` per agent based on its `Nh`/`Nm` interval + a stableHash phase offset, and on fire POSTs to `/api/agents/{id}/run`. State is pinned on `globalThis.__tamtamScheduler` so instrumentation and route handlers share the singleton across Next.js's separate module realms. Agent CRUD routes still call `installAgentSchedule` / `uninstallAgentSchedule` from `lib/agent-scheduler.ts`, which now delegate to `upsertAgentSchedule` / `removeAgentSchedule`. The `launchctl` runner is **deprecated** (warning logged on use); only `pm2` is supported going forward.
+- **One-shot job processes**: every job (review, fix, fix-push, mark-dod, agent run, rerun) is spawned by `lib/pm2-jobs.ts startJob` via PM2 → `scripts/job-runner.js` (a single node entrypoint) → the actual command. PM2 invokes the runner with `--interpreter node`, so PM2 tracks the runner's PID directly — no bash-wrapper layer. The runner forwards SIGTERM/SIGINT/SIGHUP to its child so `pm2 stop`/`pm2 delete` actually kills the work (this is what eliminated the orphan-process accumulation we used to see in `pm2 list`). The runner pipes the `${jobId}.prompt` file into the child's stdin (matching the old `cat prompt | command` behaviour) and writes `[tamtam] launching: ...` / `[tamtam] exited with code N` breadcrumbs to the same log file `app/api/streaming/[jobId]/route.ts` filters out of the user-facing stream. The `${jobId}.prompt` file is still written so `/api/jobs/[jobId]/rerun` can restore the original prompt; the per-job `.sh` wrapper is gone.
 - Dependabot with grouped PRs (production deps, dev deps, actions)
 
 ## `.tamtam/` Directory (per-project, committed to version control)

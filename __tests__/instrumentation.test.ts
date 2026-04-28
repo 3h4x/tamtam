@@ -15,21 +15,20 @@ function makeAgent(overrides: Record<string, unknown> = {}) {
 
 function makeChainedDb(agents: unknown[]) {
   const all = vi.fn().mockReturnValue(agents);
-  const where = vi.fn().mockReturnValue({ all });
-  const from = vi.fn().mockReturnValue({ where });
+  const from = vi.fn().mockReturnValue({ all });
   const select = vi.fn().mockReturnValue({ from });
-  return { select, from, where, all };
+  return { select, from, all };
 }
 
 describe('instrumentation', () => {
-  let installAgentScheduleMock: ReturnType<typeof vi.fn>;
-  let isAgentScheduleLoadedMock: ReturnType<typeof vi.fn>;
+  let startInternalSchedulerMock: ReturnType<typeof vi.fn>;
+  let reconcilePm2SchedulesMock: ReturnType<typeof vi.fn>;
   let originalRuntime: string | undefined;
 
   beforeEach(() => {
     vi.resetModules();
-    installAgentScheduleMock = vi.fn().mockResolvedValue(undefined);
-    isAgentScheduleLoadedMock = vi.fn().mockResolvedValue(false);
+    startInternalSchedulerMock = vi.fn();
+    reconcilePm2SchedulesMock = vi.fn().mockResolvedValue(undefined);
     originalRuntime = process.env.NEXT_RUNTIME;
   });
 
@@ -41,10 +40,11 @@ describe('instrumentation', () => {
   function mockDeps(agents: unknown[]) {
     const chainedDb = makeChainedDb(agents);
     vi.doMock('@/lib/db', () => ({ db: { select: chainedDb.select }, schema: { agents: { schedule: 'schedule', enabled: 'enabled' } } }));
+    vi.doMock('@/lib/internal-scheduler', () => ({
+      startInternalScheduler: startInternalSchedulerMock,
+    }));
     vi.doMock('@/lib/agent-scheduler', () => ({
-      installAgentSchedule: installAgentScheduleMock,
-      isAgentScheduleLoaded: isAgentScheduleLoadedMock,
-      reconcilePm2Schedules: vi.fn().mockResolvedValue(undefined),
+      reconcilePm2Schedules: reconcilePm2SchedulesMock,
     }));
     vi.doMock('drizzle-orm', () => ({ isNotNull: vi.fn(v => v), eq: vi.fn((_a, b) => b), and: vi.fn((...args) => args) }));
   }
@@ -58,7 +58,7 @@ describe('instrumentation', () => {
       await register();
       await new Promise((r) => setImmediate(r));
 
-      expect(installAgentScheduleMock).not.toHaveBeenCalled();
+      expect(startInternalSchedulerMock).not.toHaveBeenCalled();
     });
 
     it('fires reinstall in the background without blocking', async () => {
@@ -67,18 +67,16 @@ describe('instrumentation', () => {
 
       const { register } = await import('@/instrumentation');
       const returned = register();
-      // register() resolves synchronously; the reinstall promise keeps running.
       await returned;
-      // Flush microtasks so the fire-and-forget loop completes.
       await new Promise((r) => setImmediate(r));
 
-      expect(installAgentScheduleMock).toHaveBeenCalledTimes(1);
+      expect(startInternalSchedulerMock).toHaveBeenCalledTimes(1);
+      expect(startInternalSchedulerMock.mock.calls[0][0]).toHaveLength(1);
     });
   });
 
   describe('reinstallAgents()', () => {
-    it('reinstalls all enabled agents with schedules on startup', async () => {
-      process.env.NEXT_RUNTIME = 'nodejs';
+    it('arms the internal scheduler with all enabled scheduled agents', async () => {
       const agents = [
         makeAgent({ id: 'agent-1', name: 'A', project: 'proj1', schedule: '2h', runner: 'pm2', prompt: 'a' }),
         makeAgent({ id: 'agent-2', name: 'B', project: 'proj2', schedule: '30m', runner: 'launchctl', prompt: 'b' }),
@@ -88,53 +86,50 @@ describe('instrumentation', () => {
       const { reinstallAgents } = await import('@/instrumentation-node');
       await reinstallAgents();
 
-      expect(installAgentScheduleMock).toHaveBeenCalledTimes(2);
-      expect(installAgentScheduleMock).toHaveBeenCalledWith('agent-1', '2h', 'a', 'pm2', 'proj1', 'A');
-      expect(installAgentScheduleMock).toHaveBeenCalledWith('agent-2', '30m', 'b', 'launchctl', 'proj2', 'B');
+      expect(startInternalSchedulerMock).toHaveBeenCalledTimes(1);
+      const passed = startInternalSchedulerMock.mock.calls[0][0];
+      expect(passed).toHaveLength(2);
+      expect(passed[0]).toMatchObject({ id: 'agent-1', schedule: '2h', enabled: true, prompt: 'a' });
+      expect(passed[1]).toMatchObject({ id: 'agent-2', schedule: '30m', enabled: true, prompt: 'b' });
     });
 
-    it('skips agents where schedule is null despite the DB filter', async () => {
+    it('filters out agents with no schedule even if returned by db.all()', async () => {
       mockDeps([makeAgent({ id: 'no-sched', schedule: null })]);
 
       const { reinstallAgents } = await import('@/instrumentation-node');
       await reinstallAgents();
 
-      expect(installAgentScheduleMock).not.toHaveBeenCalled();
+      expect(startInternalSchedulerMock).toHaveBeenCalledTimes(1);
+      expect(startInternalSchedulerMock.mock.calls[0][0]).toHaveLength(0);
     });
 
-    it('skips agents whose pm2/launchctl entry is already loaded (HMR re-run)', async () => {
-      isAgentScheduleLoadedMock.mockResolvedValue(true);
-      mockDeps([makeAgent({ id: 'agent-loaded', schedule: '1h' })]);
+    it('filters out disabled agents', async () => {
+      mockDeps([makeAgent({ id: 'agent-off', schedule: '1h', enabled: 0 })]);
 
       const { reinstallAgents } = await import('@/instrumentation-node');
       await reinstallAgents();
 
-      expect(isAgentScheduleLoadedMock).toHaveBeenCalledOnce();
-      expect(installAgentScheduleMock).not.toHaveBeenCalled();
+      expect(startInternalSchedulerMock.mock.calls[0][0]).toHaveLength(0);
     });
 
-    it('continues processing remaining agents when one reinstall throws', async () => {
-      const agents = [
-        makeAgent({ id: 'agent-fail', name: 'Bad', project: 'p1', schedule: '1h', prompt: 'x' }),
-        makeAgent({ id: 'agent-ok', name: 'Good', project: 'p2', schedule: '2h', prompt: 'y' }),
-      ];
-      mockDeps(agents);
-      installAgentScheduleMock
-        .mockRejectedValueOnce(new Error('pm2 not found'))
-        .mockResolvedValueOnce(undefined);
+    it('sweeps any leftover PM2 cron entries (legacy cleanup)', async () => {
+      mockDeps([makeAgent()]);
 
       const { reinstallAgents } = await import('@/instrumentation-node');
-      await expect(reinstallAgents()).resolves.not.toThrow();
-      expect(installAgentScheduleMock).toHaveBeenCalledTimes(2);
+      await reinstallAgents();
+
+      expect(reconcilePm2SchedulesMock).toHaveBeenCalledOnce();
+      // Called with empty array — the new model has zero PM2 cron entries by design.
+      expect(reconcilePm2SchedulesMock).toHaveBeenCalledWith([]);
     });
 
-    it('does nothing when no enabled agents exist', async () => {
+    it('does nothing when no agents exist', async () => {
       mockDeps([]);
 
       const { reinstallAgents } = await import('@/instrumentation-node');
       await reinstallAgents();
 
-      expect(installAgentScheduleMock).not.toHaveBeenCalled();
+      expect(startInternalSchedulerMock).toHaveBeenCalledWith([]);
     });
   });
 

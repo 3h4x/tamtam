@@ -28,6 +28,11 @@ function cleanEnv(): Record<string, string> {
     if (value === undefined) continue;
     // Strip pnpm/npm env vars that pollute child processes
     if (key.startsWith('npm_') || key.startsWith('PNPM_') || key === 'NODE_PATH') continue;
+    // Strip PORT/HOSTNAME — Next sets these in its own process from --port/--hostname
+    // flags, so without this, every child process tamtam spawns inherits PORT=1337
+    // and any Next dev server we launch (e.g. running borged from a custom action)
+    // tries to bind there instead of its own default.
+    if (key === 'PORT' || key === 'HOSTNAME') continue;
     env[key] = value;
   }
   return env;

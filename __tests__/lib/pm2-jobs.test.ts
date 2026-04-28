@@ -38,7 +38,7 @@ describe('pm2-jobs', () => {
   });
 
   describe('startJob', () => {
-    it('creates prompt and script files in the log dir', async () => {
+    it('writes the prompt file (still consumed by /api/jobs/[id]/rerun) and does NOT write a .sh wrapper', async () => {
       execMock.mockResolvedValue(makeExecResult(0, '[]'));
 
       await startJob('job-123', 'claude --output-format stream-json', 'hello world', '/projects/foo');
@@ -46,37 +46,38 @@ describe('pm2-jobs', () => {
       const promptPath = join(logDir, 'job-123.prompt');
       const scriptPath = join(logDir, 'job-123.sh');
       expect(existsSync(promptPath)).toBe(true);
-      expect(existsSync(scriptPath)).toBe(true);
       expect(readFileSync(promptPath, 'utf-8')).toBe('hello world');
+      // The bash wrapper is gone — PM2 spawns scripts/job-runner.js directly.
+      expect(existsSync(scriptPath)).toBe(false);
     });
 
-    it('script contains the command and prompt path', async () => {
+    it('invokes pm2 with --interpreter node + the runner script + tokenized command argv', async () => {
       execMock.mockResolvedValue(makeExecResult(0, '[]'));
 
-      await startJob('job-abc', 'claude --model opus', 'prompt text', '/projects/bar');
-
-      const scriptPath = join(logDir, 'job-abc.sh');
-      const script = readFileSync(scriptPath, 'utf-8');
-      expect(script).toContain('#!/bin/bash');
-      expect(script).toContain('claude --model opus');
-      expect(script).toContain('job-abc.prompt');
-    });
-
-    it('calls pm2 start with correct args', async () => {
-      execMock.mockResolvedValue(makeExecResult(0, '[]'));
-
-      await startJob('job-xyz', 'claude', 'p', '/cwd');
+      await startJob('job-xyz', 'claude --model opus --print', 'p', '/cwd');
 
       const pm2Call = execMock.mock.calls.find(
         (c: unknown[]) => c[0] === 'pm2' && Array.isArray(c[1]) && c[1][0] === 'start'
       );
       expect(pm2Call).toBeDefined();
       const args = pm2Call![1] as string[];
+      // First positional after `start` is the runner path.
+      expect(args[1]).toMatch(/scripts\/job-runner\.js$/);
+      expect(args).toContain('--interpreter');
+      expect(args).toContain('node');
       expect(args).toContain('--name');
       expect(args).toContain('job-xyz');
       expect(args).toContain('--no-autorestart');
       expect(args).toContain('--cwd');
       expect(args).toContain('/cwd');
+      // Runner argv after `--`: <jobId> <logPath> <promptPath> <cmd...>
+      const dashDash = args.indexOf('--');
+      expect(dashDash).toBeGreaterThan(0);
+      const runnerArgv = args.slice(dashDash + 1);
+      expect(runnerArgv[0]).toBe('job-xyz');
+      expect(runnerArgv[1]).toMatch(/job-xyz\.log$/);
+      expect(runnerArgv[2]).toMatch(/job-xyz\.prompt$/);
+      expect(runnerArgv.slice(3)).toEqual(['claude', '--model', 'opus', '--print']);
     });
 
     it('throws when pm2 start fails', async () => {
@@ -85,6 +86,11 @@ describe('pm2-jobs', () => {
       await expect(startJob('job-fail', 'claude', 'p', '/cwd')).rejects.toThrow(
         'pm2 start failed: pm2 error'
       );
+    });
+
+    it('throws when the command string is empty', async () => {
+      execMock.mockResolvedValue(makeExecResult(0, '[]'));
+      await expect(startJob('job-empty', '   ', 'p', '/cwd')).rejects.toThrow(/empty command/);
     });
 
     it('returns pid from pm2 jlist after start', async () => {
@@ -106,15 +112,45 @@ describe('pm2-jobs', () => {
       expect(pid).toBe(0);
     });
 
-    it('escapes double quotes in command within script', async () => {
+    it('keeps quoted args together when tokenizing', async () => {
       execMock.mockResolvedValue(makeExecResult(0, '[]'));
 
-      await startJob('job-esc', 'claude --param "value"', 'p', '/cwd');
+      await startJob('job-q', 'claude --param "hello world" --flag', 'p', '/cwd');
 
-      const scriptPath = join(logDir, 'job-esc.sh');
-      const script = readFileSync(scriptPath, 'utf-8');
-      // The echo line should have escaped quotes
-      expect(script).toContain('\\"value\\"');
+      const args = (execMock.mock.calls.find(
+        (c: unknown[]) => c[0] === 'pm2' && Array.isArray(c[1]) && c[1][0] === 'start'
+      )![1]) as string[];
+      const runnerArgv = args.slice(args.indexOf('--') + 1);
+      // job-id, log, prompt, then the tokenized command.
+      expect(runnerArgv.slice(3)).toEqual(['claude', '--param', 'hello world', '--flag']);
+    });
+  });
+
+  describe('splitCommand', () => {
+    it('splits on whitespace', async () => {
+      const { splitCommand } = await import('@/lib/pm2-jobs');
+      expect(splitCommand('claude --model opus --print')).toEqual(['claude', '--model', 'opus', '--print']);
+    });
+
+    it('preserves double-quoted segments', async () => {
+      const { splitCommand } = await import('@/lib/pm2-jobs');
+      expect(splitCommand('claude --param "hello world"')).toEqual(['claude', '--param', 'hello world']);
+    });
+
+    it('preserves single-quoted segments', async () => {
+      const { splitCommand } = await import('@/lib/pm2-jobs');
+      expect(splitCommand("claude --param 'spaced value'")).toEqual(['claude', '--param', 'spaced value']);
+    });
+
+    it('handles backslash escapes inside quotes', async () => {
+      const { splitCommand } = await import('@/lib/pm2-jobs');
+      expect(splitCommand('claude --x "a\\"b"')).toEqual(['claude', '--x', 'a"b']);
+    });
+
+    it('returns empty array for empty / whitespace-only input', async () => {
+      const { splitCommand } = await import('@/lib/pm2-jobs');
+      expect(splitCommand('')).toEqual([]);
+      expect(splitCommand('   ')).toEqual([]);
     });
   });
 

@@ -4,7 +4,6 @@ import { homedir } from 'os';
 import { exec } from './shell';
 import { getSettings } from './config';
 import { getImproveConfig } from './scheduling';
-import { stableHash } from './fire-times';
 
 const LAUNCH_AGENTS_DIR = join(homedir(), 'Library', 'LaunchAgents');
 
@@ -20,42 +19,6 @@ function parseScheduleToSeconds(schedule: string): number {
   if (s.endsWith('h')) return parseInt(s.slice(0, -1), 10) * 3600;
   if (s.endsWith('m')) return parseInt(s.slice(0, -1), 10) * 60;
   return parseInt(s, 10);
-}
-
-function parseScheduleToCron(schedule: string, agentId = ''): string {
-  const s = schedule.trim();
-  const minOff = agentId ? stableHash(agentId + ':min', 60) : 0;
-
-  if (s.endsWith('m')) {
-    const mins = parseInt(s.slice(0, -1), 10);
-    if (mins < 60) return `*/${mins} * * * *`;
-    const hours = Math.floor(mins / 60);
-    if (hours <= 24) {
-      const startHour = agentId ? stableHash(agentId + ':h', hours) : 0;
-      return `${minOff} ${startHour}/${hours} * * *`;
-    }
-    // > 24 h expressed in minutes: fall through to day-field logic
-    const days = Math.ceil(hours / 24);
-    const startHour = agentId ? stableHash(agentId + ':h', 24) : 0;
-    return `${minOff} ${startHour} */${days} * *`;
-  }
-
-  if (s.endsWith('h')) {
-    const hours = parseInt(s.slice(0, -1), 10);
-    if (hours <= 24) {
-      const startHour = agentId ? stableHash(agentId + ':h', hours) : 0;
-      return `${minOff} ${startHour}/${hours} * * *`;
-    }
-    // > 24 h: hour-field steps would exceed the 0-23 range and PM2 rejects them.
-    // Use the day-of-month field instead (e.g. 72 h → */3, 168 h → */7).
-    const days = Math.ceil(hours / 24);
-    const startHour = agentId ? stableHash(agentId + ':h', 24) : 0;
-    return `${minOff} ${startHour} */${days} * *`;
-  }
-
-  const secs = parseInt(s, 10);
-  const mins = Math.max(1, Math.round(secs / 60));
-  return `*/${mins} * * * *`;
 }
 
 function agentLabel(agentId: string): string {
@@ -81,7 +44,7 @@ function agentPromptPath(agentId: string): string {
   return join(getScriptsDir(), `${agentId}.prompt.json`);
 }
 
-function buildScript(agentId: string): string {
+function buildLaunchctlScript(agentId: string): string {
   const port = process.env.PORT || '1337';
   const url = `http://localhost:${port}/api/agents/${agentId}/run`;
   const promptFile = agentPromptPath(agentId);
@@ -125,7 +88,7 @@ function ensureDirs(): void {
 
 function writeScriptAndPrompt(agentId: string, prompt: string): void {
   writeFileSync(agentPromptPath(agentId), JSON.stringify({ prompt }));
-  writeFileSync(agentScriptPath(agentId), buildScript(agentId));
+  writeFileSync(agentScriptPath(agentId), buildLaunchctlScript(agentId));
   chmodSync(agentScriptPath(agentId), 0o755);
 }
 
@@ -136,25 +99,12 @@ function cleanupFiles(agentId: string): void {
   if (existsSync(promptFile)) unlinkSync(promptFile);
 }
 
-// --- PM2 scheduling ---
-
-async function installPm2Schedule(agentId: string, schedule: string, prompt: string, project?: string, agentName?: string): Promise<void> {
-  ensureDirs();
-
-  // Stop existing if present
-  await uninstallPm2Schedule(agentId, project, agentName);
-
-  writeScriptAndPrompt(agentId, prompt);
-
-  const name = pm2Name(agentId, project, agentName);
-  const cron = parseScheduleToCron(schedule, agentId);
-  const scriptPath = agentScriptPath(agentId);
-
-  // --no-autostart registers the app with PM2 without executing it; without
-  // this flag pm2 start fires the script synchronously before we can stop it,
-  // which triggers a real agent run on every boot.
-  await exec('pm2', ['start', scriptPath, '--name', name, '--no-autostart', '--no-autorestart', '--cron', cron]);
-}
+// --- PM2 scheduling (legacy cleanup only) ---
+//
+// installPm2Schedule was removed: PM2 cron with --no-autostart silently
+// no-op'd, so registering an agent there had no effect. All scheduling now
+// lives in lib/internal-scheduler.ts. The uninstall + reconcile helpers stay
+// to clean up any legacy entries left over from before the migration.
 
 async function uninstallPm2Schedule(agentId: string, project?: string, agentName?: string): Promise<void> {
   const name = pm2Name(agentId, project, agentName);
@@ -250,6 +200,16 @@ export async function reconcilePm2Schedules(
 
 // --- Public API ---
 
+/**
+ * @deprecated The launchctl runner is no longer supported. New agents should
+ * use `runner: 'pm2'` (which now means in-process scheduling via
+ * `lib/internal-scheduler.ts`). The launchctl branches below remain for
+ * backwards compatibility with any pre-existing DB rows but emit a warning.
+ */
+function warnLaunchctlDeprecated(where: string): void {
+  console.warn(`[agent-scheduler] launchctl runner is deprecated (${where}); migrate to runner='pm2'`);
+}
+
 export async function installAgentSchedule(
   agentId: string,
   schedule: string,
@@ -259,23 +219,144 @@ export async function installAgentSchedule(
   agentName?: string
 ): Promise<void> {
   if (runner === 'launchctl') {
+    warnLaunchctlDeprecated('install');
     await installLaunchctlSchedule(agentId, schedule, prompt);
-  } else {
-    await installPm2Schedule(agentId, schedule, prompt, project, agentName);
+    return;
   }
+  // PM2 cron with --no-autostart silently no-op'd; agents registered that way
+  // never fired. Real scheduling is now handled in-process by lib/internal-scheduler.
+  // We still sweep any legacy PM2 cron entry so it doesn't show up as an orphan.
+  const { upsertAgentSchedule } = await import('./internal-scheduler');
+  upsertAgentSchedule({
+    id: agentId,
+    project: project ?? '',
+    name: agentName ?? agentId,
+    schedule,
+    prompt,
+    enabled: true,
+  });
+  await uninstallPm2Schedule(agentId, project, agentName);
 }
 
 export async function uninstallAgentSchedule(agentId: string, runner: string = 'pm2', project?: string, agentName?: string): Promise<void> {
   if (runner === 'launchctl') {
+    warnLaunchctlDeprecated('uninstall');
     await uninstallLaunchctlSchedule(agentId);
-  } else {
-    await uninstallPm2Schedule(agentId, project, agentName);
+    return;
   }
+  const { removeAgentSchedule } = await import('./internal-scheduler');
+  removeAgentSchedule(agentId);
+  await uninstallPm2Schedule(agentId, project, agentName);
 }
 
 export async function isAgentScheduleLoaded(agentId: string, runner: string = 'pm2', project?: string, agentName?: string): Promise<boolean> {
   if (runner === 'launchctl') {
+    warnLaunchctlDeprecated('isLoaded');
     return isLaunchctlScheduleLoaded(agentId);
   }
   return isPm2ScheduleLoaded(agentId, project, agentName);
+}
+
+// --- Health / verification ---
+
+export type SchedulerExpected = {
+  id: string;
+  project: string;
+  name: string;
+  runner: string;
+  schedule: string;
+  expectedName: string;
+};
+
+export type SchedulerHealth = {
+  ok: boolean;
+  expected: SchedulerExpected[];
+  actual: { pm2: string[]; launchctl: string[] };
+  missing: SchedulerExpected[];
+  orphans: { pm2: string[]; launchctl: string[] };
+  errors: string[];
+};
+
+async function listLaunchctlAgentLabels(): Promise<{ labels: string[]; error?: string }> {
+  const settings = getSettings();
+  const prefix = `${settings.launchagent_prefix || 'com.tamtam'}.agent.`;
+  try {
+    const r = await exec('launchctl', ['list']);
+    if (r.exitCode !== 0) return { labels: [], error: r.stderr.trim() || `launchctl list exit ${r.exitCode}` };
+    const labels: string[] = [];
+    // Output format: PID\tStatus\tLabel
+    for (const line of r.stdout.split('\n')) {
+      const cols = line.split('\t');
+      const label = cols[2]?.trim();
+      if (label && label.startsWith(prefix)) labels.push(label);
+    }
+    return { labels };
+  } catch (err) {
+    return { labels: [], error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function getSchedulerHealth(
+  agents: Array<{ id: string; project: string; name: string; runner: string; schedule: string | null; enabled: boolean }>
+): Promise<SchedulerHealth> {
+  const expected: SchedulerExpected[] = [];
+  for (const a of agents) {
+    if (!a.enabled || !a.schedule) continue;
+    const expectedName = a.runner === 'launchctl' ? agentLabel(a.id) : pm2Name(a.id, a.project, a.name);
+    expected.push({ id: a.id, project: a.project, name: a.name, runner: a.runner, schedule: a.schedule, expectedName });
+  }
+
+  const errors: string[] = [];
+
+  // Internal scheduler covers all PM2-runner agents. Launchctl runner is
+  // independent (real OS scheduler).
+  const { dumpInternalScheduler } = await import('./internal-scheduler');
+  const internal = dumpInternalScheduler();
+  const internalIds = new Set(internal.entries.map(e => e.agentId));
+
+  const lcRes = await listLaunchctlAgentLabels();
+  if (lcRes.error) errors.push(`launchctl: ${lcRes.error}`);
+  const lcSet = new Set(lcRes.labels);
+
+  const missing: SchedulerExpected[] = [];
+  const expectedLc = new Set<string>();
+  for (const e of expected) {
+    if (e.runner === 'launchctl') {
+      expectedLc.add(e.expectedName);
+      if (!lcSet.has(e.expectedName)) missing.push(e);
+    } else {
+      if (!internalIds.has(e.id)) missing.push(e);
+    }
+  }
+
+  // Internal scheduler entries with no matching enabled DB agent = orphans.
+  const expectedInternalIds = new Set(
+    expected.filter(e => e.runner !== 'launchctl').map(e => e.id)
+  );
+  const internalOrphans = internal.entries
+    .filter(e => !expectedInternalIds.has(e.agentId))
+    .map(e => `${e.project}/${e.name}`);
+
+  const orphans = {
+    pm2: internalOrphans,
+    launchctl: lcRes.labels.filter(l => !expectedLc.has(l)),
+  };
+
+  const internalNames = internal.entries.map(e => `${e.project}/${e.name}`);
+
+  const ok = errors.length === 0 && missing.length === 0 && orphans.pm2.length === 0 && orphans.launchctl.length === 0;
+  return {
+    ok,
+    expected,
+    actual: { pm2: internalNames, launchctl: lcRes.labels },
+    missing,
+    orphans,
+    errors,
+  };
+}
+
+/** Surface internal scheduler state (next-fire times, last-fire counts) for the monitoring panel. */
+export async function getInternalSchedulerDump() {
+  const { dumpInternalScheduler } = await import('./internal-scheduler');
+  return dumpInternalScheduler();
 }
