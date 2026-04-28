@@ -186,6 +186,52 @@ async function isLaunchctlScheduleLoaded(agentId: string): Promise<boolean> {
   return result.exitCode === 0;
 }
 
+// --- Reconciliation ---
+
+/**
+ * Compare PM2's running `tamtam-*-agent-*` processes against the expected set
+ * (enabled, scheduled, pm2-runner agents from the DB) and delete any orphans.
+ *
+ * This runs at startup to clean up stale entries left by renames, project
+ * changes, runner switches, or failed uninstalls.
+ */
+export async function reconcilePm2Schedules(
+  agents: Array<{ id: string; project: string; name: string; runner: string; schedule: string | null; enabled: boolean }>
+): Promise<void> {
+  let result: Awaited<ReturnType<typeof exec>>;
+  try {
+    result = await exec('pm2', ['jlist']);
+  } catch {
+    return;
+  }
+  if (result.exitCode !== 0 || !result.stdout.trim()) return;
+
+  let processes: Array<{ name: string }>;
+  try {
+    processes = JSON.parse(result.stdout);
+  } catch {
+    return;
+  }
+
+  const expectedNames = new Set<string>();
+  for (const agent of agents) {
+    if (agent.runner !== 'pm2' || !agent.schedule || !agent.enabled) continue;
+    expectedNames.add(pm2Name(agent.id, agent.project, agent.name));
+  }
+
+  for (const proc of processes) {
+    const { name } = proc;
+    if (!name || !name.startsWith('tamtam-') || !name.includes('-agent-')) continue;
+    if (expectedNames.has(name)) continue;
+    try {
+      await exec('pm2', ['delete', name]);
+      console.log(`[scheduler] reconciled orphan PM2 entry: ${name}`);
+    } catch (err) {
+      console.error(`[scheduler] failed to delete orphan ${name}:`, err);
+    }
+  }
+}
+
 // --- Public API ---
 
 export async function installAgentSchedule(

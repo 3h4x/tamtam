@@ -68,6 +68,13 @@ export async function PATCH(
   const existing = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
   if (!existing) return NextResponse.json({ detail: 'not found' }, { status: 404 });
 
+  // Capture identity before update so we can clean up the old PM2 entry if
+  // name, project, or runner changes — these produce a different PM2 process
+  // name and the old entry would otherwise be orphaned.
+  const oldName = existing.name;
+  const oldProject = existing.project;
+  const oldRunner = existing.runner;
+
   const body = await request.json();
   const updates: Record<string, unknown> = { updatedAt: Date.now() / 1000 };
   if (body.name !== undefined) updates.name = body.name.trim();
@@ -103,6 +110,14 @@ export async function PATCH(
   // Update schedule (uses pm2 or launchctl based on runner)
   if (agent) {
     try {
+      // If name, project, or runner changed, the old PM2 entry has a different
+      // name and won't be touched by install/uninstall below — delete it first.
+      const identityChanged =
+        agent.name !== oldName || agent.project !== oldProject || agent.runner !== oldRunner;
+      if (identityChanged) {
+        await uninstallAgentSchedule(agentId, oldRunner, oldProject, oldName);
+      }
+
       const skillIds: string[] = JSON.parse(agent.skillIds || '[]');
       if (agent.schedule && agent.enabled && (agent.prompt || skillIds.length > 0)) {
         await installAgentSchedule(agentId, agent.schedule, agent.prompt, agent.runner, agent.project, agent.name);
