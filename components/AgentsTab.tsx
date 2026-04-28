@@ -622,7 +622,7 @@ function AgentModal({
         {/* Body — two columns */}
         <div className="flex flex-1 min-h-0">
           {/* Left column: config */}
-          <div className="w-[420px] shrink-0 px-6 py-5 flex flex-col gap-5 border-r border-border overflow-y-auto">
+          <div className="w-[400px] shrink-0 px-6 py-4 flex flex-col gap-3 border-r border-border overflow-y-auto">
           {/* Name field */}
           <div>
             <label htmlFor="agent-name" className="block mb-1.5 text-sm font-medium text-text-primary">Name</label>
@@ -638,10 +638,10 @@ function AgentModal({
             />
           </div>
 
-          {/* Model selection as cards */}
+          {/* Model — compact segmented control */}
           <div>
-            <label className="block mb-2 text-sm font-medium text-text-primary">Model</label>
-            <div className="grid grid-cols-3 gap-2">
+            <label className="block mb-1.5 text-sm font-medium text-text-primary">Model</label>
+            <div className="flex rounded-lg border border-border overflow-hidden">
               {MODELS.map(m => {
                 const info = MODEL_LABELS[m]
                 const selected = model === m
@@ -649,15 +649,15 @@ function AgentModal({
                   <button
                     key={m}
                     type="button"
-                    className={`flex flex-col items-center gap-0.5 px-3 py-2.5 rounded-lg border text-sm cursor-pointer transition-all ${
+                    title={info.desc}
+                    className={`flex-1 py-2 text-sm font-medium cursor-pointer transition-all border-r border-border last:border-r-0 ${
                       selected
-                        ? 'border-accent bg-accent/10 text-accent ring-1 ring-accent/30'
-                        : 'border-border bg-bg-secondary text-text-primary hover:border-accent/50'
+                        ? 'bg-accent text-white'
+                        : 'bg-bg-secondary text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
                     }`}
                     onClick={() => setModel(m)}
                   >
-                    <span className="font-medium">{info.label}</span>
-                    <span className={`text-xs ${selected ? 'text-accent/70' : 'text-text-tertiary'}`}>{info.desc}</span>
+                    {info.label}
                   </button>
                 )
               })}
@@ -700,7 +700,6 @@ function AgentModal({
                 />
                 <span className="text-sm text-text-secondary">{enabled ? 'On' : 'Off'}</span>
               </label>
-              <div className="mt-1 text-xs text-text-tertiary">If off, scheduled runs are skipped.</div>
             </div>
           </div>
 
@@ -769,7 +768,7 @@ function AgentModal({
                   onChange={(e) => setSkillSearch(e.target.value)}
                   placeholder="Search skills and personas..."
                 />
-                <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
+                <div className="max-h-40 overflow-y-auto rounded-lg border border-border">
                   {filteredItems.length === 0 ? (
                     <div className="px-3 py-2 text-xs text-text-tertiary">No matches</div>
                   ) : (
@@ -803,7 +802,7 @@ function AgentModal({
 
             {/* Docs tab */}
             {contextTab === 'docs' && (
-              <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
+              <div className="max-h-40 overflow-y-auto rounded-lg border border-border">
                 {availableDocs.length === 0 ? (
                   <div className="px-3 py-2 text-xs text-text-tertiary">No docs found for this project</div>
                 ) : (
@@ -813,7 +812,7 @@ function AgentModal({
                       <button
                         key={doc.path}
                         type="button"
-                        className={`w-full px-3 py-2.5 text-left text-sm border-none cursor-pointer transition-colors ${
+                        className={`w-full px-3 py-1.5 text-left text-sm border-none cursor-pointer transition-colors ${
                           isSelected ? 'bg-status-success/10 text-status-success' : 'bg-transparent text-text-primary hover:bg-bg-secondary'
                         }`}
                         onClick={() => toggleDoc(doc.path)}
@@ -824,8 +823,8 @@ function AgentModal({
                             <path d="M10 2v4h4" />
                           </svg>
                           <span className="font-medium">{doc.name}</span>
+                          <span className="text-xs text-text-tertiary truncate">{doc.path !== doc.name ? doc.path : ''}</span>
                         </div>
-                        <div className="text-xs text-text-tertiary mt-0.5 ml-5.5">{doc.path}</div>
                       </button>
                     )
                   })
@@ -836,7 +835,7 @@ function AgentModal({
           </div>
 
           {/* Right column: prompt */}
-          <div className="flex-1 px-6 py-5 flex flex-col min-h-0">
+          <div className="flex-1 px-6 py-4 flex flex-col min-h-0">
             <label htmlFor="agent-prompt" className="block mb-1.5 text-sm font-medium text-text-primary">
               Prompt
               {selectedSkills.length > 0 && (
