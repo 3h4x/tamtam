@@ -198,6 +198,41 @@ describe('agent-scheduler', () => {
       // < 60 min schedules use simple */N form, no per-agent offset
       expect(cron).toBe('*/30 * * * *');
     });
+
+    it('converts 72h to a day-of-month cron (*/3) so hour field stays valid', async () => {
+      await installAgentSchedule('agent-72h', '72h', 'prompt', 'pm2');
+      const startCall = execMock.mock.calls.find(
+        ([cmd, args]: any) => cmd === 'pm2' && args[0] === 'start'
+      );
+      const args: string[] = startCall![1];
+      const cron = args[args.indexOf('--cron') + 1];
+      // Must use day-of-month field: "{min} {hour} */3 * *"
+      expect(cron).toMatch(/^\d+ \d+ \*\/3 \* \*$/);
+      // Hour step must be absent from the hour field (no /N > 24)
+      const parts = cron.split(' ');
+      expect(parts[1]).not.toContain('/');
+    });
+
+    it('converts 168h to a day-of-month cron (*/7)', async () => {
+      await installAgentSchedule('agent-168h', '168h', 'prompt', 'pm2');
+      const startCall = execMock.mock.calls.find(
+        ([cmd, args]: any) => cmd === 'pm2' && args[0] === 'start'
+      );
+      const args: string[] = startCall![1];
+      const cron = args[args.indexOf('--cron') + 1];
+      expect(cron).toMatch(/^\d+ \d+ \*\/7 \* \*$/);
+    });
+
+    it('24h schedule still uses hour-field step (boundary)', async () => {
+      await installAgentSchedule('agent-24h', '24h', 'prompt', 'pm2');
+      const startCall = execMock.mock.calls.find(
+        ([cmd, args]: any) => cmd === 'pm2' && args[0] === 'start'
+      );
+      const args: string[] = startCall![1];
+      const cron = args[args.indexOf('--cron') + 1];
+      // 24h is the boundary — still expressible in the hour field
+      expect(cron).toMatch(/^\d+ \d+\/24 \* \* \*$/);
+    });
   });
 
   describe('uninstallAgentSchedule (pm2)', () => {

@@ -111,7 +111,7 @@ Because this profiles the JS layer, it's useful for app-code hotspots (`/api/job
 
 - **`sample <pid>`** (macOS) for a 5 s call-graph snapshot of any Node process: `sample $(pgrep -P $(pm2 pid tamtam) next-server | head -1) 5 -mayDie`. Look at the top of the output ("Call graph:" section) for the hot stack. Heavy time in `uv__io_poll` / `Builtins_PromiseFulfillReactionJob` usually means the event loop is saturated by JS work, not native syscalls. Lighter than `--cpu-prof` because it doesn't restart the process.
 - **`/api/jobs` cost.** Tamtam's `/api/jobs` materializes every job through `jobToDict`, which historically called `getVerdict` per row (reads each review log file from disk). `getVerdict` is now memoized per finished job (`lib/job-storage.ts:verdictCache`). If you add per-row work to that endpoint, cache it the same way.
-- **PM2 zombie next-server.** If `pm2 restart tamtam` leaves an orphan `next-server` listening on 1337, the new PM2 process errors with EADDRINUSE and the orphan keeps serving stale code. Symptoms: edits don't show up; both ports busy. Fix: `lsof -ti:1337 | xargs kill -9; pm2 delete tamtam; pnpm dev`.
+- **PM2 zombie next-server.** If `pm2 restart tamtam` leaves an orphan `next-server` listening on 1337, the new PM2 process errors with EADDRINUSE and the orphan keeps serving stale code. Symptoms: edits don't show up; both ports busy. Fix: `lsof -ti:1337 | xargs kill -9; pm2 delete tamtam; pnpm start`.
 
 ---
 

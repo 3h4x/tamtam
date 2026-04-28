@@ -36,16 +36,17 @@ The agent management dashboard built for Claude CLI. Define skills, compose agen
 
 ```bash
 pnpm install
-pnpm dev        # starts on :1337 via PM2
+pnpm build && pnpm start   # builds and starts on :1337 under PM2 (canonical)
 ```
 
 Open `http://localhost:1337`, go to Settings, set your workspace path. TamTam scans for git repos and populates the projects list automatically.
 
 ```bash
-pnpm stop       # stop dev server
-pnpm restart    # restart dev server
+pnpm rebuild    # build + restart the PM2 server (use after code changes)
+pnpm stop       # stop the PM2 server
+pnpm restart    # restart the PM2 server (re-uses existing command)
 pnpm logs       # PM2 log tail
-pnpm build && pnpm start  # production
+pnpm dev        # foreground next dev with HMR (local debugging only — not PM2)
 ```
 
 > Never run `next dev` directly — always use the PM2 scripts above.
