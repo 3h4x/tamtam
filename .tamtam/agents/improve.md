@@ -1,6 +1,6 @@
 ---
 model: sonnet
-schedule: 4h
+schedule: 1h
 skillIds: ["persona:engineering-team/senior-fullstack"]
 ---
 
