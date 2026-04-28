@@ -592,7 +592,8 @@ function AgentModal({
       onClick={(e) => { if (e.target === backdropRef.current) onClose() }}
     >
       <div
-        className="bg-bg-primary rounded-xl shadow-2xl border border-border w-full max-w-4xl mx-4 animate-slide-in-up overflow-hidden"
+        className="bg-bg-primary rounded-xl shadow-2xl border border-border w-full max-w-5xl mx-4 animate-slide-in-up overflow-hidden flex flex-col"
+        style={{ maxHeight: '88vh' }}
         role="dialog"
         aria-modal="true"
         aria-labelledby="agent-modal-title"
@@ -619,9 +620,9 @@ function AgentModal({
         </div>
 
         {/* Body — two columns */}
-        <div className="flex">
+        <div className="flex flex-1 min-h-0">
           {/* Left column: config */}
-          <div className="flex-1 px-6 py-5 flex flex-col gap-5 border-r border-border overflow-y-auto" style={{ maxHeight: '70vh' }}>
+          <div className="w-[420px] shrink-0 px-6 py-5 flex flex-col gap-5 border-r border-border overflow-y-auto">
           {/* Name field */}
           <div>
             <label htmlFor="agent-name" className="block mb-1.5 text-sm font-medium text-text-primary">Name</label>
@@ -663,8 +664,8 @@ function AgentModal({
             </div>
           </div>
 
-          {/* Schedule & Runner row */}
-          <div className="grid grid-cols-2 gap-4">
+          {/* Schedule / Runner / Enabled row */}
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <label htmlFor="agent-schedule" className="block mb-1.5 text-sm font-medium text-text-primary">Schedule</label>
               <select
@@ -688,21 +689,20 @@ function AgentModal({
                 {RUNNERS.map(r => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
-          </div>
-
-          {/* Enabled toggle */}
-          <label className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border border-border bg-bg-secondary cursor-pointer">
             <div>
-              <div className="text-sm font-medium text-text-primary">Enabled</div>
-              <div className="text-xs text-text-tertiary">If off, scheduled runs are skipped and the agent can only be triggered manually.</div>
+              <div className="mb-1.5 text-sm font-medium text-text-primary">Enabled</div>
+              <label className="flex items-center gap-2 px-3 py-2.5 h-[42px] rounded-lg border border-border bg-bg-secondary cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-accent cursor-pointer shrink-0"
+                  checked={enabled}
+                  onChange={(e) => setEnabled(e.target.checked)}
+                />
+                <span className="text-sm text-text-secondary">{enabled ? 'On' : 'Off'}</span>
+              </label>
+              <div className="mt-1 text-xs text-text-tertiary">If off, scheduled runs are skipped.</div>
             </div>
-            <input
-              type="checkbox"
-              className="w-4 h-4 accent-accent cursor-pointer"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-            />
-          </label>
+          </div>
 
           {/* Context: Skills + Docs */}
           <div>
@@ -769,7 +769,7 @@ function AgentModal({
                   onChange={(e) => setSkillSearch(e.target.value)}
                   placeholder="Search skills and personas..."
                 />
-                <div className="max-h-40 overflow-y-auto rounded-lg border border-border">
+                <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
                   {filteredItems.length === 0 ? (
                     <div className="px-3 py-2 text-xs text-text-tertiary">No matches</div>
                   ) : (
@@ -803,7 +803,7 @@ function AgentModal({
 
             {/* Docs tab */}
             {contextTab === 'docs' && (
-              <div className="max-h-48 overflow-y-auto rounded-lg border border-border">
+              <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
                 {availableDocs.length === 0 ? (
                   <div className="px-3 py-2 text-xs text-text-tertiary">No docs found for this project</div>
                 ) : (
@@ -836,7 +836,7 @@ function AgentModal({
           </div>
 
           {/* Right column: prompt */}
-          <div className="flex-1 px-6 py-5 flex flex-col" style={{ maxHeight: '70vh' }}>
+          <div className="flex-1 px-6 py-5 flex flex-col min-h-0">
             <label htmlFor="agent-prompt" className="block mb-1.5 text-sm font-medium text-text-primary">
               Prompt
               {selectedSkills.length > 0 && (
