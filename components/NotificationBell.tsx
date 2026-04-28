@@ -85,14 +85,29 @@ export function NotificationBell() {
       try {
         const notifs = await fetchNotifications()
         setUnseenCount(notifs.count)
-        setRunningJobs(notifs.runningJobs ?? [])
 
+        // Sky view: one running entry per project (highest-priority kind wins)
+        const KIND_PRIORITY: Record<string, number> = {
+          release: 100, 'mark-dod': 90, 'pr-wait': 85,
+          fix: 80, review: 75, test: 70, push: 65, commit: 60,
+          'fix-push': 55, run: 40, action: 35,
+        }
+        const kindPriority = (k: string) => k.startsWith('agent:') ? 50 : (KIND_PRIORITY[k] ?? 30)
+        const runningByProject = new Map<string, JobInfo>()
+        for (const j of (notifs.runningJobs ?? [])) {
+          const existing = runningByProject.get(j.project)
+          if (!existing || kindPriority(j.kind) > kindPriority(existing.kind)) {
+            runningByProject.set(j.project, j)
+          }
+        }
+        setRunningJobs([...runningByProject.values()])
+
+        // Sky view: one finished entry per project (most recent wins)
         const sorted = [...notifs.jobs].sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))
         const seen = new Set<string>()
         setFinishedJobs(sorted.filter(j => {
-          const key = `${j.project}:${j.kind}`
-          if (seen.has(key)) return false
-          seen.add(key)
+          if (seen.has(j.project)) return false
+          seen.add(j.project)
           return true
         }))
       } catch {
@@ -199,7 +214,7 @@ export function NotificationBell() {
                 <div>
                   <div className="px-4 py-1.5 bg-bg-secondary border-b border-border">
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">
-                      Running · {runningJobs.length}
+                      Running · {runningJobs.length} {runningJobs.length === 1 ? 'project' : 'projects'}
                     </span>
                   </div>
                   {runningJobs.map(job => (
