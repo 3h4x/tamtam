@@ -276,7 +276,6 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
 // Exported for unit testing.
 export function groupReleaseChildren(entries: Entry[]): Entry[] {
   const releases = entries.filter((e) => e.kind === 'release')
-  if (releases.length === 0) return entries
 
   // Latest-starting containing release wins (in the pathological case two
   // release windows overlap). Sorted asc so the last assignment wins.
@@ -311,7 +310,64 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
     return { ...r, children: kids }
   })
 
-  const out = [...parents, ...topLevel]
+  // Cluster orphaned pipeline steps (no parent release) that are close in time
+  // into virtual groups so they display as one collapsed row instead of many
+  // individual entries. This handles pre-aggregator pipeline runs and manual
+  // step-by-step invocations.
+  const CLUSTER_GAP = 30 * 60 // 30 minutes between steps = same pipeline run
+  const pipelineOrphans = topLevel.filter(e => PIPELINE_CHILD_KINDS.has(e.kind))
+  const otherTopLevel = topLevel.filter(e => !PIPELINE_CHILD_KINDS.has(e.kind))
+  const clustered: Entry[] = []
+
+  if (pipelineOrphans.length > 0) {
+    const sortedOrphans = [...pipelineOrphans].sort((a, b) => a.startedAt - b.startedAt)
+    const clusters: Entry[][] = [[sortedOrphans[0]]]
+    for (let i = 1; i < sortedOrphans.length; i++) {
+      const prev = sortedOrphans[i - 1]
+      const curr = sortedOrphans[i]
+      const gap = curr.startedAt - (prev.finishedAt ?? prev.startedAt)
+      if (gap <= CLUSTER_GAP) {
+        clusters[clusters.length - 1].push(curr)
+      } else {
+        clusters.push([curr])
+      }
+    }
+    for (const cluster of clusters) {
+      if (cluster.length < 2) {
+        clustered.push(...cluster)
+      } else {
+        const last = cluster[cluster.length - 1]
+        const allDone = cluster.every(e => e.status === 'done')
+        const anyFailed = cluster.some(e => e.exitCode !== null && e.exitCode !== 0)
+        clustered.push({
+          key: `vgroup:${cluster[0].startedAt}`,
+          kind: 'release',
+          bucket: 'release',
+          title: 'Pipeline steps',
+          subtitle: null,
+          startedAt: cluster[0].startedAt,
+          lastActivityAt: last.lastActivityAt,
+          finishedAt: last.finishedAt,
+          status: allDone ? 'done' : 'running',
+          exitCode: anyFailed ? 1 : allDone ? 0 : null,
+          durationMs: null,
+          inputTokens: cluster.reduce((s, e) => s + e.inputTokens, 0),
+          outputTokens: cluster.reduce((s, e) => s + e.outputTokens, 0),
+          cacheReadTokens: cluster.reduce((s, e) => s + e.cacheReadTokens, 0),
+          costUsd: cluster.reduce((s, e) => s + e.costUsd, 0),
+          turns: 1,
+          model: null,
+          navJobId: last.navJobId,
+          navSessionId: null,
+          verdict: undefined,
+          logPruned: false,
+          children: cluster,
+        })
+      }
+    }
+  }
+
+  const out = [...parents, ...clustered, ...otherTopLevel]
   out.sort((a, b) => b.lastActivityAt - a.lastActivityAt)
   return out
 }

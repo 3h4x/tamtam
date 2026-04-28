@@ -112,13 +112,16 @@ describe('groupReleaseChildren', () => {
     expect(oldRel.children!.map((c) => c.navJobId)).not.toContain('c');
   });
 
-  it('no-ops when there are no release entries', () => {
+  it('clusters orphaned pipeline steps even when there are no release entries', () => {
+    // Previously this was a no-op; now nearby pipeline steps get clustered.
     const entries = [
       makeEntry({ id: 't', kind: 'test', startedAt: 100 }),
       makeEntry({ id: 'r', kind: 'review', startedAt: 120 }),
     ];
     const out = groupReleaseChildren(entries);
-    expect(out).toEqual(entries);
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe('release');
+    expect(out[0].children).toHaveLength(2);
   });
 
   it('folds mark-dod and fix-push as pipeline children', () => {
@@ -130,6 +133,48 @@ describe('groupReleaseChildren', () => {
     const out = groupReleaseChildren(entries);
     expect(out).toHaveLength(1);
     expect(out[0].children!.map((c) => c.kind).sort()).toEqual(['fix-push', 'mark-dod']);
+  });
+
+  it('clusters orphaned pipeline steps within 30 min into a virtual release group', () => {
+    // No release job — three pipeline steps close together should become one virtual group.
+    const entries = [
+      makeEntry({ id: 't', kind: 'test', startedAt: 1000, finishedAt: 1005 }),
+      makeEntry({ id: 'r', kind: 'review', startedAt: 1010, finishedAt: 1020 }),
+      makeEntry({ id: 'p', kind: 'push', startedAt: 1030, finishedAt: 1040 }),
+    ];
+    const out = groupReleaseChildren(entries);
+    // Expect one virtual group (kind=release) with 3 children
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe('release');
+    expect(out[0].title).toBe('Pipeline steps');
+    expect(out[0].children).toHaveLength(3);
+    expect(out[0].children!.map((c) => c.kind)).toEqual(['test', 'review', 'push']);
+  });
+
+  it('does not cluster orphaned pipeline steps separated by more than 30 min', () => {
+    const GAP = 31 * 60; // 31 minutes
+    const entries = [
+      makeEntry({ id: 'r1', kind: 'review', startedAt: 1000, finishedAt: 1010 }),
+      makeEntry({ id: 'r2', kind: 'review', startedAt: 1000 + GAP, finishedAt: 1000 + GAP + 10 }),
+    ];
+    const out = groupReleaseChildren(entries);
+    // Two separate clusters → two individual entries (< 2 per cluster)
+    expect(out).toHaveLength(2);
+    expect(out.every(e => e.kind === 'review')).toBe(true);
+  });
+
+  it('non-pipeline orphans are never clustered even within 30 min', () => {
+    const entries = [
+      makeEntry({ id: 'rel', kind: 'release', startedAt: 1000, finishedAt: 2000 }),
+      makeEntry({ id: 'run', kind: 'run', startedAt: 1100, finishedAt: 1200 }),
+      makeEntry({ id: 'rev', kind: 'review', startedAt: 3000, finishedAt: 3010 }),
+      makeEntry({ id: 'push', kind: 'push', startedAt: 3020, finishedAt: 3025 }),
+    ];
+    const out = groupReleaseChildren(entries);
+    // release (empty children), run (non-pipeline stays flat), virtual group (review+push)
+    expect(out).toHaveLength(3);
+    const kinds = out.map(e => e.kind).sort();
+    expect(kinds).toEqual(['release', 'release', 'run']);
   });
 
   it('sorts children by startedAt (pipeline order) regardless of input order', () => {
