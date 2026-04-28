@@ -15,6 +15,13 @@
       "when": 1777215155487,
       "tag": "0001_rare_wong",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1777401131990,
+      "tag": "0002_dusty_typhoid_mary",
+      "breakpoints": true
     }
   ]
 }

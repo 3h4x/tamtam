@@ -7,6 +7,7 @@ export interface FileAgent {
   name: string;
   project: string;
   skillIds: string[];
+  docPaths: string[];
   model: string;
   prompt: string;
   schedule: string | null;
@@ -77,6 +78,7 @@ function buildFileAgent(
     name,
     project: projectName,
     skillIds: meta.skillIds ? parseSkillIds(meta.skillIds) : [],
+    docPaths: [],
     model: meta.model || 'sonnet',
     prompt: body,
     schedule: meta.schedule?.trim() || null,

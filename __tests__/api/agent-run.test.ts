@@ -16,6 +16,7 @@ function createTestDb() {
       name TEXT NOT NULL,
       project TEXT NOT NULL,
       skill_ids TEXT NOT NULL DEFAULT '[]',
+      doc_paths TEXT NOT NULL DEFAULT '[]',
       model TEXT NOT NULL DEFAULT 'sonnet',
       prompt TEXT NOT NULL DEFAULT '',
       schedule TEXT,
