@@ -224,6 +224,110 @@ curl -N http://localhost:1337/api/streaming/<jobId>
 
 ---
 
+## Testing the Terminal — Practical Guide
+
+Use Chrome DevTools MCP (`mcp__plugin_chrome-devtools-mcp_chrome-devtools__*`) or Playwright to verify terminal behavior. This section covers the observable UI states and how to reach each one.
+
+### URL patterns
+
+| State | URL | How to reach it |
+|-------|-----|-----------------|
+| New/blank session | `/project/[name]/terminal` | Click Terminal tab |
+| Completed session | `/project/[name]/terminal/[sessionId]` | Click entry in History; auto-set after first response completes |
+| Running job (live) | `/project/[name]/terminal?job=[jobId]` | Click a running entry in History tab |
+
+The `?job=` param is used during live streaming because the session ID isn't known until Claude emits the `result` line. After the session finishes, the URL stabilises to `/terminal/[sessionId]`.
+
+### Session states and input placeholder
+
+| Placeholder text | Bottom label | Live badge | State |
+|------------------|-------------|-----------|-------|
+| `type a message...` | `no session` | — | New, nothing loaded |
+| `follow-up...` | `session [truncated-id]` | — | Completed session loaded |
+| `queue a message... (Esc cancels)` | `no session` | `● live` | Claude is actively running |
+
+### Switching sessions
+
+**Via the "recent" panel (Terminal tab):**
+1. Click **recent** button — dropdown appears with up to 5 most recent sessions (green dots = done, orange = still running)
+2. Click any entry → session loads; URL changes to `/terminal/[sessionId]` or `?job=[jobId]`
+3. Click **close** to dismiss the panel without switching
+
+**Via the History tab:**
+1. Navigate to `/project/[name]/history`
+2. Any row in the list is clickable — it navigates to Terminal and loads that job
+3. Running rows (yellow left border, `● running` badge) open with the live `● live` indicator active
+4. Completed rows restore the full conversation from the log
+
+### Toolbar controls
+
+```
+[ new ] [ recent ] [ ● live ]          [ thinking ] [ +skill ] [ +docs ] [ sonnet ▾ ]
+```
+
+- **new** — clears the terminal and starts a fresh session (prompt: `type a message...`)
+- **recent** — opens the session picker dropdown
+- **● live** — appears only while a job is actively streaming; replaces "recent" during live mode
+- **thinking** — toggles visibility of Claude's `<thinking>` blocks
+- **+skill** — opens skill picker; selected skills appear as removable tags (e.g. `Senior Fullstack ×`) and are injected as context on the *first* message only
+- **+docs** — injects project `docs/*.md` files into the next submission
+- **model selector** — haiku / sonnet / opus; persists to `default_model` setting
+
+### Content rendering
+
+**User prompts** — displayed as a monospace block with `# ` prefix. A **copy** button appears on hover.
+
+**Claude text** — markdown rendered inline: bold, inline code highlighted in teal/syntax color, list items, etc.
+
+**Tool calls** — indented block with `Tool: [ToolName]` header, tool input and output shown below. During live streaming, tool calls show as collapsed single-line rows (`tool_name ›`) until the result arrives.
+
+**Thinking blocks** — hidden by default; toggle with the **thinking** button.
+
+**Context compaction** — when Claude compacts its context window, a `[context compacted]` marker appears inline in the conversation.
+
+### "↓ latest" button
+
+A floating **↓ latest** button appears in the bottom-right whenever you have scrolled above the most recent content. Clicking it jumps to the end of the stream. During live streaming this is the primary way to follow new output after manually scrolling up to inspect earlier content.
+
+### Following a live stream step-by-step
+
+1. Start a run (submit a prompt or click "Run" on an agent)
+2. Terminal shows `● live` badge; input shows `queue a message...`
+3. Content streams in: text appears via the typewriter animation (~800 chars/sec), tool calls arrive as collapsed rows
+4. Scroll up freely — **↓ latest** keeps you able to jump back
+5. When Claude finishes: `● live` disappears, URL updates to `/terminal/[sessionId]`, placeholder switches to `follow-up...`
+
+### History tab — what you can verify
+
+| Element | How to check |
+|---------|-------------|
+| Filter tabs | Click `running`, `failed`, `chat`, etc. — list re-filters immediately |
+| Release pipeline steps | Click `▸` expand button on a release row — sub-steps appear with verdicts |
+| Session metadata | Each chat row shows: turns, model, `#sessionId` prefix, token/cost stats |
+| Status badges | `● running` (orange), `● done` (green), `● exit N` (red) — verify colors match exit code |
+| Agent runs | Shown with `agent` kind badge; clicking opens the terminal for that job |
+
+### Common test scenarios
+
+**Verify a completed multi-turn session loads correctly:**
+1. Go to History, find a `chat` entry with N turns
+2. Click it → Terminal opens; scroll to top; verify user/assistant turns alternate correctly
+3. Confirm session ID in bottom-left matches `#[id]` shown in History row
+
+**Verify live streaming works:**
+1. Submit a prompt that will take >10 seconds (e.g. a Bash command)
+2. Confirm `● live` badge appears within 1-2 seconds
+3. Confirm text starts appearing with typewriter effect
+4. Confirm `↓ latest` appears if you scroll up during streaming
+5. Confirm `● live` disappears and URL updates after completion
+
+**Verify session switching doesn't corrupt state:**
+1. Open session A (note its first line of text)
+2. Open "recent" panel, switch to session B
+3. Switch back to session A — verify text is identical to step 1
+
+---
+
 ## Common Issues
 
 | Symptom | Likely Cause | Fix |
