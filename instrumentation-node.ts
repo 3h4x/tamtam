@@ -1,38 +1,30 @@
-// Exported so tests can await the reinstall loop deterministically. In
-// production we fire-and-forget from register() so port 1337 binds
-// immediately — the PM2 subprocess storm (~30× delete/start/stop) runs in
-// the background instead of blocking Next.js dev boot after HMR restarts.
+// Loads enabled scheduled agents from the DB and arms the internal scheduler.
+// In-process timers fire on cadence and POST to /api/agents/{id}/run — no
+// PM2 cron involvement (that path silently no-op'd; see lib/internal-scheduler.ts).
 export async function reinstallAgents(): Promise<void> {
   const { db, schema } = await import('./lib/db');
   const { isNotNull, eq, and } = await import('drizzle-orm');
-  const { installAgentSchedule, isAgentScheduleLoaded, reconcilePm2Schedules } = await import('./lib/agent-scheduler');
+  const { startInternalScheduler } = await import('./lib/internal-scheduler');
+  const { reconcilePm2Schedules } = await import('./lib/agent-scheduler');
 
-  const agents = db
-    .select()
-    .from(schema.agents)
-    .where(and(isNotNull(schema.agents.schedule), eq(schema.agents.enabled, true)))
-    .all();
+  const allAgents = db.select().from(schema.agents).all();
+  const enabled = allAgents.filter(a => a.enabled && a.schedule);
 
-  for (const agent of agents) {
-    if (!agent.schedule) continue;
-    try {
-      // Idempotent: if the pm2/launchctl entry is already loaded (common
-      // after an HMR restart), skip the delete→start→stop cycle.
-      if (await isAgentScheduleLoaded(agent.id, agent.runner, agent.project, agent.name)) continue;
-      await installAgentSchedule(agent.id, agent.schedule, agent.prompt, agent.runner, agent.project, agent.name);
-      console.log(`[scheduler] reinstalled ${agent.project}/${agent.name} → ${agent.schedule}`);
-    } catch (err) {
-      console.error(`[scheduler] failed to reinstall ${agent.id}:`, err);
-    }
-  }
+  startInternalScheduler(enabled.map(a => ({
+    id: a.id,
+    project: a.project,
+    name: a.name,
+    schedule: a.schedule,
+    prompt: a.prompt ?? '',
+    enabled: !!a.enabled,
+  })));
 
-  // Remove any PM2 cron entries that no longer correspond to an active agent.
-  // Orphans accumulate from renames, project changes, runner switches, or
-  // failed uninstalls — this sweep catches all of them.
+  // One-time cleanup: PM2 cron entries from the legacy installAgentSchedule
+  // path are dead weight now. Sweep them so `pm2 list` stops being noise.
   try {
-    await reconcilePm2Schedules(agents);
+    await reconcilePm2Schedules([]);
   } catch (err) {
-    console.error('[scheduler] reconcile sweep failed:', err);
+    console.error('[scheduler] PM2 cleanup failed:', err);
   }
 }
 

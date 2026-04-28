@@ -28,6 +28,38 @@ interface Pm2LogData {
   fetchedAt: number
 }
 
+interface SchedulerExpected {
+  id: string
+  project: string
+  name: string
+  runner: string
+  schedule: string
+  expectedName: string
+}
+
+interface SchedulerInternalEntry {
+  agentId: string
+  project: string
+  name: string
+  schedule: string
+  enabled: boolean
+  nextFireMs: number
+  lastFireMs: number | null
+  fireCount: number
+  errorCount: number
+  lastError: string | null
+}
+
+interface SchedulerHealth {
+  ok: boolean
+  expected: SchedulerExpected[]
+  actual: { pm2: string[]; launchctl: string[] }
+  missing: SchedulerExpected[]
+  orphans: { pm2: string[]; launchctl: string[] }
+  errors: string[]
+  internal?: { started: boolean; entries: SchedulerInternalEntry[] }
+}
+
 interface MonitoringData {
   prometheus: {
     status: 'ok' | 'unavailable'
@@ -320,6 +352,208 @@ function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null; onRef
 
 const WINDOW_LABELS: Record<TimeWindow, string> = { '5m': '5 min', '15m': '15 min', '1h': '1 hour' }
 
+function SchedulerHealthPanel() {
+  const [health, setHealth] = useState<SchedulerHealth | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [reconciling, setReconciling] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch('/api/agents/scheduler-health')
+      if (!r.ok) throw new Error(`fetch failed: ${r.status}`)
+      setHealth(await r.json())
+      setError(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'fetch failed')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const reconcile = async () => {
+    setReconciling(true)
+    try {
+      const r = await fetch('/api/agents/scheduler-health', { method: 'POST' })
+      if (r.ok) {
+        const body = await r.json()
+        setHealth(body.after)
+      }
+    } finally {
+      setReconciling(false)
+    }
+  }
+
+  const status: 'ok' | 'issue' | 'unavailable' = error ? 'unavailable' : health?.ok ? 'ok' : 'issue'
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-3 gap-2">
+        <SectionHeader title="Scheduled agents" status={status} />
+        <div className="flex gap-2">
+          <button
+            onClick={load}
+            className="text-[11px] px-2 py-1 rounded border border-border text-text-tertiary hover:text-text-secondary bg-transparent cursor-pointer transition-colors"
+          >
+            Refresh
+          </button>
+          <button
+            onClick={reconcile}
+            disabled={reconciling || !health || health.ok}
+            className="text-[11px] px-2 py-1 rounded border border-border text-text-tertiary hover:text-text-secondary bg-transparent cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {reconciling ? 'Reconciling…' : 'Reconcile'}
+          </button>
+        </div>
+      </div>
+      {loading && !health ? (
+        <div className="skeleton h-16 rounded-md" />
+      ) : error ? (
+        <p className="text-sm text-status-error">{error}</p>
+      ) : health ? (
+        <div className="space-y-3 text-sm">
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-text-tertiary">
+            <span>Expected: <span className="text-text-primary font-medium">{health.expected.length}</span></span>
+            <span>Internal armed: <span className="text-text-primary font-medium">{health.actual.pm2.length}</span></span>
+            <span>launchctl loaded: <span className="text-text-primary font-medium">{health.actual.launchctl.length}</span></span>
+            {health.missing.length > 0 && <span className="text-status-error">Missing: {health.missing.length}</span>}
+            {(health.orphans.pm2.length + health.orphans.launchctl.length) > 0 && (
+              <span className="text-status-warning">Orphans: {health.orphans.pm2.length + health.orphans.launchctl.length}</span>
+            )}
+          </div>
+
+          {health.errors.length > 0 && (
+            <div className="rounded-md border border-status-error/30 bg-status-error/5 p-2 space-y-1">
+              {health.errors.map((e, i) => (
+                <div key={i} className="text-xs text-status-error font-mono">{e}</div>
+              ))}
+            </div>
+          )}
+
+          {health.missing.length > 0 && (
+            <div>
+              <h3 className="text-xs font-medium text-status-error mb-1">Missing (in DB but not loaded)</h3>
+              <div className="rounded-md border border-status-error/30 overflow-hidden">
+                {health.missing.map(m => (
+                  <div key={m.id} className="flex items-center gap-3 px-3 py-1.5 text-xs font-mono border-t border-status-error/20 first:border-t-0">
+                    <span className="text-text-tertiary uppercase tracking-wide w-16 shrink-0">{m.runner}</span>
+                    <span className="text-text-primary truncate" data-private>{m.expectedName}</span>
+                    <span className="text-text-tertiary ml-auto shrink-0">{m.schedule}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(health.orphans.pm2.length + health.orphans.launchctl.length) > 0 && (
+            <div>
+              <h3 className="text-xs font-medium text-status-warning mb-1">Orphans (loaded but not in DB)</h3>
+              <div className="rounded-md border border-status-warning/30 overflow-hidden">
+                {health.orphans.pm2.map(n => (
+                  <div key={`pm2:${n}`} className="flex items-center gap-3 px-3 py-1.5 text-xs font-mono border-t border-status-warning/20 first:border-t-0">
+                    <span className="text-text-tertiary uppercase tracking-wide w-16 shrink-0">pm2</span>
+                    <span className="text-text-primary truncate" data-private>{n}</span>
+                  </div>
+                ))}
+                {health.orphans.launchctl.map(l => (
+                  <div key={`lc:${l}`} className="flex items-center gap-3 px-3 py-1.5 text-xs font-mono border-t border-status-warning/20 first:border-t-0">
+                    <span className="text-text-tertiary uppercase tracking-wide w-16 shrink-0">launchctl</span>
+                    <span className="text-text-primary truncate" data-private>{l}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {health.ok && (
+            <p className="text-xs text-status-success">All scheduled agents are armed in the internal scheduler / launchctl.</p>
+          )}
+
+          {health.internal && health.internal.entries.length > 0 && (
+            <SchedulerFireTable entries={health.internal.entries} />
+          )}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function fmtRelative(ms: number | null, now: number): string {
+  if (ms === null) return 'never'
+  const diff = ms - now
+  const abs = Math.abs(diff)
+  const sec = Math.round(abs / 1000)
+  const min = Math.round(sec / 60)
+  const hr = Math.round(min / 60)
+  let label: string
+  if (sec < 60) label = `${sec}s`
+  else if (min < 60) label = `${min}m`
+  else if (hr < 48) label = `${hr}h`
+  else label = `${Math.round(hr / 24)}d`
+  return diff < 0 ? `${label} ago` : `in ${label}`
+}
+
+function SchedulerFireTable({ entries }: { entries: SchedulerInternalEntry[] }) {
+  const [showAll, setShowAll] = useState(false)
+  const now = Date.now()
+  const sorted = [...entries].sort((a, b) => {
+    if (a.lastError && !b.lastError) return -1
+    if (!a.lastError && b.lastError) return 1
+    return a.nextFireMs - b.nextFireMs
+  })
+  const overdue = sorted.filter(e => e.nextFireMs < now)
+  const visible = showAll ? sorted : sorted.slice(0, 8)
+
+  return (
+    <div>
+      <h3 className="text-xs font-medium text-text-secondary mb-1">
+        Fire history
+        {overdue.length > 0 && (
+          <span className="ml-2 text-status-warning">({overdue.length} overdue)</span>
+        )}
+      </h3>
+      <div className="rounded-md border border-border overflow-hidden">
+        <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 px-3 py-1.5 text-[10px] uppercase tracking-wide text-text-tertiary border-b border-border bg-bg-secondary/30">
+          <span>Agent</span>
+          <span>Sched</span>
+          <span>Next</span>
+          <span>Last</span>
+          <span>Fires</span>
+        </div>
+        {visible.map(e => {
+          const isOverdue = e.nextFireMs < now
+          const hasError = !!e.lastError
+          return (
+            <div
+              key={e.agentId}
+              className={`grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 px-3 py-1.5 text-xs font-mono border-t border-border first:border-t-0 ${hasError ? 'bg-status-error/5' : ''}`}
+              title={e.lastError ?? ''}
+            >
+              <span className="text-text-primary truncate" data-private>{e.project}/{e.name}</span>
+              <span className="text-text-tertiary">{e.schedule}</span>
+              <span className={isOverdue ? 'text-status-warning' : 'text-text-secondary'}>{fmtRelative(e.nextFireMs, now)}</span>
+              <span className={e.lastFireMs === null ? 'text-text-tertiary' : 'text-text-secondary'}>{fmtRelative(e.lastFireMs, now)}</span>
+              <span className={e.errorCount > 0 ? 'text-status-error' : 'text-text-secondary'}>
+                {e.fireCount}{e.errorCount > 0 ? `/${e.errorCount}!` : ''}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+      {sorted.length > 8 && (
+        <button
+          onClick={() => setShowAll(v => !v)}
+          className="mt-1 text-[11px] text-text-tertiary hover:text-text-secondary cursor-pointer"
+        >
+          {showAll ? 'Show less' : `Show all ${sorted.length}`}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function MonitoringPage() {
   const [data, setData] = useState<MonitoringData | null>(null)
   const [pm2Logs, setPm2Logs] = useState<Pm2LogData | null>(null)
@@ -440,6 +674,9 @@ export function MonitoringPage() {
           Refresh
         </button>
       </div>
+
+      {/* Scheduled agent reconciliation */}
+      <SchedulerHealthPanel />
 
       {/* tamtam PM2 logs */}
       <Pm2LogPanel pm2Logs={pm2Logs} onRefresh={fetchPm2Logs} />
