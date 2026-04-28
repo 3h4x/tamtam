@@ -14,6 +14,7 @@ interface LogLine {
 }
 
 type TimeWindow = '5m' | '15m' | '1h'
+type MonitoringTab = 'overview' | 'agents' | 'logs' | 'infra'
 
 interface Pm2LogEntry {
   ts: string | null
@@ -100,16 +101,13 @@ function tsToDate(ts: string): string {
   return new Date(ms).toLocaleTimeString()
 }
 
-// Try to extract a human-readable message from a potentially JSON-heavy log line
 function extractLogMessage(line: string): string {
-  // Try JSON parse and pull common message fields
   try {
     const parsed = JSON.parse(line)
     const msg =
       parsed.msg ?? parsed.message ?? parsed.error ?? parsed.err ??
       parsed.text ?? parsed.log ?? parsed.body ?? null
     if (typeof msg === 'string' && msg.length > 0) return msg
-    // If no known field, return the stringified object but compact
     return line
   } catch {
     return line
@@ -223,7 +221,6 @@ function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null; onRef
   const [levelFilter, setLevelFilter] = useState<LogLevelFilter>('warn+')
   const [hideStdout, setHideStdout] = useState(false)
 
-  // API now returns both error + out logs combined; filter source client-side.
   const allEntries = useMemo(
     () => hideStdout ? (pm2Logs?.entries ?? []).filter(e => e.source === 'error') : (pm2Logs?.entries ?? []),
     [pm2Logs, hideStdout]
@@ -255,11 +252,10 @@ function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null; onRef
   ]
 
   return (
-    <section>
-      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <SectionHeader title="tamtam (PM2)" status={status} />
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Level filters */}
           {pm2Logs && (
             <div className="flex items-center gap-0.5 rounded-md border border-border overflow-hidden">
               {filterButtons.map(({ key, label, count }) => (
@@ -284,7 +280,6 @@ function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null; onRef
               ))}
             </div>
           )}
-          {/* Stdout toggle */}
           {pm2Logs && (
             <button
               onClick={() => setHideStdout(h => !h)}
@@ -297,7 +292,6 @@ function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null; onRef
               {hideStdout ? 'errors only' : 'all sources'}
             </button>
           )}
-          {/* Refresh + copy */}
           <button
             onClick={onRefresh}
             className="text-[11px] px-2 py-1 rounded border border-border text-text-tertiary hover:text-text-secondary bg-transparent cursor-pointer transition-colors"
@@ -319,7 +313,6 @@ function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null; onRef
         </p>
       ) : (
         <div className="space-y-2">
-          {/* File metadata */}
           <div className="flex items-center gap-4 text-xs text-text-tertiary flex-wrap">
             {pm2Logs.files.map((f, i) => (
               <span key={i} data-private className="flex items-center gap-1">
@@ -340,13 +333,13 @@ function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null; onRef
               {allEntries.length === 0 ? 'No recent log lines' : levelFilter === 'warn+' ? 'No warnings or errors' : `No ${levelFilter} entries`}
             </p>
           ) : (
-            <div className="rounded-md border border-border overflow-hidden overflow-y-auto" style={{ maxHeight: '400px' }}>
+            <div className="rounded-md border border-border overflow-hidden overflow-y-auto" style={{ maxHeight: '500px' }}>
               {filtered.map((e, i) => <Pm2LogRow key={i} entry={e} />)}
             </div>
           )}
         </div>
       )}
-    </section>
+    </div>
   )
 }
 
@@ -389,8 +382,8 @@ function SchedulerHealthPanel() {
   const status: 'ok' | 'issue' | 'unavailable' = error ? 'unavailable' : health?.ok ? 'ok' : 'issue'
 
   return (
-    <section>
-      <div className="flex items-center justify-between mb-3 gap-2">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2">
         <SectionHeader title="Scheduled agents" status={status} />
         <div className="flex gap-2">
           <button
@@ -476,7 +469,7 @@ function SchedulerHealthPanel() {
           )}
         </div>
       ) : null}
-    </section>
+    </div>
   )
 }
 
@@ -554,76 +547,143 @@ function SchedulerFireTable({ entries }: { entries: SchedulerInternalEntry[] }) 
   )
 }
 
-export function MonitoringPage() {
-  const [data, setData] = useState<MonitoringData | null>(null)
-  const [pm2Logs, setPm2Logs] = useState<Pm2LogData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [window_, setWindow] = useState<TimeWindow>('15m')
+// ─── Status badge counts for tabs ───────────────────────────────────────────
 
-  const fetchPm2Logs = useCallback(async () => {
-    try {
-      const res = await fetch('/api/monitoring/pm2-logs?limit=200')
-      if (res.ok) setPm2Logs(await res.json())
-    } catch { /* non-fatal */ }
-  }, [])
+function TabBadge({ count, variant }: { count: number; variant: 'error' | 'warn' | 'ok' }) {
+  if (count === 0) return null
+  const cls =
+    variant === 'error' ? 'bg-status-error/15 text-status-error' :
+    variant === 'warn'  ? 'bg-status-warning/15 text-status-warning' :
+    'bg-status-success/15 text-status-success'
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${cls}`}>{count}</span>
+  )
+}
 
-  const fetch_ = useCallback(async (w: TimeWindow) => {
-    try {
-      const [monRes, pm2Res] = await Promise.all([
-        fetch(`/api/monitoring?window=${w}`),
-        fetch(`/api/monitoring/pm2-logs?limit=200`),
-      ])
-      if (!monRes.ok) throw new Error('fetch failed')
-      setData(await monRes.json())
-      if (pm2Res.ok) setPm2Logs(await pm2Res.json())
-      setError(null)
-    } catch {
-      setError('Failed to fetch monitoring data')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+// ─── Overview tab ────────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    setLoading(true)
-    fetch_(window_)
-    const id = setInterval(() => fetch_(window_), 30_000)
-    return () => clearInterval(id)
-  }, [fetch_, window_])
+function OverviewTab({
+  data,
+  pm2Logs,
+  window_,
+}: {
+  data: MonitoringData
+  pm2Logs: Pm2LogData | null
+  window_: TimeWindow
+}) {
+  const downServices = data.prometheus.services.filter(s => s.value?.[1] === '0')
+  const upServices = data.prometheus.services.filter(s => s.value?.[1] !== '0')
+  const pm2ErrorCount = pm2Logs?.entries.filter(e => e.level === 'error').length ?? 0
+  const pm2WarnCount  = pm2Logs?.entries.filter(e => e.level === 'warn').length ?? 0
 
-  const handleWindowChange = (w: TimeWindow) => {
-    setWindow(w)
-    setLoading(true)
-    fetch_(w)
-  }
+  const sections = [
+    {
+      title: 'tamtam (PM2)',
+      status: !pm2Logs ? 'unavailable' : pm2ErrorCount > 0 ? 'issue' : 'ok',
+      lines: [
+        pm2ErrorCount > 0 ? `${pm2ErrorCount} error${pm2ErrorCount > 1 ? 's' : ''}` : null,
+        pm2WarnCount  > 0 ? `${pm2WarnCount} warning${pm2WarnCount > 1 ? 's' : ''}` : null,
+        pm2ErrorCount === 0 && pm2WarnCount === 0 ? 'No warnings or errors' : null,
+      ].filter(Boolean) as string[],
+    },
+    {
+      title: 'Prometheus',
+      status: data.prometheus.status === 'unavailable' ? 'unavailable'
+        : data.prometheus.alerts.length > 0 || downServices.length > 0 ? 'issue' : 'ok',
+      lines: [
+        data.prometheus.status === 'unavailable' ? 'Not reachable' : null,
+        data.prometheus.alerts.length > 0 ? `${data.prometheus.alerts.length} firing alert${data.prometheus.alerts.length > 1 ? 's' : ''}` : null,
+        downServices.length > 0 ? `${downServices.length} service${downServices.length > 1 ? 's' : ''} down` : null,
+        data.prometheus.status !== 'unavailable' && data.prometheus.alerts.length === 0 && downServices.length === 0
+          ? `${upServices.length} service${upServices.length !== 1 ? 's' : ''} up` : null,
+      ].filter(Boolean) as string[],
+    },
+    {
+      title: `Loki (last ${WINDOW_LABELS[window_]})`,
+      status: data.loki.status === 'unavailable' ? 'unavailable'
+        : data.loki.errors.length > 0 ? 'issue' : 'ok',
+      lines: [
+        data.loki.status === 'unavailable' ? 'Not reachable' : null,
+        data.loki.errors.length > 0 ? `${data.loki.errors.length} error${data.loki.errors.length > 1 ? 's' : ''}` : null,
+        data.loki.warnings.length > 0 ? `${data.loki.warnings.length} warning${data.loki.warnings.length > 1 ? 's' : ''}` : null,
+        data.loki.status !== 'unavailable' && data.loki.errors.length === 0 && data.loki.warnings.length === 0 ? 'No errors or warnings' : null,
+      ].filter(Boolean) as string[],
+    },
+  ] as const
 
-  if (loading && !data) {
-    return (
-      <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-8">
-        <div className="skeleton h-11 w-full rounded-lg" />
-        <div className="space-y-3">
-          <div className="skeleton h-5 w-32" />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-            {Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton h-10 rounded-md" />)}
+  const statusIcon = (s: string) =>
+    s === 'ok' ? '✓' : s === 'issue' ? '!' : '–'
+  const statusCls = (s: string) =>
+    s === 'ok' ? 'text-status-success bg-status-success/10 border-status-success/20'
+    : s === 'issue' ? 'text-status-warning bg-status-warning/10 border-status-warning/20'
+    : 'text-text-tertiary bg-bg-secondary border-border'
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {sections.map(sec => (
+          <div key={sec.title} className={`rounded-lg border p-4 flex flex-col gap-2 ${statusCls(sec.status)}`}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-semibold">{sec.title}</span>
+              <span className="text-xs font-bold w-5 h-5 rounded-full border flex items-center justify-center shrink-0">
+                {statusIcon(sec.status)}
+              </span>
+            </div>
+            <ul className="space-y-0.5">
+              {sec.lines.map((l, i) => (
+                <li key={i} className="text-xs opacity-80">{l}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+
+      {/* Firing alerts inline */}
+      {data.prometheus.status !== 'unavailable' && data.prometheus.alerts.length > 0 && (
+        <div>
+          <h3 className="text-xs font-medium text-text-secondary mb-2 uppercase tracking-wide">Firing alerts</h3>
+          <div className="space-y-1">
+            {data.prometheus.alerts.map((a, i) => (
+              <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-md bg-status-error/5 border border-status-error/30 text-sm">
+                <span className="text-status-error font-medium" data-private>{a.metric.alertname ?? 'Alert'}</span>
+                {a.metric.severity && (
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-status-error/10 text-status-error">
+                    {a.metric.severity}
+                  </span>
+                )}
+                {a.metric.instance && (
+                  <span className="text-text-tertiary text-xs ml-auto" data-private>{a.metric.instance}</span>
+                )}
+              </div>
+            ))}
           </div>
         </div>
-        <div className="space-y-3">
-          <div className="skeleton h-5 w-24" />
-          <div className="skeleton h-20 rounded-md" />
+      )}
+
+      {/* Down services inline */}
+      {downServices.length > 0 && (
+        <div>
+          <h3 className="text-xs font-medium text-text-secondary mb-2 uppercase tracking-wide">Down services</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+            {downServices.map((s, i) => (
+              <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-md border bg-status-error/5 border-status-error/30 text-sm">
+                <StatusDot ok={false} />
+                <span className="font-medium text-text-primary truncate" data-private>{s.metric.job ?? s.metric.instance ?? 'unknown'}</span>
+                {s.metric.instance && s.metric.job && (
+                  <span className="text-text-tertiary text-xs ml-auto truncate" data-private>{s.metric.instance}</span>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
-    )
-  }
+      )}
+    </div>
+  )
+}
 
-  if (error || !data) {
-    return (
-      <div className="flex items-center justify-center h-64 text-status-error text-sm">
-        {error ?? 'No data'}
-      </div>
-    )
-  }
+// ─── Infra tab (Prometheus + Loki) ───────────────────────────────────────────
 
+function InfraTab({ data, window_ }: { data: MonitoringData; window_: TimeWindow }) {
   const downServices = data.prometheus.services.filter(s => s.value?.[1] === '0')
   const upServices = data.prometheus.services.filter(s => s.value?.[1] !== '0')
 
@@ -638,49 +698,7 @@ export function MonitoringPage() {
     : 'ok'
 
   return (
-    <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-8">
-      {/* Summary bar */}
-      <div className={`flex items-center gap-3 px-4 py-3 rounded-lg border text-sm font-medium ${
-        data.hasIssues
-          ? 'border-status-warning/40 bg-status-warning/5 text-status-warning'
-          : 'border-status-success/40 bg-status-success/5 text-status-success'
-      }`}>
-        <StatusDot ok={!data.hasIssues} />
-        {data.hasIssues ? 'Issues detected — review below' : 'All systems OK'}
-        <span className="ml-auto text-xs opacity-60">
-          {loading ? 'Refreshing…' : `Updated ${new Date(data.fetchedAt).toLocaleTimeString()}`}
-          {' · auto-refresh 30s'}
-        </span>
-        {/* Time window selector */}
-        <div className="flex items-center gap-0.5 rounded border border-current/20 overflow-hidden">
-          {(['5m', '15m', '1h'] as TimeWindow[]).map(w => (
-            <button
-              key={w}
-              className={`text-xs px-2 py-0.5 border-none cursor-pointer font-medium transition-colors ${
-                window_ === w
-                  ? 'bg-current/20 text-current'
-                  : 'text-current/50 hover:text-current/80 bg-transparent'
-              }`}
-              onClick={() => handleWindowChange(w)}
-            >
-              {w}
-            </button>
-          ))}
-        </div>
-        <button
-          onClick={() => fetch_(window_)}
-          className="text-xs px-2 py-0.5 rounded border border-current opacity-60 hover:opacity-100 transition-opacity cursor-pointer bg-transparent"
-        >
-          Refresh
-        </button>
-      </div>
-
-      {/* Scheduled agent reconciliation */}
-      <SchedulerHealthPanel />
-
-      {/* tamtam PM2 logs */}
-      <Pm2LogPanel pm2Logs={pm2Logs} onRefresh={fetchPm2Logs} />
-
+    <div className="space-y-8">
       {/* Prometheus */}
       <section>
         <SectionHeader title="Prometheus" status={promStatus} />
@@ -776,7 +794,193 @@ export function MonitoringPage() {
           </div>
         )}
       </section>
+    </div>
+  )
+}
 
+// ─── Main page ───────────────────────────────────────────────────────────────
+
+export function MonitoringPage() {
+  const [data, setData] = useState<MonitoringData | null>(null)
+  const [pm2Logs, setPm2Logs] = useState<Pm2LogData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [window_, setWindow] = useState<TimeWindow>('15m')
+  const [activeTab, setActiveTab] = useState<MonitoringTab>('overview')
+
+  const fetchPm2Logs = useCallback(async () => {
+    try {
+      const res = await fetch('/api/monitoring/pm2-logs?limit=200')
+      if (res.ok) setPm2Logs(await res.json())
+    } catch { /* non-fatal */ }
+  }, [])
+
+  const fetch_ = useCallback(async (w: TimeWindow) => {
+    try {
+      const [monRes, pm2Res] = await Promise.all([
+        fetch(`/api/monitoring?window=${w}`),
+        fetch(`/api/monitoring/pm2-logs?limit=200`),
+      ])
+      if (!monRes.ok) throw new Error('fetch failed')
+      setData(await monRes.json())
+      if (pm2Res.ok) setPm2Logs(await pm2Res.json())
+      setError(null)
+    } catch {
+      setError('Failed to fetch monitoring data')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    setLoading(true)
+    fetch_(window_)
+    const id = setInterval(() => fetch_(window_), 30_000)
+    return () => clearInterval(id)
+  }, [fetch_, window_])
+
+  const handleWindowChange = (w: TimeWindow) => {
+    setWindow(w)
+    setLoading(true)
+    fetch_(w)
+  }
+
+  if (loading && !data) {
+    return (
+      <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-8">
+        <div className="skeleton h-11 w-full rounded-lg" />
+        <div className="flex gap-1">
+          {Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton h-9 w-24 rounded-md" />)}
+        </div>
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-24 rounded-lg" />)}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error || !data) {
+    return (
+      <div className="flex items-center justify-center h-64 text-status-error text-sm">
+        {error ?? 'No data'}
+      </div>
+    )
+  }
+
+  // Badge counts for tabs
+  const pm2ErrorCount  = pm2Logs?.entries.filter(e => e.level === 'error').length ?? 0
+  const pm2WarnCount   = pm2Logs?.entries.filter(e => e.level === 'warn').length ?? 0
+  const lokiErrorCount = data.loki.errors.length
+  const downCount      = data.prometheus.services.filter(s => s.value?.[1] === '0').length
+  const alertCount     = data.prometheus.alerts.length
+  const infraIssues    = lokiErrorCount + downCount + alertCount
+
+  const tabs: Array<{
+    id: MonitoringTab
+    label: string
+    badge?: { count: number; variant: 'error' | 'warn' | 'ok' }
+  }> = [
+    {
+      id: 'overview',
+      label: 'Overview',
+      badge: data.hasIssues
+        ? { count: (pm2ErrorCount + infraIssues), variant: 'error' }
+        : undefined,
+    },
+    {
+      id: 'agents',
+      label: 'Agents',
+    },
+    {
+      id: 'logs',
+      label: 'Logs',
+      badge: pm2ErrorCount > 0
+        ? { count: pm2ErrorCount, variant: 'error' }
+        : pm2WarnCount > 0
+        ? { count: pm2WarnCount, variant: 'warn' }
+        : undefined,
+    },
+    {
+      id: 'infra',
+      label: 'Infra',
+      badge: infraIssues > 0
+        ? { count: infraIssues, variant: 'error' }
+        : undefined,
+    },
+  ]
+
+  return (
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-5">
+      {/* Summary bar */}
+      <div className={`flex items-center gap-3 px-4 py-3 rounded-lg border text-sm font-medium ${
+        data.hasIssues
+          ? 'border-status-warning/40 bg-status-warning/5 text-status-warning'
+          : 'border-status-success/40 bg-status-success/5 text-status-success'
+      }`}>
+        <StatusDot ok={!data.hasIssues} />
+        {data.hasIssues ? 'Issues detected — review below' : 'All systems OK'}
+        <span className="ml-auto text-xs opacity-60">
+          {loading ? 'Refreshing…' : `Updated ${new Date(data.fetchedAt).toLocaleTimeString()}`}
+          {' · auto-refresh 30s'}
+        </span>
+        <div className="flex items-center gap-0.5 rounded border border-current/20 overflow-hidden">
+          {(['5m', '15m', '1h'] as TimeWindow[]).map(w => (
+            <button
+              key={w}
+              className={`text-xs px-2 py-0.5 border-none cursor-pointer font-medium transition-colors ${
+                window_ === w
+                  ? 'bg-current/20 text-current'
+                  : 'text-current/50 hover:text-current/80 bg-transparent'
+              }`}
+              onClick={() => handleWindowChange(w)}
+            >
+              {w}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => fetch_(window_)}
+          className="text-xs px-2 py-0.5 rounded border border-current opacity-60 hover:opacity-100 transition-opacity cursor-pointer bg-transparent"
+        >
+          Refresh
+        </button>
+      </div>
+
+      {/* Tab bar */}
+      <div className="flex items-center gap-0.5 border-b border-border">
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px cursor-pointer transition-colors bg-transparent ${
+              activeTab === tab.id
+                ? 'border-text-primary text-text-primary'
+                : 'border-transparent text-text-tertiary hover:text-text-secondary hover:border-border'
+            }`}
+          >
+            {tab.label}
+            {tab.badge && <TabBadge count={tab.badge.count} variant={tab.badge.variant} />}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab panels */}
+      <div>
+        {activeTab === 'overview' && (
+          <OverviewTab data={data} pm2Logs={pm2Logs} window_={window_} />
+        )}
+        {activeTab === 'agents' && (
+          <SchedulerHealthPanel />
+        )}
+        {activeTab === 'logs' && (
+          <Pm2LogPanel pm2Logs={pm2Logs} onRefresh={fetchPm2Logs} />
+        )}
+        {activeTab === 'infra' && (
+          <InfraTab data={data} window_={window_} />
+        )}
+      </div>
     </div>
   )
 }
