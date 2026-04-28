@@ -17,7 +17,7 @@ function timeAgo(date: Date): string {
 }
 
 function elapsed(startedAt: number, finishedAt?: number | null): string {
-  const s = Math.floor((finishedAt ?? Date.now() / 1000) - startedAt)
+  const s = Math.floor((finishedAt ?? (Date.now() / 1000)) - startedAt)
   if (s < 60) return `${s}s`
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
