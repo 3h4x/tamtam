@@ -25,18 +25,34 @@ function parseScheduleToSeconds(schedule: string): number {
 function parseScheduleToCron(schedule: string, agentId = ''): string {
   const s = schedule.trim();
   const minOff = agentId ? stableHash(agentId + ':min', 60) : 0;
+
   if (s.endsWith('m')) {
     const mins = parseInt(s.slice(0, -1), 10);
     if (mins < 60) return `*/${mins} * * * *`;
     const hours = Math.floor(mins / 60);
-    const startHour = agentId ? stableHash(agentId + ':h', hours) : 0;
-    return `${minOff} ${startHour}/${hours} * * *`;
+    if (hours <= 24) {
+      const startHour = agentId ? stableHash(agentId + ':h', hours) : 0;
+      return `${minOff} ${startHour}/${hours} * * *`;
+    }
+    // > 24 h expressed in minutes: fall through to day-field logic
+    const days = Math.ceil(hours / 24);
+    const startHour = agentId ? stableHash(agentId + ':h', 24) : 0;
+    return `${minOff} ${startHour} */${days} * *`;
   }
+
   if (s.endsWith('h')) {
     const hours = parseInt(s.slice(0, -1), 10);
-    const startHour = agentId ? stableHash(agentId + ':h', hours) : 0;
-    return `${minOff} ${startHour}/${hours} * * *`;
+    if (hours <= 24) {
+      const startHour = agentId ? stableHash(agentId + ':h', hours) : 0;
+      return `${minOff} ${startHour}/${hours} * * *`;
+    }
+    // > 24 h: hour-field steps would exceed the 0-23 range and PM2 rejects them.
+    // Use the day-of-month field instead (e.g. 72 h → */3, 168 h → */7).
+    const days = Math.ceil(hours / 24);
+    const startHour = agentId ? stableHash(agentId + ':h', 24) : 0;
+    return `${minOff} ${startHour} */${days} * *`;
   }
+
   const secs = parseInt(s, 10);
   const mins = Math.max(1, Math.round(secs / 60));
   return `*/${mins} * * * *`;

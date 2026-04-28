@@ -53,13 +53,13 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - **Release**: semantic-release on push to master (GitHub releases only, no npm)
 
 ## Commands
-- `pnpm dev` — start server via PM2 on port 1337 (production mode by default, no HMR; set `TAMTAM_HMR=1` to enable HMR dev mode instead)
-- `pnpm rebuild` — `pnpm build && pnpm dev` — rebuild and restart after code changes
-- `pnpm stop` — stop server
-- `pnpm restart` — restart server (PM2 re-uses the existing command; use `pnpm rebuild` when the build is stale)
+- `pnpm dev` — run `next dev` directly in the foreground on port 1337 (HMR enabled, no PM2). Use only for active local development; never for the long-lived TamTam server.
+- `pnpm start` — start (or idempotently restart) the production server via PM2 on port 1337. This is the canonical way to run TamTam.
+- `pnpm rebuild` — `pnpm build && pnpm start` — rebuild and restart the PM2 server after code changes
+- `pnpm stop` — stop the PM2 server
+- `pnpm restart` — restart the PM2 server (re-uses the existing command; use `pnpm rebuild` when the build is stale)
 - `pnpm logs` — view PM2 logs
 - `pnpm build` — production build
-- `pnpm start` — start production server via PM2 (alias for `pnpm dev` without the log tail)
 - `pnpm test` — run unit tests
 - `pnpm test:watch` — run vitest in watch mode
 - `pnpm test:e2e` — run Playwright e2e tests (requires dev server running)
@@ -71,22 +71,18 @@ Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars
 - `pnpm dev:profile` — start dev server with Turbopack tracing enabled; stop server to flush trace to `.next/dev/trace-turbopack`, then open via `npx next internal trace` or https://trace.nextjs.org/
 - `pnpm dev:flamegraph` — start dev server with V8 CPU profiling; stop server to flush `.profiles/CPU.*.cpuprofile`, then open in Chrome DevTools or https://www.speedscope.app/
 
-**Never run `next dev` directly — always use PM2 via the scripts above.**
+**Always run TamTam under PM2 via `pnpm start` / `pnpm rebuild`.** `pnpm dev` is foreground-only and intended for ad-hoc local debugging — it does not register with PM2, so the rest of the harness (logs, restart, stop scripts) won't see it.
 
 ### Applying code changes
 
-TamTam runs in **production mode** (`next start`) by default — no HMR, no auto-reload. After any code change:
+TamTam runs in **production mode** (`next start`) under PM2 — no HMR, no auto-reload. After any code change:
 
-1. `pnpm rebuild` — builds and restarts in one step (preferred)
+1. `pnpm rebuild` — builds and restarts the PM2 server in one step (preferred)
 2. Or: `pnpm build` then `pnpm restart`
 
-To enable HMR for active development (auto-reload on save), set `TAMTAM_HMR=1` before `pnpm dev`:
+`pnpm start` is idempotent: if a `tamtam` PM2 entry already exists it is restarted in place (no port kill, no dropped in-flight requests); otherwise a new entry is created.
 
-```
-TAMTAM_HMR=1 pnpm dev
-```
-
-**Never use `TAMTAM_HMR=1` in production** — HMR file watchers can restart the server mid-operation (e.g. while a git push hook runs), orphaning in-flight jobs and marking them `exit -1`.
+If you genuinely need HMR for an interactive session, run `pnpm dev` in a separate terminal — but stop the PM2 server first (`pnpm stop`) so the two don't fight over port 1337. **Never leave `pnpm dev` running as the long-lived server**: HMR file watchers can restart the process mid-operation (e.g. while a git push hook runs), orphaning in-flight jobs and marking them `exit -1`.
 
 ## Architecture
 - `app/` — Next.js pages and API route handlers
@@ -183,7 +179,7 @@ TAMTAM_HMR=1 pnpm dev
 - Test naming: `__tests__/api/<route-name>.test.ts` mirroring `app/api/<route-name>/route.ts`.
 
 ## Definition of Done for UI/Frontend Changes
-- Dev server must be running (`pnpm dev`) before testing frontend changes
+- Server must be running (`pnpm start` — or `pnpm rebuild` if a build is needed) before testing frontend changes
 - Use Chrome DevTools MCP (`mcp__plugin_chrome-devtools-mcp_chrome-devtools__*`) to navigate to the relevant page and take a screenshot verifying the UI renders correctly
 - Test the golden path and key edge cases visually in the browser
 - Check for regressions in adjacent features
