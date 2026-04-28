@@ -44,6 +44,7 @@ describe('instrumentation', () => {
     vi.doMock('@/lib/agent-scheduler', () => ({
       installAgentSchedule: installAgentScheduleMock,
       isAgentScheduleLoaded: isAgentScheduleLoadedMock,
+      reconcilePm2Schedules: vi.fn().mockResolvedValue(undefined),
     }));
     vi.doMock('drizzle-orm', () => ({ isNotNull: vi.fn(v => v), eq: vi.fn((_a, b) => b), and: vi.fn((...args) => args) }));
   }

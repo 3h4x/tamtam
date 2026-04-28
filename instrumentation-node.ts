@@ -5,7 +5,7 @@
 export async function reinstallAgents(): Promise<void> {
   const { db, schema } = await import('./lib/db');
   const { isNotNull, eq, and } = await import('drizzle-orm');
-  const { installAgentSchedule, isAgentScheduleLoaded } = await import('./lib/agent-scheduler');
+  const { installAgentSchedule, isAgentScheduleLoaded, reconcilePm2Schedules } = await import('./lib/agent-scheduler');
 
   const agents = db
     .select()
@@ -24,6 +24,15 @@ export async function reinstallAgents(): Promise<void> {
     } catch (err) {
       console.error(`[scheduler] failed to reinstall ${agent.id}:`, err);
     }
+  }
+
+  // Remove any PM2 cron entries that no longer correspond to an active agent.
+  // Orphans accumulate from renames, project changes, runner switches, or
+  // failed uninstalls — this sweep catches all of them.
+  try {
+    await reconcilePm2Schedules(agents);
+  } catch (err) {
+    console.error('[scheduler] reconcile sweep failed:', err);
   }
 }
 
