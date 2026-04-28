@@ -588,29 +588,24 @@ function AgentModal({
   return (
     <div
       ref={backdropRef}
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
       onClick={(e) => { if (e.target === backdropRef.current) onClose() }}
     >
       <div
-        className="bg-bg-primary rounded-xl shadow-2xl border border-border w-full max-w-5xl mx-4 animate-slide-in-up overflow-hidden flex flex-col"
-        style={{ maxHeight: '88vh' }}
+        className="bg-bg-primary rounded-2xl shadow-2xl border border-border w-full max-w-2xl flex flex-col animate-slide-in-up"
+        style={{ maxHeight: '92vh' }}
         role="dialog"
         aria-modal="true"
         aria-labelledby="agent-modal-title"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <div>
-            <h2 id="agent-modal-title" className="text-lg font-semibold text-text-primary">
-              {isNew ? 'New Agent' : 'Edit Agent'}
-            </h2>
-            <p className="text-sm text-text-tertiary mt-0.5">
-              {isNew ? 'Configure an automated Claude agent' : `Editing ${agent.name}`}
-            </p>
-          </div>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
+          <h2 id="agent-modal-title" className="text-base font-semibold text-text-primary">
+            {isNew ? 'New Agent' : `Edit — ${agent.name}`}
+          </h2>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary transition-colors cursor-pointer"
+            className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary transition-colors cursor-pointer"
             aria-label="Close"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -619,158 +614,137 @@ function AgentModal({
           </button>
         </div>
 
-        {/* Body — two columns */}
-        <div className="flex flex-1 min-h-0">
-          {/* Left column: config */}
-          <div className="w-[400px] shrink-0 px-6 py-4 flex flex-col gap-3 border-r border-border overflow-y-auto">
-          {/* Name field */}
+        {/* Scrollable body */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-5 min-h-0">
+
+          {/* Row 1: Name + Model */}
+          <div className="flex gap-4 items-end">
+            <div className="flex-1">
+              <label htmlFor="agent-name" className="block mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Name</label>
+              <input
+                ref={nameRef}
+                id="agent-name"
+                type="text"
+                className="w-full px-3 py-2.5 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) handleSave() }}
+                placeholder="e.g. security-guard"
+              />
+            </div>
+            <div className="shrink-0">
+              <div className="mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Model</div>
+              <div className="flex gap-px p-0.5 rounded-lg bg-bg-secondary border border-border">
+                {MODELS.map(m => {
+                  const info = MODEL_LABELS[m]
+                  const sel = model === m
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      title={info.desc}
+                      className={`px-4 py-2 rounded-md text-sm font-medium cursor-pointer transition-all whitespace-nowrap ${
+                        sel
+                          ? 'bg-accent text-white shadow-sm'
+                          : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
+                      }`}
+                      onClick={() => setModel(m)}
+                    >
+                      {info.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Prompt */}
           <div>
-            <label htmlFor="agent-name" className="block mb-1.5 text-sm font-medium text-text-primary">Name</label>
-            <input
-              ref={nameRef}
-              id="agent-name"
-              type="text"
-              className="w-full px-3 py-2.5 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) handleSave() }}
-              placeholder="e.g. security-guard"
+            <label htmlFor="agent-prompt" className="flex items-baseline gap-2 mb-1.5">
+              <span className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">Prompt</span>
+              {selectedSkills.length > 0 && (
+                <span className="text-xs text-text-tertiary font-normal normal-case">optional — skills define default behavior</span>
+              )}
+            </label>
+            <textarea
+              id="agent-prompt"
+              className="w-full px-3 py-2.5 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors font-mono resize-none"
+              rows={8}
+              value={agentPrompt}
+              onChange={(e) => setAgentPrompt(e.target.value)}
+              placeholder={selectedSkills.length > 0
+                ? 'Optional: repo-specific hints to append to the skill (e.g. "focus on lib/auth").'
+                : 'What should this agent do when it runs?'}
             />
-          </div>
-
-          {/* Model — compact segmented control */}
-          <div>
-            <label className="block mb-1.5 text-sm font-medium text-text-primary">Model</label>
-            <div className="flex rounded-lg border border-border overflow-hidden">
-              {MODELS.map(m => {
-                const info = MODEL_LABELS[m]
-                const selected = model === m
-                return (
-                  <button
-                    key={m}
-                    type="button"
-                    title={info.desc}
-                    className={`flex-1 py-2 text-sm font-medium cursor-pointer transition-all border-r border-border last:border-r-0 ${
-                      selected
-                        ? 'bg-accent text-white'
-                        : 'bg-bg-secondary text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
-                    }`}
-                    onClick={() => setModel(m)}
-                  >
-                    {info.label}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* Schedule / Runner / Enabled row */}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label htmlFor="agent-schedule" className="block mb-1.5 text-sm font-medium text-text-primary">Schedule</label>
-              <select
-                id="agent-schedule"
-                className="w-full px-3 py-2.5 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors cursor-pointer"
-                value={schedule}
-                onChange={(e) => setSchedule(e.target.value)}
-              >
-                <option value="">Manual</option>
-                {SCHEDULES.filter(Boolean).map(s => <option key={s} value={s}>every {s}</option>)}
-              </select>
-            </div>
-            <div>
-              <label htmlFor="agent-runner" className="block mb-1.5 text-sm font-medium text-text-primary">Runner</label>
-              <select
-                id="agent-runner"
-                className="w-full px-3 py-2.5 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors cursor-pointer"
-                value={runner}
-                onChange={(e) => setRunner(e.target.value)}
-              >
-                {RUNNERS.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </div>
-            <div>
-              <div className="mb-1.5 text-sm font-medium text-text-primary">Enabled</div>
-              <label className="flex items-center gap-2 px-3 py-2.5 h-[42px] rounded-lg border border-border bg-bg-secondary cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="w-4 h-4 accent-accent cursor-pointer shrink-0"
-                  checked={enabled}
-                  onChange={(e) => setEnabled(e.target.checked)}
-                />
-                <span className="text-sm text-text-secondary">{enabled ? 'On' : 'Off'}</span>
-              </label>
-            </div>
           </div>
 
           {/* Context: Skills + Docs */}
           <div>
-            {/* Section header with tab switcher */}
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-text-primary">Context</span>
-              <div className="flex items-center gap-0.5 p-0.5 rounded-md bg-bg-tertiary border border-border">
+              <span className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">Context</span>
+              <div className="flex gap-px p-0.5 rounded-md bg-bg-secondary border border-border">
                 <button
                   type="button"
                   onClick={() => setContextTab('skills')}
-                  className={`px-2.5 py-1 text-xs rounded transition-colors cursor-pointer ${
+                  className={`px-3 py-1 text-xs rounded transition-colors cursor-pointer ${
                     contextTab === 'skills'
                       ? 'bg-bg-primary text-text-primary shadow-sm'
                       : 'text-text-tertiary hover:text-text-primary'
                   }`}
                 >
-                  Skills{selectedSkills.length > 0 && <span className="ml-1 text-accent font-semibold">{selectedSkills.length}</span>}
+                  Skills{selectedSkills.length > 0 && <span className="ml-1.5 text-accent font-bold">{selectedSkills.length}</span>}
                 </button>
                 <button
                   type="button"
                   onClick={() => setContextTab('docs')}
-                  className={`px-2.5 py-1 text-xs rounded transition-colors cursor-pointer ${
+                  className={`px-3 py-1 text-xs rounded transition-colors cursor-pointer ${
                     contextTab === 'docs'
                       ? 'bg-bg-primary text-text-primary shadow-sm'
                       : 'text-text-tertiary hover:text-text-primary'
                   }`}
                 >
-                  Docs{selectedDocPaths.length > 0 && <span className="ml-1 text-status-success font-semibold">{selectedDocPaths.length}</span>}
+                  Docs{selectedDocPaths.length > 0 && <span className="ml-1.5 text-status-success font-bold">{selectedDocPaths.length}</span>}
                 </button>
               </div>
             </div>
 
-            {/* Selected chips — both skills and docs together */}
+            {/* Selected chips */}
             {(selectedSkills.length > 0 || selectedDocPaths.length > 0) && (
-              <div className="flex flex-wrap gap-2 mb-2">
+              <div className="flex flex-wrap gap-1.5 mb-2">
                 {selectedSkills.map(id => {
                   const item = allItems.find(i => i.id === id)
                   return (
-                    <span key={id} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg bg-accent text-white">
+                    <span key={id} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 text-xs rounded-full bg-accent/15 text-accent border border-accent/25 font-medium">
                       {item?.name || id}
-                      <button type="button" className="text-white/70 hover:text-white ml-0.5 cursor-pointer" onClick={() => toggleSkill(id)}>×</button>
+                      <button type="button" className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-accent/20 cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onClick={() => toggleSkill(id)}>×</button>
                     </span>
                   )
                 })}
                 {selectedDocPaths.map(path => {
                   const doc = availableDocs.find(d => d.path === path)
                   return (
-                    <span key={path} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-status-success/40 bg-status-success/10 text-status-success">
+                    <span key={path} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 text-xs rounded-full border border-status-success/30 bg-status-success/10 text-status-success font-medium">
                       {doc?.name || path}
-                      <button type="button" className="text-status-success/60 hover:text-status-success ml-0.5 cursor-pointer" onClick={() => toggleDoc(path)}>×</button>
+                      <button type="button" className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-status-success/20 cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onClick={() => toggleDoc(path)}>×</button>
                     </span>
                   )
                 })}
               </div>
             )}
 
-            {/* Skills tab */}
+            {/* Skills list */}
             {contextTab === 'skills' && (
-              <>
+              <div className="flex flex-col gap-1.5">
                 <input
                   type="text"
-                  className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors mb-2"
+                  className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors"
                   value={skillSearch}
                   onChange={(e) => setSkillSearch(e.target.value)}
                   placeholder="Search skills and personas..."
                 />
-                <div className="max-h-40 overflow-y-auto rounded-lg border border-border">
+                <div className="max-h-48 overflow-y-auto rounded-lg border border-border divide-y divide-border">
                   {filteredItems.length === 0 ? (
-                    <div className="px-3 py-2 text-xs text-text-tertiary">No matches</div>
+                    <div className="px-4 py-3 text-sm text-text-tertiary text-center">No matches</div>
                   ) : (
                     filteredItems.slice(0, 30).map(item => {
                       const isSelected = selectedSkills.includes(item.id)
@@ -778,33 +752,44 @@ function AgentModal({
                         <button
                           key={item.id}
                           type="button"
-                          className={`w-full px-3 py-2 text-left text-sm border-none cursor-pointer transition-colors ${
-                            isSelected ? 'bg-accent/10 text-accent' : 'bg-transparent text-text-primary hover:bg-bg-secondary'
+                          className={`w-full px-3 py-2.5 text-left border-none cursor-pointer transition-colors flex items-center gap-3 ${
+                            isSelected ? 'bg-accent/8 text-text-primary' : 'bg-transparent text-text-primary hover:bg-bg-secondary'
                           }`}
                           onClick={() => toggleSkill(item.id)}
                         >
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{item.name}</span>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${item.source === 'db' ? 'bg-accent/10 text-accent' : 'bg-bg-tertiary text-text-tertiary'}`}>
-                              {item.source === 'db' ? 'custom' : 'file'}
-                            </span>
+                          <div className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center transition-colors ${
+                            isSelected ? 'bg-accent border-accent' : 'border-border'
+                          }`}>
+                            {isSelected && (
+                              <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M1.5 4.5l2 2 4-4" />
+                              </svg>
+                            )}
                           </div>
-                          {item.description && (
-                            <div className="text-xs text-text-tertiary truncate mt-0.5">{item.description}</div>
-                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">{item.name}</span>
+                              <span className={`text-[10px] px-1 py-px rounded font-medium ${item.source === 'db' ? 'bg-accent/10 text-accent' : 'bg-bg-tertiary text-text-tertiary'}`}>
+                                {item.source === 'db' ? 'custom' : 'file'}
+                              </span>
+                            </div>
+                            {item.description && (
+                              <div className="text-xs text-text-tertiary truncate mt-0.5">{item.description}</div>
+                            )}
+                          </div>
                         </button>
                       )
                     })
                   )}
                 </div>
-              </>
+              </div>
             )}
 
-            {/* Docs tab */}
+            {/* Docs list */}
             {contextTab === 'docs' && (
-              <div className="max-h-40 overflow-y-auto rounded-lg border border-border">
+              <div className="max-h-48 overflow-y-auto rounded-lg border border-border divide-y divide-border">
                 {availableDocs.length === 0 ? (
-                  <div className="px-3 py-2 text-xs text-text-tertiary">No docs found for this project</div>
+                  <div className="px-4 py-3 text-sm text-text-tertiary text-center">No docs found for this project</div>
                 ) : (
                   availableDocs.map(doc => {
                     const isSelected = selectedDocPaths.includes(doc.path)
@@ -812,18 +797,23 @@ function AgentModal({
                       <button
                         key={doc.path}
                         type="button"
-                        className={`w-full px-3 py-1.5 text-left text-sm border-none cursor-pointer transition-colors ${
-                          isSelected ? 'bg-status-success/10 text-status-success' : 'bg-transparent text-text-primary hover:bg-bg-secondary'
+                        className={`w-full px-3 py-2.5 text-left border-none cursor-pointer transition-colors flex items-center gap-3 ${
+                          isSelected ? 'bg-status-success/8 text-text-primary' : 'bg-transparent text-text-primary hover:bg-bg-secondary'
                         }`}
                         onClick={() => toggleDoc(doc.path)}
                       >
-                        <div className="flex items-center gap-2">
-                          <svg className="w-3.5 h-3.5 shrink-0 text-text-tertiary" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M4 2h6l4 4v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z" />
-                            <path d="M10 2v4h4" />
-                          </svg>
-                          <span className="font-medium">{doc.name}</span>
-                          <span className="text-xs text-text-tertiary truncate">{doc.path !== doc.name ? doc.path : ''}</span>
+                        <div className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center transition-colors ${
+                          isSelected ? 'bg-status-success border-status-success' : 'border-border'
+                        }`}>
+                          {isSelected && (
+                            <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M1.5 4.5l2 2 4-4" />
+                            </svg>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium">{doc.name}</div>
+                          <div className="text-xs text-text-tertiary truncate">{doc.path}</div>
                         </div>
                       </button>
                     )
@@ -832,61 +822,78 @@ function AgentModal({
               </div>
             )}
           </div>
+
+          {/* Settings strip: Schedule / Runner / Enabled */}
+          <div className="flex items-center gap-4 px-4 py-3 rounded-xl bg-bg-secondary border border-border">
+            <div className="flex items-center gap-2 flex-1">
+              <span className="text-xs text-text-tertiary whitespace-nowrap font-medium">Schedule</span>
+              <select
+                id="agent-schedule"
+                className="flex-1 min-w-0 px-2 py-1.5 text-xs bg-bg-primary border border-border rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/40 focus:border-accent transition-colors cursor-pointer"
+                value={schedule}
+                onChange={(e) => setSchedule(e.target.value)}
+              >
+                <option value="">Manual</option>
+                {SCHEDULES.filter(Boolean).map(s => <option key={s} value={s}>every {s}</option>)}
+              </select>
+            </div>
+            <div className="w-px h-4 bg-border shrink-0" />
+            <div className="flex items-center gap-2 flex-1">
+              <span className="text-xs text-text-tertiary whitespace-nowrap font-medium">Runner</span>
+              <select
+                id="agent-runner"
+                className="flex-1 min-w-0 px-2 py-1.5 text-xs bg-bg-primary border border-border rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/40 focus:border-accent transition-colors cursor-pointer"
+                value={runner}
+                onChange={(e) => setRunner(e.target.value)}
+              >
+                {RUNNERS.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+            <div className="w-px h-4 bg-border shrink-0" />
+            <button
+              type="button"
+              role="switch"
+              aria-checked={enabled}
+              onClick={() => setEnabled(!enabled)}
+              className="flex items-center gap-2 cursor-pointer shrink-0"
+            >
+              <div className={`relative w-9 h-5 rounded-full transition-colors ${enabled ? 'bg-accent' : 'bg-bg-tertiary border border-border'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-150 ${enabled ? 'left-[18px]' : 'left-0.5'}`} />
+              </div>
+              <span className="text-xs text-text-secondary font-medium">Enabled</span>
+            </button>
           </div>
 
-          {/* Right column: prompt */}
-          <div className="flex-1 px-6 py-4 flex flex-col min-h-0">
-            <label htmlFor="agent-prompt" className="block mb-1.5 text-sm font-medium text-text-primary">
-              Prompt
-              {selectedSkills.length > 0 && (
-                <span className="ml-2 text-xs font-normal text-text-tertiary">optional — skills provide the default behavior</span>
-              )}
-            </label>
-            <textarea
-              id="agent-prompt"
-              className="flex-1 w-full px-3 py-2.5 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors font-mono resize-none"
-              value={agentPrompt}
-              onChange={(e) => setAgentPrompt(e.target.value)}
-              placeholder={selectedSkills.length > 0
-                ? 'Optional: repo-specific hints to append to the skill (e.g. "focus on lib/auth").'
-                : 'What should this agent do when it runs?'}
-            />
-            <p className="text-xs text-text-tertiary mt-1.5">
-              {selectedSkills.length > 0
-                ? 'Appended after the skill content. Leave blank to run the skill as-is.'
-                : 'Combined with selected skills as context on every run.'}
-            </p>
-          </div>
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-border bg-bg-secondary/50">
+        <div className="flex items-center justify-between px-6 py-4 border-t border-border shrink-0">
           <div>
             {onDelete && !confirmDelete && (
               <button
                 type="button"
-                className="px-3 py-1.5 text-sm text-status-error hover:bg-status-error/10 rounded-md transition-colors cursor-pointer"
+                className="px-3 py-1.5 text-sm text-status-error hover:bg-status-error/10 rounded-lg transition-colors cursor-pointer"
                 onClick={() => setConfirmDelete(true)}
               >
-                Delete agent
+                Delete
               </button>
             )}
             {onDelete && confirmDelete && (
               <div className="flex items-center gap-2">
-                <span className="text-sm text-status-error">Are you sure?</span>
+                <span className="text-sm text-status-error">Delete this agent?</span>
                 <button
                   type="button"
-                  className="px-3 py-1.5 text-sm text-white bg-status-error rounded-md hover:bg-status-error/90 cursor-pointer"
+                  className="px-3 py-1.5 text-sm text-white bg-status-error rounded-lg hover:bg-status-error/90 cursor-pointer"
                   onClick={() => { onDelete(); onClose() }}
                 >
-                  Yes, delete
+                  Delete
                 </button>
                 <button
                   type="button"
                   className="px-3 py-1.5 text-sm text-text-secondary hover:text-text-primary cursor-pointer"
                   onClick={() => setConfirmDelete(false)}
                 >
-                  No
+                  Cancel
                 </button>
               </div>
             )}
@@ -894,7 +901,7 @@ function AgentModal({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              className="px-4 py-2 text-sm border border-border rounded-lg bg-bg-primary text-text-primary hover:bg-bg-tertiary transition-colors cursor-pointer"
+              className="px-4 py-2 text-sm border border-border rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors cursor-pointer"
               onClick={onClose}
             >
               Cancel
@@ -905,7 +912,7 @@ function AgentModal({
               onClick={handleSave}
               disabled={!name.trim() || saving}
             >
-              {saving ? 'Saving...' : isNew ? 'Create Agent' : 'Save Changes'}
+              {saving ? 'Saving…' : isNew ? 'Create Agent' : 'Save Changes'}
             </button>
           </div>
         </div>
