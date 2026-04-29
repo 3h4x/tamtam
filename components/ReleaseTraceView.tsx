@@ -125,7 +125,34 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
 
   if (!trace) {
     return (
-      <div className="p-8 text-text-tertiary font-mono text-sm animate-pulse">loading…</div>
+      <div className="max-w-3xl mx-auto p-6 space-y-4">
+        <div className="rounded-lg border border-border bg-bg-secondary p-5 space-y-3">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-2 flex-1">
+              <div className="skeleton h-4 w-32" />
+              <div className="skeleton h-3 w-48" />
+            </div>
+            <div className="skeleton h-6 w-20 rounded-full" />
+          </div>
+          <div className="flex gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="skeleton h-3 w-16" />
+            ))}
+          </div>
+        </div>
+        <div className="space-y-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="rounded-lg border border-border bg-bg-secondary p-4 flex items-start gap-3">
+              <div className="skeleton h-5 w-5 rounded-full shrink-0" />
+              <div className="flex-1 space-y-2">
+                <div className="skeleton h-4 w-24" />
+                <div className="skeleton h-3 w-48" />
+              </div>
+              <div className="skeleton h-3 w-12" />
+            </div>
+          ))}
+        </div>
+      </div>
     )
   }
 
