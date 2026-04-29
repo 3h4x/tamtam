@@ -1142,7 +1142,15 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         {showSessions && (
           <div className="border-b border-[#2a2a2a] bg-[#151515] shrink-0">
             {loadingSessions ? (
-              <div className="px-4 py-3 text-xs text-[#555] font-mono">loading…</div>
+              <div className="px-4 py-2 flex flex-col gap-1.5">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-2" style={{ opacity: 1 - i * 0.25 }}>
+                    <div className="skeleton h-3 w-3 rounded-full shrink-0" />
+                    <div className="skeleton h-3 w-28" />
+                    <div className="skeleton h-3 w-16 ml-auto" />
+                  </div>
+                ))}
+              </div>
             ) : sessions.length === 0 ? (
               <div className="px-4 py-3 text-xs text-[#555] font-mono">no recent sessions</div>
             ) : (
@@ -1199,9 +1207,9 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
             <div
               key={i}
               className={`group relative px-4 py-2 ${
-                entry.role === 'user' ? 'text-[#f0f0f0] whitespace-pre-wrap' :
-                entry.role === 'error' ? 'text-status-error whitespace-pre-wrap' :
-                entry.role === 'status' ? 'text-[#555] whitespace-pre-wrap' :
+                entry.role === 'user' ? 'text-[#f0f0f0] whitespace-pre-wrap border-l-2 border-accent/40' :
+                entry.role === 'error' ? 'text-status-error whitespace-pre-wrap border-l-2 border-status-error/50 bg-status-error/5' :
+                entry.role === 'status' ? 'text-[#555] whitespace-pre-wrap text-xs italic' :
                 entry.role === 'raw' ? 'text-[#c0c0c0] font-mono text-xs whitespace-pre-wrap' :
                 'text-[#e0e0e0] terminal-markdown'
               }`}
