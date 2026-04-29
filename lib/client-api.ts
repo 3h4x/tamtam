@@ -572,6 +572,7 @@ export interface JobInfo {
   cost_usd?: number | null
   model?: string | null
   release_id?: string | null
+  parent_job_id?: string | null
 }
 
 export async function fetchJobs(project?: string): Promise<{ jobs: JobInfo[] }> {

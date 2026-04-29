@@ -1,10 +1,25 @@
 import { eq } from 'drizzle-orm';
 import { existsSync, readFileSync, appendFileSync } from 'fs';
+import { AsyncLocalStorage } from 'async_hooks';
 import { db, schema } from './db';
 import { getJobStatus } from './pm2-jobs';
 import { markReviewed } from './git-utils';
 import { parseStreamLines } from './claude-stream-parser';
 import { costUsd } from './usage-pricing';
+
+// Tracks the job that triggered the current chained call. Completion hooks
+// wrap their child-spawn calls in `runWithParent(parentId, fn)`; createJob
+// reads the active parent from this storage and stamps it on the new row.
+// AsyncLocalStorage handles concurrent project chains without trampling.
+const parentContext = new AsyncLocalStorage<string>();
+
+export function runWithParent<T>(parentJobId: string, fn: () => Promise<T> | T): Promise<T> | T {
+  return parentContext.run(parentJobId, fn);
+}
+
+function currentParent(): string | null {
+  return parentContext.getStore() ?? null;
+}
 
 export interface JobData {
   id: string;
@@ -438,6 +453,15 @@ async function finalizeReleaseJob(release: JobData, exitCode: number): Promise<v
 }
 
 async function runCompletionHooks(job: JobData): Promise<void> {
+  // Run the entire hook body inside a parent context so any child job spawned
+  // by a chain (test→fix, review→commit, push→pr-wait, agent→release, …)
+  // automatically records `parent_job_id = job.id`. createJob reads from this
+  // AsyncLocalStorage when no explicit parent is passed, giving us a free
+  // "who started whom" link without threading parameters through every helper.
+  return parentContext.run(job.id, () => runCompletionHooksInner(job));
+}
+
+async function runCompletionHooksInner(job: JobData): Promise<void> {
   // Stream per-step output into the active release meta-log so the user can
   // watch the whole pipeline in one terminal.
   if (['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod'].includes(job.kind)) {
@@ -1033,6 +1057,7 @@ export function jobToDict(job: JobData): Record<string, unknown> {
   };
   d.log_pruned = job.logPruned ?? false;
   d.release_id = job.releaseId ?? null;
+  d.parent_job_id = job.parentJobId ?? null;
   const verdict = getVerdict(job);
   if (verdict !== null) d.verdict = verdict;
   return d;
@@ -1217,7 +1242,7 @@ export function createJob(
     sessionId: null,
     contextMeta: contextMeta ?? null,
     userPrompt: userPrompt ?? null,
-    parentJobId: parentJobId ?? null,
+    parentJobId: parentJobId ?? currentParent(),
     ghIssueNumber: ghIssueNumber ?? null,
     ghIssueRepo: ghIssueRepo ?? null,
     ghIssueTitle: ghIssueTitle ?? null,

@@ -51,6 +51,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       createJob: createJobMock, updateJob: updateJobMock,
       getVerdict: vi.fn().mockReturnValue(null),
       markDone: vi.fn(),
+      runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
     vi.doMock('@/lib/git-utils', () => ({
       isReviewed: vi.fn().mockResolvedValue(false),
@@ -188,6 +189,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       listJobs: listJobsMock, probeJobStatus: probeJobStatusMock,
       createJob: createJobMock, updateJob: updateJobMock,
       getVerdict: vi.fn().mockReturnValue(null), markDone: vi.fn(),
+      runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
     vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
     vi.doMock('@/lib/scheduling', () => ({
@@ -301,6 +303,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       createJob: createJobMock,
       updateJob: updateJobMock,
       getVerdict: getVerdictLgtm,
+      runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
     vi.doMock('@/lib/git-utils', () => ({ isReviewed: isReviewedTrue }));
     vi.doMock('@/lib/scheduling', () => ({
@@ -348,6 +351,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       createJob: createJobMock,
       updateJob: updateJobMock,
       getVerdict: vi.fn().mockReturnValue('LGTM'),
+      runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
     vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
     vi.doMock('@/lib/scheduling', () => ({
@@ -450,6 +454,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       listJobs: listJobsMock, probeJobStatus: probeJobStatusMock,
       createJob: createJobMock, updateJob: updateJobMock,
       getVerdict: vi.fn().mockReturnValue(null), markDone: vi.fn(),
+      runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
     vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
     vi.doMock('@/lib/scheduling', () => ({
@@ -498,6 +503,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       listJobs: listJobsMock, probeJobStatus: probeJobStatusMock,
       createJob: createJobMock, updateJob: updateJobMock,
       getVerdict: vi.fn().mockReturnValue(null), markDone: vi.fn(),
+      runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
     vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
     vi.doMock('@/lib/scheduling', () => ({
@@ -542,6 +548,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       listJobs: listJobsMock, probeJobStatus: probeJobStatusMock,
       createJob: createJobMock, updateJob: updateJobMock,
       getVerdict: vi.fn().mockReturnValue(null), markDone: vi.fn(),
+      runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
     vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
     vi.doMock('@/lib/scheduling', () => ({
@@ -588,6 +595,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       updateJob: updateJobMock,
       getVerdict: vi.fn().mockReturnValue(null),
       markDone: vi.fn(),
+      runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
     vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
     vi.doMock('@/lib/scheduling', () => ({
