@@ -241,9 +241,9 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
     && pr.reviewDecision !== 'CHANGES_REQUESTED'
 
   return (
-    <div className={`border-b border-border last:border-b-0 ${merged ? 'opacity-50' : ''}`}>
-      <div className="px-3 py-2.5 flex items-start gap-3 hover:bg-bg-tertiary/50">
-        <span className="mt-0.5 shrink-0 text-status-success" title="Open PR">
+    <div className={`border-b border-border last:border-b-0 transition-opacity ${merged ? 'opacity-50' : ''}`}>
+      <div className="px-3 py-2 flex items-start gap-2.5 hover:bg-bg-tertiary/50 transition-colors">
+        <span className={`mt-1 shrink-0 ${pr.isDraft ? 'text-text-tertiary' : 'text-status-success'}`} title={pr.isDraft ? 'Draft PR' : 'Open PR'}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
             <path d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
           </svg>
@@ -268,11 +268,14 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
             )}
             <Labels labels={pr.labels} />
           </div>
-          <div className="flex items-center gap-2 mt-0.5 flex-wrap text-xs text-text-tertiary">
-            <span>#{pr.number}</span>
-            <span>by {pr.author?.login}</span>
+          <div className="flex items-center gap-x-2 gap-y-1 mt-1 flex-wrap text-xs text-text-tertiary tabular-nums">
+            <span className="font-mono">#{pr.number}</span>
+            <span className="text-border">·</span>
+            <span>{pr.author?.login}</span>
+            <span className="text-border">·</span>
             <span title={pr.createdAt}>{formatAgo(new Date(pr.createdAt).getTime() / 1000)}</span>
-            <code className="font-mono bg-bg-tertiary px-1 rounded text-[10px]">{pr.headRefName}</code>
+            <span className="text-border">·</span>
+            <code className="font-mono bg-bg-tertiary px-1.5 py-0.5 rounded text-[10px] text-text-secondary">{pr.headRefName}</code>
             {reviewLabel && (
               <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${
                 pr.reviewDecision === 'APPROVED' ? 'bg-status-success/10 text-status-success border-status-success/30'
@@ -409,12 +412,19 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
             </button>
           )}
           <button
-            className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50"
+            className="p-1.5 text-text-secondary hover:text-text-primary border border-border rounded-md bg-bg-secondary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 flex items-center justify-center"
             onClick={openInTerminal}
             disabled={switchingBranch}
             title={`Open in Terminal (switches to ${pr.headRefName})`}
+            aria-label="Open in Terminal"
           >
-            {switchingBranch ? 'Switching…' : 'Terminal'}
+            {switchingBranch ? (
+              <span className="inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M2 2.75A.75.75 0 012.75 2h10.5a.75.75 0 01.75.75v10.5a.75.75 0 01-.75.75H2.75a.75.75 0 01-.75-.75V2.75zM3.5 3.5v9h9v-9h-9zm1.85 1.94a.75.75 0 011.06.02l2.25 2.25a.75.75 0 010 1.06l-2.25 2.25a.75.75 0 11-1.06-1.06L7.04 8 5.33 6.25a.75.75 0 01-.02-1.06l.04-.04zM8.5 10h3a.75.75 0 010 1.5h-3a.75.75 0 010-1.5z"/>
+              </svg>
+            )}
           </button>
           <a
             href={pr.url}
@@ -422,6 +432,7 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
             rel="noopener noreferrer"
             className="p-1.5 text-text-tertiary hover:text-text-primary border border-border rounded-md bg-bg-secondary hover:bg-bg-tertiary flex items-center justify-center"
             title="Open pull request on GitHub"
+            aria-label="Open on GitHub"
           >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
               <path d="M10.604 1h4.146a.25.25 0 01.25.25v4.146a.25.25 0 01-.427.177L13.03 4.03 9.28 7.78a.75.75 0 01-1.06-1.06l3.75-3.75-1.543-1.543A.25.25 0 0110.604 1zM3.75 2A1.75 1.75 0 002 3.75v8.5c0 .966.784 1.75 1.75 1.75h8.5A1.75 1.75 0 0014 12.25v-3.5a.75.75 0 00-1.5 0v3.5a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25v-8.5a.25.25 0 01.25-.25h3.5a.75.75 0 000-1.5h-3.5z"/>
@@ -480,8 +491,8 @@ function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; projectN
 
   return (
     <div className="border-b border-border last:border-b-0">
-      <div className="px-3 py-2.5 flex items-start gap-3 hover:bg-bg-tertiary/50">
-        <span className="mt-0.5 shrink-0 text-status-success" title="Open Issue">
+      <div className="px-3 py-2 flex items-start gap-2.5 hover:bg-bg-tertiary/50 transition-colors">
+        <span className="mt-1 shrink-0 text-accent" title="Open Issue">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
             <path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
             <path fillRule="evenodd" d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z" />
@@ -497,12 +508,17 @@ function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; projectN
             </button>
             <Labels labels={issue.labels} />
           </div>
-          <div className="flex items-center gap-3 mt-0.5 flex-wrap text-xs text-text-tertiary">
-            <span>#{issue.number}</span>
-            <span>by {issue.author?.login}</span>
+          <div className="flex items-center gap-x-2 gap-y-1 mt-1 flex-wrap text-xs text-text-tertiary tabular-nums">
+            <span className="font-mono">#{issue.number}</span>
+            <span className="text-border">·</span>
+            <span>{issue.author?.login}</span>
+            <span className="text-border">·</span>
             <span title={issue.createdAt}>{formatAgo(new Date(issue.createdAt).getTime() / 1000)}</span>
             {issue.assignees?.length > 0 && (
-              <span>assigned to {issue.assignees.map((a) => a.login).join(', ')}</span>
+              <>
+                <span className="text-border">·</span>
+                <span>→ {issue.assignees.map((a) => a.login).join(', ')}</span>
+              </>
             )}
           </div>
         </div>
@@ -639,23 +655,24 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
 
   return (
     <div className="mt-2">
-      <div className="bg-bg-secondary rounded-lg p-3 mb-3 flex items-center gap-4 flex-wrap">
+      <div className="bg-bg-secondary border border-border rounded-lg px-3 py-2 mb-3 flex items-center gap-x-4 gap-y-1 flex-wrap">
         {repo && (
           <span className="text-xs text-text-secondary font-mono">{repo}</span>
         )}
-        <span className="text-xs text-text-secondary">
-          <span className="font-medium text-text-primary">{prs.length}</span> open PRs
+        <span className="text-xs text-text-tertiary tabular-nums">
+          <span className="font-semibold text-text-primary">{prs.length}</span> PR{prs.length === 1 ? '' : 's'}
         </span>
-        <span className="text-xs text-text-secondary">
-          <span className="font-medium text-text-primary">{issues.length}</span> open issues
+        <span className="text-xs text-text-tertiary tabular-nums">
+          <span className="font-semibold text-text-primary">{issues.length}</span> issue{issues.length === 1 ? '' : 's'}
         </span>
         {fromCache && cachedAt && (
-          <span className="text-xs text-text-tertiary" title={new Date(cachedAt * 1000).toLocaleString()}>
+          <span className="text-xs text-text-tertiary inline-flex items-center gap-1" title={new Date(cachedAt * 1000).toLocaleString()}>
+            <span className="w-1 h-1 rounded-full bg-text-tertiary/60"/>
             cached {formatAgo(cachedAt)}
           </span>
         )}
         {ghError && (
-          <span className="text-xs text-status-warning">{ghError}</span>
+          <span className="text-xs text-status-warning">⚠ {ghError}</span>
         )}
         <button
           className="ml-auto px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-60"
@@ -699,17 +716,19 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
       )}
 
       {prs.length === 0 && issues.length === 0 && !ghError && (
-        <div className="p-6 text-center text-text-secondary">
-          <p className="text-sm">No open PRs or issues.</p>
+        <div className="border border-dashed border-border rounded-lg p-8 text-center">
+          <div className="text-3xl text-text-tertiary mb-2 leading-none">✓</div>
+          <p className="text-sm text-text-secondary font-medium">Inbox zero</p>
+          <p className="text-xs text-text-tertiary mt-1">No open PRs or issues for this project.</p>
           {repo && (
-            <p className="text-xs text-text-tertiary mt-1">
+            <p className="text-xs text-text-tertiary mt-3">
               <a
                 href={`https://github.com/${repo}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hover:text-accent"
+                className="font-mono hover:text-accent transition-colors"
               >
-                {repo} &#8599;
+                {repo} ↗
               </a>
             </p>
           )}
