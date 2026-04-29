@@ -48,14 +48,12 @@ function getTaskHealth(task: Task): TaskHealth {
   let status: HealthStatus = 'healthy'
   const parts: string[] = []
 
-  // Error conditions
+  // Error conditions — only TamTam-side failures. GH CI failure has its own
+  // CI column in the projects table; mirroring it into STATUS double-reports
+  // and contradicts the latest TamTam pipeline outcome.
   if (task.last_run_exit !== null && task.last_run_exit > 0) {
     status = 'error'
     parts.push(`exit ${task.last_run_exit}`)
-  }
-  if (task.ci === 'failure') {
-    status = 'error'
-    parts.push('CI failed')
   }
   // Warning conditions (only if not already error)
   if (status !== 'error') {

@@ -47,7 +47,25 @@ const launchedSummary = [cmd, ...cmdArgs]
   .join(' ');
 logLine(`[tamtam] launching: ${launchedSummary}`);
 
+// Install signal handlers BEFORE spawning the child. If we register them
+// after, there's a race: the child can be running (and visible to the test
+// or to PM2) before our handler is installed, so a SIGTERM during that
+// window kills the runner via default action — orphaning the child, which
+// is the exact bug this wrapper exists to prevent.
 let child;
+let signalled = false;
+function forward(sig) {
+  if (signalled) return;
+  signalled = true;
+  // PM2 sends SIGINT first, then SIGKILL after a grace period. Forward to
+  // the actual child so the work dies — that's the whole point of this
+  // wrapper, otherwise PM2 kills us and the child outlives us as an orphan.
+  try { if (child) child.kill(sig); } catch { /* child may have already exited */ }
+}
+process.on('SIGTERM', () => forward('SIGTERM'));
+process.on('SIGINT', () => forward('SIGINT'));
+process.on('SIGHUP', () => forward('SIGHUP'));
+
 try {
   // Strip PORT/HOSTNAME inherited from tamtam's own next-server process —
   // otherwise any child Next dev server we launch tries to bind to 1337.
@@ -84,19 +102,6 @@ try {
   logLine(`[tamtam] prompt open error: ${err.message}`);
   try { child.stdin.end(); } catch { /* noop */ }
 }
-
-let signalled = false;
-function forward(sig) {
-  if (signalled) return;
-  signalled = true;
-  // PM2 sends SIGINT first, then SIGKILL after a grace period. Forward to
-  // the actual child so the work dies — that's the whole point of this
-  // wrapper, otherwise PM2 kills us and the child outlives us as an orphan.
-  try { child.kill(sig); } catch { /* child may have already exited */ }
-}
-process.on('SIGTERM', () => forward('SIGTERM'));
-process.on('SIGINT', () => forward('SIGINT'));
-process.on('SIGHUP', () => forward('SIGHUP'));
 
 child.on('exit', (code, signal) => {
   const rc = code ?? (signal ? 128 + (require('os').constants.signals[signal] ?? 0) : 1);
