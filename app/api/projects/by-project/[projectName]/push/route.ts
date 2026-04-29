@@ -30,7 +30,7 @@ export async function POST(
 
   const result = launchProjectPush(projectName);
   if ('error' in result) {
-    return NextResponse.json({ detail: result.error }, { status: 404 });
+    return NextResponse.json({ detail: result.error }, { status: result.status ?? 404 });
   }
   return NextResponse.json({ status: 'started', job_id: result.jobId });
 }

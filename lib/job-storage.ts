@@ -102,6 +102,7 @@ function saveToDb(job: JobData): void {
         sessionId: job.sessionId,
         contextMeta: job.contextMeta,
         userPrompt: job.userPrompt,
+        parentJobId: job.parentJobId ?? null,
         ghIssueNumber: job.ghIssueNumber ?? null,
         ghIssueRepo: job.ghIssueRepo ?? null,
         ghIssueTitle: job.ghIssueTitle ?? null,
@@ -127,6 +128,7 @@ function saveToDb(job: JobData): void {
           sessionId: job.sessionId,
           contextMeta: job.contextMeta,
           userPrompt: job.userPrompt,
+          parentJobId: job.parentJobId ?? null,
           logPruned: job.logPruned ?? false,
           costUsd: job.costUsd ?? null,
           model: job.model ?? null,
@@ -1183,6 +1185,7 @@ export function createJob(
   ghIssueNumber?: number | null,
   ghIssueRepo?: string | null,
   ghIssueTitle?: string | null,
+  parentJobId?: string | null,
 ): JobData {
   loadFromDb();
   let timestamp = Math.floor(Date.now() * 1000);
@@ -1214,6 +1217,7 @@ export function createJob(
     sessionId: null,
     contextMeta: contextMeta ?? null,
     userPrompt: userPrompt ?? null,
+    parentJobId: parentJobId ?? null,
     ghIssueNumber: ghIssueNumber ?? null,
     ghIssueRepo: ghIssueRepo ?? null,
     ghIssueTitle: ghIssueTitle ?? null,
