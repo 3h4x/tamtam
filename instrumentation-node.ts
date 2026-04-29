@@ -3,21 +3,53 @@
 // PM2 cron involvement (that path silently no-op'd; see lib/internal-scheduler.ts).
 export async function reinstallAgents(): Promise<void> {
   const { db, schema } = await import('./lib/db');
-  const { isNotNull, eq, and } = await import('drizzle-orm');
+  const { eq } = await import('drizzle-orm');
   const { startInternalScheduler } = await import('./lib/internal-scheduler');
+  type AgentInput = Parameters<typeof startInternalScheduler>[0][number];
   const { reconcilePm2Schedules } = await import('./lib/agent-scheduler');
 
   const allAgents = db.select().from(schema.agents).all();
-  const enabled = allAgents.filter(a => a.enabled && a.schedule);
+  const dbEnabled: AgentInput[] = allAgents
+    .filter(a => a.enabled && a.schedule)
+    .map(a => ({
+      id: a.id,
+      project: a.project,
+      name: a.name,
+      schedule: a.schedule,
+      prompt: a.prompt ?? '',
+      enabled: !!a.enabled,
+    }));
 
-  startInternalScheduler(enabled.map(a => ({
-    id: a.id,
-    project: a.project,
-    name: a.name,
-    schedule: a.schedule,
-    prompt: a.prompt ?? '',
-    enabled: !!a.enabled,
-  })));
+  // Also scan each enabled project for file-based agents (.tamtam/agents/*.md).
+  // File agents take a back seat to DB agents with the same name (DB precedence
+  // matches the rest of the system — see app/api/agents/route.ts GET).
+  const dbAgentKeys = new Set(dbEnabled.map(a => `${a.project}:${a.name}`));
+  const fileEnabled: AgentInput[] = [];
+  try {
+    const enabledProjects = db.select().from(schema.projects).where(eq(schema.projects.enabled, true)).all();
+    const { scanFileAgents } = await import('./lib/tamtam-file-agents');
+    for (const p of enabledProjects) {
+      try {
+        const fileAgents = scanFileAgents(p.path, p.name);
+        for (const fa of fileAgents) {
+          if (!fa.enabled || !fa.schedule) continue;
+          if (dbAgentKeys.has(`${fa.project}:${fa.name}`)) continue;
+          fileEnabled.push({
+            id: fa.id,
+            project: fa.project,
+            name: fa.name,
+            schedule: fa.schedule,
+            prompt: fa.prompt,
+            enabled: fa.enabled,
+          });
+        }
+      } catch (err) {
+        console.error(`[scheduler] file-agent scan failed for ${p.name}:`, err);
+      }
+    }
+  } catch { /* projects table may not exist (test env) */ }
+
+  startInternalScheduler([...dbEnabled, ...fileEnabled]);
 
   // One-time cleanup: PM2 cron entries from the legacy installAgentSchedule
   // path are dead weight now. Sweep them so `pm2 list` stops being noise.
