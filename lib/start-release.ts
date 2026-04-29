@@ -6,7 +6,7 @@ import { startProjectTest, detectTestCommand } from './start-test';
 import { startProjectReview } from './start-review';
 import { startProjectPush } from './start-push';
 import { startProjectCommit } from './start-commit';
-import { listJobs, probeJobStatus, createJob, updateJob, getVerdict, markDone, runWithParent } from './job-storage';
+import { listJobs, probeJobStatus, createJob, updateJob, getJob, getVerdict, markDone, runWithParent } from './job-storage';
 import { isReviewed } from './git-utils';
 import { exec } from './shell';
 import { getImproveConfig, getProjectTestConfig } from './scheduling';
@@ -47,7 +47,20 @@ async function createReleaseJob(projectName: string): Promise<{ id: string; rele
     // release is active will auto-inherit this id as its releaseId.
     job.releaseId = job.id;
 
-    appendFileSync(logPath, `# release start — ${new Date().toISOString()}\n# project: ${projectName}\n`);
+    // Record the triggering job (parent agent/terminal run) in the log header
+    // for traceability. The release trace UI surfaces this via parentJobId,
+    // so we deliberately do NOT mutate the trigger's releaseId — that would
+    // re-group the parent run under this release in /runs views and other
+    // dashboards that filter by releaseId.
+    let triggerLine = '';
+    if (job.parentJobId) {
+      const trigger = getJob(job.parentJobId);
+      if (trigger && trigger.project === projectName) {
+        triggerLine = `# triggered by: ${trigger.kind} ${trigger.id}\n`;
+      }
+    }
+
+    appendFileSync(logPath, `# release start — ${new Date().toISOString()}\n# project: ${projectName}\n${triggerLine}`);
 
     // Bash monitor: polls the release log for the completion marker, then exits
     // with the embedded exit code so PM2 records it correctly.

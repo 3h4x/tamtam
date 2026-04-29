@@ -35,9 +35,15 @@ export async function POST(
     } catch {}
   }
 
-  // Find and kill the currently-running pipeline step job for this release
+  // Find and kill the currently-running pipeline step job for this release.
+  // Exclude the trigger job (the agent/run that spawned this release): it's
+  // paired to the release for traceability, not orchestrated by it. It may
+  // already be finished, but guard against killing a still-running parent.
   const runningStep = listJobs().find(
-    j => j.releaseId === releaseJob.id && j.finishedAt === null && j.kind !== 'release'
+    j => j.releaseId === releaseJob.id
+      && j.finishedAt === null
+      && j.kind !== 'release'
+      && j.id !== releaseJob.parentJobId
   );
 
   if (runningStep) {

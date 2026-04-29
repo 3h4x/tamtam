@@ -15,6 +15,16 @@ interface ReleaseStep {
   log_excerpt: string
 }
 
+interface ReleaseTrigger {
+  job_id: string
+  kind: string
+  label: string
+  prompt: string | null
+  started_at: number
+  finished_at: number | null
+  exit_code: number | null
+}
+
 interface ReleaseTrace {
   release_id: string
   project: string
@@ -22,6 +32,7 @@ interface ReleaseTrace {
   started_at: number
   finished_at: number | null
   exit_code: number | null
+  trigger: ReleaseTrigger | null
   steps: ReleaseStep[]
 }
 
@@ -186,6 +197,22 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
             <div className="text-text-tertiary text-xs font-mono">
               Release · {releaseId.slice(-12)}
             </div>
+            {trace.trigger && (
+              <div className="mt-2 text-xs font-mono text-text-tertiary">
+                <span className="mr-1">triggered by</span>
+                <Link
+                  href={`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(trace.trigger.job_id)}`}
+                  className="text-accent hover:underline"
+                >
+                  ← {trace.trigger.label}
+                </Link>
+                {trace.trigger.prompt && (
+                  <span className="ml-2 text-text-secondary">
+                    “{trace.trigger.prompt.length > 80 ? trace.trigger.prompt.slice(0, 80) + '…' : trace.trigger.prompt}”
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {isRunning && (

@@ -65,6 +65,27 @@ export async function GET(
     };
   });
 
+  // Surface the triggering job (parent) so the UI can render
+  // "← agent migration" / "← terminal run" alongside the release header.
+  const triggerJob = releaseJob.parentJobId
+    ? all.find((j) => j.id === releaseJob.parentJobId) ?? null
+    : null;
+  const trigger = triggerJob
+    ? {
+        job_id: triggerJob.id,
+        kind: triggerJob.kind,
+        label: triggerJob.kind.startsWith('agent:')
+          ? `agent ${triggerJob.kind.replace(/^agent:/, '')}`
+          : triggerJob.kind === 'run'
+            ? 'terminal run'
+            : triggerJob.kind,
+        prompt: triggerJob.userPrompt ?? triggerJob.prompt ?? null,
+        started_at: triggerJob.startedAt,
+        finished_at: triggerJob.finishedAt ?? null,
+        exit_code: triggerJob.exitCode ?? null,
+      }
+    : null;
+
   return NextResponse.json({
     release_id: releaseId,
     project: projectName,
@@ -72,6 +93,7 @@ export async function GET(
     started_at: releaseJob.startedAt,
     finished_at: releaseJob.finishedAt ?? null,
     exit_code: releaseJob.exitCode ?? null,
+    trigger,
     steps,
   });
 }

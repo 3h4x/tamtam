@@ -199,6 +199,92 @@ describe('GET /api/projects/by-project/{name}/release/{releaseId}', () => {
     expect(data.steps[0].log_excerpt).toBeTruthy();
   });
 
+  it('exposes the triggering parent job via the trigger field for an agent run', async () => {
+    const triggerJob = makeJob({
+      id: 'agent-1',
+      project: 'proj1',
+      kind: 'agent:migration',
+      startedAt: 990,
+      finishedAt: 995,
+      exitCode: 0,
+      userPrompt: 'do the thing',
+    });
+    const releaseJob = makeJob({
+      id: 'rel-1',
+      project: 'proj1',
+      kind: 'release',
+      startedAt: 1000,
+      parentJobId: 'agent-1',
+    });
+    listJobsMock.mockReturnValue([releaseJob, triggerJob]);
+
+    const res = await GET(req(), params());
+    const data = await res.json();
+    expect(data.trigger).not.toBeNull();
+    expect(data.trigger.job_id).toBe('agent-1');
+    expect(data.trigger.kind).toBe('agent:migration');
+    expect(data.trigger.label).toBe('agent migration');
+    expect(data.trigger.prompt).toBe('do the thing');
+  });
+
+  it('labels terminal-run triggers as "terminal run"', async () => {
+    const triggerJob = makeJob({
+      id: 'run-1',
+      project: 'proj1',
+      kind: 'run',
+      startedAt: 990,
+      prompt: 'a long prompt that should still be returned verbatim from the API',
+    });
+    const releaseJob = makeJob({
+      id: 'rel-1',
+      project: 'proj1',
+      kind: 'release',
+      startedAt: 1000,
+      parentJobId: 'run-1',
+    });
+    listJobsMock.mockReturnValue([releaseJob, triggerJob]);
+
+    const res = await GET(req(), params());
+    const data = await res.json();
+    expect(data.trigger.label).toBe('terminal run');
+    expect(data.trigger.prompt).toContain('a long prompt');
+  });
+
+  it('returns trigger:null when the release has no parentJobId', async () => {
+    listJobsMock.mockReturnValue([
+      makeJob({ id: 'rel-1', project: 'proj1', kind: 'release', startedAt: 1000 }),
+    ]);
+    const res = await GET(req(), params());
+    const data = await res.json();
+    expect(data.trigger).toBeNull();
+  });
+
+  it('does not include the trigger job in the steps list (banner-only)', async () => {
+    const triggerJob = makeJob({
+      id: 'agent-1',
+      project: 'proj1',
+      kind: 'agent:migration',
+      startedAt: 990,
+      releaseId: 'rel-1',
+    });
+    const releaseJob = makeJob({
+      id: 'rel-1',
+      project: 'proj1',
+      kind: 'release',
+      startedAt: 1000,
+      parentJobId: 'agent-1',
+    });
+    const testStep = makeJob({ id: 'test-1', project: 'proj1', kind: 'test', startedAt: 1001, releaseId: 'rel-1' });
+    listJobsMock.mockReturnValue([releaseJob, triggerJob, testStep]);
+
+    const res = await GET(req(), params());
+    const data = await res.json();
+    const kinds = data.steps.map((s: { kind: string }) => s.kind);
+    expect(kinds).toEqual(['test']);
+    expect(kinds).not.toContain('agent:migration');
+    expect(kinds).not.toContain('run');
+  });
+
   it('includes fix-push step kind in aggregation', async () => {
     const releaseJob = makeJob({ id: 'rel-1', project: 'proj1', kind: 'release', startedAt: 1000 });
     const pushStep = makeJob({ id: 'push-1', project: 'proj1', kind: 'push', startedAt: 1030, finishedAt: 1031, exitCode: 1, releaseId: 'rel-1' });
