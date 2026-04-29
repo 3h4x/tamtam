@@ -192,7 +192,7 @@ function titleForJob(job: JobInfo, bucket: KindBucket): string {
 }
 
 function subtitleForJob(job: JobInfo, bucket: KindBucket): string | null {
-  if (bucket === 'review' && job.verdict) return `verdict: ${job.verdict}`
+  if (bucket === 'review' && job.verdict) return null
   if ((bucket === 'review' || bucket === 'test' || bucket === 'fix-ci') && job.prompt) {
     return truncate(job.prompt, 140)
   }
@@ -750,7 +750,10 @@ function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summa
     : isFailed
     ? 'border-l-2 border-l-status-error'
     : 'border-l-2 border-l-transparent'
-  const paddingLeft = indent ? 'pl-10' : 'pl-4'
+  // Indent must align with the parent's kind badge:
+  //   parent row = pl-4 (16) + chevron (20) + gap-3 (12) = 48px before badge
+  //   indented child = pl-12 (48) so its kind badge sits directly under the parent's.
+  const paddingLeft = indent ? 'pl-12' : 'pl-4'
 
   return (
     <div className="border-b border-border last:border-b-0">
@@ -761,7 +764,7 @@ function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summa
         onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onClick() } }}
         className={`w-full text-left hover:bg-bg-tertiary cursor-pointer ${paddingLeft} pr-4 py-3 flex items-start gap-3 group ${accentBorder}`}
       >
-        {expandable && (
+        {expandable ? (
           <button
             type="button"
             className="shrink-0 mt-0.5 w-5 h-5 flex items-center justify-center text-text-tertiary hover:text-text-primary cursor-pointer border-none bg-transparent"
@@ -770,9 +773,14 @@ function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summa
           >
             <span className={`transition-transform inline-block ${expanded ? 'rotate-90' : ''}`}>▸</span>
           </button>
+        ) : (
+          // Reserve the chevron column on non-expandable rows so kind badges
+          // line up vertically across the table whether or not a row is a
+          // release parent.
+          <span className="shrink-0 mt-0.5 w-5 h-5" aria-hidden="true" />
         )}
 
-        <span className={`shrink-0 mt-0.5 inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded ${KIND_COLOR[e.bucket]}`}>
+        <span className={`shrink-0 mt-0.5 inline-flex items-center justify-center w-[64px] px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded ${KIND_COLOR[e.bucket]}`}>
           {KIND_LABEL[e.bucket]}
         </span>
 
@@ -821,14 +829,24 @@ function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summa
                 pruned
               </span>
             )}
-            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium ${
-              isRunning ? 'bg-status-warning/15 text-status-warning' :
-              isFailed ? 'bg-status-error/15 text-status-error' :
-              'bg-status-success/15 text-status-success'
-            }`}>
-              <span className={isRunning ? 'animate-pulse' : ''}>●</span>
-              {isRunning ? 'running' : isFailed ? `exit ${e.exitCode}` : 'done'}
-            </span>
+            {e.verdict && !isRunning && !isFailed ? (
+              <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium font-mono ${
+                e.verdict === 'LGTM' ? 'bg-status-success/15 text-status-success border border-status-success/30' :
+                e.verdict === 'DO NOT SHIP' ? 'bg-status-error/15 text-status-error border border-status-error/30' :
+                'bg-status-warning/15 text-status-warning border border-status-warning/30'
+              }`} title={`Review verdict: ${e.verdict}`}>
+                {e.verdict === 'LGTM' ? '✓ LGTM' : e.verdict === 'DO NOT SHIP' ? '✗ DNS' : '⚠ ATTN'}
+              </span>
+            ) : (
+              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium ${
+                isRunning ? 'bg-status-warning/15 text-status-warning' :
+                isFailed ? 'bg-status-error/15 text-status-error' :
+                'bg-status-success/15 text-status-success'
+              }`}>
+                <span className={isRunning ? 'animate-pulse' : ''}>●</span>
+                {isRunning ? 'running' : isFailed ? `exit ${e.exitCode}` : 'done'}
+              </span>
+            )}
           </div>
         </div>
       </div>
