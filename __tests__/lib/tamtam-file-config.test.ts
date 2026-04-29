@@ -5,7 +5,7 @@ import { tmpdir } from 'os';
 import { loadFileConfig, writeFileConfig } from '@/lib/tamtam-file-config';
 
 function makeTmpDir(): string {
-  const dir = join(tmpdir(), `tamtam-cfg-test-${Date.now()}`);
+  const dir = join(tmpdir(), `tamtam-cfg-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -15,6 +15,10 @@ function writeConfig(dir: string, content: string) {
   mkdirSync(cfgDir, { recursive: true });
   writeFileSync(join(cfgDir, 'config.yml'), content);
 }
+
+// `.tamtam/config.yml` is the team contract: only test_command, custom_actions
+// and safe_users live here. Workflow flags (auto_push, pr_workflow, gates,
+// cron) are DB-only so each developer can opt in independently.
 
 describe('loadFileConfig', () => {
   let tmpDir: string;
@@ -28,53 +32,7 @@ describe('loadFileConfig', () => {
 
   it('parses test_command', () => {
     writeConfig(tmpDir, 'test_command: pnpm test\n');
-    const cfg = loadFileConfig(tmpDir);
-    expect(cfg?.test_command).toBe('pnpm test');
-  });
-
-  it('parses all boolean fields', () => {
-    writeConfig(tmpDir, `pr_workflow_enabled: true
-auto_push_enabled: false
-auto_commit_enabled: true
-auto_pr_merge_enabled: false
-release_after_run: true
-test_cron_enabled: true
-tests_disabled: true
-review_disabled: false
-issue_auto_branch: true
-`);
-    const cfg = loadFileConfig(tmpDir);
-    expect(cfg?.pr_workflow_enabled).toBe(true);
-    expect(cfg?.auto_push_enabled).toBe(false);
-    expect(cfg?.auto_commit_enabled).toBe(true);
-    expect(cfg?.auto_pr_merge_enabled).toBe(false);
-    expect(cfg?.release_after_run).toBe(true);
-    expect(cfg?.test_cron_enabled).toBe(true);
-    expect(cfg?.tests_disabled).toBe(true);
-    expect(cfg?.review_disabled).toBe(false);
-    expect(cfg?.issue_auto_branch).toBe(true);
-  });
-
-  it('parses test_cron_schedule', () => {
-    writeConfig(tmpDir, 'test_cron_schedule: 6h\n');
-    expect(loadFileConfig(tmpDir)?.test_cron_schedule).toBe('6h');
-  });
-
-  it('ignores comments and blank lines', () => {
-    writeConfig(tmpDir, `# pipeline config
-test_command: npm test
-
-# disable auto push
-auto_push_enabled: false
-`);
-    const cfg = loadFileConfig(tmpDir);
-    expect(cfg?.test_command).toBe('npm test');
-    expect(cfg?.auto_push_enabled).toBe(false);
-  });
-
-  it('returns null for empty config', () => {
-    writeConfig(tmpDir, '# just comments\n');
-    expect(loadFileConfig(tmpDir)).toBeNull();
+    expect(loadFileConfig(tmpDir)?.test_command).toBe('pnpm test');
   });
 
   it('strips quotes from test_command', () => {
@@ -82,52 +40,67 @@ auto_push_enabled: false
     expect(loadFileConfig(tmpDir)?.test_command).toBe('pnpm run test');
   });
 
-  it('parses grouped format (indented keys under section headers)', () => {
-    writeConfig(tmpDir, `# TamTam project configuration
-# See .tamtam/agents/ for agent definitions
+  it('ignores comments and blank lines', () => {
+    writeConfig(tmpDir, `# project config
+test_command: npm test
 
-pipeline:
+# trailing comment
+`);
+    expect(loadFileConfig(tmpDir)?.test_command).toBe('npm test');
+  });
+
+  it('returns null for empty config', () => {
+    writeConfig(tmpDir, '# just comments\n');
+    expect(loadFileConfig(tmpDir)).toBeNull();
+  });
+
+  it('parses grouped format (test_command under pipeline)', () => {
+    writeConfig(tmpDir, `pipeline:
   test_command: pnpm lint && pnpm test
+`);
+    expect(loadFileConfig(tmpDir)?.test_command).toBe('pnpm lint && pnpm test');
+  });
+
+  it('ignores legacy workflow flags on read (DB is authoritative)', () => {
+    writeConfig(tmpDir, `pipeline:
+  test_command: pnpm test
   auto_commit_enabled: true
   auto_push_enabled: true
   release_after_run: true
-
 schedule:
   test_cron_enabled: true
   test_cron_schedule: 6h
-
 gates:
-  tests_disabled: false
+  tests_disabled: true
   review_disabled: true
-  issue_auto_branch: true
+  issue_auto_branch: false
 `);
-    const cfg = loadFileConfig(tmpDir);
-    expect(cfg?.test_command).toBe('pnpm lint && pnpm test');
-    expect(cfg?.auto_commit_enabled).toBe(true);
-    expect(cfg?.auto_push_enabled).toBe(true);
-    expect(cfg?.release_after_run).toBe(true);
-    expect(cfg?.test_cron_enabled).toBe(true);
-    expect(cfg?.test_cron_schedule).toBe('6h');
-    expect(cfg?.tests_disabled).toBe(false);
-    expect(cfg?.review_disabled).toBe(true);
-    expect(cfg?.issue_auto_branch).toBe(true);
-  });
-
-  it('returns null for a file containing only group headers', () => {
-    writeConfig(tmpDir, 'pipeline:\nschedule:\ngates:\n');
-    expect(loadFileConfig(tmpDir)).toBeNull();
+    const cfg = loadFileConfig(tmpDir) as Record<string, unknown> | null;
+    expect(cfg?.test_command).toBe('pnpm test');
+    // Workflow / schedule / gate flags are no longer part of the file contract.
+    expect(cfg?.auto_commit_enabled).toBeUndefined();
+    expect(cfg?.auto_push_enabled).toBeUndefined();
+    expect(cfg?.release_after_run).toBeUndefined();
+    expect(cfg?.test_cron_enabled).toBeUndefined();
+    expect(cfg?.test_cron_schedule).toBeUndefined();
+    expect(cfg?.tests_disabled).toBeUndefined();
+    expect(cfg?.review_disabled).toBeUndefined();
+    expect(cfg?.issue_auto_branch).toBeUndefined();
   });
 
   it('parses safe_users inline array', () => {
     writeConfig(tmpDir, 'security:\n  safe_users: [alice, bob]\n');
-    const cfg = loadFileConfig(tmpDir);
-    expect(cfg?.safe_users).toEqual(['alice', 'bob']);
+    expect(loadFileConfig(tmpDir)?.safe_users).toEqual(['alice', 'bob']);
   });
 
   it('parses safe_users block array', () => {
     writeConfig(tmpDir, 'security:\n  safe_users:\n    - alice\n    - "dependabot[bot]"\n');
-    const cfg = loadFileConfig(tmpDir);
-    expect(cfg?.safe_users).toEqual(['alice', 'dependabot[bot]']);
+    expect(loadFileConfig(tmpDir)?.safe_users).toEqual(['alice', 'dependabot[bot]']);
+  });
+
+  it('parses empty safe_users array', () => {
+    writeConfig(tmpDir, 'security:\n  safe_users: []\n');
+    expect(loadFileConfig(tmpDir)?.safe_users).toEqual([]);
   });
 
   it('ignores safe_users when not an array of strings', () => {
@@ -135,10 +108,32 @@ gates:
     expect(loadFileConfig(tmpDir)?.safe_users).toBeUndefined();
   });
 
-  it('parses empty safe_users array', () => {
-    writeConfig(tmpDir, 'security:\n  safe_users: []\n');
+  it('parses custom_actions list', () => {
+    writeConfig(tmpDir, `actions:
+  custom_actions:
+    - name: deploy
+      command: ./scripts/deploy.sh
+      color: green
+    - name: lint
+      command: pnpm lint
+`);
     const cfg = loadFileConfig(tmpDir);
-    expect(cfg?.safe_users).toEqual([]);
+    expect(cfg?.custom_actions).toEqual([
+      { name: 'deploy', command: './scripts/deploy.sh', color: 'green' },
+      { name: 'lint', command: 'pnpm lint' },
+    ]);
+  });
+
+  it('drops custom_actions entries missing name or command', () => {
+    writeConfig(tmpDir, `custom_actions:
+  - name: ok
+    command: echo ok
+  - name: missing-command
+  - command: missing-name
+`);
+    expect(loadFileConfig(tmpDir)?.custom_actions).toEqual([
+      { name: 'ok', command: 'echo ok' },
+    ]);
   });
 });
 
@@ -152,23 +147,12 @@ describe('writeFileConfig', () => {
     writeFileConfig(tmpDir, { test_command: 'pnpm test' });
     const configPath = join(tmpDir, '.tamtam', 'config.yml');
     expect(existsSync(configPath)).toBe(true);
-    const content = readFileSync(configPath, 'utf-8');
-    expect(content).toContain('test_command: pnpm test');
+    expect(readFileSync(configPath, 'utf-8')).toContain('test_command: pnpm test');
   });
 
   it('includes header comment', () => {
-    writeFileConfig(tmpDir, { auto_push_enabled: false });
-    const content = readFileSync(join(tmpDir, '.tamtam', 'config.yml'), 'utf-8');
-    expect(content).toContain('# TamTam project configuration');
-  });
-
-  it('merges into existing config without losing unrelated keys', () => {
-    writeConfig(tmpDir, 'test_command: npm test\nauto_push_enabled: false\n');
-    writeFileConfig(tmpDir, { pr_workflow_enabled: true });
-    const cfg = loadFileConfig(tmpDir);
-    expect(cfg?.test_command).toBe('npm test');
-    expect(cfg?.auto_push_enabled).toBe(false);
-    expect(cfg?.pr_workflow_enabled).toBe(true);
+    writeFileConfig(tmpDir, { test_command: 'pnpm test' });
+    expect(readFileSync(join(tmpDir, '.tamtam', 'config.yml'), 'utf-8')).toContain('# TamTam project configuration');
   });
 
   it('updates existing key', () => {
@@ -178,69 +162,9 @@ describe('writeFileConfig', () => {
   });
 
   it('removes key when set to null', () => {
-    writeConfig(tmpDir, 'test_command: npm test\nauto_push_enabled: true\n');
+    writeConfig(tmpDir, 'test_command: npm test\n');
     writeFileConfig(tmpDir, { test_command: null });
-    const cfg = loadFileConfig(tmpDir);
-    expect(cfg?.test_command).toBeUndefined();
-    expect(cfg?.auto_push_enabled).toBe(true);
-  });
-
-  it('writes keys in canonical order', () => {
-    writeFileConfig(tmpDir, {
-      auto_push_enabled: true,
-      test_command: 'pnpm test',
-      pr_workflow_enabled: true,
-    });
-    const content = readFileSync(join(tmpDir, '.tamtam', 'config.yml'), 'utf-8');
-    const lines = content.split('\n').filter(l => l && !l.startsWith('#'));
-    const keyOrder = lines.map(l => l.split(':')[0].trim());
-    expect(keyOrder.indexOf('test_command')).toBeLessThan(keyOrder.indexOf('pr_workflow_enabled'));
-    expect(keyOrder.indexOf('pr_workflow_enabled')).toBeLessThan(keyOrder.indexOf('auto_push_enabled'));
-  });
-
-  it('creates .tamtam dir if not present', () => {
-    writeFileConfig(tmpDir, { tests_disabled: true });
-    expect(existsSync(join(tmpDir, '.tamtam', 'config.yml'))).toBe(true);
-  });
-
-  it('emits grouped sections in output', () => {
-    writeFileConfig(tmpDir, {
-      test_command: 'pnpm test',
-      auto_push_enabled: true,
-      test_cron_enabled: true,
-      tests_disabled: false,
-    });
-    const content = readFileSync(join(tmpDir, '.tamtam', 'config.yml'), 'utf-8');
-    expect(content).toContain('pipeline:');
-    expect(content).toContain('  test_command: pnpm test');
-    expect(content).toContain('  auto_push_enabled: true');
-    expect(content).toContain('schedule:');
-    expect(content).toContain('  test_cron_enabled: true');
-    expect(content).toContain('gates:');
-    expect(content).toContain('  tests_disabled: false');
-  });
-
-  it('round-trips grouped format through write then load', () => {
-    writeFileConfig(tmpDir, {
-      test_command: 'pnpm test',
-      pr_workflow_enabled: true,
-      test_cron_schedule: '4h',
-      review_disabled: true,
-    });
-    const cfg = loadFileConfig(tmpDir);
-    expect(cfg?.test_command).toBe('pnpm test');
-    expect(cfg?.pr_workflow_enabled).toBe(true);
-    expect(cfg?.test_cron_schedule).toBe('4h');
-    expect(cfg?.review_disabled).toBe(true);
-  });
-
-  it('merges grouped format input without losing keys', () => {
-    writeConfig(tmpDir, `pipeline:\n  test_command: npm test\n  auto_push_enabled: false\n`);
-    writeFileConfig(tmpDir, { pr_workflow_enabled: true });
-    const cfg = loadFileConfig(tmpDir);
-    expect(cfg?.test_command).toBe('npm test');
-    expect(cfg?.auto_push_enabled).toBe(false);
-    expect(cfg?.pr_workflow_enabled).toBe(true);
+    expect(loadFileConfig(tmpDir)?.test_command).toBeUndefined();
   });
 
   it('writes safe_users under security section', () => {
@@ -253,23 +177,28 @@ describe('writeFileConfig', () => {
 
   it('round-trips safe_users through write then load', () => {
     writeFileConfig(tmpDir, { safe_users: ['owner', 'dependabot[bot]'] });
-    const cfg = loadFileConfig(tmpDir);
-    expect(cfg?.safe_users).toEqual(['owner', 'dependabot[bot]']);
+    expect(loadFileConfig(tmpDir)?.safe_users).toEqual(['owner', 'dependabot[bot]']);
+  });
+
+  it('writes custom_actions and round-trips them', () => {
+    const actions = [
+      { name: 'deploy', command: './scripts/deploy.sh', color: 'green' },
+      { name: 'lint', command: 'pnpm lint' },
+    ];
+    writeFileConfig(tmpDir, { custom_actions: actions });
+    expect(loadFileConfig(tmpDir)?.custom_actions).toEqual(actions);
+  });
+
+  it('removes custom_actions when set to null', () => {
+    writeFileConfig(tmpDir, { custom_actions: [{ name: 'x', command: 'y' }] });
+    writeFileConfig(tmpDir, { custom_actions: null });
+    expect(loadFileConfig(tmpDir)?.custom_actions).toBeUndefined();
   });
 
   it('removes safe_users when set to null', () => {
     writeConfig(tmpDir, 'security:\n  safe_users:\n    - alice\n');
     writeFileConfig(tmpDir, { safe_users: null });
-    const cfg = loadFileConfig(tmpDir);
-    expect(cfg?.safe_users).toBeUndefined();
-  });
-
-  it('merges safe_users without losing pipeline keys', () => {
-    writeConfig(tmpDir, 'pipeline:\n  test_command: pnpm test\n');
-    writeFileConfig(tmpDir, { safe_users: ['owner'] });
-    const cfg = loadFileConfig(tmpDir);
-    expect(cfg?.test_command).toBe('pnpm test');
-    expect(cfg?.safe_users).toEqual(['owner']);
+    expect(loadFileConfig(tmpDir)?.safe_users).toBeUndefined();
   });
 
   it('preserves unknown top-level keys through write', () => {

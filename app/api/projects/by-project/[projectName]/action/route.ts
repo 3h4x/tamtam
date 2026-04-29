@@ -8,6 +8,7 @@ import { db, schema } from '@/lib/db';
 import { resolveProjectPath } from '@/lib/project-data';
 import { createJob, updateJob } from '@/lib/job-storage';
 import { getSettings } from '@/lib/config';
+import { loadFileConfig, writeFileConfig } from '@/lib/tamtam-file-config';
 
 export interface CustomAction {
   name: string;
@@ -15,7 +16,19 @@ export interface CustomAction {
   color?: string;
 }
 
+/**
+ * Custom actions are part of the team contract — read from `.tamtam/config.yml`
+ * first so every teammate sees the same buttons. Fall back to the DB column
+ * for projects that haven't migrated their actions to the file yet.
+ */
 function getCustomActions(projectName: string): CustomAction[] {
+  const projPath = resolveProjectPath(projectName);
+  if (projPath) {
+    // If the file declares custom_actions (even as an empty array), it is
+    // authoritative — do not fall back to the DB.
+    const fileCfg = loadFileConfig(projPath);
+    if (fileCfg?.custom_actions !== undefined) return fileCfg.custom_actions;
+  }
   const row = db
     .select()
     .from(schema.projects)
@@ -59,6 +72,19 @@ export async function PUT(
     .set({ customActions: JSON.stringify(actions) })
     .where(eq(schema.projects.name, projectName))
     .run();
+
+  // Mirror to .tamtam/config.yml so teammates pick up new buttons on pull.
+  // DB write is the source of truth for performance/cache; the file is the
+  // version-controlled artifact. An empty array is written verbatim (rather
+  // than removing the key) so that committing "no actions" actively clears
+  // teammates' DB-stored actions on pull, instead of silently falling back
+  // to whatever each teammate has locally.
+  const projPath = resolveProjectPath(projectName);
+  if (projPath) {
+    try {
+      writeFileConfig(projPath, { custom_actions: actions });
+    } catch { /* non-fatal — DB already has the new state */ }
+  }
 
   return NextResponse.json({ status: 'ok', actions });
 }

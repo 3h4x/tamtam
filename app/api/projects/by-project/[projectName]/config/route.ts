@@ -22,22 +22,26 @@ export async function GET(
 
   return NextResponse.json({
     project: projectName,
+    // test_command is the only value the file is allowed to override on read;
+    // the rest of the workflow flags are DB-only so each developer can opt in
+    // independently of teammates' .tamtam/config.yml.
     test_command: fileConfig?.test_command ?? testCfg?.testCommand ?? '',
     detected_test_command: detectedTestCmd ?? '',
     effective_test_command: fileConfig?.test_command ?? testCfg?.testCommand ?? detectedTestCmd ?? '',
-    test_cron_enabled: fileConfig?.test_cron_enabled ?? testCfg?.testCronEnabled ?? false,
-    test_cron_schedule: fileConfig?.test_cron_schedule ?? testCfg?.testCronSchedule ?? '',
-    auto_commit_enabled: fileConfig?.auto_commit_enabled ?? testCfg?.autoCommitEnabled ?? false,
-    auto_push_enabled: fileConfig?.auto_push_enabled ?? testCfg?.autoPushEnabled ?? false,
-    auto_pr_merge_enabled: fileConfig?.auto_pr_merge_enabled ?? testCfg?.autoPrMergeEnabled ?? false,
-    release_after_run: fileConfig?.release_after_run ?? testCfg?.releaseAfterRun ?? false,
-    pr_workflow_enabled: fileConfig?.pr_workflow_enabled ?? testCfg?.prWorkflowEnabled ?? false,
-    issue_auto_branch: fileConfig?.issue_auto_branch ?? testCfg?.issueAutoBranch ?? true,
-    tests_disabled: fileConfig?.tests_disabled ?? testCfg?.testsDisabled ?? false,
-    review_disabled: fileConfig?.review_disabled ?? testCfg?.reviewDisabled ?? false,
+    test_cron_enabled: testCfg?.testCronEnabled ?? false,
+    test_cron_schedule: testCfg?.testCronSchedule ?? '',
+    auto_commit_enabled: testCfg?.autoCommitEnabled ?? false,
+    auto_push_enabled: testCfg?.autoPushEnabled ?? false,
+    auto_pr_merge_enabled: testCfg?.autoPrMergeEnabled ?? false,
+    release_after_run: testCfg?.releaseAfterRun ?? false,
+    pr_workflow_enabled: testCfg?.prWorkflowEnabled ?? false,
+    issue_auto_branch: testCfg?.issueAutoBranch ?? true,
+    tests_disabled: testCfg?.testsDisabled ?? false,
+    review_disabled: testCfg?.reviewDisabled ?? false,
     last_push_error: pushResult?.lastPushError ?? null,
     last_push_at: pushResult?.lastPushAt ?? null,
-    // Keys whose values currently come from .tamtam/config.yml
+    // Keys whose values currently come from .tamtam/config.yml — limited to the
+    // team-contract surface (test_command, custom_actions, safe_users).
     file_config: fileConfig ? Object.keys(fileConfig) : [],
     // Branch the file config was read from (may differ from working tree on PRs)
     file_config_branch: branchCtx.isDefaultBranch ? branchCtx.currentBranch : branchCtx.defaultBranch,
@@ -64,6 +68,8 @@ export async function PATCH(
   // Collect all changes for a single file write
   const fileUpdates: Parameters<typeof writeFileConfig>[1] = {};
 
+  // test_command is the team contract — write it to BOTH the DB (for cache
+  // performance) and `.tamtam/config.yml` (so teammates pick it up on pull).
   if (body.test_command !== undefined) {
     touched = true;
     const value = body.test_command?.trim() || null;
@@ -85,9 +91,11 @@ export async function PATCH(
       }
     }
     if (!writeProjectFieldYaml(projectName, 'test_cron_schedule', value)) return notFound();
-    fileUpdates.test_cron_schedule = value;
   }
 
+  // Workflow flags are intentionally DB-only — each developer opts in
+  // independently. We persist to the DB but skip the file write so teammates'
+  // `.tamtam/config.yml` doesn't change underneath them.
   const booleanFields = [
     'test_cron_enabled', 'auto_commit_enabled', 'auto_push_enabled',
     'auto_pr_merge_enabled', 'release_after_run', 'pr_workflow_enabled',
@@ -98,7 +106,6 @@ export async function PATCH(
     if (body[field] !== undefined) {
       touched = true;
       if (!writeProjectFieldYaml(projectName, field, body[field] ? '1' : '0')) return notFound();
-      fileUpdates[field] = !!body[field];
     }
   }
 

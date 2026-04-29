@@ -83,7 +83,99 @@ export async function runProbeSweep(): Promise<void> {
   }
 }
 
+/**
+ * One-shot migration: workflow flags (auto_push_enabled, pr_workflow_enabled,
+ * gates, test cron …) used to be honored from `.tamtam/config.yml`. They are
+ * now DB-only. To preserve existing behavior for installs that already had
+ * those flags in their committed config, we copy each project's legacy flag
+ * values into the DB exactly once.
+ *
+ * Idempotency comes from a per-project marker in the `settings` table:
+ * `legacy_file_flags_migrated:<projectName>=1`. Once set, the project is
+ * skipped on subsequent boots — so a user who later toggles a flag OFF in the
+ * UI keeps that choice across restarts even if the legacy file still has the
+ * key set to `true`.
+ */
+async function migrateLegacyFileWorkflowFlags(): Promise<void> {
+  try {
+    const { db, schema } = await import('./lib/db');
+    const { eq } = await import('drizzle-orm');
+    const { readLegacyWorkflowFlags } = await import('./lib/tamtam-file-config');
+
+    const markerFor = (name: string) => `legacy_file_flags_migrated:${name}`;
+    const isMigrated = (name: string): boolean => {
+      const row = db.select().from(schema.settings).where(eq(schema.settings.key, markerFor(name))).get();
+      return row?.value === '1';
+    };
+    const markMigrated = (name: string) => {
+      db.insert(schema.settings)
+        .values({ key: markerFor(name), value: '1' })
+        .onConflictDoUpdate({ target: schema.settings.key, set: { value: '1' } })
+        .run();
+    };
+
+    const projects = db.select().from(schema.projects).all();
+    let migrated = 0;
+    for (const proj of projects) {
+      if (isMigrated(proj.name)) continue;
+      if (!proj.path) continue;
+      const legacy = readLegacyWorkflowFlags(proj.path);
+      if (Object.keys(legacy).length === 0) continue;
+
+      const updates: Partial<typeof schema.projects.$inferInsert> = {};
+      // Each column: only seed when current DB row matches the column default
+      // (false / null), implying it has never been set by the user.
+      if (typeof legacy.pr_workflow_enabled === 'boolean' && !proj.prWorkflowEnabled) {
+        updates.prWorkflowEnabled = legacy.pr_workflow_enabled;
+      }
+      if (typeof legacy.auto_commit_enabled === 'boolean' && !proj.autoCommitEnabled) {
+        updates.autoCommitEnabled = legacy.auto_commit_enabled;
+      }
+      if (typeof legacy.auto_push_enabled === 'boolean' && !proj.autoPushEnabled) {
+        updates.autoPushEnabled = legacy.auto_push_enabled;
+      }
+      if (typeof legacy.auto_pr_merge_enabled === 'boolean' && !proj.autoPrMergeEnabled) {
+        updates.autoPrMergeEnabled = legacy.auto_pr_merge_enabled;
+      }
+      if (typeof legacy.release_after_run === 'boolean' && !proj.releaseAfterRun) {
+        updates.releaseAfterRun = legacy.release_after_run;
+      }
+      if (typeof legacy.test_cron_enabled === 'boolean' && !proj.testCronEnabled) {
+        updates.testCronEnabled = legacy.test_cron_enabled;
+      }
+      if (typeof legacy.test_cron_schedule === 'string' && !proj.testCronSchedule) {
+        updates.testCronSchedule = legacy.test_cron_schedule;
+      }
+      if (typeof legacy.tests_disabled === 'boolean' && !proj.testsDisabled) {
+        updates.testsDisabled = legacy.tests_disabled;
+      }
+      if (typeof legacy.review_disabled === 'boolean' && !proj.reviewDisabled) {
+        updates.reviewDisabled = legacy.review_disabled;
+      }
+      // issue_auto_branch defaults to ON (null in DB == true), so only seed
+      // when the file explicitly disables it AND the DB column is null.
+      if (typeof legacy.issue_auto_branch === 'boolean' && proj.issueAutoBranch == null) {
+        updates.issueAutoBranch = legacy.issue_auto_branch;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        db.update(schema.projects).set(updates).where(eq(schema.projects.name, proj.name)).run();
+        migrated++;
+      }
+      // Mark migrated even when no DB updates were needed (file said all flags
+      // were already at their default), so this project never re-evaluates.
+      markMigrated(proj.name);
+    }
+    if (migrated > 0) {
+      console.log(`[migration] seeded DB workflow flags from .tamtam/config.yml for ${migrated} project(s)`);
+    }
+  } catch (err) {
+    console.error('[migration] legacy file workflow flag migration failed:', err);
+  }
+}
+
 export async function registerNode(): Promise<void> {
+  await migrateLegacyFileWorkflowFlags();
   void reinstallAgents();
 
   if (process.env.VITEST || process.env.NODE_ENV === 'test') return;

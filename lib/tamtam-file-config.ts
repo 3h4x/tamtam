@@ -3,45 +3,125 @@ import { join } from 'path';
 import { parse as yamlParse, stringify as yamlStringify } from 'yaml';
 import { getBranchContext, gitShowSync } from './git-branch';
 
+/**
+ * Legacy workflow flags that used to live in `.tamtam/config.yml` but are
+ * now DB-only. Kept here so the one-shot startup migration can find them.
+ */
+const LEGACY_WORKFLOW_KEYS = [
+  'pr_workflow_enabled',
+  'auto_commit_enabled',
+  'auto_push_enabled',
+  'auto_pr_merge_enabled',
+  'release_after_run',
+  'test_cron_enabled',
+  'test_cron_schedule',
+  'tests_disabled',
+  'review_disabled',
+  'issue_auto_branch',
+] as const;
+
+export type LegacyWorkflowKey = typeof LEGACY_WORKFLOW_KEYS[number];
+
+/**
+ * Reads legacy workflow flags from a project's `.tamtam/config.yml` working tree
+ * (regardless of branch — this is the local file the developer is upgrading from).
+ * Returns an empty object when the file is missing or contains no legacy keys.
+ *
+ * Used once at startup to seed the DB before those keys silently stop being honored.
+ */
+export function readLegacyWorkflowFlags(
+  projectPath: string
+): Partial<Record<LegacyWorkflowKey, boolean | string>> {
+  const configPath = join(projectPath, '.tamtam', 'config.yml');
+  if (!existsSync(configPath)) return {};
+  let parsed: unknown;
+  try {
+    parsed = yamlParse(readFileSync(configPath, 'utf-8'));
+  } catch {
+    return {};
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  const obj = parsed as Record<string, unknown>;
+
+  // Collect nested-section values first, then let top-level keys win — this
+  // way an explicit top-level `auto_push_enabled: false` overrides a stale
+  // `pipeline.auto_push_enabled: true` instead of being silently shadowed.
+  const flat: Record<string, unknown> = {};
+  for (const val of Object.values(obj)) {
+    if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+      Object.assign(flat, val as Record<string, unknown>);
+    }
+  }
+  for (const [key, val] of Object.entries(obj)) {
+    if (val === null || typeof val !== 'object' || Array.isArray(val)) {
+      flat[key] = val;
+    }
+  }
+
+  const out: Partial<Record<LegacyWorkflowKey, boolean | string>> = {};
+  for (const key of LEGACY_WORKFLOW_KEYS) {
+    const v = flat[key];
+    if (key === 'test_cron_schedule') {
+      if (typeof v === 'string') out[key] = v;
+    } else if (typeof v === 'boolean') {
+      out[key] = v;
+    }
+  }
+  return out;
+}
+
+/**
+ * Custom action entry as committed in `.tamtam/config.yml`. Mirrors the
+ * `CustomAction` shape used by the action API route.
+ */
+export interface FileCustomAction {
+  name: string;
+  command: string;
+  color?: string;
+}
+
+/**
+ * What `.tamtam/config.yml` is allowed to set.
+ *
+ * The file is the *team contract* — committed to version control and shared by
+ * everyone working on the repo. It captures things that should be the same
+ * for every developer:
+ *   • test_command   — what command runs the project's tests
+ *   • custom_actions — buttons that should exist on the project page
+ *   • safe_users     — GitHub logins whose PR comments are not wrapped as untrusted
+ *
+ * Workflow flags (auto-push, auto-commit, PR mode, gates, test cron) intentionally
+ * live in the DB only — each developer can opt in to automation without
+ * forcing it on teammates. Older `.tamtam/config.yml` files may still contain
+ * those keys; we ignore them on read and never write them back.
+ */
 export interface FileProjectConfig {
-  // pipeline
   test_command?: string;
-  pr_workflow_enabled?: boolean;
-  auto_commit_enabled?: boolean;
-  auto_push_enabled?: boolean;
-  auto_pr_merge_enabled?: boolean;
-  release_after_run?: boolean;
-  // schedule
-  test_cron_enabled?: boolean;
-  test_cron_schedule?: string;
-  // gates
-  tests_disabled?: boolean;
-  review_disabled?: boolean;
-  issue_auto_branch?: boolean;
-  // security
+  custom_actions?: FileCustomAction[];
   safe_users?: string[];
 }
 
 const GROUPS: { label: string; keys: (keyof FileProjectConfig)[] }[] = [
-  {
-    label: 'pipeline',
-    keys: ['test_command', 'pr_workflow_enabled', 'auto_commit_enabled', 'auto_push_enabled', 'auto_pr_merge_enabled', 'release_after_run'],
-  },
-  {
-    label: 'schedule',
-    keys: ['test_cron_enabled', 'test_cron_schedule'],
-  },
-  {
-    label: 'gates',
-    keys: ['tests_disabled', 'review_disabled', 'issue_auto_branch'],
-  },
-  {
-    label: 'security',
-    keys: ['safe_users'],
-  },
+  { label: 'pipeline', keys: ['test_command'] },
+  { label: 'actions', keys: ['custom_actions'] },
+  { label: 'security', keys: ['safe_users'] },
 ];
 
 const ALL_KEYS = new Set<string>(GROUPS.flatMap(g => g.keys as string[]));
+
+function parseCustomActions(raw: unknown): FileCustomAction[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: FileCustomAction[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const o = item as Record<string, unknown>;
+    if (typeof o.name !== 'string' || typeof o.command !== 'string') continue;
+    const action: FileCustomAction = { name: o.name, command: o.command };
+    if (typeof o.color === 'string') action.color = o.color;
+    out.push(action);
+  }
+  return out;
+}
 
 function parseConfigYaml(raw: string): FileProjectConfig | null {
   try {
@@ -51,6 +131,7 @@ function parseConfigYaml(raw: string): FileProjectConfig | null {
     const obj = parsed as Record<string, unknown>;
 
     // Flatten grouped sections: { pipeline: { test_command: ... } } → { test_command: ... }
+    // Arrays are kept as-is — custom_actions is an array, not a section.
     const flat: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(obj)) {
       if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
@@ -63,16 +144,11 @@ function parseConfigYaml(raw: string): FileProjectConfig | null {
     const config: FileProjectConfig = {};
 
     if (typeof flat.test_command === 'string') config.test_command = flat.test_command;
-    if (typeof flat.test_cron_schedule === 'string') config.test_cron_schedule = flat.test_cron_schedule;
 
-    const boolKeys = [
-      'pr_workflow_enabled', 'auto_commit_enabled', 'auto_push_enabled',
-      'auto_pr_merge_enabled', 'release_after_run', 'test_cron_enabled',
-      'tests_disabled', 'review_disabled', 'issue_auto_branch',
-    ] as const;
-    for (const k of boolKeys) {
-      if (typeof flat[k] === 'boolean') config[k] = flat[k] as boolean;
-    }
+    // An explicitly-empty array means "no actions" and must be respected
+    // (so committing an empty list clears teammates' DB-stored actions on pull).
+    const actions = parseCustomActions(flat.custom_actions);
+    if (actions !== null) config.custom_actions = actions;
 
     if (Array.isArray(flat.safe_users) && flat.safe_users.every(u => typeof u === 'string')) {
       config.safe_users = flat.safe_users as string[];
@@ -120,7 +196,7 @@ export { getBranchContext } from './git-branch';
  */
 export function writeFileConfig(
   projectPath: string,
-  updates: Partial<Record<keyof FileProjectConfig, string | boolean | string[] | null>>
+  updates: Partial<Record<keyof FileProjectConfig, string | string[] | FileCustomAction[] | null>>
 ): void {
   const tamtamDir = join(projectPath, '.tamtam');
   const configPath = join(tamtamDir, 'config.yml');

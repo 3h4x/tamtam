@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 import * as schema from '@/lib/db/schema';
 
 function createTestDb() {
@@ -239,5 +242,132 @@ describe('action API (GET and PUT)', () => {
       expect(data.actions).toHaveLength(1);
       expect(data.actions[0].name).toBe('deploy');
     });
+  });
+});
+
+// .tamtam/config.yml is the version-controlled team contract; PUT must mirror
+// custom_actions to it, GET must prefer it over the DB, and an explicitly
+// empty file array must clear teammates' DB-stored actions.
+describe('action API — file mirroring (.tamtam/config.yml)', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let tmpDir: string;
+  let GET: any;
+  let PUT: any;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    tmpDir = join(tmpdir(), `tamtam-action-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(tmpDir, { recursive: true });
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+
+    testDb.db
+      .insert(schema.projects)
+      .values({ name: 'proj1', path: tmpDir, enabled: true })
+      .run();
+
+    const mod = await import('@/app/api/projects/by-project/[projectName]/action/route');
+    GET = mod.GET;
+    PUT = mod.PUT;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('PUT writes custom_actions to .tamtam/config.yml', async () => {
+    const actions = [
+      { name: 'deploy', command: './deploy.sh', color: 'green' },
+      { name: 'lint', command: 'pnpm lint' },
+    ];
+    const request = new NextRequest('http://localhost/api/projects/by-project/proj1/action', {
+      method: 'PUT',
+      body: JSON.stringify({ actions }),
+    });
+    const response = await PUT(request, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(response.status).toBe(200);
+
+    const cfgPath = join(tmpDir, '.tamtam', 'config.yml');
+    expect(existsSync(cfgPath)).toBe(true);
+    const content = readFileSync(cfgPath, 'utf-8');
+    expect(content).toContain('actions:');
+    expect(content).toContain('deploy');
+    expect(content).toContain('./deploy.sh');
+    expect(content).toContain('green');
+    expect(content).toContain('pnpm lint');
+  });
+
+  it('GET prefers .tamtam/config.yml over the DB column', async () => {
+    // DB has one set of actions ...
+    testDb.sqlite
+      .prepare('UPDATE projects SET custom_actions = ? WHERE name = ?')
+      .run(JSON.stringify([{ name: 'db-only', command: 'echo db' }]), 'proj1');
+
+    // ... and the file has a different set.
+    mkdirSync(join(tmpDir, '.tamtam'), { recursive: true });
+    writeFileSync(
+      join(tmpDir, '.tamtam', 'config.yml'),
+      'actions:\n  custom_actions:\n    - name: from-file\n      command: echo file\n'
+    );
+
+    const request = new NextRequest('http://localhost/api/projects/by-project/proj1/action');
+    const response = await GET(request, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await response.json();
+    expect(data.actions).toEqual([{ name: 'from-file', command: 'echo file' }]);
+  });
+
+  it('PUT with empty array writes an explicit empty list (so teammates pick up the cleared state on pull)', async () => {
+    // First populate the file ...
+    await PUT(
+      new NextRequest('http://localhost/api/projects/by-project/proj1/action', {
+        method: 'PUT',
+        body: JSON.stringify({ actions: [{ name: 'deploy', command: './deploy.sh' }] }),
+      }),
+      { params: Promise.resolve({ projectName: 'proj1' }) }
+    );
+    const cfgPath = join(tmpDir, '.tamtam', 'config.yml');
+    expect(readFileSync(cfgPath, 'utf-8')).toContain('deploy');
+
+    // ... then clear with an empty array.
+    await PUT(
+      new NextRequest('http://localhost/api/projects/by-project/proj1/action', {
+        method: 'PUT',
+        body: JSON.stringify({ actions: [] }),
+      }),
+      { params: Promise.resolve({ projectName: 'proj1' }) }
+    );
+    const content = readFileSync(cfgPath, 'utf-8');
+    expect(content).not.toContain('deploy');
+    // The empty state must be explicit so the file actively clears teammates'
+    // DB-stored actions on pull, rather than silently falling back to local DB.
+    expect(content).toContain('custom_actions:');
+
+    // And a subsequent GET returns [] because the file is authoritative.
+    const response = await GET(
+      new NextRequest('http://localhost/api/projects/by-project/proj1/action'),
+      { params: Promise.resolve({ projectName: 'proj1' }) }
+    );
+    expect((await response.json()).actions).toEqual([]);
+  });
+
+  it('GET returns [] when file declares an explicitly empty custom_actions (file is authoritative, not DB)', async () => {
+    // DB still has actions ...
+    testDb.sqlite
+      .prepare('UPDATE projects SET custom_actions = ? WHERE name = ?')
+      .run(JSON.stringify([{ name: 'from-db', command: 'echo db' }]), 'proj1');
+
+    // ... but the file declares custom_actions: [].
+    mkdirSync(join(tmpDir, '.tamtam'), { recursive: true });
+    writeFileSync(
+      join(tmpDir, '.tamtam', 'config.yml'),
+      'actions:\n  custom_actions: []\n'
+    );
+
+    const request = new NextRequest('http://localhost/api/projects/by-project/proj1/action');
+    const response = await GET(request, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await response.json();
+    expect(data.actions).toEqual([]);
   });
 });
