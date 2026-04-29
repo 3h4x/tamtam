@@ -53,7 +53,9 @@ describe('config', () => {
       expect(config).toEqual({
         workspace_path: '',
         github_owner: '',
+        claude_provider: 'claude',
         claude_bin: '~/.local/bin/claude',
+        lmstudio_model: '',
         log_dir: './data/logs',
         frequency: '1h',
         daytime: false,
@@ -107,6 +109,47 @@ describe('config', () => {
       const config = getSettings();
 
       expect(config.claude_bin).toBe('/usr/bin/claude');
+    });
+
+    it('resolves Gemini provider to the bundled shim', () => {
+      const db = testDb.db;
+      db.insert(schema.settings).values({ key: 'claude_provider', value: 'gemini' }).run();
+      db.insert(schema.settings).values({ key: 'claude_bin', value: '/usr/bin/claude' }).run();
+
+      const config = getSettings();
+
+      expect(config.claude_provider).toBe('gemini');
+      expect(config.claude_bin).toBe(`${process.cwd()}/scripts/gemini-shim.js`);
+    });
+
+    it('resolves LM Studio provider to the bundled shim', () => {
+      const db = testDb.db;
+      db.insert(schema.settings).values({ key: 'claude_provider', value: 'lmstudio' }).run();
+
+      const config = getSettings();
+
+      expect(config.claude_provider).toBe('lmstudio');
+      expect(config.claude_bin).toBe(`${process.cwd()}/scripts/lmstudio-shim.js`);
+    });
+
+    it('exports configured LM Studio model to child process env', () => {
+      const db = testDb.db;
+      db.insert(schema.settings).values({ key: 'lmstudio_model', value: 'gemma-4-e4b-uncensored-hauhaucs-aggressive' }).run();
+
+      const config = getSettings();
+
+      expect(config.lmstudio_model).toBe('gemma-4-e4b-uncensored-hauhaucs-aggressive');
+      expect(process.env.LMSTUDIO_MODEL).toBe('gemma-4-e4b-uncensored-hauhaucs-aggressive');
+    });
+
+    it('infers provider from an existing shim path', () => {
+      const db = testDb.db;
+      db.insert(schema.settings).values({ key: 'claude_bin', value: '/opt/tamtam/scripts/lmstudio-shim.js' }).run();
+
+      const config = getSettings();
+
+      expect(config.claude_provider).toBe('lmstudio');
+      expect(config.claude_bin).toBe(`${process.cwd()}/scripts/lmstudio-shim.js`);
     });
 
     it('returns config with overridden log_dir', () => {

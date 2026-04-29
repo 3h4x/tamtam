@@ -90,11 +90,12 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 - `hooks/` — Custom React hooks
 - `lib/` — Server-side business logic
 - `lib/db/` — Drizzle schema and connection (tables: settings, projects, jobs, gh_status, gh_issues_cache, skills, agents, pipeline_locks)
+- `scripts/` — server startup, job runners, and CLI shims (`pm2-start.sh`, `job-runner.js`, `gemini-shim.js`)
 - `skills/` — claude-skills submodule
 - `data/` — SQLite database (gitignored)
 - `__tests__/` — vitest unit tests
 - `e2e/` — Playwright integration tests
-- `docs/` — architecture docs: `STREAMING.md` (job lifecycle + SSE), `PIPELINE.md` (release pipeline state machine), `DATABASE.md` (schema reference), `SETTINGS.md` (all config keys), `AGENT.md` (agent concepts), `CACHING.md` (layered TTL cache strategy), `PROFILING.md` (server / client / Turbopack profiling), `SECURITY.md` (security model and threat surface), `UI.md` (design system: tokens, typography, components, voice — read before any visual change; canonical previews in `docs/ui-preview/*.html`)
+- `docs/` — architecture docs: `STREAMING.md` (job lifecycle + SSE), `PIPELINE.md` (release pipeline state machine), `DATABASE.md` (schema reference), `SETTINGS.md` (all config keys), `AGENT.md` (agent concepts), `CACHING.md` (layered TTL cache strategy), `PROFILING.md` (server / client / Turbopack profiling), `SECURITY.md` (security model and threat surface), `SHIM.md` (Gemini CLI compatibility layer), `UI.md` (design system: tokens, typography, components, voice — read before any visual change; canonical previews in `docs/ui-preview/*.html`)
 
 ## Pages
 - `/` — Projects list with status, changes, CI

@@ -1035,9 +1035,10 @@ export function ProjectDetailPage({
       {activeTab === 'config' && (
         <div className="mt-4">
           {configLoading ? (
-            <div className="flex items-center gap-2 text-text-secondary text-sm py-4">
-              <div className="spinner-sm" />
-              Loading configuration…
+            <div className="space-y-4 animate-pulse">
+              <div className="bg-bg-secondary rounded-lg border border-border h-32" />
+              <div className="bg-bg-secondary rounded-lg border border-border h-48" />
+              <div className="bg-bg-secondary rounded-lg border border-border h-64" />
             </div>
           ) : config ? (
             <div className="space-y-4">

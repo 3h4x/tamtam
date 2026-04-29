@@ -1,4 +1,5 @@
 import { db, schema } from './db';
+import { join } from 'path';
 
 /**
  * Read all settings from the DB and return as a config object.
@@ -8,7 +9,9 @@ import { db, schema } from './db';
 export interface TamTamConfig {
   workspace_path: string;
   github_owner: string;
+  claude_provider: string;
   claude_bin: string;
+  lmstudio_model: string;
   log_dir: string;
   frequency: string;
   daytime: boolean;
@@ -38,7 +41,9 @@ export interface TamTamConfig {
 const DEFAULTS: TamTamConfig = {
   workspace_path: '',
   github_owner: '',
+  claude_provider: 'claude',
   claude_bin: '~/.local/bin/claude',
+  lmstudio_model: '',
   log_dir: './data/logs',
   frequency: '1h',
   daytime: false,
@@ -73,6 +78,26 @@ const DEFAULTS: TamTamConfig = {
 let _cache: { config: TamTamConfig; time: number } | null = null;
 const CACHE_TTL = 5; // seconds
 
+const VALID_CLAUDE_PROVIDERS = new Set(['claude', 'gemini', 'lmstudio', 'custom']);
+
+function shimPath(name: string): string {
+  return join(process.env.TAMTAM_ROOT || process.cwd(), 'scripts', name);
+}
+
+function inferClaudeProvider(claudeBin: string | undefined): string {
+  if (!claudeBin) return DEFAULTS.claude_provider;
+  if (claudeBin.endsWith('/scripts/gemini-shim.js') || claudeBin.endsWith('scripts/gemini-shim.js')) return 'gemini';
+  if (claudeBin.endsWith('/scripts/lmstudio-shim.js') || claudeBin.endsWith('scripts/lmstudio-shim.js')) return 'lmstudio';
+  if (claudeBin === DEFAULTS.claude_bin || claudeBin.endsWith('/claude') || claudeBin === 'claude') return 'claude';
+  return 'custom';
+}
+
+function resolveClaudeBin(provider: string, storedBin: string | undefined): string {
+  if (provider === 'gemini') return shimPath('gemini-shim.js');
+  if (provider === 'lmstudio') return shimPath('lmstudio-shim.js');
+  return storedBin ?? DEFAULTS.claude_bin;
+}
+
 export function getSettings(): TamTamConfig {
   const now = Date.now() / 1000;
   if (_cache && now - _cache.time < CACHE_TTL) return _cache.config;
@@ -81,10 +106,16 @@ export function getSettings(): TamTamConfig {
   const map: Record<string, string> = {};
   for (const row of rows) map[row.key] = row.value;
 
+  const provider = VALID_CLAUDE_PROVIDERS.has(map.claude_provider)
+    ? map.claude_provider
+    : inferClaudeProvider(map.claude_bin);
+
   const config: TamTamConfig = {
     workspace_path: map.workspace_path ?? DEFAULTS.workspace_path,
     github_owner: map.github_owner ?? DEFAULTS.github_owner,
-    claude_bin: map.claude_bin ?? DEFAULTS.claude_bin,
+    claude_provider: provider,
+    claude_bin: resolveClaudeBin(provider, map.claude_bin),
+    lmstudio_model: map.lmstudio_model ?? DEFAULTS.lmstudio_model,
     log_dir: map.log_dir ?? DEFAULTS.log_dir,
     frequency: map.frequency ?? DEFAULTS.frequency,
     daytime: map.daytime === 'true',
@@ -110,6 +141,12 @@ export function getSettings(): TamTamConfig {
     notification_on_review_do_not_ship: map.notification_on_review_do_not_ship === 'true',
     notification_on_agent_run_fail: map.notification_on_agent_run_fail === 'true',
   };
+
+  if (config.lmstudio_model) {
+    process.env.LMSTUDIO_MODEL = config.lmstudio_model;
+  } else {
+    delete process.env.LMSTUDIO_MODEL;
+  }
 
   _cache = { config, time: now };
   return config;

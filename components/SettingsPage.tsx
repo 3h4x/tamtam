@@ -6,7 +6,9 @@ import { errMsg } from '@/lib/types'
 interface SettingsMap {
   workspace_path: string
   github_owner: string
+  claude_provider: string
   claude_bin: string
+  lmstudio_model: string
   log_dir: string
   frequency: string
   daytime: string
@@ -47,7 +49,9 @@ export interface AgentTemplateRecord {
 const DEFAULTS: SettingsMap = {
   workspace_path: '',
   github_owner: '',
+  claude_provider: 'claude',
   claude_bin: '~/.local/bin/claude',
+  lmstudio_model: '',
   log_dir: './data/logs',
   frequency: '1h',
   daytime: 'false',
@@ -100,6 +104,12 @@ const FIELDS: Record<keyof SettingsMap, FieldDef> = {
     group: 'workspace',
     span: 1,
   },
+  claude_provider: {
+    label: 'Agent CLI Provider',
+    help: 'Choose the Claude-compatible backend TamTam invokes for runs',
+    group: 'workspace',
+    span: 1,
+  },
   frequency: {
     label: 'Base Frequency',
     help: 'How often scheduled agents run, e.g. "1h", "30m"',
@@ -120,7 +130,13 @@ const FIELDS: Record<keyof SettingsMap, FieldDef> = {
   },
   claude_bin: {
     label: 'Claude CLI Path',
-    help: 'Absolute path to the Claude CLI binary',
+    help: 'Used for Claude or Custom provider. Gemini and LM Studio resolve to TamTam shim scripts.',
+    group: 'workspace',
+    span: 1,
+  },
+  lmstudio_model: {
+    label: 'LM Studio Model',
+    help: 'Downloaded LM Studio model identifier used when the LM Studio shim is selected',
     group: 'workspace',
     span: 1,
   },
@@ -626,14 +642,17 @@ function NotificationsTab({
 function SettingsField({
   fieldKey,
   value,
+  provider,
   onChange,
 }: {
   fieldKey: keyof SettingsMap
   value: string
+  provider?: string
   onChange: (key: keyof SettingsMap, value: string) => void
 }) {
   const field = FIELDS[fieldKey]
   const colSpanClass = COL_SPAN[field.span ?? 1] ?? 'col-span-1'
+  const shimManaged = fieldKey === 'claude_bin' && (provider === 'gemini' || provider === 'lmstudio')
 
   return (
     <div className={colSpanClass}>
@@ -656,6 +675,13 @@ function SettingsField({
           <option value="off">Weekdays only</option>
           <option value="on">Include weekends</option>
         </select>
+      ) : fieldKey === 'claude_provider' ? (
+        <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
+          <option value="claude">Claude CLI</option>
+          <option value="gemini">Gemini shim</option>
+          <option value="lmstudio">LM Studio shim</option>
+          <option value="custom">Custom executable</option>
+        </select>
       ) : fieldKey === 'default_model' ? (
         <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
           <option value="haiku">haiku</option>
@@ -674,10 +700,11 @@ function SettingsField({
       ) : (
         <input
           type="text"
-          value={value}
+          value={shimManaged ? `Managed by ${provider === 'gemini' ? 'Gemini' : 'LM Studio'} shim` : value}
+          disabled={shimManaged}
           onChange={(e) => onChange(fieldKey, e.target.value)}
           placeholder={DEFAULTS[fieldKey] || `Enter ${field.label.toLowerCase()}`}
-          className={INPUT_CLASS}
+          className={`${INPUT_CLASS} ${shimManaged ? 'opacity-70 cursor-not-allowed' : ''}`}
         />
       )}
       <p className="text-xs text-text-tertiary mt-1.5">{field.help}</p>
@@ -858,9 +885,9 @@ export function SettingsPage() {
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-2 justify-center py-12">
-          <div className="spinner" />
-          <span className="text-text-secondary">Loading settings…</span>
+        <div className="space-y-4 animate-pulse">
+          <div className="bg-bg-secondary rounded-lg border border-border h-48" />
+          <div className="bg-bg-secondary rounded-lg border border-border h-64" />
         </div>
       ) : (
         <div className="space-y-4">
@@ -907,7 +934,7 @@ export function SettingsPage() {
                 <div className="px-5 py-4">
                   <div className={`grid ${gridClass} gap-x-6 gap-y-4`}>
                     {normalFields.map((key) => (
-                      <SettingsField key={key} fieldKey={key} value={settings[key]} onChange={handleChange} />
+                      <SettingsField key={key} fieldKey={key} value={settings[key]} provider={settings.claude_provider} onChange={handleChange} />
                     ))}
                   </div>
 
@@ -927,7 +954,7 @@ export function SettingsPage() {
                       {showAdvanced && (
                         <div className={`mt-4 grid ${gridClass} gap-x-6 gap-y-4 pl-4 border-l border-border`}>
                           {advancedFields.map((key) => (
-                            <SettingsField key={key} fieldKey={key} value={settings[key]} onChange={handleChange} />
+                            <SettingsField key={key} fieldKey={key} value={settings[key]} provider={settings.claude_provider} onChange={handleChange} />
                           ))}
                         </div>
                       )}
@@ -969,9 +996,10 @@ export function SettingsPage() {
 
               <div className="px-5 py-4">
                 {projectsLoading ? (
-                  <div className="flex items-center gap-2 justify-center py-6">
-                    <div className="spinner" />
-                    <span className="text-text-secondary text-sm">Scanning workspace…</span>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1 animate-pulse">
+                    {Array.from({ length: 8 }).map((_, i) => (
+                      <div key={i} className="h-10 rounded-lg bg-bg-secondary border border-border" style={{ opacity: 1 - i * 0.1 }} />
+                    ))}
                   </div>
                 ) : projects.length === 0 ? (
                   <p className="text-text-secondary text-sm py-4 text-center">

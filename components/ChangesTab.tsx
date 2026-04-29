@@ -480,7 +480,11 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
                   {file.binary ? (
                     <div className="p-3 text-xs text-text-secondary italic">Binary file — diff not shown.</div>
                   ) : entry?.loading ? (
-                    <div className="p-3 text-xs text-text-secondary">Loading diff...</div>
+                    <div className="p-3 space-y-1 animate-pulse opacity-50">
+                      <div className="h-4 bg-bg-tertiary rounded w-full" />
+                      <div className="h-4 bg-bg-tertiary rounded w-5/6" />
+                      <div className="h-4 bg-bg-tertiary rounded w-4/6" />
+                    </div>
                   ) : entry?.error ? (
                     <div className="p-3 text-xs text-status-error">{entry.error}</div>
                   ) : entry?.content !== undefined ? (

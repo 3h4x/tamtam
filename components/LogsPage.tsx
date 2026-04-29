@@ -71,16 +71,18 @@ export function LogsPage() {
             </button>
           ))}
           {projects.length === 0 && (
-            <div className="flex items-center gap-2 text-text-secondary text-sm">
-              <div className="spinner-sm" />
-              Loading projects…
-            </div>
+            <>
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-12 border border-border rounded-lg bg-bg-secondary animate-pulse" style={{ opacity: 1 - i * 0.15 }} />
+              ))}
+            </>
           )}
         </div>
       ) : loading ? (
-        <div className="flex items-center gap-2 justify-center py-8">
-          <div className="spinner" />
-          <span className="text-text-secondary">Loading logs...</span>
+        <div className="space-y-2 animate-pulse mt-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-10 border border-border rounded-lg bg-bg-secondary" style={{ opacity: 1 - i * 0.2 }} />
+          ))}
         </div>
       ) : (
         <>

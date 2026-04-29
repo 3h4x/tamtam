@@ -97,7 +97,13 @@ export function TaskDetailPage({
         )}
       </div>
 
-      {loading && <div className="text-text-secondary text-sm">Loading task detail...</div>}
+      {loading && (
+        <div className="flex flex-col gap-6 animate-pulse">
+          <div className="bg-bg-secondary rounded-lg p-4 h-32" />
+          <div className="bg-bg-secondary rounded-lg p-4 h-48" />
+          <div className="bg-bg-secondary rounded-lg p-4 h-64" />
+        </div>
+      )}
       {error && <div className="text-status-error">Error: {error}</div>}
 
       {detail && (
