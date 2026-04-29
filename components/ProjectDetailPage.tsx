@@ -1661,6 +1661,8 @@ export function ProjectDetailPage({
               steps.push({ label: 'merge', state: 'pending', hint: 'auto-merge after CI passes', action: null })
             }
 
+            const runningStepIdx = steps.findIndex(s => s.state === 'running')
+
             const stepChipClass = (s: StepState) => {
               if (s === 'done') return 'bg-status-success/12 text-status-success border-status-success/25'
               if (s === 'failed') return 'bg-status-error/12 text-status-error border-status-error/25'
@@ -1681,7 +1683,8 @@ export function ProjectDetailPage({
               <div className="mt-3 mb-3 px-3 py-2 rounded-md border border-border bg-bg-secondary flex items-center gap-1.5 flex-wrap">
                 {steps.map((s, i) => {
                   const clickable = !!s.action
-                  const chipClass = `inline-flex items-center gap-1.5 px-2 py-1 rounded-md border font-mono text-[11px] font-medium transition-colors ${stepChipClass(s.state)}`
+                  const dimmed = s.state === 'pending' && runningStepIdx >= 0 && i > runningStepIdx
+                  const chipClass = `inline-flex items-center gap-1.5 px-2 py-1 rounded-md border font-mono text-[11px] font-medium transition-colors ${stepChipClass(s.state)} ${dimmed ? 'opacity-35' : ''}`
                   const chip = (
                     <>
                       {stepIcon(s.state)}

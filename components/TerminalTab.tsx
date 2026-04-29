@@ -1196,7 +1196,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           {history.map((entry, i) => (
             entry.role === 'thinking' ? (
               showThinking && (
-                <div key={i} className="px-4 py-2 border-l-2 border-[#444] ml-4 mr-4 my-1">
+                <div key={i} className="px-4 py-2 border-l-2 border-accent/20 ml-4 mr-4 my-1">
                   <div className="text-[10px] text-[#666] mb-1 uppercase tracking-wider">thinking</div>
                   <div className="text-[#888] text-xs whitespace-pre-wrap">{entry.text}</div>
                 </div>
@@ -1276,7 +1276,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           )}
 
           {streaming && showThinking && thinkingBuffer && (
-            <div className="px-4 py-2 border-l-2 border-[#444] ml-4 mr-4 my-1">
+            <div className="px-4 py-2 border-l-2 border-accent/20 ml-4 mr-4 my-1">
               <div className="text-[10px] text-[#666] mb-1 uppercase tracking-wider">thinking</div>
               <div className="text-[#888] text-xs whitespace-pre-wrap">{thinkingBuffer}</div>
             </div>
