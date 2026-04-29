@@ -204,7 +204,24 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
   }
 
   if (loading) {
-    return <div className="text-text-secondary text-sm p-4">Loading changes...</div>
+    return (
+      <div className="mt-2">
+        <div className="bg-bg-secondary rounded-lg p-4 mb-3 flex items-center gap-4">
+          <div className="skeleton h-3.5 w-20" />
+          <div className="skeleton h-3.5 w-12" />
+          <div className="skeleton h-3.5 w-16" />
+        </div>
+        <div className="border border-border rounded-lg overflow-hidden">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 px-3 py-2.5 border-b border-border last:border-0" style={{ opacity: 1 - i * 0.2 }}>
+              <div className="skeleton h-4 w-4 rounded shrink-0" />
+              <div className="skeleton h-3.5 flex-1 max-w-xs" />
+              <div className="skeleton h-3 w-20 ml-auto" />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
   }
 
   if (error) {

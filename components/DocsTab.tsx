@@ -25,7 +25,21 @@ export function DocsTab({ projectName }: DocsTabProps) {
       .finally(() => setLoading(false))
   }, [projectName])
 
-  if (loading) return <div className="text-text-secondary text-sm p-4">Loading docs…</div>
+  if (loading) return (
+    <div className="mt-2 flex gap-3">
+      <div className="w-44 shrink-0 flex flex-col gap-1">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="skeleton h-7 rounded-md" style={{ opacity: 1 - i * 0.2 }} />
+        ))}
+      </div>
+      <div className="flex-1 border border-border rounded-lg p-4 flex flex-col gap-2">
+        <div className="skeleton h-4 w-1/3 mb-2" />
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="skeleton h-3" style={{ opacity: 1 - i * 0.12, width: `${85 - i * 8}%` }} />
+        ))}
+      </div>
+    </div>
+  )
   if (error) return <div className="text-status-error text-sm p-4">{error}</div>
   if (docs.length === 0) return (
     <div className="p-6 text-center text-text-secondary text-sm">

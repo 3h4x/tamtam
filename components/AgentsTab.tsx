@@ -278,36 +278,36 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled }: Age
           return (
             <div
               key={agent.id}
-              className={`p-4 rounded-lg border transition-colors ${
+              className={`px-3 py-2.5 rounded-lg border transition-colors ${
                 editing?.id === agent.id
                   ? 'border-accent bg-accent-light'
                   : 'border-border bg-bg-secondary'
               } ${!agent.enabled ? 'opacity-50' : ''}`}
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="font-medium text-text-primary">{agent.name}</span>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-secondary">{agent.model}</span>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-secondary">{agent.runner}</span>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                  <span className="font-medium text-sm text-text-primary">{agent.name}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-secondary">{agent.model}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-secondary">{agent.runner}</span>
                   {agent.schedule && (
                     <>
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${agent.enabled ? 'bg-status-success/10 text-status-success' : 'bg-bg-tertiary text-text-tertiary line-through'}`}>every {agent.schedule}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${agent.enabled ? 'bg-status-success/10 text-status-success' : 'bg-bg-tertiary text-text-tertiary line-through'}`}>every {agent.schedule}</span>
                       {agent.enabled && nextFireDisplay(agent.schedule, agent.id) && (
-                        <span className="text-xs text-text-tertiary font-mono">{nextFireDisplay(agent.schedule, agent.id)}</span>
+                        <span className="text-[10px] text-text-tertiary font-mono">{nextFireDisplay(agent.schedule, agent.id)}</span>
                       )}
                     </>
                   )}
                   {agentSkills.map(s => (
-                    <span key={s.id} className="text-xs px-2 py-0.5 rounded-full bg-accent/10 text-accent">{s.name}</span>
+                    <span key={s.id} className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent">{s.name}</span>
                   ))}
                   {agent.source === 'file' && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-tertiary border border-border" title=".tamtam/agents/">file</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-tertiary border border-border" title=".tamtam/agents/">file</span>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 shrink-0">
                   {agent.schedule && agent.source !== 'file' && (
                     <button
-                      className={`px-3 py-1.5 text-sm border rounded-md cursor-pointer ${
+                      className={`px-2 py-1 text-xs border rounded-md cursor-pointer ${
                         agent.enabled
                           ? 'border-status-success/30 text-status-success hover:bg-status-success/10'
                           : 'border-status-error/30 text-status-error hover:bg-status-error/10'
@@ -319,36 +319,36 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled }: Age
                     </button>
                   )}
                   <button
-                    className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
+                    className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
                     onClick={() => { setEditing(agent); setCreating(false) }}
                   >
                     Edit
                   </button>
                   <button
-                    className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-2 py-1 text-xs bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={() => handleRun(agent)}
                     disabled={runSubmitting === agent.id || agentRunsBlocked}
                     title={agentRunsBlocked ? blockedReason : undefined}
                   >
-                    {runSubmitting === agent.id ? 'Starting...' : 'Run'}
+                    {runSubmitting === agent.id ? 'Starting…' : 'Run'}
                   </button>
                   <button
-                    className="px-3 py-1.5 text-sm border border-accent text-accent rounded-md hover:bg-accent/10 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-2 py-1 text-xs border border-accent text-accent rounded-md hover:bg-accent/10 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={() => { setRunPromptAgent(runPromptAgent === agent.id ? null : agent.id); setRunPrompt('') }}
                     disabled={agentRunsBlocked}
-                    title={agentRunsBlocked ? blockedReason : undefined}
+                    title={agentRunsBlocked ? blockedReason : `Run ${agent.name} with a custom prompt`}
                   >
-                    Run with prompt
+                    + prompt
                   </button>
                 </div>
               </div>
 
               {/* Custom prompt input */}
               {runPromptAgent === agent.id && (
-                <div className="mt-3 flex gap-2">
+                <div className="mt-2 flex gap-2">
                   <input
                     type="text"
-                    className="flex-1 px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary font-mono"
+                    className="flex-1 px-2.5 py-1.5 text-xs bg-bg-tertiary border border-border rounded-md text-text-primary font-mono"
                     value={runPrompt}
                     onChange={(e) => setRunPrompt(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter' && runPrompt.trim()) handleRun(agent, runPrompt.trim()) }}
@@ -356,7 +356,7 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled }: Age
                     autoFocus
                   />
                   <button
-                    className="px-4 py-2 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer"
+                    className="px-3 py-1.5 text-xs bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer"
                     onClick={() => handleRun(agent, runPrompt.trim())}
                     disabled={!runPrompt.trim() || runSubmitting === agent.id || agentRunsBlocked}
                     title={agentRunsBlocked ? blockedReason : undefined}
