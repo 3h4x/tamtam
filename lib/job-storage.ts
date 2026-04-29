@@ -228,7 +228,12 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
   } catch {}
   // Fallback: explicitly SIGKILL the bash wrapper and any children in case
   // Claude CLI hung and escaped pm2's tree-kill.
-  if (job.pid > 0) {
+  // Skip for inline kinds (push, commit) whose job.pid IS the server's own
+  // process.pid — killing it would crash TamTam and cascade -1 exits onto
+  // every other in-flight job. mark-dod and pr-wait already avoid this by
+  // using pid=0; push/commit use process.pid for restart detection instead.
+  const isInlineServerKind = job.kind === 'push' || job.kind === 'commit';
+  if (job.pid > 0 && !isInlineServerKind) {
     try {
       const { exec } = await import('./shell');
       const { stdout } = await exec('pgrep', ['-P', String(job.pid)], { timeout: 2000 });
@@ -1063,6 +1068,15 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
     // Cheap (one listJobs filter) and no-op when the release has already
     // been finalized by the normal path.
     await reconcileStaleRelease(job);
+    return 'done';
+  }
+  // Push and commit run inline in the Next.js server process. Their pid is
+  // set to process.pid (the server's own PID) so we can detect restarts.
+  // Same pid → still in-flight on this server instance; trust self-finalization.
+  // Different pid → the server was restarted and killed the in-flight operation.
+  if (job.kind === 'push' || job.kind === 'commit') {
+    if (job.pid === process.pid) return 'running';
+    await markDone(job, -1);
     return 'done';
   }
   // Jobs are created with pid=0 and the real pid is persisted asynchronously

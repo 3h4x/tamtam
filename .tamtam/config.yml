@@ -4,8 +4,8 @@
 pipeline:
   test_command: pnpm lint && pnpm type-check && pnpm test
   pr_workflow_enabled: false
-  auto_commit_enabled: false
-  auto_push_enabled: false
+  auto_commit_enabled: true
+  auto_push_enabled: true
   auto_pr_merge_enabled: false
   release_after_run: true
 schedule:
