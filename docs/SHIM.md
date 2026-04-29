@@ -1,0 +1,136 @@
+# CLI Shims for TamTam
+
+## Overview
+
+TamTam natively invokes a Claude-compatible CLI binary and expects either:
+
+- plain `--print` output for small helper calls such as commit-message generation
+- Claude CLI `--output-format stream-json` NDJSON for terminal, agent, review, and fix runs
+
+The shim scripts in `scripts/` let another model backend act as that configured binary without changing TamTam's pipeline code.
+
+## Gemini CLI Shim
+
+The `scripts/gemini-shim.js` script provides a compatibility layer that allows TamTam to interoperate with the Gemini CLI.
+
+It acts as a translation layer: intercepting Claude-style commands, launching the Gemini CLI with appropriate parameters, and transforming the stream of events produced by Gemini into the event shapes expected by TamTam's Claude stream parser.
+
+## How It Works
+
+### Argument Mapping
+
+The shim takes incoming arguments designed for Claude and translates them to their Gemini CLI equivalents:
+
+*   **Models:**
+    *   `haiku` → `flash`
+    *   `sonnet` → `pro`
+    *   `opus` → `pro`
+    *   `thinking` → `thinking`
+*   **Permission / Approval Modes:**
+    *   `bypassPermissions` → `yolo`
+    *   `auto` → `auto_edit`
+    *   `plan` → `plan`
+    *   `default` → `default`
+
+Other standard arguments like `--cwd` are passed through appropriately, and the `--output-format stream-json` flag is supplied to ensure the Gemini CLI outputs structured JSON lines.
+
+### Event Stream Translation
+
+TamTam relies on an event stream formatted for Anthropic's Claude APIs. The shim listens to `gemini`'s `stdout`, parses the Gemini JSON events line-by-line, and translates them in real-time:
+
+1.  **Text Generation:**
+    *   **Gemini:** `{ "type": "message", "role": "assistant", "content": "..." }`
+    *   **Claude Equivalent:** Translated into a `stream_event` containing a `content_block_delta` with a `text_delta`.
+2.  **Tool Usage:**
+    *   **Gemini:** `{ "type": "tool_use", "tool_name": "...", "tool_id": "...", "parameters": {...} }`
+    *   **Claude Equivalent:** Emits three distinct events to simulate Claude's streaming tools:
+        *   `content_block_start` (with `tool_use` type, name, and id)
+        *   `content_block_delta` (with `input_json_delta` containing the parameters)
+        *   `content_block_stop`
+3.  **Tool Results:**
+    *   **Gemini:** `{ "type": "tool_result", "status": "..." }`
+    *   **Claude Equivalent:** Emits a `system` event with subtype `tool_result`.
+4.  **Final Summary and Stats:**
+    *   **Gemini:** `{ "type": "result", "stats": {...}, "status": "...", "error": "..." }`
+    *   **Claude Equivalent:** Emitted as the final `result` object containing usage statistics mapped to `modelUsage`, capturing `inputTokens`, `outputTokens`, and `cacheReadInputTokens`.
+
+## Usage
+
+The shim is meant to be invoked as a drop-in replacement for the Claude CLI binary within the TamTam application. 
+
+```bash
+node scripts/gemini-shim.js [claude-args...]
+```
+
+## LM Studio Shim
+
+The `scripts/lmstudio-shim.js` script calls LM Studio's native stateful REST API (`POST /api/v1/chat`) and translates the streaming response into Claude-style `stream-json` events.
+
+Unlike the Gemini shim, this is not a Claude-compatible tool-running CLI. It sends TamTam's prompt to LM Studio and streams model text back. That is useful for local-model drafting, review comments, and simple assistant runs. Native LM Studio MCP/tool integrations may be added later, but Claude tool names such as `Read`, `Edit`, `Bash`, and `Grep` are not automatically available through this shim.
+
+### Sessions
+
+LM Studio's native `/api/v1/chat` endpoint is stateful. On the first request, LM Studio returns a `response_id` such as `resp_...`; the shim emits that value as Claude-style `session_id`.
+
+When TamTam later invokes the shim with:
+
+```bash
+--resume resp_...
+```
+
+the shim passes that value as `previous_response_id`, so LM Studio continues the prior chat context without TamTam resending the full conversation.
+
+### Configuration
+
+Start the LM Studio local server, then mark the shim executable and configure TamTam's `Claude CLI Path` to the shim's absolute path:
+
+```bash
+chmod +x scripts/lmstudio-shim.js
+/path/to/tamtam/scripts/lmstudio-shim.js
+```
+
+Do not put `node /path/to/tamtam/scripts/lmstudio-shim.js` directly in the setting. Some TamTam paths execute the configured binary with `execFile`, so the setting must be a single executable path. If you prefer launching through `node`, create a small wrapper script and point TamTam at that wrapper.
+
+Manual CLI usage can still call it through Node:
+
+```bash
+node scripts/lmstudio-shim.js --print -p "Write one sentence."
+```
+
+Environment variables:
+
+```bash
+LMSTUDIO_BASE_URL=http://127.0.0.1:1234
+LMSTUDIO_MODEL=your-loaded-model
+
+# Optional per-TamTam-model aliases:
+LMSTUDIO_HAIKU_MODEL=your-fast-model
+LMSTUDIO_SONNET_MODEL=your-default-model
+LMSTUDIO_OPUS_MODEL=your-largest-model
+
+# Optional:
+LMSTUDIO_API_KEY=...
+LMSTUDIO_TEMPERATURE=0.2
+LMSTUDIO_CONTEXT_LENGTH=8192
+```
+
+If no alias is set, `LMSTUDIO_MODEL` is used. If neither is set, the shim passes through TamTam's requested model name (`haiku`, `sonnet`, or `opus`). `LMSTUDIO_BASE_URL` may include a trailing `/v1` from older OpenAI-compatible setup examples; the shim normalizes it back to the server root before calling `/api/v1/chat`.
+
+### Event Translation
+
+For `--output-format stream-json`, the shim maps native LM Studio SSE events:
+
+1. `message.delta` → Claude-style `content_block_delta` with `text_delta`
+2. `reasoning.delta` → Claude-style `thinking_delta`
+3. `chat.end.result.stats` → final `result.modelUsage`
+4. `chat.end.result.response_id` → final `result.session_id`
+
+For plain `--print` calls without `--output-format stream-json`, the shim writes only the model text to stdout so helper code that expects one-line output can still parse it.
+
+### Usage
+
+```bash
+LMSTUDIO_MODEL=qwen3-coder node scripts/lmstudio-shim.js --print --model haiku -p "Write one sentence."
+LMSTUDIO_MODEL=qwen3-coder node scripts/lmstudio-shim.js --print --output-format stream-json --model sonnet < prompt.txt
+LMSTUDIO_MODEL=qwen3-coder node scripts/lmstudio-shim.js --print --output-format stream-json --model sonnet --resume resp_abc123 < followup.txt
+```

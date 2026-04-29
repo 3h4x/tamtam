@@ -170,7 +170,9 @@ describe('settings API', () => {
     it('accepts all valid setting keys', async () => {
       const validKeys = [
         'github_owner',
+        'claude_provider',
         'claude_bin',
+        'lmstudio_model',
         'log_dir',
         'frequency',
         'daytime',

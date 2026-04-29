@@ -4,7 +4,9 @@ import { db, schema } from '@/lib/db';
 import { reloadConfig } from '@/lib/config';
 const SETTING_KEYS = [
   'github_owner',
+  'claude_provider',
   'claude_bin',
+  'lmstudio_model',
   'log_dir',
   'frequency',
   'daytime',
