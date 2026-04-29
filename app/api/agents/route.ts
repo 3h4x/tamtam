@@ -1,10 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { installAgentSchedule } from '@/lib/agent-scheduler';
 import { errMsg } from '@/lib/types';
 import { getAllAgentsCached, clearAgentsCache, normalizeAgent } from '@/lib/agents-cache';
-import { scanFileAgents, writeFileAgent } from '@/lib/tamtam-file-agents';
+import { scanFileAgents, writeFileAgent, type FileAgent } from '@/lib/tamtam-file-agents';
 import { resolveProjectPath } from '@/lib/project-data';
+
+const ALL_FILE_AGENTS_TTL_MS = 10_000;
+let _allFileAgentsCache: { agents: FileAgent[]; time: number } | null = null;
+
+function getAllFileAgentsCached(): FileAgent[] {
+  const now = Date.now();
+  if (_allFileAgentsCache && now - _allFileAgentsCache.time < ALL_FILE_AGENTS_TTL_MS) {
+    return _allFileAgentsCache.agents;
+  }
+  let enabledProjects: typeof schema.projects.$inferSelect[] = [];
+  try {
+    enabledProjects = db.select().from(schema.projects).where(eq(schema.projects.enabled, true)).all();
+  } catch { /* projects table may not exist */ }
+  const out: FileAgent[] = [];
+  for (const p of enabledProjects) {
+    try {
+      for (const fa of scanFileAgents(p.path, p.name)) out.push(fa);
+    } catch { /* skip */ }
+  }
+  _allFileAgentsCache = { agents: out, time: now };
+  return out;
+}
 
 export async function GET(request: NextRequest) {
   const project = request.nextUrl.searchParams.get('project');
@@ -15,18 +38,24 @@ export async function GET(request: NextRequest) {
 
   const normalized = result.map(normalizeAgent);
 
-  // Merge file-based agents when filtering by project. DB agents take precedence
-  // over file agents with the same name.
+  // Merge file-based agents (.tamtam/agents/*.md). DB agents take precedence
+  // over file agents with the same project+name.
+  const dbKeys = new Set(normalized.map(a => `${a.project}:${a.name}`));
   if (project) {
     const projPath = resolveProjectPath(project);
     if (projPath) {
-      const dbNames = new Set(normalized.map(a => a.name));
-      const fileAgents = scanFileAgents(projPath, project);
-      for (const fa of fileAgents) {
-        if (!dbNames.has(fa.name)) {
-          normalized.push(fa);
-        }
+      for (const fa of scanFileAgents(projPath, project)) {
+        if (name && fa.name !== name) continue;
+        if (!dbKeys.has(`${fa.project}:${fa.name}`)) normalized.push(fa);
       }
+    }
+  } else {
+    // Unfiltered list: scan every enabled project so the projects table can
+    // show file agents (the home page calls this without ?project). Cached
+    // for 10 s to avoid filesystem hits on every request.
+    for (const fa of getAllFileAgentsCached()) {
+      if (name && fa.name !== name) continue;
+      if (!dbKeys.has(`${fa.project}:${fa.name}`)) normalized.push(fa);
     }
   }
 
