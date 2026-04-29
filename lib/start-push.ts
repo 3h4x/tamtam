@@ -87,9 +87,17 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
 // background, and returns the job ID immediately so callers can stream output.
 // Always push-only (no commit). The "Push to PR" flow uses startProjectCommit
 // instead, which auto-chains to push via the completion hook.
-export function launchProjectPush(projectName: string): { jobId: string } | { error: string } {
+export function launchProjectPush(projectName: string): { jobId: string } | { error: string; status?: number } {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { error: 'project not found' };
+
+  // If a release pipeline is in flight, the auto-chain will push at the right
+  // step. Letting the manual "Push" button race the release lets push run in
+  // parallel with test/review/fix and clobbers ordering.
+  const lock = getLock(projectName);
+  if (lock) {
+    return { error: `Pipeline is running for ${projectName} — wait for it to finish before pushing manually`, status: 409 };
+  }
 
   const { logDir } = getImproveConfig();
   mkdirSync(logDir, { recursive: true });
@@ -105,13 +113,25 @@ export function launchProjectPush(projectName: string): { jobId: string } | { er
 
   // Run async in background — do not await
   ;(async () => {
-    // Acquire pipeline lock — skip under parent release lock.
-    if (!isLockOwnedByActiveRelease(projectName)) {
-      try {
-        await acquireLock(projectName, job.id);
-      } catch (e) {
-        console.log(`[launch-push] failed to acquire pipeline lock for ${projectName}:`, e);
+    // Pre-check above guarantees no active pipeline; acquire the lock for this
+    // standalone push so a concurrent release/agent can't sneak in mid-push.
+    // The pre-check + async acquire has a TOCTOU window — if a release started
+    // in between, acquireLock returns { acquired: false } (it does not throw).
+    // Bail out in that case so we don't race the release on the same worktree.
+    try {
+      const lockResult = await acquireLock(projectName, job.id);
+      if (!lockResult.acquired) {
+        const detail = `Pipeline is running for ${projectName} — wait for it to finish before pushing manually`;
+        append(`\n# push aborted — ${detail}\n`);
+        try { setProjectPushResult(projectName, detail); } catch {}
+        await markDone(job, 1);
+        return;
       }
+    } catch (e) {
+      console.log(`[launch-push] failed to acquire pipeline lock for ${projectName}:`, e);
+      append(`\n# push aborted — failed to acquire pipeline lock\n`);
+      await markDone(job, 1);
+      return;
     }
 
     const result = await runPush(projectName, projPath, append, null, true);

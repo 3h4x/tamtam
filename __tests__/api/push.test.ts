@@ -29,6 +29,15 @@ describe('POST /api/projects/by-project/[projectName]/push', () => {
     expect(data.detail).toBe('project not found');
   });
 
+  it('forwards explicit status from launchProjectPush error (e.g. 409 lock held)', async () => {
+    launchProjectPushMock.mockReturnValue({ error: 'Pipeline is running for myproj — wait for it to finish before pushing manually', status: 409 });
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/push', { method: 'POST' });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.detail).toContain('Pipeline is running');
+  });
+
   it('returns started status with job_id when launch succeeds', async () => {
     launchProjectPushMock.mockReturnValue({ jobId: 'abc-123' });
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/push', { method: 'POST' });

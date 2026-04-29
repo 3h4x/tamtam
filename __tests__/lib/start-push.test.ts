@@ -1181,6 +1181,8 @@ describe('launchProjectPush — fire-and-forget', () => {
   let setProjectPushResultMock: ReturnType<typeof vi.fn>;
   let mkdirSyncMock: ReturnType<typeof vi.fn>;
   let appendFileSyncMock: ReturnType<typeof vi.fn>;
+  let getLockMock: ReturnType<typeof vi.fn>;
+  let acquireLockMock: ReturnType<typeof vi.fn>;
 
   function resp(exitCode: number, stdout = '', stderr = '') {
     return Promise.resolve({ exitCode, stdout, stderr });
@@ -1193,6 +1195,8 @@ describe('launchProjectPush — fire-and-forget', () => {
   beforeEach(async () => {
     vi.resetModules();
     execMock = vi.fn();
+    getLockMock = vi.fn().mockReturnValue(null);
+    acquireLockMock = vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } });
     setProjectPushResultMock = vi.fn();
     mkdirSyncMock = vi.fn();
     appendFileSyncMock = vi.fn();
@@ -1236,11 +1240,52 @@ describe('launchProjectPush — fire-and-forget', () => {
       mkdirSync: mkdirSyncMock,
       appendFileSync: appendFileSyncMock,
     }));
+    vi.doMock('@/lib/pipeline-lock', () => ({
+      getLock: getLockMock,
+      acquireLock: acquireLockMock,
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
 
     ({ launchProjectPush } = await import('@/lib/start-push'));
   });
 
   afterEach(() => { vi.resetModules(); });
+
+  it('returns 409 error when a pipeline lock is already held', () => {
+    getLockMock.mockReturnValue({ project: 'proj', lockedByJobId: 'release-123', acquiredAt: Date.now() / 1000 });
+    const result = launchProjectPush('proj');
+    expect('error' in result).toBe(true);
+    if ('error' in result) {
+      expect(result.status).toBe(409);
+      expect(result.error).toContain('Pipeline is running');
+    }
+    expect(createJobMock).not.toHaveBeenCalled();
+  });
+
+  it('acquires the pipeline lock for standalone pushes', async () => {
+    execMock.mockResolvedValue(resp(0));
+    launchProjectPush('proj');
+    await flush();
+    await flush();
+    expect(acquireLockMock).toHaveBeenCalled();
+  });
+
+  it('aborts the push when async acquireLock loses the race', async () => {
+    execMock.mockResolvedValue(resp(0));
+    acquireLockMock.mockResolvedValueOnce({ acquired: false, lock: { project: 'proj', lockedByJobId: 'release-99', acquiredAt: Date.now() / 1000 }, blockingJobId: 'release-99' });
+    const result = launchProjectPush('proj');
+    expect('jobId' in result).toBe(true);
+    await flush();
+    await flush();
+    await flush();
+    // No git push exec call should have been issued.
+    const pushCalls = execMock.mock.calls.filter(([cmd, args]) => cmd === 'git' && Array.isArray(args) && args.includes('push'));
+    expect(pushCalls.length).toBe(0);
+    // Job should have been marked done with non-zero exit.
+    expect(markDoneMock).toHaveBeenCalled();
+    const lastMarkDone = markDoneMock.mock.calls[markDoneMock.mock.calls.length - 1];
+    expect(lastMarkDone[1]).toBe(1);
+  });
 
   it('returns error object immediately when project path cannot be resolved', () => {
     resolveProjectPathMock.mockReturnValue(null);
