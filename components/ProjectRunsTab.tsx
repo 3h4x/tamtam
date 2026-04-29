@@ -629,14 +629,35 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
           ))}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="text-text-secondary text-sm p-6 text-center border border-border rounded-lg bg-bg-secondary">
-          {entries.length === 0
-            ? 'No runs yet — trigger an agent or use the Run button above'
-            : search.trim()
-            ? `No runs match "${search.trim()}"`
-            : 'No runs match the current filter'}
+        <div className="text-text-secondary text-sm p-8 text-center border border-border rounded-lg bg-bg-secondary flex flex-col items-center gap-2">
+          {entries.length === 0 ? (
+            <>
+              <span className="text-3xl opacity-30">▷</span>
+              <span>No runs yet — trigger an agent or use the Run button above</span>
+            </>
+          ) : search.trim() ? (
+            <>
+              <span className="text-3xl opacity-30">⌕</span>
+              <span>No runs match &ldquo;{search.trim()}&rdquo;</span>
+            </>
+          ) : filter.kind === 'running' ? (
+            <>
+              <span className="text-3xl opacity-30">◎</span>
+              <span>No runs currently running</span>
+            </>
+          ) : filter.kind === 'failed' ? (
+            <>
+              <span className="text-3xl opacity-30">✗</span>
+              <span>No failed runs — looking good</span>
+            </>
+          ) : (
+            <>
+              <span className="text-3xl opacity-30">▤</span>
+              <span>No runs match the current filter</span>
+            </>
+          )}
           {(search.trim() || filter.kind !== 'all') && (
-            <div className="mt-3">
+            <div className="mt-2">
               <button
                 className="px-3 py-1 text-xs border border-border rounded-md hover:bg-bg-tertiary cursor-pointer"
                 onClick={() => { setSearch(''); setFilter({ kind: 'all' }) }}

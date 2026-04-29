@@ -657,7 +657,12 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
           disabled={refreshing}
           title="Force refresh from GitHub"
         >
-          {refreshing ? 'Refreshing...' : 'Refresh'}
+          {refreshing ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
+              <span>Refreshing</span>
+            </span>
+          ) : 'Refresh'}
         </button>
       </div>
 

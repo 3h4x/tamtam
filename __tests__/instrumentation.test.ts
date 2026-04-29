@@ -131,6 +131,118 @@ describe('instrumentation', () => {
 
       expect(startInternalSchedulerMock).toHaveBeenCalledWith([]);
     });
+
+    it('includes enabled scheduled file-based agents from enabled projects', async () => {
+      vi.resetModules();
+      startInternalSchedulerMock = vi.fn();
+      reconcilePm2SchedulesMock = vi.fn().mockResolvedValue(undefined);
+
+      const fileAgent = {
+        id: 'file:proj1:daily-check',
+        project: 'proj1',
+        name: 'daily-check',
+        schedule: '24h',
+        prompt: 'run checks',
+        enabled: true,
+        runner: 'pm2',
+      };
+      const scanFileAgentsMock = vi.fn().mockReturnValue([fileAgent]);
+
+      // Two-table DB: agents returns [], projects returns one enabled project.
+      const allFn = vi.fn()
+        .mockReturnValueOnce([])           // schema.agents query
+        .mockReturnValueOnce([{ name: 'proj1', path: '/w/proj1' }]); // schema.projects query
+      const whereFn = vi.fn().mockReturnValue({ all: allFn });
+      const fromFn = vi.fn().mockImplementation((table) => {
+        if (table === 'agents_table') return { all: allFn };
+        return { where: whereFn, all: allFn };
+      });
+      const selectFn = vi.fn().mockReturnValue({ from: fromFn });
+      const db = { select: selectFn };
+      const schema = { agents: 'agents_table', projects: { enabled: 1 } };
+
+      vi.doMock('@/lib/db', () => ({ db, schema }));
+      vi.doMock('@/lib/internal-scheduler', () => ({ startInternalScheduler: startInternalSchedulerMock }));
+      vi.doMock('@/lib/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
+      vi.doMock('@/lib/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
+      vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
+
+      const { reinstallAgents } = await import('@/instrumentation-node');
+      await reinstallAgents();
+
+      expect(startInternalSchedulerMock).toHaveBeenCalledTimes(1);
+      const passed = startInternalSchedulerMock.mock.calls[0][0];
+      expect(passed).toHaveLength(1);
+      expect(passed[0]).toMatchObject({ id: 'file:proj1:daily-check', schedule: '24h', prompt: 'run checks' });
+    });
+
+    it('skips file agents that duplicate a DB agent with the same project+name', async () => {
+      vi.resetModules();
+      startInternalSchedulerMock = vi.fn();
+      reconcilePm2SchedulesMock = vi.fn().mockResolvedValue(undefined);
+
+      const dbAgent = makeAgent({ id: 'agent-db', name: 'shared', project: 'proj1', schedule: '4h', prompt: 'db version' });
+      const fileAgent = {
+        id: 'file:proj1:shared',
+        project: 'proj1',
+        name: 'shared',
+        schedule: '4h',
+        prompt: 'file version',
+        enabled: true,
+        runner: 'pm2',
+      };
+      const scanFileAgentsMock = vi.fn().mockReturnValue([fileAgent]);
+
+      const allFn = vi.fn()
+        .mockReturnValueOnce([dbAgent])
+        .mockReturnValueOnce([{ name: 'proj1', path: '/w/proj1' }]);
+      const whereFn = vi.fn().mockReturnValue({ all: allFn });
+      const fromFn = vi.fn().mockReturnValue({ where: whereFn, all: allFn });
+      const selectFn = vi.fn().mockReturnValue({ from: fromFn });
+
+      vi.doMock('@/lib/db', () => ({ db: { select: selectFn }, schema: { agents: {}, projects: { enabled: 1 } } }));
+      vi.doMock('@/lib/internal-scheduler', () => ({ startInternalScheduler: startInternalSchedulerMock }));
+      vi.doMock('@/lib/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
+      vi.doMock('@/lib/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
+      vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
+
+      const { reinstallAgents } = await import('@/instrumentation-node');
+      await reinstallAgents();
+
+      const passed = startInternalSchedulerMock.mock.calls[0][0];
+      // Only the DB agent; file agent is suppressed because project+name collides.
+      expect(passed).toHaveLength(1);
+      expect(passed[0].id).toBe('agent-db');
+    });
+
+    it('skips file agents that have no schedule or are disabled', async () => {
+      vi.resetModules();
+      startInternalSchedulerMock = vi.fn();
+      reconcilePm2SchedulesMock = vi.fn().mockResolvedValue(undefined);
+
+      const noSchedule = { id: 'file:p:a', project: 'p', name: 'a', schedule: null, prompt: '', enabled: true, runner: 'pm2' };
+      const disabled = { id: 'file:p:b', project: 'p', name: 'b', schedule: '1h', prompt: '', enabled: false, runner: 'pm2' };
+      const scanFileAgentsMock = vi.fn().mockReturnValue([noSchedule, disabled]);
+
+      const allFn = vi.fn()
+        .mockReturnValueOnce([])
+        .mockReturnValueOnce([{ name: 'p', path: '/w/p' }]);
+      const whereFn = vi.fn().mockReturnValue({ all: allFn });
+      const fromFn = vi.fn().mockReturnValue({ where: whereFn, all: allFn });
+      const selectFn = vi.fn().mockReturnValue({ from: fromFn });
+
+      vi.doMock('@/lib/db', () => ({ db: { select: selectFn }, schema: { agents: {}, projects: { enabled: 1 } } }));
+      vi.doMock('@/lib/internal-scheduler', () => ({ startInternalScheduler: startInternalSchedulerMock }));
+      vi.doMock('@/lib/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
+      vi.doMock('@/lib/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
+      vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
+
+      const { reinstallAgents } = await import('@/instrumentation-node');
+      await reinstallAgents();
+
+      const passed = startInternalSchedulerMock.mock.calls[0][0];
+      expect(passed).toHaveLength(0);
+    });
   });
 
   describe('runProbeSweep()', () => {
