@@ -184,7 +184,7 @@ export function NotificationBell() {
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-[22rem] bg-bg-primary border border-border rounded-lg shadow-xl z-50 overflow-hidden">
+        <div className="absolute right-0 top-full mt-2 w-[22rem] bg-bg-primary border border-border rounded-lg shadow-lg z-50 overflow-hidden">
 
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
@@ -221,7 +221,7 @@ export function NotificationBell() {
                     <button
                       key={job.id}
                       onClick={() => handleJobClick(job)}
-                      className="w-full flex items-center gap-3 px-4 py-3 border-b border-border/50 hover:bg-bg-secondary transition-colors bg-transparent cursor-pointer text-left"
+                      className="w-full flex items-center gap-3 px-4 py-2 border-b border-border/50 hover:bg-bg-secondary transition-colors bg-transparent cursor-pointer text-left"
                     >
                       <RunningIcon />
                       <div className="flex-1 min-w-0">

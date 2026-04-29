@@ -1,0 +1,35 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Pills</title>
+<style>
+  body { margin:0; padding:16px; background:#fff; font:13px -apple-system,system-ui,sans-serif; color:#1a1a1a; }
+  .row { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; align-items:center; }
+  .pill { display:inline-flex; align-items:center; gap:4px; padding:2px 6px; border-radius:4px; font-size:12px; font-weight:500; }
+  .agent-idle { background:#efefef; color:#666; }
+  .agent-run { background:rgba(37,99,235,.15); color:#2563eb; border:1px solid rgba(37,99,235,.30); }
+  .dot-blue { width:6px; height:6px; border-radius:50%; background:#2563eb; }
+  .pr { background:rgba(37,99,235,.15); color:#2563eb; border:1px solid rgba(37,99,235,.30); }
+  .issue { background:#efefef; color:#666; border:1px solid #e5e5e5; }
+  .verdict-lgtm { color:#22c55e; font-size:12px; font-weight:500; }
+  .verdict-warn { color:#f59e0b; font-size:12px; font-weight:500; }
+  .verdict-bad  { color:#ef4444; font-size:12px; font-weight:500; }
+  .label { font:500 11px ui-monospace,Menlo,monospace; color:#999; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px; }
+</style></head><body>
+<div class="label">Agent pills</div>
+<div class="row">
+  <span class="pill agent-idle">tests</span>
+  <span class="pill agent-idle">docs-claude</span>
+  <span class="pill agent-run"><span class="dot-blue"></span>security-review</span>
+  <span class="pill agent-idle">+3</span>
+</div>
+<div class="label">GitHub counts</div>
+<div class="row">
+  <span class="pill pr">⑂ 3</span>
+  <span class="pill issue">◌ 12</span>
+</div>
+<div class="label">Verdicts (text only — no chip)</div>
+<div class="row">
+  <span class="verdict-lgtm">lgtm</span>
+  <span class="verdict-warn">needs attention</span>
+  <span class="verdict-bad">do not ship</span>
+</div>
+</body></html>

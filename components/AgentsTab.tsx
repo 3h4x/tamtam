@@ -592,7 +592,7 @@ function AgentModal({
       onClick={(e) => { if (e.target === backdropRef.current) onClose() }}
     >
       <div
-        className="bg-bg-primary rounded-2xl shadow-2xl border border-border w-full max-w-2xl flex flex-col animate-slide-in-up"
+        className="bg-bg-primary rounded-lg shadow-lg border border-border w-full max-w-2xl flex flex-col animate-slide-in-up"
         style={{ maxHeight: '92vh' }}
         role="dialog"
         aria-modal="true"
@@ -824,7 +824,7 @@ function AgentModal({
           </div>
 
           {/* Settings strip: Schedule / Runner / Enabled */}
-          <div className="flex items-center gap-4 px-4 py-3 rounded-xl bg-bg-secondary border border-border">
+          <div className="flex items-center gap-4 px-4 py-3 rounded-lg bg-bg-secondary border border-border">
             <div className="flex items-center gap-2 flex-1">
               <span className="text-xs text-text-tertiary whitespace-nowrap font-medium">Schedule</span>
               <select

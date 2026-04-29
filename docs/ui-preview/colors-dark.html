@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>Colors — Dark</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { margin: 0; padding: 16px; background: #0f0f0f; font: 13px var(--font-sans); color: var(--color-text-primary); }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .sw { border: 1px solid #2a2a2a; border-radius: 8px; overflow: hidden; }
+  .chip { height: 56px; }
+  .meta { padding: 6px 8px; display: flex; justify-content: space-between; align-items: baseline; gap: 6px; background: #1a1a1a; }
+  .name { font-weight: 500; font-size: 12px; color: #e5e5e5; }
+  .hex { font: 11px ui-monospace, Menlo, monospace; color: #666; font-variant-numeric: tabular-nums; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #666; margin: 0 0 8px; font-weight: 500; }
+  .row + .row { margin-top: 14px; }
+</style>
+</head>
+<body>
+<div class="row">
+  <h2>Surfaces</h2>
+  <div class="grid">
+    <div class="sw"><div class="chip" style="background:#0f0f0f;border-bottom:1px solid #2a2a2a"></div><div class="meta"><span class="name">bg-primary</span><span class="hex">#0F0F0F</span></div></div>
+    <div class="sw"><div class="chip" style="background:#1a1a1a"></div><div class="meta"><span class="name">bg-secondary</span><span class="hex">#1A1A1A</span></div></div>
+    <div class="sw"><div class="chip" style="background:#2a2a2a"></div><div class="meta"><span class="name">bg-tertiary</span><span class="hex">#2A2A2A</span></div></div>
+    <div class="sw"><div class="chip" style="background:#222222"></div><div class="meta"><span class="name">divider</span><span class="hex">#222222</span></div></div>
+  </div>
+</div>
+<div class="row">
+  <h2>Text</h2>
+  <div class="grid">
+    <div class="sw"><div class="chip" style="background:#e5e5e5"></div><div class="meta"><span class="name">text-primary</span><span class="hex">#E5E5E5</span></div></div>
+    <div class="sw"><div class="chip" style="background:#999999"></div><div class="meta"><span class="name">text-secondary</span><span class="hex">#999999</span></div></div>
+    <div class="sw"><div class="chip" style="background:#666666"></div><div class="meta"><span class="name">text-tertiary</span><span class="hex">#666666</span></div></div>
+    <div class="sw"><div class="chip" style="background:#2a2a2a"></div><div class="meta"><span class="name">border</span><span class="hex">#2A2A2A</span></div></div>
+  </div>
+</div>
+</body>
+</html>

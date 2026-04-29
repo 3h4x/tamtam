@@ -94,7 +94,7 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 - `data/` — SQLite database (gitignored)
 - `__tests__/` — vitest unit tests
 - `e2e/` — Playwright integration tests
-- `docs/` — architecture docs: `STREAMING.md` (job lifecycle + SSE), `PIPELINE.md` (release pipeline state machine), `DATABASE.md` (schema reference), `SETTINGS.md` (all config keys), `AGENT.md` (agent concepts), `CACHING.md` (layered TTL cache strategy), `PROFILING.md` (server / client / Turbopack profiling), `SECURITY.md` (security model and threat surface)
+- `docs/` — architecture docs: `STREAMING.md` (job lifecycle + SSE), `PIPELINE.md` (release pipeline state machine), `DATABASE.md` (schema reference), `SETTINGS.md` (all config keys), `AGENT.md` (agent concepts), `CACHING.md` (layered TTL cache strategy), `PROFILING.md` (server / client / Turbopack profiling), `SECURITY.md` (security model and threat surface), `UI.md` (design system: tokens, typography, components, voice — read before any visual change; canonical previews in `docs/ui-preview/*.html`)
 
 ## Pages
 - `/` — Projects list with status, changes, CI

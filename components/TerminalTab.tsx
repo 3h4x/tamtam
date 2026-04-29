@@ -1054,7 +1054,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
                 +skill
               </button>
               {showSkillPicker && (
-                <div className="absolute top-full right-0 mt-1 w-96 bg-[#1a1a1a] border border-[#333] rounded-lg shadow-xl z-50 overflow-hidden">
+                <div className="absolute top-full right-0 mt-1 w-96 bg-[#1a1a1a] border border-[#333] rounded-lg shadow-lg z-50 overflow-hidden">
                   <input
                     ref={skillSearchRef}
                     type="text"
@@ -1101,7 +1101,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
                 +docs
               </button>
               {showDocsPicker && (
-                <div className="absolute top-full right-0 mt-1 w-72 bg-[#1a1a1a] border border-[#333] rounded-lg shadow-xl z-50 overflow-hidden">
+                <div className="absolute top-full right-0 mt-1 w-72 bg-[#1a1a1a] border border-[#333] rounded-lg shadow-lg z-50 overflow-hidden">
                   <input
                     ref={docsSearchRef}
                     type="text"
@@ -1203,9 +1203,23 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
 
           {/* Empty state */}
           {history.length === 0 && !streaming && (
-            <div className="flex-1 flex flex-col items-center justify-center gap-2 select-none py-16">
-              <span className="text-2xl font-mono text-[#222]">_</span>
-              <span className="text-sm font-mono text-[#2a2a2a]">start a conversation</span>
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 select-none py-16">
+              <span className="text-2xl font-mono text-[#333]">_</span>
+              <span className="text-sm font-mono text-[#555]">start a conversation</span>
+              {allItems.length > 0 && (
+                <div className="flex flex-wrap justify-center gap-1.5 max-w-sm mt-1">
+                  {allItems.slice(0, 4).map(item => (
+                    <button
+                      key={item.id}
+                      className="text-[11px] px-2 py-1 rounded bg-[#1e1e1e] text-[#555] hover:text-[#999] hover:bg-[#252525] cursor-pointer border border-[#2a2a2a] font-mono transition-colors"
+                      onClick={() => toggleItem(item)}
+                      title={item.description}
+                    >
+                      {item.name}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

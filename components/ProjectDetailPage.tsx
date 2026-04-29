@@ -1311,7 +1311,7 @@ export function ProjectDetailPage({
                   </div>
                   <button
                     className="px-3 py-1.5 text-xs bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer transition-colors"
-                    onClick={() => setEditActions([...editActions, { name: '', command: '', color: '#6366f1' }])}
+                    onClick={() => setEditActions([...editActions, { name: '', command: '', color: '#2563eb' }])}
                   >
                     + Add Action
                   </button>
@@ -1355,7 +1355,7 @@ export function ProjectDetailPage({
                           <input
                             type="color"
                             className="w-10 h-9 p-0.5 bg-bg-primary border border-border rounded-lg cursor-pointer"
-                            value={action.color || '#6366f1'}
+                            value={action.color || '#2563eb'}
                             onChange={(e) => {
                               const next = [...editActions]
                               next[i] = { ...next[i], color: e.target.value }

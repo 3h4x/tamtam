@@ -1,0 +1,153 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Logo & Favicon</title>
+<style>
+  body { margin:0; font:13px -apple-system,system-ui,sans-serif; color:#1a1a1a; background:#fff; }
+
+  .word { display:grid; grid-template-columns:1fr 1fr; height:130px; border-bottom:1px solid #e5e5e5; }
+  .word .panel { display:flex; align-items:center; justify-content:center; padding:16px; }
+  .word .light { background:#fff; border-right:1px solid #e5e5e5; }
+  .word .dark  { background:#0f0f0f; }
+  .word img { height:72px; width:auto; }
+
+  .section { padding:14px 16px; border-bottom:1px solid #e5e5e5; }
+  .section:last-child { border-bottom:none; }
+  .label { font:500 11px ui-monospace,Menlo,monospace; color:#999; text-transform:uppercase; letter-spacing:0.06em; margin:0 0 10px; }
+
+  /* Hero pick */
+  .hero { display:flex; align-items:center; gap:18px; }
+  .hero-mark { width:96px; height:96px; border-radius:18px; background:#0f0f0f; display:flex; align-items:center; justify-content:center; }
+  .hero-meta { display:flex; flex-direction:column; gap:4px; }
+  .hero-name { font-size:15px; font-weight:600; }
+  .hero-desc { font-size:13px; color:#666; line-height:1.5; max-width:380px; }
+  .files { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+  .files code { font:11px ui-monospace,Menlo,monospace; background:#f5f5f5; border:1px solid #e5e5e5; border-radius:4px; padding:2px 6px; color:#666; }
+
+  /* Size strip */
+  .sizes { display:flex; gap:18px; align-items:flex-end; }
+  .size { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .size .num { font:600 10px ui-monospace,Menlo,monospace; color:#999; }
+  .size .desc { font-size:11px; color:#666; }
+  .square-black { background:#0f0f0f; display:flex; align-items:center; justify-content:center; }
+  .square-rounded-black { background:#0f0f0f; display:flex; align-items:center; justify-content:center; border-radius:3px; }
+  .square-rounded-blue { background:#2563eb; display:flex; align-items:center; justify-content:center; border-radius:7px; }
+
+  /* Tab mockup */
+  .tab-row { display:flex; gap:8px; align-items:center; }
+  .tab { display:inline-flex; align-items:center; gap:6px; padding:6px 10px 6px 8px; background:#f5f5f5; border:1px solid #e5e5e5; border-radius:8px 8px 0 0; font-size:12px; color:#1a1a1a; max-width:180px; }
+  .tab .ico { width:14px; height:14px; flex:none; background:#0f0f0f; display:flex; align-items:center; justify-content:center; }
+  .tab .title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tab.active { background:#fff; }
+
+  /* Mac dock-ish row */
+  .dock-row { display:flex; gap:10px; align-items:flex-end; }
+  .dock-icon { width:48px; height:48px; border-radius:11px; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 10px rgba(0,0,0,.12); }
+</style></head>
+<body>
+
+<!-- Wordmark -->
+<div class="word">
+  <div class="panel light"><img src="../assets/logo-light.png" alt="tamtam (light)"></div>
+  <div class="panel dark"><img src="../assets/logo-dark.png" alt="tamtam (dark)"></div>
+</div>
+
+<!-- Hero: chosen mark -->
+<div class="section">
+  <div class="label">Favicon — chosen: doubled "tt"</div>
+  <div class="hero">
+    <div class="hero-mark">
+      <svg viewBox="0 0 16 16" width="68" height="68">
+        <g fill="#fff">
+          <rect x="1" y="5" width="6" height="2"/>
+          <rect x="3" y="3" width="2" height="9"/>
+          <rect x="3" y="10" width="4" height="2"/>
+          <rect x="9" y="5" width="6" height="2"/>
+          <rect x="11" y="3" width="2" height="9"/>
+          <rect x="11" y="10" width="4" height="2"/>
+        </g>
+      </svg>
+    </div>
+    <div class="hero-meta">
+      <div class="hero-name">tamtam · doubled "tt"</div>
+      <div class="hero-desc">Pulls the pixel-block letterforms straight from the wordmark, but reduced to two crossbars — readable at 16px, distinctive at 180px.</div>
+      <div class="files">
+        <code>favicon.svg</code>
+        <code>favicon-16.png</code>
+        <code>favicon-32.png</code>
+        <code>favicon-48.png</code>
+        <code>apple-touch-icon.png</code>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Real-size strip -->
+<div class="section">
+  <div class="label">At real sizes</div>
+  <div class="sizes">
+    <div class="size">
+      <div class="square-black" style="width:16px;height:16px;">
+        <img src="../assets/favicon-16.png" width="16" height="16" style="image-rendering:pixelated;">
+      </div>
+      <div class="num">16</div>
+      <div class="desc">browser tab</div>
+    </div>
+    <div class="size">
+      <div class="square-black" style="width:32px;height:32px;">
+        <img src="../assets/favicon-32.png" width="32" height="32" style="image-rendering:pixelated;">
+      </div>
+      <div class="num">32</div>
+      <div class="desc">retina tab</div>
+    </div>
+    <div class="size">
+      <div class="square-rounded-black" style="width:48px;height:48px;">
+        <img src="../assets/favicon-48.png" width="48" height="48" style="image-rendering:pixelated;">
+      </div>
+      <div class="num">48</div>
+      <div class="desc">bookmark / shortcut</div>
+    </div>
+    <div class="size">
+      <div class="square-rounded-blue" style="width:96px;height:96px;">
+        <svg viewBox="0 0 16 16" width="68" height="68"><g fill="#fff"><rect x="1" y="5" width="6" height="2"/><rect x="3" y="3" width="2" height="9"/><rect x="3" y="10" width="4" height="2"/><rect x="9" y="5" width="6" height="2"/><rect x="11" y="3" width="2" height="9"/><rect x="11" y="10" width="4" height="2"/></g></svg>
+      </div>
+      <div class="num">180</div>
+      <div class="desc">apple-touch · blue bg</div>
+    </div>
+  </div>
+</div>
+
+<!-- In context: browser tabs -->
+<div class="section">
+  <div class="label">In context — browser tabs</div>
+  <div class="tab-row">
+    <div class="tab active">
+      <span class="ico"><img src="../assets/favicon-16.png" width="14" height="14" style="image-rendering:pixelated;"></span>
+      <span class="title">tamtam · localhost:1337</span>
+    </div>
+    <div class="tab">
+      <span class="ico" style="background:#666;"></span>
+      <span class="title">GitHub</span>
+    </div>
+    <div class="tab">
+      <span class="ico" style="background:#888;"></span>
+      <span class="title">Vercel</span>
+    </div>
+  </div>
+</div>
+
+<!-- In context: app icon dock -->
+<div class="section">
+  <div class="label">In context — app icon (apple-touch)</div>
+  <div class="dock-row">
+    <div class="dock-icon" style="background:#2563eb;">
+      <svg viewBox="0 0 16 16" width="34" height="34"><g fill="#fff"><rect x="1" y="5" width="6" height="2"/><rect x="3" y="3" width="2" height="9"/><rect x="3" y="10" width="4" height="2"/><rect x="9" y="5" width="6" height="2"/><rect x="11" y="3" width="2" height="9"/><rect x="11" y="10" width="4" height="2"/></g></svg>
+    </div>
+    <div class="dock-icon" style="background:#0f0f0f;">
+      <svg viewBox="0 0 16 16" width="34" height="34"><g fill="#fff"><rect x="1" y="5" width="6" height="2"/><rect x="3" y="3" width="2" height="9"/><rect x="3" y="10" width="4" height="2"/><rect x="9" y="5" width="6" height="2"/><rect x="11" y="3" width="2" height="9"/><rect x="11" y="10" width="4" height="2"/></g></svg>
+    </div>
+    <div class="dock-icon" style="background:#fff;border:1px solid #e5e5e5;">
+      <svg viewBox="0 0 16 16" width="34" height="34"><g fill="#0f0f0f"><rect x="1" y="5" width="6" height="2"/><rect x="3" y="3" width="2" height="9"/><rect x="3" y="10" width="4" height="2"/><rect x="9" y="5" width="6" height="2"/><rect x="11" y="3" width="2" height="9"/><rect x="11" y="10" width="4" height="2"/></g></svg>
+    </div>
+  </div>
+</div>
+
+</body></html>
