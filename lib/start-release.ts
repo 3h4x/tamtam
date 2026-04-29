@@ -6,7 +6,7 @@ import { startProjectTest, detectTestCommand } from './start-test';
 import { startProjectReview } from './start-review';
 import { startProjectPush } from './start-push';
 import { startProjectCommit } from './start-commit';
-import { listJobs, probeJobStatus, createJob, updateJob, getVerdict, markDone } from './job-storage';
+import { listJobs, probeJobStatus, createJob, updateJob, getVerdict, markDone, runWithParent } from './job-storage';
 import { isReviewed } from './git-utils';
 import { exec } from './shell';
 import { getImproveConfig, getProjectTestConfig } from './scheduling';
@@ -235,48 +235,53 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
   const testCmd = detectTestCommand(projPath, projectName);
   const testsDisabled = !!getProjectTestConfig(projectName)?.testsDisabled;
 
-  // No uncommitted changes — run tests first (if configured + not disabled) to
-  // verify committed code before pushing. Completion hook handles test→push.
-  // If no test command or tests disabled, push the existing commits directly.
-  if (!changes) {
+  // First step's parent is the release meta job, not whatever triggered the
+  // release (agent run, manual click). Switching the AsyncLocalStorage parent
+  // here makes the chain read as: agent → release → test → review → commit → push.
+  return runWithParent(releaseJobId, async () => {
+    // No uncommitted changes — run tests first (if configured + not disabled) to
+    // verify committed code before pushing. Completion hook handles test→push.
+    // If no test command or tests disabled, push the existing commits directly.
+    if (!changes) {
+      if (testCmd && !testsDisabled) {
+        const r = await startProjectTest(projectName);
+        if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+        return { ok: true, step: 'test' as const, jobId: r.jobId, releaseJobId, message: `Running tests (${r.testCmd})` };
+      }
+      const r = await startProjectPush(projectName);
+      if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+      return { ok: true, step: 'push' as const, releaseJobId, message: r.message };
+    }
+
+    // Fresh LGTM and there are uncommitted changes — commit them first, then push.
+    if (skipToPush) {
+      const r = await startProjectCommit(projectName);
+      if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+      return { ok: true, step: 'push' as const, releaseJobId, message: r.message };
+    }
+
+    // Has uncommitted changes — run tests first (if configured), then review.
     if (testCmd && !testsDisabled) {
       const r = await startProjectTest(projectName);
       if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
-      return { ok: true, step: 'test', jobId: r.jobId, releaseJobId, message: `Running tests (${r.testCmd})` };
+      return { ok: true, step: 'test' as const, jobId: r.jobId, releaseJobId, message: `Running tests (${r.testCmd})` };
     }
-    const r = await startProjectPush(projectName);
-    if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
-    return { ok: true, step: 'push', releaseJobId, message: r.message };
-  }
 
-  // Fresh LGTM and there are uncommitted changes — commit them first, then push.
-  if (skipToPush) {
-    const r = await startProjectCommit(projectName);
-    if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
-    return { ok: true, step: 'push', releaseJobId, message: r.message };
-  }
+    // If review is disabled per-project, short-circuit to commit — treat the
+    // agent's own prompt as the review step. No autoCommit gating needed: we're
+    // already inside an explicit release, which implies commit intent (same reason
+    // job-storage.ts's completion hook lets `inRelease` bypass autoCommitEnabled).
+    const reviewDisabled = !!getProjectTestConfig(projectName)?.reviewDisabled;
+    if (reviewDisabled) {
+      const r = await startProjectCommit(projectName);
+      if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+      return { ok: true, step: 'commit' as const, releaseJobId, message: r.message };
+    }
 
-  // Has uncommitted changes — run tests first (if configured), then review.
-  if (testCmd && !testsDisabled) {
-    const r = await startProjectTest(projectName);
+    const r = await startProjectReview(projectName);
     if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
-    return { ok: true, step: 'test', jobId: r.jobId, releaseJobId, message: `Running tests (${r.testCmd})` };
-  }
-
-  // If review is disabled per-project, short-circuit to commit — treat the
-  // agent's own prompt as the review step. No autoCommit gating needed: we're
-  // already inside an explicit release, which implies commit intent (same reason
-  // job-storage.ts's completion hook lets `inRelease` bypass autoCommitEnabled).
-  const reviewDisabled = !!getProjectTestConfig(projectName)?.reviewDisabled;
-  if (reviewDisabled) {
-    const r = await startProjectCommit(projectName);
-    if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
-    return { ok: true, step: 'commit', releaseJobId, message: r.message };
-  }
-
-  const r = await startProjectReview(projectName);
-  if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
-  return { ok: true, step: 'review', jobId: r.jobId, releaseJobId, message: 'Running review' };
+    return { ok: true, step: 'review' as const, jobId: r.jobId, releaseJobId, message: 'Running review' };
+  });
 }
 
 // Returns true when the project's most recent finished review is LGTM AND

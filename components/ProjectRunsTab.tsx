@@ -155,6 +155,8 @@ interface Entry {
   verdict?: JobInfo['verdict']
   logPruned: boolean
   children?: Entry[]
+  parentJobId: string | null
+  parentLabel: string | null
 }
 
 function truncate(s: string, n: number): string {
@@ -205,9 +207,19 @@ function modelFromContext(ctx: string | null | undefined): string | null {
   } catch { return null }
 }
 
+function parentLabelFor(parentJob: JobInfo | undefined): string | null {
+  if (!parentJob) return null
+  const bucket = bucketOf(parentJob.kind)
+  if (bucket === 'agent') return `agent ${parentJob.kind.replace(/^agent:/, '')}`
+  if (bucket === 'release') return 'release'
+  return KIND_LABEL[bucket]
+}
+
 export function buildEntries(jobs: JobInfo[]): Entry[] {
   // Sort ascending first so session groupings see the earliest prompt first.
   const sorted = [...jobs].sort((a, b) => a.started_at - b.started_at)
+  const byId = new Map<string, JobInfo>()
+  for (const j of jobs) byId.set(j.id, j)
   const sessionGroup = new Map<string, Entry>()
   const entries: Entry[] = []
 
@@ -258,6 +270,8 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       navSessionId: j.session_id ?? null,
       verdict: j.verdict,
       logPruned: !!j.log_pruned,
+      parentJobId: j.parent_job_id ?? null,
+      parentLabel: j.parent_job_id ? parentLabelFor(byId.get(j.parent_job_id)) : null,
     }
     if (canSessionMerge) sessionGroup.set(j.session_id!, entry)
     entries.push(entry)
@@ -362,6 +376,8 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
           verdict: undefined,
           logPruned: false,
           children: cluster,
+          parentJobId: null,
+          parentLabel: null,
         })
       }
     }
@@ -765,6 +781,14 @@ function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summa
             {e.title}
           </div>
           <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5 flex-wrap">
+            {e.parentLabel && (
+              <span
+                className="font-mono text-text-tertiary"
+                title={`Started by ${e.parentLabel} (${e.parentJobId?.slice(-12) ?? ''})`}
+              >
+                ← {e.parentLabel}
+              </span>
+            )}
             {e.turns > 1 && <span className="font-mono">{e.turns} turns</span>}
             {e.model && <span className="font-mono">{e.model}</span>}
             {e.navSessionId && <span className="font-mono">#{e.navSessionId.slice(0, 8)}</span>}
