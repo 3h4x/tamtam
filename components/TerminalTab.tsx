@@ -1018,18 +1018,34 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
             >
               thinking
             </button>
-            {selectedItems.map(item => (
-              <span key={item.id} className="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent font-mono">
-                {item.name}
-                <button className="ml-1 text-accent/50 hover:text-accent cursor-pointer" onClick={() => toggleItem(item)}>x</button>
-              </span>
-            ))}
-            {selectedDocs.map(doc => (
-              <span key={doc.name} className="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent font-mono">
-                {doc.name}
-                <button className="ml-1 text-accent/50 hover:text-accent cursor-pointer" onClick={() => toggleDoc(doc)}>x</button>
-              </span>
-            ))}
+            {(() => {
+              const allSelected = [
+                ...selectedItems.map(i => ({ label: i.name, remove: () => toggleItem(i), key: `s:${i.id}` })),
+                ...selectedDocs.map(d => ({ label: d.name, remove: () => toggleDoc(d), key: `d:${d.name}` })),
+              ]
+              const SHOW = 3
+              const visible = allSelected.slice(0, SHOW)
+              const overflow = allSelected.length - SHOW
+              return (
+                <>
+                  {visible.map(item => (
+                    <span key={item.key} className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent font-mono gap-0.5 max-w-[100px]">
+                      <span className="truncate">{item.label}</span>
+                      <button className="text-accent/40 hover:text-accent cursor-pointer border-none bg-transparent leading-none shrink-0" onClick={item.remove} title={`Remove ${item.label}`}>×</button>
+                    </span>
+                  ))}
+                  {overflow > 0 && (
+                    <span
+                      className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-accent/10 text-accent/70 font-mono cursor-pointer hover:bg-accent/20"
+                      title={allSelected.slice(SHOW).map(i => i.label).join(', ')}
+                      onClick={() => setShowSkillPicker(true)}
+                    >
+                      +{overflow} more
+                    </span>
+                  )}
+                </>
+              )
+            })()}
             <div className="relative">
               <button
                 className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-[#888] hover:text-[#ccc] cursor-pointer border-none font-mono leading-none"

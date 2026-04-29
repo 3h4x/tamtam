@@ -79,18 +79,16 @@ function StatusCard({ label, primary, detail, tone, onClick, disabled, running }
   return (
     <button
       type="button"
-      className={`flex-1 min-w-0 text-left border rounded-lg p-3 flex flex-col gap-1 transition-colors ${TONE_RING[tone]} ${
+      className={`min-w-0 text-left border rounded-lg px-3 py-2 flex items-center gap-2 transition-colors ${TONE_RING[tone]} ${
         clickable ? 'bg-bg-secondary hover:bg-bg-tertiary cursor-pointer' : 'bg-bg-secondary cursor-default'
       } ${disabled ? 'opacity-60' : ''}`}
       onClick={clickable ? onClick : undefined}
       disabled={!clickable}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] uppercase tracking-wider text-text-tertiary font-semibold">{label}</span>
-        <span className={`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]} ${running ? 'animate-pulse' : ''}`} />
-      </div>
-      <div className="text-sm font-medium text-text-primary truncate">{primary}</div>
-      {detail && <div className="text-xs text-text-tertiary truncate">{detail}</div>}
+      <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${TONE_DOT[tone]} ${running ? 'animate-pulse' : ''}`} />
+      <span className="text-[10px] uppercase tracking-wider text-text-tertiary font-semibold shrink-0">{label}</span>
+      <span className="text-sm font-medium text-text-primary truncate">{primary}</span>
+      {detail && <span className="text-xs text-text-tertiary truncate hidden sm:inline">{detail}</span>}
     </button>
   )
 }
@@ -254,10 +252,8 @@ function StatusStrip({
     />
   ) : null
 
-  const colCount = pushCard ? 'grid-cols-2 lg:grid-cols-5' : 'grid-cols-2 lg:grid-cols-4'
-
   return (
-    <div className={`grid ${colCount} gap-2 mb-4`}>
+    <div className="flex flex-wrap gap-2 mb-4">
       {changesCard}
       {reviewCard}
       {testsCard}
