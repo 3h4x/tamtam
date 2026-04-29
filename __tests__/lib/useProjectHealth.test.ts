@@ -47,12 +47,12 @@ describe('computeFleetHealth', () => {
       expect(fleet.errorCount).toBe(1);
     });
 
-    it('marks task as error on CI failure', () => {
+    it('does not mark project status as error on CI failure (CI has its own column)', () => {
       const fleet = computeFleetHealth([makeTask({ ci: 'failure', last_run_ago: '5m' })]);
-      expect(fleet.projects[0].status).toBe('error');
+      expect(fleet.projects[0].status).toBe('healthy');
     });
 
-    it('exit code error takes precedence over CI failure', () => {
+    it('exit code error remains error even with CI failure', () => {
       const fleet = computeFleetHealth([makeTask({ last_run_exit: 2, ci: 'failure', last_run_ago: '5m' })]);
       expect(fleet.projects[0].status).toBe('error');
     });
@@ -219,7 +219,7 @@ describe('computeFleetHealth', () => {
     it('counts multiple project statuses correctly', () => {
       const tasks = [
         makeTask({ id: 't1', project: 'e1', last_run_exit: 1, last_run_ago: '5m' }),
-        makeTask({ id: 't2', project: 'e2', ci: 'failure', last_run_ago: '5m' }),
+        makeTask({ id: 't2', project: 'e2', last_run_exit: 1, last_run_ago: '5m' }),
         makeTask({ id: 't3', project: 'w1', launchctl: 'paused', last_run_ago: '5m' }),
         makeTask({ id: 't4', project: 'h1', last_run: '2024-01-01', last_run_ago: '5m' }),
         makeTask({ id: 't5', project: 'u1' }),
