@@ -1203,21 +1203,25 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
 
           {/* Empty state */}
           {history.length === 0 && !streaming && (
-            <div className="flex-1 flex flex-col items-center justify-center gap-3 select-none py-16">
-              <span className="text-2xl font-mono text-[#333]">_</span>
-              <span className="text-sm font-mono text-[#555]">start a conversation</span>
+            <div className="flex-1 flex flex-col items-center justify-center gap-2 select-none py-16">
+              <span className="text-3xl font-mono text-[#2a2a2a]">_</span>
+              <span className="text-sm font-mono text-[#666]">start a conversation</span>
+              <span className="text-[11px] font-mono text-[#444]">type below · ⌘↵ to send</span>
               {allItems.length > 0 && (
-                <div className="flex flex-wrap justify-center gap-1.5 max-w-sm mt-1">
-                  {allItems.slice(0, 4).map(item => (
-                    <button
-                      key={item.id}
-                      className="text-[11px] px-2 py-1 rounded bg-[#1e1e1e] text-[#555] hover:text-[#999] hover:bg-[#252525] cursor-pointer border border-[#2a2a2a] font-mono transition-colors"
-                      onClick={() => toggleItem(item)}
-                      title={item.description}
-                    >
-                      {item.name}
-                    </button>
-                  ))}
+                <div className="flex flex-col items-center gap-2 mt-3">
+                  <span className="text-[10px] font-mono text-[#3a3a3a] uppercase tracking-wider">attach a skill</span>
+                  <div className="flex flex-wrap justify-center gap-1.5 max-w-sm">
+                    {allItems.slice(0, 4).map(item => (
+                      <button
+                        key={item.id}
+                        className="text-[11px] px-2 py-1 rounded bg-[#1e1e1e] text-[#777] hover:text-[#ccc] hover:bg-[#252525] cursor-pointer border border-[#2a2a2a] font-mono transition-colors"
+                        onClick={() => toggleItem(item)}
+                        title={item.description}
+                      >
+                        {item.name}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -1239,12 +1243,14 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
               className={`group relative px-4 py-2 ${
                 entry.role === 'user' ? 'text-[#f0f0f0] whitespace-pre-wrap border-l-2 border-accent/40' :
                 entry.role === 'error' ? 'text-status-error whitespace-pre-wrap border-l-2 border-status-error/50 bg-status-error/5' :
-                entry.role === 'status' ? 'text-[#555] whitespace-pre-wrap text-xs italic' :
-                entry.role === 'raw' ? 'text-[#c0c0c0] font-mono text-xs whitespace-pre-wrap' :
+                entry.role === 'status' ? 'text-[#888] whitespace-pre-wrap text-[11px] border-l-2 border-[#2a2a2a] bg-[#141414]' :
+                entry.role === 'raw' ? 'text-[#c0c0c0] font-mono text-xs whitespace-pre-wrap border-l-2 border-[#2a2a2a]' :
                 'text-[#e0e0e0] terminal-markdown'
               }`}
             >
               {entry.role === 'user' && <span className="text-accent mr-2">#</span>}
+              {entry.role === 'status' && <span className="text-[#555] mr-2 select-none">›</span>}
+              {entry.role === 'error' && <span className="text-status-error mr-2 select-none">!</span>}
               {entry.role === 'assistant'
                 ? (hasAnsi(entry.text)
                     ? <pre className="whitespace-pre-wrap font-mono text-xs m-0">{renderAnsi(entry.text)}</pre>
@@ -1285,7 +1291,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
 
           {/* Live raw lines from passthrough streaming (test output, section headers, etc.) */}
           {streaming && rawBuffer && (
-            <div className="px-4 py-2 text-[#c0c0c0] font-mono text-xs whitespace-pre-wrap">
+            <div className="px-4 py-2 text-[#c0c0c0] font-mono text-xs whitespace-pre-wrap border-l-2 border-[#2a2a2a]">
               {hasAnsi(rawBuffer)
                 ? <pre className="whitespace-pre-wrap font-mono text-xs m-0 inline">{renderAnsi(collapseCarriageReturns(rawBuffer))}</pre>
                 : collapseCarriageReturns(rawBuffer)}
@@ -1327,12 +1333,13 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
             const label = pendingTool
               ? `running ${pendingTool.name}…`
               : (lastStreamLine || 'thinking…')
-            const idleLabel = idleSec >= 5 ? ` · idle ${idleSec}s` : ''
+            const isIdle = idleSec >= 5
+            const idleLabel = isIdle ? ` · idle ${idleSec}s` : ''
             return (
-              <div className="px-4 py-2 flex items-center gap-2">
+              <div className="px-4 py-2 flex items-center gap-2 border-l-2 border-accent/30 bg-accent/[0.02]">
                 <span className="text-accent font-mono text-sm">{spinnerChars[spinnerFrame % spinnerChars.length]}</span>
-                <span className="text-status-warning text-xs font-mono shrink-0">{(elapsedMs / 1000).toFixed(1)}s</span>
-                <span className={`text-xs font-mono truncate flex-1 ${pendingTool ? 'text-status-warning' : 'text-[#666]'}`}>
+                <span className={`text-xs font-mono shrink-0 tabular-nums ${isIdle ? 'text-status-warning' : 'text-[#888]'}`}>{(elapsedMs / 1000).toFixed(1)}s</span>
+                <span className={`text-xs font-mono truncate flex-1 ${pendingTool ? 'text-status-warning' : isIdle ? 'text-status-warning/80' : 'text-[#888]'}`}>
                   {label}{idleLabel}
                 </span>
                 <button
