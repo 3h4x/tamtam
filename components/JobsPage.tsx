@@ -47,6 +47,24 @@ function KindBadge({ kind }: { kind: string }) {
   )
 }
 
+function VerdictBadge({ verdict }: { verdict: NonNullable<JobInfo['verdict']> }) {
+  const cls =
+    verdict === 'LGTM'
+      ? 'bg-status-success/15 text-status-success border-status-success/30'
+      : verdict === 'DO NOT SHIP'
+      ? 'bg-status-error/15 text-status-error border-status-error/30'
+      : 'bg-status-warning/15 text-status-warning border-status-warning/30'
+  const label = verdict === 'LGTM' ? '✓ LGTM' : verdict === 'DO NOT SHIP' ? '✗ DNS' : '⚠ ATTN'
+  return (
+    <span
+      className={`inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-mono font-medium border ${cls}`}
+      title={`Review verdict: ${verdict}`}
+    >
+      {label}
+    </span>
+  )
+}
+
 export function JobsPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -141,12 +159,15 @@ export function JobsPage() {
       {loading ? (
         <div className="space-y-px">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="flex gap-4 px-4 py-3 border-t border-border" style={{ opacity: 1 - i * 0.1 }}>
-              <div className="skeleton h-5 w-16 rounded-full" />
-              <div className="skeleton h-4 w-28" />
-              <div className="skeleton h-5 w-14 rounded" />
-              <div className="skeleton h-4 w-48" />
-              <div className="skeleton h-4 w-20 ml-auto" />
+            <div key={i} className="flex items-center gap-4 px-4 py-2 border-t border-border" style={{ opacity: 1 - i * 0.1 }}>
+              <div className="skeleton h-5 w-20 rounded-full shrink-0" />
+              <div className="skeleton h-4 w-28 shrink-0" />
+              <div className="skeleton h-5 w-14 rounded shrink-0" />
+              <div className="skeleton h-4 flex-1 max-w-xs" />
+              <div className="skeleton h-4 w-16 shrink-0" />
+              <div className="skeleton h-4 w-12 shrink-0" />
+              <div className="skeleton h-4 w-14 shrink-0" />
+              <div className="skeleton h-4 w-12 shrink-0" />
             </div>
           ))}
         </div>
@@ -163,14 +184,14 @@ export function JobsPage() {
         <table className="w-full border-collapse">
           <thead>
             <tr className="text-left text-xs text-text-secondary uppercase tracking-wider">
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Project</th>
-              <th className="px-4 py-3">Kind</th>
-              <th className="px-4 py-3">Prompt</th>
-              <th className="px-4 py-3">Started</th>
-              <th className="px-4 py-3">Duration</th>
-              <th className="px-4 py-3">Tokens</th>
-              <th className="px-4 py-3">Cost</th>
+              <th className="px-4 py-2">Status</th>
+              <th className="px-4 py-2">Project</th>
+              <th className="px-4 py-2">Kind</th>
+              <th className="px-4 py-2">Prompt</th>
+              <th className="px-4 py-2">Started</th>
+              <th className="px-4 py-2">Duration</th>
+              <th className="px-4 py-2">Tokens</th>
+              <th className="px-4 py-2">Cost</th>
             </tr>
           </thead>
           <tbody>
@@ -183,19 +204,23 @@ export function JobsPage() {
               return (
                 <tr
                   key={job.id}
-                  className="border-t border-border hover:bg-bg-secondary/50 cursor-pointer"
+                  className={`border-t border-border hover:bg-bg-secondary/50 cursor-pointer border-l-2 ${isRunning ? 'border-l-status-warning' : isFailed ? 'border-l-status-error' : 'border-l-transparent'}`}
                   onClick={() => router.push(job.kind === 'run' && job.session_id ? `/project/${job.project}/terminal/${job.session_id}` : `/project/${job.project}/terminal?job=${encodeURIComponent(job.id)}`)}
                 >
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${isRunning ? 'bg-status-warning/15 text-status-warning' : isFailed ? 'bg-status-error/15 text-status-error' : 'bg-status-success/15 text-status-success'}`}>
-                      {isRunning ? '● running' : isFailed ? '● failed' : '● done'}
-                    </span>
+                  <td className="px-4 py-2 whitespace-nowrap">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full font-medium ${isRunning ? 'bg-status-warning/15 text-status-warning' : isFailed ? 'bg-status-error/15 text-status-error' : 'bg-status-success/15 text-status-success'}`}>
+                        <span className={isRunning ? 'animate-pulse' : ''}>●</span>
+                        {isRunning ? 'running' : isFailed ? `exit ${job.exit_code}` : 'done'}
+                      </span>
+                      {job.verdict && !isRunning && <VerdictBadge verdict={job.verdict} />}
+                    </div>
                   </td>
-                  <td className="px-4 py-3 font-medium text-text-primary whitespace-nowrap">{job.project}</td>
-                  <td className="px-4 py-3 whitespace-nowrap">
+                  <td className="px-4 py-2 font-medium text-text-primary whitespace-nowrap">{job.project}</td>
+                  <td className="px-4 py-2 whitespace-nowrap">
                     <KindBadge kind={job.kind} />
                   </td>
-                  <td className="px-4 py-3 max-w-xs">
+                  <td className="px-4 py-2 max-w-xs">
                     {promptText ? (
                       <span className="text-sm text-text-secondary truncate block" title={promptText}>
                         {promptText.split('\n')[0].slice(0, 80)}{promptText.length > 80 ? '…' : ''}
@@ -204,16 +229,16 @@ export function JobsPage() {
                       <span className="text-text-tertiary">—</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-text-secondary text-sm whitespace-nowrap" title={formatTime(job.started_at)}>
+                  <td className="px-4 py-2 text-text-secondary text-sm whitespace-nowrap" title={formatTime(job.started_at)}>
                     {formatAgo(job.started_at)}
                   </td>
-                  <td className="px-4 py-3 text-text-secondary text-sm whitespace-nowrap">
+                  <td className="px-4 py-2 text-text-secondary text-sm whitespace-nowrap tabular-nums">
                     {formatDuration(job.started_at, job.finished_at)}
                   </td>
-                  <td className="px-4 py-3 text-text-tertiary text-xs whitespace-nowrap">
+                  <td className="px-4 py-2 text-text-tertiary text-xs whitespace-nowrap tabular-nums">
                     {tokens ?? '—'}
                   </td>
-                  <td className="px-4 py-3 text-text-tertiary text-xs whitespace-nowrap tabular-nums">
+                  <td className="px-4 py-2 text-text-tertiary text-xs whitespace-nowrap tabular-nums">
                     {cost ?? '—'}
                   </td>
                 </tr>
