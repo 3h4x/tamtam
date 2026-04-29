@@ -24,6 +24,27 @@ function createTestDb() {
       created_at REAL NOT NULL,
       updated_at REAL NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS projects (
+      name TEXT PRIMARY KEY,
+      path TEXT NOT NULL,
+      enabled INTEGER DEFAULT 0,
+      github TEXT,
+      priority TEXT,
+      custom_actions TEXT,
+      test_command TEXT,
+      tests_disabled INTEGER DEFAULT 0,
+      review_disabled INTEGER DEFAULT 0,
+      test_cron_enabled INTEGER DEFAULT 0,
+      test_cron_schedule TEXT,
+      auto_commit_enabled INTEGER DEFAULT 0,
+      auto_push_enabled INTEGER DEFAULT 0,
+      auto_pr_merge_enabled INTEGER DEFAULT 0,
+      release_after_run INTEGER DEFAULT 0,
+      pr_workflow_enabled INTEGER DEFAULT 0,
+      issue_auto_branch INTEGER DEFAULT 1,
+      last_push_error TEXT,
+      last_push_at REAL
+    );
   `);
 
   return { sqlite, db: drizzle(sqlite, { schema }) };
@@ -213,6 +234,71 @@ describe('agents API', () => {
 
       expect(data.agents).toHaveLength(1);
       expect(data.agents[0].id).toBe('agent-1');
+    });
+
+    it('merges file agents from all enabled projects on unfiltered GET', async () => {
+      const db = testDb.db;
+      db.insert(schema.projects).values({ name: 'proj1', path: '/p1', enabled: true }).run();
+      db.insert(schema.projects).values({ name: 'proj2', path: '/p2', enabled: true }).run();
+      db.insert(schema.projects).values({ name: 'projDisabled', path: '/pd', enabled: false }).run();
+
+      const fileAgentsMod = await import('@/lib/tamtam-file-agents');
+      const scanMock = fileAgentsMod.scanFileAgents as ReturnType<typeof vi.fn>;
+      scanMock.mockImplementation((path: string, project: string) => {
+        if (project === 'proj1') {
+          return [{
+            id: 'file:proj1:fa1', name: 'fa1', project: 'proj1',
+            skillIds: [], docPaths: [], model: 'sonnet', prompt: '', schedule: null,
+            runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+            source: 'file', filePath: `${path}/.tamtam/agents/fa1.md`,
+          }];
+        }
+        if (project === 'proj2') {
+          return [{
+            id: 'file:proj2:fa2', name: 'fa2', project: 'proj2',
+            skillIds: [], docPaths: [], model: 'sonnet', prompt: '', schedule: null,
+            runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+            source: 'file', filePath: `${path}/.tamtam/agents/fa2.md`,
+          }];
+        }
+        return [];
+      });
+
+      const response = await GET(new NextRequest('http://localhost/api/agents'));
+      const data = await response.json();
+
+      const ids = data.agents.map((a: { id: string }) => a.id).sort();
+      expect(ids).toEqual(['file:proj1:fa1', 'file:proj2:fa2']);
+      // Disabled project must not be scanned
+      const calledProjects = scanMock.mock.calls.map(c => c[1]);
+      expect(calledProjects).not.toContain('projDisabled');
+    });
+
+    it('DB agent takes precedence over file agent with same project+name on unfiltered GET', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.projects).values({ name: 'proj1', path: '/p1', enabled: true }).run();
+      db.insert(schema.agents).values({
+        id: 'db-1', name: 'shared', project: 'proj1', skillIds: '[]',
+        model: 'sonnet', prompt: 'db version', schedule: null, runner: 'pm2',
+        createdAt: now, updatedAt: now,
+      }).run();
+
+      const fileAgentsMod = await import('@/lib/tamtam-file-agents');
+      const scanMock = fileAgentsMod.scanFileAgents as ReturnType<typeof vi.fn>;
+      scanMock.mockReturnValue([{
+        id: 'file:proj1:shared', name: 'shared', project: 'proj1',
+        skillIds: [], docPaths: [], model: 'sonnet', prompt: 'file version', schedule: null,
+        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+        source: 'file', filePath: '/p1/.tamtam/agents/shared.md',
+      }]);
+
+      const response = await GET(new NextRequest('http://localhost/api/agents'));
+      const data = await response.json();
+
+      expect(data.agents).toHaveLength(1);
+      expect(data.agents[0].id).toBe('db-1');
+      expect(data.agents[0].prompt).toBe('db version');
     });
   });
 
