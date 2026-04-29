@@ -68,6 +68,7 @@ describe('job-storage', () => {
   let getVerdict: typeof import('@/lib/job-storage').getVerdict;
   let jobToDict: typeof import('@/lib/job-storage').jobToDict;
   let probeJobStatus: typeof import('@/lib/job-storage').probeJobStatus;
+  let runWithParent: typeof import('@/lib/job-storage').runWithParent;
 
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-job-test-'));
@@ -96,6 +97,7 @@ describe('job-storage', () => {
     getVerdict = jobStorage.getVerdict;
     jobToDict = jobStorage.jobToDict;
     probeJobStatus = jobStorage.probeJobStatus;
+    runWithParent = jobStorage.runWithParent;
   });
 
   afterEach(() => {
@@ -161,6 +163,54 @@ describe('job-storage', () => {
       expect(job.ghIssueNumber).toBeNull();
       expect(job.ghIssueRepo).toBeNull();
       expect(job.ghIssueTitle).toBeNull();
+    });
+
+    it('defaults parentJobId to null when no context and no explicit param', () => {
+      const job = createJob('proj', 'review', 1, '/log');
+      expect(job.parentJobId).toBeNull();
+    });
+
+    it('picks up parentJobId from runWithParent context', async () => {
+      let childJob: ReturnType<typeof createJob> | null = null;
+      await runWithParent('parent-job-123', async () => {
+        childJob = createJob('proj', 'fix', 2, '/log');
+      });
+      expect(childJob!.parentJobId).toBe('parent-job-123');
+    });
+
+    it('explicit parentJobId param takes precedence over runWithParent context', async () => {
+      let childJob: ReturnType<typeof createJob> | null = null;
+      await runWithParent('ctx-parent', async () => {
+        childJob = createJob('proj', 'commit', 3, '/log', undefined, undefined, undefined, null, null, null, 'explicit-parent');
+      });
+      expect(childJob!.parentJobId).toBe('explicit-parent');
+    });
+
+    it('context does not leak outside runWithParent call', async () => {
+      await runWithParent('leak-test-parent', async () => {
+        createJob('proj', 'test', 4, '/log');
+      });
+      const outsideJob = createJob('proj', 'review', 5, '/log');
+      expect(outsideJob.parentJobId).toBeNull();
+    });
+
+    it('concurrent runWithParent contexts do not cross-contaminate', async () => {
+      const results: Array<{ id: string; parentJobId: string | null | undefined }> = [];
+      await Promise.all([
+        runWithParent('parent-A', async () => {
+          await new Promise((r) => setTimeout(r, 5));
+          const job = createJob('proj', 'fix', 10, '/log');
+          results.push({ id: job.id, parentJobId: job.parentJobId });
+        }),
+        runWithParent('parent-B', async () => {
+          const job = createJob('proj', 'fix', 11, '/log');
+          results.push({ id: job.id, parentJobId: job.parentJobId });
+        }),
+      ]);
+      const jobA = results.find((r) => r.parentJobId === 'parent-A');
+      const jobB = results.find((r) => r.parentJobId === 'parent-B');
+      expect(jobA).toBeTruthy();
+      expect(jobB).toBeTruthy();
     });
   });
 
