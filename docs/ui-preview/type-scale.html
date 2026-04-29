@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Type</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { margin:0; padding:16px; background:#fff; font-family: var(--font-sans); color:#1a1a1a; }
+  .row { display:flex; align-items:baseline; gap:16px; padding:8px 0; border-bottom:1px solid #eee; }
+  .row:last-child { border:0; }
+  .label { width:120px; font: 500 11px var(--font-mono); color:#999; }
+  .meta { margin-left:auto; font: 11px var(--font-mono); color:#999; font-variant-numeric:tabular-nums; }
+  .h1 { font-size:20px; font-weight:600; letter-spacing:-0.005em; }
+  .h2 { font-size:16px; font-weight:600; }
+  .h3 { font-size:14px; font-weight:600; }
+  .body { font-size:14px; }
+  .meta-text { font-size:12px; color:#666; }
+  .stat { font-size:24px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .eyebrow { font-size:12px; font-weight:500; text-transform:uppercase; letter-spacing:0.06em; color:#999; }
+</style></head>
+<body>
+  <div class="row"><span class="label">.ds-h1</span><span class="h1">Project Statistics</span><span class="meta">20 / 600 / -.005em</span></div>
+  <div class="row"><span class="label">.ds-h2</span><span class="h2">Webhook Configuration</span><span class="meta">16 / 600</span></div>
+  <div class="row"><span class="label">.ds-h3</span><span class="h3">Agent Templates</span><span class="meta">14 / 600</span></div>
+  <div class="row"><span class="label">.ds-stat</span><span class="stat">$1.42</span><span class="meta">24 / 600 / tabular</span></div>
+  <div class="row"><span class="label">.ds-body</span><span class="body">All CLI calls go through lib/shell.ts</span><span class="meta">14 / 400</span></div>
+  <div class="row"><span class="label">.ds-meta</span><span class="meta-text">Updated 2h ago · 6 projects</span><span class="meta">12 / 400</span></div>
+  <div class="row"><span class="label">.ds-eyebrow</span><span class="eyebrow">Project · Status · CI</span><span class="meta">12 / 500 / .06em</span></div>
+</body>
+</html>

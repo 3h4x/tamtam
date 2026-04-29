@@ -308,7 +308,7 @@ const isReviewRunning = (projectName: string) =>
                 onClick={() => router.push(`/project/${project.project}`)}
               >
                 {/* Project */}
-                <td className="px-4 py-3">
+                <td className="px-4 py-2">
                   <span className="flex items-center gap-2">
                     <span className="font-medium text-text-primary" data-private>{project.project}</span>
                     {issueCounts[project.project]?.prs > 0 && (
@@ -338,12 +338,12 @@ const isReviewRunning = (projectName: string) =>
                 </td>
 
                 {/* Agents */}
-                <td className="px-4 py-3 max-w-[280px]" onClick={e => e.stopPropagation()}>
+                <td className="px-4 py-2 max-w-[280px]" onClick={e => e.stopPropagation()}>
                   <AgentPills agents={agents} runningNames={runningAgentNames} />
                 </td>
 
                 {/* Status */}
-                <td className="px-4 py-3">
+                <td className="px-4 py-2">
                   {runningJobs.length > 0 ? (
                     <span className="flex items-center gap-1.5 text-accent text-sm">
                       <SpinnerIcon />
@@ -370,7 +370,7 @@ const isReviewRunning = (projectName: string) =>
                 </td>
 
                 {/* Changes */}
-                <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
                   {project.totalChanges > 0 ? (
                     <span className="flex items-center gap-2">
                       <span className={`text-sm font-medium tabular-nums ${hasUnreviewed ? 'text-status-warning' : 'text-text-primary'}`}>
@@ -404,7 +404,7 @@ const isReviewRunning = (projectName: string) =>
                 </td>
 
                 {/* Last Run */}
-                <td className="px-4 py-3">
+                <td className="px-4 py-2">
                   {lastJob ? (
                     <span className="flex items-center gap-1.5">
                       {lastJob.status === 'running' ? (
@@ -425,7 +425,7 @@ const isReviewRunning = (projectName: string) =>
                 </td>
 
                 {/* CI */}
-                <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
                   {ci === 'success' && <StatusDot ok={true} />}
                   {ci === 'failure' && (
                     ciUrl ? (
@@ -441,12 +441,12 @@ const isReviewRunning = (projectName: string) =>
                 </td>
 
                 {/* Release */}
-                <td className="px-4 py-3 text-sm text-text-tertiary tabular-nums">
+                <td className="px-4 py-2 text-sm text-text-tertiary tabular-nums">
                   <span data-private>{release || '—'}</span>
                 </td>
 
                 {/* Actions */}
-                <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
                   {isReviewed && (
                     <button
                       className="px-3 py-1.5 text-xs font-medium bg-accent text-white rounded-md hover:bg-accent-hover transition-colors cursor-pointer border-none disabled:opacity-60 disabled:cursor-not-allowed"

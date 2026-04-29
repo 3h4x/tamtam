@@ -403,7 +403,7 @@ export function SkillsPage() {
 
       {/* Toast — rendered independently of the sticky bar so bulk-create feedback remains visible after the selection is cleared */}
       {bulkResult && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-md border border-border bg-bg-secondary shadow-xl text-sm text-status-success font-medium" role="status" aria-live="polite">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-md border border-border bg-bg-secondary shadow-lg text-sm text-status-success font-medium" role="status" aria-live="polite">
           {bulkResult}
         </div>
       )}
@@ -503,7 +503,7 @@ function SkillEditor({
   }
 
   return (
-    <div className="bg-bg-secondary rounded-lg p-4 flex flex-col gap-4 shadow-xl border border-border">
+    <div className="bg-bg-secondary rounded-lg p-4 flex flex-col gap-4 border border-border">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wider">
           {skill ? 'Edit Skill' : 'New Skill'}

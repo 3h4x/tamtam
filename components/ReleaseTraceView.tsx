@@ -284,7 +284,7 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
 
                     {isOpen && step.log_excerpt && (
                       <div className="px-4 pb-3 border-t border-border">
-                        <pre className="text-[11px] text-[#c0c0c0] font-mono whitespace-pre-wrap break-words mt-2 max-h-48 overflow-y-auto leading-relaxed">
+                        <pre className="text-[11px] text-text-secondary font-mono whitespace-pre-wrap break-words mt-2 max-h-48 overflow-y-auto leading-relaxed">
                           {step.log_excerpt}
                         </pre>
                       </div>
