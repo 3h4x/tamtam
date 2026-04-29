@@ -170,6 +170,38 @@ describe('POST /api/projects/by-project/{projectName}/release/abort', () => {
     expect(execMock).not.toHaveBeenCalled();
   });
 
+  it('does not kill the triggering parent job (releaseJob.parentJobId)', async () => {
+    getLockMock.mockReturnValue(makeLock());
+    const releaseJob = makeJob({ parentJobId: 'agent-1' });
+    const parentJob = makeJob({
+      id: 'agent-1',
+      kind: 'agent:migration',
+      pid: 555,
+      releaseId: 'release-1',
+      finishedAt: null,
+    });
+    const stepJob = makeJob({
+      id: 'review-1',
+      kind: 'review',
+      pid: 1234,
+      releaseId: 'release-1',
+      finishedAt: null,
+    });
+    getJobMock.mockReturnValue(releaseJob);
+    listJobsMock.mockReturnValue([releaseJob, parentJob, stepJob]);
+
+    const res = await POST(req(), { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.status).toBe('aborted');
+    // Should kill the review step, NOT the parent agent run
+    expect(data.killed_job_id).toBe('review-1');
+    expect(execMock).toHaveBeenCalledWith('pm2', ['stop', 'review-1', '--silent'], expect.any(Object));
+    expect(execMock).not.toHaveBeenCalledWith('pm2', ['stop', 'agent-1', '--silent'], expect.any(Object));
+    // Parent job must not be marked aborted
+    expect(parentJob.abortedAt).toBeNull();
+    expect(parentJob.finishedAt).toBeNull();
+  });
+
   it('still releases lock even when pm2 stop throws', async () => {
     getLockMock.mockReturnValue(makeLock());
     const releaseJob = makeJob();
