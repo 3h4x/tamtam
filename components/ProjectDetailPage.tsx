@@ -1659,11 +1659,11 @@ export function ProjectDetailPage({
 
             const runningStepIdx = steps.findIndex(s => s.state === 'running')
 
-            const stepChipClass = (s: StepState) => {
+            const stepChipClass = (s: StepState, isRunning: boolean) => {
               if (s === 'done') return 'bg-status-success/12 text-status-success border-status-success/25'
-              if (s === 'failed') return 'bg-status-error/12 text-status-error border-status-error/25'
-              if (s === 'warning') return 'bg-status-warning/12 text-status-warning border-status-warning/25'
-              if (s === 'running') return 'bg-accent/12 text-accent border-accent/30'
+              if (s === 'failed') return 'bg-status-error/15 text-status-error border-status-error/40'
+              if (s === 'warning') return 'bg-status-warning/15 text-status-warning border-status-warning/40'
+              if (s === 'running') return `bg-accent/15 text-accent border-accent/50 ring-2 ring-accent/25 ${isRunning ? 'shadow-sm' : ''}`
               return 'bg-transparent text-text-tertiary border-border/50'
             }
 
@@ -1675,12 +1675,26 @@ export function ProjectDetailPage({
               return <span className="text-[10px] leading-none opacity-50">○</span>
             }
 
+            // Connector colour reflects the upstream step's state — done steps
+            // build a green progress trail; failed steps a red one.
+            const connectorClass = (prev: StepState) => {
+              if (prev === 'done') return 'bg-status-success/40'
+              if (prev === 'failed') return 'bg-status-error/40'
+              if (prev === 'warning') return 'bg-status-warning/40'
+              if (prev === 'running') return 'bg-accent/40'
+              return 'bg-border/50'
+            }
+
+            const doneCount = steps.filter(s => s.state === 'done').length
+            const totalSteps = steps.length
+
             return (
-              <div className="mt-3 mb-3 px-3 py-2 rounded-md border border-border bg-bg-secondary flex items-center gap-1.5 flex-wrap">
+              <div className="mt-3 mb-3 px-3 py-2 rounded-md border border-border bg-bg-secondary flex items-center gap-1 flex-wrap">
                 {steps.map((s, i) => {
                   const clickable = !!s.action
                   const dimmed = s.state === 'pending' && runningStepIdx >= 0 && i > runningStepIdx
-                  const chipClass = `inline-flex items-center gap-1.5 px-2 py-1 rounded-md border font-mono text-[11px] font-medium transition-colors ${stepChipClass(s.state)} ${dimmed ? 'opacity-35' : ''}`
+                  const isCurrent = i === runningStepIdx
+                  const chipClass = `inline-flex items-center gap-1.5 px-2 py-1 rounded-md border font-mono text-[11px] font-medium transition-colors ${stepChipClass(s.state, isCurrent)} ${dimmed ? 'opacity-35' : ''} ${isCurrent ? 'font-semibold' : ''}`
                   const chip = (
                     <>
                       {stepIcon(s.state)}
@@ -1688,7 +1702,7 @@ export function ProjectDetailPage({
                     </>
                   )
                   return (
-                    <div key={s.label} className="flex items-center gap-1.5">
+                    <div key={s.label} className="flex items-center gap-1">
                       {clickable ? (
                         <button
                           type="button"
@@ -1710,10 +1724,15 @@ export function ProjectDetailPage({
                           {retryingPush ? '…' : '↻'}
                         </button>
                       )}
-                      {i < steps.length - 1 && <span className="text-text-tertiary/40 text-xs">›</span>}
+                      {i < steps.length - 1 && (
+                        <span className={`h-px w-3 ${connectorClass(s.state)} transition-colors`} aria-hidden />
+                      )}
                     </div>
                   )
                 })}
+                <span className="ml-2 text-[10px] font-mono text-text-tertiary tabular-nums shrink-0" title={`${doneCount} of ${totalSteps} steps complete`}>
+                  {doneCount}/{totalSteps}
+                </span>
                 {activeReleaseJob && (
                   <Link
                     href={`/project/${encodeURIComponent(name)}/release/${encodeURIComponent(activeReleaseJob.id)}`}
@@ -1725,7 +1744,7 @@ export function ProjectDetailPage({
                 )}
                 <button
                   type="button"
-                  className="text-[10px] px-2 py-0.5 rounded border border-status-error/50 text-status-error hover:bg-status-error/10 cursor-pointer disabled:opacity-50 font-mono leading-none shrink-0"
+                  className={`text-[10px] font-mono leading-none shrink-0 px-1.5 py-0.5 rounded text-text-tertiary hover:text-status-error hover:bg-status-error/10 cursor-pointer disabled:opacity-50 transition-colors ${activeReleaseJob ? '' : 'ml-auto'}`}
                   onClick={handleAbortPipeline}
                   disabled={aborting}
                   title="Abort the running pipeline"
