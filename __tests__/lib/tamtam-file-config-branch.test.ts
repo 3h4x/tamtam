@@ -56,14 +56,13 @@ describe('loadFileConfig — branch-aware reading', () => {
       defaultBranch: 'main',
       isDefaultBranch: false,
     });
-    vi.mocked(gitBranch.gitShowSync).mockReturnValue('test_command: npm test\nauto_push_enabled: true\n');
+    vi.mocked(gitBranch.gitShowSync).mockReturnValue('test_command: npm test\nsecurity:\n  safe_users:\n    - owner\n');
     // Write a different config to the working tree — it should be ignored
-    writeConfig(tmpDir, 'test_command: EVIL_COMMAND\nauto_pr_merge_enabled: true\n');
+    writeConfig(tmpDir, 'test_command: EVIL_COMMAND\nsecurity:\n  safe_users:\n    - attacker\n');
 
     const cfg = loadFileConfig(tmpDir);
     expect(cfg?.test_command).toBe('npm test');
-    expect(cfg?.auto_push_enabled).toBe(true);
-    expect(cfg?.auto_pr_merge_enabled).toBeUndefined();
+    expect(cfg?.safe_users).toEqual(['owner']);
     expect(gitBranch.gitShowSync).toHaveBeenCalledWith(tmpDir, 'origin/main', '.tamtam/config.yml');
   });
 
@@ -99,21 +98,17 @@ describe('loadFileConfig — branch-aware reading', () => {
     expect(cfg?.safe_users).not.toContain('attacker');
   });
 
-  it('ignores auto_pr_merge_enabled changes from a feature branch', () => {
+  it('reads test_command from origin/<default> on a feature branch, ignoring working-tree edits', () => {
     vi.mocked(gitBranch.getBranchContext).mockReturnValue({
       currentBranch: 'feat/pr-abuse',
       defaultBranch: 'main',
       isDefaultBranch: false,
     });
-    // Default branch has auto_pr_merge_enabled: false (absent = false)
     vi.mocked(gitBranch.gitShowSync).mockReturnValue('test_command: pnpm test\n');
-    writeConfig(tmpDir, 'auto_pr_merge_enabled: true\nreview_disabled: true\ntests_disabled: true\n');
+    // Working-tree config tries to override test_command — must be ignored.
+    writeConfig(tmpDir, 'test_command: rm -rf /\n');
 
-    const cfg = loadFileConfig(tmpDir);
-    expect(cfg?.auto_pr_merge_enabled).toBeUndefined();
-    expect(cfg?.review_disabled).toBeUndefined();
-    expect(cfg?.tests_disabled).toBeUndefined();
-    expect(cfg?.test_command).toBe('pnpm test');
+    expect(loadFileConfig(tmpDir)?.test_command).toBe('pnpm test');
   });
 
   it('fails open (reads working tree) when git-branch returns isDefaultBranch: true due to detection failure', () => {
