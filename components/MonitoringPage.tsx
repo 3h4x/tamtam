@@ -46,6 +46,7 @@ interface SchedulerInternalEntry {
   enabled: boolean
   nextFireMs: number
   lastFireMs: number | null
+  lastJobMs: number | null
   fireCount: number
   errorCount: number
   lastError: string | null
@@ -527,7 +528,7 @@ function SchedulerFireTable({ entries }: { entries: SchedulerInternalEntry[] }) 
               <span className="text-text-primary truncate" data-private>{e.project}/{e.name}</span>
               <span className="text-text-tertiary">{e.schedule}</span>
               <span className={isOverdue ? 'text-status-warning' : 'text-text-secondary'}>{fmtRelative(e.nextFireMs, now)}</span>
-              <span className={e.lastFireMs === null ? 'text-text-tertiary' : 'text-text-secondary'}>{fmtRelative(e.lastFireMs, now)}</span>
+              <span className={(e.lastJobMs ?? e.lastFireMs) === null ? 'text-text-tertiary' : 'text-text-secondary'}>{fmtRelative(e.lastJobMs ?? e.lastFireMs, now)}</span>
               <span className={e.errorCount > 0 ? 'text-status-error' : 'text-text-secondary'}>
                 {e.fireCount}{e.errorCount > 0 ? `/${e.errorCount}!` : ''}
               </span>
