@@ -371,4 +371,89 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(fullPrompt).toContain('task');
     expect(fullPrompt).not.toContain('nonexistent');
   });
+
+  describe('doc_paths', () => {
+    it('prepends doc file content before skills in the prompt', async () => {
+      const projDir = mkdtempSync(join(tmpdir(), 'tamtam-docpath-'));
+      try {
+        writeFileSync(join(projDir, 'NOTES.md'), 'PROJECT NOTES CONTENT');
+        resolveProjectPathMock.mockReturnValue(projDir);
+        insertAgent({ docPaths: '["NOTES.md"]' });
+
+        const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+          method: 'POST',
+          body: JSON.stringify({ prompt: 'do task' }),
+        });
+        await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+        const [, , fullPrompt] = startJobMock.mock.calls[0];
+        expect(fullPrompt).toContain('PROJECT NOTES CONTENT');
+        expect(fullPrompt).toContain('## NOTES.md');
+        // doc content must appear before the task prompt
+        expect(fullPrompt.indexOf('PROJECT NOTES CONTENT')).toBeLessThan(fullPrompt.indexOf('do task'));
+      } finally {
+        rmSync(projDir, { recursive: true, force: true });
+      }
+    });
+
+    it('silently skips doc paths whose file does not exist', async () => {
+      insertAgent({ docPaths: '["nonexistent.md"]' });
+
+      const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+        method: 'POST',
+        body: JSON.stringify({ prompt: 'do task' }),
+      });
+      const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+      expect(res.status).toBe(200);
+
+      const [, , fullPrompt] = startJobMock.mock.calls[0];
+      expect(fullPrompt).toContain('do task');
+      expect(fullPrompt).not.toContain('nonexistent');
+    });
+
+    it('blocks path traversal outside the project root', async () => {
+      const projDir = mkdtempSync(join(tmpdir(), 'tamtam-docpath-'));
+      try {
+        resolveProjectPathMock.mockReturnValue(projDir);
+        insertAgent({ docPaths: '["../../../etc/passwd"]' });
+
+        const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+          method: 'POST',
+          body: JSON.stringify({ prompt: 'do task' }),
+        });
+        const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+        expect(res.status).toBe(200);
+
+        const [, , fullPrompt] = startJobMock.mock.calls[0];
+        // traversal path is blocked — no /etc/passwd content should appear
+        expect(fullPrompt).not.toContain('root:');
+        expect(fullPrompt).not.toContain('etc/passwd');
+      } finally {
+        rmSync(projDir, { recursive: true, force: true });
+      }
+    });
+
+    it('records resolved docs in contextMeta', async () => {
+      const projDir = mkdtempSync(join(tmpdir(), 'tamtam-docpath-'));
+      try {
+        writeFileSync(join(projDir, 'GUIDE.md'), 'guide content');
+        resolveProjectPathMock.mockReturnValue(projDir);
+        insertAgent({ docPaths: '["GUIDE.md"]' });
+
+        const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+          method: 'POST',
+          body: JSON.stringify({ prompt: 'task' }),
+        });
+        await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+        const createArgs = createJobMock.mock.calls[0];
+        const contextMeta = JSON.parse(createArgs[5]);
+        expect(contextMeta.docs).toHaveLength(1);
+        expect(contextMeta.docs[0].name).toBe('GUIDE.md');
+        expect(contextMeta.docs[0].path).toBe('GUIDE.md');
+      } finally {
+        rmSync(projDir, { recursive: true, force: true });
+      }
+    });
+  });
 });
