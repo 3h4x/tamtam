@@ -1661,24 +1661,31 @@ export function ProjectDetailPage({
               steps.push({ label: 'merge', state: 'pending', hint: 'auto-merge after CI passes', action: null })
             }
 
-            const glyph = (s: StepState) => {
-              if (s === 'done') return <span className="text-status-success">✓</span>
-              if (s === 'failed') return <span className="text-status-error">✗</span>
-              if (s === 'warning') return <span className="text-status-warning">!</span>
-              if (s === 'running') return <span className="inline-block w-3 h-3 rounded-full border-2 border-accent border-t-transparent animate-spin align-middle" />
-              return <span className="text-text-tertiary">○</span>
+            const stepChipClass = (s: StepState) => {
+              if (s === 'done') return 'bg-status-success/12 text-status-success border-status-success/25'
+              if (s === 'failed') return 'bg-status-error/12 text-status-error border-status-error/25'
+              if (s === 'warning') return 'bg-status-warning/12 text-status-warning border-status-warning/25'
+              if (s === 'running') return 'bg-accent/12 text-accent border-accent/30'
+              return 'bg-transparent text-text-tertiary border-border/50'
+            }
+
+            const stepIcon = (s: StepState) => {
+              if (s === 'done') return <span className="text-[10px] leading-none">✓</span>
+              if (s === 'failed') return <span className="text-[10px] leading-none">✗</span>
+              if (s === 'warning') return <span className="text-[10px] leading-none">!</span>
+              if (s === 'running') return <span className="inline-block w-2.5 h-2.5 rounded-full border-2 border-current border-t-transparent animate-spin shrink-0" />
+              return <span className="text-[10px] leading-none opacity-50">○</span>
             }
 
             return (
-              <div className="mt-3 mb-3 px-3 py-2 rounded-md border border-border bg-bg-secondary text-sm flex items-center gap-2 flex-wrap">
+              <div className="mt-3 mb-3 px-3 py-2 rounded-md border border-border bg-bg-secondary flex items-center gap-1.5 flex-wrap">
                 {steps.map((s, i) => {
                   const clickable = !!s.action
-                  const inner = (
+                  const chipClass = `inline-flex items-center gap-1.5 px-2 py-1 rounded-md border font-mono text-[11px] font-medium transition-colors ${stepChipClass(s.state)}`
+                  const chip = (
                     <>
-                      <span className="inline-flex items-center justify-center w-5 h-5">{glyph(s.state)}</span>
-                      <span className={`font-mono text-xs ${s.state === 'running' ? 'text-accent font-semibold' : s.state === 'done' ? 'text-text-primary' : s.state === 'failed' ? 'text-status-error' : s.state === 'warning' ? 'text-status-warning' : 'text-text-secondary'}`}>
-                        {s.label}
-                      </span>
+                      {stepIcon(s.state)}
+                      <span>{s.label}</span>
                     </>
                   )
                   return (
@@ -1686,12 +1693,12 @@ export function ProjectDetailPage({
                       {clickable ? (
                         <button
                           type="button"
-                          className="flex items-center gap-1.5 hover:bg-bg-tertiary rounded px-1 py-0.5 -mx-1 -my-0.5 cursor-pointer"
+                          className={`${chipClass} cursor-pointer hover:brightness-110`}
                           onClick={s.action!}
                           title={s.hint}
-                        >{inner}</button>
+                        >{chip}</button>
                       ) : (
-                        <div className="flex items-center gap-1.5" title={s.hint}>{inner}</div>
+                        <div className={chipClass} title={s.hint}>{chip}</div>
                       )}
                       {s.retryAction && (
                         <button
@@ -1704,7 +1711,7 @@ export function ProjectDetailPage({
                           {retryingPush ? '…' : '↻'}
                         </button>
                       )}
-                      {i < steps.length - 1 && <span className="text-text-tertiary mx-1">→</span>}
+                      {i < steps.length - 1 && <span className="text-text-tertiary/40 text-xs">›</span>}
                     </div>
                   )
                 })}

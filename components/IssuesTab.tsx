@@ -585,7 +585,36 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
   }, [load])
 
   if (loading) {
-    return <div className="text-text-secondary text-sm p-4">Loading issues and PRs...</div>
+    return (
+      <div className="mt-2">
+        <div className="bg-bg-secondary rounded-lg p-3 mb-3">
+          <div className="flex items-center gap-4">
+            <div className="skeleton h-3.5 w-32" />
+            <div className="skeleton h-3.5 w-16" />
+            <div className="skeleton h-3.5 w-16" />
+          </div>
+        </div>
+        <div className="border border-border rounded-lg overflow-hidden">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="px-3 py-2.5 flex items-start gap-3 border-b border-border last:border-0" style={{ opacity: 1 - i * 0.18 }}>
+              <div className="skeleton h-4 w-4 rounded-full mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                <div className="skeleton h-3.5 w-3/5" />
+                <div className="flex items-center gap-2">
+                  <div className="skeleton h-3 w-20" />
+                  <div className="skeleton h-3 w-14" />
+                  <div className="skeleton h-3 w-10" />
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <div className="skeleton h-6 w-16 rounded-md" />
+                <div className="skeleton h-6 w-16 rounded-md" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
   }
 
   if (error) {

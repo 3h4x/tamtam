@@ -604,9 +604,29 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-2 justify-center py-8">
-          <div className="spinner" />
-          <span className="text-text-secondary text-sm">Loading runs…</span>
+        <div className="border border-border rounded-lg overflow-hidden bg-bg-secondary">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 px-4 py-3 border-b border-border last:border-0" style={{ opacity: 1 - i * 0.15 }}>
+              <div className="skeleton h-4 w-1 rounded-none shrink-0" />
+              <div className="skeleton h-5 w-12 rounded shrink-0" />
+              <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                <div className="skeleton h-3.5 w-2/5" />
+                <div className="flex items-center gap-2">
+                  <div className="skeleton h-3 w-16" />
+                  <div className="skeleton h-3 w-12" />
+                </div>
+              </div>
+              <div className="flex flex-col items-end gap-1.5 shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="skeleton h-3 w-14" />
+                  <div className="skeleton h-3 w-10" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="skeleton h-4 w-16 rounded-full" />
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       ) : filtered.length === 0 ? (
         <div className="text-text-secondary text-sm p-6 text-center border border-border rounded-lg bg-bg-secondary">
