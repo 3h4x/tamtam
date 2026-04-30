@@ -6,19 +6,29 @@ import type { LogEntry } from '@/lib/client-api'
 
 export function LogsPage() {
   const [projects, setProjects] = useState<string[]>([])
+  const [projectsLoading, setProjectsLoading] = useState(true)
+  const [projectsError, setProjectsError] = useState<string | null>(null)
   const [selectedProject, setSelectedProject] = useState<string | null>(null)
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
 
-  useEffect(() => {
+  const loadProjects = () => {
+    setProjectsLoading(true)
+    setProjectsError(null)
     fetchProjects()
       .then((data) => {
         const unique = [...new Set(data.tasks.map(t => t.project))]
         setProjects(unique.sort())
       })
-      .catch(() => {})
-  }, [])
+      .catch((err) => {
+        console.error('Failed to load projects', err)
+        setProjectsError('Failed to load projects.')
+      })
+      .finally(() => setProjectsLoading(false))
+  }
+
+  useEffect(loadProjects, [])
 
   const loadLogs = async (project: string) => {
     setSelectedProject(project)
@@ -60,24 +70,46 @@ export function LogsPage() {
       </div>
 
       {!selectedProject ? (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
-          {projects.map((p) => (
+        projectsLoading ? (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="skeleton h-12 rounded-lg" style={{ opacity: 1 - i * 0.1 }} />
+            ))}
+          </div>
+        ) : projectsError ? (
+          <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+            <svg className="w-8 h-8 text-status-error" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p className="text-sm text-text-secondary">{projectsError}</p>
             <button
-              key={p}
-              className="px-4 py-3 text-sm border border-border rounded-lg bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer text-left font-medium"
-              onClick={() => loadLogs(p)}
+              className="px-3 py-1.5 text-xs border border-border rounded-md text-text-primary hover:bg-bg-tertiary cursor-pointer"
+              onClick={loadProjects}
             >
-              {p}
+              Retry
             </button>
-          ))}
-          {projects.length === 0 && (
-            <>
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="h-12 border border-border rounded-lg bg-bg-secondary animate-pulse" style={{ opacity: 1 - i * 0.15 }} />
-              ))}
-            </>
-          )}
-        </div>
+          </div>
+        ) : projects.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 gap-2 text-center">
+            <svg className="w-8 h-8 text-text-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9.75h16.5m-16.5 6.75h16.5M3.75 6.75h16.5m-16.5 6.75h16.5" />
+            </svg>
+            <p className="text-sm text-text-secondary">No projects with logs yet.</p>
+            <p className="text-xs text-text-tertiary">Run an agent to start collecting logs.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+            {projects.map((p) => (
+              <button
+                key={p}
+                className="px-4 py-3 text-sm border border-border rounded-lg bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer text-left font-medium transition-colors"
+                onClick={() => loadLogs(p)}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        )
       ) : loading ? (
         <div className="space-y-2 animate-pulse mt-2">
           {Array.from({ length: 4 }).map((_, i) => (

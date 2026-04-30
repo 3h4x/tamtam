@@ -148,6 +148,7 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 - `/api/projects/by-project/[name]/release/abort` — Abort the active release pipeline: marks the release job aborted, kills the running step job, and releases the pipeline lock (POST)
 - `/api/projects/by-project/[name]/issues` — GitHub PRs and issues for the project (GET, POST to force refresh); merge POST switches working copy to default branch after merge
 - `/api/projects/by-project/[name]/issue-branch` — Create or checkout `fix/issue-<n>-<slug>` before Claude edits (POST); called automatically from TerminalTab when opening from an issue
+- `/api/projects/by-project/[name]/continue-issue` — Build a "Continue work" payload for an issue (GET: `?issue_number=N`); returns `{ sessionId, prompt, unverifiedCount, hasContext }` — finds the most recent Claude run tagged with the issue and the most recent mark-dod log, then composes a focused prompt listing only the unverified acceptance criteria
 - `/api/projects/by-project/[name]/mark-dod` — Run DoD verification for latest issue-linked run (POST); also triggered automatically after review→LGTM
 - `/api/projects/by-project/[name]/pr-branch` — Fetch and checkout a PR's head branch so Terminal opens on the right branch (POST: `{ branch }`)
 - `/api/projects/by-project/[name]/pr-gates` — TamTam-side gate state for a PR: tests/review/DoD badges (GET); used by IssuesTab
@@ -198,12 +199,13 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 - Agent runs compose skill content into the prompt before sending to Claude CLI
 - `commit_style` setting injects a style guide into the commit-message generation prompt; `review_verdict_rules` setting drives LGTM/NEEDS ATTENTION/DO NOT SHIP decisions in code reviews — both configurable in Settings UI (Behavior tab)
 - File-based skills scanned from `skills/docs/skills/` and `data/skills/` (category subdirs, any `.md` file with optional YAML frontmatter: `title`, `description`)
-- DB-backed skills created via `/skills` page or API; a set of built-in agent skills (cto, security-review, dependency-check, blog, ci-monitor, release-ready, tests, gha-audit, docs-claude, readme-sync, self-improve, senior-fullstack) is seeded from `lib/default-agent-skills.ts` on first `GET /api/skills`
+- DB-backed skills created via `/skills` page or API; a set of built-in agent skills (cto, security-review, dependency-check, blog, ci-monitor, release-ready, tests, gha-audit, docs-claude, readme-sync, self-improve, manage-agents, senior-fullstack) is seeded from `lib/default-agent-skills.ts` on first `GET /api/skills`
 - GitHub owner fallback configurable via `GITHUB_OWNER` env var or Settings UI
 - Issue-driven runs auto-checkout `fix/issue-<n>-<slug>` branch before Claude edits (via `issue-branch` route called from TerminalTab); in PR Workflow mode, after the PR is merged the working copy is returned to the default branch
 - Pipeline workflow mode per project: *Direct Branch* (commit+push to current branch) or *PR Workflow* (push to feature branch → DoD → optional auto-merge); configured via project Config tab; `pr_workflow_enabled` + `auto_pr_merge_enabled` flags on the `projects` table
 - Outbound webhook notifications (`lib/notifications.ts`): Slack block kit, Discord embeds, or generic JSON POST; HMAC-SHA256 signed when `notification_webhook_secret` is set; events: `release_success`, `release_fail`, `release_aborted`, `fix_loop_exhausted`, `review_do_not_ship`, `agent_run_fail`; configured via Settings → Notifications tab; `TAMTAM_BASE_URL` env var sets the log link base
 - Log and row retention (`lib/retention.ts`): `pruneProjectLogs` deletes on-disk log files after each run (controlled by `log_retention_count` and `log_retention_days` settings; defaults 200 / 30 days); `runNightlyCleanup` deletes finished `jobs` DB rows older than `job_row_retention_days` (default 180 days) — called once at startup then every 24h from `instrumentation.ts`
+- **Global job pause**: `lib/job-control.ts` exposes `isJobsPaused()` / `syncJobsPauseState(paused)`. When the `jobs_paused` setting is `true` (toggled via the Settings UI or the pause toggle in the Jobs header), all pipeline routes (`run`, `review`, `fix`, `push`, `release`, `rerun`, `fix-ci`, `agent run`) return HTTP 409 and the internal scheduler is paused. State is held in a module-level boolean — `syncJobsPauseState` is called on settings write and on boot from `instrumentation-node.ts`.
 - Background probe sweep: `instrumentation.ts` runs `runProbeSweep` every 30 seconds — detects Claude CLI processes that hang after emitting their final result event (holding a job "running" indefinitely) and resolves them via `probeJobStatus` in `lib/job-storage.ts`
 - **Scheduled agent cron**: handled in-process by `lib/internal-scheduler.ts`, NOT by PM2 cron. PM2's `cron_restart` combined with `--no-autostart` silently no-ops (PM2 updates `pm_uptime` at the cron tick but never starts the stopped process), so registering agents that way leaves them as zombies that never fire — that bug went unnoticed for a long time. The internal scheduler reads enabled agents from the DB on boot (`reinstallAgents` in `instrumentation-node.ts`), arms a `setTimeout` per agent based on its `Nh`/`Nm` interval + a stableHash phase offset, and on fire POSTs to `/api/agents/{id}/run`. State is pinned on `globalThis.__tamtamScheduler` so instrumentation and route handlers share the singleton across Next.js's separate module realms. Agent CRUD routes still call `installAgentSchedule` / `uninstallAgentSchedule` from `lib/agent-scheduler.ts`, which now delegate to `upsertAgentSchedule` / `removeAgentSchedule`. The `launchctl` runner is **deprecated** (warning logged on use); only `pm2` is supported going forward.
 - **One-shot job processes**: every job (review, fix, fix-push, mark-dod, agent run, rerun) is spawned by `lib/pm2-jobs.ts startJob` via PM2 → `scripts/job-runner.js` (a single node entrypoint) → the actual command. PM2 invokes the runner with `--interpreter node`, so PM2 tracks the runner's PID directly — no bash-wrapper layer. The runner forwards SIGTERM/SIGINT/SIGHUP to its child so `pm2 stop`/`pm2 delete` actually kills the work (this is what eliminated the orphan-process accumulation we used to see in `pm2 list`). The runner pipes the `${jobId}.prompt` file into the child's stdin (matching the old `cat prompt | command` behaviour) and writes `[tamtam] launching: ...` / `[tamtam] exited with code N` breadcrumbs to the same log file `app/api/streaming/[jobId]/route.ts` filters out of the user-facing stream. The `${jobId}.prompt` file is still written so `/api/jobs/[jobId]/rerun` can restore the original prompt; the per-job `.sh` wrapper is gone.
@@ -214,22 +216,27 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 Each tracked workspace project can have a `.tamtam/` directory in its root for version-controlled TamTam config. TamTam reads these files on every request; writes from the UI are saved back automatically.
 
 ### `.tamtam/config.yml`
-Overrides the project's DB config. File values take precedence over DB on read. All fields are optional.
+The team contract — committed to version control and shared by everyone working on the repo. Captures shared-by-all settings only. All fields are optional.
 
 ```yaml
 # .tamtam/config.yml
-test_command: pnpm test           # overrides auto-detected command
-pr_workflow_enabled: false        # Direct Branch (false) or PR Workflow (true)
-auto_commit_enabled: false        # auto-commit after LGTM
-auto_push_enabled: false          # auto-push after commit
-auto_pr_merge_enabled: false      # auto-merge PR once CI passes
-release_after_run: false          # trigger release after every agent run
-test_cron_enabled: false          # run tests on schedule
-test_cron_schedule: 6h            # cron schedule (e.g. 30m, 6h, 1d)
-tests_disabled: false             # skip test step in pipeline
-review_disabled: false            # skip review step in pipeline
-issue_auto_branch: true           # auto-checkout fix/issue-N branch on Work on
+pipeline:
+  test_command: pnpm test         # overrides auto-detected command
+
+actions:
+  custom_actions:                 # buttons shown on the project page
+    - name: Deploy
+      command: pnpm deploy
+      color: green
+
+security:
+  safe_users:                     # GitHub logins whose PR comments are not wrapped as untrusted
+    - octocat
 ```
+
+Supported keys: `test_command`, `custom_actions`, `safe_users`. **Workflow flags** (`pr_workflow_enabled`, `auto_commit_enabled`, `auto_push_enabled`, `auto_pr_merge_enabled`, `release_after_run`, `test_cron_enabled`, `test_cron_schedule`, `tests_disabled`, `review_disabled`, `issue_auto_branch`) are **DB-only** — each developer opts in individually. Older `.tamtam/config.yml` files may still contain those keys; TamTam migrates them to the DB on startup and ignores them on subsequent reads.
+
+On a feature/PR branch, config is read from `origin/<defaultBranch>` (not the working tree) to prevent privilege escalation from untrusted branches.
 
 Reader: `lib/tamtam-file-config.ts` → `loadFileConfig(projectPath)` / `writeFileConfig(projectPath, updates)`.
 The Config tab shows a banner listing which keys come from the file; saving writes back to `.tamtam/config.yml`.
