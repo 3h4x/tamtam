@@ -370,13 +370,43 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     try {
       const { autoCommitEnabled, autoPushEnabled } = await getProjectPipelineConfig(job.project);
       if (!!findActiveReleaseJob(job.project) || autoPushEnabled || autoCommitEnabled) {
-        const { startProjectReview } = await import('@/lib/pipeline/start-review');
-        const r = await startProjectReview(job.project);
-        if (r.ok) {
-          console.log(`[fix→review] auto-started review ${r.jobId} for ${job.project}`);
-          chainedNext = true;
+        // Branch on what triggered this fix: a failing test or a NEEDS_ATTENTION
+        // review. Both call into the same `fix` kind, but the recovery path is
+        // different — a fix from a test failure must re-run tests (the tests are
+        // the source of truth for "is the bug actually fixed"), while a fix
+        // from a review must re-run review (the reviewer's checklist is the
+        // source of truth there). Previously every fix went straight to review,
+        // so a failing test followed by a successful fix would skip the
+        // re-test entirely and merge code that hadn't been verified.
+        const parent = job.parentJobId ? getJob(job.parentJobId) : null;
+        const fromTestFailure = parent?.kind === 'test' && parent.exitCode !== null && parent.exitCode !== 0;
+
+        if (fromTestFailure) {
+          // Bounded by the same fix-iteration cap so a persistently-broken test
+          // can't churn test→fix→test→fix forever.
+          const count = recentFixCount(job.project);
+          if (count >= MAX_FIX_ITERATIONS) {
+            console.log(`[fix→test] fix cap reached for ${job.project} (${count}/${MAX_FIX_ITERATIONS}) — stopping`);
+            notificationEvent = 'fix_loop_exhausted';
+          } else {
+            const { startProjectTest } = await import('@/lib/pipeline/start-test');
+            const r = await startProjectTest(job.project);
+            if (r.ok) {
+              console.log(`[fix→test] re-running tests after fix ${job.id} (iter ${count})`);
+              chainedNext = true;
+            } else {
+              console.log(`[fix→test] skipped re-test for ${job.project}: ${r.detail}`);
+            }
+          }
         } else {
-          console.log(`[fix→review] skipped auto-review for ${job.project}: ${r.detail}`);
+          const { startProjectReview } = await import('@/lib/pipeline/start-review');
+          const r = await startProjectReview(job.project);
+          if (r.ok) {
+            console.log(`[fix→review] auto-started review ${r.jobId} for ${job.project}`);
+            chainedNext = true;
+          } else {
+            console.log(`[fix→review] skipped auto-review for ${job.project}: ${r.detail}`);
+          }
         }
       }
     } catch (e) {
