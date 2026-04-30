@@ -54,16 +54,19 @@ function StatusCard({ label, primary, detail, tone, onClick, disabled, running }
   return (
     <button
       type="button"
-      className={`min-w-0 text-left border rounded-lg px-3 py-2 flex items-center gap-2 transition-colors ${TONE_RING[tone]} ${
+      className={`group min-w-0 text-left border rounded-md px-2.5 py-1.5 flex items-center gap-2 transition-colors ${TONE_RING[tone]} ${
         clickable ? 'bg-bg-secondary hover:bg-bg-tertiary cursor-pointer' : 'bg-bg-secondary cursor-default'
       } ${disabled ? 'opacity-60' : ''}`}
       onClick={clickable ? onClick : undefined}
       disabled={!clickable}
     >
-      <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${TONE_DOT[tone]} ${running ? 'animate-pulse' : ''}`} />
-      <span className="text-[10px] uppercase tracking-wider text-text-tertiary font-semibold shrink-0">{label}</span>
-      <span className="text-sm font-medium text-text-primary truncate">{primary}</span>
+      <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${TONE_DOT[tone]} ${running ? 'animate-pulse' : ''}`} />
+      <span className="text-[10px] uppercase tracking-wider text-text-tertiary shrink-0">{label}</span>
+      <span className="text-[13px] font-medium text-text-primary truncate">{primary}</span>
       {detail && <span className="text-xs text-text-tertiary truncate hidden sm:inline">{detail}</span>}
+      {clickable && (
+        <span className="text-text-tertiary text-xs opacity-0 group-hover:opacity-100 transition-opacity shrink-0" aria-hidden>›</span>
+      )}
     </button>
   )
 }
@@ -90,7 +93,7 @@ export function StatusStrip({
     <StatusCard
       label="Changes"
       primary={`${totalChanges} file${totalChanges !== 1 ? 's' : ''}`}
-      detail={hasUnreviewed ? 'unreviewed — open diff' : 'reviewed — open diff'}
+      detail={hasUnreviewed ? 'unreviewed' : 'reviewed'}
       tone={hasUnreviewed ? 'warning' : 'success'}
       onClick={onOpenChanges}
     />
@@ -105,7 +108,7 @@ export function StatusStrip({
       <StatusCard
         label="Review"
         primary="In progress"
-        detail={latestReview ? `started ${formatAgo(latestReview.started_at)} — follow output` : 'starting...'}
+        detail={latestReview ? `started ${formatAgo(latestReview.started_at)}` : 'starting...'}
         tone="warning"
         running
         onClick={latestReview ? () => onOpenJob(latestReview.id) : undefined}
@@ -116,7 +119,7 @@ export function StatusStrip({
       <StatusCard
         label="Review"
         primary="unreviewed"
-        detail={verdict ? `last: ${verdict} — open diff` : 'not yet reviewed'}
+        detail={verdict ? `last: ${verdict}` : 'not yet reviewed'}
         tone="warning"
         onClick={onOpenChanges}
       />
@@ -132,8 +135,8 @@ export function StatusStrip({
         primary={verdict}
         detail={
           pendingPush
-            ? `${formatAgo(latestReview.finished_at ?? latestReview.started_at)} — awaiting push`
-            : `${formatAgo(latestReview.finished_at ?? latestReview.started_at)} — view log`
+            ? `${formatAgo(latestReview.finished_at ?? latestReview.started_at)} · awaiting push`
+            : formatAgo(latestReview.finished_at ?? latestReview.started_at)
         }
         tone={tone}
         onClick={() => onOpenJob(latestReview.id)}
@@ -151,7 +154,7 @@ export function StatusStrip({
       <StatusCard
         label="Tests"
         primary="Running"
-        detail={(latestTest ? `started ${formatAgo(latestTest.started_at)} — follow output` : 'starting...') + cronSuffix}
+        detail={(latestTest ? `started ${formatAgo(latestTest.started_at)}` : 'starting...') + cronSuffix}
         tone="warning"
         running
         onClick={latestTest ? () => onOpenJob(latestTest.id) : undefined}
@@ -163,7 +166,7 @@ export function StatusStrip({
       <StatusCard
         label="Tests"
         primary={passed ? 'Passed' : `Failed (exit ${latestTest.exit_code})`}
-        detail={`${formatAgo(latestTest.finished_at ?? latestTest.started_at)} — view log${cronSuffix}`}
+        detail={`${formatAgo(latestTest.finished_at ?? latestTest.started_at)}${cronSuffix}`}
         tone={passed ? 'success' : 'error'}
         onClick={() => onOpenJob(latestTest.id)}
       />
@@ -196,7 +199,7 @@ export function StatusStrip({
       <StatusCard
         label="CI"
         primary="Failing"
-        detail={ciFailedUrl ? 'open run on GitHub' : 'no run url'}
+        detail={ciFailedUrl ? 'open on GitHub' : 'no run url'}
         tone="error"
         onClick={ciFailedUrl ? () => window.open(ciFailedUrl, '_blank') : undefined}
       />
@@ -206,7 +209,7 @@ export function StatusStrip({
       <StatusCard
         label="CI"
         primary="In progress"
-        detail={ciFailedUrl ? 'open run on GitHub' : undefined}
+        detail={ciFailedUrl ? 'open on GitHub' : undefined}
         tone="warning"
         running
         onClick={ciFailedUrl ? () => window.open(ciFailedUrl, '_blank') : undefined}
@@ -228,7 +231,7 @@ export function StatusStrip({
   ) : null
 
   return (
-    <div className="flex flex-wrap gap-2 mb-4">
+    <div className="flex flex-wrap gap-1.5 mb-3">
       {changesCard}
       {reviewCard}
       {testsCard}
