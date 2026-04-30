@@ -145,10 +145,25 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const router = useRouter()
   const searchParams = useSearchParams()
   const jobParam = searchParams.get('job')
-  const promptParam = searchParams.get('prompt')
-  const issueNumberParam = searchParams.get('issue_number')
-  const issueRepoParam = searchParams.get('issue_repo')
-  const issueTitleParam = searchParams.get('issue_title')
+
+  // Large prompts (e.g. issue bodies) are stashed in sessionStorage to avoid
+  // tripping Node's 8KB URL/header limit. The query string carries only a
+  // short `pending` key. Read once on first render and clear, so reloads
+  // don't re-fire the same auto-submit.
+  const pendingKey = searchParams.get('pending')
+  const [stashed] = useState<{ prompt?: string; issue_number?: string; issue_repo?: string; issue_title?: string }>(() => {
+    if (!pendingKey || typeof window === 'undefined') return {}
+    try {
+      const raw = sessionStorage.getItem(pendingKey)
+      if (!raw) return {}
+      sessionStorage.removeItem(pendingKey)
+      return JSON.parse(raw)
+    } catch { return {} }
+  })
+  const promptParam = stashed.prompt ?? searchParams.get('prompt')
+  const issueNumberParam = stashed.issue_number ?? searchParams.get('issue_number')
+  const issueRepoParam = stashed.issue_repo ?? searchParams.get('issue_repo')
+  const issueTitleParam = stashed.issue_title ?? searchParams.get('issue_title')
 
   // Subscribe to the module-level session store. Survives component unmounts.
   const state = useSyncExternalStore(

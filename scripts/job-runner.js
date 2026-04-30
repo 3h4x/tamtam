@@ -21,6 +21,7 @@
 //   the child's fds at the same file so output isn't double-buffered.
 
 const fs = require('fs');
+const path = require('path');
 const { spawn } = require('child_process');
 
 const [, , jobId, logPath, promptPath, cmd, ...cmdArgs] = process.argv;
@@ -40,6 +41,34 @@ try {
 
 function logLine(line) {
   try { fs.writeSync(logFd, line.endsWith('\n') ? line : `${line}\n`); } catch { /* noop */ }
+}
+
+function isJobsPaused() {
+  try {
+    const root = process.env.TAMTAM_ROOT || path.resolve(__dirname, '..');
+    const dbPath = path.join(root, 'data', 'db', 'tamtam.db');
+    if (!fs.existsSync(dbPath)) return false;
+
+    // Loaded lazily so the runner still fail-opens if native bindings are not
+    // available in a test or recovery environment.
+    const Database = require('better-sqlite3');
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    try {
+      const row = db.prepare("SELECT value FROM settings WHERE key = 'jobs_paused'").get();
+      return row && row.value === 'true';
+    } finally {
+      db.close();
+    }
+  } catch (err) {
+    logLine(`[tamtam] pause check unavailable; continuing: ${err.message}`);
+    return false;
+  }
+}
+
+if (isJobsPaused()) {
+  logLine('[tamtam] jobs are paused globally; refusing to launch child command');
+  try { fs.closeSync(logFd); } catch { /* noop */ }
+  process.exit(75);
 }
 
 const launchedSummary = [cmd, ...cmdArgs]

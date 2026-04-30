@@ -39,10 +39,14 @@ describe('instrumentation', () => {
 
   function mockDeps(agents: unknown[]) {
     const chainedDb = makeChainedDb(agents);
-    vi.doMock('@/lib/db', () => ({ db: { select: chainedDb.select }, schema: { agents: { schedule: 'schedule', enabled: 'enabled' } } }));
-    vi.doMock('@/lib/internal-scheduler', () => ({
+    const internalSchedulerMock = {
       startInternalScheduler: startInternalSchedulerMock,
-    }));
+      pauseInternalScheduler: vi.fn(),
+      resumeInternalScheduler: vi.fn(),
+    };
+    vi.doMock('@/lib/db', () => ({ db: { select: chainedDb.select }, schema: { agents: { schedule: 'schedule', enabled: 'enabled' } } }));
+    vi.doMock('@/lib/internal-scheduler', () => internalSchedulerMock);
+    vi.doMock('./lib/internal-scheduler', () => internalSchedulerMock);
     vi.doMock('@/lib/agent-scheduler', () => ({
       reconcilePm2Schedules: reconcilePm2SchedulesMock,
     }));
@@ -68,7 +72,7 @@ describe('instrumentation', () => {
       const { register } = await import('@/instrumentation');
       const returned = register();
       await returned;
-      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setTimeout(r, 10));
 
       expect(startInternalSchedulerMock).toHaveBeenCalledTimes(1);
       expect(startInternalSchedulerMock.mock.calls[0][0]).toHaveLength(1);
@@ -162,7 +166,13 @@ describe('instrumentation', () => {
       const schema = { agents: 'agents_table', projects: { enabled: 1 } };
 
       vi.doMock('@/lib/db', () => ({ db, schema }));
-      vi.doMock('@/lib/internal-scheduler', () => ({ startInternalScheduler: startInternalSchedulerMock }));
+      const internalSchedulerMock = {
+        startInternalScheduler: startInternalSchedulerMock,
+        pauseInternalScheduler: vi.fn(),
+        resumeInternalScheduler: vi.fn(),
+      };
+      vi.doMock('@/lib/internal-scheduler', () => internalSchedulerMock);
+      vi.doMock('./lib/internal-scheduler', () => internalSchedulerMock);
       vi.doMock('@/lib/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
       vi.doMock('@/lib/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
       vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
@@ -201,7 +211,13 @@ describe('instrumentation', () => {
       const selectFn = vi.fn().mockReturnValue({ from: fromFn });
 
       vi.doMock('@/lib/db', () => ({ db: { select: selectFn }, schema: { agents: {}, projects: { enabled: 1 } } }));
-      vi.doMock('@/lib/internal-scheduler', () => ({ startInternalScheduler: startInternalSchedulerMock }));
+      const internalSchedulerMock = {
+        startInternalScheduler: startInternalSchedulerMock,
+        pauseInternalScheduler: vi.fn(),
+        resumeInternalScheduler: vi.fn(),
+      };
+      vi.doMock('@/lib/internal-scheduler', () => internalSchedulerMock);
+      vi.doMock('./lib/internal-scheduler', () => internalSchedulerMock);
       vi.doMock('@/lib/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
       vi.doMock('@/lib/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
       vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
@@ -232,7 +248,13 @@ describe('instrumentation', () => {
       const selectFn = vi.fn().mockReturnValue({ from: fromFn });
 
       vi.doMock('@/lib/db', () => ({ db: { select: selectFn }, schema: { agents: {}, projects: { enabled: 1 } } }));
-      vi.doMock('@/lib/internal-scheduler', () => ({ startInternalScheduler: startInternalSchedulerMock }));
+      const internalSchedulerMock = {
+        startInternalScheduler: startInternalSchedulerMock,
+        pauseInternalScheduler: vi.fn(),
+        resumeInternalScheduler: vi.fn(),
+      };
+      vi.doMock('@/lib/internal-scheduler', () => internalSchedulerMock);
+      vi.doMock('./lib/internal-scheduler', () => internalSchedulerMock);
       vi.doMock('@/lib/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
       vi.doMock('@/lib/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
       vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));

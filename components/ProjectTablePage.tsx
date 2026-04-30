@@ -2,20 +2,42 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { reviewProject, releaseProject, fetchJobs, fetchAgents } from '@/lib/client-api'
+import { reviewProject, fetchJobs, fetchAgents } from '@/lib/client-api'
 import type { JobInfo, Agent } from '@/lib/client-api'
 import type { FleetHealth } from '@/hooks/useProjectHealth'
 import { formatAgo } from '@/lib/format'
-import { getAggregateCi, getCiFailedUrl, getReleaseTag } from '@/lib/statusConstants'
+import { getAggregateCi, getCiFailedUrl } from '@/lib/statusConstants'
 import { useToast } from '@/components/Toast'
 
-type SortKey = 'project' | 'status' | 'changes' | 'last_run' | 'ci' | 'release'
+type SortKey = 'project' | 'status' | 'changes' | 'last_run' | 'next_run' | 'ci'
 type SortDir = 'asc' | 'desc'
+
+interface SchedulerEntry {
+  agentId: string
+  project: string
+  name: string
+  schedule: string
+  enabled: boolean
+  nextFireMs: number
+  lastFireMs: number | null
+}
+
+function formatNextFire(ms: number): string {
+  const now = Date.now()
+  const delta = ms - now
+  if (delta <= 0) return 'now'
+  const sec = Math.round(delta / 1000)
+  if (sec < 60) return `in ${sec}s`
+  const min = Math.round(sec / 60)
+  if (min < 60) return `in ${min}m`
+  const hr = Math.round(min / 60)
+  if (hr < 24) return `in ${hr}h`
+  const d = Math.round(hr / 24)
+  return `in ${d}d`
+}
 
 interface ProjectTablePageProps {
   fleet: FleetHealth
-  onRefresh: () => Promise<void>
-  onPush?: () => void
   issueCounts?: Record<string, { prs: number; issues: number }>
 }
 
@@ -113,14 +135,37 @@ function AgentPills({
 const healthOrder: Record<string, number> = { error: 0, warning: 1, unknown: 2, healthy: 3 }
 const ciOrder: Record<string, number> = { failure: 0, in_progress: 1, success: 2 }
 
-export function ProjectTablePage({ fleet, onRefresh, onPush, issueCounts = {} }: ProjectTablePageProps) {
+export function ProjectTablePage({ fleet, issueCounts = {} }: ProjectTablePageProps) {
   const router = useRouter()
   const { toast } = useToast()
-  const [releasing, setReleasing] = useState<Set<string>>(new Set())
   const [allJobs, setAllJobs] = useState<JobInfo[]>([])
   const [agentsByProject, setAgentsByProject] = useState<Record<string, Agent[]>>({})
+  const [schedulerByProject, setSchedulerByProject] = useState<Record<string, SchedulerEntry[]>>({})
+  const [schedulerPaused, setSchedulerPaused] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('last_run')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
+
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      try {
+        const r = await fetch('/api/agents/scheduler-health')
+        if (!r.ok) return
+        const data = await r.json()
+        if (!active) return
+        const grouped: Record<string, SchedulerEntry[]> = {}
+        for (const e of (data.internal?.entries ?? []) as SchedulerEntry[]) {
+          if (!grouped[e.project]) grouped[e.project] = []
+          grouped[e.project].push(e)
+        }
+        setSchedulerByProject(grouped)
+        setSchedulerPaused(!!data.internal?.paused)
+      } catch { /* ignore */ }
+    }
+    load()
+    const interval = setInterval(load, 15000)
+    return () => { active = false; clearInterval(interval) }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -199,24 +244,11 @@ const isReviewRunning = (projectName: string) =>
     }
   }
 
-  const handleRelease = async (e: React.MouseEvent, projectName: string) => {
-    e.stopPropagation()
-    if (releasing.has(projectName)) return
-    setReleasing(prev => new Set(prev).add(projectName))
-    try {
-      const r = await releaseProject(projectName)
-      toast(r.message || `Release started for ${projectName}`, 'success')
-      if (onPush) onPush()
-      else onRefresh()
-    } catch (err) {
-      toast(err instanceof Error ? err.message : `Failed to start release for ${projectName}`, 'error')
-    } finally {
-      setReleasing(prev => {
-        const next = new Set(prev)
-        next.delete(projectName)
-        return next
-      })
-    }
+  const getNextFire = (projectName: string): { ms: number; agent: string } | null => {
+    const entries = (schedulerByProject[projectName] ?? []).filter(e => e.enabled && e.nextFireMs > 0)
+    if (entries.length === 0) return null
+    const soonest = entries.reduce((min, e) => e.nextFireMs < min.nextFireMs ? e : min)
+    return { ms: soonest.nextFireMs, agent: soonest.name }
   }
 
   const sortedProjects = [...fleet.projects].sort((a, b) => {
@@ -234,16 +266,16 @@ const isReviewRunning = (projectName: string) =>
       case 'last_run':
         cmp = getRecentTs(a.project) - getRecentTs(b.project)
         break
+      case 'next_run': {
+        const na = getNextFire(a.project)?.ms ?? Number.POSITIVE_INFINITY
+        const nb = getNextFire(b.project)?.ms ?? Number.POSITIVE_INFINITY
+        cmp = na - nb
+        break
+      }
       case 'ci': {
         const ca = getAggregateCi(a)
         const cb = getAggregateCi(b)
         cmp = (ciOrder[ca ?? ''] ?? 99) - (ciOrder[cb ?? ''] ?? 99)
-        break
-      }
-      case 'release': {
-        const ra = getReleaseTag(a) ?? ''
-        const rb = getReleaseTag(b) ?? ''
-        cmp = ra.localeCompare(rb)
         break
       }
     }
@@ -271,22 +303,19 @@ const isReviewRunning = (projectName: string) =>
             <th className={thClass('last_run')} onClick={() => handleSort('last_run')}>
               <span className="flex items-center gap-1">Last Run <SortIcon active={sortKey === 'last_run'} dir={sortDir} /></span>
             </th>
+            <th className={thClass('next_run')} onClick={() => handleSort('next_run')}>
+              <span className="flex items-center gap-1">Next Run <SortIcon active={sortKey === 'next_run'} dir={sortDir} /></span>
+            </th>
             <th className={thClass('ci')} onClick={() => handleSort('ci')}>
               <span className="flex items-center gap-1">CI <SortIcon active={sortKey === 'ci'} dir={sortDir} /></span>
             </th>
-            <th className={thClass('release')} onClick={() => handleSort('release')}>
-              <span className="flex items-center gap-1">Release <SortIcon active={sortKey === 'release'} dir={sortDir} /></span>
-            </th>
-            <th className="px-4 py-2.5 font-medium"></th>
           </tr>
         </thead>
         <tbody>
           {sortedProjects.map((project) => {
             const ci = getAggregateCi(project)
             const ciUrl = getCiFailedUrl(project)
-            const release = getReleaseTag(project)
             const hasUnreviewed = project.unreviewedCount > 0
-            const isReviewed = project.totalChanges > 0 && !hasUnreviewed
             const reviewing = isReviewRunning(project.project)
             const verdict = getLatestVerdict(project.project)
 
@@ -300,6 +329,11 @@ const isReviewRunning = (projectName: string) =>
 
             // show warning in STATUS only for non-unreviewed reasons (paused, out-of-sync, stale)
             const showWarning = project.status === 'warning' && !hasUnreviewed
+
+            const scheduledCount = (schedulerByProject[project.project] ?? []).filter(e => e.enabled).length
+            const projectPaused = project.tasks.some(th => th.task.launchctl === 'paused')
+            const outOfSync = project.tasks.some(th => th.task.sync === false)
+            const nextFire = getNextFire(project.project)
 
             return (
               <tr
@@ -344,29 +378,53 @@ const isReviewRunning = (projectName: string) =>
 
                 {/* Status */}
                 <td className="px-4 py-2">
-                  {runningJobs.length > 0 ? (
-                    <span className="flex items-center gap-1.5 text-accent text-sm">
-                      <SpinnerIcon />
-                      {runningJobs.length > 1 ? `${runningJobs.length} running` : runningJobs[0].kind}
-                    </span>
-                  ) : project.status === 'error' ? (
-                    <span className="flex items-center gap-1.5 text-sm text-status-error">
-                      <StatusDot ok={false} />
-                      <span>error</span>
-                    </span>
-                  ) : showWarning ? (
-                    <span className="flex items-center gap-1.5 text-sm text-status-warning">
-                      <WarningDot />
-                      <span>warning</span>
-                    </span>
-                  ) : lastJob ? (
-                    <span className="flex items-center gap-1.5 text-sm text-text-tertiary">
-                      <StatusDot ok={true} />
-                      idle
-                    </span>
-                  ) : (
-                    <span className="text-text-tertiary text-sm">—</span>
-                  )}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {runningJobs.length > 0 && (
+                      <span title={runningJobs.map(j => j.kind).join(', ')} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-accent/15 text-accent border border-accent/30">
+                        <SpinnerIcon />
+                        {runningJobs.length > 1 ? `${runningJobs.length} running` : 'running'}
+                      </span>
+                    )}
+                    {project.status === 'error' && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-error/10 text-status-error border border-status-error/30">
+                        <StatusDot ok={false} />
+                        error
+                      </span>
+                    )}
+                    {schedulerPaused ? (
+                      <span title="Internal scheduler paused (Resume jobs in header)" className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30">
+                        ⏸ paused
+                      </span>
+                    ) : projectPaused && (
+                      <span title="launchctl paused" className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30">
+                        ⏸ paused
+                      </span>
+                    )}
+                    {outOfSync && (
+                      <span title="Schedule out of sync with config" className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30">
+                        <WarningDot />
+                        out of sync
+                      </span>
+                    )}
+                    {scheduledCount > 0 && !schedulerPaused && (
+                      <span title={`${scheduledCount} scheduled agent${scheduledCount !== 1 ? 's' : ''}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-bg-tertiary text-text-secondary border border-border">
+                        <svg className="w-3 h-3 shrink-0" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="7" cy="7" r="5.5" />
+                          <path d="M7 4v3l2 1.5" />
+                        </svg>
+                        {scheduledCount} scheduled
+                      </span>
+                    )}
+                    {runningJobs.length === 0 && project.status !== 'error' && !showWarning && scheduledCount === 0 && lastJob && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium text-text-tertiary">
+                        <StatusDot ok={true} />
+                        idle
+                      </span>
+                    )}
+                    {runningJobs.length === 0 && project.status !== 'error' && !showWarning && scheduledCount === 0 && !lastJob && (
+                      <span className="text-text-tertiary text-xs">—</span>
+                    )}
+                  </div>
                 </td>
 
                 {/* Changes */}
@@ -424,6 +482,17 @@ const isReviewRunning = (projectName: string) =>
                   )}
                 </td>
 
+                {/* Next Run */}
+                <td className="px-4 py-2 text-sm">
+                  {nextFire ? (
+                    <span title={`${nextFire.agent} · ${new Date(nextFire.ms).toLocaleString()}`} className="text-text-secondary">
+                      {formatNextFire(nextFire.ms)}
+                    </span>
+                  ) : (
+                    <span className="text-text-tertiary">—</span>
+                  )}
+                </td>
+
                 {/* CI */}
                 <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
                   {ci === 'success' && <StatusDot ok={true} />}
@@ -438,24 +507,6 @@ const isReviewRunning = (projectName: string) =>
                   )}
                   {ci === 'in_progress' && <SpinnerIcon />}
                   {ci === null && <span className="text-text-tertiary text-sm">—</span>}
-                </td>
-
-                {/* Release */}
-                <td className="px-4 py-2 text-sm text-text-tertiary tabular-nums">
-                  <span data-private>{release || '—'}</span>
-                </td>
-
-                {/* Actions */}
-                <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
-                  {isReviewed && (
-                    <button
-                      className="px-3 py-1.5 text-xs font-medium bg-accent text-white rounded-md hover:bg-accent-hover transition-colors cursor-pointer border-none disabled:opacity-60 disabled:cursor-not-allowed"
-                      onClick={e => handleRelease(e, project.project)}
-                      disabled={releasing.has(project.project)}
-                    >
-                      {releasing.has(project.project) ? 'Releasing…' : '🚀 Release'}
-                    </button>
-                  )}
                 </td>
               </tr>
             )

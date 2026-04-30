@@ -10,6 +10,7 @@ import { createJob, updateJob } from '@/lib/job-storage';
 import { startJob } from '@/lib/pm2-jobs';
 import { withBasePrompt, getPermissionModeFlag } from '@/lib/config';
 import { errMsg } from '@/lib/types';
+import { jobsPausedResult } from '@/lib/job-control';
 
 export async function POST(
   request: NextRequest,
@@ -19,6 +20,8 @@ export async function POST(
 
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
+  const paused = jobsPausedResult('start a terminal run');
+  if (paused) return NextResponse.json({ detail: paused.detail }, { status: paused.status });
   const { claudeBin, logDir } = getImproveConfig();
 
   let prompt = '';
@@ -107,7 +110,7 @@ export async function POST(
     }
   }
   if (!resumeSessionId) {
-    prompt = withBasePrompt(prompt);
+    prompt = withBasePrompt(prompt, { projectPath: projPath });
   }
 
   if (attachmentPaths.length > 0) {

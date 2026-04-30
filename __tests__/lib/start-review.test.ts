@@ -58,6 +58,7 @@ describe('startProjectReview', () => {
       getSettings: () => ({ review_verdict_rules: 'Use LGTM / NEEDS ATTENTION / DO NOT SHIP.' }),
       withBasePrompt: (s: string) => s,
       getPermissionModeFlag: () => '--dangerously-skip-permissions',
+      getPipelineModel: () => 'sonnet',
     }));
     vi.doMock('@/lib/pipeline-lock', () => ({
       getLock: getLockMock,
@@ -96,6 +97,7 @@ describe('startProjectReview', () => {
       getSettings: () => ({ review_verdict_rules: '' }),
       withBasePrompt: (s: string) => s,
       getPermissionModeFlag: () => '--dangerously-skip-permissions',
+      getPipelineModel: () => 'sonnet',
     }));
     vi.doMock('@/lib/pipeline-lock', () => ({
       getLock: getLockMock, acquireLock: acquireLockMock,
@@ -130,6 +132,7 @@ describe('startProjectReview', () => {
       getSettings: () => ({ review_verdict_rules: '' }),
       withBasePrompt: (s: string) => s,
       getPermissionModeFlag: () => '',
+      getPipelineModel: () => 'sonnet',
     }));
     vi.doMock('@/lib/pipeline-lock', () => ({
       getLock: getLockMock, acquireLock: acquireLockMock,

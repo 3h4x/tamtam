@@ -56,11 +56,22 @@ TamTam relies on an event stream formatted for Anthropic's Claude APIs. The shim
 
 ## Usage
 
-The shim is meant to be invoked as a drop-in replacement for the Claude CLI binary within the TamTam application. 
+The shim is meant to be invoked as a drop-in replacement for the Claude CLI binary within the TamTam application.
 
 ```bash
 node scripts/gemini-shim.js [claude-args...]
 ```
+
+### Provider selection in Settings
+
+Settings → Workspace → **Agent CLI Provider** controls which binary TamTam invokes:
+
+- `claude` — uses the path in **Claude CLI Path** (default `~/.local/bin/claude`)
+- `gemini` — TamTam resolves the binary to `<TamTam>/scripts/gemini-shim.js` automatically; the Claude CLI Path field is read-only
+- `lmstudio` — TamTam resolves the binary to `<TamTam>/scripts/lmstudio-shim.js` automatically
+- `custom` — uses the path in **Claude CLI Path** verbatim (for forks of the Claude CLI or wrapper scripts)
+
+Switching the provider away from `gemini`/`lmstudio` clears any leftover shim path from the Claude CLI Path field so a stale `…/scripts/gemini-shim.js` doesn't keep getting executed under the `claude` provider. `lib/config.ts` enforces the same rule on the server side: a shim path stored under `claude` or `custom` is treated as unset and falls back to the default.
 
 ## LM Studio Shim
 

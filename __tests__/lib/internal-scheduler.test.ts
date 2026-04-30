@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   computeNextFire,
   startInternalScheduler,
+  pauseInternalScheduler,
+  resumeInternalScheduler,
   stopInternalScheduler,
   upsertAgentSchedule,
   removeAgentSchedule,
@@ -158,6 +160,22 @@ describe('internal-scheduler', () => {
       expect(dump.entries[0].lastError).toBe('HTTP 500');
       // Schedule was re-armed for the next fire (entry still present, timer set)
       expect(dump.entries[0].nextFireMs).toBeGreaterThan(Date.now());
+    });
+
+    it('pause stops future fires until resume is called', () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+      vi.stubGlobal('fetch', fetchMock);
+      setSchedulerBaseUrl('http://test');
+
+      upsertAgentSchedule({ id: 'a1', project: 'p', name: 'n', schedule: '1m', prompt: 'x', enabled: true });
+      pauseInternalScheduler();
+
+      vi.advanceTimersByTime(60_000 + 100);
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      resumeInternalScheduler();
+      vi.advanceTimersByTime(60_000 + 100);
+      expect(fetchMock).toHaveBeenCalledOnce();
     });
   });
 });

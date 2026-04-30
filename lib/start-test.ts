@@ -6,6 +6,7 @@ import { getImproveConfig, getProjectTestConfig } from './scheduling';
 import { resolveProjectPath } from './project-data';
 import { createJob, listJobs, probeJobStatus, updateJob, markDone } from './job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
+import { jobsPausedResult } from './job-control';
 
 export function detectTestCommand(projPath: string, projectName?: string): string | null {
   // Explicit off-switch — overrides user/auto-detected command. Wrapped in
@@ -57,6 +58,11 @@ export type StartTestResult =
   | { ok: false; status: number; detail: string; blockingJobId?: string };
 
 export async function startProjectTest(projectName: string): Promise<StartTestResult> {
+  const projPath = resolveProjectPath(projectName);
+  if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
+  const paused = jobsPausedResult('start tests');
+  if (paused) return paused;
+
   // Check for existing pipeline lock — but allow running under a parent
   // release job's lock (this step was kicked off by the release pipeline).
   const underRelease = isLockOwnedByActiveRelease(projectName);
@@ -77,8 +83,6 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
     }
   }
 
-  const projPath = resolveProjectPath(projectName);
-  if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
   const { logDir } = getImproveConfig();
 
   const testCmd = detectTestCommand(projPath, projectName);

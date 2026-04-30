@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { reloadConfig } from '@/lib/config';
+import { getSettings, reloadConfig } from '@/lib/config';
+import { syncJobsPauseState } from '@/lib/job-control';
 const SETTING_KEYS = [
   'github_owner',
   'claude_provider',
@@ -18,6 +19,7 @@ const SETTING_KEYS = [
   'permission_mode',
   'commit_style',
   'review_verdict_rules',
+  'jobs_paused',
   'fix_ci_max_retries',
   'fix_ci_retry_window_seconds',
   'fix_ci_fast_crash_ms',
@@ -33,6 +35,10 @@ const SETTING_KEYS = [
   'notification_on_fix_loop_exhausted',
   'notification_on_review_do_not_ship',
   'notification_on_agent_run_fail',
+  'pipeline_model_review',
+  'pipeline_model_fix',
+  'pipeline_model_dod',
+  'pipeline_model_commit',
 ] as const;
 
 export async function GET() {
@@ -63,5 +69,6 @@ export async function PATCH(request: NextRequest) {
   }
 
   reloadConfig();
+  syncJobsPauseState(getSettings().jobs_paused);
   return NextResponse.json({ status: 'ok' });
 }

@@ -487,7 +487,13 @@ export function ProjectDetailPage({
 
   useEffect(() => {
     if (!name) return
-    fetchBehind(name).then((r) => setBehindCount(r.behind)).catch(() => {})
+    let active = true
+    const refresh = () => {
+      fetchBehind(name).then((r) => { if (active) setBehindCount(r.behind) }).catch(() => {})
+    }
+    refresh()
+    const interval = setInterval(refresh, 60000)
+    return () => { active = false; clearInterval(interval) }
   }, [name])
 
   const handlePull = async (strategy: 'ff-only' | 'merge' | 'rebase' = 'ff-only') => {

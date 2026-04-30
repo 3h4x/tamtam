@@ -13,6 +13,7 @@ import { withBasePrompt, getPermissionModeFlag } from '@/lib/config';
 import { errMsg } from '@/lib/types';
 import { parseFileAgentId, loadFileAgent } from '@/lib/tamtam-file-agents';
 import { getAgentMemoryDir, getAgentMemoryPath, readAgentMemory, ensureAgentMemoryDir, buildMemoryBlock } from '@/lib/agent-memory';
+import { jobsPausedResult } from '@/lib/job-control';
 
 export async function POST(
   request: NextRequest,
@@ -74,6 +75,8 @@ export async function POST(
   if (!projPath) {
     return NextResponse.json({ detail: `project '${agent.project}' not found` }, { status: 404 });
   }
+  const paused = jobsPausedResult('start an agent run');
+  if (paused) return NextResponse.json({ detail: paused.detail }, { status: paused.status });
 
   // In Direct Branch mode, block agent runs while a fix/issue-* branch is
   // checked out. Scheduled agents committing to an issue branch would mix
@@ -168,7 +171,7 @@ export async function POST(
   const corePrompt = systemPrompt && taskPrompt
     ? `${systemPrompt}\n\n---\n\n${taskPrompt}`
     : (systemPrompt || taskPrompt);
-  const fullPrompt = withBasePrompt(`${corePrompt}\n\n---\n\n${memoryBlock}`);
+  const fullPrompt = withBasePrompt(`${corePrompt}\n\n---\n\n${memoryBlock}`, { projectPath: projPath });
 
   const job = createJob(agent.project, `agent:${agent.name}`, 0, '', taskPrompt, contextMeta, taskPrompt);
   const logPath = join(logDir, `${job.id}.log`);

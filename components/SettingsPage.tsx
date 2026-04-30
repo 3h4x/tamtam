@@ -19,6 +19,7 @@ interface SettingsMap {
   permission_mode: string
   commit_style: string
   review_verdict_rules: string
+  jobs_paused: string
   fix_ci_max_retries: string
   fix_ci_retry_window_seconds: string
   fix_ci_fast_crash_ms: string
@@ -34,7 +35,13 @@ interface SettingsMap {
   notification_on_fix_loop_exhausted: string
   notification_on_review_do_not_ship: string
   notification_on_agent_run_fail: string
+  pipeline_model_review: string
+  pipeline_model_fix: string
+  pipeline_model_dod: string
+  pipeline_model_commit: string
 }
+
+type SettingsFieldKey = Exclude<keyof SettingsMap, 'jobs_paused'>
 
 export interface AgentTemplateRecord {
   name: string
@@ -66,6 +73,7 @@ const DEFAULTS: SettingsMap = {
 - NEEDS ATTENTION when you have at least one finding but nothing that risks data loss, security regressions, or breakage in production. Orphaned code, dead imports, missing imports that happen to compile, hardcoded strings that should use env vars, non-ideal UX state leaks, stylistic inconsistencies — all NEEDS ATTENTION.
 - DO NOT SHIP when there is a real risk of breakage, data loss, security regression, or a test that hides behavior.
 - If LGTM, just confirm the changes look good and add nothing else.`,
+  jobs_paused: 'false',
   fix_ci_max_retries: '2',
   fix_ci_retry_window_seconds: '120',
   fix_ci_fast_crash_ms: '5000',
@@ -81,150 +89,155 @@ const DEFAULTS: SettingsMap = {
   notification_on_fix_loop_exhausted: 'false',
   notification_on_review_do_not_ship: 'false',
   notification_on_agent_run_fail: 'false',
+  pipeline_model_review: '',
+  pipeline_model_fix: '',
+  pipeline_model_dod: '',
+  pipeline_model_commit: '',
 }
 
 interface FieldDef {
   label: string
   help: string
-  group: 'workspace' | 'scheduling' | 'behavior'
+  group: 'agent' | 'pipeline' | 'general'
   advanced?: boolean
   span?: number  // column span within the group grid
 }
 
-const FIELDS: Record<keyof SettingsMap, FieldDef> = {
+const FIELDS: Record<SettingsFieldKey, FieldDef> = {
   workspace_path: {
     label: 'Workspace Path',
     help: 'Root directory containing your git projects',
-    group: 'workspace',
+    group: 'general',
     span: 2,
   },
   github_owner: {
     label: 'GitHub Owner',
     help: 'Default GitHub org/user for repos without an explicit remote',
-    group: 'workspace',
+    group: 'general',
     span: 1,
   },
   claude_provider: {
     label: 'Agent CLI Provider',
     help: 'Choose the Claude-compatible backend TamTam invokes for runs',
-    group: 'workspace',
+    group: 'agent',
     span: 1,
   },
   frequency: {
     label: 'Base Frequency',
     help: 'How often scheduled agents run, e.g. "1h", "30m"',
-    group: 'scheduling',
+    group: 'general',
     span: 1,
   },
   daytime: {
     label: 'Allowed Hours',
     help: 'Time window when agents are permitted to run',
-    group: 'scheduling',
+    group: 'general',
     span: 1,
   },
   weekends: {
     label: 'Weekend Runs',
     help: 'Whether agents run on Saturdays and Sundays',
-    group: 'scheduling',
+    group: 'general',
     span: 1,
   },
   claude_bin: {
     label: 'Claude CLI Path',
     help: 'Used for Claude or Custom provider. Gemini and LM Studio resolve to TamTam shim scripts.',
-    group: 'workspace',
+    group: 'agent',
     span: 1,
   },
   lmstudio_model: {
-    label: 'LM Studio Model',
-    help: 'Downloaded LM Studio model identifier used when the LM Studio shim is selected',
-    group: 'workspace',
+    label: 'Default Model',
+    help: 'Downloaded LM Studio model identifier used as the default model for runs',
+    group: 'agent',
+    span: 1,
+  },
+  default_model: {
+    label: 'Default Model',
+    help: 'Model pre-selected in the terminal runner',
+    group: 'agent',
+    span: 1,
+  },
+  permission_mode: {
+    label: 'Permission Mode',
+    help: 'Controls which operations Claude can perform without prompting',
+    group: 'agent',
     span: 1,
   },
   log_dir: {
     label: 'Log Directory',
     help: 'Directory where job logs are stored',
-    group: 'workspace',
+    group: 'general',
+    advanced: true,
     span: 1,
   },
   launchagent_prefix: {
     label: 'LaunchAgent Prefix',
     help: 'Prefix for macOS LaunchAgent plist labels',
-    group: 'workspace',
+    group: 'general',
     advanced: true,
     span: 1,
   },
   base_prompt: {
     label: 'Base Prompt',
     help: 'Prepended to every Claude invocation — runs, agents, and reviews',
-    group: 'behavior',
+    group: 'agent',
     span: 2,
-  },
-  default_model: {
-    label: 'Default Model',
-    help: 'Model pre-selected in the terminal runner',
-    group: 'behavior',
-    span: 1,
-  },
-  permission_mode: {
-    label: 'Permission Mode',
-    help: 'Controls which operations Claude can perform without prompting',
-    group: 'behavior',
-    span: 1,
   },
   commit_style: {
     label: 'Commit Message Style',
     help: 'Style guide injected into the prompt when generating commit titles in the Push panel',
-    group: 'behavior',
+    group: 'pipeline',
     span: 2,
   },
   review_verdict_rules: {
     label: 'Review Verdict Rules',
     help: 'Rules that drive LGTM / NEEDS ATTENTION / DO NOT SHIP decisions in code reviews',
-    group: 'behavior',
+    group: 'pipeline',
     span: 2,
   },
   fix_ci_max_retries: {
     label: 'Fix-CI Max Retries',
     help: 'How many times to auto-retry a fix-ci job that crashes fast before giving up. 0 disables retries.',
-    group: 'behavior',
+    group: 'pipeline',
     span: 1,
   },
   fix_ci_retry_window_seconds: {
     label: 'Fix-CI Retry Window (s)',
     help: 'Window in seconds within which retries are counted toward the cap',
-    group: 'behavior',
+    group: 'pipeline',
     advanced: true,
     span: 1,
   },
   fix_ci_fast_crash_ms: {
     label: 'Fix-CI Fast-Crash (ms)',
     help: 'Duration under which a non-zero exit is treated as a boot crash and retried. Longer failures surface as-is.',
-    group: 'behavior',
+    group: 'pipeline',
     advanced: true,
     span: 1,
   },
   agent_templates: {
     label: 'Agent Templates',
     help: 'JSON array of custom agent templates (managed via the Templates tab)',
-    group: 'behavior',
+    group: 'templates' as never,
     span: 2,
   },
   log_retention_count: {
     label: 'Log Retention (runs)',
     help: 'Keep log files for the last N finished runs per project. Older log files are deleted; the run row stays in history.',
-    group: 'behavior',
+    group: 'pipeline',
     span: 1,
   },
   log_retention_days: {
     label: 'Log Retention (days)',
     help: 'Delete log files for runs older than this many days. Set to 0 to disable age-based pruning.',
-    group: 'behavior',
+    group: 'pipeline',
     span: 1,
   },
   job_row_retention_days: {
     label: 'Run History Retention (days)',
     help: 'Nightly cleanup: delete run DB rows older than this many days. Set to 0 to disable.',
-    group: 'behavior',
+    group: 'pipeline',
     span: 1,
   },
   notification_webhook_url: {
@@ -275,9 +288,33 @@ const FIELDS: Record<keyof SettingsMap, FieldDef> = {
     group: 'notifications' as never,
     span: 1,
   },
+  pipeline_model_review: {
+    label: 'Review Model',
+    help: 'Model used for code review. "Default" uses the workspace Default Model.',
+    group: 'pipeline',
+    span: 1,
+  },
+  pipeline_model_fix: {
+    label: 'Fix Model',
+    help: 'Model used for the fix step. "Default" uses the workspace Default Model.',
+    group: 'pipeline',
+    span: 1,
+  },
+  pipeline_model_dod: {
+    label: 'DoD Model',
+    help: 'Model used for DoD verification. Empty defaults to haiku — verification is read-only and cheap.',
+    group: 'pipeline',
+    span: 1,
+  },
+  pipeline_model_commit: {
+    label: 'Commit Message Model',
+    help: 'Model used to generate commit messages. Empty defaults to haiku — short well-scoped task.',
+    group: 'pipeline',
+    span: 1,
+  },
 }
 
-type TabId = 'behavior' | 'workspace' | 'scheduling' | 'projects' | 'database' | 'templates' | 'notifications'
+type TabId = 'agent' | 'pipeline' | 'general' | 'projects' | 'database' | 'templates' | 'notifications'
 
 const GROUPS: {
   id: TabId
@@ -285,26 +322,27 @@ const GROUPS: {
   description: string
   cols: number
 }[] = [
-  { id: 'behavior',   title: 'Agent Behavior', description: 'How Claude agents behave when running',                          cols: 2 },
-  { id: 'workspace',  title: 'Workspace',       description: 'Where your projects live and how they connect to GitHub',        cols: 2 },
-  { id: 'scheduling', title: 'Scheduling',      description: 'When and how often agents are allowed to run',                  cols: 3 },
+  { id: 'agent',    title: 'Agent',           description: 'Which CLI backend TamTam invokes and how Claude is prompted',     cols: 2 },
+  { id: 'pipeline', title: 'Release Pipeline', description: 'Commit, review, fix-loop, and retention rules for the release pipeline', cols: 2 },
+  { id: 'general',  title: 'General',          description: 'Workspace location, GitHub defaults, and scheduling windows',     cols: 3 },
 ]
 
 const TABS: { id: TabId; label: string }[] = [
-  { id: 'behavior',   label: 'Behavior' },
-  { id: 'workspace',  label: 'Workspace' },
-  { id: 'scheduling', label: 'Scheduling' },
+  { id: 'agent',         label: 'Agent' },
+  { id: 'pipeline',      label: 'Pipeline' },
+  { id: 'general',       label: 'General' },
   { id: 'notifications', label: 'Notifications' },
-  { id: 'projects',   label: 'Projects' },
-  { id: 'database',   label: 'Database' },
-  { id: 'templates',  label: 'Templates' },
+  { id: 'projects',      label: 'Projects' },
+  { id: 'templates',     label: 'Templates' },
+  { id: 'database',      label: 'Database' },
 ]
 
 const COL_SPAN: Record<number, string> = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-3' }
 const GRID_COLS: Record<number, string> = { 2: 'grid-cols-2', 3: 'grid-cols-3' }
 
-const SELECT_CLASS = 'w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors'
-const INPUT_CLASS  = 'w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary'
+const FIELD_BASE = 'w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors'
+const SELECT_CLASS = `${FIELD_BASE} appearance-none cursor-pointer bg-no-repeat bg-[right_0.6rem_center] pr-9 bg-[length:1rem] bg-[image:url("data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23888%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M6%209l6%206%206-6%27%2F%3E%3C%2Fsvg%3E")]`
+const INPUT_CLASS  = `${FIELD_BASE} font-mono placeholder:text-text-tertiary`
 
 interface ProjectEntry {
   name: string
@@ -645,7 +683,7 @@ function SettingsField({
   provider,
   onChange,
 }: {
-  fieldKey: keyof SettingsMap
+  fieldKey: SettingsFieldKey
   value: string
   provider?: string
   onChange: (key: keyof SettingsMap, value: string) => void
@@ -653,6 +691,9 @@ function SettingsField({
   const field = FIELDS[fieldKey]
   const colSpanClass = COL_SPAN[field.span ?? 1] ?? 'col-span-1'
   const shimManaged = fieldKey === 'claude_bin' && (provider === 'gemini' || provider === 'lmstudio')
+  const shimDisplay = shimManaged
+    ? `<TamTam>/scripts/${provider === 'gemini' ? 'gemini-shim.js' : 'lmstudio-shim.js'}`
+    : ''
 
   return (
     <div className={colSpanClass}>
@@ -684,6 +725,23 @@ function SettingsField({
         </select>
       ) : fieldKey === 'default_model' ? (
         <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
+          {provider === 'gemini' ? (
+            <>
+              <option value="haiku">haiku → flash</option>
+              <option value="sonnet">sonnet → pro</option>
+              <option value="opus">opus → pro</option>
+            </>
+          ) : (
+            <>
+              <option value="haiku">haiku</option>
+              <option value="sonnet">sonnet</option>
+              <option value="opus">opus</option>
+            </>
+          )}
+        </select>
+      ) : fieldKey === 'pipeline_model_review' || fieldKey === 'pipeline_model_fix' || fieldKey === 'pipeline_model_dod' || fieldKey === 'pipeline_model_commit' ? (
+        <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
+          <option value="">{(fieldKey === 'pipeline_model_dod' || fieldKey === 'pipeline_model_commit') ? 'Default (haiku)' : 'Default (workspace)'}</option>
           <option value="haiku">haiku</option>
           <option value="sonnet">sonnet</option>
           <option value="opus">opus</option>
@@ -700,7 +758,7 @@ function SettingsField({
       ) : (
         <input
           type="text"
-          value={shimManaged ? `Managed by ${provider === 'gemini' ? 'Gemini' : 'LM Studio'} shim` : value}
+          value={shimManaged ? shimDisplay : value}
           disabled={shimManaged}
           onChange={(e) => onChange(fieldKey, e.target.value)}
           placeholder={DEFAULTS[fieldKey] || `Enter ${field.label.toLowerCase()}`}
@@ -721,13 +779,13 @@ export function SettingsPage() {
   const [error, setError]                 = useState<string | null>(null)
   const [showAdvanced, setShowAdvanced]   = useState(false)
   const [activeTab, setActiveTab]         = useState<TabId>(() => {
-    if (typeof window === 'undefined') return 'behavior'
-    const stored = localStorage.getItem('tamtam-settings-tab') as TabId | null
-    return stored && TABS.some(t => t.id === stored) ? stored : 'behavior'
+    if (typeof window === 'undefined') return 'agent'
+    const stored = localStorage.getItem('tamtam-settings-tab-v2') as TabId | null
+    return stored && TABS.some(t => t.id === stored) ? stored : 'agent'
   })
   const switchTab = (id: TabId) => {
     setActiveTab(id)
-    try { localStorage.setItem('tamtam-settings-tab', id) } catch {}
+    try { localStorage.setItem('tamtam-settings-tab-v2', id) } catch {}
   }
 
   const [projects, setProjects]               = useState<ProjectEntry[]>([])
@@ -805,7 +863,17 @@ export function SettingsPage() {
   }, [isDirty, handleSave])
 
   const handleChange = (key: keyof SettingsMap, value: string) => {
-    setSettings((prev) => ({ ...prev, [key]: value }))
+    setSettings((prev) => {
+      const next = { ...prev, [key]: value }
+      if (key === 'claude_provider' && (value === 'claude' || value === 'custom')) {
+        // Drop stale shim paths left over from a prior gemini/lmstudio selection
+        // so the Claude CLI Path field shows the real default instead.
+        if (/scripts\/(gemini|lmstudio)-shim\.js$/.test(prev.claude_bin)) {
+          next.claude_bin = value === 'claude' ? DEFAULTS.claude_bin : ''
+        }
+      }
+      return next
+    })
     setSaved(false)
   }
 
@@ -860,12 +928,9 @@ export function SettingsPage() {
   }
 
   const enabledCount = projects.filter((p) => p.enabled).length
-
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
-        <div>
-        </div>
         <div className="flex items-center gap-3">
           {isDirty && !saving && (
             <span className="text-xs text-text-tertiary">Unsaved changes · ⌘S</span>
@@ -918,9 +983,15 @@ export function SettingsPage() {
           </nav>
 
           {GROUPS.filter((group) => group.id === activeTab).map((group) => {
-            const allGroupFields = (Object.keys(FIELDS) as (keyof SettingsMap)[]).filter(
+            const allGroupFields = (Object.keys(FIELDS) as SettingsFieldKey[]).filter(
               (k) => FIELDS[k].group === group.id
-            )
+            ).filter((k) => {
+              // LM Studio replaces the haiku/sonnet/opus default model selector with
+              // its own model identifier field — show one or the other, never both.
+              if (k === 'lmstudio_model') return settings.claude_provider === 'lmstudio'
+              if (k === 'default_model') return settings.claude_provider !== 'lmstudio'
+              return true
+            })
             const normalFields   = allGroupFields.filter((k) => !FIELDS[k].advanced)
             const advancedFields = allGroupFields.filter((k) =>  FIELDS[k].advanced)
             const gridClass      = GRID_COLS[group.cols] ?? 'grid-cols-2'

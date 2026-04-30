@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/lib/db/schema';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 
 function createTestDb() {
   const sqlite = new Database(':memory:');
@@ -66,6 +69,7 @@ describe('config', () => {
         permission_mode: 'bypassPermissions',
         commit_style: 'Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Types: feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert.',
         review_verdict_rules: expect.stringContaining('Pragmatic verdict rules'),
+        jobs_paused: false,
         fix_ci_max_retries: 2,
         fix_ci_retry_window_seconds: 120,
         fix_ci_fast_crash_ms: 5000,
@@ -80,6 +84,10 @@ describe('config', () => {
         notification_on_fix_loop_exhausted: false,
         notification_on_review_do_not_ship: false,
         notification_on_agent_run_fail: false,
+        pipeline_model_review: '',
+        pipeline_model_fix: '',
+        pipeline_model_dod: '',
+        pipeline_model_commit: '',
       });
     });
 
@@ -215,6 +223,15 @@ describe('config', () => {
       expect(config.launchagent_prefix).toBe('org.example');
     });
 
+    it('returns jobs_paused=true when stored in settings', () => {
+      const db = testDb.db;
+      db.insert(schema.settings).values({ key: 'jobs_paused', value: 'true' }).run();
+
+      const config = getSettings();
+
+      expect(config.jobs_paused).toBe(true);
+    });
+
     it('handles multiple settings', () => {
       const db = testDb.db;
       db.insert(schema.settings).values({ key: 'workspace_path', value: '/projects' }).run();
@@ -345,6 +362,40 @@ describe('config', () => {
 
       const result = withBasePrompt('task here');
       expect(result).toBe('Rule 1\nRule 2\n\n---\n\ntask here');
+    });
+
+    it('injects project CLAUDE.md for LM Studio provider', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'tamtam-config-'));
+      try {
+        writeFileSync(join(dir, 'CLAUDE.md'), '# Project Rules\n\nUse pnpm.');
+        testDb.db.insert(schema.settings).values({ key: 'claude_provider', value: 'lmstudio' }).run();
+        testDb.db.insert(schema.settings).values({ key: 'base_prompt', value: 'Base rules.' }).run();
+        reloadConfig();
+
+        const result = withBasePrompt('task here', { projectPath: dir });
+
+        expect(result).toContain('Base rules.');
+        expect(result).toContain('Project instructions from CLAUDE.md');
+        expect(result).toContain('Use pnpm.');
+        expect(result).toContain('task here');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('does not inject project CLAUDE.md for Claude provider', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'tamtam-config-'));
+      try {
+        writeFileSync(join(dir, 'CLAUDE.md'), '# Project Rules\n\nUse pnpm.');
+        testDb.db.insert(schema.settings).values({ key: 'base_prompt', value: 'Base rules.' }).run();
+        reloadConfig();
+
+        const result = withBasePrompt('task here', { projectPath: dir });
+
+        expect(result).toBe('Base rules.\n\n---\n\ntask here');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
   });
 

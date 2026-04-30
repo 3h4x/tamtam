@@ -5,7 +5,7 @@ import { ProjectTablePage } from '@/components/ProjectTablePage'
 import { LoadingState } from '@/components/LoadingState'
 
 export default function Home() {
-  const { tasks, loading, fleet, loadProjects, issueCounts } = useProjects()
+  const { tasks, loading, fleet, issueCounts } = useProjects()
 
   if (loading && tasks.length === 0) return <LoadingState />
   if (tasks.length === 0) {
@@ -19,7 +19,6 @@ export default function Home() {
   return (
     <ProjectTablePage
       fleet={fleet}
-      onRefresh={loadProjects}
       issueCounts={issueCounts}
     />
   )

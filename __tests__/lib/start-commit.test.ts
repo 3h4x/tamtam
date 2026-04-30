@@ -188,7 +188,7 @@ describe('generateCommitMessage', () => {
     vi.resetModules();
     execMock = vi.fn();
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       getProjectTestConfig: vi.fn().mockReturnValue(null),
@@ -251,7 +251,7 @@ describe('generateCommitMessage', () => {
 
   it('includes commit style guide in prompt when configured', async () => {
     vi.doUnmock('@/lib/config');
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: 'Use imperative mood' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: 'Use imperative mood' }), getPipelineModel: () => 'haiku' }));
     vi.resetModules();
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/scheduling', () => ({
@@ -308,7 +308,7 @@ describe('startProjectCommit', () => {
       clearProjectDataCache: vi.fn(),
     }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
@@ -718,7 +718,7 @@ describe('startProjectCommit', () => {
       clearProjectDataCache: vi.fn(),
     }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,

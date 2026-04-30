@@ -4,11 +4,12 @@ import { tmpdir } from 'os';
 import { resolveProjectPath } from './project-data';
 import { getImproveConfig } from './scheduling';
 import { exec } from './shell';
-import { getPermissionModeFlag } from './config';
+import { getPermissionModeFlag, getPipelineModel } from './config';
 import { createJob, listJobs, markDone, updateJob } from './job-storage';
 import { wrapIfUntrusted, withUntrustedPreamble } from './untrusted';
 import { startJob, getJobStatus, deleteJob } from './pm2-jobs';
 import { ensureBranchForCtx } from './mark-dod-branch';
+import { jobsPausedResult } from './job-control';
 
 export type MarkDodResult =
   | { ok: true; jobId: string; issueNumber: number; verified: number; total: number; changed: boolean }
@@ -102,6 +103,8 @@ export async function startMarkDod(
     isPr = !issueCtx && !!prCtx;
   }
   if (!ctx) return { ok: false, status: 400, detail: 'no issue or PR context on latest run' };
+  const paused = jobsPausedResult('start DoD verification');
+  if (paused) return paused;
 
   const { logDir, claudeBin } = getImproveConfig();
   mkdirSync(logDir, { recursive: true });
@@ -193,7 +196,7 @@ JSON schema:
     const basePreamble = 'You verify whether acceptance criteria are implemented in a codebase. Use tools to inspect real code. Output strict JSON only.';
     const fullPrompt = withUntrustedPreamble(`${basePreamble}\n\n---\n\n${prompt}`);
     // Restrict to read-only tools — DoD verification never needs to run shell commands.
-    const claudeCommand = `${claudeBin} --print ${getPermissionModeFlag()} --model haiku --allowed-tools Read,Grep,Glob`;
+    const claudeCommand = `${claudeBin} --print ${getPermissionModeFlag()} --model ${getPipelineModel('dod')} --allowed-tools Read,Grep,Glob`;
 
     let claudeOutput = '';
     let claudeExitCode = 1;
@@ -338,4 +341,3 @@ JSON schema:
     }
   }
 }
-

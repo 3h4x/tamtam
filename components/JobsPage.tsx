@@ -32,17 +32,35 @@ function formatCost(job: JobInfo): string | null {
   return `$${c.toFixed(2)}`
 }
 
+// Mirror ProjectRunsTab color/label mapping so kind badges look the same
+// across the global Runs view and project-scoped runs.
+const KIND_STYLES: Record<string, { label: string; cls: string }> = {
+  run: { label: 'chat', cls: 'bg-accent/15 text-accent' },
+  release: { label: 'release', cls: 'bg-accent/20 text-accent border border-accent/40' },
+  review: { label: 'review', cls: 'bg-status-info/15 text-status-info' },
+  test: { label: 'test', cls: 'bg-status-success/15 text-status-success' },
+  fix: { label: 'fix', cls: 'bg-status-warning/15 text-status-warning' },
+  'fix-ci': { label: 'fix-ci', cls: 'bg-status-warning/15 text-status-warning' },
+  'fix-push': { label: 'fix-push', cls: 'bg-status-warning/15 text-status-warning' },
+  commit: { label: 'commit', cls: 'bg-status-success/15 text-status-success' },
+  push: { label: 'push', cls: 'bg-status-success/15 text-status-success' },
+  'mark-dod': { label: 'dod', cls: 'bg-status-info/15 text-status-info' },
+  'pr-wait': { label: 'pr-wait', cls: 'bg-status-info/15 text-status-info' },
+}
+
 function KindBadge({ kind }: { kind: string }) {
-  const colors: Record<string, string> = {
-    run: 'bg-accent/10 text-accent',
-    review: 'bg-purple-500/10 text-purple-400',
-    'fix-ci': 'bg-orange-500/10 text-orange-400',
-    fix: 'bg-orange-500/10 text-orange-400',
-    test: 'bg-blue-500/10 text-blue-400',
-  }
+  const isAgent = kind.startsWith('agent:')
+  const style = KIND_STYLES[kind]
+  const label = isAgent ? kind.slice('agent:'.length) || 'agent' : style?.label ?? kind
+  const cls = isAgent
+    ? 'bg-purple-500/15 text-purple-400'
+    : style?.cls ?? 'bg-text-tertiary/15 text-text-secondary'
   return (
-    <span className={`px-1.5 py-0.5 text-xs rounded font-medium ${colors[kind] ?? 'bg-bg-tertiary text-text-tertiary'}`}>
-      {kind}
+    <span
+      className={`inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded ${cls}`}
+      title={kind}
+    >
+      {label}
     </span>
   )
 }
@@ -141,19 +159,25 @@ export function JobsPage() {
         </div>
       </div>
 
-      <div className="flex gap-1 border-b border-border mb-4">
-        {(['all', 'running', 'failed', 'done'] as const).map((f) => (
-          <button
-            key={f}
-            className={`px-3 py-1.5 text-sm cursor-pointer transition-colors ${filter === f ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`}
-            onClick={() => setFilter(f)}
-          >
-            {f === 'all' && `All (${jobs.length})`}
-            {f === 'running' && `Running (${runningCount})`}
-            {f === 'failed' && `Failed (${failedCount})`}
-            {f === 'done' && `Done (${doneCount})`}
-          </button>
-        ))}
+      <div className="flex items-center gap-1.5 flex-wrap mb-4">
+        {(['all', 'running', 'failed', 'done'] as const).map((f) => {
+          const count = f === 'all' ? jobs.length : f === 'running' ? runningCount : f === 'failed' ? failedCount : doneCount
+          const active = filter === f
+          const tone =
+            f === 'running' ? (active ? 'border-status-warning bg-status-warning/15 text-status-warning' : 'border-border bg-bg-secondary text-text-secondary hover:text-status-warning') :
+            f === 'failed' ? (active ? 'border-status-error bg-status-error/15 text-status-error' : 'border-border bg-bg-secondary text-text-secondary hover:text-status-error') :
+            f === 'done' ? (active ? 'border-status-success bg-status-success/15 text-status-success' : 'border-border bg-bg-secondary text-text-secondary hover:text-status-success') :
+            (active ? 'border-accent bg-accent/15 text-accent' : 'border-border bg-bg-secondary text-text-secondary hover:text-text-primary')
+          return (
+            <button
+              key={f}
+              className={`px-2.5 py-1 text-xs rounded-full font-mono cursor-pointer border transition-colors ${tone}`}
+              onClick={() => setFilter(f)}
+            >
+              {f} <span className="opacity-70">{count}</span>
+            </button>
+          )
+        })}
       </div>
 
       {loading ? (
@@ -181,17 +205,18 @@ export function JobsPage() {
           </p>
         </div>
       ) : (
+        <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
         <table className="w-full border-collapse">
-          <thead>
-            <tr className="text-left text-xs text-text-secondary uppercase tracking-wider">
-              <th className="px-4 py-2">Status</th>
-              <th className="px-4 py-2">Project</th>
-              <th className="px-4 py-2">Kind</th>
-              <th className="px-4 py-2">Prompt</th>
-              <th className="px-4 py-2">Started</th>
-              <th className="px-4 py-2">Duration</th>
-              <th className="px-4 py-2">Tokens</th>
-              <th className="px-4 py-2">Cost</th>
+          <thead className="bg-bg-tertiary border-b border-border">
+            <tr className="text-left text-[11px] text-text-secondary uppercase tracking-wider">
+              <th className="px-4 py-2 font-medium">Status</th>
+              <th className="px-4 py-2 font-medium">Project</th>
+              <th className="px-4 py-2 font-medium">Kind</th>
+              <th className="px-4 py-2 font-medium">Prompt</th>
+              <th className="px-4 py-2 font-medium">Started</th>
+              <th className="px-4 py-2 font-medium text-right">Duration</th>
+              <th className="px-4 py-2 font-medium text-right">Tokens</th>
+              <th className="px-4 py-2 font-medium text-right">Cost</th>
             </tr>
           </thead>
           <tbody>
@@ -204,7 +229,7 @@ export function JobsPage() {
               return (
                 <tr
                   key={job.id}
-                  className={`border-t border-border hover:bg-bg-secondary/50 cursor-pointer border-l-2 ${isRunning ? 'border-l-status-warning' : isFailed ? 'border-l-status-error' : 'border-l-transparent'}`}
+                  className={`border-t border-border/60 hover:bg-bg-tertiary/40 cursor-pointer transition-colors border-l-2 ${isRunning ? 'border-l-status-warning' : isFailed ? 'border-l-status-error' : 'border-l-transparent'}`}
                   onClick={() => router.push(job.kind === 'run' && job.session_id ? `/project/${job.project}/terminal/${job.session_id}` : `/project/${job.project}/terminal?job=${encodeURIComponent(job.id)}`)}
                 >
                   <td className="px-4 py-2 whitespace-nowrap">
@@ -232,13 +257,13 @@ export function JobsPage() {
                   <td className="px-4 py-2 text-text-secondary text-sm whitespace-nowrap" title={formatTime(job.started_at)}>
                     {formatAgo(job.started_at)}
                   </td>
-                  <td className="px-4 py-2 text-text-secondary text-sm whitespace-nowrap tabular-nums">
+                  <td className="px-4 py-2 text-right text-text-secondary text-sm whitespace-nowrap tabular-nums">
                     {formatDuration(job.started_at, job.finished_at)}
                   </td>
-                  <td className="px-4 py-2 text-text-tertiary text-xs whitespace-nowrap tabular-nums">
+                  <td className="px-4 py-2 text-right text-text-tertiary text-xs whitespace-nowrap tabular-nums">
                     {tokens ?? '—'}
                   </td>
-                  <td className="px-4 py-2 text-text-tertiary text-xs whitespace-nowrap tabular-nums">
+                  <td className="px-4 py-2 text-right text-text-tertiary text-xs whitespace-nowrap tabular-nums">
                     {cost ?? '—'}
                   </td>
                 </tr>
@@ -246,6 +271,7 @@ export function JobsPage() {
             })}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   )

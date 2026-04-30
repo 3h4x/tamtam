@@ -7,6 +7,7 @@ import { getJob, createJob, updateJob } from '@/lib/job-storage';
 import { startJob } from '@/lib/pm2-jobs';
 import { getPermissionModeFlag, getSettings } from '@/lib/config';
 import { errMsg } from '@/lib/types';
+import { jobsPausedResult } from '@/lib/job-control';
 
 export async function POST(
   request: NextRequest,
@@ -28,6 +29,8 @@ export async function POST(
   if (!projPath) {
     return NextResponse.json({ detail: `project '${projectName}' not found` }, { status: 404 });
   }
+  const paused = jobsPausedResult('rerun a job');
+  if (paused) return NextResponse.json({ detail: paused.detail }, { status: paused.status });
 
   // For review and fix-ci, delegate to those endpoints
   if (jobKind === 'review') {

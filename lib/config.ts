@@ -1,5 +1,6 @@
 import { db, schema } from './db';
 import { join } from 'path';
+import { existsSync, readFileSync } from 'fs';
 
 /**
  * Read all settings from the DB and return as a config object.
@@ -22,6 +23,7 @@ export interface TamTamConfig {
   permission_mode: string;
   commit_style: string;
   review_verdict_rules: string;
+  jobs_paused: boolean;
   fix_ci_max_retries: number;
   fix_ci_retry_window_seconds: number;
   fix_ci_fast_crash_ms: number;
@@ -36,6 +38,10 @@ export interface TamTamConfig {
   notification_on_fix_loop_exhausted: boolean;
   notification_on_review_do_not_ship: boolean;
   notification_on_agent_run_fail: boolean;
+  pipeline_model_review: string;
+  pipeline_model_fix: string;
+  pipeline_model_dod: string;
+  pipeline_model_commit: string;
 }
 
 const DEFAULTS: TamTamConfig = {
@@ -59,6 +65,7 @@ const DEFAULTS: TamTamConfig = {
 - DO NOT SHIP for real risk: data loss, security regression, guaranteed production breakage.
 - Prefer LGTM over NEEDS ATTENTION when in doubt. Do not list every stylistic opinion. Aim for fewer than 3 findings — if you have more, the review has drifted into nitpicking.
 - Keep LGTM responses short: one sentence confirmation is enough.`,
+  jobs_paused: false,
   fix_ci_max_retries: 2,
   fix_ci_retry_window_seconds: 120,
   fix_ci_fast_crash_ms: 5000,
@@ -73,15 +80,27 @@ const DEFAULTS: TamTamConfig = {
   notification_on_fix_loop_exhausted: false,
   notification_on_review_do_not_ship: false,
   notification_on_agent_run_fail: false,
+  // Empty string = use the per-step sensible default (review/fix → workspace
+  // default_model; dod/commit → haiku since they're cheap classification tasks).
+  pipeline_model_review: '',
+  pipeline_model_fix: '',
+  pipeline_model_dod: '',
+  pipeline_model_commit: '',
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
 const CACHE_TTL = 5; // seconds
 
 const VALID_CLAUDE_PROVIDERS = new Set(['claude', 'gemini', 'lmstudio', 'custom']);
+const PROJECT_MEMORY_PROVIDERS = new Set(['gemini', 'lmstudio']);
 
 function shimPath(name: string): string {
   return join(process.env.TAMTAM_ROOT || process.cwd(), 'scripts', name);
+}
+
+function isShimPath(bin: string | undefined): boolean {
+  if (!bin) return false;
+  return /scripts\/(gemini|lmstudio)-shim\.js$/.test(bin);
 }
 
 function inferClaudeProvider(claudeBin: string | undefined): string {
@@ -95,6 +114,9 @@ function inferClaudeProvider(claudeBin: string | undefined): string {
 function resolveClaudeBin(provider: string, storedBin: string | undefined): string {
   if (provider === 'gemini') return shimPath('gemini-shim.js');
   if (provider === 'lmstudio') return shimPath('lmstudio-shim.js');
+  // For claude/custom providers, ignore stored shim paths left over from a prior
+  // gemini/lmstudio configuration — they would invoke the wrong backend.
+  if (isShimPath(storedBin)) return DEFAULTS.claude_bin;
   return storedBin ?? DEFAULTS.claude_bin;
 }
 
@@ -126,6 +148,7 @@ export function getSettings(): TamTamConfig {
     permission_mode: map.permission_mode ?? DEFAULTS.permission_mode,
     commit_style: map.commit_style ?? DEFAULTS.commit_style,
     review_verdict_rules: map.review_verdict_rules ?? DEFAULTS.review_verdict_rules,
+    jobs_paused: map.jobs_paused === 'true',
     fix_ci_max_retries: parseIntOr(map.fix_ci_max_retries, DEFAULTS.fix_ci_max_retries),
     fix_ci_retry_window_seconds: parseIntOr(map.fix_ci_retry_window_seconds, DEFAULTS.fix_ci_retry_window_seconds),
     fix_ci_fast_crash_ms: parseIntOr(map.fix_ci_fast_crash_ms, DEFAULTS.fix_ci_fast_crash_ms),
@@ -140,6 +163,10 @@ export function getSettings(): TamTamConfig {
     notification_on_fix_loop_exhausted: map.notification_on_fix_loop_exhausted === 'true',
     notification_on_review_do_not_ship: map.notification_on_review_do_not_ship === 'true',
     notification_on_agent_run_fail: map.notification_on_agent_run_fail === 'true',
+    pipeline_model_review: map.pipeline_model_review ?? DEFAULTS.pipeline_model_review,
+    pipeline_model_fix: map.pipeline_model_fix ?? DEFAULTS.pipeline_model_fix,
+    pipeline_model_dod: map.pipeline_model_dod ?? DEFAULTS.pipeline_model_dod,
+    pipeline_model_commit: map.pipeline_model_commit ?? DEFAULTS.pipeline_model_commit,
   };
 
   if (config.lmstudio_model) {
@@ -164,6 +191,29 @@ function parseIntOr(v: string | undefined, fallback: number): number {
 
 const VALID_PERMISSION_MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'default', 'dontAsk', 'plan'] as const;
 
+/**
+ * Resolve the Claude model to use for a specific pipeline step. Returns the
+ * user-configured override (Settings → Pipeline) when set; otherwise falls
+ * back to the per-step default. `review` and `fix` default to the workspace
+ * default_model (the user's general-purpose model); `dod` and `commit`
+ * default to haiku because they're cheap, well-scoped tasks where stronger
+ * models would be wasteful.
+ */
+export type PipelineStepKind = 'review' | 'fix' | 'dod' | 'commit';
+
+export function getPipelineModel(step: PipelineStepKind): string {
+  const cfg = getSettings();
+  const override = (
+    step === 'review' ? cfg.pipeline_model_review :
+    step === 'fix'    ? cfg.pipeline_model_fix    :
+    step === 'dod'    ? cfg.pipeline_model_dod    :
+                        cfg.pipeline_model_commit
+  );
+  if (override) return override;
+  if (step === 'dod' || step === 'commit') return 'haiku';
+  return cfg.default_model;
+}
+
 /** Returns the --permission-mode flag string for the Claude CLI. */
 export function getPermissionModeFlag(): string {
   const { permission_mode } = getSettings();
@@ -172,8 +222,25 @@ export function getPermissionModeFlag(): string {
 }
 
 /** Prepend the base prompt (if configured) to a user/task prompt. */
-export function withBasePrompt(prompt: string): string {
-  const { base_prompt } = getSettings();
-  if (!base_prompt) return prompt;
-  return `${base_prompt}\n\n---\n\n${prompt}`;
+export function withBasePrompt(prompt: string, options: { projectPath?: string } = {}): string {
+  const { base_prompt, claude_provider } = getSettings();
+  const parts: string[] = [];
+  if (base_prompt) parts.push(base_prompt);
+
+  if (options.projectPath && PROJECT_MEMORY_PROVIDERS.has(claude_provider)) {
+    const memoryPath = join(options.projectPath, 'CLAUDE.md');
+    if (existsSync(memoryPath)) {
+      try {
+        const memory = readFileSync(memoryPath, 'utf-8').trim();
+        if (memory) {
+          parts.push(`Project instructions from CLAUDE.md:\n\n${memory}`);
+        }
+      } catch {
+        // Missing/unreadable project memory should not block a run.
+      }
+    }
+  }
+
+  if (parts.length === 0) return prompt;
+  return `${parts.join('\n\n---\n\n')}\n\n---\n\n${prompt}`;
 }

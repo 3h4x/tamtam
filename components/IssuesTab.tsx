@@ -169,7 +169,9 @@ function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projectName: 
       setSwitchingBranch(false)
     }
     const prompt = `Review pull request #${pr.number}: "${pr.title}" (${pr.url})\n\nBranch: ${pr.headRefName} → ${pr.baseRefName}`
-    router.push(`/project/${projectName}/terminal?prompt=${encodeURIComponent(prompt)}`)
+    const key = `tamtam-pending-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    try { sessionStorage.setItem(key, JSON.stringify({ prompt })) } catch {}
+    router.push(`/project/${projectName}/terminal?pending=${key}`)
   }
 
   const runDod = async () => {
@@ -470,23 +472,30 @@ function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; projectN
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
 
+  // Issue bodies can be many KB. Stuffing them into the URL trips Node's
+  // 8KB header limit (HTTP 431) before the terminal page even renders, so
+  // we stash the payload in sessionStorage and pass only the short key.
+  const stashAndOpen = (data: { prompt: string; issue_number?: string; issue_repo?: string; issue_title?: string }) => {
+    const key = `tamtam-pending-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    try { sessionStorage.setItem(key, JSON.stringify(data)) } catch {}
+    router.push(`/project/${projectName}/terminal?pending=${key}`)
+  }
+
   const openInTerminal = () => {
     const prompt = `Work on GitHub issue #${issue.number}: "${issue.title}" (${issue.url})\n\n${issue.body || ''}`
     const repoMatch = issue.url.match(/github\.com\/([^/]+\/[^/]+)\/issues\//)
     const repo = repoMatch?.[1] ?? ''
-    const params = new URLSearchParams({
+    stashAndOpen({
       prompt,
       issue_number: String(issue.number),
       issue_repo: repo,
       issue_title: issue.title,
     })
-    router.push(`/project/${projectName}/terminal?${params.toString()}`)
   }
 
   const discussInTerminal = () => {
     const prompt = `Let's discuss GitHub issue #${issue.number}: "${issue.title}" (${issue.url})\n\n${issue.body || ''}\n\nHelp me think through this issue — the requirements, edge cases, possible approaches, and any open questions.`
-    const params = new URLSearchParams({ prompt })
-    router.push(`/project/${projectName}/terminal?${params.toString()}`)
+    stashAndOpen({ prompt })
   }
 
   return (

@@ -5,8 +5,9 @@ import { mkdirSync, openSync, closeSync } from 'fs';
 import { getImproveConfig } from './scheduling';
 import { resolveProjectPath } from './project-data';
 import { getJob, createJob, readLog, probeJobStatus, updateJob, markDone } from './job-storage';
-import { getPermissionModeFlag, getSettings } from './config';
+import { getPermissionModeFlag, getPipelineModel } from './config';
 import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
+import { jobsPausedResult } from './job-control';
 
 export type StartFixResult =
   | { ok: true; jobId: string; pid: number }
@@ -23,6 +24,8 @@ export async function startFixFromJob(sourceJobId: string): Promise<StartFixResu
   const { claudeBin, logDir } = getImproveConfig();
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
+  const paused = jobsPausedResult('start a fix job');
+  if (paused) return paused;
 
   const resumeSessionId = sourceJob.sessionId ?? null;
   let prompt: string;
@@ -53,13 +56,12 @@ Do not commit — just make the code changes.
   job.logPath = logPath;
   if (resumeSessionId) job.sessionId = resumeSessionId;
 
-  const { default_model } = getSettings();
   const claudeArgs = [
     '--print',
     '--output-format', 'stream-json',
     '--include-partial-messages',
     '--verbose',
-    '--model', default_model,
+    '--model', getPipelineModel('fix'),
     ...getPermissionModeFlag().split(' '),
   ];
   if (resumeSessionId) claudeArgs.push('--resume', resumeSessionId);
