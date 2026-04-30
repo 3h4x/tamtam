@@ -176,6 +176,7 @@ describe('startMarkDod', () => {
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/config', () => ({
       getPermissionModeFlag: () => '--permission-mode bypassPermissions',
+      getPipelineModel: () => 'haiku',
     }));
     vi.doMock('@/lib/job-storage', () => ({
       createJob: createJobMock,

@@ -82,6 +82,7 @@ describe('startFixFromJob', () => {
     vi.doMock('@/lib/config', () => ({
       getPermissionModeFlag: () => '--dangerously-skip-permissions',
       getSettings: () => ({ default_model: 'sonnet' }),
+      getPipelineModel: () => 'sonnet',
     }));
     vi.doMock('@/lib/pipeline-lock', () => ({
       acquireLock: acquireLockMock,

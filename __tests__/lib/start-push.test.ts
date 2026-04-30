@@ -28,7 +28,7 @@ describe('startProjectPush — push result tracking', () => {
     }));
     vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
@@ -94,7 +94,7 @@ describe('startProjectPush — push result tracking', () => {
     }));
     vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
@@ -207,7 +207,7 @@ describe('startProjectPush — push result tracking', () => {
     }));
     vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
@@ -345,7 +345,7 @@ describe('startProjectPush — push result tracking', () => {
     }));
     vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
@@ -377,7 +377,7 @@ describe('startProjectPush — push result tracking', () => {
     }));
     vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
@@ -418,7 +418,7 @@ describe('startProjectPush — push result tracking', () => {
     }));
     vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
@@ -458,7 +458,7 @@ describe('startProjectPush — push result tracking', () => {
     }));
     vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
@@ -515,7 +515,7 @@ describe('startProjectPush — push result tracking', () => {
     }));
     vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
@@ -571,7 +571,7 @@ describe('startProjectPush — push result tracking', () => {
     }));
     vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
@@ -621,7 +621,7 @@ describe('startProjectPush — push result tracking', () => {
     }));
     vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
@@ -690,7 +690,7 @@ describe('startProjectPush — push result tracking', () => {
     }));
     vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
@@ -740,7 +740,7 @@ describe('startProjectPush — push result tracking', () => {
     }));
     vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
@@ -797,7 +797,7 @@ describe('startProjectPush — push result tracking', () => {
     }));
     vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
@@ -853,7 +853,7 @@ describe('startProjectPush — push result tracking', () => {
     }));
     vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
@@ -900,7 +900,7 @@ describe('startProjectPush — push result tracking', () => {
     }));
     vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
@@ -954,7 +954,7 @@ describe('generateCommitMessage', () => {
     vi.doUnmock('@/lib/start-commit');
     execMock = vi.fn();
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       getProjectTestConfig: vi.fn().mockReturnValue(null),
@@ -1125,6 +1125,7 @@ describe('generateCommitMessage', () => {
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/config', () => ({
       getSettings: () => ({ commit_style: 'Always include a ticket number like PROJ-123.' }),
+      getPipelineModel: () => 'haiku',
     }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
@@ -1218,7 +1219,7 @@ describe('launchProjectPush — fire-and-forget', () => {
     }));
     vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp/test-logs' }),
       setProjectPushResult: setProjectPushResultMock,
@@ -1382,7 +1383,7 @@ describe('pushCurrentBranch', () => {
     vi.doMock('@/lib/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn(), clearProjectDataCache: vi.fn() }));
     vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }) }));
+    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
     vi.doMock('@/lib/scheduling', () => ({ getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }), setProjectPushResult: vi.fn() }));
     vi.doMock('@/lib/job-storage', () => ({ createJob: vi.fn(), markDone: vi.fn(), updateJob: vi.fn(), listJobs: vi.fn().mockReturnValue([]) }));
     vi.doMock('@/lib/pipeline-lock', () => ({ getLock: vi.fn(), acquireLock: vi.fn(), isLockOwnedByActiveRelease: vi.fn() }));

@@ -7,6 +7,7 @@ import { getImproveConfig, setProjectPushResult } from './scheduling';
 import { createJob, markDone, updateJob } from './job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { generateCommitMessage, findIssueContext, detectMainBranch } from './start-commit';
+import { jobsPausedResult } from './job-control';
 
 export type PushResult =
   | { ok: true; commitSha: string; message: string; prUrl?: string; prNumber?: number; prRepo?: string }
@@ -28,6 +29,11 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
   if (!projPath) {
     setProjectPushResult(projectName, 'project not found');
     return { ok: false, status: 404, detail: 'project not found' };
+  }
+  const paused = jobsPausedResult('start a push');
+  if (paused) {
+    setProjectPushResult(projectName, paused.detail);
+    return paused;
   }
 
   // Track every push attempt as a job so it appears in /runs with a log file
@@ -90,6 +96,8 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
 export function launchProjectPush(projectName: string): { jobId: string } | { error: string; status?: number } {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { error: 'project not found' };
+  const paused = jobsPausedResult('start a push');
+  if (paused) return { error: paused.detail, status: paused.status };
 
   // If a release pipeline is in flight, the auto-chain will push at the right
   // step. Letting the manual "Push" button race the release lets push run in

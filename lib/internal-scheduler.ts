@@ -45,6 +45,7 @@ type SchedulerGlobals = {
   __tamtamScheduler?: {
     entries: Map<string, ScheduleEntry>;
     started: boolean;
+    paused: boolean;
     baseUrl: string;
   };
 };
@@ -53,12 +54,15 @@ const g = globalThis as SchedulerGlobals;
 const state = (g.__tamtamScheduler ??= {
   entries: new Map<string, ScheduleEntry>(),
   started: false,
+  paused: false,
   baseUrl: `http://127.0.0.1:${process.env.PORT || '1337'}`,
 });
 
 const entries = state.entries;
 function getStarted(): boolean { return state.started; }
 function setStarted(v: boolean): void { state.started = v; }
+function getPaused(): boolean { return state.paused; }
+function setPaused(v: boolean): void { state.paused = v; }
 function getBaseUrl(): string { return state.baseUrl; }
 function setBaseUrl(v: string): void { state.baseUrl = v; }
 
@@ -114,6 +118,7 @@ export function computeNextFire(schedule: string, agentId: string, fromMs: numbe
 }
 
 async function fire(entry: ScheduleEntry): Promise<void> {
+  if (getPaused() || !entry.enabled) return;
   entry.lastFireMs = Date.now();
   entry.fireCount += 1;
   const url = `${getBaseUrl()}/api/agents/${entry.agentId}/run`;
@@ -143,6 +148,7 @@ async function fire(entry: ScheduleEntry): Promise<void> {
 
 function armNext(entry: ScheduleEntry): void {
   if (!entry.enabled) return;
+  if (getPaused()) return;
   if (entry.timer) clearTimeout(entry.timer);
   entry.nextFireMs = computeNextFire(entry.schedule, entry.agentId);
   const delay = Math.max(1000, entry.nextFireMs - Date.now());
@@ -200,12 +206,31 @@ export function startInternalScheduler(agents: AgentInput[]): void {
   console.log(`[internal-scheduler] armed ${entries.size} schedule(s)`);
 }
 
+export function pauseInternalScheduler(): void {
+  setPaused(true);
+  for (const e of entries.values()) {
+    if (e.timer) clearTimeout(e.timer);
+    e.timer = null;
+  }
+  console.log('[internal-scheduler] paused');
+}
+
+export function resumeInternalScheduler(): void {
+  if (!getPaused()) return;
+  setPaused(false);
+  for (const e of entries.values()) {
+    armNext(e);
+  }
+  console.log(`[internal-scheduler] resumed ${entries.size} schedule(s)`);
+}
+
 export function stopInternalScheduler(): void {
   for (const e of entries.values()) {
     if (e.timer) clearTimeout(e.timer);
   }
   entries.clear();
   setStarted(false);
+  setPaused(false);
 }
 
 export type SchedulerEntryDump = {
@@ -221,7 +246,7 @@ export type SchedulerEntryDump = {
   lastError: string | null;
 };
 
-export function dumpInternalScheduler(): { started: boolean; entries: SchedulerEntryDump[] } {
+export function dumpInternalScheduler(): { started: boolean; paused: boolean; entries: SchedulerEntryDump[] } {
   const out: SchedulerEntryDump[] = [];
   for (const e of entries.values()) {
     out.push({
@@ -238,5 +263,5 @@ export function dumpInternalScheduler(): { started: boolean; entries: SchedulerE
     });
   }
   out.sort((a, b) => a.nextFireMs - b.nextFireMs);
-  return { started: getStarted(), entries: out };
+  return { started: getStarted(), paused: getPaused(), entries: out };
 }

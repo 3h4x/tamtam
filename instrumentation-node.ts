@@ -5,6 +5,8 @@ export async function reinstallAgents(): Promise<void> {
   const { db, schema } = await import('./lib/db');
   const { eq } = await import('drizzle-orm');
   const { startInternalScheduler } = await import('./lib/internal-scheduler');
+  const { syncJobsPauseState } = await import('./lib/job-control');
+  const { getSettings } = await import('./lib/config');
   type AgentInput = Parameters<typeof startInternalScheduler>[0][number];
   const { reconcilePm2Schedules } = await import('./lib/agent-scheduler');
 
@@ -49,6 +51,11 @@ export async function reinstallAgents(): Promise<void> {
     }
   } catch { /* projects table may not exist (test env) */ }
 
+  try {
+    syncJobsPauseState(getSettings().jobs_paused);
+  } catch {
+    // Settings table may be unavailable or partially mocked in tests.
+  }
   startInternalScheduler([...dbEnabled, ...fileEnabled]);
 
   // One-time cleanup: PM2 cron entries from the legacy installAgentSchedule

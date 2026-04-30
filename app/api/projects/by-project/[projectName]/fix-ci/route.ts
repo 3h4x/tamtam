@@ -7,6 +7,7 @@ import { startJob } from '@/lib/pm2-jobs';
 import { exec } from '@/lib/shell';
 import { getPermissionModeFlag, getSettings } from '@/lib/config';
 import { errMsg } from '@/lib/types';
+import { jobsPausedResult } from '@/lib/job-control';
 
 export async function POST(
   request: NextRequest,
@@ -31,6 +32,8 @@ export async function POST(
   const { default_model } = getSettings();
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
+  const paused = jobsPausedResult('start a CI fix');
+  if (paused) return NextResponse.json({ detail: paused.detail }, { status: paused.status });
 
   const owner = process.env.GITHUB_OWNER || projectName;
   let repo = `${owner}/${projectName}`;

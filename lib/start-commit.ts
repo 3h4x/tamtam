@@ -2,11 +2,12 @@ import { appendFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { resolveProjectPath, clearProjectDataCache } from './project-data';
 import { exec } from './shell';
-import { getSettings } from './config';
+import { getSettings, getPipelineModel } from './config';
 import { getImproveConfig, setProjectPushResult } from './scheduling';
 import { buildDiffContext } from './diff-context';
 import { createJob, markDone, updateJob, listJobs } from './job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
+import { jobsPausedResult } from './job-control';
 
 export type CommitResult =
   | { ok: true; commitSha: string; message: string; jobId?: string }
@@ -54,7 +55,7 @@ Return ONLY the title — nothing else.${extra}`;
   const claudeArgs = (prompt: string) => [
     '--print', '--tools', '', '--system-prompt',
     'You are a commit message generator. Output only what is requested. Do not add prose or explanation.',
-    '--model', 'haiku', '-p', prompt,
+    '--model', getPipelineModel('commit'), '-p', prompt,
   ];
 
   const parse = (stdout: string): string => {
@@ -293,6 +294,11 @@ export async function startProjectCommit(projectName: string): Promise<CommitRes
   if (!projPath) {
     setProjectPushResult(projectName, 'project not found');
     return { ok: false, status: 404, detail: 'project not found' };
+  }
+  const paused = jobsPausedResult('start a commit');
+  if (paused) {
+    setProjectPushResult(projectName, paused.detail);
+    return paused;
   }
 
   const { logDir } = getImproveConfig();

@@ -6,8 +6,9 @@ import { createJob, listJobs, probeJobStatus, updateJob } from './job-storage';
 import { startJob } from './pm2-jobs';
 import { exec } from './shell';
 import { CODE_REVIEWER_SKILL } from './skills';
-import { withBasePrompt, getPermissionModeFlag, getSettings } from './config';
+import { withBasePrompt, getPermissionModeFlag, getSettings, getPipelineModel } from './config';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
+import { jobsPausedResult } from './job-control';
 
 export type StartReviewResult =
   | { ok: true; jobId: string; pid: number; logPath: string }
@@ -50,6 +51,15 @@ export async function startProjectReview(projectName: string): Promise<StartRevi
     }
   } catch { /* ignore — test env without DB */ }
 
+  const { claudeBin, logDir } = getImproveConfig();
+  const reviewModel = getPipelineModel('review');
+  const projPath = resolveProjectPath(projectName);
+  if (!projPath) {
+    return { ok: false, status: 404, detail: `project '${projectName}' not found` };
+  }
+  const paused = jobsPausedResult('start a review');
+  if (paused) return paused;
+
   // Check for existing pipeline lock — but allow running under a parent
   // release job's lock (this step was kicked off by the release pipeline).
   const underRelease = isLockOwnedByActiveRelease(projectName);
@@ -70,13 +80,6 @@ export async function startProjectReview(projectName: string): Promise<StartRevi
     }
   }
 
-  const { claudeBin, logDir } = getImproveConfig();
-  const { default_model } = getSettings();
-  const projPath = resolveProjectPath(projectName);
-  if (!projPath) {
-    return { ok: false, status: 404, detail: `project '${projectName}' not found` };
-  }
-
   const statusR = await exec('git', ['-C', projPath, 'status', '--porcelain', '--ignore-submodules'], { timeout: 5000 });
   if (!statusR.stdout.trim()) {
     return { ok: false, status: 400, detail: 'No uncommitted changes to review' };
@@ -85,7 +88,8 @@ export async function startProjectReview(projectName: string): Promise<StartRevi
   const prompt = withBasePrompt(
     loadReviewPrompt()
       .replace('{project}', projectName)
-      .replace('{path}', projPath)
+      .replace('{path}', projPath),
+    { projectPath: projPath }
   );
 
   const job = createJob(projectName, 'review', 0, '');
@@ -95,7 +99,7 @@ export async function startProjectReview(projectName: string): Promise<StartRevi
   try {
     const pid = await startJob(
       job.id,
-      `${claudeBin} --print --output-format stream-json --verbose --include-partial-messages --model ${default_model} ${getPermissionModeFlag()}`,
+      `${claudeBin} --print --output-format stream-json --verbose --include-partial-messages --model ${reviewModel} ${getPermissionModeFlag()}`,
       prompt,
       projPath
     );

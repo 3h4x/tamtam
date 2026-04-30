@@ -8,6 +8,7 @@ import { exec } from './shell';
 import { CODE_REVIEWER_SKILL } from './skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings } from './config';
 import { wrapUntrusted, withUntrustedPreamble } from './untrusted';
+import { jobsPausedResult } from './job-control';
 
 export type StartPrReviewResult =
   | { ok: true; jobId: string; pid: number; logPath: string }
@@ -42,6 +43,15 @@ export async function startPrReview(
   headRef: string,
   baseRef: string,
 ): Promise<StartPrReviewResult> {
+  const { claudeBin, logDir } = getImproveConfig();
+  const { default_model } = getSettings();
+  const projPath = resolveProjectPath(projectName);
+  if (!projPath) {
+    return { ok: false, status: 404, detail: `project '${projectName}' not found` };
+  }
+  const paused = jobsPausedResult('start a PR review');
+  if (paused) return paused;
+
   const jobs = listJobs();
   const running = jobs.filter(
     (j) => j.project === projectName && j.kind === 'review' && j.finishedAt === null
@@ -50,13 +60,6 @@ export async function startPrReview(
     if ((await probeJobStatus(j)) === 'running') {
       return { ok: false, status: 409, detail: `Review already in progress for ${projectName} (PID ${j.pid})` };
     }
-  }
-
-  const { claudeBin, logDir } = getImproveConfig();
-  const { default_model } = getSettings();
-  const projPath = resolveProjectPath(projectName);
-  if (!projPath) {
-    return { ok: false, status: 404, detail: `project '${projectName}' not found` };
   }
 
   const diffR = await exec('gh', ['pr', 'diff', String(prNumber)], { cwd: projPath, timeout: 30000 });
@@ -78,7 +81,7 @@ export async function startPrReview(
   for (const [key, value] of Object.entries(substitutions)) {
     rendered = rendered.split(key).join(value);
   }
-  const prompt = withUntrustedPreamble(withBasePrompt(rendered));
+  const prompt = withUntrustedPreamble(withBasePrompt(rendered, { projectPath: projPath }));
 
   const job = createJob(projectName, 'review', 0, '');
   const logPath = join(logDir, `${job.id}.log`);

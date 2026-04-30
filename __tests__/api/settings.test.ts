@@ -23,14 +23,19 @@ describe('settings API', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let GET: any;
   let PATCH: any;
+  let syncJobsPauseStateMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
     testDb = createTestDb();
+    syncJobsPauseStateMock = vi.fn();
 
     vi.doMock('@/lib/db', () => ({
       db: testDb.db,
       schema,
+    }));
+    vi.doMock('@/lib/job-control', () => ({
+      syncJobsPauseState: syncJobsPauseStateMock,
     }));
 
     const mod = await import('@/app/api/settings/route');
@@ -167,6 +172,18 @@ describe('settings API', () => {
       expect(row?.value).toBe('Be direct. No questions.');
     });
 
+    it('saves jobs_paused and applies scheduler pause immediately', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ jobs_paused: 'true' }),
+      });
+      await PATCH(request);
+
+      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'jobs_paused');
+      expect(row?.value).toBe('true');
+      expect(syncJobsPauseStateMock).toHaveBeenCalledWith(true);
+    });
+
     it('accepts all valid setting keys', async () => {
       const validKeys = [
         'github_owner',
@@ -184,6 +201,7 @@ describe('settings API', () => {
         'permission_mode',
         'commit_style',
         'review_verdict_rules',
+        'jobs_paused',
         'fix_ci_max_retries',
         'fix_ci_retry_window_seconds',
         'fix_ci_fast_crash_ms',
@@ -281,7 +299,8 @@ describe('settings API', () => {
 
       reloadConfigMock = vi.fn();
       vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-      vi.doMock('@/lib/config', () => ({ reloadConfig: reloadConfigMock }));
+      vi.doMock('@/lib/config', () => ({ reloadConfig: reloadConfigMock, getSettings: () => ({ jobs_paused: false }) }));
+      vi.doMock('@/lib/job-control', () => ({ syncJobsPauseState: vi.fn() }));
 
       const mod = await import('@/app/api/settings/route');
       PATCHWithSpy = mod.PATCH;
