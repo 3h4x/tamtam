@@ -141,8 +141,8 @@ export function TerminalMessages({
             className={`group relative px-4 py-2 ${
               entry.role === 'user' ? 'text-[#f0f0f0] whitespace-pre-wrap border-l-2 border-accent/40' :
               entry.role === 'error' ? 'text-status-error whitespace-pre-wrap border-l-2 border-status-error/50 bg-status-error/5' :
-              entry.role === 'status' ? 'text-[#888] whitespace-pre-wrap text-[11px] border-l-2 border-[#2a2a2a] bg-[#141414]' :
-              entry.role === 'raw' ? 'text-[#c0c0c0] font-mono text-xs whitespace-pre-wrap border-l-2 border-[#2a2a2a]' :
+              entry.role === 'status' ? 'text-[#888] whitespace-pre-wrap text-[11px] border-l-2 border-[#333] bg-[#141414]' :
+              entry.role === 'raw' ? 'text-[#b0b8b0] font-mono text-xs whitespace-pre-wrap border-l-2 border-[#3a4a3a] bg-[#0e120e]' :
               'text-[#e0e0e0] terminal-markdown'
             }`}
           >
@@ -189,7 +189,7 @@ export function TerminalMessages({
 
         {/* Live raw lines from passthrough streaming (test output, section headers, etc.) */}
         {streaming && rawBuffer && (
-          <div className="px-4 py-2 text-[#c0c0c0] font-mono text-xs whitespace-pre-wrap border-l-2 border-[#2a2a2a]">
+          <div className="px-4 py-2 text-[#b0b8b0] font-mono text-xs whitespace-pre-wrap border-l-2 border-[#3a4a3a] bg-[#0e120e]">
             {hasAnsi(rawBuffer)
               ? <pre className="whitespace-pre-wrap font-mono text-xs m-0 inline">{renderAnsi(collapseCarriageReturns(rawBuffer))}</pre>
               : collapseCarriageReturns(rawBuffer)}
