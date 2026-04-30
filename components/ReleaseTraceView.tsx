@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { ErrorState } from './ErrorState'
 
 interface ReleaseStep {
   job_id: string
@@ -130,7 +131,12 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
 
   if (error) {
     return (
-      <div className="p-8 text-status-error font-mono text-sm">{error}</div>
+      <div className="max-w-3xl mx-auto p-6">
+        <ErrorState
+          message={error}
+          hint={`Release id ${releaseId.slice(-12)}`}
+        />
+      </div>
     )
   }
 

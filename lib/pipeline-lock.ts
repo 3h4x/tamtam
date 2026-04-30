@@ -1,6 +1,5 @@
 import { db, schema } from './db';
 import { eq } from 'drizzle-orm';
-import { listJobs } from './job-storage';
 
 /**
  * True when the project's pipeline lock is held by an active (unfinished)
@@ -45,9 +44,9 @@ export async function acquireLock(projectName: string, jobId: string): Promise<{
     // release the stale lock immediately rather than waiting for the 30-min
     // timeout. Covers the rare case where finalizeReleaseJob skipped the
     // releaseLock call due to completion-hook ordering.
-    const blockingJob = listJobs().find(j => j.id === existing.lockedByJobId);
-    const holderFinished = blockingJob ? blockingJob.finishedAt !== null : false;
-    if (holderFinished || !blockingJob) {
+    const blockingRow = db.select().from(schema.jobs).where(eq(schema.jobs.id, existing.lockedByJobId)).get();
+    const holderFinished = blockingRow ? blockingRow.finishedAt !== null : false;
+    if (holderFinished || !blockingRow) {
       releaseLockSync(projectName);
     } else {
       // Holder is still running. Preserve existing behavior: block new

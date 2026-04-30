@@ -71,6 +71,8 @@ describe('startProjectReview', () => {
     vi.doMock('fs', () => ({
       existsSync: vi.fn().mockReturnValue(false),
       readFileSync: vi.fn(),
+      mkdirSync: vi.fn(),
+      appendFileSync: vi.fn(),
     }));
 
     ({ startProjectReview } = await import('@/lib/start-review'));
@@ -104,7 +106,7 @@ describe('startProjectReview', () => {
       isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
     }));
     vi.doMock('@/lib/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/code-reviewer.md' }));
-    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn() }));
+    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
     const { startProjectReview: fn } = await import('@/lib/start-review');
     const r = await fn('proj');
     expect(r.ok).toBe(false);
@@ -139,7 +141,7 @@ describe('startProjectReview', () => {
       isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
     }));
     vi.doMock('@/lib/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/path' }));
-    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn() }));
+    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
 
     const { startProjectReview: fn } = await import('@/lib/start-review');
     const r = await fn('missing');

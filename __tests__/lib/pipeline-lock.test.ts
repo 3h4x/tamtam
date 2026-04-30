@@ -46,7 +46,6 @@ function createTestDb() {
 
 describe('pipeline-lock', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let listJobsMock: ReturnType<typeof vi.fn>;
   let acquireLock: typeof import('@/lib/pipeline-lock').acquireLock;
   let releaseLock: typeof import('@/lib/pipeline-lock').releaseLock;
   let getLock: typeof import('@/lib/pipeline-lock').getLock;
@@ -55,15 +54,9 @@ describe('pipeline-lock', () => {
   beforeEach(async () => {
     vi.resetModules();
     testDb = createTestDb();
-    listJobsMock = vi.fn().mockReturnValue([]);
-
     vi.doMock('@/lib/db', () => ({
       db: testDb.db,
       schema,
-    }));
-    vi.doMock('@/lib/job-storage', () => ({
-      listJobs: listJobsMock,
-      probeJobStatus: vi.fn(),
     }));
 
     const mod = await import('@/lib/pipeline-lock');
@@ -110,7 +103,9 @@ describe('pipeline-lock', () => {
 
     it('returns acquired:false when a fresh lock is held by another job', async () => {
       await acquireLock('proj', 'job-1');
-      listJobsMock.mockReturnValue([{ id: 'job-1', finishedAt: null }]);
+      // pipeline-lock queries the jobs table directly to check whether the
+      // holder is still running, so insert a real row rather than mock.
+      testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at, finished_at) VALUES ('job-1', 'proj', 'release', ${Date.now() / 1000}, NULL)`);
       const result = await acquireLock('proj', 'job-2');
       expect(result.acquired).toBe(false);
       expect(result.blockingJobId).toBe('job-1');
@@ -120,7 +115,7 @@ describe('pipeline-lock', () => {
       testDb.sqlite.exec(
         `INSERT INTO pipeline_locks (project, locked_by_job_id, acquired_at) VALUES ('proj', 'old-job', ${Date.now() / 1000 - 31 * 60})`
       );
-      listJobsMock.mockReturnValue([{ id: 'old-job', finishedAt: Date.now() / 1000 - 100 }]);
+      testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at, finished_at) VALUES ('old-job', 'proj', 'release', ${Date.now() / 1000 - 200}, ${Date.now() / 1000 - 100})`);
 
       const result = await acquireLock('proj', 'new-job');
       expect(result.acquired).toBe(true);
@@ -131,7 +126,6 @@ describe('pipeline-lock', () => {
       testDb.sqlite.exec(
         `INSERT INTO pipeline_locks (project, locked_by_job_id, acquired_at) VALUES ('proj', 'ghost-job', ${Date.now() / 1000 - 31 * 60})`
       );
-      listJobsMock.mockReturnValue([]);
 
       const result = await acquireLock('proj', 'new-job');
       expect(result.acquired).toBe(true);
@@ -146,7 +140,7 @@ describe('pipeline-lock', () => {
       testDb.sqlite.exec(
         `INSERT INTO pipeline_locks (project, locked_by_job_id, acquired_at) VALUES ('proj', 'release-done', ${Date.now() / 1000 - 10})`
       );
-      listJobsMock.mockReturnValue([{ id: 'release-done', finishedAt: Date.now() / 1000 - 5 }]);
+      testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at, finished_at) VALUES ('release-done', 'proj', 'release', ${Date.now() / 1000 - 100}, ${Date.now() / 1000 - 5})`);
 
       const result = await acquireLock('proj', 'new-release');
       expect(result.acquired).toBe(true);
@@ -157,7 +151,6 @@ describe('pipeline-lock', () => {
       testDb.sqlite.exec(
         `INSERT INTO pipeline_locks (project, locked_by_job_id, acquired_at) VALUES ('proj', 'vanished', ${Date.now() / 1000 - 5})`
       );
-      listJobsMock.mockReturnValue([]);
 
       const result = await acquireLock('proj', 'new-release');
       expect(result.acquired).toBe(true);
@@ -167,7 +160,7 @@ describe('pipeline-lock', () => {
       testDb.sqlite.exec(
         `INSERT INTO pipeline_locks (project, locked_by_job_id, acquired_at) VALUES ('proj', 'long-running', ${Date.now() / 1000 - 31 * 60})`
       );
-      listJobsMock.mockReturnValue([{ id: 'long-running', finishedAt: null }]);
+      testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at, finished_at) VALUES ('long-running', 'proj', 'release', ${Date.now() / 1000 - 1900}, NULL)`);
 
       const result = await acquireLock('proj', 'new-job');
       expect(result.acquired).toBe(false);

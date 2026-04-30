@@ -59,6 +59,8 @@ describe('startPrReview', () => {
     vi.doMock('fs', () => ({
       existsSync: vi.fn().mockReturnValue(false),
       readFileSync: vi.fn(),
+      mkdirSync: vi.fn(),
+      appendFileSync: vi.fn(),
     }));
 
     ({ startPrReview } = await import('@/lib/start-pr-review'));
@@ -86,7 +88,7 @@ describe('startPrReview', () => {
       getPermissionModeFlag: () => '',
     }));
     vi.doMock('@/lib/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/path' }));
-    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn() }));
+    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
 
     const { startPrReview: fn } = await import('@/lib/start-pr-review');
     const r = await fn('missing', 42, 'Fix bug', 'fix/42', 'main');
@@ -321,7 +323,7 @@ describe('loadReviewPrompt — skill file handling', () => {
       getPermissionModeFlag: () => '',
     }));
     vi.doMock('@/lib/skills', () => ({ CODE_REVIEWER_SKILL: '/skill/code-reviewer.md' }));
-    vi.doMock('fs', () => ({ existsSync: existsSyncMock, readFileSync: readFileSyncMock }));
+    vi.doMock('fs', () => ({ existsSync: existsSyncMock, readFileSync: readFileSyncMock, mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
 
     ({ startPrReview } = await import('@/lib/start-pr-review'));
   }

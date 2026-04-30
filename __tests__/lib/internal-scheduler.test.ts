@@ -72,8 +72,8 @@ describe('internal-scheduler', () => {
 
       // Advance past the scheduled time. fire() is async (awaits the
       // issue-branch lock probe before fetching), so drain microtasks.
-      vi.advanceTimersByTime(60_000 + 100);
-      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(60_000 + 100);
+      for (let _i = 0; _i < 20; _i++) await Promise.resolve();
 
       expect(fetchMock).toHaveBeenCalledOnce();
       expect(fetchMock).toHaveBeenCalledWith(
@@ -95,8 +95,8 @@ describe('internal-scheduler', () => {
 
       expect(dumpInternalScheduler().entries).toHaveLength(1);
 
-      vi.advanceTimersByTime(60_000 + 100);
-      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(60_000 + 100);
+      for (let _i = 0; _i < 20; _i++) await Promise.resolve();
       // Only one fire — old timer was cleared
       expect(fetchMock).toHaveBeenCalledOnce();
       expect(fetchMock.mock.calls[0][1].body).toContain('v2');
@@ -151,11 +151,10 @@ describe('internal-scheduler', () => {
 
       upsertAgentSchedule({ id: 'a1', project: 'p', name: 'n', schedule: '1m', prompt: 'x', enabled: true });
 
-      vi.advanceTimersByTime(60_000 + 100);
-      // Drain microtasks for the fetch promise + the post-fire armNext call
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(60_000 + 100);
+      // Drain microtasks for the dynamic imports (pipeline-lock, job-storage)
+      // and the fetch promise + the post-fire armNext call.
+      for (let i = 0; i < 8; i++) await Promise.resolve();
 
       const dump = dumpInternalScheduler();
       expect(dump.entries[0].fireCount).toBe(1);
@@ -177,9 +176,121 @@ describe('internal-scheduler', () => {
       expect(fetchMock).not.toHaveBeenCalled();
 
       resumeInternalScheduler();
-      vi.advanceTimersByTime(60_000 + 100);
-      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(60_000 + 100);
+      for (let _i = 0; _i < 20; _i++) await Promise.resolve();
       expect(fetchMock).toHaveBeenCalledOnce();
     });
+  });
+});
+
+// ── Issue-branch skip behavior ────────────────────────────────────────────────
+// These tests need to mock @/lib/project-branch-lock, so they live in a
+// separate describe that resets modules and uses vi.doMock.
+
+describe('internal-scheduler — issue-branch skip', () => {
+  let upsertAgentScheduleDynamic: typeof import('@/lib/internal-scheduler').upsertAgentSchedule;
+  let dumpInternalSchedulerDynamic: typeof import('@/lib/internal-scheduler').dumpInternalScheduler;
+  let stopInternalSchedulerDynamic: typeof import('@/lib/internal-scheduler').stopInternalScheduler;
+  let setSchedulerBaseUrlDynamic: typeof import('@/lib/internal-scheduler').setSchedulerBaseUrl;
+  let getIssueBranchLockMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.useFakeTimers();
+
+    getIssueBranchLockMock = vi.fn().mockResolvedValue(null);
+    vi.doMock('@/lib/project-branch-lock', () => ({
+      getIssueBranchLock: getIssueBranchLockMock,
+    }));
+    // Stub pipeline-lock so the statically-imported getLock doesn't hit the
+    // real DB-backed module under test (vi.resetModules() + vi.doMock() before
+    // the dynamic import causes the static import to be re-evaluated with the mock).
+    vi.doMock('@/lib/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+    }));
+
+    const mod = await import('@/lib/internal-scheduler');
+    upsertAgentScheduleDynamic = mod.upsertAgentSchedule;
+    dumpInternalSchedulerDynamic = mod.dumpInternalScheduler;
+    stopInternalSchedulerDynamic = mod.stopInternalScheduler;
+    setSchedulerBaseUrlDynamic = mod.setSchedulerBaseUrl;
+
+    stopInternalSchedulerDynamic();
+  });
+
+  afterEach(() => {
+    stopInternalSchedulerDynamic();
+    vi.useRealTimers();
+    vi.resetModules();
+    vi.restoreAllMocks();
+  });
+
+  it('skips fire and increments skippedCount when an issue branch is active', async () => {
+    getIssueBranchLockMock.mockResolvedValue('fix/issue-5-in-progress');
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+    setSchedulerBaseUrlDynamic('http://test');
+
+    upsertAgentScheduleDynamic({ id: 'a1', project: 'myproj', name: 'tests', schedule: '1m', prompt: 'run tests', enabled: true });
+
+    await vi.advanceTimersByTimeAsync(60_000 + 100);
+    for (let _i = 0; _i < 20; _i++) await Promise.resolve();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    const dump = dumpInternalSchedulerDynamic();
+    expect(dump.entries[0].skippedCount).toBe(1);
+    expect(dump.entries[0].lastSkippedReason).toContain('fix/issue-5-in-progress');
+    expect(dump.entries[0].fireCount).toBe(0);
+  });
+
+  it('re-arms the timer after a skip so the next tick re-checks', async () => {
+    getIssueBranchLockMock.mockResolvedValue('fix/issue-5-in-progress');
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+    setSchedulerBaseUrlDynamic('http://test');
+
+    upsertAgentScheduleDynamic({ id: 'a1', project: 'myproj', name: 'tests', schedule: '1m', prompt: 'run tests', enabled: true });
+
+    await vi.advanceTimersByTimeAsync(60_000 + 100);
+    for (let _i = 0; _i < 20; _i++) await Promise.resolve();
+
+    // Timer should have been re-armed — entry still present with a future nextFireMs
+    const dump = dumpInternalSchedulerDynamic();
+    expect(dump.entries).toHaveLength(1);
+    expect(dump.entries[0].nextFireMs).toBeGreaterThan(Date.now());
+  });
+
+  it('fires normally when getIssueBranchLock returns null', async () => {
+    getIssueBranchLockMock.mockResolvedValue(null);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+    setSchedulerBaseUrlDynamic('http://test');
+
+    upsertAgentScheduleDynamic({ id: 'a1', project: 'myproj', name: 'tests', schedule: '1m', prompt: 'run', enabled: true });
+
+    await vi.advanceTimersByTimeAsync(60_000 + 100);
+    for (let _i = 0; _i < 20; _i++) await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const dump = dumpInternalSchedulerDynamic();
+    expect(dump.entries[0].skippedCount).toBe(0);
+    expect(dump.entries[0].fireCount).toBe(1);
+  });
+
+  it('fires normally when getIssueBranchLock throws (detection failure is non-fatal)', async () => {
+    getIssueBranchLockMock.mockRejectedValue(new Error('git timeout'));
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+    setSchedulerBaseUrlDynamic('http://test');
+
+    upsertAgentScheduleDynamic({ id: 'a1', project: 'myproj', name: 'tests', schedule: '1m', prompt: 'run', enabled: true });
+
+    await vi.advanceTimersByTimeAsync(60_000 + 100);
+    for (let _i = 0; _i < 20; _i++) await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const dump = dumpInternalSchedulerDynamic();
+    expect(dump.entries[0].skippedCount).toBe(0);
+    expect(dump.entries[0].fireCount).toBe(1);
   });
 });
