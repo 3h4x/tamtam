@@ -1,5 +1,5 @@
 ---
-model: opus
+model: sonnet
 schedule: 1h
 skillIds: ["persona:engineering-team/senior-fullstack"]
 ---
