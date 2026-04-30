@@ -3,6 +3,14 @@
 import Link from 'next/link'
 import type { CustomAction, ProjectConfig } from '@/lib/client-api'
 
+const BTN_BASE = 'px-3 py-1.5 text-sm rounded-md font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
+const BTN_SECONDARY = `${BTN_BASE} border border-border bg-bg-secondary text-text-primary hover:bg-bg-tertiary`
+const BTN_GHOST = `${BTN_BASE} border border-transparent text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/60`
+const BTN_PRIMARY = `${BTN_BASE} border border-accent bg-accent/10 text-accent hover:bg-accent/20`
+const BTN_WARNING = `${BTN_BASE} border border-status-warning/60 bg-status-warning/10 text-status-warning hover:bg-status-warning/20`
+const BTN_ERROR = `${BTN_BASE} border border-status-error text-status-error hover:bg-status-error/10`
+const BTN_INFO = `${BTN_BASE} border border-status-info/50 bg-status-info/10 text-status-info hover:bg-status-info/20`
+
 export interface ProjectActionsProps {
   projectName: string
   totalChanges: number
@@ -119,16 +127,23 @@ export function ProjectActions({
     ? `Branch ${currentBranch} has no commits ahead of origin/${defaultBranch}. Commit your changes (use 🚀 Release) or move them to ${defaultBranch} first.`
     : `Create pull request for branch ${currentBranch}`
 
+  const pullPrimaryDisabled = pulling || totalChanges > 0 || behindCount === 0
+  const pullClass = totalChanges > 0
+    ? `${BTN_BASE} border border-border bg-bg-secondary text-text-primary cursor-not-allowed`
+    : behindCount > 0
+      ? BTN_WARNING
+      : BTN_SECONDARY
+
   return (
     <>
       {aggregateCi === 'failure' && ciFailedUrl && (
         <button
-          className="px-3 py-1.5 text-sm border border-status-error text-status-error rounded-md hover:bg-status-error/10 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          className={BTN_ERROR}
           onClick={onFixCi}
           disabled={fixingCi || isCiFixRunning}
           title={isCiFixRunning ? 'CI fix already in progress' : 'Start CI fix'}
         >
-          {fixingCi || isCiFixRunning ? 'CI Fix in Progress...' : 'Fix CI'}
+          {fixingCi || isCiFixRunning ? 'CI Fix in Progress…' : 'Fix CI'}
         </button>
       )}
       {fixCiResult && (
@@ -137,7 +152,7 @@ export function ProjectActions({
         </span>
       )}
       <button
-        className="px-3 py-1.5 text-sm border border-accent bg-accent/10 text-accent rounded-md hover:bg-accent/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+        className={BTN_PRIMARY}
         onClick={onRelease}
         disabled={busy || nothingToRelease}
         title={
@@ -154,7 +169,7 @@ export function ProjectActions({
       </button>
       {showCreatePr && (
         <button
-          className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+          className={BTN_SECONDARY}
           onClick={onCreatePr}
           disabled={createPrDisabled}
           title={createPrTitle}
@@ -164,7 +179,7 @@ export function ProjectActions({
       )}
       {hasOpenPr && totalChanges > 0 && (
         <button
-          className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+          className={BTN_SECONDARY}
           onClick={onPushToPr}
           disabled={pushingToPr}
           title={`Stage ${totalChanges} change${totalChanges === 1 ? '' : 's'}, commit (Claude-generated message), push — attaches to existing PR. Skips test + review (use Release for the full pipeline).`}
@@ -172,9 +187,9 @@ export function ProjectActions({
           {pushingToPr ? 'Pushing…' : `Push to PR${openPrByBranch[currentBranch ?? ''] ? ` #${openPrByBranch[currentBranch ?? '']}` : ''}`}
         </button>
       )}
-      {!!(config?.effective_test_command || config?.detected_test_command) && (
+      {hasTestCommand && (
         <button
-          className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+          className={BTN_SECONDARY}
           onClick={onTest}
           disabled={testing || isTestRunning}
           title={isTestRunning ? 'Tests already running' : `Run: ${config?.effective_test_command || config?.detected_test_command}`}
@@ -191,12 +206,12 @@ export function ProjectActions({
           disabled={runningActions.has(action.name)}
           title={`Run: ${action.command}`}
         >
-          {runningActions.has(action.name) ? `${action.name}...` : action.name}
+          {runningActions.has(action.name) ? `${action.name}…` : action.name}
         </button>
       ))}
       {(unpushed ?? 0) > 0 && totalChanges === 0 && (
         <button
-          className="px-3 py-1.5 text-sm border border-status-warning/60 bg-status-warning/10 text-status-warning rounded-md hover:bg-status-warning/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+          className={BTN_WARNING}
           onClick={onPush}
           disabled={pushing}
           title={`Push ${unpushed} commit${unpushed !== 1 ? 's' : ''} to origin`}
@@ -205,10 +220,10 @@ export function ProjectActions({
         </button>
       )}
       {pullDiverged ? (
-        <>
+        <span className="inline-flex items-center gap-1.5 pl-2 pr-1 py-0.5 rounded-md bg-status-error/10 border border-status-error/40">
           <span className="text-xs text-status-error font-medium">Diverged:</span>
           <button
-            className="px-3 py-1.5 text-sm border border-status-info/50 bg-status-info/10 text-status-info rounded-md hover:bg-status-info/20 cursor-pointer disabled:opacity-50 font-medium"
+            className={BTN_INFO}
             onClick={() => onPull('rebase')}
             disabled={pulling}
             title="git pull --rebase"
@@ -216,7 +231,7 @@ export function ProjectActions({
             {pulling ? 'Working…' : 'Rebase'}
           </button>
           <button
-            className="px-3 py-1.5 text-sm border border-border bg-bg-secondary text-text-primary rounded-md hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 font-medium"
+            className={BTN_SECONDARY}
             onClick={() => onPull('merge')}
             disabled={pulling}
             title="git pull --no-ff"
@@ -224,21 +239,17 @@ export function ProjectActions({
             {pulling ? 'Working…' : 'Merge'}
           </button>
           <button
-            className="px-2 py-1 text-xs text-text-tertiary hover:text-text-secondary cursor-pointer"
+            className="px-1.5 py-1 text-xs text-text-tertiary hover:text-text-secondary cursor-pointer"
             onClick={onDismissDiverged}
+            aria-label="Dismiss diverged warning"
+            title="Dismiss"
           >✕</button>
-        </>
+        </span>
       ) : (
         <button
-          className={`px-3 py-1.5 text-sm border rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-            totalChanges > 0
-              ? 'border-border bg-bg-secondary text-text-primary cursor-not-allowed'
-              : behindCount > 0
-              ? 'border-status-warning/60 bg-status-warning/10 text-status-warning hover:bg-status-warning/20 cursor-pointer'
-              : 'border-border bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer'
-          }`}
+          className={pullClass}
           onClick={() => onPull('ff-only')}
-          disabled={pulling || totalChanges > 0 || behindCount === 0}
+          disabled={pullPrimaryDisabled}
           title={
             totalChanges > 0
               ? `Commit or stash your ${totalChanges} local change${totalChanges !== 1 ? 's' : ''} before pulling`
@@ -255,22 +266,28 @@ export function ProjectActions({
           {pullResult}
         </span>
       )}
+      {(projectName || githubUrl) && (
+        <span className="mx-1 self-center h-5 w-px bg-border/60" aria-hidden="true" />
+      )}
       {projectName && (
         <Link
           href={`/pipeline?project=${encodeURIComponent(projectName)}`}
-          className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer inline-flex items-center no-underline font-medium"
+          className={`${BTN_GHOST} inline-flex items-center no-underline`}
+          title="View pipeline metrics for this project"
         >
           Pipeline
         </Link>
       )}
       {githubUrl && (
         <a
-          className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer inline-flex items-center font-medium"
+          className={`${BTN_GHOST} inline-flex items-center gap-1 no-underline`}
           href={githubUrl}
           target="_blank"
           rel="noopener noreferrer"
+          title="Open repository on GitHub"
         >
-          GitHub &#8599;
+          GitHub
+          <span aria-hidden="true" className="text-text-tertiary">↗</span>
         </a>
       )}
     </>
