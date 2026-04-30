@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { Fragment, useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { fetchJobs } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
@@ -30,6 +30,19 @@ type Filter =
 
 function filterKey(f: Filter): string {
   return f.kind === 'bucket' ? `b:${f.bucket}` : f.kind
+}
+
+// Walk the chained children tree built by `groupReleaseChildren` and render
+// one `RunRow` per node, with depth-based indentation/connectors. Defined at
+// module scope so the recursive call shares one stable reference across
+// nested rows (avoids re-creating the function on each parent render).
+function renderChain(node: Entry, depth: number, navigate: (e: Entry) => void): React.ReactNode {
+  return (
+    <Fragment key={node.key}>
+      <RunRow entry={node} onClick={() => navigate(node)} depth={depth} />
+      {node.chainedChildren?.map((c) => renderChain(c, depth + 1, navigate))}
+    </Fragment>
+  )
 }
 
 export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
@@ -319,16 +332,16 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
                       onToggleExpand={() => toggleExpanded(e.key)}
                       summary={isReleaseParent ? buildReleaseSummary(e.children ?? []) : null}
                     >
-                      {isReleaseParent && isExpanded && e.children && (
+                      {isReleaseParent && isExpanded && (
                         <div className="bg-bg-primary/40">
-                          {e.children.map((c) => (
-                            <RunRow
-                              key={c.key}
-                              entry={c}
-                              onClick={() => navigate(c)}
-                              indent
-                            />
-                          ))}
+                          {/* Render the chain (test → review → fix → review …)
+                              by walking the parent_job_id tree. Falls back to
+                              the flat children list for orphan-clusters
+                              (vgroup:*) that don't have a real release id. */}
+                          {(e.chainedChildren && e.chainedChildren.length > 0
+                            ? e.chainedChildren
+                            : (e.children ?? []).map(c => ({ ...c, chainedChildren: undefined }))
+                          ).map((root) => renderChain(root, 1, navigate))}
                         </div>
                       )}
                     </RunRow>

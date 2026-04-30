@@ -147,9 +147,24 @@ export interface Entry {
   navSessionId: string | null
   verdict?: JobInfo['verdict']
   logPruned: boolean
+  // Flat list of every pipeline child that ran inside this release's time
+  // window — used by `buildReleaseSummary` for the one-line "test ✓ · review
+  // LGTM · …" recap on the collapsed parent row.
   children?: Entry[]
+  // Tree of children built from `parent_job_id` so the expanded release row
+  // can render the actual recovery chain (test → review → fix → review →
+  // commit → push). Only populated for `kind === 'release'` entries; the
+  // other entries reachable through this tree are the same Entry instances
+  // present in `children`, but each non-root carries its direct parent's
+  // edge instead of being a flat sibling.
+  chainedChildren?: Entry[]
   parentJobId: string | null
   parentLabel: string | null
+  // Every original job id that collapsed into this entry (session-grouped
+  // turns share an entry). Used by `groupReleaseChildren` to resolve
+  // `parent_job_id` edges when the parent might itself be a multi-turn
+  // entry. Internal — callers shouldn't read this directly.
+  _jobIds?: string[]
 }
 
 function truncate(s: string, n: number): string {
@@ -237,6 +252,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
         existing.cacheReadTokens += j.cache_read_tokens ?? 0
         existing.costUsd += jobCost(j)
         existing.navJobId = j.id
+        existing._jobIds!.push(j.id)
         continue
       }
     }
@@ -265,6 +281,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       logPruned: !!j.log_pruned,
       parentJobId: j.parent_job_id ?? null,
       parentLabel: j.parent_job_id ? parentLabelFor(byId.get(j.parent_job_id)) : null,
+      _jobIds: [j.id],
     }
     if (canSessionMerge) sessionGroup.set(j.session_id!, entry)
     entries.push(entry)
@@ -272,6 +289,60 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
 
   entries.sort((a, b) => b.lastActivityAt - a.lastActivityAt)
   return entries
+}
+
+// Build the parent → child tree for a release's pipeline steps using
+// `parent_job_id`. The release's direct children (typically just `test`)
+// have `parentJobId === release.navJobId`; subsequent steps point at
+// whichever step spawned them (test→review, review→fix, fix→review,
+// review→commit, commit→push). Steps whose parent isn't in the same
+// release window are attached as roots so nothing is dropped from the
+// view — better to render them at depth 1 than hide them entirely.
+function buildChain(_release: Entry, kids: Entry[]): Entry[] {
+  if (kids.length === 0) return []
+  // Build a job-id → child-entry index. A session-grouped entry can absorb
+  // multiple jobs (e.g. review turn 1 + review turn 2), so we walk every
+  // job id each entry consumed.
+  const byJobId = new Map<string, Entry>()
+  for (const k of kids) {
+    for (const jid of k._jobIds ?? [k.navJobId]) byJobId.set(jid, k)
+  }
+
+  // childrenOf: for each entry key, the entries whose parent is that entry.
+  // A kid is a "root" of the chain when its parent_job_id either points
+  // outside the kids set (e.g. at the release meta-job, an agent run, or
+  // anything outside this cluster's window) or isn't set at all. Anything
+  // whose parent points at another kid becomes its child.
+  const childrenOfKey = new Map<string, Entry[]>()
+  const roots: Entry[] = []
+  const seen = new Set<string>()
+  for (const k of kids) {
+    if (seen.has(k.key)) continue
+    seen.add(k.key)
+    const parentEntry = k.parentJobId ? byJobId.get(k.parentJobId) : null
+    if (!parentEntry) {
+      roots.push(k)
+    } else if (parentEntry.key === k.key) {
+      // Self-edge (a session-grouped entry whose first turn is its own
+      // parent within the merge). Treat as a root, not an infinite loop.
+      roots.push(k)
+    } else {
+      const arr = childrenOfKey.get(parentEntry.key) ?? []
+      arr.push(k)
+      childrenOfKey.set(parentEntry.key, arr)
+    }
+  }
+
+  // Hydrate `chainedChildren` recursively. Sort children by start time at
+  // each level so the chain reads forward in time.
+  const visited = new Set<string>()
+  const hydrate = (node: Entry): Entry => {
+    if (visited.has(node.key)) return node // cycle guard
+    visited.add(node.key)
+    const direct = (childrenOfKey.get(node.key) ?? []).sort((a, b) => a.startedAt - b.startedAt)
+    return { ...node, chainedChildren: direct.map(hydrate) }
+  }
+  return roots.sort((a, b) => a.startedAt - b.startedAt).map(hydrate)
 }
 
 // Collapse pipeline children (test/review/fix/commit/push/…) under their
@@ -314,7 +385,7 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
 
   const parents: Entry[] = releases.map((r) => {
     const kids = (childrenByParent.get(r.key) ?? []).sort((a, b) => a.startedAt - b.startedAt)
-    return { ...r, children: kids }
+    return { ...r, children: kids, chainedChildren: buildChain(r, kids) }
   })
 
   // Cluster orphaned pipeline steps (no parent release) that are close in time
@@ -346,7 +417,7 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
         const last = cluster[cluster.length - 1]
         const allDone = cluster.every(e => e.status === 'done')
         const anyFailed = cluster.some(e => e.exitCode !== null && e.exitCode !== 0)
-        clustered.push({
+        const vgroup: Entry = {
           key: `vgroup:${cluster[0].startedAt}`,
           kind: 'release',
           bucket: 'release',
@@ -371,7 +442,13 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
           children: cluster,
           parentJobId: null,
           parentLabel: null,
-        })
+          // Synthetic — collect every job id in the cluster so buildChain
+          // recognizes any cross-cluster parent_job_id link as "outside the
+          // cluster" → root, and intra-cluster links as edges.
+          _jobIds: cluster.flatMap(c => c._jobIds ?? [c.navJobId]),
+        }
+        vgroup.chainedChildren = buildChain(vgroup, cluster)
+        clustered.push(vgroup)
       }
     }
   }
