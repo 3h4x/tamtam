@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 describe('checkIssueBranchBlock — agent concurrency guard', () => {
-  let checkIssueBranchBlock: typeof import('@/lib/start-release').checkIssueBranchBlock;
+  let checkIssueBranchBlock: typeof import('@/lib/pipeline/start-release').checkIssueBranchBlock;
   let execMock: ReturnType<typeof vi.fn>;
   let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
 
@@ -10,22 +10,22 @@ describe('checkIssueBranchBlock — agent concurrency guard', () => {
     execMock = vi.fn();
     getProjectTestConfigMock = vi.fn();
 
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       getProjectTestConfig: getProjectTestConfigMock,
     }));
     // Stub out all other start-release dependencies
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue('/proj'), clearProjectDataCache: vi.fn() }));
-    vi.doMock('@/lib/job-storage', () => ({ listJobs: vi.fn().mockReturnValue([]), probeJobStatus: vi.fn(), createJob: vi.fn(), updateJob: vi.fn(), markDone: vi.fn() }));
-    vi.doMock('@/lib/pipeline-lock', () => ({ acquireLock: vi.fn(), getLock: vi.fn().mockReturnValue(null) }));
-    vi.doMock('@/lib/start-test', () => ({ startProjectTest: vi.fn(), detectTestCommand: vi.fn() }));
-    vi.doMock('@/lib/start-review', () => ({ startProjectReview: vi.fn() }));
-    vi.doMock('@/lib/start-push', () => ({ startProjectPush: vi.fn() }));
-    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: vi.fn(), detectMainBranch: vi.fn().mockResolvedValue('main') }));
-    vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn() }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue('/proj'), clearProjectDataCache: vi.fn() }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({ listJobs: vi.fn().mockReturnValue([]), probeJobStatus: vi.fn(), createJob: vi.fn(), updateJob: vi.fn(), markDone: vi.fn() }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({ acquireLock: vi.fn(), getLock: vi.fn().mockReturnValue(null) }));
+    vi.doMock('@/lib/pipeline/start-test', () => ({ startProjectTest: vi.fn(), detectTestCommand: vi.fn() }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: vi.fn() }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: vi.fn() }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: vi.fn(), detectMainBranch: vi.fn().mockResolvedValue('main') }));
+    vi.doMock('@/lib/git/git-utils', () => ({ isReviewed: vi.fn() }));
 
-    ({ checkIssueBranchBlock } = await import('@/lib/start-release'));
+    ({ checkIssueBranchBlock } = await import('@/lib/pipeline/start-release'));
   });
 
   it('returns the branch name when on fix/issue-* in Direct Branch mode', async () => {

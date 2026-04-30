@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
-import { resolveProjectPath, clearProjectDataCache } from '@/lib/project-data';
-import { exec } from '@/lib/shell';
+import { resolveProjectPath, clearProjectDataCache } from '@/lib/shared/project-data';
+import { exec } from '@/lib/shared/shell';
 import { db, schema } from '@/lib/db';
 import { homedir } from 'os';
 

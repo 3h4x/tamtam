@@ -33,7 +33,7 @@ describe('GET /api/projects', () => {
       priorities: {},
     });
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       fetchProjectData: fetchProjectDataMock,
     }));
 

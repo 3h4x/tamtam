@@ -8,9 +8,9 @@ describe('agent-scheduler', () => {
   let execMock: ReturnType<typeof vi.fn>;
   let upsertAgentScheduleMock: ReturnType<typeof vi.fn>;
   let removeAgentScheduleMock: ReturnType<typeof vi.fn>;
-  let installAgentSchedule: typeof import('@/lib/agent-scheduler').installAgentSchedule;
-  let uninstallAgentSchedule: typeof import('@/lib/agent-scheduler').uninstallAgentSchedule;
-  let isAgentScheduleLoaded: typeof import('@/lib/agent-scheduler').isAgentScheduleLoaded;
+  let installAgentSchedule: typeof import('@/lib/scheduling/agent-scheduler').installAgentSchedule;
+  let uninstallAgentSchedule: typeof import('@/lib/scheduling/agent-scheduler').uninstallAgentSchedule;
+  let isAgentScheduleLoaded: typeof import('@/lib/scheduling/agent-scheduler').isAgentScheduleLoaded;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -24,16 +24,16 @@ describe('agent-scheduler', () => {
       return { ...actual, homedir: () => tempDir };
     });
 
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({
       getSettings: vi.fn().mockReturnValue({ launchagent_prefix: 'com.test' }),
     }));
-    vi.doMock('@/lib/internal-scheduler', () => ({
+    vi.doMock('@/lib/scheduling/internal-scheduler', () => ({
       upsertAgentSchedule: upsertAgentScheduleMock,
       removeAgentSchedule: removeAgentScheduleMock,
     }));
 
-    const mod = await import('@/lib/agent-scheduler');
+    const mod = await import('@/lib/scheduling/agent-scheduler');
     installAgentSchedule = mod.installAgentSchedule;
     uninstallAgentSchedule = mod.uninstallAgentSchedule;
     isAgentScheduleLoaded = mod.isAgentScheduleLoaded;

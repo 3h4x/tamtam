@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveProjectPath, clearProjectDataCache } from '@/lib/project-data';
-import { clearIssueBranchLockCache } from '@/lib/project-branch-lock';
-import { exec } from '@/lib/shell';
-import { getProjectTestConfig } from '@/lib/scheduling';
-import { getLock } from '@/lib/pipeline-lock';
-import { listJobs } from '@/lib/job-storage';
+import { resolveProjectPath, clearProjectDataCache } from '@/lib/shared/project-data';
+import { clearIssueBranchLockCache } from '@/lib/shared/project-branch-lock';
+import { exec } from '@/lib/shared/shell';
+import { getProjectTestConfig } from '@/lib/scheduling/scheduling';
+import { getLock } from '@/lib/pipeline/pipeline-lock';
+import { listJobs } from '@/lib/jobs/job-storage';
 
 // Given an issue context (number + title), check out a feature branch
 // `fix/issue-<n>-<slug>` before Claude starts editing so all interim work

@@ -6,7 +6,7 @@ import {
   BUILT_IN_STEPS,
   type PipelineStep,
   type StepToggleContext,
-} from '@/lib/pipeline-steps';
+} from '@/lib/pipeline/pipeline-steps';
 
 function makeCtx(overrides: Partial<StepToggleContext['config']> = {}): StepToggleContext {
   return {

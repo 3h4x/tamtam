@@ -5,20 +5,20 @@ import { tmpdir } from 'os';
 
 describe('detectTestCommand', () => {
   let projDir: string;
-  let detectTestCommand: typeof import('@/lib/start-test').detectTestCommand;
+  let detectTestCommand: typeof import('@/lib/pipeline/start-test').detectTestCommand;
 
   beforeEach(async () => {
     vi.resetModules();
     projDir = mkdtempSync(join(tmpdir(), 'tamtam-detect-'));
 
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp' }),
       getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn(),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: vi.fn(),
       listJobs: vi.fn().mockReturnValue([]),
       probeJobStatus: vi.fn().mockResolvedValue('done'),
@@ -26,7 +26,7 @@ describe('detectTestCommand', () => {
       markDone: vi.fn().mockResolvedValue(undefined),
     }));
 
-    const mod = await import('@/lib/start-test');
+    const mod = await import('@/lib/pipeline/start-test');
     detectTestCommand = mod.detectTestCommand;
   });
 
@@ -37,7 +37,7 @@ describe('detectTestCommand', () => {
 
   it('returns configured test_command when project config exists', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({
         projects: { myproj: { project: 'myproj', test_command: 'custom-test-runner' } },
         claudeBin: 'claude',
@@ -45,12 +45,12 @@ describe('detectTestCommand', () => {
       }),
       getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn() }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn() }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: vi.fn(), listJobs: vi.fn().mockReturnValue([]),
       probeJobStatus: vi.fn(), updateJob: vi.fn(), markDone: vi.fn(),
     }));
-    const mod = await import('@/lib/start-test');
+    const mod = await import('@/lib/pipeline/start-test');
     expect(mod.detectTestCommand(projDir, 'myproj')).toBe('custom-test-runner');
   });
 
@@ -116,16 +116,16 @@ describe('detectTestCommand', () => {
 
   it('returns null when tests_disabled=true for the project, even if a test file exists', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp' }),
       getProjectTestConfig: vi.fn().mockReturnValue({ testsDisabled: true }),
     }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn() }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn() }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: vi.fn(), listJobs: vi.fn().mockReturnValue([]),
       probeJobStatus: vi.fn(), updateJob: vi.fn(), markDone: vi.fn(),
     }));
-    const mod = await import('@/lib/start-test');
+    const mod = await import('@/lib/pipeline/start-test');
     writeFileSync(join(projDir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
     writeFileSync(join(projDir, 'pnpm-lock.yaml'), '');
     expect(mod.detectTestCommand(projDir, 'myproj')).toBeNull();

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isPipelineBusy, PIPELINE_KINDS } from '../../lib/pipeline-status'
+import { isPipelineBusy, PIPELINE_KINDS } from '../../lib/pipeline/pipeline-status'
 import type { JobInfo } from '../../lib/client-api'
 
 function job(partial: Partial<JobInfo> & { kind: string; status: 'running' | 'done' }): JobInfo {

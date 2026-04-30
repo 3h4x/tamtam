@@ -23,10 +23,10 @@ function createTestDb() {
 
 describe('config', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let getSettings: typeof import('@/lib/config').getSettings;
-  let reloadConfig: typeof import('@/lib/config').reloadConfig;
-  let withBasePrompt: typeof import('@/lib/config').withBasePrompt;
-  let getPermissionModeFlag: typeof import('@/lib/config').getPermissionModeFlag;
+  let getSettings: typeof import('@/lib/shared/config').getSettings;
+  let reloadConfig: typeof import('@/lib/shared/config').reloadConfig;
+  let withBasePrompt: typeof import('@/lib/shared/config').withBasePrompt;
+  let getPermissionModeFlag: typeof import('@/lib/shared/config').getPermissionModeFlag;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -38,7 +38,7 @@ describe('config', () => {
       schema,
     }));
 
-    const config = await import('@/lib/config');
+    const config = await import('@/lib/shared/config');
     getSettings = config.getSettings;
     reloadConfig = config.reloadConfig;
     withBasePrompt = config.withBasePrompt;

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { launchProjectPush } from '@/lib/start-push';
-import { startProjectCommit } from '@/lib/start-commit';
+import { launchProjectPush } from '@/lib/pipeline/start-push';
+import { startProjectCommit } from '@/lib/pipeline/start-commit';
 
 export async function POST(
   request: NextRequest,

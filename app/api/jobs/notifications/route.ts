@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { unseenFinished, listJobs, jobToDict } from '@/lib/job-storage';
+import { unseenFinished, listJobs, jobToDict } from '@/lib/jobs/job-storage';
 
 export async function GET() {
   const jobs = unseenFinished();

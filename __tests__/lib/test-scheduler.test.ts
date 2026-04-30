@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { parseTestScheduleToCron } from '@/lib/test-scheduler';
+import { parseTestScheduleToCron } from '@/lib/scheduling/test-scheduler';
 
 describe('parseTestScheduleToCron', () => {
   describe('minute intervals', () => {
@@ -131,8 +131,8 @@ describe('parseTestScheduleToCron', () => {
 describe('installTestSchedule / uninstallTestSchedule', () => {
   let tempDir: string;
   let execMock: ReturnType<typeof vi.fn>;
-  let installTestSchedule: typeof import('@/lib/test-scheduler').installTestSchedule;
-  let uninstallTestSchedule: typeof import('@/lib/test-scheduler').uninstallTestSchedule;
+  let installTestSchedule: typeof import('@/lib/scheduling/test-scheduler').installTestSchedule;
+  let uninstallTestSchedule: typeof import('@/lib/scheduling/test-scheduler').uninstallTestSchedule;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -144,9 +144,9 @@ describe('installTestSchedule / uninstallTestSchedule', () => {
       return { ...actual, homedir: () => tempDir };
     });
 
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
 
-    const mod = await import('@/lib/test-scheduler');
+    const mod = await import('@/lib/scheduling/test-scheduler');
     installTestSchedule = mod.installTestSchedule;
     uninstallTestSchedule = mod.uninstallTestSchedule;
   });

@@ -5,10 +5,10 @@ import { spawn, type SpawnOptions } from 'child_process';
 import { homedir } from 'os';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { resolveProjectPath } from '@/lib/project-data';
-import { createJob, updateJob } from '@/lib/job-storage';
-import { getSettings } from '@/lib/config';
-import { loadFileConfig, writeFileConfig } from '@/lib/tamtam-file-config';
+import { resolveProjectPath } from '@/lib/shared/project-data';
+import { createJob, updateJob } from '@/lib/jobs/job-storage';
+import { getSettings } from '@/lib/shared/config';
+import { loadFileConfig, writeFileConfig } from '@/lib/skills/tamtam-file-config';
 
 export interface CustomAction {
   name: string;

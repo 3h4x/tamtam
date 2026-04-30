@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getImproveConfig } from '@/lib/scheduling';
-import { resumeAll } from '@/lib/launchagent';
+import { getImproveConfig } from '@/lib/scheduling/scheduling';
+import { resumeAll } from '@/lib/scheduling/launchagent';
 
 export async function POST(
   request: NextRequest,

@@ -7,7 +7,7 @@ import {
   readAgentMemory,
   ensureAgentMemoryDir,
   buildMemoryBlock,
-} from '@/lib/agent-memory';
+} from '@/lib/agents/agent-memory';
 
 function makeTmpDir(): string {
   const dir = join(tmpdir(), `tamtam-memory-test-${Date.now()}`);

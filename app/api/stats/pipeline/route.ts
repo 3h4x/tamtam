@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listJobs, getVerdict } from '@/lib/job-storage';
-import type { JobData } from '@/lib/job-storage';
-import { getSettings } from '@/lib/config';
+import { listJobs, getVerdict } from '@/lib/jobs/job-storage';
+import type { JobData } from '@/lib/jobs/job-storage';
+import { getSettings } from '@/lib/shared/config';
 
 const WINDOWS = {
   '24h': 24 * 60 * 60 * 1000,

@@ -45,9 +45,9 @@ describe('instrumentation', () => {
       resumeInternalScheduler: vi.fn(),
     };
     vi.doMock('@/lib/db', () => ({ db: { select: chainedDb.select }, schema: { agents: { schedule: 'schedule', enabled: 'enabled' } } }));
-    vi.doMock('@/lib/internal-scheduler', () => internalSchedulerMock);
+    vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerMock);
     vi.doMock('./lib/internal-scheduler', () => internalSchedulerMock);
-    vi.doMock('@/lib/agent-scheduler', () => ({
+    vi.doMock('@/lib/scheduling/agent-scheduler', () => ({
       reconcilePm2Schedules: reconcilePm2SchedulesMock,
     }));
     vi.doMock('drizzle-orm', () => ({ isNotNull: vi.fn(v => v), eq: vi.fn((_a, b) => b), and: vi.fn((...args) => args) }));
@@ -171,10 +171,10 @@ describe('instrumentation', () => {
         pauseInternalScheduler: vi.fn(),
         resumeInternalScheduler: vi.fn(),
       };
-      vi.doMock('@/lib/internal-scheduler', () => internalSchedulerMock);
+      vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerMock);
       vi.doMock('./lib/internal-scheduler', () => internalSchedulerMock);
-      vi.doMock('@/lib/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
-      vi.doMock('@/lib/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
+      vi.doMock('@/lib/scheduling/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
+      vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
       vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
 
       const { reinstallAgents } = await import('@/instrumentation-node');
@@ -216,10 +216,10 @@ describe('instrumentation', () => {
         pauseInternalScheduler: vi.fn(),
         resumeInternalScheduler: vi.fn(),
       };
-      vi.doMock('@/lib/internal-scheduler', () => internalSchedulerMock);
+      vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerMock);
       vi.doMock('./lib/internal-scheduler', () => internalSchedulerMock);
-      vi.doMock('@/lib/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
-      vi.doMock('@/lib/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
+      vi.doMock('@/lib/scheduling/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
+      vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
       vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
 
       const { reinstallAgents } = await import('@/instrumentation-node');
@@ -253,10 +253,10 @@ describe('instrumentation', () => {
         pauseInternalScheduler: vi.fn(),
         resumeInternalScheduler: vi.fn(),
       };
-      vi.doMock('@/lib/internal-scheduler', () => internalSchedulerMock);
+      vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerMock);
       vi.doMock('./lib/internal-scheduler', () => internalSchedulerMock);
-      vi.doMock('@/lib/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
-      vi.doMock('@/lib/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
+      vi.doMock('@/lib/scheduling/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
+      vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
       vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
 
       const { reinstallAgents } = await import('@/instrumentation-node');
@@ -269,7 +269,7 @@ describe('instrumentation', () => {
 
   describe('runProbeSweep()', () => {
     function mockJobStorage(jobs: unknown[], probeJobStatus = vi.fn().mockResolvedValue(undefined)) {
-      vi.doMock('@/lib/job-storage', () => ({ listJobs: () => jobs, probeJobStatus }));
+      vi.doMock('@/lib/jobs/job-storage', () => ({ listJobs: () => jobs, probeJobStatus }));
       return { probeJobStatus };
     }
 
@@ -335,7 +335,7 @@ describe('instrumentation', () => {
     });
 
     it('swallows top-level errors when listJobs throws', async () => {
-      vi.doMock('@/lib/job-storage', () => ({
+      vi.doMock('@/lib/jobs/job-storage', () => ({
         listJobs: () => { throw new Error('db unavailable'); },
         probeJobStatus: vi.fn(),
       }));

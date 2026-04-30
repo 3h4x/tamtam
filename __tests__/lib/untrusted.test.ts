@@ -8,7 +8,7 @@ import {
   withUntrustedPreamble,
   isUserTrusted,
   wrapIfUntrusted,
-} from '@/lib/untrusted';
+} from '@/lib/shared/untrusted';
 
 function makeTmpDir(): string {
   const dir = join(tmpdir(), `tamtam-untrusted-test-${Date.now()}`);

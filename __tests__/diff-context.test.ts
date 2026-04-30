@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildDiffContext, shouldSkipFile, DIFF_MAX_CHARS_PER_FILE, DIFF_MAX_TOTAL_CHARS } from '../lib/diff-context';
+import { buildDiffContext, shouldSkipFile, DIFF_MAX_CHARS_PER_FILE, DIFF_MAX_TOTAL_CHARS } from '../lib/git/diff-context';
 
 // Realistic large diff: new feature + bug fix + refactor + lock file + binary + dist output
 const REALISTIC_BIG_DIFF = `diff --git a/lib/diff-context.ts b/lib/diff-context.ts
@@ -96,7 +96,7 @@ index 0000000..ababab 100644
 +++ b/__tests__/diff-context.test.ts
 @@ -0,0 +1,20 @@
 +import { describe, it, expect } from 'vitest';
-+import { buildDiffContext } from '../lib/diff-context';
++import { buildDiffContext } from '../lib/git/diff-context';
 +
 +describe('buildDiffContext', () => {
 +  it('skips lock files', () => {

@@ -76,18 +76,18 @@ describe('agents API', () => {
       schema,
     }));
 
-    vi.doMock('@/lib/agent-scheduler', () => ({
+    vi.doMock('@/lib/scheduling/agent-scheduler', () => ({
       installAgentSchedule: installAgentScheduleMock,
       uninstallAgentSchedule: uninstallAgentScheduleMock,
     }));
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue(null),
       clearProjectDataCache: vi.fn(),
       getEnabledProjects: vi.fn().mockReturnValue({}),
     }));
 
-    vi.doMock('@/lib/tamtam-file-agents', () => ({
+    vi.doMock('@/lib/agents/tamtam-file-agents', () => ({
       scanFileAgents: vi.fn().mockReturnValue([]),
       loadFileAgent: vi.fn().mockReturnValue(null),
       parseFileAgentId: vi.fn().mockReturnValue(null),
@@ -95,11 +95,11 @@ describe('agents API', () => {
     }));
 
     // Capture mock function references so individual tests can override return values
-    const fileAgentsMod = await import('@/lib/tamtam-file-agents');
+    const fileAgentsMod = await import('@/lib/agents/tamtam-file-agents');
     parseFileAgentIdMock = fileAgentsMod.parseFileAgentId as ReturnType<typeof vi.fn>;
     loadFileAgentMock = fileAgentsMod.loadFileAgent as ReturnType<typeof vi.fn>;
     writeFileAgentMock = fileAgentsMod.writeFileAgent as ReturnType<typeof vi.fn>;
-    const projectDataMod = await import('@/lib/project-data');
+    const projectDataMod = await import('@/lib/shared/project-data');
     resolveProjectPathMock = projectDataMod.resolveProjectPath as ReturnType<typeof vi.fn>;
 
     const agentsRoute = await import('@/app/api/agents/route');
@@ -242,7 +242,7 @@ describe('agents API', () => {
       db.insert(schema.projects).values({ name: 'proj2', path: '/p2', enabled: true }).run();
       db.insert(schema.projects).values({ name: 'projDisabled', path: '/pd', enabled: false }).run();
 
-      const fileAgentsMod = await import('@/lib/tamtam-file-agents');
+      const fileAgentsMod = await import('@/lib/agents/tamtam-file-agents');
       const scanMock = fileAgentsMod.scanFileAgents as ReturnType<typeof vi.fn>;
       scanMock.mockImplementation((path: string, project: string) => {
         if (project === 'proj1') {
@@ -284,7 +284,7 @@ describe('agents API', () => {
         createdAt: now, updatedAt: now,
       }).run();
 
-      const fileAgentsMod = await import('@/lib/tamtam-file-agents');
+      const fileAgentsMod = await import('@/lib/agents/tamtam-file-agents');
       const scanMock = fileAgentsMod.scanFileAgents as ReturnType<typeof vi.fn>;
       scanMock.mockReturnValue([{
         id: 'file:proj1:shared', name: 'shared', project: 'proj1',

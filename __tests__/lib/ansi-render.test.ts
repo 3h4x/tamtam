@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { CSSProperties } from 'react';
-import { hasAnsi, renderAnsi } from '@/lib/ansi-render';
+import { hasAnsi, renderAnsi } from '@/lib/terminal/ansi-render';
 
 type SpanNode = { type: string; props: { style: CSSProperties; children?: string } };
 

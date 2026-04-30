@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { loadFileConfig, writeFileConfig } from '@/lib/tamtam-file-config';
+import { loadFileConfig, writeFileConfig } from '@/lib/skills/tamtam-file-config';
 
 function makeTmpDir(): string {
   const dir = join(tmpdir(), `tamtam-cfg-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);

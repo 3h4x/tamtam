@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getLock, releaseLock } from '@/lib/pipeline-lock';
-import { getJob, listJobs, updateJob } from '@/lib/job-storage';
-import { exec } from '@/lib/shell';
+import { getLock, releaseLock } from '@/lib/pipeline/pipeline-lock';
+import { getJob, listJobs, updateJob } from '@/lib/jobs/job-storage';
+import { exec } from '@/lib/shared/shell';
 
 export async function POST(
   _request: NextRequest,
@@ -72,7 +72,7 @@ export async function POST(
 
   // Fire-and-forget notification
   try {
-    const { notify } = await import('@/lib/notifications');
+    const { notify } = await import('@/lib/shared/notifications');
     await notify({
       event: 'release_aborted',
       project: projectName,

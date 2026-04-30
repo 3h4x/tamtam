@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { costUsd, totalTokens, PRICE_PER_MTOK } from '@/lib/usage-pricing';
+import { costUsd, totalTokens, PRICE_PER_MTOK } from '@/lib/shared/usage-pricing';
 
 describe('PRICE_PER_MTOK', () => {
   it('has expected price rates', () => {

@@ -2,9 +2,9 @@ import { NextRequest } from 'next/server';
 import { existsSync, readFileSync, watch, openSync, readSync, fstatSync, closeSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { getJob, probeJobStatus } from '@/lib/job-storage';
-import { parseStreamLines, createParseState, type ParseState } from '@/lib/claude-stream-parser';
-import { errMsg } from '@/lib/types';
+import { getJob, probeJobStatus } from '@/lib/jobs/job-storage';
+import { parseStreamLines, createParseState, type ParseState } from '@/lib/jobs/claude-stream-parser';
+import { errMsg } from '@/lib/shared/types';
 
 function getLogPath(jobId: string): string {
   const job = getJob(jobId);

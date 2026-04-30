@@ -95,29 +95,29 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
 
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: '/tmp/logs' }),
       getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
 
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
       probeJobStatus: vi.fn().mockResolvedValue('done'),
     }));
 
-    vi.doMock('@/lib/pm2-jobs', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       startJob: startJobMock,
     }));
 
-    vi.doMock('@/lib/skills', () => ({ SKILLS_DIR: tempSkillsDir, DATA_SKILLS_DIR: join(tempSkillsDir, 'data-skills') }));
+    vi.doMock('@/lib/skills/skills', () => ({ SKILLS_DIR: tempSkillsDir, DATA_SKILLS_DIR: join(tempSkillsDir, 'data-skills') }));
 
-    vi.doMock('@/lib/agent-memory', () => ({
+    vi.doMock('@/lib/agents/agent-memory', () => ({
       getAgentMemoryDir: vi.fn().mockReturnValue('/tmp/tamtam-memory'),
       ensureAgentMemoryDir: vi.fn(),
       getAgentMemoryPath: vi.fn().mockReturnValue('/tmp/tamtam-memory/proj1/Test Agent.md'),
@@ -125,7 +125,7 @@ describe('POST /api/agents/{agentId}/run', () => {
       buildMemoryBlock: vi.fn().mockReturnValue(''),
     }));
 
-    vi.doMock('@/lib/config', () => ({
+    vi.doMock('@/lib/shared/config', () => ({
       withBasePrompt: (p: string) => p,
       getPermissionModeFlag: () => '--dangerously-skip-permissions',
       getSettings: () => ({

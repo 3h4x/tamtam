@@ -53,7 +53,7 @@ afterEach(() => {
 let _ctr = 0;
 const proj = () => `store-test-proj-${_ctr++}`;
 
-import { terminalStore } from '@/lib/terminal-session-store';
+import { terminalStore } from '@/lib/terminal/terminal-session-store';
 
 describe('TerminalStore – pure state management', () => {
   it('get returns empty state for unknown project', () => {

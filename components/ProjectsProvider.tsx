@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useRef, useCallback, type ReactNode } from 'react'
 import { fetchProjects, setPriority, pauseProject, resumeProject } from '@/lib/client-api'
-import type { Task, ProjectsResponse } from '@/lib/types'
+import type { Task, ProjectsResponse } from '@/lib/shared/types'
 import { computeFleetHealth, type FleetHealth } from '@/hooks/useProjectHealth'
 
 interface ProjectsContextType {

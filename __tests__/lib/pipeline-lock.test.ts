@@ -46,10 +46,10 @@ function createTestDb() {
 
 describe('pipeline-lock', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let acquireLock: typeof import('@/lib/pipeline-lock').acquireLock;
-  let releaseLock: typeof import('@/lib/pipeline-lock').releaseLock;
-  let getLock: typeof import('@/lib/pipeline-lock').getLock;
-  let isLockOwnedByActiveRelease: typeof import('@/lib/pipeline-lock').isLockOwnedByActiveRelease;
+  let acquireLock: typeof import('@/lib/pipeline/pipeline-lock').acquireLock;
+  let releaseLock: typeof import('@/lib/pipeline/pipeline-lock').releaseLock;
+  let getLock: typeof import('@/lib/pipeline/pipeline-lock').getLock;
+  let isLockOwnedByActiveRelease: typeof import('@/lib/pipeline/pipeline-lock').isLockOwnedByActiveRelease;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -59,7 +59,7 @@ describe('pipeline-lock', () => {
       schema,
     }));
 
-    const mod = await import('@/lib/pipeline-lock');
+    const mod = await import('@/lib/pipeline/pipeline-lock');
     acquireLock = mod.acquireLock;
     releaseLock = mod.releaseLock;
     getLock = mod.getLock;
@@ -85,6 +85,28 @@ describe('pipeline-lock', () => {
     it('returns null for a different project', async () => {
       await acquireLock('proj-a', 'job-1');
       expect(getLock('proj-b')).toBeNull();
+    });
+
+    it('self-heals: returns null when the holder job is already finished', async () => {
+      // Regression: stale lock pointing at a terminal release used to block
+      // every new pipeline operation forever, because routes (release/push/
+      // fix-ci/etc.) called getLock first and bailed with 409 before reaching
+      // acquireLock's self-heal path. Now getLock itself heals.
+      testDb.sqlite.exec(
+        `INSERT INTO pipeline_locks (project, locked_by_job_id, acquired_at) VALUES ('proj', 'old-release', ${Date.now() / 1000 - 5})`
+      );
+      testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at, finished_at) VALUES ('old-release', 'proj', 'release', ${Date.now() / 1000 - 200}, ${Date.now() / 1000 - 10})`);
+      expect(getLock('proj')).toBeNull();
+    });
+
+    it('self-heals: still returns the lock while the holder is running', async () => {
+      testDb.sqlite.exec(
+        `INSERT INTO pipeline_locks (project, locked_by_job_id, acquired_at) VALUES ('proj', 'live-release', ${Date.now() / 1000 - 5})`
+      );
+      testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at, finished_at) VALUES ('live-release', 'proj', 'release', ${Date.now() / 1000 - 200}, NULL)`);
+      const lock = getLock('proj');
+      expect(lock).not.toBeNull();
+      expect(lock!.lockedByJobId).toBe('live-release');
     });
   });
 
@@ -147,9 +169,13 @@ describe('pipeline-lock', () => {
       expect(result.lock.lockedByJobId).toBe('new-release');
     });
 
-    it('immediately self-heals a fresh lock whose holder no longer exists', async () => {
+    it('self-heals a lock whose holder no longer exists once it ages past the grace window', async () => {
+      // We use a 70-second-old lock here: the self-heal path has a 60s
+      // grace window for the no-holder-row case so brief insert/persist
+      // races (tests, server boot) don't false-clear a freshly-acquired
+      // lock. Past the grace, a missing holder is treated as crashed.
       testDb.sqlite.exec(
-        `INSERT INTO pipeline_locks (project, locked_by_job_id, acquired_at) VALUES ('proj', 'vanished', ${Date.now() / 1000 - 5})`
+        `INSERT INTO pipeline_locks (project, locked_by_job_id, acquired_at) VALUES ('proj', 'vanished', ${Date.now() / 1000 - 70})`
       );
 
       const result = await acquireLock('proj', 'new-release');

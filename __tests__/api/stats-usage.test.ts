@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import type { JobData } from '@/lib/job-storage';
-import { costUsd, totalTokens, PRICE_PER_MTOK } from '@/lib/usage-pricing';
+import type { JobData } from '@/lib/jobs/job-storage';
+import { costUsd, totalTokens, PRICE_PER_MTOK } from '@/lib/shared/usage-pricing';
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
   return {
@@ -30,7 +30,7 @@ describe('GET /api/stats/usage', () => {
   beforeEach(async () => {
     vi.resetModules();
     listJobsMock = vi.fn().mockReturnValue([]);
-    vi.doMock('@/lib/job-storage', () => ({ listJobs: listJobsMock }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({ listJobs: listJobsMock }));
     const mod = await import('@/app/api/stats/usage/route');
     GET = mod.GET;
   });
@@ -158,7 +158,7 @@ describe('GET /api/stats/usage — response caching', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2025-01-01T00:00:00Z'));
     listJobsMock = vi.fn().mockReturnValue([]);
-    vi.doMock('@/lib/job-storage', () => ({ listJobs: listJobsMock }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({ listJobs: listJobsMock }));
     const mod = await import('@/app/api/stats/usage/route');
     GET = mod.GET;
   });

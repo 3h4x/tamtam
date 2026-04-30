@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { errMsg } from '@/lib/types'
+import { errMsg } from '@/lib/shared/types'
 
 export function JobsPauseToggle() {
   const [jobsPaused, setJobsPaused] = useState(false)

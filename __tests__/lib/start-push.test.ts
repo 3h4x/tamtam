@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 describe('startProjectPush — push result tracking', () => {
-  let startProjectPush: typeof import('@/lib/start-push').startProjectPush;
+  let startProjectPush: typeof import('@/lib/pipeline/start-push').startProjectPush;
   let execMock: ReturnType<typeof vi.fn>;
   let setProjectPushResultMock: ReturnType<typeof vi.fn>;
   let createJobMock: ReturnType<typeof vi.fn>;
@@ -22,37 +22,37 @@ describe('startProjectPush — push result tracking', () => {
     markDoneMock = vi.fn().mockResolvedValue(undefined);
     updateJobMock = vi.fn();
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn().mockResolvedValue('feat: test'),
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn().mockReturnValue('fix/issue-1-test'),
     }));
 
-    ({ startProjectPush } = await import('@/lib/start-push'));
+    ({ startProjectPush } = await import('@/lib/pipeline/start-push'));
   });
 
   afterEach(() => { vi.resetModules(); });
@@ -88,31 +88,31 @@ describe('startProjectPush — push result tracking', () => {
 
   it('returns 404 when project path cannot be resolved', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue(null),
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn(),
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn(),
     }));
-    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     const r = await fn('missing');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(404);
@@ -192,7 +192,7 @@ describe('startProjectPush — push result tracking', () => {
 
   it('stages and commits hook-left changes then retries push when pre-push hook leaves new files', async () => {
     const generateCommitMessageMock = vi.fn().mockResolvedValue('chore: apply lint fixes');
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: generateCommitMessageMock,
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
@@ -201,36 +201,36 @@ describe('startProjectPush — push result tracking', () => {
 
     vi.resetModules();
     // Re-setup all mocks after resetModules
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: generateCommitMessageMock,
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn().mockReturnValue('fix/issue-1-test'),
     }));
-    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
 
     execMock
       .mockImplementationOnce(() => resp(0, '1\n'))                              // git rev-list --count
@@ -339,31 +339,31 @@ describe('startProjectPush — push result tracking', () => {
 
   it('does not create a push job when project path cannot be resolved', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue(null),
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn(),
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn(),
     }));
-    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     await fn('missing');
     expect(createJobMock).not.toHaveBeenCalled();
     expect(markDoneMock).not.toHaveBeenCalled();
@@ -371,36 +371,36 @@ describe('startProjectPush — push result tracking', () => {
 
   it('returns 409 with blockingJobId when pipeline lock is held by another job', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue({ project: 'proj', lockedByJobId: 'blocking-job-99', acquiredAt: Date.now() / 1000 }),
       acquireLock: vi.fn().mockResolvedValue({ acquired: false, lock: {}, blockingJobId: 'blocking-job-99' }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn(),
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn(),
     }));
-    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     const r = await fn('proj');
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -412,30 +412,30 @@ describe('startProjectPush — push result tracking', () => {
 
   it('skips lock check and proceeds when isLockOwnedByActiveRelease returns true', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue({ project: 'proj', lockedByJobId: 'release-job', acquiredAt: Date.now() / 1000 }),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(true),
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn(),
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
@@ -444,7 +444,7 @@ describe('startProjectPush — push result tracking', () => {
     execMock
       .mockImplementationOnce(() => resp(0, '0'));  // git rev-list --count (not ahead)
 
-    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     const r = await fn('proj');
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.message).toBe('No changes to push');
@@ -452,19 +452,19 @@ describe('startProjectPush — push result tracking', () => {
 
   it('creates a PR when the most recent run job has a ghIssueNumber, prWorkflowEnabled, and push succeeds', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue({ prWorkflowEnabled: true }),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
@@ -473,12 +473,12 @@ describe('startProjectPush — push result tracking', () => {
         ghIssueNumber: 42, ghIssueRepo: 'owner/repo', ghIssueTitle: 'Fix login bug',
       }]),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn().mockResolvedValue('fix: login bug'),
       findIssueContext: vi.fn().mockResolvedValue({ number: 42, repo: 'owner/repo', title: 'Fix login bug' }),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
@@ -496,7 +496,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0))                                     // git checkout main
       .mockImplementationOnce(() => resp(0));                                    // git pull --ff-only origin main
 
-    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     const r = await fn('proj');
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -509,19 +509,19 @@ describe('startProjectPush — push result tracking', () => {
 
   it('skips PR creation when one already exists for the current branch (Push to PR flow)', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue({ prWorkflowEnabled: true }),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
@@ -530,12 +530,12 @@ describe('startProjectPush — push result tracking', () => {
         ghIssueNumber: 42, ghIssueRepo: 'owner/repo', ghIssueTitle: 'Fix login bug',
       }]),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn().mockResolvedValue('fix: login bug'),
       findIssueContext: vi.fn().mockResolvedValue({ number: 42, repo: 'owner/repo', title: 'Fix login bug' }),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
@@ -552,7 +552,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0))                                     // git checkout main
       .mockImplementationOnce(() => resp(0));                                    // git pull
 
-    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     const r = await fn('proj');
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -565,19 +565,19 @@ describe('startProjectPush — push result tracking', () => {
 
   it('does NOT create a PR when the linked issue is already CLOSED', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
@@ -586,12 +586,12 @@ describe('startProjectPush — push result tracking', () => {
         ghIssueNumber: 7, ghIssueRepo: 'owner/repo', ghIssueTitle: 'Already shipped',
       }]),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn().mockResolvedValue('feat: add'),
       findIssueContext: vi.fn().mockResolvedValue(null), // issue is closed, findIssueContext returns null
       detectMainBranch: vi.fn().mockResolvedValue('main'),
@@ -604,7 +604,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0))                                  // git push
       .mockImplementationOnce(() => resp(0, 'abc1234'));                      // git rev-parse
 
-    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     const r = await fn('proj');
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.message).toBe('pushed'); // plain message, NOT "PR created"
@@ -615,19 +615,19 @@ describe('startProjectPush — push result tracking', () => {
 
   it('creates a PR for an issue-linked push even when prWorkflowEnabled is off (Work-on opt-in)', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue({ prWorkflowEnabled: false }),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
@@ -636,12 +636,12 @@ describe('startProjectPush — push result tracking', () => {
         ghIssueNumber: 42, ghIssueRepo: 'owner/repo', ghIssueTitle: 'Fix login bug',
       }]),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn().mockResolvedValue('fix: login bug'),
       findIssueContext: vi.fn().mockResolvedValue({ number: 42, repo: 'owner/repo', title: 'Fix login bug' }),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
@@ -659,7 +659,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0))                                                            // checkout main (post-PR cleanup)
       .mockImplementationOnce(() => resp(0));                                                           // pull origin main
 
-    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     const r = await fn('proj');
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -684,30 +684,30 @@ describe('startProjectPush — push result tracking', () => {
 
   it('auto-returns to default branch in Direct Branch mode when on fix/issue-* with no issue context', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue({ prWorkflowEnabled: false }),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn().mockResolvedValue('feat: test'),
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
@@ -722,7 +722,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, 'fix/issue-45-test\n'))                       // git branch --show-current
       .mockImplementationOnce(() => resp(0));                                              // git checkout main
 
-    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     const r = await fn('proj');
     expect(r.ok).toBe(true);
 
@@ -734,30 +734,30 @@ describe('startProjectPush — push result tracking', () => {
 
   it('creates a generic PR and switches to main when prWorkflowEnabled and on a feature branch', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue({ prWorkflowEnabled: true }),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn().mockResolvedValue('feat: test'),
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
@@ -776,7 +776,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0))                                       // git checkout main
       .mockImplementationOnce(() => resp(0));                                      // git pull --ff-only
 
-    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     const r = await fn('proj');
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -791,30 +791,30 @@ describe('startProjectPush — push result tracking', () => {
 
   it('returns existing PR url without creating a new one when prWorkflowEnabled and PR already exists', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue({ prWorkflowEnabled: true }),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn().mockResolvedValue('feat: test'),
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
@@ -833,7 +833,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0))                                       // git checkout main
       .mockImplementationOnce(() => resp(0));                                      // git pull --ff-only
 
-    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     const r = await fn('proj');
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -847,30 +847,30 @@ describe('startProjectPush — push result tracking', () => {
 
   it('returns "pushed (PR creation failed)" when prWorkflowEnabled but gh pr create fails', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue({ prWorkflowEnabled: true }),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn().mockResolvedValue('feat: test'),
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
@@ -886,7 +886,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(1, '', 'no pr'))                          // gh pr view (no existing PR)
       .mockImplementationOnce(() => resp(1, '', 'pr create failed'));              // gh pr create fails
 
-    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     const r = await fn('proj');
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.message).toContain('PR creation failed');
@@ -894,30 +894,30 @@ describe('startProjectPush — push result tracking', () => {
 
   it('skips PR creation when prWorkflowEnabled but currently on the default branch', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue({ prWorkflowEnabled: true }),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn().mockResolvedValue('feat: test'),
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
@@ -931,7 +931,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, 'abc1234'))                            // git rev-parse
       .mockImplementationOnce(() => resp(0, 'main'));                              // git branch --show-current (=main → skips PR)
 
-    const { startProjectPush: fn } = await import('@/lib/start-push');
+    const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     const r = await fn('proj');
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.message).toBe('pushed');
@@ -941,7 +941,7 @@ describe('startProjectPush — push result tracking', () => {
 });
 
 describe('generateCommitMessage', () => {
-  let generateCommitMessage: typeof import('@/lib/start-commit').generateCommitMessage;
+  let generateCommitMessage: typeof import('@/lib/pipeline/start-commit').generateCommitMessage;
   let execMock: ReturnType<typeof vi.fn>;
 
   function resp(exitCode: number, stdout = '', stderr = '') {
@@ -950,27 +950,27 @@ describe('generateCommitMessage', () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    // Ensure @/lib/start-commit is NOT mocked so we test the real implementation.
-    vi.doUnmock('@/lib/start-commit');
+    // Ensure @/lib/pipeline/start-commit is NOT mocked so we test the real implementation.
+    vi.doUnmock('@/lib/pipeline/start-commit');
     execMock = vi.fn();
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: vi.fn().mockReturnValue([]),
       createJob: vi.fn(),
       markDone: vi.fn(),
       updateJob: vi.fn(),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
-    ({ generateCommitMessage } = await import('@/lib/start-commit'));
+    ({ generateCommitMessage } = await import('@/lib/pipeline/start-commit'));
   });
 
   afterEach(() => { vi.resetModules(); });
@@ -1120,29 +1120,29 @@ describe('generateCommitMessage', () => {
 
   it('includes style guide in prompt when commit_style is set', async () => {
     vi.resetModules();
-    vi.doUnmock('@/lib/start-commit');
+    vi.doUnmock('@/lib/pipeline/start-commit');
     execMock = vi.fn();
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ commit_style: 'Always include a ticket number like PROJ-123.' }),
       getPipelineModel: () => 'haiku',
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: vi.fn().mockReturnValue([]),
       createJob: vi.fn(),
       markDone: vi.fn(),
       updateJob: vi.fn(),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
-    const { generateCommitMessage: fn } = await import('@/lib/start-commit');
+    const { generateCommitMessage: fn } = await import('@/lib/pipeline/start-commit');
 
     execMock
       .mockImplementationOnce(() => resp(0, ''))
@@ -1173,7 +1173,7 @@ describe('generateCommitMessage', () => {
 });
 
 describe('launchProjectPush — fire-and-forget', () => {
-  let launchProjectPush: typeof import('@/lib/start-push').launchProjectPush;
+  let launchProjectPush: typeof import('@/lib/pipeline/start-push').launchProjectPush;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
   let createJobMock: ReturnType<typeof vi.fn>;
@@ -1213,25 +1213,25 @@ describe('launchProjectPush — fire-and-forget', () => {
 
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp/test-logs' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn().mockResolvedValue('feat: test'),
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
@@ -1241,13 +1241,13 @@ describe('launchProjectPush — fire-and-forget', () => {
       mkdirSync: mkdirSyncMock,
       appendFileSync: appendFileSyncMock,
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: getLockMock,
       acquireLock: acquireLockMock,
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
 
-    ({ launchProjectPush } = await import('@/lib/start-push'));
+    ({ launchProjectPush } = await import('@/lib/pipeline/start-push'));
   });
 
   afterEach(() => { vi.resetModules(); });
@@ -1372,7 +1372,7 @@ describe('launchProjectPush — fire-and-forget', () => {
 });
 
 describe('pushCurrentBranch', () => {
-  let pushCurrentBranch: typeof import('@/lib/start-push').pushCurrentBranch;
+  let pushCurrentBranch: typeof import('@/lib/pipeline/start-push').pushCurrentBranch;
   let execMock: ReturnType<typeof vi.fn>;
 
   const resp = (exitCode: number, stdout = '', stderr = '') => ({ exitCode, stdout, stderr });
@@ -1380,17 +1380,17 @@ describe('pushCurrentBranch', () => {
   beforeEach(async () => {
     vi.resetModules();
     execMock = vi.fn();
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn(), clearProjectDataCache: vi.fn() }));
-    vi.doMock('@/lib/gh-status', () => ({ invalidateProject: vi.fn() }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({ getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }), setProjectPushResult: vi.fn() }));
-    vi.doMock('@/lib/job-storage', () => ({ createJob: vi.fn(), markDone: vi.fn(), updateJob: vi.fn(), listJobs: vi.fn().mockReturnValue([]) }));
-    vi.doMock('@/lib/pipeline-lock', () => ({ getLock: vi.fn(), acquireLock: vi.fn(), isLockOwnedByActiveRelease: vi.fn() }));
-    vi.doMock('@/lib/start-commit', () => ({ generateCommitMessage: vi.fn(), findIssueContext: vi.fn(), detectMainBranch: vi.fn(), issueBranchName: vi.fn() }));
-    vi.doMock('@/lib/notifications', () => ({ notify: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn(), clearProjectDataCache: vi.fn() }));
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }), setProjectPushResult: vi.fn() }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({ createJob: vi.fn(), markDone: vi.fn(), updateJob: vi.fn(), listJobs: vi.fn().mockReturnValue([]) }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({ getLock: vi.fn(), acquireLock: vi.fn(), isLockOwnedByActiveRelease: vi.fn() }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({ generateCommitMessage: vi.fn(), findIssueContext: vi.fn(), detectMainBranch: vi.fn(), issueBranchName: vi.fn() }));
+    vi.doMock('@/lib/shared/notifications', () => ({ notify: vi.fn() }));
 
-    const mod = await import('@/lib/start-push');
+    const mod = await import('@/lib/pipeline/start-push');
     pushCurrentBranch = mod.pushCurrentBranch;
   });
 

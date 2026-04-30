@@ -23,10 +23,10 @@ describe('GET /api/projects/by-project/[projectName]/changes', () => {
     execMock = vi.fn().mockResolvedValue(makeExecResult());
     statSyncMock = vi.fn().mockReturnValue({ size: 1024 });
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('fs', () => ({ statSync: statSyncMock }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/changes/route');
@@ -143,8 +143,8 @@ describe('GET /api/projects/by-project/[projectName]/changes — defaultBranch a
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn().mockResolvedValue(makeExecResult());
     statSyncMock = vi.fn().mockReturnValue({ size: 1024 });
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('fs', () => ({ statSync: statSyncMock }));
     const mod = await import('@/app/api/projects/by-project/[projectName]/changes/route');
     GET = mod.GET;
@@ -340,8 +340,8 @@ describe('POST /api/projects/by-project/[projectName]/changes', () => {
     vi.resetModules();
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn().mockResolvedValue(makeExecResult({ stdout: 'Already up to date.' }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     const mod = await import('@/app/api/projects/by-project/[projectName]/changes/route');
     POST = mod.POST;
   });
@@ -435,10 +435,10 @@ describe('GET /api/projects/by-project/[projectName]/changes/diff', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn().mockResolvedValue(makeExecResult());
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/changes/diff/route');
     GET = mod.GET;

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { resolveProjectPath } from '@/lib/project-data';
+import { resolveProjectPath } from '@/lib/shared/project-data';
 
 export async function GET(
   _request: NextRequest,

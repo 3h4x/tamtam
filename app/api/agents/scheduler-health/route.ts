@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { getSchedulerHealth, reconcilePm2Schedules, installAgentSchedule } from '@/lib/agent-scheduler';
-import { dumpInternalScheduler } from '@/lib/internal-scheduler';
-import { scanFileAgents } from '@/lib/tamtam-file-agents';
-import { errMsg } from '@/lib/types';
+import { getSchedulerHealth, reconcilePm2Schedules, installAgentSchedule } from '@/lib/scheduling/agent-scheduler';
+import { dumpInternalScheduler } from '@/lib/scheduling/internal-scheduler';
+import { scanFileAgents } from '@/lib/agents/tamtam-file-agents';
+import { errMsg } from '@/lib/shared/types';
 
 function loadAgentsForCheck() {
   const dbAgents = db.select().from(schema.agents).all().map(a => ({

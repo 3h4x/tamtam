@@ -34,7 +34,7 @@ describe('settings API', () => {
       db: testDb.db,
       schema,
     }));
-    vi.doMock('@/lib/job-control', () => ({
+    vi.doMock('@/lib/shared/job-control', () => ({
       syncJobsPauseState: syncJobsPauseStateMock,
     }));
 
@@ -299,8 +299,8 @@ describe('settings API', () => {
 
       reloadConfigMock = vi.fn();
       vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-      vi.doMock('@/lib/config', () => ({ reloadConfig: reloadConfigMock, getSettings: () => ({ jobs_paused: false }) }));
-      vi.doMock('@/lib/job-control', () => ({ syncJobsPauseState: vi.fn() }));
+      vi.doMock('@/lib/shared/config', () => ({ reloadConfig: reloadConfigMock, getSettings: () => ({ jobs_paused: false }) }));
+      vi.doMock('@/lib/shared/job-control', () => ({ syncJobsPauseState: vi.fn() }));
 
       const mod = await import('@/app/api/settings/route');
       PATCHWithSpy = mod.PATCH;

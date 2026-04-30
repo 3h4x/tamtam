@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import { writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { JobData } from '@/lib/job-storage';
+import type { JobData } from '@/lib/jobs/job-storage';
 
 async function collectSSEStream(
   response: Response,
@@ -44,16 +44,16 @@ describe('GET /api/streaming/[jobId]', () => {
     getJobMock = vi.fn().mockReturnValue(null);
     probeJobStatusMock = vi.fn().mockResolvedValue('running');
 
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
       probeJobStatus: probeJobStatusMock,
     }));
 
     // Mock claude-stream-parser to use the real implementation
-    const actualParser = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
-      '@/lib/claude-stream-parser'
+    const actualParser = await vi.importActual<typeof import('@/lib/jobs/claude-stream-parser')>(
+      '@/lib/jobs/claude-stream-parser'
     );
-    vi.doMock('@/lib/claude-stream-parser', () => actualParser);
+    vi.doMock('@/lib/jobs/claude-stream-parser', () => actualParser);
 
     const mod = await import('@/app/api/streaming/[jobId]/route');
     GET = mod.GET;
@@ -347,15 +347,15 @@ describe('GET /api/streaming/[jobId] – extractLogDetail in done event', () => 
     vi.resetModules();
 
     getJobMock = vi.fn().mockReturnValue(null);
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
       probeJobStatus: vi.fn().mockResolvedValue('running'),
     }));
 
-    const actualParser = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
-      '@/lib/claude-stream-parser'
+    const actualParser = await vi.importActual<typeof import('@/lib/jobs/claude-stream-parser')>(
+      '@/lib/jobs/claude-stream-parser'
     );
-    vi.doMock('@/lib/claude-stream-parser', () => actualParser);
+    vi.doMock('@/lib/jobs/claude-stream-parser', () => actualParser);
 
     const mod = await import('@/app/api/streaming/[jobId]/route');
     GET = mod.GET;
@@ -484,15 +484,15 @@ describe('GET /api/streaming/[jobId] – passthrough mode', () => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-streaming-pt-test-'));
     vi.resetModules();
     getJobMock = vi.fn().mockReturnValue(null);
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
       probeJobStatus: vi.fn().mockResolvedValue('running'),
     }));
 
-    const actualParser = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
-      '@/lib/claude-stream-parser'
+    const actualParser = await vi.importActual<typeof import('@/lib/jobs/claude-stream-parser')>(
+      '@/lib/jobs/claude-stream-parser'
     );
-    vi.doMock('@/lib/claude-stream-parser', () => actualParser);
+    vi.doMock('@/lib/jobs/claude-stream-parser', () => actualParser);
 
     const mod = await import('@/app/api/streaming/[jobId]/route');
     GET = mod.GET;
@@ -623,15 +623,15 @@ describe('GET /api/streaming/[jobId] – tool_result SSE event', () => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-streaming-tr-test-'));
     vi.resetModules();
     getJobMock = vi.fn().mockReturnValue(null);
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
       probeJobStatus: vi.fn().mockResolvedValue('running'),
     }));
 
-    const actualParser = await vi.importActual<typeof import('@/lib/claude-stream-parser')>(
-      '@/lib/claude-stream-parser'
+    const actualParser = await vi.importActual<typeof import('@/lib/jobs/claude-stream-parser')>(
+      '@/lib/jobs/claude-stream-parser'
     );
-    vi.doMock('@/lib/claude-stream-parser', () => actualParser);
+    vi.doMock('@/lib/jobs/claude-stream-parser', () => actualParser);
 
     const mod = await import('@/app/api/streaming/[jobId]/route');
     GET = mod.GET;

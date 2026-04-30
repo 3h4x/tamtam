@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, schema } from '@/lib/db';
-import { seedDefaultSkills } from '@/lib/default-agent-skills';
+import { seedDefaultSkills } from '@/lib/agents/default-agent-skills';
 
 export async function GET() {
   seedDefaultSkills();

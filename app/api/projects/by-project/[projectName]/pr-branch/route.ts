@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveProjectPath, clearProjectDataCache } from '@/lib/project-data';
-import { exec } from '@/lib/shell';
+import { resolveProjectPath, clearProjectDataCache } from '@/lib/shared/project-data';
+import { exec } from '@/lib/shared/shell';
 
 // Fetch and checkout a PR's head branch so Terminal opens on the right branch.
 export async function POST(

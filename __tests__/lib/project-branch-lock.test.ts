@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 describe('project-branch-lock', () => {
-  let getIssueBranchLock: typeof import('@/lib/project-branch-lock').getIssueBranchLock;
-  let clearIssueBranchLockCache: typeof import('@/lib/project-branch-lock').clearIssueBranchLockCache;
+  let getIssueBranchLock: typeof import('@/lib/shared/project-branch-lock').getIssueBranchLock;
+  let clearIssueBranchLockCache: typeof import('@/lib/shared/project-branch-lock').clearIssueBranchLockCache;
   let execMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
 
@@ -15,12 +15,12 @@ describe('project-branch-lock', () => {
     execMock = vi.fn().mockResolvedValue(makeExecResult());
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
 
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
 
-    ({ getIssueBranchLock, clearIssueBranchLockCache } = await import('@/lib/project-branch-lock'));
+    ({ getIssueBranchLock, clearIssueBranchLockCache } = await import('@/lib/shared/project-branch-lock'));
   });
 
   afterEach(() => {

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { installAgentSchedule } from '@/lib/agent-scheduler';
-import { errMsg } from '@/lib/types';
-import { getAllAgentsCached, clearAgentsCache, normalizeAgent } from '@/lib/agents-cache';
-import { scanFileAgents, writeFileAgent, type FileAgent } from '@/lib/tamtam-file-agents';
-import { resolveProjectPath } from '@/lib/project-data';
+import { installAgentSchedule } from '@/lib/scheduling/agent-scheduler';
+import { errMsg } from '@/lib/shared/types';
+import { getAllAgentsCached, clearAgentsCache, normalizeAgent } from '@/lib/agents/agents-cache';
+import { scanFileAgents, writeFileAgent, type FileAgent } from '@/lib/agents/tamtam-file-agents';
+import { resolveProjectPath } from '@/lib/shared/project-data';
 
 const ALL_FILE_AGENTS_TTL_MS = 10_000;
 let _allFileAgentsCache: { agents: FileAgent[]; time: number } | null = null;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listJobs, jobToDict, probeJobStatus } from '@/lib/job-storage';
+import { listJobs, jobToDict, probeJobStatus } from '@/lib/jobs/job-storage';
 
 export async function GET(request: NextRequest) {
   const project = request.nextUrl.searchParams.get('project');

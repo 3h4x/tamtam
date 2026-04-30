@@ -44,13 +44,13 @@ function makeAgentRow(overrides: Partial<typeof schema.agents.$inferSelect> = {}
 }
 
 describe('normalizeAgent', () => {
-  let normalizeAgent: typeof import('@/lib/agents-cache').normalizeAgent;
+  let normalizeAgent: typeof import('@/lib/agents/agents-cache').normalizeAgent;
 
   beforeEach(async () => {
     vi.resetModules();
     const testDb = createTestDb();
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    const mod = await import('@/lib/agents-cache');
+    const mod = await import('@/lib/agents/agents-cache');
     normalizeAgent = mod.normalizeAgent;
   });
 
@@ -88,14 +88,14 @@ describe('normalizeAgent', () => {
 
 describe('getAllAgentsCached', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let getAllAgentsCached: typeof import('@/lib/agents-cache').getAllAgentsCached;
-  let clearAgentsCache: typeof import('@/lib/agents-cache').clearAgentsCache;
+  let getAllAgentsCached: typeof import('@/lib/agents/agents-cache').getAllAgentsCached;
+  let clearAgentsCache: typeof import('@/lib/agents/agents-cache').clearAgentsCache;
 
   beforeEach(async () => {
     vi.resetModules();
     testDb = createTestDb();
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    const mod = await import('@/lib/agents-cache');
+    const mod = await import('@/lib/agents/agents-cache');
     getAllAgentsCached = mod.getAllAgentsCached;
     clearAgentsCache = mod.clearAgentsCache;
     clearAgentsCache();
@@ -165,14 +165,14 @@ describe('getAllAgentsCached', () => {
 
 describe('clearAgentsCache', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let getAllAgentsCached: typeof import('@/lib/agents-cache').getAllAgentsCached;
-  let clearAgentsCache: typeof import('@/lib/agents-cache').clearAgentsCache;
+  let getAllAgentsCached: typeof import('@/lib/agents/agents-cache').getAllAgentsCached;
+  let clearAgentsCache: typeof import('@/lib/agents/agents-cache').clearAgentsCache;
 
   beforeEach(async () => {
     vi.resetModules();
     testDb = createTestDb();
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    const mod = await import('@/lib/agents-cache');
+    const mod = await import('@/lib/agents/agents-cache');
     getAllAgentsCached = mod.getAllAgentsCached;
     clearAgentsCache = mod.clearAgentsCache;
     clearAgentsCache();

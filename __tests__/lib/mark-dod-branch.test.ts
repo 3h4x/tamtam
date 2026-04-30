@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 describe('ensureBranchForCtx', () => {
-  let ensureBranchForCtx: typeof import('@/lib/mark-dod-branch').ensureBranchForCtx;
+  let ensureBranchForCtx: typeof import('@/lib/pipeline/mark-dod-branch').ensureBranchForCtx;
   let execMock: ReturnType<typeof vi.fn>;
   const log = vi.fn();
 
@@ -12,8 +12,8 @@ describe('ensureBranchForCtx', () => {
   beforeEach(async () => {
     vi.resetModules();
     execMock = vi.fn();
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    ({ ensureBranchForCtx } = await import('@/lib/mark-dod-branch'));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    ({ ensureBranchForCtx } = await import('@/lib/pipeline/mark-dod-branch'));
     log.mockClear();
   });
 

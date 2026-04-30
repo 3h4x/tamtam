@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { startFixFromJob } from '@/lib/start-fix';
+import { startFixFromJob } from '@/lib/pipeline/start-fix';
 
 export async function POST(
   _request: NextRequest,

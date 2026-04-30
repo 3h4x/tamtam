@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import type { JobData } from '@/lib/job-storage';
+import type { JobData } from '@/lib/jobs/job-storage';
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
   return {
@@ -45,11 +45,11 @@ describe('GET /api/stats/pipeline', () => {
       commit_style: 'conventional commits',
     });
 
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock,
       getVerdict: getVerdictMock,
     }));
-    vi.doMock('@/lib/config', () => ({ getSettings: getSettingsMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: getSettingsMock }));
 
     const mod = await import('@/app/api/stats/pipeline/route');
     GET = mod.GET as typeof GET;
@@ -250,8 +250,8 @@ describe('GET /api/stats/pipeline — caching', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2025-01-01T00:00:00Z'));
     listJobsMock = vi.fn().mockReturnValue([]);
-    vi.doMock('@/lib/job-storage', () => ({ listJobs: listJobsMock, getVerdict: vi.fn().mockReturnValue(null) }));
-    vi.doMock('@/lib/config', () => ({ getSettings: vi.fn().mockReturnValue({ review_verdict_rules: '', commit_style: '' }) }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({ listJobs: listJobsMock, getVerdict: vi.fn().mockReturnValue(null) }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: vi.fn().mockReturnValue({ review_verdict_rules: '', commit_style: '' }) }));
     const mod = await import('@/app/api/stats/pipeline/route');
     GET = mod.GET as typeof GET;
   });

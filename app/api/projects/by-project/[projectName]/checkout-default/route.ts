@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveProjectPath, clearProjectDataCache } from '@/lib/project-data';
-import { clearIssueBranchLockCache } from '@/lib/project-branch-lock';
-import { exec } from '@/lib/shell';
-import { detectMainBranch } from '@/lib/start-commit';
+import { resolveProjectPath, clearProjectDataCache } from '@/lib/shared/project-data';
+import { clearIssueBranchLockCache } from '@/lib/shared/project-branch-lock';
+import { exec } from '@/lib/shared/shell';
+import { detectMainBranch } from '@/lib/pipeline/start-commit';
 
 // Switch the working copy back to the project's default branch.
 // Used from the Changes tab when a feature branch has been pushed/merged and

@@ -45,7 +45,7 @@ describe('GET /api/projects/by-project/{projectName}/continue-issue', () => {
     vi.resetModules();
     listJobsMock = vi.fn().mockReturnValue([]);
     readLogMock = vi.fn().mockReturnValue('');
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock,
       readLog: readLogMock,
     }));

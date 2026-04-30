@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import type { LogFrame } from '@/lib/log-persistence';
+import type { LogFrame } from '@/lib/jobs/log-persistence';
 
 describe('GET /api/jobs/{jobId}/logs', () => {
   let GET: any;
@@ -11,7 +11,7 @@ describe('GET /api/jobs/{jobId}/logs', () => {
 
     readJobLogsMock = vi.fn().mockReturnValue([]);
 
-    vi.doMock('@/lib/log-persistence', () => ({
+    vi.doMock('@/lib/jobs/log-persistence', () => ({
       readJobLogs: readJobLogsMock,
     }));
 

@@ -1,4 +1,4 @@
-import { Task } from '@/lib/types'
+import { Task } from '@/lib/shared/types'
 
 export type HealthStatus = 'error' | 'warning' | 'healthy' | 'unknown'
 

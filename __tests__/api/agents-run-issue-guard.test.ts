@@ -38,28 +38,28 @@ describe('POST /api/agents/[agentId]/run — Direct Branch issue-branch guard', 
     createJobMock = vi.fn().mockReturnValue({ id: 'job-1', project: 'proj', kind: 'agent:my-agent', pid: 0, logPath: '' });
     updateJobMock = vi.fn();
 
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ logDir: '/tmp/test-logs', claudeBin: 'claude', projects: {} }),
       getProjectTestConfig: getProjectTestConfigMock,
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock,
       probeJobStatus: probeJobStatusMock,
       createJob: createJobMock,
       updateJob: updateJobMock,
     }));
-    vi.doMock('@/lib/pm2-jobs', () => ({ startJob: startJobMock }));
-    vi.doMock('@/lib/config', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/shared/config', () => ({
       withBasePrompt: (p: string) => p,
       getPermissionModeFlag: () => '--permission-mode default',
     }));
-    vi.doMock('@/lib/skills', () => ({
+    vi.doMock('@/lib/skills/skills', () => ({
       SKILLS_DIR: '/tmp/skills',
       DATA_SKILLS_DIR: '/tmp/data-skills',
     }));
-    vi.doMock('@/lib/tamtam-file-agents', () => ({
+    vi.doMock('@/lib/agents/tamtam-file-agents', () => ({
       parseFileAgentId: () => null,
       loadFileAgent: () => null,
     }));

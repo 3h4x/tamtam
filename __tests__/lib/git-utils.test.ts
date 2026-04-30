@@ -6,10 +6,10 @@ import { tmpdir } from 'os';
 describe('git-utils', () => {
   let tempDir: string;
   let cacheDir: string;
-  let gitStatusHash: typeof import('@/lib/git-utils').gitStatusHash;
-  let markReviewed: typeof import('@/lib/git-utils').markReviewed;
-  let isReviewed: typeof import('@/lib/git-utils').isReviewed;
-  let gitChanges: typeof import('@/lib/git-utils').gitChanges;
+  let gitStatusHash: typeof import('@/lib/git/git-utils').gitStatusHash;
+  let markReviewed: typeof import('@/lib/git/git-utils').markReviewed;
+  let isReviewed: typeof import('@/lib/git/git-utils').isReviewed;
+  let gitChanges: typeof import('@/lib/git/git-utils').gitChanges;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -27,7 +27,7 @@ describe('git-utils', () => {
     });
 
     // Mock the shell.exec function
-    vi.doMock('@/lib/shell', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn(async (cmd: string, args: string[]) => {
         if (cmd === 'git' && args[0] === '-C') {
           const path = args[1];
@@ -45,7 +45,7 @@ describe('git-utils', () => {
       }),
     }));
 
-    const gitUtils = await import('@/lib/git-utils');
+    const gitUtils = await import('@/lib/git/git-utils');
     gitStatusHash = gitUtils.gitStatusHash;
     markReviewed = gitUtils.markReviewed;
     isReviewed = gitUtils.isReviewed;

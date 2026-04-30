@@ -15,7 +15,7 @@ describe('GET /api/projects/by-project/{projectName}/logs', () => {
     logDir = join(tempDir, 'logs');
     mkdirSync(logDir, { recursive: true });
 
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({
         claudeBin: 'claude',
         logDir,
@@ -33,7 +33,7 @@ describe('GET /api/projects/by-project/{projectName}/logs', () => {
 
   it('returns empty logs when logDir does not exist', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({
         claudeBin: 'claude',
         logDir: join(tempDir, 'nonexistent-logs'),

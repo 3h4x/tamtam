@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listJobs } from '@/lib/job-storage';
-import { costUsd, PRICE_PER_MTOK } from '@/lib/usage-pricing';
+import { listJobs } from '@/lib/jobs/job-storage';
+import { costUsd, PRICE_PER_MTOK } from '@/lib/shared/usage-pricing';
 
 const WINDOWS = {
   '24h': 24 * 60 * 60 * 1000,

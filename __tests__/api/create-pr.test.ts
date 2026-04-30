@@ -31,12 +31,12 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
     detectMainBranchMock = vi.fn().mockResolvedValue('main');
     pushCurrentBranchMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123' });
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/start-commit', () => ({ detectMainBranch: detectMainBranchMock }));
-    vi.doMock('@/lib/start-push', () => ({ pushCurrentBranch: pushCurrentBranchMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({ detectMainBranch: detectMainBranchMock }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ pushCurrentBranch: pushCurrentBranchMock }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/create-pr/route');
     POST = mod.POST;
@@ -214,10 +214,10 @@ describe('POST /api/projects/by-project/[projectName]/create-pr — title genera
     detectMainBranchMock = vi.fn().mockResolvedValue('main');
     pushCurrentBranchMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123' });
 
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue('/repo') }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/start-commit', () => ({ detectMainBranch: detectMainBranchMock }));
-    vi.doMock('@/lib/start-push', () => ({ pushCurrentBranch: pushCurrentBranchMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue('/repo') }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({ detectMainBranch: detectMainBranchMock }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ pushCurrentBranch: pushCurrentBranchMock }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/create-pr/route');
     POST = mod.POST;
