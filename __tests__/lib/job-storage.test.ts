@@ -2018,6 +2018,82 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     expect(startFixFromJobMock).not.toHaveBeenCalled();
   });
 
+  it('counts fix cap per release when job has releaseId — fixes in same release block', async () => {
+    const now = Date.now() / 1000;
+    // Insert 3 fix jobs belonging to the SAME release
+    for (let i = 0; i < 3; i++) {
+      testDb.db
+        .insert(schema.jobs)
+        .values({
+          id: `same-release-fix-${i}`,
+          project: 'my-proj',
+          kind: 'fix',
+          prompt: null,
+          pid: 300 + i,
+          logPath: null,
+          startedAt: now - 60 * i,
+          finishedAt: now - 60 * i + 5,
+          exitCode: 0,
+          seen: 1,
+          durationMs: null,
+          inputTokens: null,
+          outputTokens: null,
+          cacheReadTokens: null,
+          cacheCreateTokens: null,
+          sessionId: null,
+          releaseId: 'release-current',
+        } as any)
+        .run();
+    }
+
+    const logFile = join(tempDir, 'release-scoped-cap.log');
+    writeFileSync(logFile, 'Verdict: NEEDS ATTENTION\n');
+    const job = makeJob('review', logFile, { releaseId: 'release-current' });
+
+    await markDoneFn(job, 0);
+
+    expect(startFixFromJobMock).not.toHaveBeenCalled();
+  });
+
+  it('does not count fixes from a different release against the current release cap', async () => {
+    const now = Date.now() / 1000;
+    // 3 fix jobs from a PREVIOUS release — should not eat into current release's budget
+    for (let i = 0; i < 3; i++) {
+      testDb.db
+        .insert(schema.jobs)
+        .values({
+          id: `old-release-fix-${i}`,
+          project: 'my-proj',
+          kind: 'fix',
+          prompt: null,
+          pid: 400 + i,
+          logPath: null,
+          startedAt: now - 60 * i,
+          finishedAt: now - 60 * i + 5,
+          exitCode: 0,
+          seen: 1,
+          durationMs: null,
+          inputTokens: null,
+          outputTokens: null,
+          cacheReadTokens: null,
+          cacheCreateTokens: null,
+          sessionId: null,
+          releaseId: 'release-previous',
+        } as any)
+        .run();
+    }
+
+    const logFile = join(tempDir, 'new-release-not-capped.log');
+    writeFileSync(logFile, 'Verdict: NEEDS ATTENTION\n');
+    // New release with a different releaseId — previous release fixes should not count
+    const job = makeJob('review', logFile, { releaseId: 'release-new' });
+
+    await markDoneFn(job, 0);
+
+    // The current release has 0 fixes, so it should start a fix
+    expect(startFixFromJobMock).toHaveBeenCalledWith(job.id);
+  });
+
   it('does not auto-chain fix→review when auto-push is disabled', async () => {
     getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoPushEnabled: false });
     const job = makeJob('fix', null);
