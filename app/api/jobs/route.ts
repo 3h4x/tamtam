@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listJobs, jobToDict, probeJobStatus } from '@/lib/jobs/job-storage';
+import { listPendingReleaseProjects } from '@/lib/pipeline/pending-release';
 
 export async function GET(request: NextRequest) {
   const project = request.nextUrl.searchParams.get('project');
@@ -21,5 +22,12 @@ export async function GET(request: NextRequest) {
   // source (each running job does a PM2 jlist round-trip, ~50-100 ms each).
   await Promise.all(jobs.map((j) => probeJobStatus(j)));
 
-  return NextResponse.json({ jobs: jobs.map(jobToDict) });
+  // Surface the pending-release queue so the runs view can render a
+  // "release queued" pill on agent rows whose project has a flag set.
+  const pendingProjects = listPendingReleaseProjects();
+
+  return NextResponse.json({
+    jobs: jobs.map(jobToDict),
+    pendingReleaseProjects: project ? pendingProjects.filter(p => p === project) : pendingProjects,
+  });
 }
