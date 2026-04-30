@@ -95,7 +95,7 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
 
   return (
     <div className="border-b border-border last:border-b-0">
-      <div className="px-3 py-2 flex items-start gap-2.5 hover:bg-bg-tertiary/50 transition-colors">
+      <div className="px-3 py-1.5 flex items-start gap-2.5 hover:bg-bg-tertiary/50 transition-colors">
         <span className="mt-1 shrink-0 text-accent" title="Open Issue">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
             <path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
