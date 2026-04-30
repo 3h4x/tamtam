@@ -5,6 +5,7 @@ import { installAgentSchedule, uninstallAgentSchedule } from '@/lib/scheduling/a
 import { errMsg } from '@/lib/shared/types';
 import { clearAgentsCache, normalizeAgent } from '@/lib/agents/agents-cache';
 import { parseFileAgentId, loadFileAgent, writeFileAgent, deleteFileAgent } from '@/lib/agents/tamtam-file-agents';
+import { setFileAgentOverride, deleteFileAgentOverride } from '@/lib/agents/file-agent-overrides';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 
 export async function GET(
@@ -42,14 +43,31 @@ export async function PATCH(
     }
     const body = await request.json();
     try {
-      const updated = writeFileAgent(projPath, parsedFile.project, parsedFile.name, {
-        prompt: body.prompt,
-        model: body.model,
-        schedule: body.schedule,
-        skillIds: body.skillIds,
-        runner: body.runner,
-        enabled: body.enabled,
-      });
+      // Operational config goes to the DB override so the toggle/edit UI
+      // doesn't dirty a tracked .md file. Only the prompt belongs in the
+      // file (the agent's "identity"); everything else is per-environment.
+      if (
+        body.enabled !== undefined ||
+        body.schedule !== undefined ||
+        body.model !== undefined ||
+        body.runner !== undefined ||
+        body.skillIds !== undefined
+      ) {
+        setFileAgentOverride(parsedFile.project, parsedFile.name, {
+          enabled: body.enabled,
+          schedule: body.schedule,
+          model: body.model,
+          runner: body.runner,
+          skillIds: body.skillIds,
+        });
+      }
+      // Prompt edits still flow to the .md file — that's the part of an
+      // agent worth committing.
+      if (body.prompt !== undefined) {
+        writeFileAgent(projPath, parsedFile.project, parsedFile.name, { prompt: body.prompt });
+      }
+      const updated = loadFileAgent(projPath, parsedFile.project, parsedFile.name);
+      if (!updated) return NextResponse.json({ detail: 'not found after write' }, { status: 500 });
       try {
         if (updated.schedule && updated.enabled && (updated.prompt || updated.skillIds.length > 0)) {
           await installAgentSchedule(updated.id, updated.schedule, updated.prompt, updated.runner, updated.project, updated.name);
@@ -144,6 +162,9 @@ export async function DELETE(
     const projPath = resolveProjectPath(parsedFileDel.project);
     if (!projPath) return NextResponse.json({ detail: 'not found' }, { status: 404 });
     deleteFileAgent(projPath, parsedFileDel.name);
+    // Drop the DB override too — otherwise re-creating the agent later
+    // would silently inherit a stale enabled/schedule.
+    deleteFileAgentOverride(parsedFileDel.project, parsedFileDel.name);
     return NextResponse.json({ status: 'deleted' });
   }
 
