@@ -88,6 +88,9 @@ describe('startFixFromJob', () => {
       acquireLock: acquireLockMock,
       isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
     }));
+    vi.doMock('@/lib/job-control', () => ({
+      jobsPausedResult: vi.fn().mockReturnValue(null),
+    }));
 
     ({ startFixFromJob } = await import('@/lib/start-fix'));
   });
@@ -164,7 +167,10 @@ describe('startFixFromJob', () => {
     expect(prompt).toContain('review');
   });
 
-  it('uses short resume prompt when sessionId is present', async () => {
+  it('embeds review findings in the prompt even when sessionId is present (resume)', async () => {
+    // Resume keeps the Claude session for full context, but we still embed
+    // the findings so the contract is explicit in the fix log and doesn't
+    // rely on session memory alone.
     getJobMock.mockReturnValue(makeSourceJob({ sessionId: 'ses-abc123' }));
     const proc = makeProc();
     spawnMock.mockReturnValue(proc);
@@ -173,9 +179,8 @@ describe('startFixFromJob', () => {
     expect(args).toContain('--resume');
     expect(args).toContain('ses-abc123');
     const prompt: string = (proc.stdin!.write as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    expect(prompt).toContain('Please fix ALL the issues');
-    // Should NOT include raw log output
-    expect(prompt).not.toContain('Error: test failure');
+    expect(prompt).toContain('Apply fixes for ALL the findings');
+    expect(prompt).toContain('Error: test failure');
   });
 
   it('truncates log output exceeding 12000 chars', async () => {
@@ -232,5 +237,36 @@ describe('startFixFromJob', () => {
     await startFixFromJob('src-job-1');
     const updatedJob = updateJobMock.mock.calls[0][0];
     expect(updatedJob.sessionId).toBe('ses-xyz');
+  });
+
+  it('returns 409 when jobs are globally paused', async () => {
+    vi.resetModules();
+    vi.doMock('child_process', () => ({ spawn: spawnMock }));
+    vi.doMock('fs', () => ({ mkdirSync: mkdirSyncMock, openSync: openSyncMock, closeSync: vi.fn() }));
+    vi.doMock('@/lib/job-storage', () => ({
+      getJob: getJobMock, createJob: createJobMock, readLog: readLogMock,
+      probeJobStatus: probeJobStatusMock, updateJob: updateJobMock, markDone: markDoneMock,
+    }));
+    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/scheduling', () => ({ getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp/logs' }) }));
+    vi.doMock('@/lib/config', () => ({
+      getPermissionModeFlag: () => '--dangerously-skip-permissions',
+      getSettings: () => ({ default_model: 'sonnet' }),
+      getPipelineModel: () => 'sonnet',
+    }));
+    vi.doMock('@/lib/pipeline-lock', () => ({
+      acquireLock: acquireLockMock, isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
+    }));
+    vi.doMock('@/lib/job-control', () => ({
+      jobsPausedResult: vi.fn().mockReturnValue({ ok: false, status: 409, detail: 'Jobs are paused globally.' }),
+    }));
+    const { startFixFromJob: startFixPaused } = await import('@/lib/start-fix');
+    const r = await startFixPaused('src-job-1');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(409);
+      expect(r.detail).toContain('paused');
+    }
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 });

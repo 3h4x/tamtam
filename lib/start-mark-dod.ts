@@ -116,6 +116,11 @@ export async function startMarkDod(
   const job = createJob(projectName, 'mark-dod', 0, '');
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
+  // Persist log_path right away so the UI can show the log mid-run. Without
+  // this, the DB row keeps an empty log_path until the first explicit
+  // updateJob() much later in the flow — a user opening the job page early
+  // sees an empty terminal even though the log file is being written.
+  updateJob(job);
   const log = (s: string) => { try { appendFileSync(logPath, s); } catch {} };
 
   const ctxLabel = isPr ? `PR` : `issue`;

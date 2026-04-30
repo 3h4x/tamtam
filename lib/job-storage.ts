@@ -333,6 +333,52 @@ function recentFixCount(projectName: string): number {
   ).length;
 }
 
+// Build a stable fingerprint of a review's findings list so we can detect
+// stuck-in-place fix loops. We strip whitespace, list bullets, code fences,
+// and the verdict line itself — only the *content* of the findings should
+// drive the hash, not formatting churn.
+function findingsFingerprint(reviewLogText: string): string {
+  let s = reviewLogText.trim();
+  const verdictMatch = s.match(/\n[ \t]*Verdict:[^\n]*\s*$/i);
+  if (verdictMatch) s = s.slice(0, verdictMatch.index);
+  s = s
+    .replace(/```[\s\S]*?```/g, '')         // drop fenced code blocks
+    .replace(/^[\s]*[-*•]\s+/gm, '')        // strip bullet markers
+    .replace(/^#+\s+/gm, '')                // strip markdown headers
+    .replace(/\s+/g, ' ')                   // collapse whitespace
+    .trim()
+    .toLowerCase();
+  // Cheap non-crypto hash; we only need equality, not security.
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return h.toString(36);
+}
+
+// True if the previous review in the same release window produced the same
+// findings as the one that just finished — fix isn't making progress, so
+// running another iteration won't help.
+function reviewIsStuck(currentReview: JobData): boolean {
+  if (!currentReview.releaseId) return false;
+  const reviews = listJobs()
+    .filter(j =>
+      j.project === currentReview.project &&
+      j.kind === 'review' &&
+      j.releaseId === currentReview.releaseId &&
+      j.id !== currentReview.id &&
+      j.exitCode === 0
+    )
+    .sort((a, b) => b.startedAt - a.startedAt);
+  if (reviews.length === 0) return false;
+  const prev = reviews[0];
+  try {
+    const cur = findingsFingerprint(readLog(currentReview));
+    const old = findingsFingerprint(readLog(prev));
+    return cur === old && cur.length > 1;
+  } catch {
+    return false;
+  }
+}
+
 // Find the most recent in-flight release job for this project — the single
 // terminal the user watches during a release. Each pipeline step appends
 // its section to this job's log.
@@ -557,7 +603,14 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
             notificationEvent = 'review_do_not_ship';
           }
           const count = recentFixCount(job.project);
-          if (count < MAX_FIX_ITERATIONS) {
+          // Convergence guard: if this review listed the same findings as the
+          // previous one in this release, fix isn't making progress — abort
+          // instead of wasting another iteration on the same nits.
+          const stuck = reviewIsStuck(job);
+          if (stuck) {
+            console.log(`[release] review findings unchanged from previous iteration for ${job.project} — fix not converging, stopping`);
+            notificationEvent = 'fix_loop_exhausted';
+          } else if (count < MAX_FIX_ITERATIONS) {
             const { startFixFromJob } = await import('./start-fix');
             const r = await startFixFromJob(job.id);
             if (r.ok) {

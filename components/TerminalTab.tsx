@@ -151,7 +151,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   // short `pending` key. Read once on first render and clear, so reloads
   // don't re-fire the same auto-submit.
   const pendingKey = searchParams.get('pending')
-  const [stashed] = useState<{ prompt?: string; issue_number?: string; issue_repo?: string; issue_title?: string }>(() => {
+  const [stashed] = useState<{ prompt?: string; issue_number?: string; issue_repo?: string; issue_title?: string; resume_session_id?: string }>(() => {
     if (!pendingKey || typeof window === 'undefined') return {}
     try {
       const raw = sessionStorage.getItem(pendingKey)
@@ -164,6 +164,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const issueNumberParam = stashed.issue_number ?? searchParams.get('issue_number')
   const issueRepoParam = stashed.issue_repo ?? searchParams.get('issue_repo')
   const issueTitleParam = stashed.issue_title ?? searchParams.get('issue_title')
+  const resumeSessionIdParam = stashed.resume_session_id ?? null
 
   // Subscribe to the module-level session store. Survives component unmounts.
   const state = useSyncExternalStore(
@@ -288,6 +289,13 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         // `gh_issue_number`, and the downstream commit/push pipeline can't
         // find the issue → branch never gets committed to → no PR.
         terminalStore.reset(projectName)
+      }
+      // "Continue work" path: caller supplied a Claude session id to resume
+      // (last run/fix on this issue). Seed it into the store BEFORE auto-submit
+      // so the run-API call picks it up as resume_session_id and Claude keeps
+      // its prior context.
+      if (resumeSessionIdParam) {
+        terminalStore.update(projectName, () => ({ claudeSessionId: resumeSessionIdParam }))
       }
       terminalStore.update(projectName, () => ({ pendingAutoSubmit: submit }))
       router.replace(`/project/${projectName}/terminal`)
