@@ -74,11 +74,20 @@ function recentFixPushCount(projectName: string): number {
   ).length;
 }
 
-function recentFixCount(projectName: string): number {
+// Count fix iterations that should be billed against the current pipeline
+// run's cap. When the calling job is part of a release (has a `releaseId`),
+// only count fixes inside that same release — a leftover review→fix loop
+// from an earlier release shouldn't eat this release's test→fix budget.
+// Falls back to the 30-min window for ad-hoc fixes outside any release.
+function recentFixCount(projectName: string, currentJob?: JobData): number {
+  const all = listJobs().filter(
+    (j) => j.project === projectName && j.kind === 'fix'
+  );
+  if (currentJob?.releaseId) {
+    return all.filter((j) => j.releaseId === currentJob.releaseId).length;
+  }
   const cutoff = Date.now() / 1000 - FIX_WINDOW_SECONDS;
-  return listJobs().filter(
-    (j) => j.project === projectName && j.kind === 'fix' && j.startedAt >= cutoff
-  ).length;
+  return all.filter((j) => j.startedAt >= cutoff).length;
 }
 
 // Build a stable fingerprint of a review's findings list so we can detect
@@ -340,7 +349,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           if (verdict === 'DO NOT SHIP') {
             notificationEvent = 'review_do_not_ship';
           }
-          const count = recentFixCount(job.project);
+          const count = recentFixCount(job.project, job);
           // Convergence guard: if this review listed the same findings as the
           // previous one in this release, fix isn't making progress — abort
           // instead of wasting another iteration on the same nits.
@@ -388,7 +397,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         if (fromTestFailure) {
           // Bounded by the same fix-iteration cap so a persistently-broken test
           // can't churn test→fix→test→fix forever.
-          const count = recentFixCount(job.project);
+          const count = recentFixCount(job.project, job);
           if (count >= MAX_FIX_ITERATIONS) {
             console.log(`[fix→test] fix cap reached for ${job.project} (${count}/${MAX_FIX_ITERATIONS}) — stopping`);
             notificationEvent = 'fix_loop_exhausted';
@@ -512,7 +521,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
       const { autoCommitEnabled, autoPushEnabled } = await getProjectPipelineConfig(job.project);
       const inRelease = !!findActiveReleaseJob(job.project);
       if (inRelease || autoPushEnabled || autoCommitEnabled) {
-        const count = recentFixCount(job.project);
+        const count = recentFixCount(job.project, job);
         if (count < MAX_FIX_ITERATIONS) {
           const { startFixFromJob } = await import('@/lib/pipeline/start-fix');
           const r = await startFixFromJob(job.id);

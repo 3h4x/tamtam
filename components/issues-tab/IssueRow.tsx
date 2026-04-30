@@ -113,16 +113,11 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
             <Labels labels={issue.labels} />
           </div>
           <div className="flex items-center gap-x-2 gap-y-1 mt-1 flex-wrap text-xs text-text-tertiary tabular-nums">
-            <span className="font-mono">#{issue.number}</span>
-            <span className="text-border">·</span>
+            <span className="font-mono text-text-secondary">#{issue.number}</span>
             <span>{issue.author?.login}</span>
-            <span className="text-border">·</span>
             <span title={issue.createdAt}>{formatAgo(new Date(issue.createdAt).getTime() / 1000)}</span>
             {issue.assignees?.length > 0 && (
-              <>
-                <span className="text-border">·</span>
-                <span>→ {issue.assignees.map((a) => a.login).join(', ')}</span>
-              </>
+              <span>→ {issue.assignees.map((a) => a.login).join(', ')}</span>
             )}
           </div>
         </div>
