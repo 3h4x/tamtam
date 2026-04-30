@@ -5,11 +5,11 @@ import { tmpdir } from 'os';
 
 describe('run-history', () => {
   let homeDir: string;
-  let recordRunStart: typeof import('@/lib/run-history').recordRunStart;
-  let recordRunEnd: typeof import('@/lib/run-history').recordRunEnd;
-  let readRunHistory: typeof import('@/lib/run-history').readRunHistory;
-  let pruneRunsFile: typeof import('@/lib/run-history').pruneRunsFile;
-  let lastRunLookup: typeof import('@/lib/run-history').lastRunLookup;
+  let recordRunStart: typeof import('@/lib/jobs/run-history').recordRunStart;
+  let recordRunEnd: typeof import('@/lib/jobs/run-history').recordRunEnd;
+  let readRunHistory: typeof import('@/lib/jobs/run-history').readRunHistory;
+  let pruneRunsFile: typeof import('@/lib/jobs/run-history').pruneRunsFile;
+  let lastRunLookup: typeof import('@/lib/jobs/run-history').lastRunLookup;
 
   beforeEach(async () => {
     homeDir = mkdtempSync(join(tmpdir(), 'tamtam-run-history-'));
@@ -20,7 +20,7 @@ describe('run-history', () => {
       return { ...actual, homedir: () => homeDir };
     });
 
-    const mod = await import('@/lib/run-history');
+    const mod = await import('@/lib/jobs/run-history');
     recordRunStart = mod.recordRunStart;
     recordRunEnd = mod.recordRunEnd;
     readRunHistory = mod.readRunHistory;

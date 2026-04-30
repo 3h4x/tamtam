@@ -6,19 +6,19 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 describe('issueBranchName', () => {
   it('produces a valid branch name from a normal issue title', async () => {
-    const { issueBranchName } = await import('@/lib/start-commit');
+    const { issueBranchName } = await import('@/lib/pipeline/start-commit');
     expect(issueBranchName({ number: 42, title: 'Add dark mode toggle' }))
       .toBe('fix/issue-42-add-dark-mode-toggle');
   });
 
   it('strips leading/trailing hyphens from slugified title', async () => {
-    const { issueBranchName } = await import('@/lib/start-commit');
+    const { issueBranchName } = await import('@/lib/pipeline/start-commit');
     expect(issueBranchName({ number: 1, title: '!!!Special chars!!!' }))
       .toBe('fix/issue-1-special-chars');
   });
 
   it('truncates long titles to 40 chars without trailing hyphens', async () => {
-    const { issueBranchName } = await import('@/lib/start-commit');
+    const { issueBranchName } = await import('@/lib/pipeline/start-commit');
     const branch = issueBranchName({ number: 7, title: 'A'.repeat(50) });
     const slug = branch.replace('fix/issue-7-', '');
     expect(slug.length).toBeLessThanOrEqual(40);
@@ -26,12 +26,12 @@ describe('issueBranchName', () => {
   });
 
   it('handles empty title gracefully', async () => {
-    const { issueBranchName } = await import('@/lib/start-commit');
+    const { issueBranchName } = await import('@/lib/pipeline/start-commit');
     expect(issueBranchName({ number: 5, title: '' })).toBe('fix/issue-5');
   });
 
   it('lowercases the title slug', async () => {
-    const { issueBranchName } = await import('@/lib/start-commit');
+    const { issueBranchName } = await import('@/lib/pipeline/start-commit');
     expect(issueBranchName({ number: 3, title: 'FIX: Memory Leak In Parser' }))
       .toBe('fix/issue-3-fix-memory-leak-in-parser');
   });
@@ -47,7 +47,7 @@ describe('detectMainBranch', () => {
   beforeEach(() => {
     vi.resetModules();
     execMock = vi.fn();
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
   });
   afterEach(() => vi.resetModules());
 
@@ -57,13 +57,13 @@ describe('detectMainBranch', () => {
 
   it('returns branch from symbolic-ref when it succeeds', async () => {
     execMock.mockResolvedValueOnce(resp(0, 'refs/remotes/origin/main\n'));
-    const { detectMainBranch } = await import('@/lib/start-commit');
+    const { detectMainBranch } = await import('@/lib/pipeline/start-commit');
     expect(await detectMainBranch('/repo')).toBe('main');
   });
 
   it('returns "master" branch from symbolic-ref', async () => {
     execMock.mockResolvedValueOnce(resp(0, 'refs/remotes/origin/master\n'));
-    const { detectMainBranch } = await import('@/lib/start-commit');
+    const { detectMainBranch } = await import('@/lib/pipeline/start-commit');
     expect(await detectMainBranch('/repo')).toBe('master');
   });
 
@@ -71,7 +71,7 @@ describe('detectMainBranch', () => {
     execMock
       .mockResolvedValueOnce(resp(1, ''))         // git symbolic-ref fails
       .mockResolvedValueOnce(resp(0, 'abc1234')); // git rev-parse main succeeds
-    const { detectMainBranch } = await import('@/lib/start-commit');
+    const { detectMainBranch } = await import('@/lib/pipeline/start-commit');
     expect(await detectMainBranch('/repo')).toBe('main');
   });
 
@@ -79,7 +79,7 @@ describe('detectMainBranch', () => {
     execMock
       .mockResolvedValueOnce(resp(1, ''))  // git symbolic-ref fails
       .mockResolvedValueOnce(resp(1, '')); // git rev-parse main fails → master
-    const { detectMainBranch } = await import('@/lib/start-commit');
+    const { detectMainBranch } = await import('@/lib/pipeline/start-commit');
     expect(await detectMainBranch('/repo')).toBe('master');
   });
 });
@@ -111,14 +111,14 @@ describe('findIssueContext', () => {
     vi.resetModules();
     execMock = vi.fn();
     listJobsMock = vi.fn().mockReturnValue([]);
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/job-storage', () => ({ listJobs: listJobsMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({ listJobs: listJobsMock }));
   });
   afterEach(() => vi.resetModules());
 
   it('returns null when no run jobs with issue numbers exist', async () => {
     listJobsMock.mockReturnValue([makeJob()]);
-    const { findIssueContext } = await import('@/lib/start-commit');
+    const { findIssueContext } = await import('@/lib/pipeline/start-commit');
     expect(await findIssueContext('p', '/repo')).toBeNull();
   });
 
@@ -127,7 +127,7 @@ describe('findIssueContext', () => {
       makeJob({ ghIssueNumber: 10, ghIssueRepo: 'org/repo', ghIssueTitle: 'Fix bug', startedAt: 1000 }),
     ]);
     execMock.mockResolvedValueOnce(resp(0, JSON.stringify({ state: 'OPEN' })));
-    const { findIssueContext } = await import('@/lib/start-commit');
+    const { findIssueContext } = await import('@/lib/pipeline/start-commit');
     const ctx = await findIssueContext('p', '/repo');
     expect(ctx).toEqual({ number: 10, repo: 'org/repo', title: 'Fix bug' });
   });
@@ -137,7 +137,7 @@ describe('findIssueContext', () => {
       makeJob({ ghIssueNumber: 10, ghIssueRepo: 'org/repo', ghIssueTitle: 'Fix bug' }),
     ]);
     execMock.mockResolvedValueOnce(resp(0, JSON.stringify({ state: 'CLOSED' })));
-    const { findIssueContext } = await import('@/lib/start-commit');
+    const { findIssueContext } = await import('@/lib/pipeline/start-commit');
     expect(await findIssueContext('p', '/repo')).toBeNull();
   });
 
@@ -146,7 +146,7 @@ describe('findIssueContext', () => {
       makeJob({ ghIssueNumber: 5, ghIssueRepo: 'org/repo', ghIssueTitle: 'Crash fix' }),
     ]);
     execMock.mockRejectedValueOnce(new Error('ENOENT: gh not found'));
-    const { findIssueContext } = await import('@/lib/start-commit');
+    const { findIssueContext } = await import('@/lib/pipeline/start-commit');
     const ctx = await findIssueContext('p', '/repo');
     expect(ctx).toEqual({ number: 5, repo: 'org/repo', title: 'Crash fix' });
   });
@@ -155,7 +155,7 @@ describe('findIssueContext', () => {
     listJobsMock.mockReturnValue([
       makeJob({ ghIssueNumber: 3, ghIssueRepo: '', ghIssueTitle: 'Perf fix' }),
     ]);
-    const { findIssueContext } = await import('@/lib/start-commit');
+    const { findIssueContext } = await import('@/lib/pipeline/start-commit');
     const ctx = await findIssueContext('p', '/repo');
     expect(ctx).toEqual({ number: 3, repo: '', title: 'Perf fix' });
     expect(execMock).not.toHaveBeenCalled();
@@ -167,7 +167,7 @@ describe('findIssueContext', () => {
       makeJob({ ghIssueNumber: 2, ghIssueRepo: 'org/repo', ghIssueTitle: 'New', startedAt: 1000 }),
     ]);
     execMock.mockResolvedValue(resp(0, JSON.stringify({ state: 'OPEN' })));
-    const { findIssueContext } = await import('@/lib/start-commit');
+    const { findIssueContext } = await import('@/lib/pipeline/start-commit');
     const ctx = await findIssueContext('p', '/repo');
     expect(ctx?.number).toBe(2);
   });
@@ -187,13 +187,13 @@ describe('generateCommitMessage', () => {
   beforeEach(() => {
     vi.resetModules();
     execMock = vi.fn();
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/diff-context', () => ({
+    vi.doMock('@/lib/git/diff-context', () => ({
       buildDiffContext: vi.fn().mockReturnValue({ context: 'diff context here', truncated: false }),
     }));
   });
@@ -204,7 +204,7 @@ describe('generateCommitMessage', () => {
       .mockResolvedValueOnce(resp(0, 'lib/foo.ts | 5 ++++'))   // git diff --cached --stat
       .mockResolvedValueOnce(resp(0, '+const x = 1'))           // git diff --cached
       .mockResolvedValueOnce(resp(0, 'feat: add dark mode\n')); // claude
-    const { generateCommitMessage } = await import('@/lib/start-commit');
+    const { generateCommitMessage } = await import('@/lib/pipeline/start-commit');
     expect(await generateCommitMessage('/repo', 'myproject')).toBe('feat: add dark mode');
   });
 
@@ -213,7 +213,7 @@ describe('generateCommitMessage', () => {
       .mockResolvedValueOnce(resp(0, 'lib/foo.ts | 2 ++'))
       .mockResolvedValueOnce(resp(0, '+x'))
       .mockResolvedValueOnce(resp(0, '**fix: resolve null pointer**\n'));
-    const { generateCommitMessage } = await import('@/lib/start-commit');
+    const { generateCommitMessage } = await import('@/lib/pipeline/start-commit');
     expect(await generateCommitMessage('/repo', 'p')).toBe('fix: resolve null pointer');
   });
 
@@ -223,7 +223,7 @@ describe('generateCommitMessage', () => {
       .mockResolvedValueOnce(resp(0, '+x'))                  // diff
       .mockResolvedValueOnce(resp(0, 'chore: automated update\n'))  // claude attempt 1 (generic)
       .mockResolvedValueOnce(resp(0, 'refactor: extract helper function\n')); // claude attempt 2 (specific)
-    const { generateCommitMessage } = await import('@/lib/start-commit');
+    const { generateCommitMessage } = await import('@/lib/pipeline/start-commit');
     expect(await generateCommitMessage('/repo', 'p')).toBe('refactor: extract helper function');
   });
 
@@ -233,7 +233,7 @@ describe('generateCommitMessage', () => {
       .mockResolvedValueOnce(resp(0, '+x'))                                            // diff
       .mockResolvedValueOnce(resp(0, 'chore: automated update\n'))  // attempt 1 generic
       .mockResolvedValueOnce(resp(0, 'chore: update\n'));            // attempt 2 generic
-    const { generateCommitMessage } = await import('@/lib/start-commit');
+    const { generateCommitMessage } = await import('@/lib/pipeline/start-commit');
     const msg = await generateCommitMessage('/repo', 'p');
     expect(msg).toMatch(/^chore: update lib\/auth\.ts/);
   });
@@ -245,20 +245,20 @@ describe('generateCommitMessage', () => {
       .mockResolvedValueOnce(resp(0, ''))   // git diff --cached (empty)
       .mockResolvedValueOnce(resp(0, ''))   // claude attempt 1 → empty → msg1 = ''
       .mockResolvedValueOnce(resp(0, ''));  // claude attempt 2 → empty → msg2 = ''
-    const { generateCommitMessage } = await import('@/lib/start-commit');
+    const { generateCommitMessage } = await import('@/lib/pipeline/start-commit');
     expect(await generateCommitMessage('/repo', 'p')).toBe('chore: update files');
   });
 
   it('includes commit style guide in prompt when configured', async () => {
-    vi.doUnmock('@/lib/config');
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: 'Use imperative mood' }), getPipelineModel: () => 'haiku' }));
+    vi.doUnmock('@/lib/shared/config');
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: 'Use imperative mood' }), getPipelineModel: () => 'haiku' }));
     vi.resetModules();
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/diff-context', () => ({
+    vi.doMock('@/lib/git/diff-context', () => ({
       buildDiffContext: vi.fn().mockReturnValue({ context: 'diff context here', truncated: false }),
     }));
     const calls: string[][] = [];
@@ -268,7 +268,7 @@ describe('generateCommitMessage', () => {
       if (args[0] === '-C') return resp(0, '+x');
       return resp(0, 'feat: add something');
     });
-    const { generateCommitMessage } = await import('@/lib/start-commit');
+    const { generateCommitMessage } = await import('@/lib/pipeline/start-commit');
     await generateCommitMessage('/repo', 'p');
     const claudeCall = calls.find(a => a.includes('-p'));
     const prompt = claudeCall?.find(a => a.includes('Use imperative mood'));
@@ -303,29 +303,29 @@ describe('startProjectCommit', () => {
       underRelease = false,
     } = overrides;
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue(resolvePath),
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: listJobsMock,
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(lockHeld ? { lockedByJobId: 'blocker-job' } : null),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(underRelease),
     }));
-    vi.doMock('@/lib/diff-context', () => ({
+    vi.doMock('@/lib/git/diff-context', () => ({
       buildDiffContext: vi.fn().mockReturnValue({ context: '', truncated: false }),
     }));
   }
@@ -350,7 +350,7 @@ describe('startProjectCommit', () => {
 
   it('returns 404 when project path cannot be resolved', async () => {
     setupMocks({ resolvePath: null });
-    const { startProjectCommit } = await import('@/lib/start-commit');
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
     const r = await startProjectCommit('missing');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(404);
@@ -360,7 +360,7 @@ describe('startProjectCommit', () => {
 
   it('returns 409 with blockingJobId when pipeline lock is held', async () => {
     setupMocks({ lockHeld: true });
-    const { startProjectCommit } = await import('@/lib/start-commit');
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
     const r = await startProjectCommit('proj');
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -381,7 +381,7 @@ describe('startProjectCommit', () => {
       .mockResolvedValueOnce(resp(0, ''))     // git diff --cached --name-status (empty → nothing to stage)
       .mockResolvedValueOnce(resp(0, '0\n'))  // git rev-list --count
       ;
-    const { startProjectCommit } = await import('@/lib/start-commit');
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
     const r = await startProjectCommit('proj');
     // Under release the lock check is bypassed — result depends on git state, not lock
     expect(createJobMock).toHaveBeenCalled();
@@ -408,7 +408,7 @@ describe('startProjectCommit', () => {
     // We also need to mock listJobs for findIssueContext (called in startProjectCommit)
     listJobsMock.mockReturnValue([]);
 
-    const { startProjectCommit } = await import('@/lib/start-commit');
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
     const r = await startProjectCommit('proj');
     expect(createJobMock).toHaveBeenCalled();
     const job = createJobMock.mock.results[0].value;
@@ -427,7 +427,7 @@ describe('startProjectCommit', () => {
       .mockResolvedValueOnce(resp(0, '0\n')) // git rev-list --count @{u}..HEAD
     ;
 
-    const { startProjectCommit } = await import('@/lib/start-commit');
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
     const r = await startProjectCommit('proj');
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.message).toContain('Nothing to commit');
@@ -443,7 +443,7 @@ describe('startProjectCommit', () => {
       .mockResolvedValueOnce(resp(0, '3\n')) // git rev-list --count @{u}..HEAD → 3 ahead
     ;
 
-    const { startProjectCommit } = await import('@/lib/start-commit');
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
     const r = await startProjectCommit('proj');
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.message).toContain('already ahead');
@@ -463,7 +463,7 @@ describe('startProjectCommit', () => {
       .mockResolvedValueOnce(resp(0, ''))                      // git status --porcelain (no hook changes)
     ;
 
-    const { startProjectCommit } = await import('@/lib/start-commit');
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
     const r = await startProjectCommit('proj');
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -491,7 +491,7 @@ describe('startProjectCommit', () => {
       .mockResolvedValueOnce(resp(0, 'def5678'))             // git rev-parse
     ;
 
-    const { startProjectCommit } = await import('@/lib/start-commit');
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
     const r = await startProjectCommit('proj');
     expect(r.ok).toBe(true);
     // Verify two separate git commit calls were made
@@ -531,7 +531,7 @@ describe('startProjectCommit', () => {
       .mockResolvedValueOnce(resp(0, 'abc'))                          // git rev-parse
     ;
 
-    const { startProjectCommit } = await import('@/lib/start-commit');
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
     const r = await startProjectCommit('proj');
     expect(r.ok).toBe(true);
     const checkoutCall = execMock.mock.calls.find(
@@ -563,7 +563,7 @@ describe('startProjectCommit', () => {
       .mockResolvedValueOnce(resp(0, 'abc'))                           // git rev-parse
     ;
 
-    const { startProjectCommit } = await import('@/lib/start-commit');
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
     const r = await startProjectCommit('proj');
     expect(r.ok).toBe(true);
     // Both checkout calls were made
@@ -590,7 +590,7 @@ describe('startProjectCommit', () => {
       .mockResolvedValueOnce(resp(1, '', 'checkout also failed'))      // git checkout -m existing → also fails
     ;
 
-    const { startProjectCommit } = await import('@/lib/start-commit');
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
     const r = await startProjectCommit('proj');
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -616,7 +616,7 @@ describe('startProjectCommit', () => {
       .mockResolvedValueOnce(resp(0, 'lib/conflict.ts\n'))                  // git diff --diff-filter=U → conflict
     ;
 
-    const { startProjectCommit } = await import('@/lib/start-commit');
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
     const r = await startProjectCommit('proj');
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -648,7 +648,7 @@ describe('startProjectCommit', () => {
       .mockResolvedValueOnce(resp(0, 'abc'))                                   // git rev-parse
     ;
 
-    const { startProjectCommit } = await import('@/lib/start-commit');
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
     const r = await startProjectCommit('proj');
     expect(r.ok).toBe(true);
     const deleteCall = execMock.mock.calls.find(
@@ -688,7 +688,7 @@ describe('startProjectCommit', () => {
       .mockResolvedValueOnce(resp(0, 'abc'))                          // git rev-parse
     ;
 
-    const { startProjectCommit } = await import('@/lib/start-commit');
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
     const r = await startProjectCommit('proj');
     expect(r.ok).toBe(true);
     const checkoutBCalls = execMock.mock.calls.filter(
@@ -713,29 +713,29 @@ describe('startProjectCommit', () => {
     markDoneMock = vi.fn().mockResolvedValue(undefined);
     updateJobMock = vi.fn();
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
       getProjectTestConfig: vi.fn().mockReturnValue({ prWorkflowEnabled: true }),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: listJobsMock,
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
-    vi.doMock('@/lib/diff-context', () => ({
+    vi.doMock('@/lib/git/diff-context', () => ({
       buildDiffContext: vi.fn().mockReturnValue({ context: '', truncated: false }),
     }));
 
@@ -752,7 +752,7 @@ describe('startProjectCommit', () => {
       .mockResolvedValueOnce(resp(0, 'abc123'))              // git rev-parse
     ;
 
-    const { startProjectCommit } = await import('@/lib/start-commit');
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
     const r = await startProjectCommit('proj');
     expect(r.ok).toBe(true);
 
@@ -773,7 +773,7 @@ describe('startProjectCommit', () => {
       .mockResolvedValueOnce(resp(0, '0\n')) // git rev-list --count (nothing to push)
     ;
 
-    const { startProjectCommit } = await import('@/lib/start-commit');
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
     const r = await startProjectCommit('proj');
     expect(r.ok).toBe(true);
     const checkoutBCalls = execMock.mock.calls.filter(

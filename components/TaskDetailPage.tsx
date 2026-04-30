@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { fetchTaskDetail } from '@/lib/client-api'
 import type { TaskDetail } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
-import { formatDuration } from '@/lib/statusConstants'
+import { formatDuration } from '@/lib/shared/statusConstants'
 
 interface TaskDetailPageProps {
   fleet: FleetHealth

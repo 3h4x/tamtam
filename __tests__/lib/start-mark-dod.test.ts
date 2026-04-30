@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { extractCriteria, tickCriteria } from '@/lib/start-mark-dod';
+import { extractCriteria, tickCriteria } from '@/lib/pipeline/start-mark-dod';
 
 // ─── Pure helpers ────────────────────────────────────────────────────────────
 
@@ -104,7 +104,7 @@ describe('tickCriteria', () => {
 // ─── startMarkDod ─────────────────────────────────────────────────────────────
 
 describe('startMarkDod', () => {
-  let startMarkDod: typeof import('@/lib/start-mark-dod').startMarkDod;
+  let startMarkDod: typeof import('@/lib/pipeline/start-mark-dod').startMarkDod;
   let execMock: ReturnType<typeof vi.fn>;
   let listJobsMock: ReturnType<typeof vi.fn>;
   let createJobMock: ReturnType<typeof vi.fn>;
@@ -169,16 +169,16 @@ describe('startMarkDod', () => {
     getJobStatusMock = vi.fn().mockResolvedValue({ status: 'done', exitCode: 0 });
     deleteJobMock = vi.fn().mockResolvedValue(undefined);
 
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', logDir: '/tmp/tamtam-logs', projects: {} }),
     }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({
       getPermissionModeFlag: () => '--permission-mode bypassPermissions',
       getPipelineModel: () => 'haiku',
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       listJobs: listJobsMock,
       markDone: markDoneMock,
@@ -187,10 +187,10 @@ describe('startMarkDod', () => {
     // Default branch-switch to a no-op so the tests' explicit exec mock
     // chain isn't consumed by the gh pr lookup. Tests that exercise the
     // branch-switch behavior re-mock this module directly.
-    vi.doMock('@/lib/mark-dod-branch', () => ({
+    vi.doMock('@/lib/pipeline/mark-dod-branch', () => ({
       ensureBranchForCtx: vi.fn().mockResolvedValue({ switched: false, skipped: 'mocked in tests' }),
     }));
-    vi.doMock('@/lib/pm2-jobs', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       startJob: startJobMock,
       getJobStatus: getJobStatusMock,
       deleteJob: deleteJobMock,
@@ -204,7 +204,7 @@ describe('startMarkDod', () => {
       unlinkSync: unlinkSyncMock,
     }));
 
-    ({ startMarkDod } = await import('@/lib/start-mark-dod'));
+    ({ startMarkDod } = await import('@/lib/pipeline/start-mark-dod'));
   });
 
   afterEach(() => { vi.resetModules(); });

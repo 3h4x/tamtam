@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 describe('startRelease — release pipeline entry decision tree', () => {
-  let startRelease: typeof import('@/lib/start-release').startRelease;
+  let startRelease: typeof import('@/lib/pipeline/start-release').startRelease;
   let execMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let listJobsMock: ReturnType<typeof vi.fn>;
@@ -44,33 +44,33 @@ describe('startRelease — release pipeline entry decision tree', () => {
       return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
     });
 
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock, probeJobStatus: probeJobStatusMock,
       createJob: createJobMock, updateJob: updateJobMock,
       getVerdict: vi.fn().mockReturnValue(null),
       markDone: vi.fn(),
       runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
-    vi.doMock('@/lib/git-utils', () => ({
+    vi.doMock('@/lib/git/git-utils', () => ({
       isReviewed: vi.fn().mockResolvedValue(false),
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
       getProjectTestConfig: () => null,
     }));
-    vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
-    vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
-    vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
-    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' }) }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' }) }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
       getLock: vi.fn().mockReturnValue(null),
     }));
 
-    ({ startRelease } = await import('@/lib/start-release'));
+    ({ startRelease } = await import('@/lib/pipeline/start-release'));
   });
 
   afterEach(() => { vi.resetModules(); });
@@ -183,34 +183,34 @@ describe('startRelease — release pipeline entry decision tree', () => {
         return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
       });
 
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock, probeJobStatus: probeJobStatusMock,
       createJob: createJobMock, updateJob: updateJobMock,
       getVerdict: vi.fn().mockReturnValue(null), markDone: vi.fn(),
       runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
-    vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/git/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
       // prWorkflowEnabled not set → treated as false (Direct Branch) → branch pre-flight runs
       getProjectTestConfig: () => ({ reviewDisabled: true }),
     }));
-    vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
-    vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
-    vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       startProjectCommit: startProjectCommitMock,
       detectMainBranch: vi.fn().mockResolvedValue('master'),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
       getLock: vi.fn().mockReturnValue(null),
     }));
 
-    const { startRelease: fn } = await import('@/lib/start-release');
+    const { startRelease: fn } = await import('@/lib/pipeline/start-release');
     const r = await fn('proj');
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.step).toBe('commit');
@@ -295,9 +295,9 @@ describe('startRelease — release pipeline entry decision tree', () => {
         return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
       });
 
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsWithReview,
       probeJobStatus: probeJobStatusMock,
       createJob: createJobMock,
@@ -305,17 +305,17 @@ describe('startRelease — release pipeline entry decision tree', () => {
       getVerdict: getVerdictLgtm,
       runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
-    vi.doMock('@/lib/git-utils', () => ({ isReviewed: isReviewedTrue }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/git/git-utils', () => ({ isReviewed: isReviewedTrue }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
       getProjectTestConfig: () => null,
     }));
-    vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
-    vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
-    vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
-    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
+    vi.doMock('@/lib/pipeline/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
 
-    const { startRelease: fn } = await import('@/lib/start-release');
+    const { startRelease: fn } = await import('@/lib/pipeline/start-release');
     const r = await fn('proj');
 
     expect(r.ok).toBe(true);
@@ -343,9 +343,9 @@ describe('startRelease — release pipeline entry decision tree', () => {
         return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
       });
 
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: vi.fn().mockReturnValue([latestReview]),
       probeJobStatus: probeJobStatusMock,
       createJob: createJobMock,
@@ -353,17 +353,17 @@ describe('startRelease — release pipeline entry decision tree', () => {
       getVerdict: vi.fn().mockReturnValue('LGTM'),
       runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
-    vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/git/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
       getProjectTestConfig: () => null,
     }));
-    vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
-    vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
-    vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
-    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' }) }));
+    vi.doMock('@/lib/pipeline/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' }) }));
 
-    const { startRelease: fn } = await import('@/lib/start-release');
+    const { startRelease: fn } = await import('@/lib/pipeline/start-release');
     const r = await fn('proj');
 
     expect(r.ok).toBe(true);
@@ -448,32 +448,32 @@ describe('startRelease — release pipeline entry decision tree', () => {
         return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
       });
 
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock, probeJobStatus: probeJobStatusMock,
       createJob: createJobMock, updateJob: updateJobMock,
       getVerdict: vi.fn().mockReturnValue(null), markDone: vi.fn(),
       runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
-    vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/git/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
       getProjectTestConfig: () => ({ prWorkflowEnabled: false, reviewDisabled: false }),
     }));
-    vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
-    vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
-    vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       startProjectCommit: vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' }),
       detectMainBranch: vi.fn().mockResolvedValue('master'),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
       getLock: vi.fn().mockReturnValue(null),
     }));
 
-    const { startRelease: fn } = await import('@/lib/start-release');
+    const { startRelease: fn } = await import('@/lib/pipeline/start-release');
     const r = await fn('proj');
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -497,32 +497,32 @@ describe('startRelease — release pipeline entry decision tree', () => {
         return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
       });
 
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock, probeJobStatus: probeJobStatusMock,
       createJob: createJobMock, updateJob: updateJobMock,
       getVerdict: vi.fn().mockReturnValue(null), markDone: vi.fn(),
       runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
-    vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/git/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
       getProjectTestConfig: () => ({ prWorkflowEnabled: false, reviewDisabled: false }),
     }));
-    vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
-    vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
-    vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       startProjectCommit: vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' }),
       detectMainBranch: vi.fn().mockResolvedValue('master'),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
       getLock: vi.fn().mockReturnValue(null),
     }));
 
-    const { startRelease: fn } = await import('@/lib/start-release');
+    const { startRelease: fn } = await import('@/lib/pipeline/start-release');
     const r = await fn('proj');
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.step).toBe('review');
@@ -542,32 +542,32 @@ describe('startRelease — release pipeline entry decision tree', () => {
         return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
       });
 
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock, probeJobStatus: probeJobStatusMock,
       createJob: createJobMock, updateJob: updateJobMock,
       getVerdict: vi.fn().mockReturnValue(null), markDone: vi.fn(),
       runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
-    vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/git/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
       getProjectTestConfig: () => ({ prWorkflowEnabled: true, reviewDisabled: false }),
     }));
-    vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
-    vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
-    vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       startProjectCommit: vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' }),
       detectMainBranch: vi.fn().mockResolvedValue('master'),
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
       getLock: vi.fn().mockReturnValue(null),
     }));
 
-    const { startRelease: fn } = await import('@/lib/start-release');
+    const { startRelease: fn } = await import('@/lib/pipeline/start-release');
     const r = await fn('proj');
     expect(r.ok).toBe(true);
     // PR Workflow on any branch → review starts normally
@@ -586,9 +586,9 @@ describe('startRelease — release pipeline entry decision tree', () => {
         return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
       });
 
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock,
       probeJobStatus: probeJobStatusMock,
       createJob: createJobMock,
@@ -597,22 +597,22 @@ describe('startRelease — release pipeline entry decision tree', () => {
       markDone: vi.fn(),
       runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
-    vi.doMock('@/lib/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/git/git-utils', () => ({ isReviewed: vi.fn().mockResolvedValue(false) }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
       getProjectTestConfig: () => null,
     }));
-    vi.doMock('@/lib/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
-    vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
-    vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
-    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' }) }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' }) }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: false, lock: {}, blockingJobId: 'blocking-job-42' }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
       getLock: vi.fn().mockReturnValue(null),
     }));
 
-    const { startRelease: fn } = await import('@/lib/start-release');
+    const { startRelease: fn } = await import('@/lib/pipeline/start-release');
     const r = await fn('proj');
     expect(r.ok).toBe(false);
     if (!r.ok) {

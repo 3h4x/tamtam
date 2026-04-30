@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { installAgentSchedule, uninstallAgentSchedule } from '@/lib/agent-scheduler';
-import { errMsg } from '@/lib/types';
-import { clearAgentsCache, normalizeAgent } from '@/lib/agents-cache';
-import { parseFileAgentId, loadFileAgent, writeFileAgent, deleteFileAgent } from '@/lib/tamtam-file-agents';
-import { resolveProjectPath } from '@/lib/project-data';
+import { installAgentSchedule, uninstallAgentSchedule } from '@/lib/scheduling/agent-scheduler';
+import { errMsg } from '@/lib/shared/types';
+import { clearAgentsCache, normalizeAgent } from '@/lib/agents/agents-cache';
+import { parseFileAgentId, loadFileAgent, writeFileAgent, deleteFileAgent } from '@/lib/agents/tamtam-file-agents';
+import { resolveProjectPath } from '@/lib/shared/project-data';
 
 export async function GET(
   _request: NextRequest,

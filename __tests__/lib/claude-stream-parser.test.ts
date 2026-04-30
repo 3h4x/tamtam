@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseStreamLines, toolContentToString, createParseState } from '@/lib/claude-stream-parser';
+import { parseStreamLines, toolContentToString, createParseState } from '@/lib/jobs/claude-stream-parser';
 
 describe('claude-stream-parser', () => {
   it('extracts text from content_block_delta', () => {

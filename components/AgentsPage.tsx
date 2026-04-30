@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { fetchProjects } from '@/lib/client-api'
-import type { Task } from '@/lib/types'
+import type { Task } from '@/lib/shared/types'
 
 function formatFiresAt(firesAt: string): string {
   return firesAt || '—'

@@ -9,7 +9,7 @@ import {
   gitShowSync,
   gitLsTreeSync,
   getBranchContext,
-} from '@/lib/git-branch';
+} from '@/lib/git/git-branch';
 
 const mockExec = vi.mocked(execFileSync);
 

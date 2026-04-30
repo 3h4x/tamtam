@@ -4,7 +4,7 @@ import {
   buildDiffContext,
   DIFF_MAX_CHARS_PER_FILE,
   DIFF_MAX_TOTAL_CHARS,
-} from '@/lib/diff-context';
+} from '@/lib/git/diff-context';
 
 describe('shouldSkipFile', () => {
   it.each([

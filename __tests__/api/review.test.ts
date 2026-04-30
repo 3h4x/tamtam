@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import type { JobData } from '@/lib/job-storage';
+import type { JobData } from '@/lib/jobs/job-storage';
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
   return {
@@ -39,11 +39,11 @@ describe('POST /api/projects/by-project/{projectName}/review', () => {
     startJobMock = vi.fn().mockResolvedValue(12345);
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: 'M file.ts\n', stderr: '' });
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
 
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({
         claudeBin: 'claude',
         logDir: '/tmp/tamtam-logs',
@@ -51,26 +51,26 @@ describe('POST /api/projects/by-project/{projectName}/review', () => {
       }),
     }));
 
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       updateJob: updateJobMock,
       listJobs: listJobsMock,
       probeJobStatus: probeJobStatusMock,
     }));
 
-    vi.doMock('@/lib/pm2-jobs', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       startJob: startJobMock,
     }));
 
-    vi.doMock('@/lib/shell', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({
       exec: execMock,
     }));
 
-    vi.doMock('@/lib/skills', () => ({
+    vi.doMock('@/lib/skills/skills', () => ({
       CODE_REVIEWER_SKILL: '/nonexistent/skill.md',
     }));
 
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj1', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
@@ -165,24 +165,24 @@ describe('POST /api/projects/by-project/{projectName}/review', () => {
 
   it('returns 409 with blocking_job_id when pipeline is locked', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/project'),
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: '/tmp/tamtam-logs', projects: {} }),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: vi.fn().mockImplementation(() => makeJob()),
       updateJob: vi.fn(),
       listJobs: vi.fn().mockReturnValue([]),
       probeJobStatus: vi.fn().mockResolvedValue('done'),
     }));
-    vi.doMock('@/lib/pm2-jobs', () => ({ startJob: vi.fn().mockResolvedValue(12345) }));
-    vi.doMock('@/lib/shell', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: vi.fn().mockResolvedValue(12345) }));
+    vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: 'M file.ts\n', stderr: '' }),
     }));
-    vi.doMock('@/lib/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/skill.md' }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/skill.md' }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue({ project: 'proj1', lockedByJobId: 'blocker-job-99', acquiredAt: Date.now() / 1000 }),
       acquireLock: vi.fn().mockResolvedValue({ acquired: false, lock: {}, blockingJobId: 'blocker-job-99' }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),

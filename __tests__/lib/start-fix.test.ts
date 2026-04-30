@@ -15,7 +15,7 @@ function makeProc(pid = 12345) {
 }
 
 describe('startFixFromJob', () => {
-  let startFixFromJob: typeof import('@/lib/start-fix').startFixFromJob;
+  let startFixFromJob: typeof import('@/lib/pipeline/start-fix').startFixFromJob;
   let getJobMock: ReturnType<typeof vi.fn>;
   let probeJobStatusMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
@@ -65,7 +65,7 @@ describe('startFixFromJob', () => {
       openSync: openSyncMock,
       closeSync: vi.fn(),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
       createJob: createJobMock,
       readLog: readLogMock,
@@ -73,26 +73,26 @@ describe('startFixFromJob', () => {
       updateJob: updateJobMock,
       markDone: markDoneMock,
     }));
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp/logs' }),
     }));
-    vi.doMock('@/lib/config', () => ({
+    vi.doMock('@/lib/shared/config', () => ({
       getPermissionModeFlag: () => '--dangerously-skip-permissions',
       getSettings: () => ({ default_model: 'sonnet' }),
       getPipelineModel: () => 'sonnet',
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: acquireLockMock,
       isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
     }));
-    vi.doMock('@/lib/job-control', () => ({
+    vi.doMock('@/lib/shared/job-control', () => ({
       jobsPausedResult: vi.fn().mockReturnValue(null),
     }));
 
-    ({ startFixFromJob } = await import('@/lib/start-fix'));
+    ({ startFixFromJob } = await import('@/lib/pipeline/start-fix'));
   });
 
   afterEach(() => vi.resetModules());
@@ -243,24 +243,24 @@ describe('startFixFromJob', () => {
     vi.resetModules();
     vi.doMock('child_process', () => ({ spawn: spawnMock }));
     vi.doMock('fs', () => ({ mkdirSync: mkdirSyncMock, openSync: openSyncMock, closeSync: vi.fn() }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock, createJob: createJobMock, readLog: readLogMock,
       probeJobStatus: probeJobStatusMock, updateJob: updateJobMock, markDone: markDoneMock,
     }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/scheduling', () => ({ getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp/logs' }) }));
-    vi.doMock('@/lib/config', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp/logs' }) }));
+    vi.doMock('@/lib/shared/config', () => ({
       getPermissionModeFlag: () => '--dangerously-skip-permissions',
       getSettings: () => ({ default_model: 'sonnet' }),
       getPipelineModel: () => 'sonnet',
     }));
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: acquireLockMock, isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
     }));
-    vi.doMock('@/lib/job-control', () => ({
+    vi.doMock('@/lib/shared/job-control', () => ({
       jobsPausedResult: vi.fn().mockReturnValue({ ok: false, status: 409, detail: 'Jobs are paused globally.' }),
     }));
-    const { startFixFromJob: startFixPaused } = await import('@/lib/start-fix');
+    const { startFixFromJob: startFixPaused } = await import('@/lib/pipeline/start-fix');
     const r = await startFixPaused('src-job-1');
     expect(r.ok).toBe(false);
     if (!r.ok) {

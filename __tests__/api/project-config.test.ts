@@ -15,18 +15,18 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
 
     resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/config', () => ({ reloadConfig: vi.fn() }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/config', () => ({ reloadConfig: vi.fn() }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
       writeProjectFieldYaml: vi.fn().mockReturnValue(true),
       getProjectTestConfig: vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false }),
       getProjectPushResult: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/test-scheduler', () => ({
+    vi.doMock('@/lib/scheduling/test-scheduler', () => ({
       installTestSchedule: vi.fn(),
       uninstallTestSchedule: vi.fn(),
       parseTestScheduleToCron: (s: string) => {
@@ -116,9 +116,9 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
   it('surfaces issue_auto_branch=false when the per-project config flips it off', async () => {
     vi.resetModules();
     resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
-    vi.doMock('@/lib/config', () => ({ reloadConfig: vi.fn() }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
+    vi.doMock('@/lib/shared/config', () => ({ reloadConfig: vi.fn() }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
       writeProjectFieldYaml: vi.fn().mockReturnValue(true),
       getProjectTestConfig: vi.fn().mockReturnValue({
@@ -128,7 +128,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
       }),
       getProjectPushResult: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
+    vi.doMock('@/lib/scheduling/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
     const { GET: GET2 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
     const res = await GET2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
@@ -139,9 +139,9 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
   it('surfaces tests_disabled=true when config has it set', async () => {
     vi.resetModules();
     resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
-    vi.doMock('@/lib/config', () => ({ reloadConfig: vi.fn() }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
+    vi.doMock('@/lib/shared/config', () => ({ reloadConfig: vi.fn() }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
       writeProjectFieldYaml: vi.fn().mockReturnValue(true),
       getProjectTestConfig: vi.fn().mockReturnValue({
@@ -151,7 +151,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
       }),
       getProjectPushResult: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
+    vi.doMock('@/lib/scheduling/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
     const { GET: GET2 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
     const res = await GET2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
@@ -163,9 +163,9 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
   it('surfaces review_disabled=true when config has it set', async () => {
     vi.resetModules();
     resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
-    vi.doMock('@/lib/config', () => ({ reloadConfig: vi.fn() }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
+    vi.doMock('@/lib/shared/config', () => ({ reloadConfig: vi.fn() }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
       writeProjectFieldYaml: vi.fn().mockReturnValue(true),
       getProjectTestConfig: vi.fn().mockReturnValue({
@@ -175,7 +175,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
       }),
       getProjectPushResult: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
+    vi.doMock('@/lib/scheduling/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
     const { GET: GET2 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
     const res = await GET2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
@@ -187,15 +187,15 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
   it('returns auto_push_enabled from config when set', async () => {
     vi.resetModules();
     resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
-    vi.doMock('@/lib/config', () => ({ reloadConfig: vi.fn() }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
+    vi.doMock('@/lib/shared/config', () => ({ reloadConfig: vi.fn() }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
       writeProjectFieldYaml: vi.fn().mockReturnValue(true),
       getProjectTestConfig: vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: true, autoPushEnabled: true, releaseAfterRun: true }),
       getProjectPushResult: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
+    vi.doMock('@/lib/scheduling/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
     const { GET: GET2 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
     const res = await GET2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
@@ -258,12 +258,12 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     vi.resetModules();
     // Mock with a configured test command
     resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/config', () => ({ reloadConfig: vi.fn() }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/config', () => ({ reloadConfig: vi.fn() }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({
         projects: { 'proj1': { project: 'proj1', path: tempDir, test_command: 'custom test cmd', prompt: '', validate: false, persona: [], scheduler: null, github: null, priority: null } },
         claudeBin: 'claude',
@@ -273,7 +273,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
       getProjectTestConfig: vi.fn().mockReturnValue({ testCommand: 'custom test cmd', testCronEnabled: false, testCronSchedule: null }),
       getProjectPushResult: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/test-scheduler', () => ({
+    vi.doMock('@/lib/scheduling/test-scheduler', () => ({
       installTestSchedule: vi.fn(),
       uninstallTestSchedule: vi.fn(),
       parseTestScheduleToCron: (s: string) => s,
@@ -311,17 +311,17 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     installTestScheduleMock = vi.fn();
     uninstallTestScheduleMock = vi.fn();
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: clearProjectDataCacheMock,
     }));
-    vi.doMock('@/lib/config', () => ({ reloadConfig: reloadConfigMock }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/config', () => ({ reloadConfig: reloadConfigMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
       writeProjectFieldYaml: writeProjectFieldYamlMock,
       getProjectTestConfig: getProjectTestConfigMock,
     }));
-    vi.doMock('@/lib/test-scheduler', () => ({
+    vi.doMock('@/lib/scheduling/test-scheduler', () => ({
       installTestSchedule: installTestScheduleMock,
       uninstallTestSchedule: uninstallTestScheduleMock,
       parseTestScheduleToCron: (s: string) => {
@@ -678,12 +678,12 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
 });
 
 describe('parseTestScheduleToCron', () => {
-  let parseTestScheduleToCron: typeof import('@/lib/test-scheduler').parseTestScheduleToCron;
+  let parseTestScheduleToCron: typeof import('@/lib/scheduling/test-scheduler').parseTestScheduleToCron;
 
   beforeEach(async () => {
     vi.resetModules();
-    vi.doUnmock('@/lib/test-scheduler');
-    const mod = await vi.importActual<typeof import('@/lib/test-scheduler')>('@/lib/test-scheduler');
+    vi.doUnmock('@/lib/scheduling/test-scheduler');
+    const mod = await vi.importActual<typeof import('@/lib/scheduling/test-scheduler')>('@/lib/scheduling/test-scheduler');
     parseTestScheduleToCron = mod.parseTestScheduleToCron;
   });
 

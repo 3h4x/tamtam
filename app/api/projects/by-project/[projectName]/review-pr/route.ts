@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { startPrReview } from '@/lib/start-pr-review';
+import { startPrReview } from '@/lib/pipeline/start-pr-review';
 
 export async function POST(
   request: NextRequest,

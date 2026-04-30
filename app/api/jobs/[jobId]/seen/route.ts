@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { markSeen } from '@/lib/job-storage';
+import { markSeen } from '@/lib/jobs/job-storage';
 
 export async function POST(
   _request: NextRequest,

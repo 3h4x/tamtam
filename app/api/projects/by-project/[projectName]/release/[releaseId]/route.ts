@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listJobs, getVerdict, readLog } from '@/lib/job-storage';
-import { exec } from '@/lib/shell';
-import { resolveProjectPath } from '@/lib/project-data';
+import { listJobs, getVerdict, readLog } from '@/lib/jobs/job-storage';
+import { exec } from '@/lib/shared/shell';
+import { resolveProjectPath } from '@/lib/shared/project-data';
 
 const PIPELINE_STEP_KINDS = ['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod'];
 

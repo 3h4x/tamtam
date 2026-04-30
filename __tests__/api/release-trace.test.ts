@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import type { JobData } from '@/lib/job-storage';
+import type { JobData } from '@/lib/jobs/job-storage';
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
   return {
@@ -34,15 +34,15 @@ describe('GET /api/projects/by-project/{name}/release/{releaseId}', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/workspace/proj1');
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: 'main', stderr: '' });
 
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock,
       getVerdict: getVerdictMock,
       readLog: readLogMock,
     }));
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
 
     const mod = await import(
       '@/app/api/projects/by-project/[projectName]/release/[releaseId]/route'

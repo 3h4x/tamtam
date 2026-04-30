@@ -4,11 +4,11 @@
 export async function reinstallAgents(): Promise<void> {
   const { db, schema } = await import('./lib/db');
   const { eq } = await import('drizzle-orm');
-  const { startInternalScheduler } = await import('./lib/internal-scheduler');
-  const { syncJobsPauseState } = await import('./lib/job-control');
-  const { getSettings } = await import('./lib/config');
+  const { startInternalScheduler } = await import('./lib/scheduling/internal-scheduler');
+  const { syncJobsPauseState } = await import('./lib/shared/job-control');
+  const { getSettings } = await import('./lib/shared/config');
   type AgentInput = Parameters<typeof startInternalScheduler>[0][number];
-  const { reconcilePm2Schedules } = await import('./lib/agent-scheduler');
+  const { reconcilePm2Schedules } = await import('./lib/scheduling/agent-scheduler');
 
   const allAgents = db.select().from(schema.agents).all();
   const dbEnabled: AgentInput[] = allAgents
@@ -29,7 +29,7 @@ export async function reinstallAgents(): Promise<void> {
   const fileEnabled: AgentInput[] = [];
   try {
     const enabledProjects = db.select().from(schema.projects).where(eq(schema.projects.enabled, true)).all();
-    const { scanFileAgents } = await import('./lib/tamtam-file-agents');
+    const { scanFileAgents } = await import('./lib/agents/tamtam-file-agents');
     for (const p of enabledProjects) {
       try {
         const fileAgents = scanFileAgents(p.path, p.name);
@@ -76,7 +76,7 @@ export async function reinstallAgents(): Promise<void> {
 // sweep fixes that: list running Claude-backed jobs and probe them.
 export async function runProbeSweep(): Promise<void> {
   try {
-    const { listJobs, probeJobStatus } = await import('./lib/job-storage');
+    const { listJobs, probeJobStatus } = await import('./lib/jobs/job-storage');
     const claudeKinds = new Set(['run', 'review', 'fix', 'fix-ci', 'fix-push']);
     const running = listJobs().filter(j =>
       j.finishedAt === null
@@ -107,7 +107,7 @@ async function migrateLegacyFileWorkflowFlags(): Promise<void> {
   try {
     const { db, schema } = await import('./lib/db');
     const { eq } = await import('drizzle-orm');
-    const { readLegacyWorkflowFlags } = await import('./lib/tamtam-file-config');
+    const { readLegacyWorkflowFlags } = await import('./lib/skills/tamtam-file-config');
 
     const markerFor = (name: string) => `legacy_file_flags_migrated:${name}`;
     const isMigrated = (name: string): boolean => {
@@ -189,7 +189,7 @@ async function migrateLegacyFileWorkflowFlags(): Promise<void> {
 // them at boot and mark them as `exit -1` so the UI stops lying about them.
 async function reapAbandonedInlineJobs(): Promise<void> {
   try {
-    const { listJobs, markDone } = await import('./lib/job-storage');
+    const { listJobs, markDone } = await import('./lib/jobs/job-storage');
     const orphaned = listJobs().filter(j =>
       j.finishedAt === null
       && j.pid === 0
@@ -219,7 +219,7 @@ export async function registerNode(): Promise<void> {
   // Run once at startup (catches drift from long downtimes) then every 24 h.
   const runCleanup = async () => {
     try {
-      const { runNightlyCleanup } = await import('./lib/retention');
+      const { runNightlyCleanup } = await import('./lib/jobs/retention');
       runNightlyCleanup();
       console.log('[retention] nightly cleanup completed');
     } catch (err) {

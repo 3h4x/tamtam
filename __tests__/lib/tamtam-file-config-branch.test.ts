@@ -4,7 +4,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 // Mock git-branch so we can simulate default vs feature branches without a real git repo.
-vi.mock('@/lib/git-branch', () => ({
+vi.mock('@/lib/git/git-branch', () => ({
   getBranchContext: vi.fn(),
   gitShowSync: vi.fn(),
   gitLsTreeSync: vi.fn(),
@@ -12,8 +12,8 @@ vi.mock('@/lib/git-branch', () => ({
   getCurrentBranchSync: vi.fn(),
 }));
 
-import * as gitBranch from '@/lib/git-branch';
-import { loadFileConfig } from '@/lib/tamtam-file-config';
+import * as gitBranch from '@/lib/git/git-branch';
+import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
 
 function makeTmpDir(): string {
   const dir = join(tmpdir(), `tamtam-cfg-branch-test-${Date.now()}`);

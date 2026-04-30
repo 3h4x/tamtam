@@ -1,0 +1,29 @@
+export interface JobData {
+  id: string;
+  project: string;
+  kind: string;
+  prompt: string | null;
+  pid: number;
+  logPath: string | null;
+  startedAt: number;
+  finishedAt: number | null;
+  exitCode: number | null;
+  seen: boolean;
+  durationMs?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  cacheReadTokens?: number | null;
+  cacheCreateTokens?: number | null;
+  sessionId?: string | null;
+  contextMeta?: string | null;
+  userPrompt?: string | null;
+  parentJobId?: string | null;
+  ghIssueNumber?: number | null;
+  ghIssueRepo?: string | null;
+  ghIssueTitle?: string | null;
+  logPruned?: boolean | null;
+  costUsd?: number | null;
+  model?: string | null;
+  releaseId?: string | null;
+  abortedAt?: number | null;
+}

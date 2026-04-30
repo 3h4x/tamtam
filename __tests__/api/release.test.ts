@@ -8,7 +8,7 @@ describe('POST /api/projects/by-project/{projectName}/release', () => {
   beforeEach(async () => {
     vi.resetModules();
     startReleaseMock = vi.fn();
-    vi.doMock('@/lib/start-release', () => ({ startRelease: startReleaseMock }));
+    vi.doMock('@/lib/pipeline/start-release', () => ({ startRelease: startReleaseMock }));
     const mod = await import('@/app/api/projects/by-project/[projectName]/release/route');
     POST = mod.POST;
   });

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveProjectPath } from '@/lib/project-data';
-import { exec } from '@/lib/shell';
-import { detectMainBranch } from '@/lib/start-commit';
-import { pushCurrentBranch } from '@/lib/start-push';
+import { resolveProjectPath } from '@/lib/shared/project-data';
+import { exec } from '@/lib/shared/shell';
+import { detectMainBranch } from '@/lib/pipeline/start-commit';
+import { pushCurrentBranch } from '@/lib/pipeline/start-push';
 
 export async function POST(
   _request: NextRequest,

@@ -41,7 +41,7 @@ function createTestDb() {
 
 describe('resolveProjectPath', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let resolveProjectPath: typeof import('@/lib/project-data').resolveProjectPath;
+  let resolveProjectPath: typeof import('@/lib/shared/project-data').resolveProjectPath;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -49,7 +49,7 @@ describe('resolveProjectPath', () => {
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
 
-    const mod = await import('@/lib/project-data');
+    const mod = await import('@/lib/shared/project-data');
     resolveProjectPath = mod.resolveProjectPath;
   });
 
@@ -133,23 +133,23 @@ describe('fetchProjectData — unpushed field', () => {
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/git-utils', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/git/git-utils', () => ({
       gitChanges: vi.fn().mockResolvedValue(0),
       isReviewed: vi.fn().mockResolvedValue(null),
     }));
-    vi.doMock('@/lib/launchagent', () => ({
+    vi.doMock('@/lib/scheduling/launchagent', () => ({
       launchctlInfo: vi.fn().mockResolvedValue({ loaded: false, pid: null, plistMinute: null, wrapperPhase: null, wrapperCycle: null }),
       plistPath: vi.fn().mockReturnValue('/tmp/plist'),
       pausedPlistPath: vi.fn().mockReturnValue('/tmp/plist.paused'),
     }));
-    vi.doMock('@/lib/gh-status', () => ({
+    vi.doMock('@/lib/shared/gh-status', () => ({
       ghStatusLookup: vi.fn().mockResolvedValue({}),
     }));
-    vi.doMock('@/lib/run-history', () => ({
+    vi.doMock('@/lib/jobs/run-history', () => ({
       lastRunLookup: vi.fn().mockReturnValue({}),
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ logDir: '/tmp/logs', claudeBin: 'claude', projects: {}, freqMin: 60 }),
       getPriorityMultipliers: vi.fn().mockReturnValue({}),
       effectiveFreqMin: vi.fn().mockReturnValue(60),
@@ -158,7 +158,7 @@ describe('fetchProjectData — unpushed field', () => {
       cronFiresStr: vi.fn().mockReturnValue('every 1h'),
       PRIORITY_ORDER: ['critical', 'high', 'medium', 'low', 'none'],
     }));
-    vi.doMock('@/lib/fire-times', () => ({
+    vi.doMock('@/lib/scheduling/fire-times', () => ({
       fireTimesStr: vi.fn().mockReturnValue('every 1h'),
     }));
   });
@@ -169,7 +169,7 @@ describe('fetchProjectData — unpushed field', () => {
 
   it('returns unpushed=0 when no upstream or clean', async () => {
     execMock.mockResolvedValue({ exitCode: 1, stdout: '', stderr: 'no upstream' });
-    const { fetchProjectData } = await import('@/lib/project-data');
+    const { fetchProjectData } = await import('@/lib/shared/project-data');
     const result = await fetchProjectData();
     const proj = result.projects['myproj']?.[0];
     expect(proj?.unpushed).toBe(0);
@@ -182,7 +182,7 @@ describe('fetchProjectData — unpushed field', () => {
       }
       return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
     });
-    const { fetchProjectData } = await import('@/lib/project-data');
+    const { fetchProjectData } = await import('@/lib/shared/project-data');
     const result = await fetchProjectData();
     const proj = result.projects['myproj']?.[0];
     expect(proj?.unpushed).toBe(3);
@@ -197,7 +197,7 @@ describe('fetchProjectData — unpushed field', () => {
       }
       return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
     });
-    const { fetchProjectData } = await import('@/lib/project-data');
+    const { fetchProjectData } = await import('@/lib/shared/project-data');
     const result = await fetchProjectData();
     const proj = result.projects['myproj']?.[0];
     expect(proj?.unpushed).toBe(1);
@@ -209,7 +209,7 @@ describe('fetchProjectData — unpushed field', () => {
 
 describe('clearProjectDataCache', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let clearProjectDataCache: typeof import('@/lib/project-data').clearProjectDataCache;
+  let clearProjectDataCache: typeof import('@/lib/shared/project-data').clearProjectDataCache;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -217,7 +217,7 @@ describe('clearProjectDataCache', () => {
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
 
-    const mod = await import('@/lib/project-data');
+    const mod = await import('@/lib/shared/project-data');
     clearProjectDataCache = mod.clearProjectDataCache;
   });
 

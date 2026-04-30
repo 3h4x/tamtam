@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 describe('startPrReview', () => {
-  let startPrReview: typeof import('@/lib/start-pr-review').startPrReview;
+  let startPrReview: typeof import('@/lib/pipeline/start-pr-review').startPrReview;
   let execMock: ReturnType<typeof vi.fn>;
   let startJobMock: ReturnType<typeof vi.fn>;
   let createJobMock: ReturnType<typeof vi.fn>;
@@ -34,26 +34,26 @@ describe('startPrReview', () => {
       prompt: null, startedAt: 0, finishedAt: null, exitCode: null, seen: false,
     }));
 
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       updateJob: updateJobMock,
       listJobs: listJobsMock,
       probeJobStatus: probeJobStatusMock,
     }));
-    vi.doMock('@/lib/pm2-jobs', () => ({ startJob: startJobMock }));
-    vi.doMock('@/lib/config', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ review_verdict_rules: 'Use LGTM / NEEDS ATTENTION / DO NOT SHIP.' }),
       withBasePrompt: (s: string) => s,
       getPermissionModeFlag: () => '--dangerously-skip-permissions',
     }));
-    vi.doMock('@/lib/skills', () => ({
+    vi.doMock('@/lib/skills/skills', () => ({
       CODE_REVIEWER_SKILL: '/nonexistent/code-reviewer.md',
     }));
     vi.doMock('fs', () => ({
@@ -63,34 +63,34 @@ describe('startPrReview', () => {
       appendFileSync: vi.fn(),
     }));
 
-    ({ startPrReview } = await import('@/lib/start-pr-review'));
+    ({ startPrReview } = await import('@/lib/pipeline/start-pr-review'));
   });
 
   afterEach(() => vi.resetModules());
 
   it('returns 404 when project path cannot be resolved', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock, updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]), probeJobStatus: probeJobStatusMock,
     }));
-    vi.doMock('@/lib/pm2-jobs', () => ({ startJob: startJobMock }));
-    vi.doMock('@/lib/config', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ review_verdict_rules: '' }),
       withBasePrompt: (s: string) => s,
       getPermissionModeFlag: () => '',
     }));
-    vi.doMock('@/lib/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/path' }));
+    vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/path' }));
     vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
 
-    const { startPrReview: fn } = await import('@/lib/start-pr-review');
+    const { startPrReview: fn } = await import('@/lib/pipeline/start-pr-review');
     const r = await fn('missing', 42, 'Fix bug', 'fix/42', 'main');
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -283,7 +283,7 @@ describe('startPrReview', () => {
 });
 
 describe('loadReviewPrompt — skill file handling', () => {
-  let startPrReview: typeof import('@/lib/start-pr-review').startPrReview;
+  let startPrReview: typeof import('@/lib/pipeline/start-pr-review').startPrReview;
   let execMock: ReturnType<typeof vi.fn>;
   let startJobMock: ReturnType<typeof vi.fn>;
   let existsSyncMock: ReturnType<typeof vi.fn>;
@@ -300,14 +300,14 @@ describe('loadReviewPrompt — skill file handling', () => {
     existsSyncMock = vi.fn().mockReturnValue(fileContent !== null);
     readFileSyncMock = vi.fn().mockReturnValue(fileContent ?? '');
 
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/proj'),
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: vi.fn().mockImplementation((project: string, kind: string) => ({
         id: `${project}-${kind}-id`, project, kind, pid: 0, logPath: '',
         prompt: null, startedAt: 0, finishedAt: null, exitCode: null, seen: false,
@@ -316,16 +316,16 @@ describe('loadReviewPrompt — skill file handling', () => {
       listJobs: vi.fn().mockReturnValue([]),
       probeJobStatus: vi.fn().mockResolvedValue('done'),
     }));
-    vi.doMock('@/lib/pm2-jobs', () => ({ startJob: startJobMock }));
-    vi.doMock('@/lib/config', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ review_verdict_rules: 'VERDICT_RULES' }),
       withBasePrompt: (s: string) => s,
       getPermissionModeFlag: () => '',
     }));
-    vi.doMock('@/lib/skills', () => ({ CODE_REVIEWER_SKILL: '/skill/code-reviewer.md' }));
+    vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/skill/code-reviewer.md' }));
     vi.doMock('fs', () => ({ existsSync: existsSyncMock, readFileSync: readFileSyncMock, mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
 
-    ({ startPrReview } = await import('@/lib/start-pr-review'));
+    ({ startPrReview } = await import('@/lib/pipeline/start-pr-review'));
   }
 
   afterEach(() => vi.resetModules());

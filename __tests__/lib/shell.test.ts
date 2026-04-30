@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { exec } from '@/lib/shell';
+import { exec } from '@/lib/shared/shell';
 
 describe('exec — killProcessGroup mode', () => {
   it('runs a command and captures stdout', async () => {

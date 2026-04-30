@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills';
+import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills/skills';
 import { existsSync } from 'fs';
 
 interface Persona {

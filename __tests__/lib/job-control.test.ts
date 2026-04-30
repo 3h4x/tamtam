@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 describe('job-control', () => {
-  let isJobsPaused: typeof import('@/lib/job-control').isJobsPaused;
-  let jobsPausedResult: typeof import('@/lib/job-control').jobsPausedResult;
-  let syncJobsPauseState: typeof import('@/lib/job-control').syncJobsPauseState;
+  let isJobsPaused: typeof import('@/lib/shared/job-control').isJobsPaused;
+  let jobsPausedResult: typeof import('@/lib/shared/job-control').jobsPausedResult;
+  let syncJobsPauseState: typeof import('@/lib/shared/job-control').syncJobsPauseState;
   let pauseInternalSchedulerMock: ReturnType<typeof vi.fn>;
   let resumeInternalSchedulerMock: ReturnType<typeof vi.fn>;
 
@@ -11,11 +11,11 @@ describe('job-control', () => {
     vi.resetModules();
     pauseInternalSchedulerMock = vi.fn();
     resumeInternalSchedulerMock = vi.fn();
-    vi.doMock('@/lib/internal-scheduler', () => ({
+    vi.doMock('@/lib/scheduling/internal-scheduler', () => ({
       pauseInternalScheduler: pauseInternalSchedulerMock,
       resumeInternalScheduler: resumeInternalSchedulerMock,
     }));
-    ({ isJobsPaused, jobsPausedResult, syncJobsPauseState } = await import('@/lib/job-control'));
+    ({ isJobsPaused, jobsPausedResult, syncJobsPauseState } = await import('@/lib/shared/job-control'));
   });
 
   afterEach(() => vi.resetModules());

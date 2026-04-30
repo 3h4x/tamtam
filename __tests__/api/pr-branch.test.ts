@@ -28,11 +28,11 @@ describe('POST /api/projects/by-project/[projectName]/pr-branch', () => {
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }))        // fetch origin
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));       // checkout
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/pr-branch/route');
     POST = mod.POST;

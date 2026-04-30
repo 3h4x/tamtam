@@ -21,16 +21,16 @@ Steps are pluggable per project and coordinated by completion hooks in `lib/job-
 The **🚀 Release** button triggers the pipeline at the right starting step. When `auto_push_enabled` is on (per-project config, off by default), the chain continues automatically from one step to the next. The pipeline strip in the Terminal tab shows the live state of each step (`○` pending, spinner running, `✓` done, `!` needs attention, `✗` failed); clicking a step opens its log. The strip is **only visible while the pipeline is actively running** — it disappears when all steps finish. Each release starts with a clean strip: only jobs from the current run are shown. Steps that come after the currently-running step always render as `○` (they haven't executed yet in this run), and prior steps are only shown as `✓` if they started within 30 minutes of the running step (older jobs are from a previous release and are ignored).
 
 **Helpers** (composable building blocks used by both the API routes and the auto-chain):
-- `lib/start-test.ts` → `startProjectTest`
-- `lib/start-review.ts` → `startProjectReview`
-- `lib/start-fix.ts` → `startFixFromJob`
-- `lib/start-fix-push.ts` → `startFixPush` (pre-commit/pre-push hook failure recovery)
-- `lib/start-commit.ts` → `startProjectCommit` (stage all changes + generate commit message via Claude; also exports `generateCommitMessage`, `issueBranchName`, `findIssueContext`, `detectMainBranch`)
-- `lib/start-push.ts` → `startProjectPush`
-- `lib/start-release.ts` → `startRelease` (pipeline entry point)
-- `lib/start-pr-review.ts` → `startPrReview` (AI review of a GitHub PR)
-- `lib/start-mark-dod.ts` → `startMarkDod` (DoD verification + GitHub issue checkbox update)
-- `lib/start-pr-wait.ts` → `launchPrWait` (background PR poller: polls CI checks, auto-merges once they pass, switches working copy back to default branch, then runs mark-dod)
+- `lib/pipeline/start-test.ts` → `startProjectTest`
+- `lib/pipeline/start-review.ts` → `startProjectReview`
+- `lib/pipeline/start-fix.ts` → `startFixFromJob`
+- `lib/pipeline/start-fix-push.ts` → `startFixPush` (pre-commit/pre-push hook failure recovery)
+- `lib/pipeline/start-commit.ts` → `startProjectCommit` (stage all changes + generate commit message via Claude; also exports `generateCommitMessage`, `issueBranchName`, `findIssueContext`, `detectMainBranch`)
+- `lib/pipeline/start-push.ts` → `startProjectPush`
+- `lib/pipeline/start-release.ts` → `startRelease` (pipeline entry point)
+- `lib/pipeline/start-pr-review.ts` → `startPrReview` (AI review of a GitHub PR)
+- `lib/pipeline/start-mark-dod.ts` → `startMarkDod` (DoD verification + GitHub issue checkbox update)
+- `lib/pipeline/start-pr-wait.ts` → `launchPrWait` (background PR poller: polls CI checks, auto-merges once they pass, switches working copy back to default branch, then runs mark-dod)
 - `lib/notifications.ts` → `notify` / `sendTestNotification` (outbound webhook delivery)
 
 Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars** of the parsed Claude log and looks for an explicit "Verdict: X" marker or a bare token on the final line — deliberately lenient across markdown formatting (`## Verdict\n**NEEDS ATTENTION**`) but robust against false positives from code snippets higher up in the log.
@@ -86,16 +86,30 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 
 ## Architecture
 - `app/` — Next.js pages and API route handlers
-- `components/` — React client components
+- `components/` — React client components; large pages have a co-located subfolder (e.g. `components/monitoring/`, `components/settings/`, `components/project-detail/`, `components/project-runs/`, `components/terminal/`)
 - `hooks/` — Custom React hooks
-- `lib/` — Server-side business logic
-- `lib/db/` — Drizzle schema and connection (tables: settings, projects, jobs, gh_status, gh_issues_cache, skills, agents, pipeline_locks)
+- `lib/` — Server-side business logic, organised into domain folders:
+  - `lib/pipeline/` — release pipeline orchestration (`start-*`, `pipeline-lock`, `pipeline-status`, `pipeline-steps`, `mark-dod-branch`)
+  - `lib/scheduling/` — agent/test scheduling (`agent-scheduler`, `internal-scheduler`, `test-scheduler`, `scheduling`, `fire-times`, `launchagent`)
+  - `lib/git/` — git operations (`git-branch`, `git-utils`, `diff-context`)
+  - `lib/jobs/` — job lifecycle (`job-storage` barrel + `storage`, `lifecycle`, `verdict`, `probe`, `types`, `parent-context`; also `pm2-jobs`, `run-history`, `log-persistence`, `retention`, `claude-stream-parser`)
+  - `lib/terminal/` — terminal streaming (`terminal-session-store`, `ansi-render`)
+  - `lib/agents/` — agent management (`agent-memory`, `agents-cache`, `default-agent-skills`, `tamtam-file-agents`)
+  - `lib/skills/` — skills (`skills`, `tamtam-file-config`)
+  - `lib/shared/` — cross-cutting utilities (`shell`, `types`, `format`, `config`, `untrusted`, `usage-pricing`, `notifications`, `job-control`, `statusConstants`, `gh-status`, `project-data`, `project-branch-lock`)
+  - `lib/db/` — Drizzle schema and connection (tables: settings, projects, jobs, gh_status, gh_issues_cache, skills, agents, pipeline_locks)
+  - `lib/client-api.ts` — barrel re-exporting from `lib/client/` (split by resource: `projects`, `jobs`, `agents`, `skills`, `types`)
 - `scripts/` — server startup, job runners, and CLI shims (`pm2-start.sh`, `job-runner.js`, `gemini-shim.js`)
 - `skills/` — claude-skills submodule
 - `data/` — SQLite database (gitignored)
 - `__tests__/` — vitest unit tests
 - `e2e/` — Playwright integration tests
 - `docs/` — architecture docs: `STREAMING.md` (job lifecycle + SSE), `PIPELINE.md` (release pipeline state machine), `DATABASE.md` (schema reference), `SETTINGS.md` (all config keys), `AGENT.md` (agent concepts), `CACHING.md` (layered TTL cache strategy), `PROFILING.md` (server / client / Turbopack profiling), `SECURITY.md` (security model and threat surface), `SHIM.md` (Gemini CLI compatibility layer), `UI.md` (design system: tokens, typography, components, voice — read before any visual change; canonical previews in `docs/ui-preview/*.html`)
+
+**File size conventions (enforced by convention, not tooling):**
+- No new top-level files directly in `lib/` — all new lib modules must go in a domain subfolder
+- New lib files: target under 300 lines, hard cap 500 lines
+- New component files: target under 400 lines, hard cap 600 lines; if a page component grows past 600 lines, extract subcomponents into a co-located `components/<page-name>/` folder
 
 ## Pages
 - `/` — Projects list with status, changes, CI

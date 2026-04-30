@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { startRelease } from '@/lib/start-release';
+import { startRelease } from '@/lib/pipeline/start-release';
 
 export async function POST(
   _request: NextRequest,

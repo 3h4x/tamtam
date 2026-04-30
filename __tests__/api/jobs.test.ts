@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import { writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { JobData } from '@/lib/job-storage';
+import type { JobData } from '@/lib/jobs/job-storage';
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
   return {
@@ -39,7 +39,7 @@ describe('GET /api/jobs', () => {
       status: j.finishedAt ? 'done' : 'running',
     }));
 
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock,
       probeJobStatus: probeJobStatusMock,
       jobToDict: jobToDictMock,
@@ -188,7 +188,7 @@ describe('GET /api/jobs/[jobId]', () => {
     readParsedLogMock = vi.fn().mockReturnValue('parsed log content');
     readLogMock = vi.fn().mockReturnValue('raw log content');
 
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
       probeJobStatus: probeJobStatusMock,
       jobToDict: jobToDictMock,
@@ -260,7 +260,7 @@ describe('POST /api/jobs/[jobId]/seen', () => {
 
     markSeenMock = vi.fn().mockReturnValue(true);
 
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       markSeen: markSeenMock,
     }));
 
@@ -306,7 +306,7 @@ describe('GET /api/jobs/notifications', () => {
     unseenFinishedMock = vi.fn().mockReturnValue([]);
     jobToDictMock = vi.fn().mockImplementation((j: JobData) => ({ id: j.id }));
 
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       unseenFinished: unseenFinishedMock,
       jobToDict: jobToDictMock,
       listJobs: vi.fn().mockReturnValue([]),
@@ -350,7 +350,7 @@ describe('POST /api/jobs/notifications/mark-seen', () => {
     unseenFinishedMock = vi.fn().mockReturnValue([]);
     markSeenMock = vi.fn().mockReturnValue(true);
 
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       unseenFinished: unseenFinishedMock,
       markSeen: markSeenMock,
     }));
@@ -399,12 +399,12 @@ describe('DELETE /api/jobs/[jobId]', () => {
     updateJobMock = vi.fn();
     execMock = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
 
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
       updateJob: updateJobMock,
     }));
 
-    vi.doMock('@/lib/shell', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({
       exec: execMock,
     }));
 
@@ -530,11 +530,11 @@ describe('GET /api/streaming/[jobId]', () => {
 
     getJobMock = vi.fn().mockReturnValue(null);
 
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
     }));
 
-    vi.doMock('@/lib/claude-stream-parser', () => ({
+    vi.doMock('@/lib/jobs/claude-stream-parser', () => ({
       parseStreamLines: vi.fn().mockReturnValue([]),
       createParseState: vi.fn().mockReturnValue({ currentToolName: '', currentToolInput: '', inToolUse: false, hasEmitted: false }),
     }));

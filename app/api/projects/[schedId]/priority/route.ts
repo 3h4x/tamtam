@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getImproveConfig, writePriorityYaml, PRIORITY_ORDER } from '@/lib/scheduling';
+import { getImproveConfig, writePriorityYaml, PRIORITY_ORDER } from '@/lib/scheduling/scheduling';
 
 export async function PATCH(
   request: NextRequest,

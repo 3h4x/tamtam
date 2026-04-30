@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveProjectPath } from '@/lib/project-data';
-import { exec } from '@/lib/shell';
+import { resolveProjectPath } from '@/lib/shared/project-data';
+import { exec } from '@/lib/shared/shell';
 import { statSync } from 'fs';
 import { join } from 'path';
 

@@ -89,11 +89,11 @@ describe('GET /api/agents/scheduler-health', () => {
     upsertAgentScheduleMock = vi.fn();
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ launchagent_prefix: 'com.tamtam' }),
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ logDir: '/tmp/tamtam-logs', claudeBin: 'claude' }),
     }));
     const internalSchedulerStub = {
@@ -101,11 +101,11 @@ describe('GET /api/agents/scheduler-health', () => {
       upsertAgentSchedule: upsertAgentScheduleMock,
       removeAgentSchedule: vi.fn(),
     };
-    vi.doMock('@/lib/internal-scheduler', () => internalSchedulerStub);
+    vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerStub);
     // agent-scheduler.ts imports via the relative path './internal-scheduler' —
     // Vitest treats relative and aliased paths as separate modules.
     vi.doMock('./internal-scheduler', () => internalSchedulerStub);
-    vi.doMock('@/lib/tamtam-file-agents', () => ({ scanFileAgents: vi.fn().mockReturnValue([]) }));
+    vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: vi.fn().mockReturnValue([]) }));
 
     const mod = await import('@/app/api/agents/scheduler-health/route');
     GET = mod.GET;
@@ -240,12 +240,12 @@ describe('GET /api/agents/scheduler-health', () => {
     };
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ launchagent_prefix: 'com.tamtam' }) }));
-    vi.doMock('@/lib/scheduling', () => ({ getImproveConfig: () => ({ logDir: '/tmp', claudeBin: 'claude' }) }));
-    vi.doMock('@/lib/internal-scheduler', () => internalSchedulerStub);
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ launchagent_prefix: 'com.tamtam' }) }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir: '/tmp', claudeBin: 'claude' }) }));
+    vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerStub);
     vi.doMock('./internal-scheduler', () => internalSchedulerStub);
-    vi.doMock('@/lib/tamtam-file-agents', () => ({ scanFileAgents: vi.fn().mockReturnValue([fileAgent]) }));
+    vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: vi.fn().mockReturnValue([fileAgent]) }));
 
     const { GET: GET2 } = await import('@/app/api/agents/scheduler-health/route');
     const res = await GET2();
@@ -294,12 +294,12 @@ describe('GET /api/agents/scheduler-health', () => {
     };
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getSettings: () => ({ launchagent_prefix: 'com.tamtam' }) }));
-    vi.doMock('@/lib/scheduling', () => ({ getImproveConfig: () => ({ logDir: '/tmp', claudeBin: 'claude' }) }));
-    vi.doMock('@/lib/internal-scheduler', () => internalSchedulerStub);
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ launchagent_prefix: 'com.tamtam' }) }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir: '/tmp', claudeBin: 'claude' }) }));
+    vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerStub);
     vi.doMock('./internal-scheduler', () => internalSchedulerStub);
-    vi.doMock('@/lib/tamtam-file-agents', () => ({ scanFileAgents: vi.fn().mockReturnValue([fileAgent]) }));
+    vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: vi.fn().mockReturnValue([fileAgent]) }));
 
     const { GET: GET3 } = await import('@/app/api/agents/scheduler-health/route');
     const res = await GET3();

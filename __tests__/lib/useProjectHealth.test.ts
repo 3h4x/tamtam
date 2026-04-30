@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { computeFleetHealth } from '@/hooks/useProjectHealth';
-import type { Task } from '@/lib/types';
+import type { Task } from '@/lib/shared/types';
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {

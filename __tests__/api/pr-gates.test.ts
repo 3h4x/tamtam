@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { JobData } from '@/lib/job-storage';
+import type { JobData } from '@/lib/jobs/job-storage';
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
   return {
@@ -40,15 +40,15 @@ describe('GET /api/projects/by-project/[projectName]/pr-gates', () => {
     execMock = vi.fn().mockResolvedValue({ exitCode: 1, stdout: '', stderr: '' });
     extractCriteriaMock = vi.fn().mockReturnValue([]);
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock,
       getVerdict: getVerdictMock,
     }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/start-mark-dod', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({
       extractCriteria: extractCriteriaMock,
     }));
 

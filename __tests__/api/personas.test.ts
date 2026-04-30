@@ -15,7 +15,7 @@ describe('GET /api/projects/personas', () => {
     skillsDir = tempDir;
     dataSkillsDir = join(tempDir, 'data-skills');
 
-    vi.doMock('@/lib/skills', () => ({
+    vi.doMock('@/lib/skills/skills', () => ({
       SKILLS_DIR: skillsDir,
       DATA_SKILLS_DIR: dataSkillsDir,
     }));

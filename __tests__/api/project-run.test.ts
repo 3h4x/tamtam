@@ -39,26 +39,26 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     createJobMock = vi.fn().mockImplementation(() => makeJob());
     updateJobMock = vi.fn();
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
 
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi
         .fn()
         .mockReturnValue({ claudeBin: 'claude', logDir: join(tempDir, 'logs') }),
     }));
 
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       updateJob: updateJobMock,
     }));
 
-    vi.doMock('@/lib/pm2-jobs', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       startJob: startJobMock,
     }));
 
-    vi.doMock('@/lib/skills', () => ({
+    vi.doMock('@/lib/skills/skills', () => ({
       SKILLS_DIR: skillsDir,
       DATA_SKILLS_DIR: join(skillsDir, 'data-skills'),
     }));
@@ -229,18 +229,18 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
   it('does NOT inject base_prompt on follow-up turns', async () => {
     vi.resetModules();
     // Re-mock with a recognizable base_prompt via config
-    vi.doMock('@/lib/config', () => ({
+    vi.doMock('@/lib/shared/config', () => ({
       withBasePrompt: (p: string) => `BASE-PROMPT-SENTINEL\n\n---\n\n${p}`,
       getPermissionModeFlag: () => '--permission-mode bypassPermissions',
     }));
     // Re-apply other mocks that resetModules cleared
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: join(tempDir, 'logs') }),
     }));
-    vi.doMock('@/lib/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock }));
-    vi.doMock('@/lib/pm2-jobs', () => ({ startJob: startJobMock }));
-    vi.doMock('@/lib/skills', () => ({ SKILLS_DIR: skillsDir, DATA_SKILLS_DIR: join(skillsDir, 'data-skills') }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/skills/skills', () => ({ SKILLS_DIR: skillsDir, DATA_SKILLS_DIR: join(skillsDir, 'data-skills') }));
     const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
     const POST2 = mod.POST;
 
@@ -257,17 +257,17 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
 
   it('DOES inject base_prompt on initial turn (no resumeSessionId)', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/config', () => ({
+    vi.doMock('@/lib/shared/config', () => ({
       withBasePrompt: (p: string) => `BASE-PROMPT-SENTINEL\n\n---\n\n${p}`,
       getPermissionModeFlag: () => '--permission-mode bypassPermissions',
     }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: join(tempDir, 'logs') }),
     }));
-    vi.doMock('@/lib/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock }));
-    vi.doMock('@/lib/pm2-jobs', () => ({ startJob: startJobMock }));
-    vi.doMock('@/lib/skills', () => ({ SKILLS_DIR: skillsDir, DATA_SKILLS_DIR: join(skillsDir, 'data-skills') }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/skills/skills', () => ({ SKILLS_DIR: skillsDir, DATA_SKILLS_DIR: join(skillsDir, 'data-skills') }));
     const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
     const POST2 = mod.POST;
 

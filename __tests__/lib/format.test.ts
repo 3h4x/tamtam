@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { formatAgo } from '@/lib/format';
+import { formatAgo } from '@/lib/shared/format';
 
 describe('formatAgo', () => {
   afterEach(() => {

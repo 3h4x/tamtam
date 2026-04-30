@@ -8,7 +8,7 @@ describe('POST /api/settings/test-notification', () => {
   beforeEach(async () => {
     vi.resetModules();
     mockSendTestNotification = vi.fn().mockResolvedValue({ ok: true });
-    vi.doMock('@/lib/notifications', () => ({
+    vi.doMock('@/lib/shared/notifications', () => ({
       sendTestNotification: mockSendTestNotification,
     }));
 

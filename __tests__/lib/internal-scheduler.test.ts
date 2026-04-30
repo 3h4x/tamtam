@@ -9,7 +9,7 @@ import {
   removeAgentSchedule,
   dumpInternalScheduler,
   setSchedulerBaseUrl,
-} from '@/lib/internal-scheduler';
+} from '@/lib/scheduling/internal-scheduler';
 
 describe('internal-scheduler', () => {
   beforeEach(() => {
@@ -184,14 +184,14 @@ describe('internal-scheduler', () => {
 });
 
 // ── Issue-branch skip behavior ────────────────────────────────────────────────
-// These tests need to mock @/lib/project-branch-lock, so they live in a
+// These tests need to mock @/lib/shared/project-branch-lock, so they live in a
 // separate describe that resets modules and uses vi.doMock.
 
 describe('internal-scheduler — issue-branch skip', () => {
-  let upsertAgentScheduleDynamic: typeof import('@/lib/internal-scheduler').upsertAgentSchedule;
-  let dumpInternalSchedulerDynamic: typeof import('@/lib/internal-scheduler').dumpInternalScheduler;
-  let stopInternalSchedulerDynamic: typeof import('@/lib/internal-scheduler').stopInternalScheduler;
-  let setSchedulerBaseUrlDynamic: typeof import('@/lib/internal-scheduler').setSchedulerBaseUrl;
+  let upsertAgentScheduleDynamic: typeof import('@/lib/scheduling/internal-scheduler').upsertAgentSchedule;
+  let dumpInternalSchedulerDynamic: typeof import('@/lib/scheduling/internal-scheduler').dumpInternalScheduler;
+  let stopInternalSchedulerDynamic: typeof import('@/lib/scheduling/internal-scheduler').stopInternalScheduler;
+  let setSchedulerBaseUrlDynamic: typeof import('@/lib/scheduling/internal-scheduler').setSchedulerBaseUrl;
   let getIssueBranchLockMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
@@ -199,17 +199,17 @@ describe('internal-scheduler — issue-branch skip', () => {
     vi.useFakeTimers();
 
     getIssueBranchLockMock = vi.fn().mockResolvedValue(null);
-    vi.doMock('@/lib/project-branch-lock', () => ({
+    vi.doMock('@/lib/shared/project-branch-lock', () => ({
       getIssueBranchLock: getIssueBranchLockMock,
     }));
     // Stub pipeline-lock so the statically-imported getLock doesn't hit the
     // real DB-backed module under test (vi.resetModules() + vi.doMock() before
     // the dynamic import causes the static import to be re-evaluated with the mock).
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
     }));
 
-    const mod = await import('@/lib/internal-scheduler');
+    const mod = await import('@/lib/scheduling/internal-scheduler');
     upsertAgentScheduleDynamic = mod.upsertAgentSchedule;
     dumpInternalSchedulerDynamic = mod.dumpInternalScheduler;
     stopInternalSchedulerDynamic = mod.stopInternalScheduler;

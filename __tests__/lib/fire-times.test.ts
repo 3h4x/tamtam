@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fireTimesStr, stableHash, nextFireDisplay } from '@/lib/fire-times';
+import { fireTimesStr, stableHash, nextFireDisplay } from '@/lib/scheduling/fire-times';
 
 describe('fireTimesStr', () => {
   describe('cycleHours <= 1 (hourly)', () => {

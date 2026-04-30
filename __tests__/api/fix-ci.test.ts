@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import type { JobData } from '@/lib/job-storage';
+import type { JobData } from '@/lib/jobs/job-storage';
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
   return {
@@ -44,25 +44,25 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
 
     dbGetMock = vi.fn().mockReturnValue({ project: 'proj1', ciFailedUrl: CI_URL });
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({
         claudeBin: 'claude',
         logDir: '/tmp/tamtam-logs',
         projects: {},
       }),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       updateJob: updateJobMock,
       listJobs: listJobsMock,
       probeJobStatus: probeJobStatusMock,
     }));
-    vi.doMock('@/lib/pm2-jobs', () => ({ startJob: startJobMock }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/config', () => ({ getPermissionModeFlag: vi.fn().mockReturnValue(''), getSettings: vi.fn().mockReturnValue({ default_model: 'sonnet' }) }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getPermissionModeFlag: vi.fn().mockReturnValue(''), getSettings: vi.fn().mockReturnValue({ default_model: 'sonnet' }) }));
     vi.doMock('@/lib/db', () => ({
       db: {
         select: vi.fn().mockReturnValue({

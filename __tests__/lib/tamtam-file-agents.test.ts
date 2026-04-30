@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { scanFileAgents, loadFileAgent, parseFileAgentId, writeFileAgent } from '@/lib/tamtam-file-agents';
+import { scanFileAgents, loadFileAgent, parseFileAgentId, writeFileAgent } from '@/lib/agents/tamtam-file-agents';
 
 function makeTmpDir(): string {
   const dir = join(tmpdir(), `tamtam-test-${Date.now()}`);

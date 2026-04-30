@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Database from 'better-sqlite3';
 import { join } from 'path';
-import { errMsg } from '@/lib/types';
+import { errMsg } from '@/lib/shared/types';
 
 export async function POST(_request: NextRequest) {
   const dbDir = join(process.cwd(), 'data', 'db');

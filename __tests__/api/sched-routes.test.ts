@@ -18,8 +18,8 @@ describe('POST /api/projects/[schedId]/pause', () => {
     getImproveConfigMock = vi.fn().mockReturnValue({ projects: mockProjects });
     pauseAllMock = vi.fn().mockResolvedValue(undefined);
 
-    vi.doMock('@/lib/scheduling', () => ({ getImproveConfig: getImproveConfigMock }));
-    vi.doMock('@/lib/launchagent', () => ({ pauseAll: pauseAllMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: getImproveConfigMock }));
+    vi.doMock('@/lib/scheduling/launchagent', () => ({ pauseAll: pauseAllMock }));
 
     const mod = await import('@/app/api/projects/[schedId]/pause/route');
     POST = mod.POST;
@@ -63,8 +63,8 @@ describe('POST /api/projects/[schedId]/resume', () => {
     getImproveConfigMock = vi.fn().mockReturnValue({ projects: mockProjects });
     resumeAllMock = vi.fn().mockResolvedValue(undefined);
 
-    vi.doMock('@/lib/scheduling', () => ({ getImproveConfig: getImproveConfigMock }));
-    vi.doMock('@/lib/launchagent', () => ({ resumeAll: resumeAllMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: getImproveConfigMock }));
+    vi.doMock('@/lib/scheduling/launchagent', () => ({ resumeAll: resumeAllMock }));
 
     const mod = await import('@/app/api/projects/[schedId]/resume/route');
     POST = mod.POST;
@@ -108,7 +108,7 @@ describe('PATCH /api/projects/[schedId]/priority', () => {
     getImproveConfigMock = vi.fn().mockReturnValue({ projects: mockProjects });
     writePriorityYamlMock = vi.fn();
 
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: getImproveConfigMock,
       writePriorityYaml: writePriorityYamlMock,
       PRIORITY_ORDER: ['critical', 'high', 'medium', 'low'],
@@ -166,7 +166,7 @@ describe('PATCH /api/projects/[schedId]/priority', () => {
     for (const priority of ['critical', 'high', 'medium', 'low']) {
       vi.resetModules();
       writePriorityYamlMock = vi.fn();
-      vi.doMock('@/lib/scheduling', () => ({
+      vi.doMock('@/lib/scheduling/scheduling', () => ({
         getImproveConfig: vi.fn().mockReturnValue({ projects: mockProjects }),
         writePriorityYaml: writePriorityYamlMock,
         PRIORITY_ORDER: ['critical', 'high', 'medium', 'low'],
@@ -197,8 +197,8 @@ describe('GET /api/projects/[schedId]/detail', () => {
     });
     readRunHistoryMock = vi.fn().mockReturnValue([]);
 
-    vi.doMock('@/lib/scheduling', () => ({ getImproveConfig: getImproveConfigMock }));
-    vi.doMock('@/lib/run-history', () => ({ readRunHistory: readRunHistoryMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: getImproveConfigMock }));
+    vi.doMock('@/lib/jobs/run-history', () => ({ readRunHistory: readRunHistoryMock }));
     // Mock os.homedir to avoid reading real home directory
     vi.doMock('os', async () => {
       const actual = await vi.importActual('os');
