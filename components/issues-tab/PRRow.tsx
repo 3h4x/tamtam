@@ -181,12 +181,9 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
             <Labels labels={pr.labels} />
           </div>
           <div className="flex items-center gap-x-2 gap-y-1 mt-1 flex-wrap text-xs text-text-tertiary tabular-nums">
-            <span className="font-mono">#{pr.number}</span>
-            <span className="text-border">·</span>
+            <span className="font-mono text-text-secondary">#{pr.number}</span>
             <span>{pr.author?.login}</span>
-            <span className="text-border">·</span>
             <span title={pr.createdAt}>{formatAgo(new Date(pr.createdAt).getTime() / 1000)}</span>
-            <span className="text-border">·</span>
             <code className="font-mono bg-bg-tertiary px-1.5 py-0.5 rounded text-[10px] text-text-secondary">{pr.headRefName}</code>
             {reviewLabel && (
               <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${
