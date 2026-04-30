@@ -98,10 +98,17 @@ export function TaskDetailPage({
       </div>
 
       {loading && (
-        <div className="flex flex-col gap-6 animate-pulse">
-          <div className="bg-bg-secondary rounded-lg p-4 h-32" />
-          <div className="bg-bg-secondary rounded-lg p-4 h-48" />
-          <div className="bg-bg-secondary rounded-lg p-4 h-64" />
+        <div className="flex flex-col gap-6">
+          {[
+            { h: 'h-32', titleW: 'w-20' },
+            { h: 'h-48', titleW: 'w-24' },
+            { h: 'h-64', titleW: 'w-28' },
+          ].map((s, i) => (
+            <div key={i} className="bg-bg-secondary rounded-lg p-4 flex flex-col gap-3">
+              <div className={`skeleton h-3.5 ${s.titleW} rounded`} />
+              <div className={`skeleton ${s.h} rounded-md`} />
+            </div>
+          ))}
         </div>
       )}
       {error && <div className="text-status-error">Error: {error}</div>}

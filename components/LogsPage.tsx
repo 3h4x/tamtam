@@ -111,9 +111,9 @@ export function LogsPage() {
           </div>
         )
       ) : loading ? (
-        <div className="space-y-2 animate-pulse mt-2">
+        <div className="space-y-2 mt-2">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-10 border border-border rounded-lg bg-bg-secondary" style={{ opacity: 1 - i * 0.2 }} />
+            <div key={i} className="skeleton h-10 rounded-lg" />
           ))}
         </div>
       ) : (

@@ -56,7 +56,7 @@ describe('internal-scheduler', () => {
   });
 
   describe('upsert / remove', () => {
-    it('arms a timer that fires at the computed time', () => {
+    it('arms a timer that fires at the computed time', async () => {
       const fetchMock = vi.fn().mockResolvedValue({ ok: true });
       vi.stubGlobal('fetch', fetchMock);
       setSchedulerBaseUrl('http://test');
@@ -70,8 +70,10 @@ describe('internal-scheduler', () => {
       expect(dump.entries[0].agentId).toBe('a1');
       expect(dump.entries[0].fireCount).toBe(0);
 
-      // Advance past the scheduled time
+      // Advance past the scheduled time. fire() is async (awaits the
+      // issue-branch lock probe before fetching), so drain microtasks.
       vi.advanceTimersByTime(60_000 + 100);
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
 
       expect(fetchMock).toHaveBeenCalledOnce();
       expect(fetchMock).toHaveBeenCalledWith(
@@ -83,7 +85,7 @@ describe('internal-scheduler', () => {
       );
     });
 
-    it('replaces an existing entry on upsert (no duplicate timers)', () => {
+    it('replaces an existing entry on upsert (no duplicate timers)', async () => {
       const fetchMock = vi.fn().mockResolvedValue({ ok: true });
       vi.stubGlobal('fetch', fetchMock);
       setSchedulerBaseUrl('http://test');
@@ -94,6 +96,7 @@ describe('internal-scheduler', () => {
       expect(dumpInternalScheduler().entries).toHaveLength(1);
 
       vi.advanceTimersByTime(60_000 + 100);
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
       // Only one fire — old timer was cleared
       expect(fetchMock).toHaveBeenCalledOnce();
       expect(fetchMock.mock.calls[0][1].body).toContain('v2');
@@ -162,7 +165,7 @@ describe('internal-scheduler', () => {
       expect(dump.entries[0].nextFireMs).toBeGreaterThan(Date.now());
     });
 
-    it('pause stops future fires until resume is called', () => {
+    it('pause stops future fires until resume is called', async () => {
       const fetchMock = vi.fn().mockResolvedValue({ ok: true });
       vi.stubGlobal('fetch', fetchMock);
       setSchedulerBaseUrl('http://test');
@@ -175,6 +178,7 @@ describe('internal-scheduler', () => {
 
       resumeInternalScheduler();
       vi.advanceTimersByTime(60_000 + 100);
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
       expect(fetchMock).toHaveBeenCalledOnce();
     });
   });

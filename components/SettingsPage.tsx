@@ -950,9 +950,18 @@ export function SettingsPage() {
       </div>
 
       {loading ? (
-        <div className="space-y-4 animate-pulse">
-          <div className="bg-bg-secondary rounded-lg border border-border h-48" />
-          <div className="bg-bg-secondary rounded-lg border border-border h-64" />
+        <div className="space-y-4">
+          {[
+            { h: 'h-48', rows: 3 },
+            { h: 'h-64', rows: 4 },
+          ].map((s, i) => (
+            <div key={i} className={`bg-bg-secondary rounded-lg border border-border p-5 flex flex-col gap-3 ${s.h}`}>
+              <div className="skeleton h-4 w-1/3 rounded" />
+              {Array.from({ length: s.rows }).map((_, j) => (
+                <div key={j} className="skeleton h-3.5 rounded" style={{ width: `${85 - j * 8}%` }} />
+              ))}
+            </div>
+          ))}
         </div>
       ) : (
         <div className="space-y-4">
@@ -1067,9 +1076,9 @@ export function SettingsPage() {
 
               <div className="px-5 py-4">
                 {projectsLoading ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1 animate-pulse">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1">
                     {Array.from({ length: 8 }).map((_, i) => (
-                      <div key={i} className="h-10 rounded-lg bg-bg-secondary border border-border" style={{ opacity: 1 - i * 0.1 }} />
+                      <div key={i} className="skeleton h-10 rounded-lg" />
                     ))}
                   </div>
                 ) : projects.length === 0 ? (
