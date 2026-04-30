@@ -272,8 +272,13 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     const submit = promptParam
     const run = async () => {
       if (issueNumberParam) {
+        // Fail-closed on branch-checkout failure. If we silently continued,
+        // Claude would resume on whatever branch happens to be checked out
+        // (typically main), and all edits land in the wrong place.
+        let branchOk = true
+        let branchErr = ''
         try {
-          await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/issue-branch`, {
+          const r = await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/issue-branch`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -281,7 +286,27 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
               issue_title: issueTitleParam ?? '',
             }),
           })
-        } catch {}
+          if (!r.ok) {
+            branchOk = false
+            try { branchErr = (await r.json())?.detail ?? r.statusText } catch { branchErr = r.statusText }
+          }
+        } catch (e) {
+          branchOk = false
+          branchErr = e instanceof Error ? e.message : 'network error'
+        }
+        if (!branchOk) {
+          terminalStore.update(projectName, (s) => ({
+            history: [
+              ...s.history,
+              {
+                role: 'error',
+                text: `Could not check out the issue branch: ${branchErr}\n\nResolve the underlying problem (commit / stash / rm conflicting files) and click Continue again. Auto-submit aborted so edits don't land on the wrong branch.`,
+              },
+            ],
+          }))
+          router.replace(`/project/${projectName}/terminal`)
+          return
+        }
         // When "Work on issue N" arrives, clear any leftover terminal session
         // for this project. Otherwise a stale `claudeSessionId` makes the
         // auto-submit look like a follow-up message — the `!sessionId` guard

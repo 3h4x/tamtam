@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/project-data';
+import { clearIssueBranchLockCache } from '@/lib/project-branch-lock';
 import { exec } from '@/lib/shell';
 import { getProjectTestConfig } from '@/lib/scheduling';
 import { getLock } from '@/lib/pipeline-lock';
@@ -91,11 +92,13 @@ export async function POST(
   const createR = await exec('git', ['-C', projPath, 'checkout', '-b', branch], { timeout: 10000 });
   if (createR.exitCode === 0) {
     clearProjectDataCache();
+    clearIssueBranchLockCache(projectName);
     return NextResponse.json({ status: 'created', branch });
   }
   const existingR = await exec('git', ['-C', projPath, 'checkout', branch], { timeout: 10000 });
   if (existingR.exitCode === 0) {
     clearProjectDataCache();
+    clearIssueBranchLockCache(projectName);
     return NextResponse.json({ status: 'reused', branch });
   }
   return NextResponse.json(

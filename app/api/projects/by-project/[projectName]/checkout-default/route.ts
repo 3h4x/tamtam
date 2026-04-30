@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/project-data';
+import { clearIssueBranchLockCache } from '@/lib/project-branch-lock';
 import { exec } from '@/lib/shell';
 import { detectMainBranch } from '@/lib/start-commit';
 
@@ -110,5 +111,6 @@ export async function POST(
   }
 
   clearProjectDataCache();
+  clearIssueBranchLockCache(projectName);
   return NextResponse.json({ status: 'switched', branch: defaultBranch, deletedBranch });
 }

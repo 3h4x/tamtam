@@ -20,6 +20,7 @@
 //   cover it without adding a dependency.
 
 import { stableHash } from './fire-times';
+import { getIssueBranchLock } from './project-branch-lock';
 
 type ScheduleEntry = {
   agentId: string;
@@ -34,6 +35,12 @@ type ScheduleEntry = {
   errorCount: number;
   lastError: string | null;
   timer: NodeJS.Timeout | null;
+  // Skipped fires when an issue branch was checked out and we declined to
+  // run the agent on it. Tracked separately from errorCount so the
+  // monitoring page can distinguish a paused-by-design state from real
+  // failures.
+  skippedCount: number;
+  lastSkippedReason: string | null;
 };
 
 // Pin the scheduler state on globalThis so it survives Next.js's separation
@@ -119,6 +126,25 @@ export function computeNextFire(schedule: string, agentId: string, fromMs: numbe
 
 async function fire(entry: ScheduleEntry): Promise<void> {
   if (getPaused() || !entry.enabled) return;
+
+  // Don't fire scheduled agents while an issue branch is checked out for the
+  // project — they'd run with cwd on someone's WIP feature branch and either
+  // edit unrelated files there or get pushed in surprise commits. The user's
+  // manual Run buttons on /project/[name] are already disabled in this state;
+  // the scheduler is the leaky path. Re-arm so the next tick re-checks.
+  try {
+    const lockedBranch = await getIssueBranchLock(entry.project);
+    if (lockedBranch) {
+      entry.skippedCount += 1;
+      entry.lastSkippedReason = `issue branch active: ${lockedBranch}`;
+      console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${entry.lastSkippedReason}`);
+      armNext(entry);
+      return;
+    }
+  } catch {
+    // Detection failure shouldn't block runs — fall through and fire normally.
+  }
+
   entry.lastFireMs = Date.now();
   entry.fireCount += 1;
   const url = `${getBaseUrl()}/api/agents/${entry.agentId}/run`;
@@ -183,6 +209,8 @@ export function upsertAgentSchedule(agent: AgentInput): void {
     errorCount: 0,
     lastError: null,
     timer: null,
+    skippedCount: 0,
+    lastSkippedReason: null,
   };
   entries.set(agent.id, entry);
   armNext(entry);
@@ -244,6 +272,8 @@ export type SchedulerEntryDump = {
   fireCount: number;
   errorCount: number;
   lastError: string | null;
+  skippedCount: number;
+  lastSkippedReason: string | null;
 };
 
 export function dumpInternalScheduler(): { started: boolean; paused: boolean; entries: SchedulerEntryDump[] } {
@@ -260,6 +290,8 @@ export function dumpInternalScheduler(): { started: boolean; paused: boolean; en
       fireCount: e.fireCount,
       errorCount: e.errorCount,
       lastError: e.lastError,
+      skippedCount: e.skippedCount,
+      lastSkippedReason: e.lastSkippedReason,
     });
   }
   out.sort((a, b) => a.nextFireMs - b.nextFireMs);

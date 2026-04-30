@@ -1041,10 +1041,19 @@ export function ProjectDetailPage({
       {activeTab === 'config' && (
         <div className="mt-4">
           {configLoading ? (
-            <div className="space-y-4 animate-pulse">
-              <div className="bg-bg-secondary rounded-lg border border-border h-32" />
-              <div className="bg-bg-secondary rounded-lg border border-border h-48" />
-              <div className="bg-bg-secondary rounded-lg border border-border h-64" />
+            <div className="space-y-4">
+              {[
+                { h: 'h-32', rows: 2 },
+                { h: 'h-48', rows: 3 },
+                { h: 'h-64', rows: 4 },
+              ].map((s, i) => (
+                <div key={i} className={`bg-bg-secondary rounded-lg border border-border p-4 flex flex-col gap-3 ${s.h}`}>
+                  <div className="skeleton h-3.5 w-1/4 rounded" />
+                  {Array.from({ length: s.rows }).map((_, j) => (
+                    <div key={j} className="skeleton h-4 rounded" style={{ width: `${90 - j * 10}%` }} />
+                  ))}
+                </div>
+              ))}
             </div>
           ) : config ? (
             <div className="space-y-4">
