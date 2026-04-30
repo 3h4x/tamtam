@@ -34,7 +34,7 @@ describe('lib/notifications', () => {
   beforeEach(async () => {
     vi.resetModules();
     mockGetSettings = vi.fn().mockReturnValue(defaultSettings());
-    vi.doMock('@/lib/config', () => ({ getSettings: mockGetSettings }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: mockGetSettings }));
     mockFetch = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', mockFetch);
   });
@@ -54,7 +54,7 @@ describe('lib/notifications', () => {
       mockGetSettings.mockReturnValue(
         defaultSettings({ notification_webhook_url: GENERIC_URL, notification_on_release_success: false }),
       );
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       await notify({ event: 'release_success', project: 'p', job_id: 'j', status: 'success', timestamp: Date.now() });
       await flush();
       expect(mockFetch).not.toHaveBeenCalled();
@@ -64,7 +64,7 @@ describe('lib/notifications', () => {
       mockGetSettings.mockReturnValue(
         defaultSettings({ notification_webhook_url: '', notification_on_release_success: true }),
       );
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       await notify({ event: 'release_success', project: 'p', job_id: 'j', status: 'success', timestamp: Date.now() });
       await flush();
       expect(mockFetch).not.toHaveBeenCalled();
@@ -74,7 +74,7 @@ describe('lib/notifications', () => {
       mockGetSettings.mockReturnValue(
         defaultSettings({ notification_webhook_url: GENERIC_URL, notification_on_release_success: true }),
       );
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       await notify({ event: 'release_success', project: 'myapp', job_id: 'job-1', status: 'success', timestamp: Date.now() });
       await flush();
       expect(mockFetch).toHaveBeenCalledOnce();
@@ -86,7 +86,7 @@ describe('lib/notifications', () => {
       mockGetSettings.mockReturnValue(
         defaultSettings({ notification_webhook_url: GENERIC_URL, notification_on_release_fail: true }),
       );
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       await notify({ event: 'release_fail', project: 'p', job_id: 'j', status: 'failed', timestamp: 1000 });
       await flush();
 
@@ -101,7 +101,7 @@ describe('lib/notifications', () => {
       mockGetSettings.mockReturnValue(
         defaultSettings({ notification_webhook_url: SLACK_URL, notification_on_release_success: true }),
       );
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       await notify({ event: 'release_success', project: 'p', job_id: 'j', status: 'success', timestamp: Date.now() });
       await flush();
 
@@ -115,7 +115,7 @@ describe('lib/notifications', () => {
       mockGetSettings.mockReturnValue(
         defaultSettings({ notification_webhook_url: DISCORD_URL, notification_on_release_fail: true }),
       );
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       await notify({ event: 'release_fail', project: 'p', job_id: 'j', status: 'failed', timestamp: Date.now() });
       await flush();
 
@@ -133,7 +133,7 @@ describe('lib/notifications', () => {
           notification_on_agent_run_fail: true,
         }),
       );
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       await notify({ event: 'agent_run_fail', project: 'p', job_id: 'j', status: 'failed', timestamp: Date.now() });
       await flush();
 
@@ -147,7 +147,7 @@ describe('lib/notifications', () => {
       mockGetSettings.mockReturnValue(
         defaultSettings({ notification_webhook_url: GENERIC_URL, notification_on_review_do_not_ship: true }),
       );
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       await notify({ event: 'review_do_not_ship', project: 'p', job_id: 'j', status: 'failed', timestamp: Date.now() });
       await flush();
 
@@ -159,7 +159,7 @@ describe('lib/notifications', () => {
       mockGetSettings.mockReturnValue(
         defaultSettings({ notification_webhook_url: GENERIC_URL, notification_on_release_success: true }),
       );
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       const before = Date.now();
       await notify({ event: 'release_success', project: 'p', job_id: 'j', status: 'success', timestamp: 0 });
       await flush();
@@ -175,7 +175,7 @@ describe('lib/notifications', () => {
       mockGetSettings.mockReturnValue(
         defaultSettings({ notification_webhook_url: SLACK_URL, notification_on_release_success: true }),
       );
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       await notify({ event: 'release_success', project: 'p', job_id: 'j', status: 'success', timestamp: Date.now() });
       await flush();
 
@@ -189,7 +189,7 @@ describe('lib/notifications', () => {
       mockGetSettings.mockReturnValue(
         defaultSettings({ notification_webhook_url: DISCORD_URL, notification_on_release_success: true }),
       );
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       await notify({ event: 'release_success', project: 'p', job_id: 'j', status: 'success', timestamp: Date.now() });
       await flush();
 
@@ -202,7 +202,7 @@ describe('lib/notifications', () => {
       mockGetSettings.mockReturnValue(
         defaultSettings({ notification_webhook_url: 'https://ntfy.sh/topic', notification_on_release_success: true }),
       );
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       await notify({ event: 'release_success', project: 'p', job_id: 'j', status: 'success', timestamp: Date.now() });
       await flush();
 
@@ -220,7 +220,7 @@ describe('lib/notifications', () => {
           notification_on_release_success: true,
         }),
       );
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       const payload = { event: 'release_success' as const, project: 'p', job_id: 'j', status: 'success' as const, timestamp: 42 };
 
       await notify({ ...payload });
@@ -236,7 +236,7 @@ describe('lib/notifications', () => {
     });
 
     it('produces different signatures for different secrets', async () => {
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       const payload = { event: 'release_success' as const, project: 'p', job_id: 'j', status: 'success' as const, timestamp: 42 };
 
       mockGetSettings.mockReturnValue(
@@ -261,14 +261,14 @@ describe('lib/notifications', () => {
   describe('retry and backoff (via sendTestNotification)', () => {
     it('returns { ok: true } on first successful fetch', async () => {
       mockFetch.mockResolvedValue({ ok: true });
-      const { sendTestNotification } = await import('@/lib/notifications');
+      const { sendTestNotification } = await import('@/lib/shared/notifications');
       const result = await sendTestNotification(GENERIC_URL, '');
       expect(result).toEqual({ ok: true });
       expect(mockFetch).toHaveBeenCalledOnce();
     });
 
     it('returns { ok: false } when URL is blank', async () => {
-      const { sendTestNotification } = await import('@/lib/notifications');
+      const { sendTestNotification } = await import('@/lib/shared/notifications');
       const result = await sendTestNotification('', '');
       expect(result.ok).toBe(false);
       expect(result.error).toMatch(/required/i);
@@ -279,7 +279,7 @@ describe('lib/notifications', () => {
       vi.useFakeTimers();
       mockFetch.mockRejectedValue(new Error('network error'));
 
-      const { sendTestNotification } = await import('@/lib/notifications');
+      const { sendTestNotification } = await import('@/lib/shared/notifications');
       const promise = sendTestNotification(GENERIC_URL, '');
       await vi.runAllTimersAsync();
       const result = await promise;
@@ -295,7 +295,7 @@ describe('lib/notifications', () => {
         .mockResolvedValueOnce({ ok: false, status: 503 })
         .mockResolvedValueOnce({ ok: true });
 
-      const { sendTestNotification } = await import('@/lib/notifications');
+      const { sendTestNotification } = await import('@/lib/shared/notifications');
       const promise = sendTestNotification(GENERIC_URL, '');
       await vi.runAllTimersAsync();
       const result = await promise;
@@ -307,7 +307,7 @@ describe('lib/notifications', () => {
 
     it('succeeds immediately without retrying on 200', async () => {
       mockFetch.mockResolvedValue({ ok: true });
-      const { sendTestNotification } = await import('@/lib/notifications');
+      const { sendTestNotification } = await import('@/lib/shared/notifications');
       const result = await sendTestNotification(GENERIC_URL, '');
       expect(result.ok).toBe(true);
       expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -317,7 +317,7 @@ describe('lib/notifications', () => {
   describe('sendTestNotification()', () => {
     it('sends a Slack-formatted body to Slack URLs', async () => {
       mockFetch.mockResolvedValue({ ok: true });
-      const { sendTestNotification } = await import('@/lib/notifications');
+      const { sendTestNotification } = await import('@/lib/shared/notifications');
       await sendTestNotification(SLACK_URL, '');
 
       const body = JSON.parse(mockFetch.mock.calls[0][1].body);
@@ -326,7 +326,7 @@ describe('lib/notifications', () => {
 
     it('sends a Discord embed body to Discord URLs', async () => {
       mockFetch.mockResolvedValue({ ok: true });
-      const { sendTestNotification } = await import('@/lib/notifications');
+      const { sendTestNotification } = await import('@/lib/shared/notifications');
       await sendTestNotification(DISCORD_URL, '');
 
       const body = JSON.parse(mockFetch.mock.calls[0][1].body);
@@ -335,7 +335,7 @@ describe('lib/notifications', () => {
 
     it('sends signature header when secret is provided', async () => {
       mockFetch.mockResolvedValue({ ok: true });
-      const { sendTestNotification } = await import('@/lib/notifications');
+      const { sendTestNotification } = await import('@/lib/shared/notifications');
       await sendTestNotification(GENERIC_URL, 'myverysecretkey');
 
       const headers = mockFetch.mock.calls[0][1].headers;
@@ -344,7 +344,7 @@ describe('lib/notifications', () => {
 
     it('omits signature header when no secret provided', async () => {
       mockFetch.mockResolvedValue({ ok: true });
-      const { sendTestNotification } = await import('@/lib/notifications');
+      const { sendTestNotification } = await import('@/lib/shared/notifications');
       await sendTestNotification(GENERIC_URL, '');
 
       const headers = mockFetch.mock.calls[0][1].headers;
@@ -353,11 +353,11 @@ describe('lib/notifications', () => {
   });
 
   describe('formatSlackMessage() shape', () => {
-    async function slackBody(payload: Partial<Parameters<(typeof import('@/lib/notifications'))['notify']>[0]> = {}) {
+    async function slackBody(payload: Partial<Parameters<(typeof import('@/lib/shared/notifications'))['notify']>[0]> = {}) {
       mockGetSettings.mockReturnValue(
         defaultSettings({ notification_webhook_url: SLACK_URL, notification_on_release_success: true, notification_on_release_fail: true }),
       );
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       await notify({
         event: 'release_success',
         project: 'myapp',
@@ -465,11 +465,11 @@ describe('lib/notifications', () => {
   });
 
   describe('formatDiscordMessage() shape', () => {
-    async function discordBody(payload: Partial<Parameters<(typeof import('@/lib/notifications'))['notify']>[0]> = {}) {
+    async function discordBody(payload: Partial<Parameters<(typeof import('@/lib/shared/notifications'))['notify']>[0]> = {}) {
       mockGetSettings.mockReturnValue(
         defaultSettings({ notification_webhook_url: DISCORD_URL, notification_on_release_success: true, notification_on_release_fail: true }),
       );
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       await notify({
         event: 'release_success',
         project: 'myapp',
@@ -542,7 +542,7 @@ describe('lib/notifications', () => {
       mockGetSettings.mockReturnValue(
         defaultSettings({ notification_webhook_url: 'https://ntfy.sh/t', notification_on_release_success: true }),
       );
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       // Verify generic path (raw payload) is used for a plain URL — already covered,
       // but also verify an empty-string URL never reaches fetch (config guard)
       mockGetSettings.mockReturnValue(
@@ -559,7 +559,7 @@ describe('lib/notifications', () => {
       mockGetSettings.mockReturnValue(
         defaultSettings({ notification_webhook_url: ambiguousUrl, notification_on_release_success: true }),
       );
-      const { notify } = await import('@/lib/notifications');
+      const { notify } = await import('@/lib/shared/notifications');
       await notify({ event: 'release_success', project: 'p', job_id: 'j', status: 'success', timestamp: 1 });
       await flush();
       const body = JSON.parse(mockFetch.mock.calls[0][1].body);

@@ -31,11 +31,11 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
     execMock = vi.fn();
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/issues/route');
@@ -182,11 +182,11 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
     execMock = vi.fn();
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/issues/route');

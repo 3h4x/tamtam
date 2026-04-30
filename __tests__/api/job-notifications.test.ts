@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import type { JobData } from '@/lib/job-storage';
+import type { JobData } from '@/lib/jobs/job-storage';
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
   return {
@@ -25,7 +25,7 @@ describe('POST /api/jobs/[jobId]/seen', () => {
   beforeEach(async () => {
     vi.resetModules();
     markSeenMock = vi.fn().mockReturnValue(true);
-    vi.doMock('@/lib/job-storage', () => ({ markSeen: markSeenMock }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({ markSeen: markSeenMock }));
     const mod = await import('@/app/api/jobs/[jobId]/seen/route');
     POST = mod.POST;
   });
@@ -69,7 +69,7 @@ describe('GET /api/jobs/notifications', () => {
     unseenFinishedMock = vi.fn().mockReturnValue([]);
     listJobsMock = vi.fn().mockReturnValue([]);
     jobToDictMock = vi.fn().mockImplementation((j: JobData) => ({ id: j.id, project: j.project }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       unseenFinished: unseenFinishedMock,
       listJobs: listJobsMock,
       jobToDict: jobToDictMock,
@@ -141,7 +141,7 @@ describe('POST /api/jobs/notifications/mark-seen', () => {
     vi.resetModules();
     unseenFinishedMock = vi.fn().mockReturnValue([]);
     markSeenMock = vi.fn().mockReturnValue(true);
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       unseenFinished: unseenFinishedMock,
       markSeen: markSeenMock,
     }));

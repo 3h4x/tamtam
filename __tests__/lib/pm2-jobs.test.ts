@@ -10,22 +10,22 @@ function makeExecResult(exitCode: number, stdout = '', stderr = '') {
 describe('pm2-jobs', () => {
   let execMock: ReturnType<typeof vi.fn>;
   let logDir: string;
-  let startJob: typeof import('@/lib/pm2-jobs').startJob;
-  let getJobStatus: typeof import('@/lib/pm2-jobs').getJobStatus;
-  let deleteJob: typeof import('@/lib/pm2-jobs').deleteJob;
-  let getJobPid: typeof import('@/lib/pm2-jobs').getJobPid;
+  let startJob: typeof import('@/lib/jobs/pm2-jobs').startJob;
+  let getJobStatus: typeof import('@/lib/jobs/pm2-jobs').getJobStatus;
+  let deleteJob: typeof import('@/lib/jobs/pm2-jobs').deleteJob;
+  let getJobPid: typeof import('@/lib/jobs/pm2-jobs').getJobPid;
 
   beforeEach(async () => {
     vi.resetModules();
     logDir = mkdtempSync(join(tmpdir(), 'tamtam-pm2-jobs-'));
     execMock = vi.fn();
 
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ logDir }),
     }));
 
-    const mod = await import('@/lib/pm2-jobs');
+    const mod = await import('@/lib/jobs/pm2-jobs');
     startJob = mod.startJob;
     getJobStatus = mod.getJobStatus;
     deleteJob = mod.deleteJob;
@@ -128,27 +128,27 @@ describe('pm2-jobs', () => {
 
   describe('splitCommand', () => {
     it('splits on whitespace', async () => {
-      const { splitCommand } = await import('@/lib/pm2-jobs');
+      const { splitCommand } = await import('@/lib/jobs/pm2-jobs');
       expect(splitCommand('claude --model opus --print')).toEqual(['claude', '--model', 'opus', '--print']);
     });
 
     it('preserves double-quoted segments', async () => {
-      const { splitCommand } = await import('@/lib/pm2-jobs');
+      const { splitCommand } = await import('@/lib/jobs/pm2-jobs');
       expect(splitCommand('claude --param "hello world"')).toEqual(['claude', '--param', 'hello world']);
     });
 
     it('preserves single-quoted segments', async () => {
-      const { splitCommand } = await import('@/lib/pm2-jobs');
+      const { splitCommand } = await import('@/lib/jobs/pm2-jobs');
       expect(splitCommand("claude --param 'spaced value'")).toEqual(['claude', '--param', 'spaced value']);
     });
 
     it('handles backslash escapes inside quotes', async () => {
-      const { splitCommand } = await import('@/lib/pm2-jobs');
+      const { splitCommand } = await import('@/lib/jobs/pm2-jobs');
       expect(splitCommand('claude --x "a\\"b"')).toEqual(['claude', '--x', 'a"b']);
     });
 
     it('returns empty array for empty / whitespace-only input', async () => {
-      const { splitCommand } = await import('@/lib/pm2-jobs');
+      const { splitCommand } = await import('@/lib/jobs/pm2-jobs');
       expect(splitCommand('')).toEqual([]);
       expect(splitCommand('   ')).toEqual([]);
     });

@@ -3,17 +3,17 @@ import { eq, inArray } from 'drizzle-orm';
 import { existsSync, readFileSync } from 'fs';
 import { basename, join } from 'path';
 import { db, schema } from '@/lib/db';
-import { resolveProjectPath } from '@/lib/project-data';
-import { getImproveConfig } from '@/lib/scheduling';
-import { checkIssueBranchBlock } from '@/lib/start-release';
-import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills';
-import { createJob, updateJob, listJobs, probeJobStatus } from '@/lib/job-storage';
-import { startJob } from '@/lib/pm2-jobs';
-import { withBasePrompt, getPermissionModeFlag } from '@/lib/config';
-import { errMsg } from '@/lib/types';
-import { parseFileAgentId, loadFileAgent } from '@/lib/tamtam-file-agents';
-import { getAgentMemoryDir, getAgentMemoryPath, readAgentMemory, ensureAgentMemoryDir, buildMemoryBlock } from '@/lib/agent-memory';
-import { jobsPausedResult } from '@/lib/job-control';
+import { resolveProjectPath } from '@/lib/shared/project-data';
+import { getImproveConfig } from '@/lib/scheduling/scheduling';
+import { checkIssueBranchBlock } from '@/lib/pipeline/start-release';
+import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills/skills';
+import { createJob, updateJob, listJobs, probeJobStatus } from '@/lib/jobs/job-storage';
+import { startJob } from '@/lib/jobs/pm2-jobs';
+import { withBasePrompt, getPermissionModeFlag } from '@/lib/shared/config';
+import { errMsg } from '@/lib/shared/types';
+import { parseFileAgentId, loadFileAgent } from '@/lib/agents/tamtam-file-agents';
+import { getAgentMemoryDir, getAgentMemoryPath, readAgentMemory, ensureAgentMemoryDir, buildMemoryBlock } from '@/lib/agents/agent-memory';
+import { jobsPausedResult } from '@/lib/shared/job-control';
 
 export async function POST(
   request: NextRequest,

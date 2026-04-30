@@ -26,12 +26,12 @@ describe('POST /api/projects/by-project/[projectName]/checkout-default', () => {
     execMock = vi.fn().mockResolvedValue(makeExecResult());
     detectMainBranchMock = vi.fn().mockResolvedValue('main');
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: clearProjectDataCacheMock,
     }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/start-commit', () => ({ detectMainBranch: detectMainBranchMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({ detectMainBranch: detectMainBranchMock }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/checkout-default/route');
     POST = mod.POST;

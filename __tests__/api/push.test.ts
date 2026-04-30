@@ -10,8 +10,8 @@ describe('POST /api/projects/by-project/[projectName]/push', () => {
     vi.resetModules();
     launchProjectPushMock = vi.fn().mockReturnValue({ jobId: 'push-job-id' });
     startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc1234', message: 'committed', jobId: 'commit-job-id' });
-    vi.doMock('@/lib/start-push', () => ({ launchProjectPush: launchProjectPushMock }));
-    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ launchProjectPush: launchProjectPushMock }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
     const mod = await import('@/app/api/projects/by-project/[projectName]/push/route');
     POST = mod.POST;
   });

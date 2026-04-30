@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/lib/db/schema';
-import { JobData } from '@/lib/job-storage';
+import { JobData } from '@/lib/jobs/job-storage';
 import { writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -58,17 +58,17 @@ function createTestDb() {
 describe('job-storage', () => {
   let tempDir: string;
   let testDb: ReturnType<typeof createTestDb>;
-  let createJob: typeof import('@/lib/job-storage').createJob;
-  let getJob: typeof import('@/lib/job-storage').getJob;
-  let listJobs: typeof import('@/lib/job-storage').listJobs;
-  let markSeen: typeof import('@/lib/job-storage').markSeen;
-  let unseenFinished: typeof import('@/lib/job-storage').unseenFinished;
-  let updateJob: typeof import('@/lib/job-storage').updateJob;
-  let readLog: typeof import('@/lib/job-storage').readLog;
-  let getVerdict: typeof import('@/lib/job-storage').getVerdict;
-  let jobToDict: typeof import('@/lib/job-storage').jobToDict;
-  let probeJobStatus: typeof import('@/lib/job-storage').probeJobStatus;
-  let runWithParent: typeof import('@/lib/job-storage').runWithParent;
+  let createJob: typeof import('@/lib/jobs/job-storage').createJob;
+  let getJob: typeof import('@/lib/jobs/job-storage').getJob;
+  let listJobs: typeof import('@/lib/jobs/job-storage').listJobs;
+  let markSeen: typeof import('@/lib/jobs/job-storage').markSeen;
+  let unseenFinished: typeof import('@/lib/jobs/job-storage').unseenFinished;
+  let updateJob: typeof import('@/lib/jobs/job-storage').updateJob;
+  let readLog: typeof import('@/lib/jobs/job-storage').readLog;
+  let getVerdict: typeof import('@/lib/jobs/job-storage').getVerdict;
+  let jobToDict: typeof import('@/lib/jobs/job-storage').jobToDict;
+  let probeJobStatus: typeof import('@/lib/jobs/job-storage').probeJobStatus;
+  let runWithParent: typeof import('@/lib/jobs/job-storage').runWithParent;
 
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-job-test-'));
@@ -86,7 +86,7 @@ describe('job-storage', () => {
     }));
 
     // Now import job-storage (which will use the mocked db)
-    const jobStorage = await import('@/lib/job-storage');
+    const jobStorage = await import('@/lib/jobs/job-storage');
     createJob = jobStorage.createJob;
     getJob = jobStorage.getJob;
     listJobs = jobStorage.listJobs;
@@ -955,17 +955,17 @@ describe('job-storage', () => {
 describe('readParsedLog', () => {
   let tempDir: string;
   let testDb: ReturnType<typeof createTestDb>;
-  let readParsedLog: typeof import('@/lib/job-storage').readParsedLog;
+  let readParsedLog: typeof import('@/lib/jobs/job-storage').readParsedLog;
 
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-parsed-log-test-'));
     vi.resetModules();
     testDb = createTestDb();
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/pm2-jobs', () => ({ getJobStatus: vi.fn(), deleteJob: vi.fn() }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ getJobStatus: vi.fn(), deleteJob: vi.fn() }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
 
-    const mod = await import('@/lib/job-storage');
+    const mod = await import('@/lib/jobs/job-storage');
     readParsedLog = mod.readParsedLog;
   });
 
@@ -1054,7 +1054,7 @@ describe('readParsedLog', () => {
 
 describe('probeJobStatus with pm2', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let probeJobStatusFn: typeof import('@/lib/job-storage').probeJobStatus;
+  let probeJobStatusFn: typeof import('@/lib/jobs/job-storage').probeJobStatus;
   let getJobStatusMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
@@ -1063,10 +1063,10 @@ describe('probeJobStatus with pm2', () => {
     getJobStatusMock = vi.fn();
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/pm2-jobs', () => ({ getJobStatus: getJobStatusMock, getJobPid: vi.fn().mockResolvedValue(null), deleteJob: vi.fn() }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ getJobStatus: getJobStatusMock, getJobPid: vi.fn().mockResolvedValue(null), deleteJob: vi.fn() }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
 
-    const mod = await import('@/lib/job-storage');
+    const mod = await import('@/lib/jobs/job-storage');
     probeJobStatusFn = mod.probeJobStatus;
   });
 
@@ -1405,17 +1405,17 @@ describe('probeJobStatus with pm2', () => {
 
 describe('probeJobStatus – test/action kind liveness via process.kill', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let probeJobStatusFn: typeof import('@/lib/job-storage').probeJobStatus;
+  let probeJobStatusFn: typeof import('@/lib/jobs/job-storage').probeJobStatus;
 
   beforeEach(async () => {
     vi.resetModules();
     testDb = createTestDb();
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/pm2-jobs', () => ({ getJobStatus: vi.fn(), deleteJob: vi.fn() }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ getJobStatus: vi.fn(), deleteJob: vi.fn() }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
 
-    const mod = await import('@/lib/job-storage');
+    const mod = await import('@/lib/jobs/job-storage');
     probeJobStatusFn = mod.probeJobStatus;
   });
 
@@ -1483,7 +1483,7 @@ describe('runCompletionHooks – fix→review auto-trigger', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let startProjectReviewMock: ReturnType<typeof vi.fn>;
   let getJobStatusMock: ReturnType<typeof vi.fn>;
-  let probeJobStatusFn: typeof import('@/lib/job-storage').probeJobStatus;
+  let probeJobStatusFn: typeof import('@/lib/jobs/job-storage').probeJobStatus;
 
   function makeFixJob(overrides: Partial<JobData> = {}): JobData {
     return {
@@ -1514,23 +1514,23 @@ describe('runCompletionHooks – fix→review auto-trigger', () => {
     getJobStatusMock = vi.fn();
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/pm2-jobs', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: getJobStatusMock,
       deleteJob: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/shell', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
     }));
-    vi.doMock('@/lib/git-utils', () => ({
+    vi.doMock('@/lib/git/git-utils', () => ({
       markReviewed: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/start-review', () => ({
+    vi.doMock('@/lib/pipeline/start-review', () => ({
       startProjectReview: startProjectReviewMock,
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getProjectTestConfig: vi.fn().mockReturnValue({
         testCommand: null,
         testCronEnabled: false,
@@ -1539,7 +1539,7 @@ describe('runCompletionHooks – fix→review auto-trigger', () => {
       }),
     }));
 
-    const mod = await import('@/lib/job-storage');
+    const mod = await import('@/lib/jobs/job-storage');
     probeJobStatusFn = mod.probeJobStatus;
   });
 
@@ -1603,7 +1603,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
   let startProjectReviewMock: ReturnType<typeof vi.fn>;
   let startFixFromJobMock: ReturnType<typeof vi.fn>;
   let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
-  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   let tempDir: string;
   let execMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
@@ -1643,41 +1643,41 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/proj');
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/pm2-jobs', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/shell', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({
       exec: execMock,
     }));
-    vi.doMock('@/lib/git-utils', () => ({
+    vi.doMock('@/lib/git/git-utils', () => ({
       markReviewed: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
     startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-auto', pid: 1, logPath: '' });
     startFixFromJobMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-auto', pid: 2 });
-    vi.doMock('@/lib/start-review', () => ({
+    vi.doMock('@/lib/pipeline/start-review', () => ({
       startProjectReview: startProjectReviewMock,
     }));
-    vi.doMock('@/lib/start-test', () => ({
+    vi.doMock('@/lib/pipeline/start-test', () => ({
       startProjectTest: startProjectTestMock,
     }));
-    vi.doMock('@/lib/start-push', () => ({
+    vi.doMock('@/lib/pipeline/start-push', () => ({
       startProjectPush: startProjectPushMock,
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       startProjectCommit: startProjectCommitMock,
     }));
-    vi.doMock('@/lib/start-fix', () => ({
+    vi.doMock('@/lib/pipeline/start-fix', () => ({
       startFixFromJob: startFixFromJobMock,
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getProjectTestConfig: getProjectTestConfigMock,
     }));
 
-    const mod = await import('@/lib/job-storage');
+    const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
   });
 
@@ -2168,7 +2168,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
 describe('markDone – isClaudeKind exit-code override for new kinds', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   let tempDir: string;
 
   function makeJob(kind: string, logPath: string | null): JobData {
@@ -2200,34 +2200,34 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-isclaudekind-'));
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/pm2-jobs', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/shell', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
     }));
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getProjectTestConfig: vi.fn().mockReturnValue({ autoPushEnabled: false }),
     }));
-    vi.doMock('@/lib/git-utils', () => ({
+    vi.doMock('@/lib/git/git-utils', () => ({
       markReviewed: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/start-review', () => ({
+    vi.doMock('@/lib/pipeline/start-review', () => ({
       startProjectReview: vi.fn().mockResolvedValue({ ok: false, status: 503, detail: 'test' }),
     }));
-    vi.doMock('@/lib/start-push', () => ({
+    vi.doMock('@/lib/pipeline/start-push', () => ({
       startProjectPush: vi.fn().mockResolvedValue({ ok: false, status: 503, detail: 'test' }),
     }));
-    vi.doMock('@/lib/start-fix-push', () => ({
+    vi.doMock('@/lib/pipeline/start-fix-push', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
       startFixPush: vi.fn().mockResolvedValue({ ok: false, status: 503, detail: 'test' }),
     }));
 
-    const mod = await import('@/lib/job-storage');
+    const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
   });
 
@@ -2327,7 +2327,7 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
   let startProjectReviewMock: ReturnType<typeof vi.fn>;
   let isHookRejectionMock: ReturnType<typeof vi.fn>;
   let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
-  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   let tempDir: string;
   let execMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
@@ -2391,31 +2391,31 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/proj');
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/pm2-jobs', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/shell', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({
       exec: execMock,
     }));
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getProjectTestConfig: getProjectTestConfigMock,
     }));
-    vi.doMock('@/lib/git-utils', () => ({
+    vi.doMock('@/lib/git/git-utils', () => ({
       markReviewed: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
-    vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
-    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
-    vi.doMock('@/lib/start-fix-push', () => ({
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
+    vi.doMock('@/lib/pipeline/start-fix-push', () => ({
       isHookRejection: isHookRejectionMock,
       startFixPush: startFixPushMock,
     }));
 
-    const mod = await import('@/lib/job-storage');
+    const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
   });
 
@@ -2593,7 +2593,7 @@ describe('runCompletionHooks – release-after-run', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let startReleaseMock: ReturnType<typeof vi.fn>;
   let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
-  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
 
   function makeJob(kind: string, overrides: Partial<JobData> = {}): JobData {
     return {
@@ -2624,37 +2624,37 @@ describe('runCompletionHooks – release-after-run', () => {
     getProjectTestConfigMock = vi.fn().mockReturnValue({ autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: true });
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/pm2-jobs', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/shell', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
     }));
-    vi.doMock('@/lib/git-utils', () => ({
+    vi.doMock('@/lib/git/git-utils', () => ({
       markReviewed: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/proj'),
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getProjectTestConfig: getProjectTestConfigMock,
     }));
-    vi.doMock('@/lib/start-release', () => ({
+    vi.doMock('@/lib/pipeline/start-release', () => ({
       startRelease: startReleaseMock,
     }));
-    vi.doMock('@/lib/start-review', () => ({
+    vi.doMock('@/lib/pipeline/start-review', () => ({
       startProjectReview: vi.fn().mockResolvedValue({ ok: false, status: 503, detail: 'not needed' }),
     }));
-    vi.doMock('@/lib/start-push', () => ({
+    vi.doMock('@/lib/pipeline/start-push', () => ({
       startProjectPush: vi.fn().mockResolvedValue({ ok: false, status: 503, detail: 'not needed' }),
     }));
-    vi.doMock('@/lib/start-fix-push', () => ({
+    vi.doMock('@/lib/pipeline/start-fix-push', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
       startFixPush: vi.fn().mockResolvedValue({ ok: false, status: 503, detail: 'not needed' }),
     }));
 
-    const mod = await import('@/lib/job-storage');
+    const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
   });
 
@@ -2714,7 +2714,7 @@ describe('runCompletionHooks – release-after-run', () => {
 
 describe('markDone – ghIssuesCache invalidation', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
 
   function makeJob(project: string, kind = 'run'): JobData {
     return {
@@ -2752,40 +2752,40 @@ describe('markDone – ghIssuesCache invalidation', () => {
     testDb = createTestDb();
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/pm2-jobs', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/shell', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
     }));
-    vi.doMock('@/lib/git-utils', () => ({
+    vi.doMock('@/lib/git/git-utils', () => ({
       markReviewed: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/proj'),
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getProjectTestConfig: vi.fn().mockReturnValue({ autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false }),
     }));
-    vi.doMock('@/lib/start-review', () => ({
+    vi.doMock('@/lib/pipeline/start-review', () => ({
       startProjectReview: vi.fn().mockResolvedValue({ ok: false }),
     }));
-    vi.doMock('@/lib/start-push', () => ({
+    vi.doMock('@/lib/pipeline/start-push', () => ({
       startProjectPush: vi.fn().mockResolvedValue({ ok: false }),
     }));
-    vi.doMock('@/lib/start-fix', () => ({
+    vi.doMock('@/lib/pipeline/start-fix', () => ({
       startFixFromJob: vi.fn().mockResolvedValue({ ok: false }),
     }));
-    vi.doMock('@/lib/start-fix-push', () => ({
+    vi.doMock('@/lib/pipeline/start-fix-push', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
       startFixPush: vi.fn().mockResolvedValue({ ok: false }),
     }));
-    vi.doMock('@/lib/start-release', () => ({
+    vi.doMock('@/lib/pipeline/start-release', () => ({
       startRelease: vi.fn().mockResolvedValue({ ok: false }),
     }));
 
-    const mod = await import('@/lib/job-storage');
+    const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
   });
 
@@ -2834,7 +2834,7 @@ describe('markDone – ghIssuesCache invalidation', () => {
 
 describe('markDone – metadata extraction skipped for release kind', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   let tempDir: string;
 
   const resultLine = '{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"session_id":"ses-abc","result":"ok","modelUsage":{"claude-sonnet":{"inputTokens":100,"outputTokens":50,"cacheReadInputTokens":10,"cacheCreationInputTokens":5}}}';
@@ -2866,34 +2866,34 @@ describe('markDone – metadata extraction skipped for release kind', () => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-meta-'));
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/pm2-jobs', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/shell', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
     }));
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getProjectTestConfig: vi.fn().mockReturnValue({ autoPushEnabled: false }),
     }));
-    vi.doMock('@/lib/git-utils', () => ({
+    vi.doMock('@/lib/git/git-utils', () => ({
       markReviewed: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/start-review', () => ({
+    vi.doMock('@/lib/pipeline/start-review', () => ({
       startProjectReview: vi.fn().mockResolvedValue({ ok: false }),
     }));
-    vi.doMock('@/lib/start-push', () => ({
+    vi.doMock('@/lib/pipeline/start-push', () => ({
       startProjectPush: vi.fn().mockResolvedValue({ ok: false }),
     }));
-    vi.doMock('@/lib/start-fix-push', () => ({
+    vi.doMock('@/lib/pipeline/start-fix-push', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
       startFixPush: vi.fn().mockResolvedValue({ ok: false }),
     }));
 
-    const mod = await import('@/lib/job-storage');
+    const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
   });
 
@@ -2991,7 +2991,7 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
   let startMarkDodMock: ReturnType<typeof vi.fn>;
   let launchPrWaitMock: ReturnType<typeof vi.fn>;
   let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
-  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   let tempDir: string;
 
   function makeJob(kind: string, overrides: Partial<JobData> = {}): JobData {
@@ -3028,24 +3028,24 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
     });
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/pm2-jobs', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
-    vi.doMock('@/lib/git-utils', () => ({ markReviewed: vi.fn().mockResolvedValue(undefined) }));
-    vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue('/proj') }));
-    vi.doMock('@/lib/start-review', () => ({ startProjectReview: vi.fn() }));
-    vi.doMock('@/lib/start-test', () => ({ startProjectTest: vi.fn() }));
-    vi.doMock('@/lib/start-push', () => ({ startProjectPush: vi.fn() }));
-    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: vi.fn() }));
-    vi.doMock('@/lib/start-fix', () => ({ startFixFromJob: vi.fn() }));
-    vi.doMock('@/lib/scheduling', () => ({ getProjectTestConfig: getProjectTestConfigMock }));
-    vi.doMock('@/lib/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
+    vi.doMock('@/lib/git/git-utils', () => ({ markReviewed: vi.fn().mockResolvedValue(undefined) }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue('/proj') }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: vi.fn() }));
+    vi.doMock('@/lib/pipeline/start-test', () => ({ startProjectTest: vi.fn() }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: vi.fn() }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: vi.fn() }));
+    vi.doMock('@/lib/pipeline/start-fix', () => ({ startFixFromJob: vi.fn() }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getProjectTestConfig: getProjectTestConfigMock }));
+    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
     launchPrWaitMock = vi.fn().mockReturnValue({ jobId: 'prwait-1' });
-    vi.doMock('@/lib/start-pr-wait', () => ({ launchPrWait: launchPrWaitMock }));
+    vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ launchPrWait: launchPrWaitMock }));
 
-    const mod = await import('@/lib/job-storage');
+    const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
   });
 
@@ -3102,7 +3102,7 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
 
 describe('markDone – DB-level idempotency guard', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   let startProjectReviewMock: ReturnType<typeof vi.fn>;
   let startProjectPushMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
@@ -3137,40 +3137,40 @@ describe('markDone – DB-level idempotency guard', () => {
     startProjectPushMock = vi.fn().mockResolvedValue({ ok: false, detail: 'guard' });
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/pm2-jobs', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/shell', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
     }));
-    vi.doMock('@/lib/git-utils', () => ({
+    vi.doMock('@/lib/git/git-utils', () => ({
       markReviewed: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getProjectTestConfig: vi.fn().mockReturnValue({ autoPushEnabled: false }),
     }));
-    vi.doMock('@/lib/start-review', () => ({
+    vi.doMock('@/lib/pipeline/start-review', () => ({
       startProjectReview: startProjectReviewMock,
     }));
-    vi.doMock('@/lib/start-push', () => ({
+    vi.doMock('@/lib/pipeline/start-push', () => ({
       startProjectPush: startProjectPushMock,
     }));
-    vi.doMock('@/lib/start-commit', () => ({
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
       startProjectCommit: vi.fn().mockResolvedValue({ ok: false, detail: 'guard' }),
     }));
-    vi.doMock('@/lib/start-fix', () => ({
+    vi.doMock('@/lib/pipeline/start-fix', () => ({
       startFixFromJob: vi.fn().mockResolvedValue({ ok: false, detail: 'guard' }),
     }));
-    vi.doMock('@/lib/start-fix-push', () => ({
+    vi.doMock('@/lib/pipeline/start-fix-push', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
       startFixPush: vi.fn().mockResolvedValue({ ok: false, detail: 'guard' }),
     }));
 
-    const mod = await import('@/lib/job-storage');
+    const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
   });
 
@@ -3270,7 +3270,7 @@ describe('markDone – DB-level idempotency guard', () => {
 
 describe('runCompletionHooks – abort short-circuit', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let markDoneFn: typeof import('@/lib/job-storage').markDone;
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   let startProjectReviewMock: ReturnType<typeof vi.fn>;
   let startProjectPushMock: ReturnType<typeof vi.fn>;
   let startProjectCommitMock: ReturnType<typeof vi.fn>;
@@ -3310,28 +3310,28 @@ describe('runCompletionHooks – abort short-circuit', () => {
     getProjectTestConfigMock = vi.fn().mockReturnValue({ autoPushEnabled: true });
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/pm2-jobs', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/shell', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
     }));
-    vi.doMock('@/lib/git-utils', () => ({
+    vi.doMock('@/lib/git/git-utils', () => ({
       markReviewed: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/proj'),
     }));
-    vi.doMock('@/lib/start-review', () => ({ startProjectReview: startProjectReviewMock }));
-    vi.doMock('@/lib/start-push', () => ({ startProjectPush: startProjectPushMock }));
-    vi.doMock('@/lib/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
-    vi.doMock('@/lib/start-fix', () => ({ startFixFromJob: startFixFromJobMock }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
+    vi.doMock('@/lib/pipeline/start-fix', () => ({ startFixFromJob: startFixFromJobMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getProjectTestConfig: getProjectTestConfigMock,
     }));
 
-    const mod = await import('@/lib/job-storage');
+    const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
   });
 

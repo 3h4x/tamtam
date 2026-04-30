@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import type { JobData } from '@/lib/job-storage';
-import type { PipelineLock } from '@/lib/pipeline-lock';
+import type { JobData } from '@/lib/jobs/job-storage';
+import type { PipelineLock } from '@/lib/pipeline/pipeline-lock';
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
   return {
@@ -48,17 +48,17 @@ describe('POST /api/projects/by-project/{projectName}/release/abort', () => {
     updateJobMock = vi.fn();
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
 
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: getLockMock,
       releaseLock: releaseLockMock,
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
       listJobs: listJobsMock,
       updateJob: updateJobMock,
     }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/notifications', () => ({ notify: vi.fn().mockResolvedValue(undefined) }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/notifications', () => ({ notify: vi.fn().mockResolvedValue(undefined) }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/release/abort/route');
     POST = mod.POST;

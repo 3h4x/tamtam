@@ -15,7 +15,7 @@ describe('GET /api/projects', () => {
       priorities: [],
     });
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       fetchProjectData: fetchProjectDataMock,
     }));
 
@@ -74,7 +74,7 @@ describe('PATCH /api/projects/[schedId]/priority', () => {
     });
     writePriorityYamlMock = vi.fn();
 
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: getImproveConfigMock,
       writePriorityYaml: writePriorityYamlMock,
       PRIORITY_ORDER: ['critical', 'high', 'medium', 'low'],
@@ -141,11 +141,11 @@ describe('POST /api/projects/[schedId]/pause', () => {
     });
     pauseAllMock = vi.fn().mockResolvedValue(undefined);
 
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: getImproveConfigMock,
     }));
 
-    vi.doMock('@/lib/launchagent', () => ({
+    vi.doMock('@/lib/scheduling/launchagent', () => ({
       pauseAll: pauseAllMock,
     }));
 
@@ -196,11 +196,11 @@ describe('POST /api/projects/[schedId]/resume', () => {
     });
     resumeAllMock = vi.fn().mockResolvedValue(undefined);
 
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: getImproveConfigMock,
     }));
 
-    vi.doMock('@/lib/launchagent', () => ({
+    vi.doMock('@/lib/scheduling/launchagent', () => ({
       resumeAll: resumeAllMock,
     }));
 
@@ -258,11 +258,11 @@ describe('GET /api/projects/[schedId]/detail', () => {
     });
     readRunHistoryMock = vi.fn().mockReturnValue([]);
 
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: getImproveConfigMock,
     }));
 
-    vi.doMock('@/lib/run-history', () => ({
+    vi.doMock('@/lib/jobs/run-history', () => ({
       readRunHistory: readRunHistoryMock,
     }));
 

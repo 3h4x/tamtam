@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { JobData } from '@/lib/job-storage';
+import type { JobData } from '@/lib/jobs/job-storage';
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
   return {
@@ -44,7 +44,7 @@ describe('POST /api/jobs/[jobId]/fix', () => {
     updateJobMock = vi.fn();
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
 
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
       probeJobStatus: probeJobStatusMock,
       readLog: readLogMock,
@@ -52,14 +52,14 @@ describe('POST /api/jobs/[jobId]/fix', () => {
       updateJob: updateJobMock,
     }));
 
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({
         claudeBin: 'claude',
         logDir: join(tempDir, 'logs'),
       }),
     }));
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
 

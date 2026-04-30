@@ -15,7 +15,7 @@ describe('GET /api/projects/by-project/{projectName}/docs', () => {
 
     resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
 

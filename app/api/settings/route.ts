@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { getSettings, reloadConfig } from '@/lib/config';
-import { syncJobsPauseState } from '@/lib/job-control';
+import { getSettings, reloadConfig } from '@/lib/shared/config';
+import { syncJobsPauseState } from '@/lib/shared/job-control';
 const SETTING_KEYS = [
   'github_owner',
   'claude_provider',

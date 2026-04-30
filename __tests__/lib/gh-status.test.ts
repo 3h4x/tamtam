@@ -22,15 +22,15 @@ function createTestDb() {
 
 describe('gh-status invalidateProject', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let invalidateProject: typeof import('@/lib/gh-status').invalidateProject;
+  let invalidateProject: typeof import('@/lib/shared/gh-status').invalidateProject;
 
   beforeEach(async () => {
     vi.resetModules();
     testDb = createTestDb();
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 1, stdout: '', stderr: '' }) }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 1, stdout: '', stderr: '' }) }));
 
-    const mod = await import('@/lib/gh-status');
+    const mod = await import('@/lib/shared/gh-status');
     invalidateProject = mod.invalidateProject;
   });
 
@@ -109,7 +109,7 @@ describe('gh-status invalidateProject', () => {
 describe('gh-status cache TTL per CI status', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let execMock: ReturnType<typeof vi.fn>;
-  let ghStatusLookup: typeof import('@/lib/gh-status').ghStatusLookup;
+  let ghStatusLookup: typeof import('@/lib/shared/gh-status').ghStatusLookup;
 
   function insertStatus(project: string, ci: string, fetchedSecondsAgo: number) {
     const fetchedAt = new Date(Date.now() - fetchedSecondsAgo * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -130,9 +130,9 @@ describe('gh-status cache TTL per CI status', () => {
     execMock = vi.fn().mockResolvedValue({ exitCode: 1, stdout: '', stderr: '' });
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
 
-    const mod = await import('@/lib/gh-status');
+    const mod = await import('@/lib/shared/gh-status');
     ghStatusLookup = mod.ghStatusLookup;
   });
 
@@ -198,7 +198,7 @@ describe('gh-status cache TTL per CI status', () => {
 describe('gh-status ghRepo auto-detection via git remote', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let execMock: ReturnType<typeof vi.fn>;
-  let ghStatusLookup: typeof import('@/lib/gh-status').ghStatusLookup;
+  let ghStatusLookup: typeof import('@/lib/shared/gh-status').ghStatusLookup;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -206,9 +206,9 @@ describe('gh-status ghRepo auto-detection via git remote', () => {
     execMock = vi.fn();
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
 
-    const mod = await import('@/lib/gh-status');
+    const mod = await import('@/lib/shared/gh-status');
     ghStatusLookup = mod.ghStatusLookup;
   });
 

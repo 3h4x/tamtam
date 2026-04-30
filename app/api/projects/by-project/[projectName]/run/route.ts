@@ -3,14 +3,14 @@ import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
-import { getImproveConfig } from '@/lib/scheduling';
-import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills';
-import { resolveProjectPath } from '@/lib/project-data';
-import { createJob, updateJob } from '@/lib/job-storage';
-import { startJob } from '@/lib/pm2-jobs';
-import { withBasePrompt, getPermissionModeFlag } from '@/lib/config';
-import { errMsg } from '@/lib/types';
-import { jobsPausedResult } from '@/lib/job-control';
+import { getImproveConfig } from '@/lib/scheduling/scheduling';
+import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills/skills';
+import { resolveProjectPath } from '@/lib/shared/project-data';
+import { createJob, updateJob } from '@/lib/jobs/job-storage';
+import { startJob } from '@/lib/jobs/pm2-jobs';
+import { withBasePrompt, getPermissionModeFlag } from '@/lib/shared/config';
+import { errMsg } from '@/lib/shared/types';
+import { jobsPausedResult } from '@/lib/shared/job-control';
 
 export async function POST(
   request: NextRequest,

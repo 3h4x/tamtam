@@ -9,18 +9,18 @@ function makeExecResult(exitCode: number, stdout = '', stderr = '') {
 
 describe('launchagent', () => {
   let execMock: ReturnType<typeof vi.fn>;
-  let plistPath: typeof import('@/lib/launchagent').plistPath;
-  let pausedPlistPath: typeof import('@/lib/launchagent').pausedPlistPath;
-  let launchctlInfo: typeof import('@/lib/launchagent').launchctlInfo;
-  let pauseAll: typeof import('@/lib/launchagent').pauseAll;
-  let resumeAll: typeof import('@/lib/launchagent').resumeAll;
+  let plistPath: typeof import('@/lib/scheduling/launchagent').plistPath;
+  let pausedPlistPath: typeof import('@/lib/scheduling/launchagent').pausedPlistPath;
+  let launchctlInfo: typeof import('@/lib/scheduling/launchagent').launchctlInfo;
+  let pauseAll: typeof import('@/lib/scheduling/launchagent').pauseAll;
+  let resumeAll: typeof import('@/lib/scheduling/launchagent').resumeAll;
 
   beforeEach(async () => {
     vi.resetModules();
     execMock = vi.fn();
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
 
-    const mod = await import('@/lib/launchagent');
+    const mod = await import('@/lib/scheduling/launchagent');
     plistPath = mod.plistPath;
     pausedPlistPath = mod.pausedPlistPath;
     launchctlInfo = mod.launchctlInfo;
@@ -43,8 +43,8 @@ describe('launchagent', () => {
     it('uses LAUNCHAGENT_PREFIX env var when set', async () => {
       vi.resetModules();
       process.env.LAUNCHAGENT_PREFIX = 'org.custom';
-      vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-      const mod = await import('@/lib/launchagent');
+      vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+      const mod = await import('@/lib/scheduling/launchagent');
       expect(mod.plistPath('foo')).toContain('org.custom.improve.foo.plist');
     });
   });

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { sendTestNotification } from '@/lib/notifications';
+import { sendTestNotification } from '@/lib/shared/notifications';
 
 export async function POST(request: NextRequest) {
   try {

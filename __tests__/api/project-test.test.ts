@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { JobData } from '@/lib/job-storage';
+import type { JobData } from '@/lib/jobs/job-storage';
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
   return {
@@ -67,11 +67,11 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
     const mockProc = makeMockProcess();
     spawnMock = vi.fn().mockReturnValue(mockProc);
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
 
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({
         claudeBin: 'claude',
         logDir: join(tempDir, 'logs'),
@@ -79,7 +79,7 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
       }),
     }));
 
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       updateJob: updateJobMock,
       listJobs: listJobsMock,
@@ -94,7 +94,7 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
       };
     });
 
-    vi.doMock('@/lib/pipeline-lock', () => ({
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj1', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
@@ -194,11 +194,11 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
 
     try {
       const mockProc = makeMockProcess();
-      vi.doMock('@/lib/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(newProjDir) }));
-      vi.doMock('@/lib/scheduling', () => ({
+      vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(newProjDir) }));
+      vi.doMock('@/lib/scheduling/scheduling', () => ({
         getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: join(tempDir, 'logs'), projects: {} }),
       }));
-      vi.doMock('@/lib/job-storage', () => ({
+      vi.doMock('@/lib/jobs/job-storage', () => ({
         createJob: vi.fn().mockImplementation(() => makeJob()),
         updateJob: vi.fn(),
         listJobs: vi.fn().mockReturnValue([]),
@@ -208,7 +208,7 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
         const actual = await vi.importActual('child_process');
         return { ...actual, spawn: vi.fn().mockReturnValue(mockProc) };
       });
-      vi.doMock('@/lib/pipeline-lock', () => ({
+      vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
         getLock: vi.fn().mockReturnValue({ project: 'proj1', lockedByJobId: 'blocker-123', acquiredAt: Date.now() / 1000 }),
         acquireLock: vi.fn().mockResolvedValue({ acquired: false, lock: {}, blockingJobId: 'blocker-123' }),
         isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),

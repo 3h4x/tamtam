@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildEntries } from '../../components/ProjectRunsTab'
+import { buildEntries } from '../../components/project-runs/utils'
 import type { JobInfo } from '../../lib/client-api'
 
 function job(partial: Partial<JobInfo> & { id: string; kind: string; started_at: number }): JobInfo {

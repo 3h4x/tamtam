@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { getAggregateCi, getCiFailedUrl, getReleaseTag, formatDuration } from '@/lib/statusConstants';
+import { getAggregateCi, getCiFailedUrl, getReleaseTag, formatDuration } from '@/lib/shared/statusConstants';
 import type { ProjectHealth } from '@/hooks/useProjectHealth';
-import type { Task } from '@/lib/types';
+import type { Task } from '@/lib/shared/types';
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {

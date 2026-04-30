@@ -27,12 +27,12 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
     // Default: no per-project row → issueAutoBranch defaults to ON (legacy).
     getProjectTestConfigMock = vi.fn().mockReturnValue(null);
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: vi.fn(),
     }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getProjectTestConfig: getProjectTestConfigMock,
     }));
 

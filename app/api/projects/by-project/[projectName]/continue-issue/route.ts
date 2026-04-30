@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listJobs, readLog } from '@/lib/job-storage';
+import { listJobs, readLog } from '@/lib/jobs/job-storage';
 
 interface ContinuePayload {
   sessionId: string | null;

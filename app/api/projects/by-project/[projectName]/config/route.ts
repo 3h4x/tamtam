@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { writeProjectFieldYaml, getProjectTestConfig, getProjectPushResult } from '@/lib/scheduling';
-import { resolveProjectPath, clearProjectDataCache } from '@/lib/project-data';
-import { reloadConfig } from '@/lib/config';
-import { installTestSchedule, uninstallTestSchedule, parseTestScheduleToCron } from '@/lib/test-scheduler';
-import { detectTestCommand } from '@/lib/start-test';
-import { loadFileConfig, writeFileConfig, getBranchContext } from '@/lib/tamtam-file-config';
+import { writeProjectFieldYaml, getProjectTestConfig, getProjectPushResult } from '@/lib/scheduling/scheduling';
+import { resolveProjectPath, clearProjectDataCache } from '@/lib/shared/project-data';
+import { reloadConfig } from '@/lib/shared/config';
+import { installTestSchedule, uninstallTestSchedule, parseTestScheduleToCron } from '@/lib/scheduling/test-scheduler';
+import { detectTestCommand } from '@/lib/pipeline/start-test';
+import { loadFileConfig, writeFileConfig, getBranchContext } from '@/lib/skills/tamtam-file-config';
 
 export async function GET(
   _request: NextRequest,

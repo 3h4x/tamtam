@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { getImproveConfig } from '@/lib/scheduling';
-import { resolveProjectPath } from '@/lib/project-data';
-import { getJob, createJob, updateJob } from '@/lib/job-storage';
-import { startJob } from '@/lib/pm2-jobs';
-import { getPermissionModeFlag, getSettings } from '@/lib/config';
-import { errMsg } from '@/lib/types';
-import { jobsPausedResult } from '@/lib/job-control';
+import { getImproveConfig } from '@/lib/scheduling/scheduling';
+import { resolveProjectPath } from '@/lib/shared/project-data';
+import { getJob, createJob, updateJob } from '@/lib/jobs/job-storage';
+import { startJob } from '@/lib/jobs/pm2-jobs';
+import { getPermissionModeFlag, getSettings } from '@/lib/shared/config';
+import { errMsg } from '@/lib/shared/types';
+import { jobsPausedResult } from '@/lib/shared/job-control';
 
 export async function POST(
   request: NextRequest,

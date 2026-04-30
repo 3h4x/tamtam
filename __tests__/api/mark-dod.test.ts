@@ -7,7 +7,7 @@ describe('POST /api/projects/by-project/{projectName}/mark-dod', () => {
   beforeEach(async () => {
     vi.resetModules();
     startMarkDodMock = vi.fn();
-    vi.doMock('@/lib/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
+    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/mark-dod/route');
     POST = mod.POST;

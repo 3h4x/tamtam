@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { fetchJobs } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
-import { formatAgo } from '@/lib/format'
+import { formatAgo } from '@/lib/shared/format'
 
 function formatTime(ts: number): string {
   return new Date(ts * 1000).toLocaleString()

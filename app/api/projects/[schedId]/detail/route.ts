@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { getImproveConfig } from '@/lib/scheduling';
-import { readRunHistory } from '@/lib/run-history';
+import { getImproveConfig } from '@/lib/scheduling/scheduling';
+import { readRunHistory } from '@/lib/jobs/run-history';
 
 export async function GET(
   _request: NextRequest,

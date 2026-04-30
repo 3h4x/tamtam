@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
-import { getImproveConfig } from '@/lib/scheduling';
+import { getImproveConfig } from '@/lib/scheduling/scheduling';
 
 export async function GET(
   _request: NextRequest,

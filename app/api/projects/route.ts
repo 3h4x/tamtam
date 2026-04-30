@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { fetchProjectData } from '@/lib/project-data';
+import { fetchProjectData } from '@/lib/shared/project-data';
 import { db, schema } from '@/lib/db';
-import type { Task } from '@/lib/types';
+import type { Task } from '@/lib/shared/types';
 
 export async function GET() {
   const data = await fetchProjectData();

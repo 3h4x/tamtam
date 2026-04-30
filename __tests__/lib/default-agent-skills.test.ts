@@ -21,13 +21,13 @@ function createTestDb() {
 
 describe('seedDefaultSkills', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let seedFn: typeof import('@/lib/default-agent-skills').seedDefaultSkills;
+  let seedFn: typeof import('@/lib/agents/default-agent-skills').seedDefaultSkills;
 
   beforeEach(async () => {
     vi.resetModules();
     testDb = createTestDb();
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    const mod = await import('@/lib/default-agent-skills');
+    const mod = await import('@/lib/agents/default-agent-skills');
     seedFn = mod.seedDefaultSkills;
   });
 

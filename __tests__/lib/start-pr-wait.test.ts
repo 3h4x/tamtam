@@ -5,7 +5,7 @@ process.env.TAMTAM_PR_WAIT_POLL_MS = '1';
 process.env.TAMTAM_PR_WAIT_TIMEOUT_MS = '5000';
 
 describe('launchPrWait', () => {
-  let launchPrWait: typeof import('@/lib/start-pr-wait').launchPrWait;
+  let launchPrWait: typeof import('@/lib/pipeline/start-pr-wait').launchPrWait;
   let execMock: ReturnType<typeof vi.fn>;
   let createJobMock: ReturnType<typeof vi.fn>;
   let markDoneMock: ReturnType<typeof vi.fn>;
@@ -26,23 +26,23 @@ describe('launchPrWait', () => {
     updateJobMock = vi.fn();
     startMarkDodMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'dod-1', issueNumber: 42, verified: 2, total: 2, changed: true });
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
     }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs' }),
     }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
     }));
-    vi.doMock('@/lib/start-mark-dod', () => ({
+    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({
       startMarkDod: startMarkDodMock,
     }));
 
-    ({ launchPrWait } = await import('@/lib/start-pr-wait'));
+    ({ launchPrWait } = await import('@/lib/pipeline/start-pr-wait'));
   });
 
   afterEach(() => {
@@ -66,18 +66,18 @@ describe('launchPrWait', () => {
 
   it('returns error when project not found', async () => {
     vi.resetModules();
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/scheduling', () => ({ getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs' }) }));
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs' }) }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
     }));
-    vi.doMock('@/lib/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
-    const { launchPrWait: launchPrWait2 } = await import('@/lib/start-pr-wait');
+    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
+    const { launchPrWait: launchPrWait2 } = await import('@/lib/pipeline/start-pr-wait');
     const r = launchPrWait2('missing-proj', 1, 'owner/repo', 'https://github.com/owner/repo/pull/1');
     expect(r).toEqual({ error: 'project not found' });
   });
@@ -560,7 +560,7 @@ describe('launchPrWait', () => {
   });
 
   describe('timeout', () => {
-    let launchPrWaitT: typeof import('@/lib/start-pr-wait').launchPrWait;
+    let launchPrWaitT: typeof import('@/lib/pipeline/start-pr-wait').launchPrWait;
     let execT: ReturnType<typeof vi.fn>;
     let markDoneT: ReturnType<typeof vi.fn>;
 
@@ -571,14 +571,14 @@ describe('launchPrWait', () => {
       execT = vi.fn();
       markDoneT = vi.fn().mockResolvedValue(undefined);
 
-      vi.doMock('@/lib/project-data', () => ({
+      vi.doMock('@/lib/shared/project-data', () => ({
         resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
       }));
-      vi.doMock('@/lib/shell', () => ({ exec: execT }));
-      vi.doMock('@/lib/scheduling', () => ({
+      vi.doMock('@/lib/shared/shell', () => ({ exec: execT }));
+      vi.doMock('@/lib/scheduling/scheduling', () => ({
         getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs' }),
       }));
-      vi.doMock('@/lib/job-storage', () => ({
+      vi.doMock('@/lib/jobs/job-storage', () => ({
         createJob: vi.fn().mockImplementation((project: string, kind: string) => ({
           id: `${project}-${kind}-timeout`, project, kind, pid: process.pid, logPath: '',
           prompt: null, startedAt: Date.now() / 1000, finishedAt: null, exitCode: null, seen: false,
@@ -586,9 +586,9 @@ describe('launchPrWait', () => {
         markDone: markDoneT,
         updateJob: vi.fn(),
       }));
-      vi.doMock('@/lib/start-mark-dod', () => ({ startMarkDod: vi.fn() }));
+      vi.doMock('@/lib/pipeline/start-mark-dod', () => ({ startMarkDod: vi.fn() }));
 
-      ({ launchPrWait: launchPrWaitT } = await import('@/lib/start-pr-wait'));
+      ({ launchPrWait: launchPrWaitT } = await import('@/lib/pipeline/start-pr-wait'));
     });
 
     afterEach(() => {

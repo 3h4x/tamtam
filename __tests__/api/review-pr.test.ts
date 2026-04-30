@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import type { JobData } from '@/lib/job-storage';
+import type { JobData } from '@/lib/jobs/job-storage';
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
   return {
@@ -43,11 +43,11 @@ describe('POST /api/projects/by-project/{projectName}/review-pr', () => {
       stderr: '',
     });
 
-    vi.doMock('@/lib/project-data', () => ({
+    vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
 
-    vi.doMock('@/lib/scheduling', () => ({
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({
         claudeBin: 'claude',
         logDir: '/tmp/tamtam-logs',
@@ -55,22 +55,22 @@ describe('POST /api/projects/by-project/{projectName}/review-pr', () => {
       }),
     }));
 
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       updateJob: updateJobMock,
       listJobs: listJobsMock,
       probeJobStatus: probeJobStatusMock,
     }));
 
-    vi.doMock('@/lib/pm2-jobs', () => ({
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       startJob: startJobMock,
     }));
 
-    vi.doMock('@/lib/shell', () => ({
+    vi.doMock('@/lib/shared/shell', () => ({
       exec: execMock,
     }));
 
-    vi.doMock('@/lib/skills', () => ({
+    vi.doMock('@/lib/skills/skills', () => ({
       CODE_REVIEWER_SKILL: '/nonexistent/skill.md',
     }));
 

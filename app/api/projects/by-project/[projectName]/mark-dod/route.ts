@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { startMarkDod } from '@/lib/start-mark-dod';
+import { startMarkDod } from '@/lib/pipeline/start-mark-dod';
 
 // Manually run DoD verification for the project's latest issue-linked run.
 // Used for debugging and as a "re-check now" button — the release pipeline

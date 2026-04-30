@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getJob, jobToDict, readParsedLog, readLog, probeJobStatus, updateJob } from '@/lib/job-storage';
-import { exec } from '@/lib/shell';
+import { getJob, jobToDict, readParsedLog, readLog, probeJobStatus, updateJob } from '@/lib/jobs/job-storage';
+import { exec } from '@/lib/shared/shell';
 
 export async function GET(
   _request: NextRequest,

@@ -5,7 +5,7 @@ import * as schema from '@/lib/db/schema';
 import { writeFileSync, mkdtempSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { RetentionConfig } from '@/lib/retention';
+import type { RetentionConfig } from '@/lib/jobs/retention';
 
 function createTestDb() {
   const sqlite = new Database(':memory:');
@@ -68,14 +68,14 @@ function makeJob(
 describe('pruneProjectLogs', () => {
   let tempDir: string;
   let testDb: ReturnType<typeof createTestDb>;
-  let pruneProjectLogs: typeof import('@/lib/retention').pruneProjectLogs;
+  let pruneProjectLogs: typeof import('@/lib/jobs/retention').pruneProjectLogs;
 
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-retention-'));
     vi.resetModules();
     testDb = createTestDb();
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    const mod = await import('@/lib/retention');
+    const mod = await import('@/lib/jobs/retention');
     pruneProjectLogs = mod.pruneProjectLogs;
   });
 
@@ -221,13 +221,13 @@ describe('pruneProjectLogs', () => {
 
 describe('runNightlyCleanup', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let runNightlyCleanup: typeof import('@/lib/retention').runNightlyCleanup;
+  let runNightlyCleanup: typeof import('@/lib/jobs/retention').runNightlyCleanup;
 
   beforeEach(async () => {
     vi.resetModules();
     testDb = createTestDb();
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    const mod = await import('@/lib/retention');
+    const mod = await import('@/lib/jobs/retention');
     runNightlyCleanup = mod.runNightlyCleanup;
   });
 

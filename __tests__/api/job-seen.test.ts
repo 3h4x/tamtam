@@ -10,7 +10,7 @@ describe('POST /api/jobs/[jobId]/seen', () => {
 
     markSeenMock = vi.fn().mockReturnValue(true);
 
-    vi.doMock('@/lib/job-storage', () => ({
+    vi.doMock('@/lib/jobs/job-storage', () => ({
       markSeen: markSeenMock,
     }));
 
