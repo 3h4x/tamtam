@@ -66,16 +66,16 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
   if (loading) {
     return (
       <div className="mt-2">
-        <div className="bg-bg-secondary rounded-lg p-3 mb-3">
-          <div className="flex items-center gap-4">
+        <div className="bg-bg-secondary border border-border rounded-md px-3 py-1.5 mb-2">
+          <div className="flex items-center gap-3">
             <div className="skeleton h-3.5 w-32" />
-            <div className="skeleton h-3.5 w-16" />
-            <div className="skeleton h-3.5 w-16" />
+            <div className="skeleton h-3.5 w-12" />
+            <div className="skeleton h-3.5 w-12" />
           </div>
         </div>
-        <div className="border border-border rounded-lg overflow-hidden">
+        <div className="border border-border rounded-md overflow-hidden">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="px-3 py-2.5 flex items-start gap-3 border-b border-border last:border-0" style={{ opacity: 1 - i * 0.18 }}>
+            <div key={i} className="px-3 py-1.5 flex items-start gap-2.5 border-b border-border last:border-0" style={{ opacity: 1 - i * 0.18 }}>
               <div className="skeleton h-4 w-4 rounded-full mt-0.5 shrink-0" />
               <div className="flex-1 min-w-0 flex flex-col gap-1.5">
                 <div className="skeleton h-3.5 w-3/5" />
@@ -108,7 +108,7 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
 
   return (
     <div className="mt-2">
-      <div className="bg-bg-secondary border border-border rounded-lg px-3 py-2 mb-3 flex items-center gap-x-4 gap-y-1 flex-wrap">
+      <div className="bg-bg-secondary border border-border rounded-md px-3 py-1.5 mb-2 flex items-center gap-x-3 gap-y-1 flex-wrap">
         {repo && (
           <span className="text-xs text-text-secondary font-mono">{repo}</span>
         )}
@@ -143,11 +143,11 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
       </div>
 
       {prs.length > 0 && (
-        <div className="mb-4">
-          <div className="text-xs font-medium text-text-secondary uppercase tracking-wider mb-1.5 px-1">
-            Pull Requests
+        <div className="mb-3">
+          <div className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wider mb-1 px-1">
+            Pull Requests · {prs.length}
           </div>
-          <div className="border border-border rounded-lg overflow-hidden bg-bg-secondary">
+          <div className="border border-border rounded-md overflow-hidden bg-bg-secondary">
             {prs.map((pr) => (
               <PRRow key={pr.number} pr={pr} projectName={projectName} onMerged={() => load('refresh')} />
             ))}
@@ -157,10 +157,10 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
 
       {issues.length > 0 && (
         <div>
-          <div className="text-xs font-medium text-text-secondary uppercase tracking-wider mb-1.5 px-1">
-            Issues
+          <div className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wider mb-1 px-1">
+            Issues · {issues.length}
           </div>
-          <div className="border border-border rounded-lg overflow-hidden bg-bg-secondary">
+          <div className="border border-border rounded-md overflow-hidden bg-bg-secondary">
             {issues.map((issue) => (
               <IssueRow key={issue.number} issue={issue} projectName={projectName} projectCfg={projectCfg} />
             ))}
@@ -169,7 +169,7 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
       )}
 
       {prs.length === 0 && issues.length === 0 && !ghError && (
-        <div className="border border-dashed border-border rounded-lg p-8 text-center">
+        <div className="border border-dashed border-border rounded-md p-8 text-center">
           <div className="text-3xl text-text-tertiary mb-2 leading-none">✓</div>
           <p className="text-sm text-text-secondary font-medium">Inbox zero</p>
           <p className="text-xs text-text-tertiary mt-1">No open PRs or issues for this project.</p>
