@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { getBranchContext, gitLsTreeSync, gitShowSync } from '@/lib/git/git-branch';
+import { getFileAgentOverride } from '@/lib/agents/file-agent-overrides';
 
 export interface FileAgent {
   id: string;
@@ -73,17 +74,30 @@ function buildFileAgent(
   now: number
 ): FileAgent {
   const { meta, body } = parseFrontmatter(content);
+  // The `.md` file owns prompt + identity. Operational config (enabled,
+  // schedule, model, runner, skillIds) is stored in the DB so the UI can
+  // toggle them without dirtying a committed file. Frontmatter values are
+  // used as a starting baseline; the DB override (if any) wins on every
+  // field it explicitly sets.
+  const override = getFileAgentOverride(projectName, name);
+  const fileSkillIds = meta.skillIds ? parseSkillIds(meta.skillIds) : [];
   return {
     id: `file:${projectName}:${name}`,
     name,
     project: projectName,
-    skillIds: meta.skillIds ? parseSkillIds(meta.skillIds) : [],
+    skillIds: override?.skillIds ?? fileSkillIds,
     docPaths: [],
-    model: meta.model || 'sonnet',
+    model: override?.model ?? meta.model ?? 'sonnet',
     prompt: body,
-    schedule: meta.schedule?.trim() || null,
-    runner: meta.runner || 'pm2',
-    enabled: meta.enabled !== 'false',
+    schedule:
+      override?.schedule !== undefined
+        ? override.schedule
+        : (meta.schedule?.trim() || null),
+    runner: override?.runner ?? meta.runner ?? 'pm2',
+    enabled:
+      override?.enabled !== undefined
+        ? override.enabled
+        : meta.enabled !== 'false',
     createdAt: now,
     updatedAt: now,
     source: 'file',

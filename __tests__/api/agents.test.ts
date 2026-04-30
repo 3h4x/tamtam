@@ -92,6 +92,12 @@ describe('agents API', () => {
       loadFileAgent: vi.fn().mockReturnValue(null),
       parseFileAgentId: vi.fn().mockReturnValue(null),
       writeFileAgent: vi.fn().mockReturnValue(null),
+      deleteFileAgent: vi.fn(),
+    }));
+    vi.doMock('@/lib/agents/file-agent-overrides', () => ({
+      getFileAgentOverride: vi.fn().mockReturnValue(null),
+      setFileAgentOverride: vi.fn().mockImplementation((_p: string, _n: string, patch) => patch),
+      deleteFileAgentOverride: vi.fn(),
     }));
 
     // Capture mock function references so individual tests can override return values
@@ -652,7 +658,9 @@ describe('agents API', () => {
       };
       parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
       resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
-      loadFileAgentMock.mockReturnValueOnce(fakeAgent);
+      // The route calls loadFileAgent twice — once to verify existence,
+      // once after writes to return the merged result.
+      loadFileAgentMock.mockReturnValue(fakeAgent);
       writeFileAgentMock.mockReturnValueOnce(fakeAgent);
 
       const request = new NextRequest('http://localhost/api/agents/file:myproj:my-agent', {
@@ -675,7 +683,7 @@ describe('agents API', () => {
       };
       parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
       resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
-      loadFileAgentMock.mockReturnValueOnce(fakeAgent);
+      loadFileAgentMock.mockReturnValue(fakeAgent);
       writeFileAgentMock.mockReturnValueOnce(fakeAgent);
 
       const request = new NextRequest('http://localhost/api/agents/file:myproj:my-agent', {
@@ -698,7 +706,7 @@ describe('agents API', () => {
       };
       parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
       resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
-      loadFileAgentMock.mockReturnValueOnce(fakeAgent);
+      loadFileAgentMock.mockReturnValue(fakeAgent);
       writeFileAgentMock.mockReturnValueOnce(fakeAgent);
 
       const request = new NextRequest('http://localhost/api/agents/file:myproj:my-agent', {

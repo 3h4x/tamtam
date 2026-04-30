@@ -65,7 +65,7 @@ export function AgentRow({
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          {agent.schedule && agent.source !== 'file' && (
+          {agent.schedule && (
             <button
               className={`px-2 py-1 text-xs border rounded-md cursor-pointer ${
                 agent.enabled
