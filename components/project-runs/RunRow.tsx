@@ -11,11 +11,28 @@ export interface RunRowProps {
   expanded?: boolean
   onToggleExpand?: () => void
   summary?: string | null
-  indent?: boolean
+  // Depth in the chain tree. 0 = top-level row, 1 = direct child of release,
+  // 2 = grandchild (e.g. review under test), etc. Drives left padding and
+  // the connector tree on the row's left edge.
+  depth?: number
   children?: React.ReactNode
 }
 
-export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summary, indent, children }: RunRowProps) {
+// Tailwind doesn't see dynamic class names, so map fixed depths → static
+// padding-left classes. Anything past depth 6 saturates at the same padding
+// — we don't expect chains longer than test → review → fix → review → commit
+// → push → mark-dod (depth 6) in practice.
+const DEPTH_PADDING: Record<number, string> = {
+  0: 'pl-4',
+  1: 'pl-12',
+  2: 'pl-20',
+  3: 'pl-28',
+  4: 'pl-36',
+  5: 'pl-44',
+  6: 'pl-52',
+}
+
+export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summary, depth = 0, children }: RunRowProps) {
   const isRunning = e.status === 'running'
   const isFailed = !isRunning && e.exitCode !== null && e.exitCode !== 0
   const totalTokens = e.inputTokens + e.outputTokens
@@ -24,13 +41,25 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
     : isFailed
     ? 'border-l-2 border-l-status-error'
     : 'border-l-2 border-l-transparent'
-  // Indent must align with the parent's kind badge:
-  //   parent row = pl-4 (16) + chevron (20) + gap-3 (12) = 48px before badge
-  //   indented child = pl-12 (48) so its kind badge sits directly under the parent's.
-  const paddingLeft = indent ? 'pl-12' : 'pl-4'
+  const paddingLeft = DEPTH_PADDING[Math.min(depth, 6)] ?? 'pl-52'
+
+  // Connector glyphs for nested rows. The vertical pipes show the chain
+  // walking down through ancestor depths; the angled `└─` puts the row
+  // visually under its direct parent. Rendered as absolute-positioned spans
+  // so they don't fight the existing flex layout.
+  const connectors: React.ReactNode = depth > 0 ? (
+    <span aria-hidden className="absolute left-0 top-0 bottom-0 pointer-events-none select-none font-mono text-text-tertiary/50 text-[12px]">
+      {Array.from({ length: depth - 1 }).map((_, i) => (
+        <span key={i} className="absolute top-0 bottom-0 border-l border-border/50" style={{ left: `${20 + i * 32}px` }} />
+      ))}
+      <span className="absolute border-l border-border/50" style={{ left: `${20 + (depth - 1) * 32}px`, top: 0, height: '50%' }} />
+      <span className="absolute border-t border-border/50" style={{ left: `${20 + (depth - 1) * 32}px`, top: '50%', width: '12px' }} />
+    </span>
+  ) : null
 
   return (
-    <div className="border-b border-border last:border-b-0">
+    <div className="border-b border-border last:border-b-0 relative">
+      {connectors}
       <div
         role="button"
         tabIndex={0}
@@ -63,7 +92,12 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
             {e.title}
           </div>
           <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5 flex-wrap">
-            {e.parentLabel && (
+            {/* When depth > 0 the chain visualization on the left edge already
+                shows what spawned this row — the badge becomes noisy. Keep
+                the parent label as a hover title on the chain connector for
+                screen readers and tooltip lookup, but don't render the
+                redundant inline `← test` badge. */}
+            {e.parentLabel && depth === 0 && (
               <span
                 className="font-mono text-text-tertiary"
                 title={`Started by ${e.parentLabel} (${e.parentJobId?.slice(-12) ?? ''})`}
