@@ -274,15 +274,38 @@ export function SkillsPage() {
 
   if (loading) {
     return (
-      <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-semibold text-text-primary">Skills</h2>
+      <div className="p-6 flex flex-col gap-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-text-primary">Skills</h2>
+            <p className="text-sm text-text-tertiary mt-0.5">Select skills, pick a project, and create agents in bulk.</p>
+          </div>
+          <div className="skeleton h-8 w-28 rounded-md" />
         </div>
-        <div className="flex flex-col gap-1">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-12 rounded bg-bg-secondary border border-border" style={{ opacity: 1 - i * 0.12 }} />
-          ))}
-        </div>
+        {[6, 2].map((rows, sectionIdx) => (
+          <section key={sectionIdx}>
+            <div className="flex items-center gap-3 mb-1 px-4">
+              <div className="skeleton h-4 w-4 rounded" />
+              <div className="skeleton h-3 w-24 rounded" />
+            </div>
+            <div className="rounded-lg border border-border overflow-hidden divide-y divide-border">
+              {Array.from({ length: rows }).map((_, i) => (
+                <div
+                  key={i}
+                  className="grid items-center gap-x-3 px-4 py-3"
+                  style={{ gridTemplateColumns: '1rem 1rem 10rem 6rem 1fr auto', opacity: 1 - i * 0.1 }}
+                >
+                  <div className="skeleton h-4 w-4 rounded" />
+                  <div className="skeleton h-4 w-4 rounded" />
+                  <div className="skeleton h-4 w-32 rounded" />
+                  <div className="skeleton h-5 w-16 rounded-full" />
+                  <div className="skeleton h-3 w-full rounded" />
+                  <div className="skeleton h-6 w-12 rounded" />
+                </div>
+              ))}
+            </div>
+          </section>
+        ))}
       </div>
     )
   }
