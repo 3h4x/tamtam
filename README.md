@@ -107,7 +107,7 @@ All API routes have corresponding tests in `__tests__/`. Follow the existing pat
 
 ## Architecture notes
 
-- All CLI calls (git, gh, pm2, launchctl) go through `lib/shell.ts`
-- `lib/project-data.ts` assembles project state with a 10s TTL cache
+- All CLI calls (git, gh, pm2, launchctl) go through `lib/shared/shell.ts`
+- `lib/shared/project-data.ts` assembles project state with a 10s TTL cache
 - Streaming uses `claude --output-format stream-json` → PM2 log file → `fs.watch` → NDJSON parser → SSE
 - See `docs/STREAMING.md` for the full terminal streaming architecture
