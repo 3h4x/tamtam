@@ -28,19 +28,44 @@ export async function startFixFromJob(sourceJobId: string): Promise<StartFixResu
   if (paused) return paused;
 
   const resumeSessionId = sourceJob.sessionId ?? null;
+
+  // Pull the review's findings out of its log so we can feed them to fix
+  // verbatim. Trusting --resume alone means the fix prompt is just a
+  // boilerplate "fix the issues above", which (a) hides the actual
+  // contract from anyone reading the fix log and (b) leans entirely on
+  // Claude's session memory — which can drop earlier turns under context
+  // pressure or after long delays. Embedding the findings makes the work
+  // explicit and reproducible.
+  const rawLog = readLog(sourceJob);
+  let findingsBlock = rawLog.trim();
+  // Strip the trailing "Verdict: ..." line so the fix doesn't echo it back.
+  const verdictMatch = findingsBlock.match(/\n[ \t]*Verdict:[^\n]*\s*$/i);
+  if (verdictMatch) findingsBlock = findingsBlock.slice(0, verdictMatch.index).trimEnd();
+  // Cap to keep the resumed-session token budget sane — same 12 KB cap
+  // used by the no-resume path below.
+  if (findingsBlock.length > 12000) {
+    findingsBlock = '...(truncated)...\n' + findingsBlock.slice(-12000);
+  }
+
   let prompt: string;
   if (resumeSessionId) {
-    prompt = 'Please fix ALL the issues identified in your review above. Apply the changes directly to the codebase. After fixing, run the relevant tests or linter locally to confirm the fixes work. Do not commit — just make the code changes.';
-  } else {
-    let logOutput = readLog(sourceJob);
-    if (!logOutput.trim()) return { ok: false, status: 400, detail: 'No output to fix from' };
-    if (logOutput.length > 12000) {
-      logOutput = '...(truncated)...\n' + logOutput.slice(-12000);
+    if (findingsBlock) {
+      prompt = `Apply fixes for ALL the findings from your review (reproduced below for clarity — work from this list, not from memory):
+
+---
+${findingsBlock}
+---
+
+Edit the files directly. After fixing, run the relevant tests or linter locally to confirm. Do not commit — just make the code changes.`;
+    } else {
+      prompt = 'Please fix ALL the issues identified in your review above. Apply the changes directly to the codebase. After fixing, run the relevant tests or linter locally to confirm the fixes work. Do not commit — just make the code changes.';
     }
+  } else {
+    if (!findingsBlock) return { ok: false, status: 400, detail: 'No output to fix from' };
     prompt = `A previous ${sourceJob.kind} job for \`${projectName}\` produced the following output:
 
 \`\`\`
-${logOutput}
+${findingsBlock}
 \`\`\`
 
 Please fix ALL the issues identified above. Apply the changes directly to the codebase.

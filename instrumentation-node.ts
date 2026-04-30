@@ -181,8 +181,36 @@ async function migrateLegacyFileWorkflowFlags(): Promise<void> {
   }
 }
 
+// In-process job kinds (mark-dod, pr-wait) run inside the next-server itself
+// with pid=0. probeJobStatus deliberately treats them as "running" forever to
+// avoid racing their self-finalization. That's fine while the server is alive,
+// but a server restart kills the in-flight async function — leaving these
+// rows stuck as `running` indefinitely with no markDone ever called. Sweep
+// them at boot and mark them as `exit -1` so the UI stops lying about them.
+async function reapAbandonedInlineJobs(): Promise<void> {
+  try {
+    const { listJobs, markDone } = await import('./lib/job-storage');
+    const orphaned = listJobs().filter(j =>
+      j.finishedAt === null
+      && j.pid === 0
+      && (j.kind === 'mark-dod' || j.kind === 'pr-wait')
+    );
+    for (const job of orphaned) {
+      try {
+        await markDone(job, -1);
+        console.log(`[boot] reaped abandoned ${job.kind} job ${job.id} (server restarted mid-run)`);
+      } catch (err) {
+        console.error(`[boot] failed to reap ${job.id}:`, err);
+      }
+    }
+  } catch (err) {
+    console.error('[boot] reapAbandonedInlineJobs failed:', err);
+  }
+}
+
 export async function registerNode(): Promise<void> {
   await migrateLegacyFileWorkflowFlags();
+  void reapAbandonedInlineJobs();
   void reinstallAgents();
 
   if (process.env.VITEST || process.env.NODE_ENV === 'test') return;

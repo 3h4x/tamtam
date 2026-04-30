@@ -471,11 +471,27 @@ function workOnChainSummary(cfg: ProjectConfig | null): string {
 function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; projectName: string; projectCfg: ProjectConfig | null }) {
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
+  // Whether a previous Claude session for this issue exists (run/fix with
+  // gh_issue_number stamped + a session_id). When true we offer a "Continue"
+  // button that resumes that session and prompts only for unverified DoD items.
+  const [hasContext, setHasContext] = useState(false)
+  const [continuing, setContinuing] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/continue-issue?issue_number=${issue.number}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { hasContext?: boolean } | null) => {
+        if (!cancelled && data?.hasContext) setHasContext(true)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [projectName, issue.number])
 
   // Issue bodies can be many KB. Stuffing them into the URL trips Node's
   // 8KB header limit (HTTP 431) before the terminal page even renders, so
   // we stash the payload in sessionStorage and pass only the short key.
-  const stashAndOpen = (data: { prompt: string; issue_number?: string; issue_repo?: string; issue_title?: string }) => {
+  const stashAndOpen = (data: { prompt: string; issue_number?: string; issue_repo?: string; issue_title?: string; resume_session_id?: string }) => {
     const key = `tamtam-pending-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     try { sessionStorage.setItem(key, JSON.stringify(data)) } catch {}
     router.push(`/project/${projectName}/terminal?pending=${key}`)
@@ -496,6 +512,30 @@ function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; projectN
   const discussInTerminal = () => {
     const prompt = `Let's discuss GitHub issue #${issue.number}: "${issue.title}" (${issue.url})\n\n${issue.body || ''}\n\nHelp me think through this issue — the requirements, edge cases, possible approaches, and any open questions.`
     stashAndOpen({ prompt })
+  }
+
+  const continueWork = async () => {
+    if (continuing) return
+    setContinuing(true)
+    try {
+      const res = await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/continue-issue?issue_number=${issue.number}`)
+      if (!res.ok) throw new Error('continue-issue lookup failed')
+      const data = await res.json() as { sessionId: string | null; prompt: string; unverifiedCount: number }
+      const repoMatch = issue.url.match(/github\.com\/([^/]+\/[^/]+)\/issues\//)
+      const repo = repoMatch?.[1] ?? ''
+      stashAndOpen({
+        prompt: data.prompt,
+        issue_number: String(issue.number),
+        issue_repo: repo,
+        issue_title: issue.title,
+        resume_session_id: data.sessionId ?? undefined,
+      })
+    } catch {
+      // Fall back to a plain Work-on if the lookup failed.
+      openInTerminal()
+    } finally {
+      setContinuing(false)
+    }
   }
 
   return (
@@ -539,13 +579,24 @@ function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; projectN
           >
             Discuss
           </button>
-          <button
-            className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
-            onClick={openInTerminal}
-            title={workOnChainSummary(projectCfg)}
-          >
-            Work on
-          </button>
+          {hasContext ? (
+            <button
+              className="px-2 py-1 text-xs border border-accent/40 rounded-md bg-accent/10 text-accent hover:bg-accent/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={continueWork}
+              disabled={continuing}
+              title="Resume the last Claude session for this issue. Auto-prompts only the acceptance criteria still unverified."
+            >
+              {continuing ? 'Loading…' : 'Continue'}
+            </button>
+          ) : (
+            <button
+              className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
+              onClick={openInTerminal}
+              title={workOnChainSummary(projectCfg)}
+            >
+              Work on
+            </button>
+          )}
           <a
             href={issue.url}
             target="_blank"
