@@ -31,9 +31,9 @@ The **🚀 Release** button triggers the pipeline at the right starting step. Wh
 - `lib/pipeline/start-pr-review.ts` → `startPrReview` (AI review of a GitHub PR)
 - `lib/pipeline/start-mark-dod.ts` → `startMarkDod` (DoD verification + GitHub issue checkbox update)
 - `lib/pipeline/start-pr-wait.ts` → `launchPrWait` (background PR poller: polls CI checks, auto-merges once they pass, switches working copy back to default branch, then runs mark-dod)
-- `lib/notifications.ts` → `notify` / `sendTestNotification` (outbound webhook delivery)
+- `lib/shared/notifications.ts` → `notify` / `sendTestNotification` (outbound webhook delivery)
 
-Verdict detection (`getVerdict` in `job-storage.ts`) reads the **last 2000 chars** of the parsed Claude log and looks for an explicit "Verdict: X" marker or a bare token on the final line — deliberately lenient across markdown formatting (`## Verdict\n**NEEDS ATTENTION**`) but robust against false positives from code snippets higher up in the log.
+Verdict detection (`getVerdict` in `lib/jobs/job-storage.ts`) reads the **last 2000 chars** of the parsed Claude log and looks for an explicit "Verdict: X" marker or a bare token on the final line — deliberately lenient across markdown formatting (`## Verdict\n**NEEDS ATTENTION**`) but robust against false positives from code snippets higher up in the log.
 
 ## Concepts
 - **Skills** — reusable prompt/instruction blocks (DB-backed + file-based from `skills/docs/skills/`)
@@ -89,7 +89,7 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 - `components/` — React client components; large pages have a co-located subfolder (e.g. `components/monitoring/`, `components/settings/`, `components/project-detail/`, `components/project-runs/`, `components/terminal/`)
 - `hooks/` — Custom React hooks
 - `lib/` — Server-side business logic, organised into domain folders:
-  - `lib/pipeline/` — release pipeline orchestration (`start-*`, `pipeline-lock`, `pipeline-status`, `pipeline-steps`, `mark-dod-branch`, `pr-create`)
+  - `lib/pipeline/` — release pipeline orchestration (`start-*`, `pipeline-lock`, `pipeline-status`, `pipeline-steps`, `mark-dod-branch`, `pr-create`, `pending-release`)
   - `lib/scheduling/` — agent/test scheduling (`agent-scheduler`, `internal-scheduler`, `test-scheduler`, `scheduling`, `fire-times`, `launchagent`)
   - `lib/git/` — git operations (`git-branch`, `git-utils`, `diff-context`)
   - `lib/jobs/` — job lifecycle (`job-storage` barrel + `storage`, `lifecycle`, `verdict`, `probe`, `types`, `parent-context`; also `pm2-jobs`, `run-history`, `log-persistence`, `retention`, `claude-stream-parser`)
@@ -99,7 +99,7 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
   - `lib/shared/` — cross-cutting utilities (`shell`, `types`, `format`, `config`, `untrusted`, `usage-pricing`, `notifications`, `job-control`, `statusConstants`, `gh-status`, `project-data`, `project-branch-lock`)
   - `lib/db/` — Drizzle schema and connection (tables: settings, projects, jobs, gh_status, gh_issues_cache, skills, agents, pipeline_locks)
   - `lib/client-api.ts` — barrel re-exporting from `lib/client/` (split by resource: `projects`, `jobs`, `agents`, `skills`, `types`)
-- `scripts/` — server startup, job runners, and CLI shims (`pm2-start.sh`, `job-runner.js`, `gemini-shim.js`)
+- `scripts/` — server startup, job runners, and CLI shims (`pm2-start.sh`, `job-runner.js`, `gemini-shim.js`, `lmstudio-shim.js`)
 - `skills/` — claude-skills submodule
 - `data/` — SQLite database (gitignored)
 - `__tests__/` — vitest unit tests
@@ -220,8 +220,8 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 ## Key Patterns
 - All config stored in DB (`settings`, `projects`, `skills`, `agents` tables)
 - Workspace path configured in Settings UI, projects discovered by scanning for git repos
-- All CLI calls (git, gh, launchctl, pm2) go through `lib/shell.ts`
-- `lib/project-data.ts` assembles project data with 10s TTL cache
+- All CLI calls (git, gh, launchctl, pm2) go through `lib/shared/shell.ts`
+- `lib/shared/project-data.ts` assembles project data with 10s TTL cache
 - Terminal runs use `claude --output-format stream-json` for token-by-token streaming via PM2 + log file + fs.watch + NDJSON parser (see `docs/STREAMING.md`)
 - SSE at `/api/streaming/[jobId]` parses NDJSON and sends text deltas + `done` event (`?raw=1` for raw mode)
 - Agent runs compose skill content into the prompt before sending to Claude CLI
@@ -231,13 +231,13 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 - GitHub owner fallback configurable via `GITHUB_OWNER` env var or Settings UI
 - Issue-driven runs auto-checkout `fix/issue-<n>-<slug>` branch before Claude edits (via `issue-branch` route called from TerminalTab); in PR Workflow mode, after the PR is merged the working copy is returned to the default branch
 - Pipeline workflow mode per project: *Direct Branch* (commit+push to current branch) or *PR Workflow* (push to feature branch → DoD → optional auto-merge); configured via project Config tab; `pr_workflow_enabled` + `auto_pr_merge_enabled` flags on the `projects` table
-- Outbound webhook notifications (`lib/notifications.ts`): Slack block kit, Discord embeds, or generic JSON POST; HMAC-SHA256 signed when `notification_webhook_secret` is set; events: `release_success`, `release_fail`, `release_aborted`, `fix_loop_exhausted`, `review_do_not_ship`, `agent_run_fail`; configured via Settings → Notifications tab; `TAMTAM_BASE_URL` env var sets the log link base
-- Log and row retention (`lib/retention.ts`): `pruneProjectLogs` deletes on-disk log files after each run (controlled by `log_retention_count` and `log_retention_days` settings; defaults 200 / 30 days); `runNightlyCleanup` deletes finished `jobs` DB rows older than `job_row_retention_days` (default 180 days) — called once at startup then every 24h from `instrumentation.ts`
-- **Global job pause**: `lib/job-control.ts` exposes `isJobsPaused()` / `syncJobsPauseState(paused)`. When the `jobs_paused` setting is `true` (toggled via the Settings UI or the pause toggle in the Jobs header), all pipeline routes (`run`, `review`, `fix`, `push`, `release`, `rerun`, `fix-ci`, `agent run`) return HTTP 409 and the internal scheduler is paused. State is held in a module-level boolean — `syncJobsPauseState` is called on settings write and on boot from `instrumentation-node.ts`.
-- Background probe sweep: `instrumentation.ts` runs `runProbeSweep` every 30 seconds — detects Claude CLI processes that hang after emitting their final result event (holding a job "running" indefinitely) and resolves them via `probeJobStatus` in `lib/job-storage.ts`
-- **Issue-branch lock** (`lib/project-branch-lock.ts`): when a project's working tree is checked out on a `fix/issue-N-…` branch, the internal scheduler skips any scheduled agent fire for that project. Prevents unrelated agent commits landing on an in-progress feature branch. The lock state is cached for 5 s (TTL) and cleared by `checkout-default` and `issue-branch` routes after branch switches. Exposed as `getIssueBranchLock(projectName)` / `clearIssueBranchLockCache(projectName)`.
-- **Scheduled agent cron**: handled in-process by `lib/internal-scheduler.ts`, NOT by PM2 cron. PM2's `cron_restart` combined with `--no-autostart` silently no-ops (PM2 updates `pm_uptime` at the cron tick but never starts the stopped process), so registering agents that way leaves them as zombies that never fire — that bug went unnoticed for a long time. The internal scheduler reads enabled agents from the DB on boot (`reinstallAgents` in `instrumentation-node.ts`), arms a `setTimeout` per agent based on its `Nh`/`Nm` interval + a stableHash phase offset, and on fire POSTs to `/api/agents/{id}/run`. State is pinned on `globalThis.__tamtamScheduler` so instrumentation and route handlers share the singleton across Next.js's separate module realms. Agent CRUD routes still call `installAgentSchedule` / `uninstallAgentSchedule` from `lib/agent-scheduler.ts`, which now delegate to `upsertAgentSchedule` / `removeAgentSchedule`. The `launchctl` runner is **deprecated** (warning logged on use); only `pm2` is supported going forward.
-- **One-shot job processes**: every job (review, fix, fix-push, mark-dod, agent run, rerun) is spawned by `lib/pm2-jobs.ts startJob` via PM2 → `scripts/job-runner.js` (a single node entrypoint) → the actual command. PM2 invokes the runner with `--interpreter node`, so PM2 tracks the runner's PID directly — no bash-wrapper layer. The runner forwards SIGTERM/SIGINT/SIGHUP to its child so `pm2 stop`/`pm2 delete` actually kills the work (this is what eliminated the orphan-process accumulation we used to see in `pm2 list`). The runner pipes the `${jobId}.prompt` file into the child's stdin (matching the old `cat prompt | command` behaviour) and writes `[tamtam] launching: ...` / `[tamtam] exited with code N` breadcrumbs to the same log file `app/api/streaming/[jobId]/route.ts` filters out of the user-facing stream. The `${jobId}.prompt` file is still written so `/api/jobs/[jobId]/rerun` can restore the original prompt; the per-job `.sh` wrapper is gone.
+- Outbound webhook notifications (`lib/shared/notifications.ts`): Slack block kit, Discord embeds, or generic JSON POST; HMAC-SHA256 signed when `notification_webhook_secret` is set; events: `release_success`, `release_fail`, `release_aborted`, `fix_loop_exhausted`, `review_do_not_ship`, `agent_run_fail`; configured via Settings → Notifications tab; `TAMTAM_BASE_URL` env var sets the log link base
+- Log and row retention (`lib/jobs/retention.ts`): `pruneProjectLogs` deletes on-disk log files after each run (controlled by `log_retention_count` and `log_retention_days` settings; defaults 200 / 30 days); `runNightlyCleanup` deletes finished `jobs` DB rows older than `job_row_retention_days` (default 180 days) — called once at startup then every 24h from `instrumentation.ts`
+- **Global job pause**: `lib/shared/job-control.ts` exposes `isJobsPaused()` / `syncJobsPauseState(paused)`. When the `jobs_paused` setting is `true` (toggled via the Settings UI or the pause toggle in the Jobs header), all pipeline routes (`run`, `review`, `fix`, `push`, `release`, `rerun`, `fix-ci`, `agent run`) return HTTP 409 and the internal scheduler is paused. State is held in a module-level boolean — `syncJobsPauseState` is called on settings write and on boot from `instrumentation-node.ts`.
+- Background probe sweep: `instrumentation.ts` runs `runProbeSweep` every 30 seconds — detects Claude CLI processes that hang after emitting their final result event (holding a job "running" indefinitely) and resolves them via `probeJobStatus` in `lib/jobs/job-storage.ts`
+- **Issue-branch lock** (`lib/shared/project-branch-lock.ts`): when a project's working tree is checked out on a `fix/issue-N-…` branch, the internal scheduler skips any scheduled agent fire for that project. Prevents unrelated agent commits landing on an in-progress feature branch. The lock state is cached for 5 s (TTL) and cleared by `checkout-default` and `issue-branch` routes after branch switches. Exposed as `getIssueBranchLock(projectName)` / `clearIssueBranchLockCache(projectName)` from `lib/shared/project-branch-lock.ts`.
+- **Scheduled agent cron**: handled in-process by `lib/scheduling/internal-scheduler.ts`, NOT by PM2 cron. PM2's `cron_restart` combined with `--no-autostart` silently no-ops (PM2 updates `pm_uptime` at the cron tick but never starts the stopped process), so registering agents that way leaves them as zombies that never fire — that bug went unnoticed for a long time. The internal scheduler reads enabled agents from the DB on boot (`reinstallAgents` in `instrumentation-node.ts`), arms a `setTimeout` per agent based on its `Nh`/`Nm` interval + a stableHash phase offset, and on fire POSTs to `/api/agents/{id}/run`. State is pinned on `globalThis.__tamtamScheduler` so instrumentation and route handlers share the singleton across Next.js's separate module realms. Agent CRUD routes still call `installAgentSchedule` / `uninstallAgentSchedule` from `lib/scheduling/agent-scheduler.ts`, which now delegate to `upsertAgentSchedule` / `removeAgentSchedule`. The `launchctl` runner is **deprecated** (warning logged on use); only `pm2` is supported going forward.
+- **One-shot job processes**: every job (review, fix, fix-push, mark-dod, agent run, rerun) is spawned by `lib/jobs/pm2-jobs.ts startJob` via PM2 → `scripts/job-runner.js` (a single node entrypoint) → the actual command. PM2 invokes the runner with `--interpreter node`, so PM2 tracks the runner's PID directly — no bash-wrapper layer. The runner forwards SIGTERM/SIGINT/SIGHUP to its child so `pm2 stop`/`pm2 delete` actually kills the work (this is what eliminated the orphan-process accumulation we used to see in `pm2 list`). The runner pipes the `${jobId}.prompt` file into the child's stdin (matching the old `cat prompt | command` behaviour) and writes `[tamtam] launching: ...` / `[tamtam] exited with code N` breadcrumbs to the same log file `app/api/streaming/[jobId]/route.ts` filters out of the user-facing stream. The `${jobId}.prompt` file is still written so `/api/jobs/[jobId]/rerun` can restore the original prompt; the per-job `.sh` wrapper is gone.
 - Dependabot with grouped PRs (production deps, dev deps, actions)
 
 ## `.tamtam/` Directory (per-project, committed to version control)
@@ -267,7 +267,7 @@ Supported keys: `test_command`, `custom_actions`, `safe_users`. **Workflow flags
 
 On a feature/PR branch, config is read from `origin/<defaultBranch>` (not the working tree) to prevent privilege escalation from untrusted branches.
 
-Reader: `lib/tamtam-file-config.ts` → `loadFileConfig(projectPath)` / `writeFileConfig(projectPath, updates)`.
+Reader: `lib/skills/tamtam-file-config.ts` → `loadFileConfig(projectPath)` / `writeFileConfig(projectPath, updates)`.
 The Config tab shows a banner listing which keys come from the file; saving writes back to `.tamtam/config.yml`.
 
 ### `.tamtam/agents/*.md`
@@ -287,7 +287,7 @@ Prompt content here. This is sent verbatim as the agent's task instructions.
 
 File agents appear in the Agents tab with a `file` badge and are read-only — edit/delete are disabled in the UI. To override a file agent, create a DB agent with the same name (DB takes precedence).
 
-Reader: `lib/tamtam-file-agents.ts` → `scanFileAgents(projectPath, projectName)` / `loadFileAgent(...)`.
+Reader: `lib/agents/tamtam-file-agents.ts` → `scanFileAgents(projectPath, projectName)` / `loadFileAgent(...)`.
 File agent IDs use the format `file:<project>:<name>` and are handled transparently in all agent API routes.
 
 ## Coding Conventions
