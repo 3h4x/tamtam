@@ -68,7 +68,7 @@ enabled: true
 skillIds: ["persona:engineering-team/senior-fullstack"]
 ---
 Improve the UI of tamtam.`);
-    const agents = scanFileAgents(tmpDir, 'tamtam');
+    const agents = scanFileAgents(tmpDir, 'testproject');
     expect(agents).toHaveLength(1);
     const a = agents[0];
     expect(a.model).toBe('opus');
