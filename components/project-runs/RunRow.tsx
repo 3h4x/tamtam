@@ -65,7 +65,7 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
         tabIndex={0}
         onClick={onClick}
         onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onClick() } }}
-        className={`w-full text-left hover:bg-bg-tertiary cursor-pointer ${paddingLeft} pr-4 py-3 flex items-start gap-3 group ${accentBorder}`}
+        className={`w-full text-left hover:bg-bg-tertiary cursor-pointer ${paddingLeft} pr-4 py-2 flex items-start gap-3 group ${accentBorder}`}
       >
         {expandable ? (
           <button
@@ -113,24 +113,56 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
           </div>
         </div>
 
-        <div className="shrink-0 flex flex-col items-end gap-0.5 text-xs">
-          <div className="flex items-center gap-2">
-            {totalTokens > 0 && (
-              <span className="font-mono text-text-tertiary" title="Input / output tokens">
-                <span className="text-status-success">↑{formatTokens(e.inputTokens)}</span>{' '}
-                <span className="text-accent">↓{formatTokens(e.outputTokens)}</span>
+        {totalTokens > 0 || e.costUsd > 0 ? (
+          <div className="shrink-0 flex flex-col items-end gap-0.5 text-xs">
+            <div className="flex items-center gap-2">
+              {totalTokens > 0 && (
+                <span className="font-mono text-text-tertiary" title="Input / output tokens">
+                  <span className="text-status-success">↑{formatTokens(e.inputTokens)}</span>{' '}
+                  <span className="text-accent">↓{formatTokens(e.outputTokens)}</span>
+                </span>
+              )}
+              {e.costUsd > 0 && (
+                <span className="font-mono text-accent/70" title="Estimated cost">
+                  {formatCost(e.costUsd)}
+                </span>
+              )}
+              <span className="font-mono text-text-secondary">
+                {formatDuration(e.startedAt, e.finishedAt)}
               </span>
-            )}
-            {e.costUsd > 0 && (
-              <span className="font-mono text-accent/70" title="Estimated cost">
-                {formatCost(e.costUsd)}
-              </span>
-            )}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-text-tertiary text-[11px]">{formatAgo(e.lastActivityAt)}</span>
+              {e.logPruned && (
+                <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium bg-text-tertiary/15 text-text-tertiary" title="Log file deleted by retention policy">
+                  pruned
+                </span>
+              )}
+              {e.verdict && !isRunning && !isFailed ? (
+                <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium font-mono ${
+                  e.verdict === 'LGTM' ? 'bg-status-success/15 text-status-success border border-status-success/30' :
+                  e.verdict === 'DO NOT SHIP' ? 'bg-status-error/15 text-status-error border border-status-error/30' :
+                  'bg-status-warning/15 text-status-warning border border-status-warning/30'
+                }`} title={`Review verdict: ${e.verdict}`}>
+                  {e.verdict === 'LGTM' ? '✓ LGTM' : e.verdict === 'DO NOT SHIP' ? '✗ DNS' : '⚠ ATTN'}
+                </span>
+              ) : (
+                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium ${
+                  isRunning ? 'bg-status-warning/15 text-status-warning' :
+                  isFailed ? 'bg-status-error/15 text-status-error' :
+                  'bg-status-success/15 text-status-success'
+                }`}>
+                  <span className={isRunning ? 'animate-pulse' : ''}>●</span>
+                  {isRunning ? 'running' : isFailed ? `exit ${e.exitCode}` : 'done'}
+                </span>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="shrink-0 flex items-center gap-2 text-xs">
             <span className="font-mono text-text-secondary">
               {formatDuration(e.startedAt, e.finishedAt)}
             </span>
-          </div>
-          <div className="flex items-center gap-2">
             <span className="text-text-tertiary text-[11px]">{formatAgo(e.lastActivityAt)}</span>
             {e.logPruned && (
               <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium bg-text-tertiary/15 text-text-tertiary" title="Log file deleted by retention policy">
@@ -156,7 +188,7 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
               </span>
             )}
           </div>
-        </div>
+        )}
       </div>
       {children}
     </div>
