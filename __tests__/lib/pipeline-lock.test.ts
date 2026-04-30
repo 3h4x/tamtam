@@ -235,6 +235,41 @@ describe('pipeline-lock', () => {
       expect(getLock('proj-a')).toBeNull();
       expect(getLock('proj-b')).not.toBeNull();
     });
+
+    it('calls drainPendingRelease for the project when the lock is released', async () => {
+      const drainMock = vi.fn().mockResolvedValue(undefined);
+      vi.doMock('@/lib/pipeline/pending-release', () => ({
+        drainPendingRelease: drainMock,
+      }));
+      // Re-import after adding the mock so the module picks up the new mock.
+      vi.resetModules();
+      testDb = createTestDb();
+      vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+      vi.doMock('@/lib/pipeline/pending-release', () => ({
+        drainPendingRelease: drainMock,
+      }));
+      const mod2 = await import('@/lib/pipeline/pipeline-lock');
+      await mod2.acquireLock('proj', 'job-drain');
+      mod2.releaseLock('proj', 'job-drain');
+      // drain is async fire-and-forget — wait a microtask cycle
+      await new Promise<void>((r) => setTimeout(r, 10));
+      expect(drainMock).toHaveBeenCalledWith('proj');
+    });
+
+    it('does not call drainPendingRelease when the wrong job tries to release', async () => {
+      const drainMock = vi.fn().mockResolvedValue(undefined);
+      vi.resetModules();
+      testDb = createTestDb();
+      vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+      vi.doMock('@/lib/pipeline/pending-release', () => ({
+        drainPendingRelease: drainMock,
+      }));
+      const mod2 = await import('@/lib/pipeline/pipeline-lock');
+      await mod2.acquireLock('proj', 'job-owner');
+      mod2.releaseLock('proj', 'job-other');
+      await new Promise<void>((r) => setTimeout(r, 10));
+      expect(drainMock).not.toHaveBeenCalled();
+    });
   });
 
   describe('isLockOwnedByActiveRelease', () => {

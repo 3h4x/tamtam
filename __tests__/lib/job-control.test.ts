@@ -6,14 +6,22 @@ describe('job-control', () => {
   let syncJobsPauseState: typeof import('@/lib/shared/job-control').syncJobsPauseState;
   let pauseInternalSchedulerMock: ReturnType<typeof vi.fn>;
   let resumeInternalSchedulerMock: ReturnType<typeof vi.fn>;
+  let listPendingMock: ReturnType<typeof vi.fn>;
+  let drainMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
     pauseInternalSchedulerMock = vi.fn();
     resumeInternalSchedulerMock = vi.fn();
+    listPendingMock = vi.fn().mockReturnValue([]);
+    drainMock = vi.fn().mockResolvedValue(undefined);
     vi.doMock('@/lib/scheduling/internal-scheduler', () => ({
       pauseInternalScheduler: pauseInternalSchedulerMock,
       resumeInternalScheduler: resumeInternalSchedulerMock,
+    }));
+    vi.doMock('@/lib/pipeline/pending-release', () => ({
+      listPendingReleaseProjects: listPendingMock,
+      drainPendingRelease: drainMock,
     }));
     ({ isJobsPaused, jobsPausedResult, syncJobsPauseState } = await import('@/lib/shared/job-control'));
   });
@@ -84,6 +92,32 @@ describe('job-control', () => {
       expect(isJobsPaused()).toBe(false);
       syncJobsPauseState(true);
       expect(isJobsPaused()).toBe(true);
+    });
+
+    it('drains pending releases for each queued project when resuming after a pause', async () => {
+      listPendingMock.mockReturnValue(['proj-a', 'proj-b']);
+      syncJobsPauseState(true);
+      syncJobsPauseState(false);
+      // drain is async fire-and-forget — wait a microtask cycle
+      await new Promise<void>((r) => setTimeout(r, 10));
+      expect(listPendingMock).toHaveBeenCalled();
+      expect(drainMock).toHaveBeenCalledWith('proj-a');
+      expect(drainMock).toHaveBeenCalledWith('proj-b');
+    });
+
+    it('does not drain pending releases when resuming without a prior pause', async () => {
+      listPendingMock.mockReturnValue(['proj-a']);
+      // syncJobsPauseState(false) without ever having called true first
+      syncJobsPauseState(false);
+      await new Promise<void>((r) => setTimeout(r, 10));
+      expect(drainMock).not.toHaveBeenCalled();
+    });
+
+    it('does not drain pending releases when pausing', async () => {
+      listPendingMock.mockReturnValue(['proj-a']);
+      syncJobsPauseState(true);
+      await new Promise<void>((r) => setTimeout(r, 10));
+      expect(drainMock).not.toHaveBeenCalled();
     });
   });
 });
