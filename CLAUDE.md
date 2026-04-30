@@ -111,6 +111,17 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 - New lib files: target under 300 lines, hard cap 500 lines
 - New component files: target under 400 lines, hard cap 600 lines; if a page component grows past 600 lines, extract subcomponents into a co-located `components/<page-name>/` folder
 
+**React Server vs Client Components (Next.js App Router):**
+- All files in `components/` are Client Components — every file must start with `'use client'` (single quotes, first line).
+- Pages in `app/` are Server Components by default; do not add `'use client'` to a page file unless the page itself needs React hooks directly (rare — usually the page just imports a client component).
+- Never use browser-only APIs (`window`, `document`, `localStorage`) in `app/` page/layout files.
+
+**Adding a new API route:**
+1. Create `app/api/<path>/route.ts` — export named functions (`GET`, `POST`, etc.).
+2. Add a matching test at `__tests__/api/<route-name>.test.ts`.
+3. Document the route in the API Routes section of this file.
+4. If the route needs a new DB table, follow the schema change procedure in Commit & Branch Rules.
+
 ## Pages
 - `/` — Projects list with status, changes, CI
 - `/project/[name]` — Project overview with agents, status bar (changes/review/tests)
@@ -195,6 +206,9 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 - **Do not mock the database** — use an in-memory `better-sqlite3` instance with the real Drizzle schema instead. Mock only external side-effects: `lib/shell.ts` `exec`, PM2, Claude CLI spawning.
 - Run `pnpm test` after every non-trivial code change, not only after writing new tests. All tests must pass before committing.
 - Test naming: `__tests__/api/<route-name>.test.ts` mirroring `app/api/<route-name>/route.ts`.
+- **`createTestDb()` pattern**: each test file defines its own local `createTestDb()` that opens `new Database(':memory:')` with `pragma journal_mode = WAL` and creates only the tables that test actually needs via raw SQL. There is no shared helper — copy the pattern from the nearest similar test file. Never import the real DB connection in tests.
+- **E2e vs unit**: write Playwright tests (`e2e/`) only for end-to-end user-visible flows (streaming, full pipeline runs, multi-step UI interactions). All API routes and lib logic must have vitest unit tests. Component tests with `@testing-library/react` are available but optional — prefer testing behaviour through the API layer instead.
+- **What must be tested**: new API route handlers (happy path + error cases), new lib functions that contain branching logic or state mutations. Skip trivial passthrough functions and pure type definitions.
 
 ## Definition of Done for UI/Frontend Changes
 - Server must be running (`pnpm start` — or `pnpm rebuild` if a build is needed) before testing frontend changes
@@ -277,9 +291,11 @@ Reader: `lib/tamtam-file-agents.ts` → `scanFileAgents(projectPath, projectName
 File agent IDs use the format `file:<project>:<name>` and are handled transparently in all agent API routes.
 
 ## Coding Conventions
+- **Runtime versions**: Next.js 16 (App Router), React 19, TypeScript 6 (strict), Tailwind CSS v4, pnpm 10. Do not use APIs or syntax that requires a higher version than what is pinned in `package.json`.
 - **Path imports**: always use the `@/` alias (e.g. `import { exec } from '@/lib/shell'`), never relative `../../` paths.
 - **File naming**: kebab-case for all files (`start-fix.ts`, `project-data.ts`); PascalCase only for React component files (`AgentsTab.tsx`).
 - **Components**: PascalCase, one component per file, `.tsx` extension. No class components.
+- **Barrel files**: `lib/client-api.ts` is the only barrel; do not create new barrel `index.ts` files — import directly from the module file.
 - **TypeScript**: strict mode is on. Avoid `any`; ESLint allows it but prefer explicit types. Never use `// @ts-ignore` — fix the type instead.
 - **Error handling**: throw exceptions for unexpected failures; return typed result objects (`{ ok, error }`) only where callers need to branch on failure without crashing. Log errors to `console.error` before re-throwing in API routes.
 - **Async**: use `async/await` throughout. No raw `.then()` chains. Parallelise independent async work with `Promise.all`.
