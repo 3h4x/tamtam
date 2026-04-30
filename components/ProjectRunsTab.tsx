@@ -48,6 +48,7 @@ function renderChain(node: Entry, depth: number, navigate: (e: Entry) => void): 
 export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
   const router = useRouter()
   const [jobs, setJobs] = useState<JobInfo[]>([])
+  const [pendingReleaseQueued, setPendingReleaseQueued] = useState(false)
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<Filter>({ kind: 'all' })
   const [search, setSearch] = useState('')
@@ -65,9 +66,10 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
     let active = true
     const poll = async () => {
       try {
-        const data = await fetchJobs(projectName)
+        const data = await fetchJobs(projectName, { limit: 0 })
         if (active) {
           setJobs(data.jobs)
+          setPendingReleaseQueued(!!data.pendingReleaseProjects?.includes(projectName))
           setLoading(false)
         }
       } catch {}
@@ -161,6 +163,15 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
 
   return (
     <div className="mt-4">
+      {/* Release-queued banner: an agent/run finished and tried to trigger
+          a release while another release was in flight (or jobs were paused)
+          — the request was queued and will fire once the lock releases. */}
+      {pendingReleaseQueued && (
+        <div className="mb-3 px-3 py-2 rounded-md border border-accent/30 bg-accent/5 text-xs text-accent flex items-center gap-2">
+          <span className="font-mono">↦</span>
+          <span>Release queued — will fire automatically when the running pipeline finishes (or jobs resume).</span>
+        </div>
+      )}
       {/* Search + summary */}
       <div className="flex items-center gap-3 mb-3 flex-wrap">
         <div className="relative flex-1 min-w-[240px]">
@@ -320,23 +331,29 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
               </div>
               <div className="border border-border rounded-lg overflow-hidden bg-bg-secondary">
                 {g.items.map((e) => {
+                  // A row is expandable if it has any chainable children:
+                  //   - releases with their pipeline children
+                  //   - agent/run rows that own a release (release nests under agent)
+                  const hasChainedKids = (e.chainedChildren?.length ?? 0) > 0
                   const isReleaseParent = e.kind === 'release' && (e.children?.length ?? 0) > 0
+                  const isExpandable = isReleaseParent || hasChainedKids
                   const isExpanded = expanded.has(e.key)
                   return (
                     <RunRow
                       key={e.key}
                       entry={e}
                       onClick={() => navigate(e)}
-                      expandable={isReleaseParent}
+                      expandable={isExpandable}
                       expanded={isExpanded}
                       onToggleExpand={() => toggleExpanded(e.key)}
                       summary={isReleaseParent ? buildReleaseSummary(e.children ?? []) : null}
                     >
-                      {isReleaseParent && isExpanded && (
+                      {isExpandable && isExpanded && (
                         <div className="bg-bg-primary/40">
                           {/* Render the chain (test → review → fix → review …)
-                              by walking the parent_job_id tree. Falls back to
-                              the flat children list for orphan-clusters
+                              by walking the parent_job_id tree. Agent/run
+                              rows nest their owned release here. Falls back
+                              to the flat children list for orphan-clusters
                               (vgroup:*) that don't have a real release id. */}
                           {(e.chainedChildren && e.chainedChildren.length > 0
                             ? e.chainedChildren

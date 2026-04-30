@@ -233,13 +233,29 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
 
   for (const j of sorted) {
     const bucket = bucketOf(j.kind)
-    // Release meta-jobs must never session-merge: their aggregate log may
-    // contain a child's session_id, and merging would shrink the release's
-    // apparent window (losing commit/push from grouping). Only real chat-style
-    // jobs (run, review, fix, fix-ci, fix-push, agent:*) should session-group.
+    // Two distinct merge rules sharing the session_id grouping mechanism:
+    //
+    // 1. Conversational jobs (`run` + `agent:*`) merge across kinds — an
+    //    agent run that the user follows up on via the terminal becomes
+    //    multi-turn on a single Entry, even though one turn is `agent:foo`
+    //    and the next is `run`.
+    //
+    // 2. Pipeline-step jobs (review, fix, fix-ci, fix-push, commit, push,
+    //    mark-dod, pr-wait) only merge with another job of the *same* kind.
+    //    A `fix` job that resumes a `review`'s Claude session via
+    //    `--resume <sessionId>` shares Claude's conversation memory — but
+    //    the user expects them to render as two distinct steps in the
+    //    chain, not as "review 2 turns".
+    //
+    // Release meta-jobs never merge: their aggregate log may contain a
+    // child's session_id, and merging would shrink the release window.
+    const isConversational = bucket === 'run' || bucket === 'agent'
     const canSessionMerge = !!j.session_id && j.kind !== 'release'
+    const sessionKey = canSessionMerge
+      ? (isConversational ? `${j.session_id}:conversation` : `${j.session_id}:${j.kind}`)
+      : ''
     if (canSessionMerge) {
-      const existing = sessionGroup.get(j.session_id!)
+      const existing = sessionGroup.get(sessionKey)
       if (existing) {
         existing.turns += 1
         existing.lastActivityAt = j.started_at
@@ -258,7 +274,13 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
     }
 
     const entry: Entry = {
-      key: j.session_id ? `sess:${j.session_id}` : `job:${j.id}`,
+      // Conversational sessions get a stable `sess:<id>` key so the same
+      // entry is reused across turns. Pipeline-step jobs sharing a session
+      // (review → fix via --resume) need distinct keys per kind so they
+      // don't collide on the same entry.
+      key: j.session_id
+        ? (isConversational ? `sess:${j.session_id}` : `sess:${j.session_id}:${j.kind}`)
+        : `job:${j.id}`,
       kind: j.kind,
       bucket,
       title: titleForJob(j, bucket),
@@ -283,7 +305,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       parentLabel: j.parent_job_id ? parentLabelFor(byId.get(j.parent_job_id)) : null,
       _jobIds: [j.id],
     }
-    if (canSessionMerge) sessionGroup.set(j.session_id!, entry)
+    if (canSessionMerge) sessionGroup.set(sessionKey, entry)
     entries.push(entry)
   }
 
@@ -383,10 +405,38 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
     }
   }
 
-  const parents: Entry[] = releases.map((r) => {
+  const releasesByKey = new Map<string, Entry>()
+  for (const r of releases) {
     const kids = (childrenByParent.get(r.key) ?? []).sort((a, b) => a.startedAt - b.startedAt)
-    return { ...r, children: kids, chainedChildren: buildChain(r, kids) }
-  })
+    releasesByKey.set(r.key, { ...r, children: kids, chainedChildren: buildChain(r, kids) })
+  }
+
+  // Index every entry by its absorbed job ids so we can resolve a release's
+  // parent_job_id to a concrete Entry (release.parent might be an agent run
+  // or a chat run that triggered the release-after-run hook).
+  const entryByJobId = new Map<string, Entry>()
+  for (const e of entries) {
+    for (const jid of e._jobIds ?? [e.navJobId]) entryByJobId.set(jid, e)
+  }
+
+  // Releases that were triggered by an agent/run nest under that owner so
+  // the runs view reads as `agent → release → test → review → …`. Releases
+  // without a parent (or whose parent is itself a release) stay top-level.
+  const releasesNestedUnderParent = new Set<string>()
+  const releaseChildrenByParentKey = new Map<string, Entry[]>()
+  for (const r of releasesByKey.values()) {
+    if (!r.parentJobId) continue
+    const parentEntry = entryByJobId.get(r.parentJobId)
+    if (!parentEntry || parentEntry.kind === 'release') continue
+    releasesNestedUnderParent.add(r.key)
+    const arr = releaseChildrenByParentKey.get(parentEntry.key) ?? []
+    arr.push(r)
+    releaseChildrenByParentKey.set(parentEntry.key, arr)
+  }
+
+  const parents: Entry[] = Array.from(releasesByKey.values()).filter(
+    (r) => !releasesNestedUnderParent.has(r.key),
+  )
 
   // Cluster orphaned pipeline steps (no parent release) that are close in time
   // into virtual groups so they display as one collapsed row instead of many
@@ -453,7 +503,18 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
     }
   }
 
-  const out = [...parents, ...clustered, ...otherTopLevel]
+  // Attach nested releases to their parent agent/run entries. We mutate
+  // copies (spread) so the original Entry instances aren't aliased between
+  // the flat children list and the chained tree.
+  const otherWithReleaseChildren = otherTopLevel.map((e) => {
+    const releaseKids = releaseChildrenByParentKey.get(e.key)
+    if (!releaseKids || releaseKids.length === 0) return e
+    const sortedKids = [...releaseKids].sort((a, b) => a.startedAt - b.startedAt)
+    const existing = e.chainedChildren ?? []
+    return { ...e, chainedChildren: [...existing, ...sortedKids] }
+  })
+
+  const out = [...parents, ...clustered, ...otherWithReleaseChildren]
   out.sort((a, b) => b.lastActivityAt - a.lastActivityAt)
   return out
 }

@@ -21,12 +21,16 @@ async function getProjectPipelineConfig(projectName: string): Promise<{ autoComm
     return {
       autoCommitEnabled: !!cfg?.autoCommitEnabled,
       autoPushEnabled: !!cfg?.autoPushEnabled,
-      releaseAfterRun: !!cfg?.releaseAfterRun,
+      // Default ON: every agent run owns a release. The Project Config tab
+      // can opt a repo out (read-only mirrors, archived projects). Older
+      // rows still in the DB with `false` are respected — only nullish
+      // values get the new default.
+      releaseAfterRun: cfg?.releaseAfterRun ?? true,
       autoPrMergeEnabled: !!cfg?.autoPrMergeEnabled,
       prWorkflowEnabled: !!cfg?.prWorkflowEnabled,
     };
   } catch {
-    return { autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false, autoPrMergeEnabled: false, prWorkflowEnabled: false };
+    return { autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: true, autoPrMergeEnabled: false, prWorkflowEnabled: false };
   }
 }
 
@@ -712,7 +716,13 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         if (r.ok) {
           console.log(`[release-after-run] triggered release ${r.jobId} for ${job.project} after run ${job.id}`);
         } else {
-          console.log(`[release-after-run] skipped for ${job.project}: ${r.detail}`);
+          // Don't drop on the floor: queue a pending release and let the
+          // pipeline-lock release hook (or `Resume jobs`) drain it. Covers
+          // the "agent finishes while another release is mid-flight" race
+          // and "jobs paused" race uniformly.
+          const { setPendingRelease } = await import('@/lib/pipeline/pending-release');
+          setPendingRelease(job.project);
+          console.log(`[release-after-run] queued for ${job.project} (will drain when pipeline lock releases): ${r.detail}`);
         }
       }
     } catch (e) {

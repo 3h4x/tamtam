@@ -1,10 +1,15 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { fetchJobs } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
+
+// Initial page size and how many additional rows each scroll batch loads.
+// Kept generous enough that a single batch covers a typical viewport so
+// the user doesn't see a "loading more" flicker after every screen.
+const PAGE_SIZE = 50
 
 function formatTime(ts: number): string {
   return new Date(ts * 1000).toLocaleString()
@@ -91,6 +96,15 @@ export function JobsPage() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'running' | 'done' | 'failed'>('all')
   const [search, setSearch] = useState('')
+  // How many rows to request from the server. Starts at one page; each time
+  // the sentinel scrolls into view we bump by another page. The polling
+  // effect re-runs whenever this changes so already-loaded rows refresh
+  // alongside any newly-added ones.
+  const [pageLimit, setPageLimit] = useState(PAGE_SIZE)
+  // Whether the last response returned fewer rows than requested — that's
+  // the signal that we've reached the end of the dataset.
+  const [hasMore, setHasMore] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -98,11 +112,15 @@ export function JobsPage() {
 
     const poll = async () => {
       try {
-        const data = await fetchJobs(projectFilter || undefined)
+        const data = await fetchJobs(projectFilter || undefined, { limit: pageLimit })
         if (!active) return
         const sorted = data.jobs.sort((a, b) => b.started_at - a.started_at)
         setJobs(sorted)
         setLoading(false)
+        setLoadingMore(false)
+        // If the server returned fewer than we asked for, there's nothing
+        // more to load. Otherwise assume more pages might exist.
+        setHasMore(sorted.length >= pageLimit)
         // Poll faster while jobs are actively running, back off when idle.
         const hasRunning = sorted.some(j => j.status === 'running')
         timeoutId = setTimeout(poll, hasRunning ? 5000 : 15000)
@@ -113,7 +131,25 @@ export function JobsPage() {
 
     poll()
     return () => { active = false; clearTimeout(timeoutId) }
-  }, [projectFilter])
+  }, [projectFilter, pageLimit])
+
+  // IntersectionObserver on a sentinel below the table — triggers
+  // `setPageLimit` to bump the request size, which the polling effect
+  // picks up and re-fetches.
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (loading || !hasMore) return
+    const node = sentinelRef.current
+    if (!node) return
+    const obs = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) {
+        setLoadingMore(true)
+        setPageLimit((n) => n + PAGE_SIZE)
+      }
+    }, { rootMargin: '400px' })
+    obs.observe(node)
+    return () => obs.disconnect()
+  }, [loading, hasMore, jobs.length])
 
   const filtered = jobs.filter((j) => {
     if (filter === 'running' && j.status !== 'running') return false
@@ -271,6 +307,17 @@ export function JobsPage() {
             })}
           </tbody>
         </table>
+        </div>
+      )}
+      {/* Infinite-scroll sentinel + status. Hidden until the initial page
+          finished loading so the skeleton doesn't fight with this. */}
+      {!loading && filtered.length > 0 && (
+        <div ref={sentinelRef} className="flex justify-center py-6 text-xs text-text-tertiary font-mono">
+          {hasMore
+            ? (loadingMore ? 'Loading more…' : `Showing ${filtered.length} of ${jobs.length}+`)
+            : (search || filter !== 'all'
+                ? `${filtered.length} match${filtered.length === 1 ? '' : 'es'}`
+                : `End of runs · ${jobs.length} total`)}
         </div>
       )}
     </div>

@@ -2,8 +2,15 @@ import type { JobInfo } from './types'
 
 const JOBS_BASE = '/api/jobs'
 
-export async function fetchJobs(project?: string): Promise<{ jobs: JobInfo[] }> {
-  const url = project ? `${JOBS_BASE}?project=${encodeURIComponent(project)}` : JOBS_BASE
+export async function fetchJobs(
+  project?: string,
+  opts: { limit?: number } = {},
+): Promise<{ jobs: JobInfo[]; pendingReleaseProjects?: string[] }> {
+  const params = new URLSearchParams()
+  if (project) params.set('project', project)
+  if (typeof opts.limit === 'number') params.set('limit', String(opts.limit))
+  const qs = params.toString()
+  const url = qs ? `${JOBS_BASE}?${qs}` : JOBS_BASE
   const response = await fetch(url)
   if (!response.ok) {
     throw new Error(`Failed to fetch jobs: ${response.statusText}`)

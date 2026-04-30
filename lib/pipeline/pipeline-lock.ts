@@ -119,12 +119,25 @@ export async function acquireLock(projectName: string, jobId: string): Promise<{
 }
 
 /**
- * Release a lock if it's held by the given job.
+ * Release a lock if it's held by the given job. After deletion, fire a
+ * pending-release drain so any agent run that completed while we held the
+ * lock now gets its inherited release. Drain is async fire-and-forget —
+ * we don't want completion-hook ordering to depend on it.
  */
 export function releaseLock(projectName: string, jobId: string): void {
   const existing = getLockSync(projectName);
   if (existing && existing.lockedByJobId === jobId) {
     releaseLockSync(projectName);
+    void drainPendingReleaseAsync(projectName);
+  }
+}
+
+async function drainPendingReleaseAsync(projectName: string): Promise<void> {
+  try {
+    const { drainPendingRelease } = await import('./pending-release');
+    await drainPendingRelease(projectName);
+  } catch (e) {
+    console.error('[pipeline-lock] pending-release drain failed for', projectName, e);
   }
 }
 

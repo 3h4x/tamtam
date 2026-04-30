@@ -22,6 +22,13 @@
       "when": 1777401131990,
       "tag": "0002_dusty_typhoid_mary",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1777578753429,
+      "tag": "0003_fat_shiver_man",
+      "breakpoints": true
     }
   ]
 }

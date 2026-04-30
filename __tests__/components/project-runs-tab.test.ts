@@ -97,4 +97,30 @@ describe('buildEntries session grouping', () => {
     const entries = buildEntries(jobs)
     expect(entries.map(e => e.key)).toEqual(['sess:B', 'sess:A'])
   })
+
+  it('keeps review and fix as separate entries even when they share a session_id (--resume)', () => {
+    // Regression: a fix job that resumes the review's Claude session via
+    // `--resume <sessionId>` shares the session for context but is a
+    // distinct pipeline step. They must not collapse into one entry
+    // labeled "review 2 turns" — that hid the fix from the user.
+    const jobs = [
+      job({ id: 'review-1', kind: 'review', started_at: 100, session_id: 'S1', exit_code: 0, verdict: 'NEEDS ATTENTION' as JobInfo['verdict'] }),
+      job({ id: 'fix-1', kind: 'fix', started_at: 200, session_id: 'S1', parent_job_id: 'review-1' }),
+    ]
+    const entries = buildEntries(jobs)
+    expect(entries).toHaveLength(2)
+    expect(entries.map(e => e.bucket).sort()).toEqual(['fix', 'review'])
+    expect(entries.every(e => e.turns === 1)).toBe(true)
+  })
+
+  it('still merges multiple review turns under the same session into one entry', () => {
+    const jobs = [
+      job({ id: 'rev-1', kind: 'review', started_at: 100, session_id: 'S2' }),
+      job({ id: 'rev-2', kind: 'review', started_at: 200, session_id: 'S2' }),
+    ]
+    const entries = buildEntries(jobs)
+    expect(entries).toHaveLength(1)
+    expect(entries[0].turns).toBe(2)
+    expect(entries[0].bucket).toBe('review')
+  })
 })
