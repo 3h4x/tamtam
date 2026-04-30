@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import type { PipelineResponse, VerdictDistribution, DurationStats } from '@/app/api/stats/pipeline/route'
+import { ErrorState } from './ErrorState'
 
 type Window = '24h' | '7d' | '30d' | 'all'
 
@@ -167,8 +168,12 @@ export function PipelinePage() {
 
   if (error || !data) {
     return (
-      <div className="flex items-center justify-center h-64 text-status-error text-sm">
-        {error ?? 'No data'}
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto">
+        <ErrorState
+          message={error ?? 'No pipeline data available.'}
+          hint="Pipeline metrics are collected from release runs across all projects."
+          onRetry={() => { setLoading(true); load(window_) }}
+        />
       </div>
     )
   }

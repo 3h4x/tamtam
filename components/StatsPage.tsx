@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import type { UsageResponse, ProjectUsageRow, AgentUsageRow } from '@/app/api/stats/usage/route'
+import { ErrorState } from './ErrorState'
 
 type Window = '24h' | '7d' | '30d' | 'all'
 const WINDOW_LABELS: Record<Window, string> = { '24h': '24 hours', '7d': '7 days', '30d': '30 days', all: 'All time' }
@@ -146,8 +147,12 @@ export function StatsPage() {
 
   if (error || !data) {
     return (
-      <div className="flex items-center justify-center h-64 text-status-error text-sm">
-        {error ?? 'No data'}
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto">
+        <ErrorState
+          message={error ?? 'No usage data available.'}
+          hint="Token usage data is collected from each Claude run's result event."
+          onRetry={() => { setLoading(true); load(window_) }}
+        />
       </div>
     )
   }

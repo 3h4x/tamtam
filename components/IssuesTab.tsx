@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { fetchIssuesAndPRs, fetchProjectConfig, mergePR, approvePR, reviewPR, runMarkDod } from '@/lib/client-api'
 import type { GhPullRequest, GhIssue, GhLabel, ProjectConfig } from '@/lib/client-api'
 import { formatAgo } from '@/lib/format'
+import { ErrorState } from './ErrorState'
 
 interface IssuesTabProps {
   projectName: string
@@ -701,15 +702,11 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
 
   if (error) {
     return (
-      <div className="p-4">
-        <div className="text-status-error text-sm mb-2">{error}</div>
-        <button
-          className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
-          onClick={() => load('initial')}
-        >
-          Retry
-        </button>
-      </div>
+      <ErrorState
+        message={error}
+        hint="GitHub data is fetched via the gh CLI. Check that gh is authenticated and the repo is a GitHub remote."
+        onRetry={() => load('initial')}
+      />
     )
   }
 

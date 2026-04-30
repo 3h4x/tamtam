@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
+import { ErrorState } from './ErrorState'
 
 interface PrometheusResult {
   metric: Record<string, string>
@@ -864,8 +865,12 @@ export function MonitoringPage() {
 
   if (error || !data) {
     return (
-      <div className="flex items-center justify-center h-64 text-status-error text-sm">
-        {error ?? 'No data'}
+      <div className="p-4 sm:p-6 max-w-5xl mx-auto">
+        <ErrorState
+          message={error ?? 'Monitoring data is not available.'}
+          hint="Make sure Prometheus and Loki are reachable from the TamTam server."
+          onRetry={() => { setLoading(true); fetch_(window_) }}
+        />
       </div>
     )
   }

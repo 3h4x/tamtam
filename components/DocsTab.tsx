@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { fetchProjectDocs } from '@/lib/client-api'
 import type { ProjectDoc } from '@/lib/client-api'
+import { ErrorState } from './ErrorState'
 
 interface DocsTabProps {
   projectName: string
@@ -14,7 +15,8 @@ export function DocsTab({ projectName }: DocsTabProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  function load() {
+    setError(null)
     setLoading(true)
     fetchProjectDocs(projectName)
       .then((res) => {
@@ -23,7 +25,9 @@ export function DocsTab({ projectName }: DocsTabProps) {
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load docs'))
       .finally(() => setLoading(false))
-  }, [projectName])
+  }
+
+  useEffect(() => { load() }, [projectName])
 
   if (loading) return (
     <div className="mt-2 flex gap-3">
@@ -40,7 +44,12 @@ export function DocsTab({ projectName }: DocsTabProps) {
       </div>
     </div>
   )
-  if (error) return <div className="text-status-error text-sm p-4">{error}</div>
+  if (error) return (
+    <ErrorState
+      message={error}
+      onRetry={load}
+    />
+  )
   if (docs.length === 0) return (
     <div className="p-6 text-center text-text-secondary text-sm">
       No docs found. Add a <code className="font-mono text-xs">README.md</code> or <code className="font-mono text-xs">docs/*.md</code> files.

@@ -21,6 +21,9 @@
 
 import { stableHash } from './fire-times';
 import { getIssueBranchLock } from './project-branch-lock';
+import { getLock } from './pipeline-lock';
+import { db, schema } from './db';
+import { eq } from 'drizzle-orm';
 
 type ScheduleEntry = {
   agentId: string;
@@ -126,6 +129,27 @@ export function computeNextFire(schedule: string, agentId: string, fromMs: numbe
 
 async function fire(entry: ScheduleEntry): Promise<void> {
   if (getPaused() || !entry.enabled) return;
+
+  // Don't fire while a release pipeline is running for the project. The
+  // pipeline owns the working tree (commit/push are inline; review/fix run
+  // back-to-back), and an agent firing in the middle would race with those
+  // edits — agent edits get included in the in-flight commit, or trigger a
+  // cascade of re-reviews on top of the pipeline's own changes.
+  try {
+    const lock = getLock(entry.project);
+    if (lock) {
+      const holderRow = db.select().from(schema.jobs).where(eq(schema.jobs.id, lock.lockedByJobId)).get();
+      if (holderRow && holderRow.finishedAt === null) {
+        entry.skippedCount += 1;
+        entry.lastSkippedReason = `release pipeline active: ${holderRow.kind} ${holderRow.id}`;
+        console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${entry.lastSkippedReason}`);
+        armNext(entry);
+        return;
+      }
+    }
+  } catch {
+    // Lock probe failure shouldn't block runs — fall through.
+  }
 
   // Don't fire scheduled agents while an issue branch is checked out for the
   // project — they'd run with cwd on someone's WIP feature branch and either
