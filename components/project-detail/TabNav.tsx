@@ -17,7 +17,11 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, onSet
   const router = useRouter()
 
   const tabClass = (tab: Tab) =>
-    `px-3 py-1.5 text-sm cursor-pointer ${activeTab === tab ? 'border-b-2 border-accent text-accent' : 'text-text-secondary hover:text-text-primary'}`
+    `relative px-3 py-1.5 text-sm cursor-pointer transition-colors focus:outline-none focus-visible:text-text-primary ${
+      activeTab === tab
+        ? 'border-b-2 border-accent text-accent font-medium -mb-px'
+        : 'border-b-2 border-transparent text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/40 -mb-px'
+    }`
 
   const handleTerminalClick = async () => {
     try {
@@ -44,7 +48,7 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, onSet
       <button className={tabClass('changes')} onClick={() => onSetTab('changes')}>
         Changes
         {totalChanges > 0 && (
-          <span className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full bg-accent-light text-accent font-medium">
+          <span className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full bg-accent-light text-accent font-medium tabular-nums">
             {totalChanges}
           </span>
         )}
@@ -55,7 +59,7 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, onSet
       <button className={tabClass('issues')} onClick={() => onSetTab('issues')}>
         Issues / PRs
         {issueCount && (issueCount.prs + issueCount.issues) > 0 && (
-          <span className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full bg-accent-light text-accent font-medium">
+          <span className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full bg-accent-light text-accent font-medium tabular-nums">
             {issueCount.prs + issueCount.issues}
           </span>
         )}
