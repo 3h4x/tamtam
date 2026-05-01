@@ -619,3 +619,149 @@ describe('concurrent step finalization guard', () => {
     expect(relRow?.finishedAt).not.toBeNull();
   });
 });
+
+// ─── verdict retry rescue (lifecycle integration) ──────────────────────────
+
+describe('verdict retry rescue', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
+  let startFixFromJobMock: ReturnType<typeof vi.fn>;
+  let retryVerdictMock: ReturnType<typeof vi.fn>;
+  let tempDir: string;
+
+  function makeReviewJob(id: string, logPath: string | null): JobData {
+    const now = Date.now() / 1000;
+    return {
+      id,
+      project: 'proj',
+      kind: 'review',
+      prompt: null,
+      pid: 0,
+      logPath,
+      startedAt: now,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      releaseId: 'release-retry',
+    };
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-retry-test-'));
+    startFixFromJobMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-auto' });
+    retryVerdictMock = vi.fn().mockResolvedValue(null);
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+      getJobStatus: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/git/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({
+        autoPushEnabled: true,
+        autoCommitEnabled: false,
+        releaseAfterRun: false,
+        prWorkflowEnabled: false,
+      }),
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      releaseLock: vi.fn(),
+      getLock: vi.fn().mockReturnValue(null),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/jobs/retention', () => ({
+      pruneProjectLogs: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/notifications', () => ({
+      notify: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: vi.fn().mockReturnValue({
+        fix_ci_max_retries: 0,
+        fix_ci_retry_window_seconds: 120,
+        fix_ci_fast_crash_ms: 5000,
+        review_retry_on_parse_failure: true,
+      }),
+    }));
+    vi.doMock('@/lib/pipeline/start-fix', () => ({
+      startFixFromJob: startFixFromJobMock,
+    }));
+    vi.doMock('@/lib/jobs/verdict-retry', () => ({
+      retryVerdictWithClaude: retryVerdictMock,
+    }));
+    // Stub out the LGTM-path actions so they don't throw when retry succeeds
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
+      startProjectCommit: vi.fn().mockResolvedValue({ ok: true, jobId: 'commit-1' }),
+    }));
+    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({
+      startMarkDod: vi.fn().mockResolvedValue({ ok: false }),
+    }));
+
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.jobs).values(
+      makeJobRow({ id: 'release-retry', project: 'proj', kind: 'release', startedAt: now - 120 }) as any
+    ).run();
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('calls retryVerdictWithClaude when the review log has no parseable verdict', async () => {
+    const logPath = join(tempDir, 'no-verdict.log');
+    writeFileSync(logPath, 'The code looks fine overall. No major issues spotted.\n');
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+
+    await markDoneFn(makeReviewJob('rev-no-verdict', logPath), 0);
+
+    expect(retryVerdictMock).toHaveBeenCalledOnce();
+  });
+
+  it('uses the rescued verdict from retry — LGTM → no fix started', async () => {
+    retryVerdictMock.mockResolvedValue('LGTM');
+    const logPath = join(tempDir, 'no-verdict-lgtm.log');
+    writeFileSync(logPath, 'Everything looks good, tests pass.\n');
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+
+    await markDoneFn(makeReviewJob('rev-rescued-lgtm', logPath), 0);
+
+    expect(retryVerdictMock).toHaveBeenCalledOnce();
+    expect(startFixFromJobMock).not.toHaveBeenCalled();
+  });
+
+  it('defaults to NEEDS ATTENTION when retry also returns null → fix is started', async () => {
+    retryVerdictMock.mockResolvedValue(null);
+    const logPath = join(tempDir, 'no-verdict-null.log');
+    writeFileSync(logPath, 'Some concerns here but no verdict emitted.\n');
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+
+    await markDoneFn(makeReviewJob('rev-retry-null', logPath), 0);
+
+    expect(retryVerdictMock).toHaveBeenCalledOnce();
+    expect(startFixFromJobMock).toHaveBeenCalledWith('rev-retry-null');
+  });
+});

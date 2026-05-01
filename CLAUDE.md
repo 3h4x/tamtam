@@ -33,7 +33,7 @@ The **🚀 Release** button triggers the pipeline at the right starting step. Wh
 - `lib/pipeline/start-pr-wait.ts` → `launchPrWait` (background PR poller: polls CI checks, auto-merges once they pass, switches working copy back to default branch, then runs mark-dod)
 - `lib/shared/notifications.ts` → `notify` / `sendTestNotification` (outbound webhook delivery)
 
-Verdict detection (`getVerdict` in `lib/jobs/job-storage.ts`) reads the **last 2000 chars** of the parsed Claude log and looks for an explicit "Verdict: X" marker or a bare token on the final line — deliberately lenient across markdown formatting (`## Verdict\n**NEEDS ATTENTION**`) but robust against false positives from code snippets higher up in the log.
+Verdict detection (`getVerdict` in `lib/jobs/verdict.ts`, re-exported via the `job-storage` barrel) reads the **last 2000 chars** of the parsed Claude log and looks for an explicit "Verdict: X" marker or a bare token on the final line — deliberately lenient across markdown formatting (`## Verdict\n**NEEDS ATTENTION**`) but robust against false positives from code snippets higher up in the log.
 
 ## Concepts
 - **Skills** — reusable prompt/instruction blocks (DB-backed + file-based from `skills/docs/skills/`)
@@ -93,7 +93,7 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
   - `lib/pipeline/` — release pipeline orchestration (`start-*`, `pipeline-lock`, `pipeline-status`, `pipeline-steps`, `mark-dod-branch`, `pr-create`, `pending-release`)
   - `lib/scheduling/` — agent/test scheduling (`agent-scheduler`, `internal-scheduler`, `test-scheduler`, `scheduling`, `fire-times`, `launchagent`)
   - `lib/git/` — git operations (`git-branch`, `git-utils`, `diff-context`)
-  - `lib/jobs/` — job lifecycle (`job-storage` barrel + `storage`, `lifecycle`, `verdict`, `probe`, `types`, `parent-context`; also `pm2-jobs`, `run-history`, `log-persistence`, `retention`, `claude-stream-parser`)
+  - `lib/jobs/` — job lifecycle (`job-storage` barrel + `storage`, `lifecycle`, `verdict`, `verdict-retry`, `probe`, `types`, `parent-context`, `prompt-size`; also `pm2-jobs`, `run-history`, `log-persistence`, `retention`, `claude-stream-parser`)
   - `lib/terminal/` — terminal streaming (`terminal-session-store`, `ansi-render`)
   - `lib/agents/` — agent management (`agent-memory`, `agents-cache`, `default-agent-skills`, `file-agent-overrides`, `tamtam-file-agents`)
   - `lib/skills/` — skills (`skills`, `tamtam-file-config`)
