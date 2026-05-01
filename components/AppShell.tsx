@@ -11,7 +11,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen flex flex-col bg-bg-primary text-text-primary">
       <Header loading={loading} lastRefresh={lastRefresh} />
-      <main className="flex-1 p-6">
+      <main className="flex-1 p-4 sm:p-6">
         {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
         {children}
       </main>

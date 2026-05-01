@@ -188,11 +188,11 @@ export function ProjectDetailPage({
 
   if (!project) {
     return (
-      <div className="p-6">
+      <div className="py-2">
         <button className="text-accent hover:underline text-sm mb-4 inline-block" onClick={() => router.push('/')}>
           &larr; Back to projects
         </button>
-        <p className="text-text-secondary text-sm p-6">
+        <p className="text-text-secondary text-sm">
           Project &quot;{name}&quot; not found.
         </p>
       </div>
@@ -440,7 +440,7 @@ export function ProjectDetailPage({
   }
 
   return (
-    <div className="p-6">
+    <div className="px-0 py-1">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
           <h2 className="text-xl font-semibold text-text-primary" data-private>{project.project}</h2>

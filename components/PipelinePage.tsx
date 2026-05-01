@@ -153,7 +153,7 @@ export function PipelinePage() {
 
   if (loading && !data) {
     return (
-      <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
+      <div className="max-w-6xl mx-auto space-y-6">
         <div className="skeleton h-11 w-full rounded-lg" />
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -168,7 +168,7 @@ export function PipelinePage() {
 
   if (error || !data) {
     return (
-      <div className="p-4 sm:p-6 max-w-6xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <ErrorState
           message={error ?? 'No pipeline data available.'}
           hint="Pipeline metrics are collected from release runs across all projects."
@@ -198,7 +198,7 @@ export function PipelinePage() {
     convRate == null ? undefined : convRate >= 0.8 ? 'green' : convRate >= 0.5 ? 'yellow' : 'red'
 
   return (
-    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex items-center gap-3 flex-wrap">
         <div>
