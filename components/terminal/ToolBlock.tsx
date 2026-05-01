@@ -47,7 +47,7 @@ export function ToolBlock({ tool, executing }: { tool: ToolEntry; executing?: bo
   return (
     <div className="mx-4 group/tool">
       <div
-        className={`flex items-center gap-2 px-2 py-0.5 rounded-sm leading-tight ${clickable ? 'cursor-pointer hover:bg-[#181818]' : ''}`}
+        className={`flex items-center gap-2 px-2 py-0.5 rounded-sm leading-tight ${clickable ? 'cursor-pointer hover:bg-bg-secondary' : ''}`}
         onClick={() => clickable && setCollapsed(!collapsed)}
       >
         {executing && !hasResult && (
@@ -55,21 +55,21 @@ export function ToolBlock({ tool, executing }: { tool: ToolEntry; executing?: bo
         )}
         <span className={`${nameColor} text-xs font-mono shrink-0`}>{tool.name}</span>
         {summary && (
-          <span className="text-[#888] text-xs font-mono truncate min-w-0 flex-1">{summary}</span>
+          <span className="text-text-tertiary text-xs font-mono truncate min-w-0 flex-1">{summary}</span>
         )}
         {hasResult && tool.result && (
-          <span className="text-[10px] text-[#444] shrink-0 font-mono tabular-nums">
+          <span className="text-[10px] text-text-tertiary/50 shrink-0 font-mono tabular-nums">
             {tool.result.length > 1024
               ? `${(tool.result.length / 1024).toFixed(1)}k`
               : `${tool.result.length}`}
           </span>
         )}
         {hasResult && (
-          <span className="text-[10px] text-[#555] shrink-0 transition-transform" style={{ transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)' }}>›</span>
+          <span className="text-[10px] text-text-tertiary/60 shrink-0 transition-transform" style={{ transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)' }}>›</span>
         )}
       </div>
       {!collapsed && hasResult && (
-        <pre className="ml-2 mt-1 mb-1 px-3 py-2 text-xs text-[#999] bg-[#0d0d0d] border-l-2 border-[#2a2a2a] m-0 overflow-x-auto whitespace-pre-wrap max-h-60 overflow-y-auto font-mono">
+        <pre className="ml-2 mt-1 mb-1 px-3 py-2 text-xs text-text-secondary bg-bg-primary border-l-2 border-border m-0 overflow-x-auto whitespace-pre-wrap max-h-60 overflow-y-auto font-mono">
           {resultPreview}
         </pre>
       )}

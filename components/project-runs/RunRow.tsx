@@ -57,12 +57,11 @@ function VerdictBadge({ verdict, isRunning, isFailed, exitCode }: { verdict: str
     )
   }
   return (
-    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium ${
-      isFailed ? 'bg-status-error/15 text-status-error' :
-      'bg-status-success/15 text-status-success'
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium border ${
+      isFailed ? 'bg-status-error/15 text-status-error border-status-error/30' :
+      'bg-status-success/15 text-status-success border-status-success/30'
     }`}>
-      <span>●</span>
-      {isFailed ? `exit ${exitCode}` : 'done'}
+      {isFailed ? `exit ${exitCode}` : '✓ done'}
     </span>
   )
 }
