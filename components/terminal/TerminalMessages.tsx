@@ -143,15 +143,15 @@ export function TerminalMessages({
           <div
             key={i}
             className={`group relative px-4 py-2 ${
-              entry.role === 'user' ? 'text-[#f0f0f0] whitespace-pre-wrap border-l-2 border-accent/40' :
+              entry.role === 'user' ? 'text-text-primary whitespace-pre-wrap border-l-2 border-accent/40' :
               entry.role === 'error' ? 'text-status-error whitespace-pre-wrap border-l-2 border-status-error/60 bg-status-error/8' :
-              entry.role === 'status' ? 'text-[#888] whitespace-pre-wrap text-[11px] border-l-2 border-[#333] bg-[#141414]' :
+              entry.role === 'status' ? 'text-text-tertiary whitespace-pre-wrap text-[11px] border-l-2 border-border bg-bg-primary' :
               entry.role === 'raw' ? 'text-[#b0b8b0] font-mono text-xs whitespace-pre-wrap border-l-2 border-[#3a4a3a] bg-[#0e120e]' :
-              'text-[#e0e0e0] terminal-markdown'
+              'text-text-secondary terminal-markdown'
             }`}
           >
             {entry.role === 'user' && <span className="text-accent mr-2">#</span>}
-            {entry.role === 'status' && <span className="text-[#555] mr-2 select-none">›</span>}
+            {entry.role === 'status' && <span className="text-text-tertiary/60 mr-2 select-none">›</span>}
             {entry.role === 'error' && <span className="text-status-error mr-2 select-none">!</span>}
             {entry.role === 'assistant'
               ? (hasAnsi(entry.text)
@@ -167,13 +167,13 @@ export function TerminalMessages({
             {entry.imageUrls && entry.imageUrls.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-2">
                 {entry.imageUrls.map((url, j) => (
-                  <img key={j} src={url} alt="attachment" className="max-h-40 max-w-[240px] rounded border border-[#333] block" />
+                  <img key={j} src={url} alt="attachment" className="max-h-40 max-w-[240px] rounded border border-border block" />
                 ))}
               </div>
             )}
             {(entry.role === 'assistant' || entry.role === 'user') && entry.text && (
               <button
-                className="absolute top-1.5 right-2 px-1.5 py-0.5 text-[10px] rounded bg-[#1f1f1f] text-[#666] hover:text-[#ccc] border border-[#2a2a2a] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer font-mono"
+                className="absolute top-1.5 right-2 px-1.5 py-0.5 text-[10px] rounded bg-bg-secondary text-text-tertiary hover:text-text-primary border border-border opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer font-mono"
                 onClick={async (e) => {
                   e.stopPropagation()
                   try {
@@ -202,7 +202,7 @@ export function TerminalMessages({
 
         {/* Live streamed assistant text */}
         {streaming && streamBuffer && (
-          <div className={`px-4 py-2 ${streamIsRaw ? 'text-[#c0c0c0] font-mono text-xs whitespace-pre-wrap' : 'text-[#e0e0e0] terminal-markdown'}`}>
+          <div className={`px-4 py-2 ${streamIsRaw ? 'text-text-secondary font-mono text-xs whitespace-pre-wrap' : 'text-text-secondary terminal-markdown'}`}>
             {streamIsRaw
               ? (hasAnsi(streamBuffer)
                   ? <pre className="whitespace-pre-wrap font-mono text-xs m-0 inline">{renderAnsi(collapseCarriageReturns(streamBuffer))}</pre>
@@ -254,8 +254,8 @@ export function TerminalMessages({
                 )}
                 <span className="text-accent font-mono text-sm relative z-10">{spinnerChars[spinnerFrame % spinnerChars.length]}</span>
               </span>
-              <span className={`text-xs font-mono shrink-0 tabular-nums ${isIdle ? 'text-status-warning' : 'text-[#888]'}`}>{(elapsedMs / 1000).toFixed(1)}s</span>
-              <span className={`text-xs font-mono truncate flex-1 ${pendingTool ? 'text-status-warning' : isIdle ? 'text-status-warning/80' : 'text-[#888]'}`}>
+              <span className={`text-xs font-mono shrink-0 tabular-nums ${isIdle ? 'text-status-warning' : 'text-text-tertiary'}`}>{(elapsedMs / 1000).toFixed(1)}s</span>
+              <span className={`text-xs font-mono truncate flex-1 ${pendingTool ? 'text-status-warning' : isIdle ? 'text-status-warning/80' : 'text-text-tertiary'}`}>
                 {label}{idleLabel}
               </span>
               <button
@@ -272,11 +272,11 @@ export function TerminalMessages({
         {messageQueue.length > 0 && (
           <div className="px-4 pb-1">
             {messageQueue.map((msg, i) => (
-              <div key={i} className="flex items-center gap-2 text-xs text-[#888] font-mono py-0.5">
-                <span className="text-[#666]">{i + 1}.</span>
+              <div key={i} className="flex items-center gap-2 text-xs text-text-tertiary font-mono py-0.5">
+                <span className="text-text-tertiary/60">{i + 1}.</span>
                 <span className="truncate flex-1">{msg}</span>
                 <button
-                  className="text-[#666] hover:text-[#aaa] cursor-pointer border-none bg-transparent font-mono shrink-0"
+                  className="text-text-tertiary/60 hover:text-text-secondary cursor-pointer border-none bg-transparent font-mono shrink-0"
                   onClick={() => onClearQueueItem(i)}
                 >✕</button>
               </div>
@@ -285,13 +285,13 @@ export function TerminalMessages({
         )}
 
         {!streaming && pendingImageUrls.length > 0 && (
-          <div className="mx-4 mt-2 px-3 py-2 bg-[#161616] border border-[#2a2a2a] rounded-md">
+          <div className="mx-4 mt-2 px-3 py-2 bg-bg-primary border border-border rounded-md">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] text-[#666] uppercase tracking-wider font-mono">
+              <span className="text-[10px] text-text-tertiary uppercase tracking-wider font-mono">
                 {pendingImageUrls.length} attachment{pendingImageUrls.length === 1 ? '' : 's'}
               </span>
               <button
-                className="text-[10px] text-[#666] hover:text-[#aaa] font-mono cursor-pointer border-none bg-transparent"
+                className="text-[10px] text-text-tertiary hover:text-text-secondary font-mono cursor-pointer border-none bg-transparent"
                 onClick={onClearImages}
                 title="Remove all attachments"
               >clear all</button>
@@ -303,15 +303,15 @@ export function TerminalMessages({
                 return (
                   <div key={i} className="relative group">
                     <a href={url} target="_blank" rel="noopener noreferrer" title="open full-size">
-                      <img src={url} alt={f?.name ?? 'pending'} className="max-h-24 max-w-[200px] rounded border border-[#333] block" />
+                      <img src={url} alt={f?.name ?? 'pending'} className="max-h-24 max-w-[200px] rounded border border-border block" />
                     </a>
                     <button
-                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#2a2a2a] hover:bg-status-error text-[#ccc] hover:text-white text-[11px] leading-none flex items-center justify-center cursor-pointer border border-[#444] shadow"
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-bg-tertiary hover:bg-status-error text-text-secondary hover:text-white text-[11px] leading-none flex items-center justify-center cursor-pointer border border-border shadow"
                       onClick={(e) => { e.stopPropagation(); onRemoveImage(i) }}
                       title="Remove"
                     >×</button>
                     {f && (
-                      <div className="mt-1 text-[10px] text-[#666] font-mono max-w-[200px] truncate" title={f.name}>
+                      <div className="mt-1 text-[10px] text-text-tertiary font-mono max-w-[200px] truncate" title={f.name}>
                         {f.name} · {sizeKb}kb
                       </div>
                     )}

@@ -85,17 +85,17 @@ export function TerminalToolbar({
   const overflow = allSelected.length - SHOW
 
   return (
-    <div className="flex items-center justify-between gap-2 px-3 py-2 bg-[#1a1a1a] border-b border-[#2a2a2a] shrink-0">
+    <div className="flex items-center justify-between gap-2 px-3 py-2 bg-bg-secondary border-b border-border shrink-0">
       <div className="flex items-center gap-1.5">
         <button
-          className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-[#888] hover:text-[#ccc] cursor-pointer border-none font-mono leading-none"
+          className="text-[11px] px-2 py-1 h-[26px] rounded bg-bg-tertiary text-text-tertiary hover:text-text-primary cursor-pointer border-none font-mono leading-none"
           onClick={onNewSession}
           title="New session"
         >
           new
         </button>
         <button
-          className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-[#888] hover:text-[#ccc] cursor-pointer border-none font-mono leading-none flex items-center gap-1"
+          className="text-[11px] px-2 py-1 h-[26px] rounded bg-bg-tertiary text-text-tertiary hover:text-text-primary cursor-pointer border-none font-mono leading-none flex items-center gap-1"
           onClick={onToggleSessions}
           title="Recent sessions"
         >
@@ -123,7 +123,7 @@ export function TerminalToolbar({
 
       <div className="flex items-center gap-1.5">
         <button
-          className={`text-[11px] px-2 py-1 h-[26px] rounded cursor-pointer border-none font-mono leading-none ${showThinking ? 'bg-accent/20 text-accent' : 'bg-[#252525] text-[#888] hover:text-[#ccc]'}`}
+          className={`text-[11px] px-2 py-1 h-[26px] rounded cursor-pointer border-none font-mono leading-none ${showThinking ? 'bg-accent/20 text-accent' : 'bg-bg-tertiary text-text-tertiary hover:text-text-primary'}`}
           onClick={onToggleThinking}
           title="Toggle thinking blocks"
         >
@@ -146,17 +146,17 @@ export function TerminalToolbar({
         )}
         <div className="relative">
           <button
-            className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-[#888] hover:text-[#ccc] cursor-pointer border-none font-mono leading-none"
+            className="text-[11px] px-2 py-1 h-[26px] rounded bg-bg-tertiary text-text-tertiary hover:text-text-primary cursor-pointer border-none font-mono leading-none"
             onClick={onToggleSkillPicker}
           >
             +skill
           </button>
           {showSkillPicker && (
-            <div className="absolute top-full right-0 mt-1 w-96 bg-[#1a1a1a] border border-[#333] rounded-lg shadow-lg z-50 overflow-hidden">
+            <div className="absolute top-full right-0 mt-1 w-96 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden">
               <input
                 ref={skillSearchRef}
                 type="text"
-                className="w-full px-3 py-2.5 text-sm bg-[#111] border-b border-[#333] text-[#ccc] outline-none placeholder:text-[#555] font-mono"
+                className="w-full px-3 py-2.5 text-sm bg-bg-primary border-b border-border text-text-primary outline-none placeholder:text-text-tertiary/40 font-mono"
                 value={skillSearch}
                 onChange={(e) => onSkillSearchChange(e.target.value)}
                 placeholder="search skills..."
@@ -167,7 +167,7 @@ export function TerminalToolbar({
               />
               <div className="max-h-80 overflow-y-auto">
                 {filteredItems.length === 0 ? (
-                  <div className="px-3 py-3 text-xs text-[#555]">
+                  <div className="px-3 py-3 text-xs text-text-tertiary/50">
                     {allItems.length === 0 ? 'no skills' : 'no matches'}
                   </div>
                 ) : (
@@ -179,7 +179,7 @@ export function TerminalToolbar({
                         className={`w-full px-3 py-2 text-left text-xs cursor-pointer border-none font-mono flex items-center justify-between gap-2 transition-colors ${
                           isSelected
                             ? 'bg-accent/10 hover:bg-accent/15 text-accent'
-                            : 'hover:bg-[#252525] bg-transparent text-[#ccc]'
+                            : 'hover:bg-bg-tertiary bg-transparent text-text-primary'
                         }`}
                         onClick={() => onToggleItem(item)}
                         title={item.description || item.name}
@@ -187,10 +187,10 @@ export function TerminalToolbar({
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="shrink-0 w-3 text-center text-[10px]">{isSelected ? '✓' : ''}</span>
                           <span className="truncate">{item.name}</span>
-                          <span className="text-[#444] shrink-0">{item.source === 'db' ? 'db' : 'file'}</span>
+                          <span className="text-text-tertiary/50 shrink-0">{item.source === 'db' ? 'db' : 'file'}</span>
                         </div>
                         {(skillUsage[item.id] || 0) > 0 && (
-                          <span className="text-[10px] text-[#555] shrink-0">{skillUsage[item.id]}</span>
+                          <span className="text-[10px] text-text-tertiary/40 shrink-0">{skillUsage[item.id]}</span>
                         )}
                       </button>
                     )
@@ -202,17 +202,17 @@ export function TerminalToolbar({
         </div>
         <div className="relative">
           <button
-            className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-[#888] hover:text-[#ccc] cursor-pointer border-none font-mono leading-none"
+            className="text-[11px] px-2 py-1 h-[26px] rounded bg-bg-tertiary text-text-tertiary hover:text-text-primary cursor-pointer border-none font-mono leading-none"
             onClick={onToggleDocsPicker}
           >
             +docs
           </button>
           {showDocsPicker && (
-            <div className="absolute top-full right-0 mt-1 w-72 bg-[#1a1a1a] border border-[#333] rounded-lg shadow-lg z-50 overflow-hidden">
+            <div className="absolute top-full right-0 mt-1 w-72 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden">
               <input
                 ref={docsSearchRef}
                 type="text"
-                className="w-full px-3 py-2.5 text-sm bg-[#111] border-b border-[#333] text-[#ccc] outline-none placeholder:text-[#555] font-mono"
+                className="w-full px-3 py-2.5 text-sm bg-bg-primary border-b border-border text-text-primary outline-none placeholder:text-text-tertiary/40 font-mono"
                 value={docsSearch}
                 onChange={(e) => onDocsSearchChange(e.target.value)}
                 placeholder="search docs..."
@@ -223,7 +223,7 @@ export function TerminalToolbar({
               />
               <div className="max-h-80 overflow-y-auto">
                 {filteredDocs.length === 0 ? (
-                  <div className="px-3 py-3 text-xs text-[#555]">
+                  <div className="px-3 py-3 text-xs text-text-tertiary/50">
                     {allDocs.length === 0 ? 'no docs' : 'no matches'}
                   </div>
                 ) : (
@@ -233,7 +233,7 @@ export function TerminalToolbar({
                       <button
                         key={doc.name}
                         className={`w-full px-3 py-2 text-left text-xs cursor-pointer border-none font-mono flex items-center gap-2 transition-colors ${
-                          isSelected ? 'bg-accent/10 hover:bg-accent/15 text-accent' : 'hover:bg-[#252525] bg-transparent text-[#ccc]'
+                          isSelected ? 'bg-accent/10 hover:bg-accent/15 text-accent' : 'hover:bg-bg-tertiary bg-transparent text-text-primary'
                         }`}
                         onClick={() => onToggleDoc(doc)}
                       >
@@ -247,14 +247,14 @@ export function TerminalToolbar({
             </div>
           )}
         </div>
-        <div className="flex items-center h-[26px] rounded overflow-hidden border border-[#333]">
+        <div className="flex items-center h-[26px] rounded overflow-hidden border border-border">
           {(['haiku', 'sonnet', 'opus'] as const).map((m) => (
             <button
               key={m}
               className={`text-[11px] px-2 h-full cursor-pointer border-none font-mono leading-none transition-colors ${
                 model === m
                   ? 'bg-accent/20 text-accent'
-                  : 'bg-[#252525] text-[#888] hover:text-[#ccc]'
+                  : 'bg-bg-tertiary text-text-tertiary hover:text-text-primary'
               }`}
               onClick={async () => {
                 onModelChange(m)
@@ -264,7 +264,11 @@ export function TerminalToolbar({
                   body: JSON.stringify({ default_model: m }),
                 }).catch(() => {})
               }}
-              title={`Switch to ${m}`}
+              title={
+                m === 'haiku' ? 'haiku — fastest, lowest cost' :
+                m === 'sonnet' ? 'sonnet — balanced speed and quality' :
+                'opus — most capable, highest quality'
+              }
             >
               {m}
             </button>
