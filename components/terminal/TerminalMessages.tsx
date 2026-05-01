@@ -128,9 +128,9 @@ export function TerminalMessages({
         {history.map((entry, i) => (
           entry.role === 'thinking' ? (
             showThinking && (
-              <div key={i} className="px-4 py-2 border-l-2 border-accent/20 ml-4 mr-4 my-1">
-                <div className="text-[10px] text-[#666] mb-1 uppercase tracking-wider">thinking</div>
-                <div className="text-[#888] text-xs whitespace-pre-wrap">{entry.text}</div>
+              <div key={i} className="px-4 py-2 border-l-2 border-accent/35 ml-4 mr-4 my-1 bg-accent/[0.04] rounded-r">
+                <div className="text-[10px] text-accent/60 mb-1 uppercase tracking-wider">thinking</div>
+                <div className="text-[#999] text-xs whitespace-pre-wrap">{entry.text}</div>
               </div>
             )
           ) : entry.role === 'tool' && entry.tool ? (
@@ -140,7 +140,7 @@ export function TerminalMessages({
             key={i}
             className={`group relative px-4 py-2 ${
               entry.role === 'user' ? 'text-[#f0f0f0] whitespace-pre-wrap border-l-2 border-accent/40' :
-              entry.role === 'error' ? 'text-status-error whitespace-pre-wrap border-l-2 border-status-error/50 bg-status-error/5' :
+              entry.role === 'error' ? 'text-status-error whitespace-pre-wrap border-l-2 border-status-error/60 bg-status-error/8' :
               entry.role === 'status' ? 'text-[#888] whitespace-pre-wrap text-[11px] border-l-2 border-[#333] bg-[#141414]' :
               entry.role === 'raw' ? 'text-[#b0b8b0] font-mono text-xs whitespace-pre-wrap border-l-2 border-[#3a4a3a] bg-[#0e120e]' :
               'text-[#e0e0e0] terminal-markdown'
@@ -210,9 +210,9 @@ export function TerminalMessages({
         )}
 
         {streaming && showThinking && thinkingBuffer && (
-          <div className="px-4 py-2 border-l-2 border-accent/20 ml-4 mr-4 my-1">
-            <div className="text-[10px] text-[#666] mb-1 uppercase tracking-wider">thinking</div>
-            <div className="text-[#888] text-xs whitespace-pre-wrap">{thinkingBuffer}</div>
+          <div className="px-4 py-2 border-l-2 border-accent/35 ml-4 mr-4 my-1 bg-accent/[0.04] rounded-r">
+            <div className="text-[10px] text-accent/60 mb-1 uppercase tracking-wider">thinking</div>
+            <div className="text-[#999] text-xs whitespace-pre-wrap">{thinkingBuffer}</div>
           </div>
         )}
 
