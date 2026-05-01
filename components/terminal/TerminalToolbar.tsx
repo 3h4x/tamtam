@@ -171,22 +171,30 @@ export function TerminalToolbar({
                     {allItems.length === 0 ? 'no skills' : 'no matches'}
                   </div>
                 ) : (
-                  filteredItems.slice(0, 50).map(item => (
-                    <button
-                      key={item.id}
-                      className="w-full px-3 py-2 text-left text-xs hover:bg-[#252525] cursor-pointer border-none bg-transparent text-[#ccc] font-mono flex items-center justify-between gap-2"
-                      onClick={() => onToggleItem(item)}
-                      title={item.description || item.name}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="truncate">{item.name}</span>
-                        <span className="text-[#444] shrink-0">{item.source === 'db' ? 'db' : 'file'}</span>
-                      </div>
-                      {(skillUsage[item.id] || 0) > 0 && (
-                        <span className="text-[10px] text-[#555] shrink-0">{skillUsage[item.id]}</span>
-                      )}
-                    </button>
-                  ))
+                  filteredItems.slice(0, 50).map(item => {
+                    const isSelected = selectedItems.some(s => s.id === item.id)
+                    return (
+                      <button
+                        key={item.id}
+                        className={`w-full px-3 py-2 text-left text-xs cursor-pointer border-none font-mono flex items-center justify-between gap-2 transition-colors ${
+                          isSelected
+                            ? 'bg-accent/10 hover:bg-accent/15 text-accent'
+                            : 'hover:bg-[#252525] bg-transparent text-[#ccc]'
+                        }`}
+                        onClick={() => onToggleItem(item)}
+                        title={item.description || item.name}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="shrink-0 w-3 text-center text-[10px]">{isSelected ? '✓' : ''}</span>
+                          <span className="truncate">{item.name}</span>
+                          <span className="text-[#444] shrink-0">{item.source === 'db' ? 'db' : 'file'}</span>
+                        </div>
+                        {(skillUsage[item.id] || 0) > 0 && (
+                          <span className="text-[10px] text-[#555] shrink-0">{skillUsage[item.id]}</span>
+                        )}
+                      </button>
+                    )
+                  })
                 )}
               </div>
             </div>
@@ -219,15 +227,21 @@ export function TerminalToolbar({
                     {allDocs.length === 0 ? 'no docs' : 'no matches'}
                   </div>
                 ) : (
-                  filteredDocs.map(doc => (
-                    <button
-                      key={doc.name}
-                      className="w-full px-3 py-2 text-left text-xs hover:bg-[#252525] cursor-pointer border-none bg-transparent text-[#ccc] font-mono"
-                      onClick={() => onToggleDoc(doc)}
-                    >
-                      {doc.name}
-                    </button>
-                  ))
+                  filteredDocs.map(doc => {
+                    const isSelected = selectedDocs.some(d => d.name === doc.name)
+                    return (
+                      <button
+                        key={doc.name}
+                        className={`w-full px-3 py-2 text-left text-xs cursor-pointer border-none font-mono flex items-center gap-2 transition-colors ${
+                          isSelected ? 'bg-accent/10 hover:bg-accent/15 text-accent' : 'hover:bg-[#252525] bg-transparent text-[#ccc]'
+                        }`}
+                        onClick={() => onToggleDoc(doc)}
+                      >
+                        <span className="shrink-0 w-3 text-center text-[10px]">{isSelected ? '✓' : ''}</span>
+                        <span className="truncate">{doc.name}</span>
+                      </button>
+                    )
+                  })
                 )}
               </div>
             </div>

@@ -560,6 +560,7 @@ export function ProjectDetailPage({
           config={config}
           currentBranch={currentBranch}
           runningJobs={runningJobs}
+          projectJobs={projectJobs}
           onOpenChanges={() => setActiveTab('changes')}
         />
       )}

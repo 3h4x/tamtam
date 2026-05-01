@@ -10,7 +10,7 @@ type Verdict = 'LGTM' | 'NEEDS ATTENTION' | 'DO NOT SHIP'
 
 function runLabel(j: JobInfo): string {
   if (j.kind === 'run') return 'chat'
-  if (j.kind.startsWith('agent:')) return 'agent'
+  if (j.kind.startsWith('agent:')) return j.kind.slice('agent:'.length)
   if (j.kind === 'fix-ci') return 'fix-ci'
   return j.kind
 }
@@ -32,6 +32,7 @@ export interface OverviewTabProps {
   config: ProjectConfig | null
   currentBranch: string | null
   runningJobs: JobInfo[]
+  projectJobs: JobInfo[]
   onOpenChanges: () => void
 }
 
@@ -51,6 +52,7 @@ export function OverviewTab({
   config,
   currentBranch,
   runningJobs,
+  projectJobs,
   onOpenChanges,
 }: OverviewTabProps) {
   const router = useRouter()
@@ -103,6 +105,7 @@ export function OverviewTab({
         projectName={projectName}
         currentBranch={currentBranch}
         prWorkflowEnabled={!!config?.pr_workflow_enabled}
+        projectJobs={projectJobs}
       />
     </>
   )

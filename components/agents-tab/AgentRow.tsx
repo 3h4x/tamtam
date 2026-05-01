@@ -12,6 +12,8 @@ interface AgentRowProps {
   runPrompt: string
   agentRunsBlocked: boolean
   blockedReason: string
+  lastRunAgo?: string | null
+  lastRunFailed?: boolean
   onEdit: (agent: Agent) => void
   onToggleEnabled: (agent: Agent) => void
   onRun: (agent: Agent, customPrompt?: string) => void
@@ -28,6 +30,8 @@ export function AgentRow({
   runPrompt,
   agentRunsBlocked,
   blockedReason,
+  lastRunAgo,
+  lastRunFailed,
   onEdit,
   onToggleEnabled,
   onRun,
@@ -62,6 +66,14 @@ export function AgentRow({
           ))}
           {agent.source === 'file' && (
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-tertiary border border-border" title=".tamtam/agents/">file</span>
+          )}
+          {lastRunAgo && (
+            <span
+              className={`text-[10px] font-mono ${lastRunFailed ? 'text-status-error/70' : 'text-text-tertiary/70'}`}
+              title={lastRunFailed ? `Last run failed · ${lastRunAgo}` : `Last ran ${lastRunAgo}`}
+            >
+              {lastRunFailed ? `✗ ${lastRunAgo}` : lastRunAgo}
+            </span>
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
