@@ -9,7 +9,7 @@ TamTam's north star is a **quality-gated release pipeline** for each tracked rep
 **Direct Branch**: `test → review → (fix loop) → commit → push`
 **PR Workflow**: `test → review → (fix loop) → commit → push → dod → merge`
 
-Steps are pluggable per project and coordinated by completion hooks in `lib/job-storage.ts`:
+Steps are pluggable per project and coordinated by completion hooks in `lib/jobs/job-storage.ts`:
 
 - **test** — runs the project's test command (auto-detected from `package.json`/`pyproject.toml`/`Package.swift`/`Cargo.toml`/`go.mod`/`Makefile:test` or user-configured). Skipped if none. If tests pass and there are no uncommitted changes, the pipeline short-circuits directly to push (skipping review).
 - **review** — Claude reads the uncommitted diff and emits a verdict: `LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP` (verdict rules are configurable in Settings).
@@ -203,7 +203,7 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 ## Testing Requirements
 - **All new API routes must have vitest tests** in `__tests__/api/`; lib logic tests go in `__tests__/lib/` or alongside the file.
 - Follow existing test patterns (in-memory SQLite, mocked shell/PM2 calls).
-- **Do not mock the database** — use an in-memory `better-sqlite3` instance with the real Drizzle schema instead. Mock only external side-effects: `lib/shell.ts` `exec`, PM2, Claude CLI spawning.
+- **Do not mock the database** — use an in-memory `better-sqlite3` instance with the real Drizzle schema instead. Mock only external side-effects: `lib/shared/shell.ts` `exec`, PM2, Claude CLI spawning.
 - Run `pnpm test` after every non-trivial code change, not only after writing new tests. All tests must pass before committing.
 - Test naming: `__tests__/api/<route-name>.test.ts` mirroring `app/api/<route-name>/route.ts`.
 - **`createTestDb()` pattern**: each test file defines its own local `createTestDb()` that opens `new Database(':memory:')` with `pragma journal_mode = WAL` and creates only the tables that test actually needs via raw SQL. There is no shared helper — copy the pattern from the nearest similar test file. Never import the real DB connection in tests.
@@ -292,7 +292,7 @@ File agent IDs use the format `file:<project>:<name>` and are handled transparen
 
 ## Coding Conventions
 - **Runtime versions**: Next.js 16 (App Router), React 19, TypeScript 6 (strict), Tailwind CSS v4, pnpm 10. Do not use APIs or syntax that requires a higher version than what is pinned in `package.json`.
-- **Path imports**: always use the `@/` alias (e.g. `import { exec } from '@/lib/shell'`), never relative `../../` paths.
+- **Path imports**: always use the `@/` alias (e.g. `import { exec } from '@/lib/shared/shell'`), never relative `../../` paths.
 - **File naming**: kebab-case for all files (`start-fix.ts`, `project-data.ts`); PascalCase only for React component files (`AgentsTab.tsx`).
 - **Components**: PascalCase, one component per file, `.tsx` extension. No class components.
 - **Barrel files**: `lib/client-api.ts` is the only barrel; do not create new barrel `index.ts` files — import directly from the module file.
