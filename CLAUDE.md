@@ -55,8 +55,8 @@ Verdict detection (`getVerdict` in `lib/jobs/job-storage.ts`) reads the **last 2
 ## Commands
 - `pnpm dev` — run `next dev` directly in the foreground on port 1337 (HMR enabled, no PM2). Use only for active local development; never for the long-lived TamTam server.
 - `pnpm start` — start (or idempotently restart) the production server via PM2 on port 1337. Delegates to `scripts/pm2-start.sh`, which spawns `next` directly under PM2 (`--interpreter node`, no shell wrapper) so PM2 tracks the actual server PID — no orphans on stop/restart. Self-heals if a previous orphan is still squatting on port 1337. This is the canonical way to run TamTam.
-- `pnpm restart` — `pnpm build && pnpm start` — production mode has no HMR, so restart always rebuilds first to pick up code changes.
-- `pnpm rebuild` — equivalent to `pnpm restart` (legacy alias). Note: bare `pnpm rebuild` (without `run`) invokes pnpm's built-in native-deps rebuild instead — use `pnpm run rebuild` or `pnpm restart`.
+- `pnpm rebuild` — `pnpm build && pnpm start` — production mode has no HMR, so rebuild always rebuilds first to pick up code changes. This is the canonical post-edit command.
+- `pnpm restart` — equivalent to `pnpm rebuild` (alias). Note: bare `pnpm rebuild` (without `run`) invokes pnpm's built-in native-deps rebuild instead — use `pnpm run rebuild` or `pnpm restart`.
 - `pnpm stop` — stop the PM2 server.
 - `pnpm logs` — view PM2 logs.
 - `pnpm build` — production build.
@@ -77,7 +77,7 @@ Verdict detection (`getVerdict` in `lib/jobs/job-storage.ts`) reads the **last 2
 
 TamTam runs in **production mode** (`next start`) under PM2 — no HMR, no auto-reload. After any code change:
 
-1. `pnpm restart` — builds and restarts the PM2 server in one step (preferred)
+1. `pnpm rebuild` — builds and restarts the PM2 server in one step (preferred)
 2. Or: `pnpm build` then `pnpm start`
 
 `pnpm start` is idempotent: if a `tamtam` PM2 entry already exists it is restarted in place (no port kill, no dropped in-flight requests); otherwise a new entry is created.
