@@ -220,8 +220,10 @@ export function AgentsPage() {
                       )}
                     </td>
                     <td className="px-4 py-2 text-text-tertiary text-xs tabular-nums font-mono">
-                      {schedEntry?.lastFireMs
-                        ? formatAgoMs(schedEntry.lastFireMs)
+                      {schedEntry
+                        ? schedEntry.lastFireMs
+                          ? formatAgoMs(schedEntry.lastFireMs)
+                          : <span className="text-text-tertiary/50 italic">never fired</span>
                         : <span>—</span>}
                     </td>
                     <td className="px-4 py-2 text-center tabular-nums text-xs text-text-secondary">
