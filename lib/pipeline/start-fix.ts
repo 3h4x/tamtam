@@ -7,7 +7,7 @@ import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getJob, createJob, readLog, probeJobStatus, updateJob, markDone } from '@/lib/jobs/job-storage';
 import { getPermissionModeFlag, getPipelineModel } from '@/lib/shared/config';
 import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { jobsPausedResult } from '@/lib/shared/job-control';
+import { runGates } from '@/lib/shared/job-control';
 
 export type StartFixResult =
   | { ok: true; jobId: string; pid: number }
@@ -24,7 +24,7 @@ export async function startFixFromJob(sourceJobId: string): Promise<StartFixResu
   const { claudeBin, logDir } = getImproveConfig();
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
-  const paused = jobsPausedResult('start a fix job');
+  const paused = runGates('start a fix job');
   if (paused) return paused;
 
   const resumeSessionId = sourceJob.sessionId ?? null;

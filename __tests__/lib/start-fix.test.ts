@@ -90,6 +90,7 @@ describe('startFixFromJob', () => {
     }));
     vi.doMock('@/lib/shared/job-control', () => ({
       jobsPausedResult: vi.fn().mockReturnValue(null),
+      runGates: vi.fn().mockReturnValue(null),
     }));
 
     ({ startFixFromJob } = await import('@/lib/pipeline/start-fix'));
@@ -259,6 +260,7 @@ describe('startFixFromJob', () => {
     }));
     vi.doMock('@/lib/shared/job-control', () => ({
       jobsPausedResult: vi.fn().mockReturnValue({ ok: false, status: 409, detail: 'Jobs are paused globally.' }),
+      runGates: vi.fn().mockReturnValue({ ok: false, status: 409, detail: 'Jobs are paused globally.' }),
     }));
     const { startFixFromJob: startFixPaused } = await import('@/lib/pipeline/start-fix');
     const r = await startFixPaused('src-job-1');

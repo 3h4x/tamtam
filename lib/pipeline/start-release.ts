@@ -12,7 +12,7 @@ import { exec } from '@/lib/shared/shell';
 import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/scheduling';
 import { acquireLock, getLock } from './pipeline-lock';
 import { detectMainBranch } from './start-commit';
-import { jobsPausedResult } from '@/lib/shared/job-control';
+import { runGates } from '@/lib/shared/job-control';
 
 const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push', 'pr-wait', 'mark-dod', 'release']);
 
@@ -178,7 +178,7 @@ export async function checkIssueBranchBlock(
 export async function startRelease(projectName: string): Promise<ReleaseResult> {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
-  const paused = jobsPausedResult('start a release');
+  const paused = runGates('start a release');
   if (paused) return paused;
 
   // In Direct Branch mode, guard against releasing from an unexpected branch.

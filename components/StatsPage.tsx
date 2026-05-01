@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import type { UsageResponse, ProjectUsageRow, AgentUsageRow } from '@/app/api/stats/usage/route'
 import { ErrorState } from './ErrorState'
+import { QuotaWidget } from './QuotaWidget'
 
 type Window = '24h' | '7d' | '30d' | 'all'
 const WINDOW_LABELS: Record<Window, string> = { '24h': '24 hours', '7d': '7 days', '30d': '30 days', all: 'All time' }
@@ -88,6 +89,8 @@ export function StatsPage() {
   const [window_, setWindow] = useState<Window>('30d')
   const [sortKey, setSortKey] = useState<SortKey>('costUsd')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [warnAt, setWarnAt] = useState(80)
+  const [blockAt, setBlockAt] = useState(95)
 
   const load = useCallback(async (w: Window) => {
     try {
@@ -108,6 +111,19 @@ export function StatsPage() {
     const id = setInterval(() => load(window_), 60_000)
     return () => clearInterval(id)
   }, [load, window_])
+
+  useEffect(() => {
+    fetch('/api/settings')
+      .then((r) => r.ok ? r.json() : null)
+      .then((s: Record<string, string> | null) => {
+        if (!s) return
+        const w = parseInt(s.budget_warn_at_pct, 10)
+        const b = parseInt(s.budget_block_at_pct, 10)
+        if (!isNaN(w)) setWarnAt(w)
+        if (!isNaN(b)) setBlockAt(b)
+      })
+      .catch(() => { /* keep defaults on error */ })
+  }, [])
 
   const onSort = (k: SortKey) => {
     if (k === sortKey) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))
@@ -190,6 +206,9 @@ export function StatsPage() {
           </span>
         </div>
       </div>
+
+      {/* Live Claude subscription quota */}
+      <QuotaWidget warnAt={warnAt} blockAt={blockAt} />
 
       {/* Totals */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

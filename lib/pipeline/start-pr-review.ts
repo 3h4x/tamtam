@@ -8,7 +8,7 @@ import { exec } from '@/lib/shared/shell';
 import { CODE_REVIEWER_SKILL } from '@/lib/skills/skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings } from '@/lib/shared/config';
 import { wrapUntrusted, withUntrustedPreamble } from '@/lib/shared/untrusted';
-import { jobsPausedResult } from '@/lib/shared/job-control';
+import { runGates } from '@/lib/shared/job-control';
 
 export type StartPrReviewResult =
   | { ok: true; jobId: string; pid: number; logPath: string }
@@ -49,7 +49,7 @@ export async function startPrReview(
   if (!projPath) {
     return { ok: false, status: 404, detail: `project '${projectName}' not found` };
   }
-  const paused = jobsPausedResult('start a PR review');
+  const paused = runGates('start a PR review');
   if (paused) return paused;
 
   const jobs = listJobs();
