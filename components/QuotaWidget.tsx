@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { fmtAbsolute } from '@/lib/shared/format-date'
 
 interface QuotaWindow {
   utilization: number
@@ -134,6 +135,46 @@ function QuotaBar({
   )
 }
 
+function ScheduledAgentsRow({ sevenDay }: { sevenDay: QuotaWindow }) {
+  if (sevenDay.msUntilReset == null) return null
+  const elapsedMs = Math.max(0, SEVEN_DAY_MS - sevenDay.msUntilReset)
+  if (elapsedMs <= 0) return null
+  const projectedEndPct = sevenDay.utilization * (SEVEN_DAY_MS / elapsedMs)
+  if (projectedEndPct <= 100) {
+    return (
+      <div className="flex items-baseline justify-between gap-2 text-xs px-3 py-2 rounded bg-bg-tertiary/50">
+        <span className="font-medium text-text-secondary">Scheduled agents</span>
+        <span className="tabular-nums">
+          <span className="font-semibold text-status-success">firing</span>
+          <span className="text-text-tertiary"> · 7d projection {projectedEndPct.toFixed(0)}%</span>
+        </span>
+      </div>
+    )
+  }
+  // Blocked. Resume when utilization × (windowMs/elapsedMs) ≤ 100, assuming
+  // flat usage from now (manual work pushes it later). Compute the absolute
+  // wall-clock time so the user knows when cron resumes without doing math.
+  const requiredElapsedMs = sevenDay.utilization * SEVEN_DAY_MS / 100
+  const msUntilResume = Math.max(0, requiredElapsedMs - elapsedMs)
+  const resumeAtMs = Date.now() + msUntilResume
+  // Cap at the window reset — past that the new window starts at 0% and they fire anyway.
+  const resetMs = sevenDay.resetsAt ? new Date(sevenDay.resetsAt).getTime() : null
+  const effectiveResumeMs = resetMs && resumeAtMs > resetMs ? resetMs : resumeAtMs
+  return (
+    <div className="flex items-baseline justify-between gap-2 text-xs px-3 py-2 rounded bg-status-error/10 border border-status-error/20">
+      <span className="font-medium text-status-error">Scheduled agents</span>
+      <span className="tabular-nums text-right">
+        <span className="font-semibold text-status-error">paused</span>
+        <span className="text-text-secondary">
+          {' · resumes '}
+          <span className="font-medium text-text-primary">{fmtAbsolute(effectiveResumeMs)}</span>
+          <span className="text-text-tertiary"> (in {fmtCountdown(msUntilResume)})</span>
+        </span>
+      </span>
+    </div>
+  )
+}
+
 function DailyBurnRow({ sevenDay }: { sevenDay: QuotaWindow }) {
   if (sevenDay.msUntilReset == null) return null
   const elapsedMs = Math.max(0, SEVEN_DAY_MS - sevenDay.msUntilReset)
@@ -232,6 +273,7 @@ export function QuotaWidget({
       <QuotaBar label="5-hour rolling" win={data.fiveHour} warnAt={warnAt} blockAt={blockAt} windowMs={FIVE_HOUR_MS} />
       <QuotaBar label="7-day weekly" win={data.sevenDay} warnAt={warnAt} blockAt={blockAt} windowMs={SEVEN_DAY_MS} />
       <DailyBurnRow sevenDay={data.sevenDay} />
+      <ScheduledAgentsRow sevenDay={data.sevenDay} />
       {(data.sevenDaySonnet || data.sevenDayOpus) && (
         <div className="grid grid-cols-2 gap-3 pt-1">
           {data.sevenDaySonnet && (
