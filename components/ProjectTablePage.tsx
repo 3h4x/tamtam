@@ -404,7 +404,7 @@ const isReviewRunning = (projectName: string) =>
 
                 {/* Agents */}
                 <td className="px-4 py-2 max-w-[280px]" onClick={e => e.stopPropagation()}>
-                  <AgentPills agents={agents} runningNames={runningAgentNames} />
+                  <AgentPills agents={agents} runningNames={runningAgentNames} schedulerEntries={schedulerByProject[project.project] ?? []} />
                 </td>
 
                 {/* Status */}
@@ -501,7 +501,7 @@ const isReviewRunning = (projectName: string) =>
                 {/* Last Run */}
                 <td className="px-4 py-2">
                   {lastJob ? (
-                    <span className="flex items-center gap-1.5">
+                    <span className="flex items-center gap-1.5 flex-wrap">
                       {lastJob.status === 'running' ? (
                         <SpinnerIcon />
                       ) : (
@@ -513,6 +513,15 @@ const isReviewRunning = (projectName: string) =>
                           ? `running · started ${formatAgo(lastJob.started_at)}`
                           : formatAgo(lastJob.finished_at ?? lastJob.started_at)}
                       </span>
+                      {lastJob.verdict && lastJob.status !== 'running' && (
+                        <span className={`text-[10px] px-1 py-0.5 rounded font-mono font-medium ${
+                          lastJob.verdict === 'LGTM' ? 'bg-status-success/15 text-status-success' :
+                          lastJob.verdict === 'DO NOT SHIP' ? 'bg-status-error/15 text-status-error' :
+                          'bg-status-warning/15 text-status-warning'
+                        }`}>
+                          {lastJob.verdict === 'LGTM' ? 'lgtm' : lastJob.verdict === 'DO NOT SHIP' ? 'dns' : 'attn'}
+                        </span>
+                      )}
                     </span>
                   ) : (
                     <span className="text-text-tertiary text-sm">—</span>
