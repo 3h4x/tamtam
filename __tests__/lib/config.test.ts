@@ -88,6 +88,7 @@ describe('config', () => {
         pipeline_model_fix: '',
         pipeline_model_dod: '',
         pipeline_model_commit: '',
+        review_retry_on_parse_failure: true,
       });
     });
 

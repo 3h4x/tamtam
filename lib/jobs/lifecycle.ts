@@ -298,7 +298,18 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         // propose a fix without emitting the formal "Verdict: X" line —
         // shipping in that case is dangerous. The fix loop is idempotent
         // (Claude will re-review and emit LGTM if nothing's broken).
-        const rawVerdict = getVerdict(job);
+        let rawVerdict = getVerdict(job);
+        if (!rawVerdict) {
+          // One-shot rescue: ask haiku to classify the existing review text
+          // before we burn a full fix iteration on a parsing artifact.
+          // Gated by `review_retry_on_parse_failure` (default on).
+          try {
+            const { retryVerdictWithClaude } = await import('@/lib/jobs/verdict-retry');
+            rawVerdict = await retryVerdictWithClaude(job);
+          } catch (e) {
+            console.log(`[release] verdict retry failed for ${job.id}:`, e);
+          }
+        }
         const verdict = rawVerdict ?? 'NEEDS ATTENTION';
         if (!rawVerdict) {
           console.log(`[release] review ${job.id} emitted no verdict — defaulting to NEEDS ATTENTION`);
