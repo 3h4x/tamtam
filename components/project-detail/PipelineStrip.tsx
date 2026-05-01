@@ -74,6 +74,7 @@ export function PipelineStrip({
   const { toast } = useToast()
   const [retryingPush, setRetryingPush] = useState(false)
   const [aborting, setAborting] = useState(false)
+  const [confirmAbort, setConfirmAbort] = useState(false)
 
   const hasTestCommand = !!(
     config?.effective_test_command ||
@@ -270,7 +271,11 @@ export function PipelineStrip({
 
   const handleAbortPipeline = async () => {
     if (aborting) return
-    if (!confirm('Abort the running pipeline? The current step will be killed and no further steps will run.')) return
+    if (!confirmAbort) {
+      setConfirmAbort(true)
+      return
+    }
+    setConfirmAbort(false)
     setAborting(true)
     try {
       const res = await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/release/abort`, { method: 'POST' })
@@ -387,15 +392,33 @@ export function PipelineStrip({
           trace →
         </Link>
       )}
-      <button
-        type="button"
-        className={`text-[10px] font-mono leading-none shrink-0 px-1.5 py-0.5 rounded text-text-tertiary hover:text-status-error hover:bg-status-error/10 cursor-pointer disabled:opacity-50 transition-colors ${activeReleaseJob ? '' : 'ml-auto'}`}
-        onClick={handleAbortPipeline}
-        disabled={aborting}
-        title="Abort the running pipeline"
-      >
-        {aborting ? '…' : 'abort'}
-      </button>
+      {confirmAbort ? (
+        <div className={`flex items-center gap-1 shrink-0 ${activeReleaseJob ? '' : 'ml-auto'}`}>
+          <span className="text-[10px] font-mono text-text-tertiary">abort?</span>
+          <button
+            type="button"
+            className="text-[10px] font-mono leading-none px-1.5 py-0.5 rounded text-status-error border border-status-error/40 hover:bg-status-error/15 cursor-pointer transition-colors"
+            onClick={handleAbortPipeline}
+            disabled={aborting}
+            title="Confirm abort"
+          >{aborting ? '…' : 'yes'}</button>
+          <button
+            type="button"
+            className="text-[10px] font-mono leading-none px-1.5 py-0.5 rounded text-text-tertiary border border-border/50 hover:bg-bg-tertiary cursor-pointer transition-colors"
+            onClick={() => setConfirmAbort(false)}
+          >no</button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className={`text-[10px] font-mono leading-none shrink-0 px-1.5 py-0.5 rounded text-text-tertiary hover:text-status-error hover:bg-status-error/10 cursor-pointer disabled:opacity-50 transition-colors ${activeReleaseJob ? '' : 'ml-auto'}`}
+          onClick={handleAbortPipeline}
+          disabled={aborting}
+          title="Abort the running pipeline"
+        >
+          abort
+        </button>
+      )}
     </div>
   )
 }
