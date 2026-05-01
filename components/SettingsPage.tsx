@@ -263,12 +263,13 @@ export function SettingsPage() {
           <button
             onClick={handleSave}
             disabled={saving || !isDirty}
-            className={`px-4 py-2 text-white border-none rounded-lg font-semibold text-sm transition-colors ${
+            className={`px-4 py-2 text-white border-none rounded-lg font-semibold text-sm transition-colors inline-flex items-center gap-1.5 ${
               saved      ? 'bg-status-success cursor-default' :
               isDirty    ? 'bg-accent hover:bg-accent-hover cursor-pointer' :
                            'bg-accent/40 cursor-default'
-            } ${saving ? 'opacity-50 cursor-wait' : ''}`}
+            } ${saving ? 'opacity-70 cursor-wait' : ''}`}
           >
+            {saving && <span className="inline-block w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin shrink-0" />}
             {saving ? 'Saving…' : saved ? 'Saved!' : 'Save Settings'}
           </button>
         </div>
@@ -439,10 +440,11 @@ export function SettingsPage() {
                       <button
                         onClick={saveProjects}
                         disabled={projectsSaving}
-                        className={`px-4 py-1.5 text-white border-none rounded-lg font-semibold text-sm cursor-pointer transition-colors ${
+                        className={`px-4 py-1.5 text-white border-none rounded-lg font-semibold text-sm cursor-pointer transition-colors inline-flex items-center gap-1.5 ${
                           projectsSaved ? 'bg-status-success' : 'bg-accent hover:bg-accent-hover'
-                        } ${projectsSaving ? 'opacity-50 cursor-wait' : ''}`}
+                        } ${projectsSaving ? 'opacity-70 cursor-wait' : ''}`}
                       >
+                        {projectsSaving && <span className="inline-block w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin shrink-0" />}
                         {projectsSaving ? 'Saving…' : projectsSaved ? 'Saved!' : `Save (${enabledCount} enabled)`}
                       </button>
                     </div>

@@ -366,12 +366,14 @@ export function PipelineStrip({
             {s.retryAction && (
               <button
                 type="button"
-                className="text-[10px] px-1.5 py-0.5 rounded border border-status-error/40 text-status-error hover:bg-status-error/10 cursor-pointer disabled:opacity-50 font-mono leading-none"
+                className="text-[10px] px-1.5 py-0.5 rounded border border-status-error/40 text-status-error hover:bg-status-error/10 cursor-pointer disabled:opacity-50 font-mono leading-none inline-flex items-center justify-center w-[22px]"
                 onClick={s.retryAction}
                 disabled={retryingPush}
                 title="Retry push"
               >
-                {retryingPush ? '…' : '↻'}
+                {retryingPush
+                  ? <span className="inline-block w-2 h-2 rounded-full border border-current border-t-transparent animate-spin" />
+                  : '↻'}
               </button>
             )}
             {i < steps.length - 1 && (
@@ -397,11 +399,14 @@ export function PipelineStrip({
           <span className="text-[10px] font-mono text-text-tertiary">abort?</span>
           <button
             type="button"
-            className="text-[10px] font-mono leading-none px-1.5 py-0.5 rounded text-status-error border border-status-error/40 hover:bg-status-error/15 cursor-pointer transition-colors"
+            className="text-[10px] font-mono leading-none px-1.5 py-0.5 rounded text-status-error border border-status-error/40 hover:bg-status-error/15 cursor-pointer transition-colors inline-flex items-center justify-center min-w-[28px]"
             onClick={handleAbortPipeline}
             disabled={aborting}
             title="Confirm abort"
-          >{aborting ? '…' : 'yes'}</button>
+          >{aborting
+            ? <span className="inline-block w-2 h-2 rounded-full border border-current border-t-transparent animate-spin" />
+            : 'yes'
+          }</button>
           <button
             type="button"
             className="text-[10px] font-mono leading-none px-1.5 py-0.5 rounded text-text-tertiary border border-border/50 hover:bg-bg-tertiary cursor-pointer transition-colors"

@@ -264,12 +264,13 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
         <div className="flex items-center gap-1.5 shrink-0">
           {!merged && needsApproval && (
             <button
-              className="px-2 py-1 text-xs border border-accent/50 rounded-md bg-accent/10 text-accent hover:bg-accent/20 cursor-pointer disabled:opacity-50"
+              className="px-2 py-1 text-xs border border-accent/50 rounded-md bg-accent/10 text-accent hover:bg-accent/20 cursor-pointer disabled:opacity-50 inline-flex items-center gap-1.5"
               onClick={doApprove}
               disabled={approving}
               title="Submit an APPROVE review (required by branch protection before merge)"
             >
-              {approving ? 'Approving…' : 'Approve'}
+              {approving && <span className="inline-block w-2.5 h-2.5 rounded-full border-2 border-current border-t-transparent animate-spin shrink-0" />}
+              Approve
             </button>
           )}
           {!merged && (
@@ -293,11 +294,12 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
                   ))}
                 </div>
                 <button
-                  className="px-2 py-1 text-xs bg-status-success text-white rounded-md hover:opacity-90 cursor-pointer disabled:opacity-50 font-medium"
+                  className="px-2 py-1 text-xs bg-status-success text-white rounded-md hover:opacity-90 cursor-pointer disabled:opacity-50 font-medium inline-flex items-center gap-1.5"
                   onClick={doMerge}
                   disabled={merging}
                 >
-                  {merging ? 'Merging…' : 'Confirm'}
+                  {merging && <span className="inline-block w-2.5 h-2.5 rounded-full border-2 border-current border-t-transparent animate-spin shrink-0" />}
+                  Confirm
                 </button>
                 <button
                   className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-secondary hover:bg-bg-tertiary cursor-pointer"
@@ -319,12 +321,13 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
           )}
           {!merged && (
             <button
-              className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50"
+              className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 inline-flex items-center gap-1.5"
               onClick={doReview}
               disabled={reviewing}
               title="AI code review of this PR's diff"
             >
-              {reviewing ? 'Starting…' : 'Review'}
+              {reviewing && <span className="inline-block w-2.5 h-2.5 rounded-full border-2 border-current border-t-transparent animate-spin shrink-0" />}
+              Review
             </button>
           )}
           <button

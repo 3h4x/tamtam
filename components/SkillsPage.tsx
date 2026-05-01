@@ -547,11 +547,12 @@ function SkillEditor({
             {skill ? 'Close' : 'Cancel'}
           </button>
           <button
-            className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer"
+            className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer inline-flex items-center gap-1.5"
             onClick={handleSave}
             disabled={!name.trim() || saving}
           >
-            {saving ? 'Saving...' : saved ? 'Saved ✓' : 'Save'}
+            {saving && <span className="inline-block w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin shrink-0" />}
+            {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save'}
           </button>
         </div>
       </div>

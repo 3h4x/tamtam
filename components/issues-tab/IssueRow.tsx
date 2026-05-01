@@ -131,12 +131,13 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
           </button>
           {hasContext ? (
             <button
-              className="px-2 py-1 text-xs border border-accent/40 rounded-md bg-accent/10 text-accent hover:bg-accent/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-2 py-1 text-xs border border-accent/40 rounded-md bg-accent/10 text-accent hover:bg-accent/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
               onClick={continueWork}
               disabled={continuing}
               title="Resume the last Claude session for this issue. Auto-prompts only the acceptance criteria still unverified."
             >
-              {continuing ? 'Loading…' : 'Continue'}
+              {continuing && <span className="inline-block w-2.5 h-2.5 rounded-full border-2 border-current border-t-transparent animate-spin shrink-0" />}
+              Continue
             </button>
           ) : (
             <button
