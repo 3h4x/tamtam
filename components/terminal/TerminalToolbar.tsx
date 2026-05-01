@@ -232,23 +232,29 @@ export function TerminalToolbar({
             </div>
           )}
         </div>
-        <select
-          className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-[#888] cursor-pointer outline-none border-none font-mono leading-none"
-          value={model}
-          onChange={async (e) => {
-            const m = e.target.value as 'haiku' | 'sonnet' | 'opus'
-            onModelChange(m)
-            await fetch('/api/settings', {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ default_model: m }),
-            }).catch(() => {})
-          }}
-        >
-          <option value="haiku">haiku</option>
-          <option value="sonnet">sonnet</option>
-          <option value="opus">opus</option>
-        </select>
+        <div className="flex items-center h-[26px] rounded overflow-hidden border border-[#333]">
+          {(['haiku', 'sonnet', 'opus'] as const).map((m) => (
+            <button
+              key={m}
+              className={`text-[11px] px-2 h-full cursor-pointer border-none font-mono leading-none transition-colors ${
+                model === m
+                  ? 'bg-accent/20 text-accent'
+                  : 'bg-[#252525] text-[#888] hover:text-[#ccc]'
+              }`}
+              onClick={async () => {
+                onModelChange(m)
+                await fetch('/api/settings', {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ default_model: m }),
+                }).catch(() => {})
+              }}
+              title={`Switch to ${m}`}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )

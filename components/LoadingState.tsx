@@ -2,7 +2,7 @@
 
 export function LoadingState() {
   return (
-    <div className="p-6">
+    <div>
       <div className="flex items-center justify-between mb-4">
         <div className="skeleton h-7 w-32" />
         <div className="skeleton h-8 w-24" />
