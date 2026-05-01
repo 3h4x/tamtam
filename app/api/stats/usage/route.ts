@@ -30,6 +30,7 @@ export interface ProjectUsageRow {
 export interface AgentUsageRow {
   kind: string;
   runs: number;
+  commitProducingRuns: number;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
@@ -101,6 +102,7 @@ export async function GET(request: NextRequest) {
     const agentRow = byKind.get(j.kind) ?? {
       kind: j.kind,
       runs: 0,
+      commitProducingRuns: 0,
       inputTokens: 0,
       outputTokens: 0,
       cacheReadTokens: 0,
@@ -112,6 +114,7 @@ export async function GET(request: NextRequest) {
       promptSamples: 0,
     };
     agentRow.runs += 1;
+    if (j.kind === 'commit' && j.exitCode === 0) agentRow.commitProducingRuns += 1;
     agentRow.inputTokens += j.inputTokens ?? 0;
     agentRow.outputTokens += j.outputTokens ?? 0;
     agentRow.cacheReadTokens += j.cacheReadTokens ?? 0;

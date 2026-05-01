@@ -73,6 +73,7 @@ export async function retryVerdictWithClaude(job: JobData): Promise<string | nul
   const result = await new Promise<string | null>((resolve) => {
     let out = '';
     let settled = false;
+    let timer: ReturnType<typeof setTimeout>;
     const finish = (v: string | null) => {
       if (settled) return;
       settled = true;
@@ -92,7 +93,7 @@ export async function retryVerdictWithClaude(job: JobData): Promise<string | nul
       return;
     }
 
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       try { child.kill('SIGTERM'); } catch {}
       console.log(`[verdict-retry] timed out after ${TIMEOUT_MS}ms for ${job.id}`);
       finish(null);

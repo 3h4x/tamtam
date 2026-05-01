@@ -327,7 +327,12 @@ export function StatsPage() {
                 {data.agents.slice(0, 5).map((r: AgentUsageRow) => (
                   <tr key={r.kind} className="border-b border-border/40 last:border-b-0 hover:bg-bg-tertiary/40 transition-colors">
                     <td className="px-3 py-2.5 font-mono text-text-primary">{r.kind}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">{r.runs.toLocaleString()}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">
+                      {r.runs.toLocaleString()}
+                      {r.kind === 'commit' && r.commitProducingRuns > 0 && (
+                        <span className="block text-xs text-text-tertiary">{r.commitProducingRuns.toLocaleString()} committed</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">{fmtTokens(r.totalTokens)}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-text-tertiary" title={r.avgPromptBytes != null ? `${r.avgPromptBytes.toLocaleString()} bytes over ${r.promptSamples} run${r.promptSamples === 1 ? '' : 's'}` : 'no prompt-size samples'}>
                       {r.avgPromptTokens != null ? `~${fmtTokens(r.avgPromptTokens)}` : '—'}
