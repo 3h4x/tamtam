@@ -6,7 +6,7 @@ import { notify } from '@/lib/shared/notifications';
 export type JobsPausedResult = { ok: false; status: 409; detail: string };
 export type BudgetBlockedResult = {
   ok: false;
-  status: 409;
+  status: 429;
   detail: string;
   window: '5h' | '7d';
   utilization: number;
@@ -29,11 +29,11 @@ export function jobsPausedResult(action = 'start new jobs'): JobsPausedResult | 
 }
 
 /**
- * Returns a 409 result when the configured Claude subscription budget threshold
- * is exceeded on either the 5-hour or 7-day window. Synchronous: reads the
- * in-memory snapshot only. Triggers a background refresh on every call so the
- * cache stays warm. Fails OPEN (returns null) when no snapshot is cached — a
- * cold-start or transient API failure must not paralyse every pipeline.
+ * Returns a 429 result when the configured Claude subscription budget threshold
+ * is exceeded on the 5-hour rolling window. Synchronous: reads the in-memory
+ * snapshot only. Triggers a background refresh on every call so the cache stays
+ * warm. Fails OPEN (returns null) when no snapshot is cached — a cold-start or
+ * transient API failure must not paralyse every pipeline.
  */
 export function budgetBlockedResult(action = 'start new jobs'): BudgetBlockedResult | null {
   let cfg;
@@ -48,19 +48,20 @@ export function budgetBlockedResult(action = 'start new jobs'): BudgetBlockedRes
   // Refresh in background so the next call sees fresh data.
   prefetchQuota();
   if (!snapshot) return null;
-  const offending =
-    snapshot.fiveHour.utilization >= limit ? { window: '5h' as const, win: snapshot.fiveHour } :
-    snapshot.sevenDay.utilization >= limit ? { window: '7d' as const, win: snapshot.sevenDay } :
-    null;
-  if (!offending) return null;
-  fireBudgetBlockedNotification(offending.window, offending.win.utilization, offending.win.resetsAt, action);
+  // Only the 5-hour rolling window gates pipeline actions. The 7-day window
+  // is informational — for active users it's structurally always over-pace
+  // and would otherwise wedge the pipeline for days at a time.
+  const win = snapshot.fiveHour;
+  if (win.utilization < limit) return null;
+  fireBudgetBlockedNotification('5h', win.utilization, win.resetsAt, action);
+  const resetsLabel = win.resetsAt ? new Date(win.resetsAt).toLocaleTimeString() : 'reset';
   return {
     ok: false,
-    status: 409,
-    detail: `Claude subscription budget exceeded (${offending.window} at ${offending.win.utilization.toFixed(0)}%, limit ${limit}%). Wait for reset or raise threshold in Settings to ${action}.`,
-    window: offending.window,
-    utilization: offending.win.utilization,
-    resetsAt: offending.win.resetsAt,
+    status: 429,
+    detail: `Claude quota exceeded (5h at ${win.utilization.toFixed(0)}%). Will resume after ${resetsLabel}.`,
+    window: '5h',
+    utilization: win.utilization,
+    resetsAt: win.resetsAt,
   };
 }
 
@@ -105,13 +106,41 @@ export function syncJobsPauseState(paused: boolean): void {
 /**
  * Runs both the pause and budget gates for a pipeline route. Returns either a
  * JobsPausedResult or BudgetBlockedResult; null when both gates are clear.
- * Synchronous — both component checks are sync. Callers convert to a 409
- * NextResponse with `result.detail`.
+ * Synchronous — both component checks are sync. Callers convert to a 409 or
+ * 429 NextResponse (pause→409, budget→429) using `result.status` and `result.detail`.
  */
 export function runGates(action = 'start new jobs'): JobsPausedResult | BudgetBlockedResult | null {
   const paused = jobsPausedResult(action);
   if (paused) return paused;
   return budgetBlockedResult(action);
+}
+
+/**
+ * Burn-rate gate for *scheduled* (non-interactive) work only. Returns a reason
+ * string when the 7-day window is on pace to exceed quota before reset, so the
+ * caller (the internal scheduler) can skip the fire. Manual buttons ignore
+ * this — humans can spend quota however they like; the goal is to stop
+ * unattended cron from torching the weekly limit overnight.
+ *
+ * Fails OPEN when no snapshot is cached or the 7d reset timestamp is missing.
+ */
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+export function scheduledBurnRateBlocked(): { reason: string; projectedPct: number } | null {
+  let cfg;
+  try { cfg = getSettings(); } catch { return null; }
+  if (!cfg?.budget_block_runs_enabled) return null;
+  const snapshot = peekQuotaCache();
+  if (!snapshot) return null;
+  const win = snapshot.sevenDay;
+  if (win.msUntilReset == null || win.msUntilReset <= 0) return null;
+  const elapsedMs = SEVEN_DAYS_MS - win.msUntilReset;
+  if (elapsedMs <= 0) return null;
+  const projectedPct = win.utilization * (SEVEN_DAYS_MS / elapsedMs);
+  if (projectedPct <= 100) return null;
+  return {
+    reason: `7d burn rate too high: ${win.utilization.toFixed(0)}% used, projected ${projectedPct.toFixed(0)}%`,
+    projectedPct,
+  };
 }
 
 async function drainAllPendingReleasesAsync(): Promise<void> {

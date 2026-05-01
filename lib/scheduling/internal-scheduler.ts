@@ -22,6 +22,7 @@
 import { stableHash } from './fire-times';
 import { getIssueBranchLock } from '@/lib/shared/project-branch-lock';
 import { getLock } from '@/lib/pipeline/pipeline-lock';
+import { scheduledBurnRateBlocked } from '@/lib/shared/job-control';
 import { db, schema } from '@/lib/db';
 import { eq } from 'drizzle-orm';
 
@@ -129,6 +130,19 @@ export function computeNextFire(schedule: string, agentId: string, fromMs: numbe
 
 async function fire(entry: ScheduleEntry): Promise<void> {
   if (getPaused() || !entry.enabled) return;
+
+  // Burn-rate gate: skip scheduled fires when 7d projection is over quota.
+  // Manual buttons stay free (this gate is only consulted here). Re-arm so the
+  // scheduler keeps probing — once usage decays under the cap or the window
+  // resets, scheduled work resumes automatically without user intervention.
+  const burn = scheduledBurnRateBlocked();
+  if (burn) {
+    entry.skippedCount += 1;
+    entry.lastSkippedReason = burn.reason;
+    console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${burn.reason}`);
+    armNext(entry);
+    return;
+  }
 
   // Don't fire while a release pipeline is running for the project. The
   // pipeline owns the working tree (commit/push are inline; review/fix run

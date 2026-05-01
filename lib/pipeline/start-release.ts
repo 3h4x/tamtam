@@ -179,7 +179,15 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
   const paused = runGates('start a release');
-  if (paused) return paused;
+  if (paused) {
+    // For budget-blocked releases, enqueue so the periodic drain picks it up
+    // when the 5h window resets. For pause, the existing resume hook drains.
+    if ('window' in paused) {
+      const { setPendingRelease } = await import('./pending-release');
+      setPendingRelease(projectName);
+    }
+    return paused;
+  }
 
   // In Direct Branch mode, guard against releasing from an unexpected branch.
   // fix/issue-* branches are "expected" (issue work), but any other non-default
