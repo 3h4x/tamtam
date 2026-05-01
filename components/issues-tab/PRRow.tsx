@@ -275,16 +275,23 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
           {!merged && (
             mergeConfirm ? (
               <div className="flex items-center gap-1">
-                <select
-                  className="px-1.5 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary cursor-pointer"
-                  value={mergeMethod}
-                  onChange={(e) => setMergeMethod(e.target.value as MergeMethod)}
-                  disabled={merging}
-                >
-                  <option value="squash">squash</option>
-                  <option value="merge">merge</option>
-                  <option value="rebase">rebase</option>
-                </select>
+                <div className="flex rounded-md border border-border overflow-hidden text-[10px] font-mono">
+                  {(['squash', 'merge', 'rebase'] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      className={`px-1.5 py-1 cursor-pointer transition-colors border-r border-border last:border-r-0 ${
+                        mergeMethod === m
+                          ? 'bg-accent/20 text-accent'
+                          : 'bg-bg-secondary text-text-secondary hover:bg-bg-tertiary'
+                      }`}
+                      onClick={() => setMergeMethod(m)}
+                      disabled={merging}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
                 <button
                   className="px-2 py-1 text-xs bg-status-success text-white rounded-md hover:opacity-90 cursor-pointer disabled:opacity-50 font-medium"
                   onClick={doMerge}
