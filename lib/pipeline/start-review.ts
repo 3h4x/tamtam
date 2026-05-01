@@ -31,14 +31,20 @@ function loadReviewPrompt(): string {
     'There are uncommitted changes in this repository. Use git and any other tools ' +
     'you need to inspect the changes yourself (git status, git diff, read files, ' +
     'etc.), then review them.\n\n' +
-    'You MUST end your response with a line in this exact format, on its own line, ' +
-    'as the final non-empty line of your output:\n\n' +
-    '    Verdict: LGTM\n\n' +
-    'or:\n\n' +
-    '    Verdict: NEEDS ATTENTION\n\n' +
+    'OUTPUT FORMAT — strict. Your final non-empty line must be exactly one of:\n\n' +
+    '    Verdict: LGTM\n' +
+    '    Verdict: NEEDS ATTENTION\n' +
     '    Verdict: DO NOT SHIP\n\n' +
-    'No other text may follow the verdict line. If you omit it, the release ' +
-    'pipeline will treat the review as NEEDS ATTENTION and run a fix loop.\n\n' +
+    'Rules:\n' +
+    '- The verdict line MUST be the very last non-empty line of your response.\n' +
+    '- No markdown decoration (no `**`, no `#`, no backticks, no bullet, no quote).\n' +
+    '- No trailing punctuation, no rationale on the same line, no extra words.\n' +
+    '- Put rationale BEFORE the verdict line, not after.\n\n' +
+    'Example ending:\n\n' +
+    '    The diff updates two helpers and adds matching tests. Tests pass.\n' +
+    '\n    Verdict: LGTM\n\n' +
+    'If you omit the verdict line, the release pipeline treats the review as ' +
+    'NEEDS ATTENTION and runs a fix loop — wasted spend. Always emit one.\n\n' +
     review_verdict_rules;
 }
 
