@@ -102,9 +102,11 @@ function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
 function AgentPills({
   agents,
   runningNames,
+  schedulerEntries,
 }: {
   agents: Agent[]
   runningNames: Set<string>
+  schedulerEntries: SchedulerEntry[]
 }) {
   if (agents.length === 0) return <span className="text-text-tertiary">—</span>
 
@@ -116,10 +118,31 @@ function AgentPills({
     <div className="flex flex-wrap gap-1">
       {visible.map((agent) => {
         const isRunning = runningNames.has(agent.name)
+        const sched = schedulerEntries.find(e => e.name === agent.name)
+        let tooltipParts: string[] = []
+        if (agent.schedule) tooltipParts.push(`schedule: ${agent.schedule}`)
+        if (sched) {
+          const now = Date.now()
+          const delta = sched.nextFireMs - now
+          if (delta > 0) {
+            const min = Math.round(delta / 60000)
+            tooltipParts.push(min < 60 ? `next in ${min}m` : `next in ${Math.round(min / 60)}h`)
+          } else if (delta > -30000) {
+            tooltipParts.push('next: now')
+          }
+          if (sched.lastFireMs) {
+            const agoMin = Math.round((now - sched.lastFireMs) / 60000)
+            tooltipParts.push(agoMin < 60 ? `last ${agoMin}m ago` : `last ${Math.round(agoMin / 60)}h ago`)
+          } else {
+            tooltipParts.push('never fired')
+          }
+        } else if (!agent.schedule) {
+          tooltipParts.push('on-demand')
+        }
         return (
           <span
             key={agent.id}
-            title={agent.schedule ? `schedule: ${agent.schedule}` : 'manual'}
+            title={tooltipParts.join(' · ')}
             className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium transition-colors ${
               isRunning
                 ? 'bg-accent/15 text-accent border border-accent/30'
