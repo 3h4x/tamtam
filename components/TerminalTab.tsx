@@ -387,7 +387,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className={`flex-1 bg-[#111] rounded-lg border ${dragOver ? 'border-accent' : 'border-[#2a2a2a]'} flex flex-col overflow-hidden relative`}>
+      <div className={`flex-1 bg-bg-primary rounded-lg border ${dragOver ? 'border-accent' : 'border-border'} flex flex-col overflow-hidden relative`}>
         {dragOver && (
           <div className="absolute inset-0 bg-accent/10 z-50 flex items-center justify-center pointer-events-none rounded-lg">
             <span className="text-accent text-sm font-mono">drop image</span>

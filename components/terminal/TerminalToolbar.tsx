@@ -113,7 +113,7 @@ export function TerminalToolbar({
         {currentReleaseId && (
           <Link
             href={`/project/${encodeURIComponent(projectName)}/release/${encodeURIComponent(currentReleaseId)}`}
-            className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-accent hover:text-accent/80 font-mono leading-none flex items-center"
+            className="text-[11px] px-2 py-1 h-[26px] rounded bg-bg-tertiary text-accent hover:text-accent/80 font-mono leading-none flex items-center"
             title="View unified release trace"
           >
             trace ↗
