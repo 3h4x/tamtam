@@ -411,32 +411,12 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
     releasesByKey.set(r.key, { ...r, children: kids, chainedChildren: buildChain(r, kids) })
   }
 
-  // Index every entry by its absorbed job ids so we can resolve a release's
-  // parent_job_id to a concrete Entry (release.parent might be an agent run
-  // or a chat run that triggered the release-after-run hook).
-  const entryByJobId = new Map<string, Entry>()
-  for (const e of entries) {
-    for (const jid of e._jobIds ?? [e.navJobId]) entryByJobId.set(jid, e)
-  }
-
-  // Releases that were triggered by an agent/run nest under that owner so
-  // the runs view reads as `agent → release → test → review → …`. Releases
-  // without a parent (or whose parent is itself a release) stay top-level.
-  const releasesNestedUnderParent = new Set<string>()
-  const releaseChildrenByParentKey = new Map<string, Entry[]>()
-  for (const r of releasesByKey.values()) {
-    if (!r.parentJobId) continue
-    const parentEntry = entryByJobId.get(r.parentJobId)
-    if (!parentEntry || parentEntry.kind === 'release') continue
-    releasesNestedUnderParent.add(r.key)
-    const arr = releaseChildrenByParentKey.get(parentEntry.key) ?? []
-    arr.push(r)
-    releaseChildrenByParentKey.set(parentEntry.key, arr)
-  }
-
-  const parents: Entry[] = Array.from(releasesByKey.values()).filter(
-    (r) => !releasesNestedUnderParent.has(r.key),
-  )
+  // All releases are top-level entries — do not nest them under their
+  // triggering run/agent. A release that was triggered by `release_after_run`
+  // has a parentJobId pointing to that run, but displaying it nested inside
+  // the run makes it invisible and gives the impression that no release was
+  // triggered.
+  const parents: Entry[] = Array.from(releasesByKey.values())
 
   // Cluster orphaned pipeline steps (no parent release) that are close in time
   // into virtual groups so they display as one collapsed row instead of many
@@ -503,18 +483,7 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
     }
   }
 
-  // Attach nested releases to their parent agent/run entries. We mutate
-  // copies (spread) so the original Entry instances aren't aliased between
-  // the flat children list and the chained tree.
-  const otherWithReleaseChildren = otherTopLevel.map((e) => {
-    const releaseKids = releaseChildrenByParentKey.get(e.key)
-    if (!releaseKids || releaseKids.length === 0) return e
-    const sortedKids = [...releaseKids].sort((a, b) => a.startedAt - b.startedAt)
-    const existing = e.chainedChildren ?? []
-    return { ...e, chainedChildren: [...existing, ...sortedKids] }
-  })
-
-  const out = [...parents, ...clustered, ...otherWithReleaseChildren]
+  const out = [...parents, ...clustered, ...otherTopLevel]
   out.sort((a, b) => b.lastActivityAt - a.lastActivityAt)
   return out
 }
