@@ -147,8 +147,8 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
           </div>
         </div>
 
-        {totalTokens > 0 || e.costUsd > 0 ? (
-          <div className="shrink-0 flex flex-col items-end gap-0.5 text-xs">
+        <div className="shrink-0 flex flex-col items-end gap-0.5 text-xs">
+          {(totalTokens > 0 || e.costUsd > 0) && (
             <div className="flex items-center gap-2">
               {totalTokens > 0 && (
                 <span className="font-mono text-text-tertiary" title="Input / output tokens">
@@ -165,21 +165,13 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
                 {formatDuration(e.startedAt, e.finishedAt)}
               </span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-text-tertiary text-[11px]">{formatAgo(e.lastActivityAt)}</span>
-              {e.logPruned && (
-                <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium bg-text-tertiary/15 text-text-tertiary" title="Log file deleted by retention policy">
-                  pruned
-                </span>
-              )}
-              <VerdictBadge verdict={e.verdict} isRunning={isRunning} isFailed={isFailed} exitCode={e.exitCode} />
-            </div>
-          </div>
-        ) : (
-          <div className="shrink-0 flex items-center gap-2 text-xs">
-            <span className="font-mono text-text-secondary">
-              {formatDuration(e.startedAt, e.finishedAt)}
-            </span>
+          )}
+          <div className="flex items-center gap-2">
+            {totalTokens === 0 && e.costUsd === 0 && (
+              <span className="font-mono text-text-secondary">
+                {formatDuration(e.startedAt, e.finishedAt)}
+              </span>
+            )}
             <span className="text-text-tertiary text-[11px]">{formatAgo(e.lastActivityAt)}</span>
             {e.logPruned && (
               <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium bg-text-tertiary/15 text-text-tertiary" title="Log file deleted by retention policy">
@@ -188,7 +180,7 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
             )}
             <VerdictBadge verdict={e.verdict} isRunning={isRunning} isFailed={isFailed} exitCode={e.exitCode} />
           </div>
-        )}
+        </div>
       </div>
       {children}
     </div>
