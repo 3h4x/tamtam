@@ -22,14 +22,15 @@ export interface RunRowProps {
 // padding-left classes. Anything past depth 6 saturates at the same padding
 // — we don't expect chains longer than test → review → fix → review → commit
 // → push → mark-dod (depth 6) in practice.
+// Steps of 7 (28px) match the connector rail spacing (16 + depth*28 px).
 const DEPTH_PADDING: Record<number, string> = {
   0: 'pl-4',
-  1: 'pl-12',
-  2: 'pl-20',
-  3: 'pl-28',
-  4: 'pl-36',
-  5: 'pl-44',
-  6: 'pl-52',
+  1: 'pl-11',
+  2: 'pl-[74px]',
+  3: 'pl-[102px]',
+  4: 'pl-[130px]',
+  5: 'pl-[158px]',
+  6: 'pl-[186px]',
 }
 
 function VerdictBadge({ verdict, isRunning, isFailed, exitCode }: { verdict: string | null | undefined; isRunning: boolean; isFailed: boolean; exitCode: number | null | undefined }) {
@@ -44,14 +45,24 @@ function VerdictBadge({ verdict, isRunning, isFailed, exitCode }: { verdict: str
       </span>
     )
   }
+  if (isRunning) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-1.5 py-0.5 text-[10px] rounded-full font-medium bg-status-info/15 text-status-info border border-status-info/30">
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-status-info opacity-60" />
+          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-status-info" />
+        </span>
+        running
+      </span>
+    )
+  }
   return (
     <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium ${
-      isRunning ? 'bg-status-warning/15 text-status-warning' :
       isFailed ? 'bg-status-error/15 text-status-error' :
       'bg-status-success/15 text-status-success'
     }`}>
-      <span className={isRunning ? 'animate-pulse' : ''}>●</span>
-      {isRunning ? 'running' : isFailed ? `exit ${exitCode}` : 'done'}
+      <span>●</span>
+      {isFailed ? `exit ${exitCode}` : 'done'}
     </span>
   )
 }
@@ -61,23 +72,22 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
   const isFailed = !isRunning && e.exitCode !== null && e.exitCode !== 0
   const totalTokens = e.inputTokens + e.outputTokens
   const accentBorder = isRunning
-    ? 'border-l-2 border-l-status-warning'
+    ? 'border-l-2 border-l-status-info'
     : isFailed
     ? 'border-l-2 border-l-status-error'
     : 'border-l-2 border-l-transparent'
   const paddingLeft = DEPTH_PADDING[Math.min(depth, 6)] ?? 'pl-52'
 
-  // Connector glyphs for nested rows. The vertical pipes show the chain
-  // walking down through ancestor depths; the angled `└─` puts the row
-  // visually under its direct parent. Rendered as absolute-positioned spans
-  // so they don't fight the existing flex layout.
+  // Tree connector lines. Ancestor levels get a full-height vertical rail;
+  // the current depth gets a half-height vertical + horizontal stub (└─ shape).
+  // Using a stronger color so the hierarchy is clearly readable.
   const connectors: React.ReactNode = depth > 0 ? (
-    <span aria-hidden className="absolute left-0 top-0 bottom-0 pointer-events-none select-none font-mono text-text-tertiary/50 text-[12px]">
+    <span aria-hidden className="absolute left-0 top-0 bottom-0 pointer-events-none select-none">
       {Array.from({ length: depth - 1 }).map((_, i) => (
-        <span key={i} className="absolute top-0 bottom-0 border-l border-border/50" style={{ left: `${20 + i * 32}px` }} />
+        <span key={i} className="absolute top-0 bottom-0 border-l border-border" style={{ left: `${16 + i * 28}px` }} />
       ))}
-      <span className="absolute border-l border-border/50" style={{ left: `${20 + (depth - 1) * 32}px`, top: 0, height: '50%' }} />
-      <span className="absolute border-t border-border/50" style={{ left: `${20 + (depth - 1) * 32}px`, top: '50%', width: '12px' }} />
+      <span className="absolute border-l border-border" style={{ left: `${16 + (depth - 1) * 28}px`, top: 0, height: '50%' }} />
+      <span className="absolute border-t border-border" style={{ left: `${16 + (depth - 1) * 28}px`, top: '50%', width: '10px' }} />
     </span>
   ) : null
 
