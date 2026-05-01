@@ -1,13 +1,12 @@
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { mkdirSync } from 'fs';
 
-const dbDir = join(process.cwd(), 'data', 'db');
+const dbPath = process.env.TAMTAM_DB_PATH ?? join(process.cwd(), 'data', 'db', 'tamtam.db');
+const dbDir = dirname(dbPath);
 mkdirSync(dbDir, { recursive: true });
-
-const dbPath = join(dbDir, 'tamtam.db');
 
 const sqlite = new Database(dbPath);
 sqlite.pragma('journal_mode = WAL');
