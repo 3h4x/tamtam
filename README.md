@@ -43,13 +43,13 @@ Open `http://localhost:1337`, go to Settings, set your workspace path. TamTam sc
 
 ```bash
 pnpm rebuild    # build + restart the PM2 server (use after code changes)
+pnpm restart    # same as rebuild — build + restart (alias)
 pnpm stop       # stop the PM2 server
-pnpm restart    # restart the PM2 server (re-uses existing command)
 pnpm logs       # PM2 log tail
-pnpm dev        # foreground next dev with HMR (local debugging only — not PM2)
+pnpm dev        # foreground next dev with HMR (local debugging only — stop PM2 first)
 ```
 
-> Never run `next dev` directly — always use the PM2 scripts above.
+> `pnpm dev` is for active local debugging only — it runs foreground without PM2 and must not be left running as the long-lived server.
 
 ## Configuration
 
