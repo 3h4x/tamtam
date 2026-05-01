@@ -18,6 +18,7 @@ export {
   markSeen,
   updateJob,
   jobToDict,
+  persistVerdict,
 } from './storage';
 
 export { markDone, runCompletionHooks, reconcileStaleRelease } from './lifecycle';

@@ -61,6 +61,38 @@ function ndjsonText(text: string): string {
   });
 }
 
+// ─── getVerdict stored verdict shortcut ──────────────────────────────────────
+
+describe('getVerdict — stored verdict field', () => {
+  it('returns stored verdict without reading log file', () => {
+    // job.verdict is set in the DB (post-persist); no logPath needed
+    const job = makeJob({ verdict: 'LGTM', logPath: null });
+    expect(getVerdict(job)).toBe('LGTM');
+  });
+
+  it('returns stored NEEDS ATTENTION without reading log file', () => {
+    const job = makeJob({ verdict: 'NEEDS ATTENTION', logPath: null });
+    expect(getVerdict(job)).toBe('NEEDS ATTENTION');
+  });
+
+  it('returns stored DO NOT SHIP without reading log file', () => {
+    const job = makeJob({ verdict: 'DO NOT SHIP', logPath: null });
+    expect(getVerdict(job)).toBe('DO NOT SHIP');
+  });
+
+  it('falls through to log parse when stored verdict is absent', () => {
+    // No verdict stored, but log file has LGTM — should still parse it
+    const job = makeJob({ verdict: undefined, logPath: writeLog('Verdict: LGTM') });
+    expect(getVerdict(job)).toBe('LGTM');
+  });
+
+  it('stored verdict takes precedence over log file content', () => {
+    // DB says LGTM but log says DO NOT SHIP — stored wins
+    const job = makeJob({ verdict: 'LGTM', logPath: writeLog('Verdict: DO NOT SHIP') });
+    expect(getVerdict(job)).toBe('LGTM');
+  });
+});
+
 // ─── getVerdict guards ───────────────────────────────────────────────────────
 
 describe('getVerdict — guards', () => {
