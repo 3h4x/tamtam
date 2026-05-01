@@ -177,6 +177,34 @@ describe('groupReleaseChildren', () => {
     expect(kinds).toEqual(['release', 'release', 'run']);
   });
 
+  it('nests a release under its parent agent when parentJobId matches', () => {
+    const entries = [
+      { ...makeEntry({ id: 'agent1', kind: 'agent:test-e2e', startedAt: 100, finishedAt: 500 }), parentJobId: null, _jobIds: ['agent1'] },
+      { ...makeEntry({ id: 'rel', kind: 'release', startedAt: 120, finishedAt: 480 }), parentJobId: 'agent1', _jobIds: ['rel'] },
+      makeEntry({ id: 'r', kind: 'review', startedAt: 130, finishedAt: 200 }),
+      makeEntry({ id: 'c', kind: 'commit', startedAt: 210, finishedAt: 220 }),
+    ];
+    const out = groupReleaseChildren(entries);
+    // Only the agent row is top-level; the release is nested inside it.
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe('agent:test-e2e');
+    expect(out[0].chainedChildren).toHaveLength(1);
+    expect(out[0].chainedChildren![0].kind).toBe('release');
+    // The release still has its pipeline children.
+    expect(out[0].chainedChildren![0].children!.map((c: AnyEntry) => c.kind)).toEqual(['review', 'commit']);
+  });
+
+  it('keeps a release top-level when its parentJobId does not match any agent/run', () => {
+    const entries = [
+      { ...makeEntry({ id: 'rel', kind: 'release', startedAt: 100, finishedAt: 200 }), parentJobId: 'unknown-id', _jobIds: ['rel'] },
+      makeEntry({ id: 'r', kind: 'review', startedAt: 110, finishedAt: 150 }),
+    ];
+    const out = groupReleaseChildren(entries);
+    // Release stays at top level (no matching parent in top-level entries).
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe('release');
+  });
+
   it('sorts children by startedAt (pipeline order) regardless of input order', () => {
     const entries = [
       makeEntry({ id: 'rel', kind: 'release', startedAt: 100, finishedAt: 300 }),
