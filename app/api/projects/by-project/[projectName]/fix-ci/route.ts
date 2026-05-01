@@ -29,13 +29,13 @@ export async function POST(
   }
 
   const { projects, claudeBin, logDir } = getImproveConfig();
-  const { default_model } = getSettings();
+  const { default_model, github_owner: dbGithubOwner } = getSettings();
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
   const paused = jobsPausedResult('start a CI fix');
   if (paused) return NextResponse.json({ detail: paused.detail }, { status: paused.status });
 
-  const owner = process.env.GITHUB_OWNER || projectName;
+  const owner = process.env.GITHUB_OWNER || dbGithubOwner || projectName;
   let repo = `${owner}/${projectName}`;
   for (const cfg of Object.values(projects)) {
     if (cfg.project === projectName && cfg.github) {
