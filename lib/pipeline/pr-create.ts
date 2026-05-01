@@ -52,9 +52,12 @@ export async function createIssuePR(
   const currentBranch = branchR.stdout.trim();
   const mainBranch = await detectMainBranch(projPath);
 
+  let effectiveBranch = currentBranch;
+
   if (!currentBranch || currentBranch === mainBranch) {
     const { issueBranchName } = await import('./start-commit');
     const featureBranch = issueBranchName(issue);
+    effectiveBranch = featureBranch;
 
     log(`\n# creating branch ${featureBranch} for issue #${issue.number}\n`);
 
@@ -72,7 +75,7 @@ export async function createIssuePR(
   }
 
   const existingR = await exec(
-    'gh', ['pr', 'list', '--head', currentBranch || '', '--state', 'open', '--json', 'url', '--limit', '1'],
+    'gh', ['pr', 'list', '--head', effectiveBranch, '--state', 'open', '--json', 'url', '--limit', '1'],
     { cwd: projPath, timeout: 10000 },
   );
   if (existingR.exitCode === 0 && existingR.stdout.trim()) {
