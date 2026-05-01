@@ -1,9 +1,16 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'fs';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { readLog, readParsedLog, getVerdict } from '@/lib/jobs/verdict';
+import { readLog, readParsedLog, getVerdict, _resetVerdictCache } from '@/lib/jobs/verdict';
 import type { JobData } from '@/lib/jobs/types';
+
+beforeEach(() => {
+  // The verdict cache is process-wide; tests that mutate logs to verify
+  // re-parse behaviour need a clean slate. The "memoization" test is the only
+  // test that intentionally re-uses the cache, and it primes the cache itself.
+  _resetVerdictCache();
+});
 
 // Plain text written to a log file won't parse as NDJSON, so parseStreamLines
 // returns no events and readParsedLog falls back to the raw content — which is
@@ -279,6 +286,18 @@ describe('readParsedLog', () => {
     expect(result).toContain('Tool: Read');
   });
 
+  it('does NOT cache null verdicts (rereads on next call)', () => {
+    // Regression: prior behaviour cached `null`, so a single transient read
+    // (e.g. log not yet flushed when getVerdict was first called from a
+    // completion hook) would poison the cache for the rest of the process
+    // lifetime — the root cause of the live "59% parseFailed" rate.
+    const path = writeLog('No verdict here.');
+    const job = makeJob({ logPath: path });
+    expect(getVerdict(job)).toBeNull();
+    writeFileSync(path, 'Verdict: LGTM', 'utf-8');
+    expect(getVerdict(job)).toBe('LGTM');
+  });
+
   it('truncates long tool_result content with ellipsis', () => {
     const longContent = 'x'.repeat(600);
     // tool_result comes via system event with subtype tool_result
@@ -291,5 +310,77 @@ describe('readParsedLog', () => {
     const result = readParsedLog(makeJob({ logPath }));
     expect(result).toContain('...');
     expect(result.length).toBeLessThan(700);
+  });
+});
+
+// ─── Issue #62 — sampled real-world failure modes ─────────────────────────────
+
+describe('getVerdict — issue #62 sampled failure modes', () => {
+  function job(content: string): JobData {
+    return makeJob({ logPath: writeLog(content) });
+  }
+
+  // Failure mode: model wraps the verdict line in markdown decoration, no
+  // explicit "Verdict:" prefix. Previously the line-fallback regex failed
+  // when the leading `>` quote marker preceded the bold markers.
+  it('detects "> **LGTM**" blockquote-bold form', () => {
+    expect(getVerdict(job('Looks good.\n> **LGTM**'))).toBe('LGTM');
+  });
+
+  it('detects "### LGTM" markdown header form', () => {
+    expect(getVerdict(job('Done.\n### LGTM'))).toBe('LGTM');
+  });
+
+  // Token surrounded by backticks — common when models try to emphasise
+  // "this is the literal token to look for".
+  it('detects "`LGTM`" bare-backtick form', () => {
+    expect(getVerdict(job('All clear.\n`LGTM`'))).toBe('LGTM');
+  });
+
+  it('detects "**LGTM.**" bold-with-trailing-period form', () => {
+    expect(getVerdict(job('Reviewed.\n**LGTM.**'))).toBe('LGTM');
+  });
+
+  // Failure mode: short trailing aside after the verdict line. Previously
+  // the line-fallback only scanned the last 5 non-empty lines.
+  it('finds verdict 6 lines from the end (final aside trail)', () => {
+    const tail = [
+      'Reviewed the diff.',
+      '',
+      'Verdict: LGTM',
+      '',
+      'Note: typecheck passed.',
+      'Tests pass.',
+      '(end of review)',
+    ].join('\n');
+    expect(getVerdict(job(tail))).toBe('LGTM');
+  });
+
+  // Synonyms — only as a last resort. Models occasionally answer in
+  // GitHub-PR review vocabulary instead of the prompt's enum.
+  it('falls back to synonym APPROVE → LGTM', () => {
+    expect(getVerdict(job('Looks fine to me.\nAPPROVE'))).toBe('LGTM');
+  });
+
+  it('falls back to synonym BLOCK → DO NOT SHIP', () => {
+    expect(getVerdict(job('Critical regression.\nBLOCK'))).toBe('DO NOT SHIP');
+  });
+
+  it('falls back to synonym REQUEST CHANGES → NEEDS ATTENTION', () => {
+    expect(getVerdict(job('Couple of issues.\nREQUEST CHANGES'))).toBe('NEEDS ATTENTION');
+  });
+
+  // Synonym must not override an explicit verdict. If both appear, the
+  // canonical one wins because it's matched first.
+  it('prefers explicit canonical verdict over earlier synonym', () => {
+    expect(getVerdict(job('APPROVE\n\nVerdict: NEEDS ATTENTION'))).toBe('NEEDS ATTENTION');
+  });
+
+  // Pure-empty parsed text (Claude aborted streaming mid-tool-use) —
+  // legitimately unparseable, should still return null so the caller can
+  // decide whether to retry or default.
+  it('returns null when log is mostly noise (aborted stream)', () => {
+    const noise = 'tool input...\n[ede_diagnostic]\nError: Request was aborted.\n';
+    expect(getVerdict(job(noise))).toBeNull();
   });
 });

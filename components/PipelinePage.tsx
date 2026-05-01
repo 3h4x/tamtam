@@ -197,6 +197,11 @@ export function PipelinePage() {
   const convColor =
     convRate == null ? undefined : convRate >= 0.8 ? 'green' : convRate >= 0.5 ? 'yellow' : 'red'
 
+  const parseFailRate = verdicts.total > 0 ? verdicts.parseFailed / verdicts.total : null
+  // Inverted scale: low parse-fail = good. Issue #62 target is < 10%.
+  const parseFailColor =
+    parseFailRate == null ? undefined : parseFailRate <= 0.1 ? 'green' : parseFailRate <= 0.25 ? 'yellow' : 'red'
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {/* Header */}
@@ -243,7 +248,7 @@ export function PipelinePage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <StatCard
           label="Pipeline success"
           value={pipelineSuccess.total > 0 ? fmtPct(pipelineSuccess.rate) : '—'}
@@ -255,6 +260,12 @@ export function PipelinePage() {
           value={verdicts.total > 0 ? fmtPct(lgtmRate) : '—'}
           sub={verdicts.total > 0 ? `${verdicts.lgtm}/${verdicts.total} reviews` : 'No reviews'}
           color={lgtmColor as 'green' | 'yellow' | 'red' | undefined}
+        />
+        <StatCard
+          label="Verdict parse fail"
+          value={verdicts.total > 0 ? fmtPct(parseFailRate) : '—'}
+          sub={verdicts.total > 0 ? `${verdicts.parseFailed}/${verdicts.total} unparseable` : 'No reviews'}
+          color={parseFailColor as 'green' | 'yellow' | 'red' | undefined}
         />
         <StatCard
           label="Fix convergence"

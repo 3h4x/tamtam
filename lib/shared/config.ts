@@ -42,6 +42,7 @@ export interface TamTamConfig {
   pipeline_model_fix: string;
   pipeline_model_dod: string;
   pipeline_model_commit: string;
+  review_retry_on_parse_failure: boolean;
 }
 
 const DEFAULTS: TamTamConfig = {
@@ -86,6 +87,7 @@ const DEFAULTS: TamTamConfig = {
   pipeline_model_fix: '',
   pipeline_model_dod: '',
   pipeline_model_commit: '',
+  review_retry_on_parse_failure: true,
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
@@ -167,6 +169,10 @@ export function getSettings(): TamTamConfig {
     pipeline_model_fix: map.pipeline_model_fix ?? DEFAULTS.pipeline_model_fix,
     pipeline_model_dod: map.pipeline_model_dod ?? DEFAULTS.pipeline_model_dod,
     pipeline_model_commit: map.pipeline_model_commit ?? DEFAULTS.pipeline_model_commit,
+    review_retry_on_parse_failure:
+      map.review_retry_on_parse_failure === undefined
+        ? DEFAULTS.review_retry_on_parse_failure
+        : map.review_retry_on_parse_failure === 'true',
   };
 
   if (config.lmstudio_model) {

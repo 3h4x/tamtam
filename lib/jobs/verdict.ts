@@ -55,16 +55,57 @@ export function readParsedLog(job: JobData, tailBytes = 100_000): string {
 // and the per-row jobToDict were re-reading every review log file from disk
 // + re-parsing stream-json on every request — driving the dev server CPU
 // to ~800% with hundreds of historical review jobs.
-const verdictCache = new Map<string, string | null>();
+//
+// IMPORTANT: only successful parses are cached. Caching `null` is unsafe
+// because the log file may not have been fully flushed when getVerdict is
+// first called right after markDone — a single transient miss would then
+// poison the cache for the whole process lifetime, which is exactly what
+// drove the live "59% parseFailed" rate seen in the issue.
+const verdictCache = new Map<string, string>();
 
 export function getVerdict(job: JobData): string | null {
   if (job.kind !== 'review' || job.finishedAt === null) return null;
   const cached = verdictCache.get(job.id);
   if (cached !== undefined) return cached;
   const v = computeVerdict(job);
-  verdictCache.set(job.id, v);
+  if (v !== null) verdictCache.set(job.id, v);
   return v;
 }
+
+// Strip markdown emphasis, code-fence/backtick remnants, list markers, and
+// surrounding whitespace so a decorated token like "  **`LGTM`** ." reduces
+// to the bare word for matching.
+function stripDecoration(s: string): string {
+  return s
+    .replace(/^[\s>*_`#\-•]+/, '')
+    .replace(/[\s*_`.,;!?]+$/, '')
+    .trim();
+}
+
+const CANON_TOKENS: Record<string, string> = {
+  LGTM: 'LGTM',
+  'NEEDS ATTENTION': 'NEEDS ATTENTION',
+  'DO NOT SHIP': 'DO NOT SHIP',
+};
+
+// Last-resort synonym map. Models occasionally substitute these when the
+// verdict prompt instructions are buried under a long reasoning trace.
+// Only consulted if every "real" pattern fails — emits a debug log so we can
+// monitor drift over time.
+const SYNONYMS: Record<string, string> = {
+  APPROVE: 'LGTM',
+  APPROVED: 'LGTM',
+  SHIP: 'LGTM',
+  'SHIP IT': 'LGTM',
+  BLOCK: 'DO NOT SHIP',
+  BLOCKED: 'DO NOT SHIP',
+  REJECT: 'DO NOT SHIP',
+  REJECTED: 'DO NOT SHIP',
+  CHANGES: 'NEEDS ATTENTION',
+  'CHANGES REQUESTED': 'NEEDS ATTENTION',
+  'REQUEST CHANGES': 'NEEDS ATTENTION',
+  REQUEST_CHANGES: 'NEEDS ATTENTION',
+};
 
 function computeVerdict(job: JobData): string | null {
   // Use parsed log — raw stream-json encodes newlines as literal "\n",
@@ -76,6 +117,7 @@ function computeVerdict(job: JobData): string | null {
   // review prompt's own "Verdict: LGTM / NEEDS ATTENTION / DO NOT SHIP"
   // instructions further up in the log.
   const tail = log.slice(-2000);
+
   // Multi-line "Verdict\n**X**" form: "Verdict" header followed by a token
   // within a short window of non-alpha characters (whitespace, punctuation,
   // markdown bold, list markers).
@@ -83,18 +125,52 @@ function computeVerdict(job: JobData): string | null {
   // the prompt's own "LGTM / NEEDS ATTENTION / DO NOT SHIP" listing, not a
   // decision.
   const multiline = [...tail.matchAll(/[Vv]erdict[^A-Za-z]{1,80}?(LGTM|NEEDS ATTENTION|DO NOT SHIP)(?![*_` ]*\s*\/)/g)];
-  if (multiline.length > 0) return multiline[multiline.length - 1][1];
-  // Fallback: scan the final non-empty lines for a verdict token at the
+  if (multiline.length > 0) return CANON_TOKENS[multiline[multiline.length - 1][1]];
+
+  // Fallback 1: scan the final non-empty lines for a verdict token at the
   // start (with optional markdown decoration) followed by either end-of-line
   // or a separator like " — ", ":", " -" introducing a one-line rationale.
   // Accepts bare `LGTM`, `**LGTM**`, `LGTM — summary`, `LGTM: summary`, etc.
   // Rejects `LGTM / NEEDS ATTENTION / DO NOT SHIP` (the prompt's own enum)
   // because that line has a "/" right after the token.
+  // Widened from the last 5 lines to the last 8 — models sometimes emit a
+  // short closing aside ("That's all I have." / a blank line / a markdown
+  // separator) after the verdict line.
   const lines = tail.split('\n').map((l) => l.trim()).filter(Boolean);
-  const lineTokenRe = /^[*_` ]*(LGTM|NEEDS ATTENTION|DO NOT SHIP)[*_` ]*(?:\s*[-–—:]|\s*$)(?![*_` ]*\s*\/)/;
-  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 5); i--) {
+  const lineTokenRe = /^[*_`>#\-•\s]*(LGTM|NEEDS ATTENTION|DO NOT SHIP)[*_`]*(?:\s*[-–—:]|\s*$)(?![*_` ]*\s*\/)/;
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 8); i--) {
     const m = lineTokenRe.exec(lines[i]);
-    if (m) return m[1];
+    if (m) return CANON_TOKENS[m[1]];
   }
+
+  // Fallback 2: a stripped-decoration final-lines scan. Catches forms like
+  // "### LGTM ###", "> **LGTM.**", "`LGTM`" — markdown decoration only,
+  // no real text beyond the token.
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 8); i--) {
+    const stripped = stripDecoration(lines[i]).toUpperCase();
+    if (stripped === 'LGTM' || stripped === 'NEEDS ATTENTION' || stripped === 'DO NOT SHIP') {
+      return CANON_TOKENS[stripped];
+    }
+  }
+
+  // Last resort: synonyms. Only checked after every real pattern fails so a
+  // model accidentally writing "approve" mid-review doesn't override an
+  // explicit verdict elsewhere. Logged once per detection so we can tell
+  // whether the new prompt is regressing models toward synonyms.
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 5); i--) {
+    const stripped = stripDecoration(lines[i]).toUpperCase().replace(/[^A-Z _]/g, '');
+    const mapped = SYNONYMS[stripped];
+    if (mapped) {
+      console.log(`[verdict] synonym fallback for ${job.id}: "${stripped}" → ${mapped}`);
+      return mapped;
+    }
+  }
+
   return null;
+}
+
+/** Test helper — clear the in-memory cache so a test that mutates a log can
+ * re-observe the verdict. Not exported in any production path. */
+export function _resetVerdictCache(): void {
+  verdictCache.clear();
 }
