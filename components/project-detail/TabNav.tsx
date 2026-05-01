@@ -10,10 +10,11 @@ export interface TabNavProps {
   activeTab: Tab
   totalChanges: number
   issueCount: { prs: number; issues: number } | null
+  runningCount?: number
   onSetTab: (tab: Tab) => void
 }
 
-export function TabNav({ projectName, activeTab, totalChanges, issueCount, onSetTab }: TabNavProps) {
+export function TabNav({ projectName, activeTab, totalChanges, issueCount, runningCount = 0, onSetTab }: TabNavProps) {
   const router = useRouter()
 
   const tabClass = (tab: Tab) =>
@@ -55,6 +56,9 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, onSet
       </button>
       <button className={tabClass('history')} onClick={() => onSetTab('history')}>
         History
+        {runningCount > 0 && (
+          <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-status-warning animate-pulse align-middle" title={`${runningCount} running`} />
+        )}
       </button>
       <button className={tabClass('issues')} onClick={() => onSetTab('issues')}>
         Issues / PRs
