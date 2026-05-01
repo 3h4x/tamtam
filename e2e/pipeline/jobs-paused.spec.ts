@@ -3,7 +3,7 @@ import {
   writeScenario,
   resetShimState,
   enableProject,
-  waitForJobCompletion,
+  waitForPipelineCompletion,
 } from './helpers';
 
 const PROJECT = 'paused';
@@ -54,9 +54,8 @@ test.describe('Jobs-paused global gate', () => {
       `release POST failed after unpause: ${await releaseResp.text()}`,
     ).toBe(200);
 
-    const releaseBody = await releaseResp.json() as { release_job_id: string };
-    const done = await waitForJobCompletion(request, releaseBody.release_job_id, 90_000);
-    expect(done, 'release job should complete after unpause').not.toBeNull();
-    expect(done!['exit_code'], 'release should succeed (exit 0)').toBe(0);
+    const result = await waitForPipelineCompletion(request, PROJECT, 90_000);
+    expect(result.status, 'release job should complete after unpause').toBe('done');
+    expect(result.releaseJob?.['exit_code'], 'release should succeed (exit 0)').toBe(0);
   });
 });
