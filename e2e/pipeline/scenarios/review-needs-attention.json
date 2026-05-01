@@ -1,0 +1,21 @@
+{
+  "description": "Review needs attention: first review flags issues, fix applies, second review is LGTM.",
+  "steps": [
+    {
+      "label": "review-1",
+      "text": "There is missing error handling on the main execution path.\n\n- src/index.js line 3: no error handling for null input\n\nVerdict: NEEDS ATTENTION"
+    },
+    {
+      "label": "fix",
+      "text": "Added null check and error handling on the main execution path. The issue noted in the review has been resolved."
+    },
+    {
+      "label": "review-2",
+      "text": "All issues from the previous review have been addressed. The error handling is now correct.\n\nVerdict: LGTM"
+    },
+    {
+      "label": "commit-message",
+      "text": "fix: add error handling to main execution path"
+    }
+  ]
+}

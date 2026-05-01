@@ -259,5 +259,6 @@ export async function registerNode(): Promise<void> {
   runCleanup();
   setInterval(runCleanup, 24 * 60 * 60 * 1000);
 
-  setInterval(runProbeSweep, 30_000);
+  const probeIntervalMs = parseInt(process.env.TAMTAM_PROBE_INTERVAL_MS ?? '', 10) || 30_000;
+  setInterval(runProbeSweep, probeIntervalMs);
 }
