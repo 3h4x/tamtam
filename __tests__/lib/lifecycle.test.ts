@@ -276,6 +276,38 @@ describe('reconcileStaleRelease', () => {
     // test step failed — release must report exit 1
     expect(row?.exitCode).toBe(1);
   });
+
+  it('breaks the chain and excludes jobs that start more than 60s after the previous edge', async () => {
+    const now = Date.now() / 1000;
+    // release → test (finishes at now-50) → review starts 90s later (gap > 60s → excluded from chain)
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: 'release-gap', project: 'proj', kind: 'release', startedAt: now - 120 }) as any,
+      makeJobRow({ id: 'test-gap', project: 'proj', kind: 'test', startedAt: now - 110, finishedAt: now - 50, exitCode: 0 }) as any,
+      // review starts 90 seconds after test finished (now-50 + 90 = now+40) — but we keep it in the past:
+      // use finishedAt = now - 55 so grace window passes, then review starts at now - 55 + 90 = now+35 — too far in future
+      // Actually: release at now-200, test finishes at now-120, review starts at now-50 (gap = 70s > 60s)
+    ]).run();
+    // Re-insert with correct timing: release at now-200, test at now-190 finishing at now-130, review at now-50 (gap 80s)
+    testDb.db.delete(schema.jobs).run();
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: 'release-gap', project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
+      makeJobRow({ id: 'test-gap', project: 'proj', kind: 'test', startedAt: now - 190, finishedAt: now - 130, exitCode: 0 }) as any,
+      // review starts 80 seconds after test finished (now-130 + 80 = now-50) — gap > 60s → excluded
+      makeJobRow({ id: 'review-gap', project: 'proj', kind: 'review', startedAt: now - 50, finishedAt: now - 20, exitCode: 0 }) as any,
+    ]).run();
+
+    const { reconcileStaleRelease: fn } = await import('@/lib/jobs/job-storage');
+
+    // Trigger via the review job finishing (it's within its own chain, but not the release's)
+    const reviewJob = makeJob('review', { project: 'proj', finishedAt: now - 20, exitCode: 0 });
+    await fn(reviewJob);
+
+    const row = testDb.db.select().from(schema.jobs).where(eq(schema.jobs.id, 'release-gap')).get();
+    // The chain should include only the test step; the review is too far away.
+    // Release is finalized because test finished long ago (now-130, well past the 5s grace).
+    expect(row?.finishedAt).not.toBeNull();
+    expect(row?.exitCode).toBe(0); // only the test step (exit 0) is in the chain
+  });
 });
 
 // ─── reviewIsStuck convergence guard (tested through markDone) ───────────────

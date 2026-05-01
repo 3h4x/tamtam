@@ -9,6 +9,7 @@ import {
   buildReleaseSummary,
   dayLabel,
   groupReleaseChildren,
+  flattenPipelineSteps,
 } from '@/components/project-runs/utils';
 import type { Entry } from '@/components/project-runs/utils';
 
@@ -377,5 +378,74 @@ describe('groupReleaseChildren', () => {
     const vg = out[0];
     expect(vg.inputTokens).toBe(t.inputTokens + r.inputTokens);
     expect(vg.costUsd).toBeCloseTo(t.costUsd + r.costUsd);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// flattenPipelineSteps
+// ---------------------------------------------------------------------------
+
+function makeFlatEntry(id: string, kind: string, chainedChildren?: Entry[]): Entry {
+  return {
+    ...makeStepEntry(id, kind, 1000),
+    chainedChildren,
+  };
+}
+
+describe('flattenPipelineSteps', () => {
+  it('returns empty list for no roots', () => {
+    expect(flattenPipelineSteps([], 0)).toEqual([]);
+  });
+
+  it('assigns baseDepth to non-fix steps', () => {
+    const test = makeFlatEntry('test-1', 'test');
+    const review = makeFlatEntry('review-1', 'review');
+    const result = flattenPipelineSteps([test, review], 1);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual({ entry: test, depth: 1 });
+    expect(result[1]).toEqual({ entry: review, depth: 1 });
+  });
+
+  it('assigns baseDepth+1 to fix steps', () => {
+    const fix = makeFlatEntry('fix-1', 'fix');
+    const result = flattenPipelineSteps([fix], 2);
+    expect(result).toHaveLength(1);
+    expect(result[0].depth).toBe(3);
+  });
+
+  it('assigns baseDepth+1 to fix-push steps', () => {
+    const fixPush = makeFlatEntry('fp-1', 'fix-push');
+    const result = flattenPipelineSteps([fixPush], 0);
+    expect(result[0].depth).toBe(1);
+  });
+
+  it('flattens chained children back to baseDepth after a fix', () => {
+    // test → fix → review (review should resume at baseDepth, not fix depth)
+    const review = makeFlatEntry('review-1', 'review');
+    const fix = makeFlatEntry('fix-1', 'fix', [review]);
+    const test = makeFlatEntry('test-1', 'test', [fix]);
+    const result = flattenPipelineSteps([test], 1);
+    expect(result).toHaveLength(3);
+    expect(result[0]).toEqual({ entry: test, depth: 1 });   // test at baseDepth
+    expect(result[1]).toEqual({ entry: fix, depth: 2 });    // fix at baseDepth+1
+    expect(result[2]).toEqual({ entry: review, depth: 1 }); // review back at baseDepth
+  });
+
+  it('handles multiple roots with mixed fix and non-fix kinds', () => {
+    const test = makeFlatEntry('test-1', 'test');
+    const fix = makeFlatEntry('fix-1', 'fix');
+    const commit = makeFlatEntry('commit-1', 'commit');
+    const result = flattenPipelineSteps([test, fix, commit], 0);
+    expect(result[0].depth).toBe(0);  // test
+    expect(result[1].depth).toBe(1);  // fix
+    expect(result[2].depth).toBe(0);  // commit
+  });
+
+  it('respects a non-zero baseDepth for all depth calculations', () => {
+    const fix = makeFlatEntry('fix-1', 'fix');
+    const push = makeFlatEntry('push-1', 'push');
+    const result = flattenPipelineSteps([fix, push], 3);
+    expect(result[0].depth).toBe(4);  // fix at baseDepth+1 = 4
+    expect(result[1].depth).toBe(3);  // push at baseDepth = 3
   });
 });

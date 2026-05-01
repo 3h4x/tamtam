@@ -516,3 +516,22 @@ export function buildReleaseSummary(children: Entry[]): string {
   }
   return parts.join(' · ')
 }
+
+// Flatten the pipeline chain tree into a linear {entry, depth} list. Main
+// pipeline steps (test/review/commit/push/mark-dod/pr-wait) all appear at
+// `baseDepth`. fix/fix-push appear at baseDepth+1 so they read as an
+// indented remediation rather than as a separate tier. After any node its
+// chained children resume at `baseDepth` — a review that follows a fix is a
+// sibling of the preceding test, not its grandchild.
+export function flattenPipelineSteps(roots: Entry[], baseDepth: number): Array<{ entry: Entry; depth: number }> {
+  const result: Array<{ entry: Entry; depth: number }> = []
+  const walk = (nodes: Entry[], stepDepth: number) => {
+    for (const node of nodes) {
+      const isFix = node.kind === 'fix' || node.kind === 'fix-push'
+      result.push({ entry: node, depth: isFix ? stepDepth + 1 : stepDepth })
+      walk(node.chainedChildren ?? [], baseDepth)
+    }
+  }
+  walk(roots, baseDepth)
+  return result
+}
