@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, chmodSync, mkdirSync, openSync, closeSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/scheduling';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { createJob, listJobs, probeJobStatus, updateJob, markDone } from '@/lib/jobs/job-storage';
@@ -37,7 +37,12 @@ export function detectTestCommand(projPath: string, projectName?: string): strin
     } catch {}
   }
   if (existsSync(join(projPath, 'foundry.toml'))) return 'forge test';
-  if (existsSync(join(projPath, 'Package.swift'))) return 'swift test';
+  if (existsSync(join(projPath, 'Package.swift'))) {
+    // Guard against triggering macOS Xcode GUI dialogs when running headless.
+    // xcode-select -p exits 0 only when developer tools are properly configured.
+    try { execSync('xcode-select -p', { stdio: 'ignore', timeout: 3000 }); } catch { return null; }
+    return 'swift test';
+  }
   if (existsSync(join(projPath, 'Cargo.toml'))) return 'cargo test';
   if (existsSync(join(projPath, 'go.mod'))) return 'go test ./...';
   if (existsSync(join(projPath, 'pom.xml'))) return 'mvn test';
