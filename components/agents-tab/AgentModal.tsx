@@ -442,10 +442,11 @@ export function AgentModal({
             </button>
             <button
               type="button"
-              className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
               onClick={handleSave}
               disabled={!name.trim() || saving}
             >
+              {saving && <span className="inline-block w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin shrink-0" />}
               {saving ? 'Saving…' : isNew ? 'Create Agent' : 'Save Changes'}
             </button>
           </div>

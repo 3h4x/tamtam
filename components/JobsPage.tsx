@@ -338,9 +338,11 @@ export function JobsPage() {
       {/* Infinite-scroll sentinel + status. Hidden until the initial page
           finished loading so the skeleton doesn't fight with this. */}
       {!loading && filtered.length > 0 && (
-        <div ref={sentinelRef} className="flex justify-center py-6 text-xs text-text-tertiary font-mono">
+        <div ref={sentinelRef} className="flex justify-center items-center gap-2 py-6 text-xs text-text-tertiary font-mono">
           {hasMore
-            ? (loadingMore ? 'Loading more…' : `Showing ${filtered.length} of ${jobs.length}+`)
+            ? loadingMore
+              ? <><span className="inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin" />Loading more…</>
+              : `Showing ${filtered.length} of ${jobs.length}+`
             : (search || filter !== 'all'
                 ? `${filtered.length} match${filtered.length === 1 ? '' : 'es'}`
                 : `End of runs · ${jobs.length} total`)}
