@@ -57,6 +57,13 @@ export function ToolBlock({ tool, executing }: { tool: ToolEntry; executing?: bo
         {summary && (
           <span className="text-[#888] text-xs font-mono truncate min-w-0 flex-1">{summary}</span>
         )}
+        {hasResult && tool.result && (
+          <span className="text-[10px] text-[#444] shrink-0 font-mono tabular-nums">
+            {tool.result.length > 1024
+              ? `${(tool.result.length / 1024).toFixed(1)}k`
+              : `${tool.result.length}`}
+          </span>
+        )}
         {hasResult && (
           <span className="text-[10px] text-[#555] shrink-0 transition-transform" style={{ transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)' }}>›</span>
         )}
