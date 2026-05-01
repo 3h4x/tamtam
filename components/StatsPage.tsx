@@ -318,6 +318,7 @@ export function StatsPage() {
                   <th className="px-3 py-2 text-xs font-medium text-text-secondary text-left">Kind</th>
                   <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Runs</th>
                   <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Tokens</th>
+                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right" title="Average prompt size sent to Claude per run (estimated tokens; actual cache size may be larger for non-agent kinds)">Avg prompt</th>
                   <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Cost</th>
                   <th className="px-3 py-2 text-xs font-medium text-text-secondary w-32">Share</th>
                 </tr>
@@ -328,6 +329,9 @@ export function StatsPage() {
                     <td className="px-3 py-2.5 font-mono text-text-primary">{r.kind}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">{r.runs.toLocaleString()}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">{fmtTokens(r.totalTokens)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-text-tertiary" title={r.avgPromptBytes != null ? `${r.avgPromptBytes.toLocaleString()} bytes over ${r.promptSamples} run${r.promptSamples === 1 ? '' : 's'}` : 'no prompt-size samples'}>
+                      {r.avgPromptTokens != null ? `~${fmtTokens(r.avgPromptTokens)}` : '—'}
+                    </td>
                     <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-accent">{fmtUsd(r.costUsd)}</td>
                     <td className="px-3 py-2.5">
                       <Bar value={r.costUsd} max={data.agents[0]?.costUsd ?? 1} />

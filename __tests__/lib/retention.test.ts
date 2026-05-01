@@ -38,7 +38,8 @@ function createTestDb() {
       cost_usd REAL,
       model TEXT,
       release_id TEXT,
-      aborted_at REAL
+      aborted_at REAL,
+      prompt_bytes INTEGER
     );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };

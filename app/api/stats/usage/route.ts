@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listJobs } from '@/lib/jobs/job-storage';
 import { costUsd, PRICE_PER_MTOK } from '@/lib/shared/usage-pricing';
+import { estimateTokens } from '@/lib/jobs/prompt-size';
 
 const WINDOWS = {
   '24h': 24 * 60 * 60 * 1000,
@@ -35,6 +36,9 @@ export interface AgentUsageRow {
   cacheCreateTokens: number;
   totalTokens: number;
   costUsd: number;
+  avgPromptBytes: number | null;
+  avgPromptTokens: number | null;
+  promptSamples: number;
 }
 
 export interface UsageResponse {
@@ -70,6 +74,7 @@ export async function GET(request: NextRequest) {
 
   const byProject = new Map<string, ProjectUsageRow>();
   const byKind = new Map<string, AgentUsageRow>();
+  const promptByKind = new Map<string, { totalBytes: number; samples: number }>();
 
   for (const j of jobs) {
     const row = byProject.get(j.project) ?? {
@@ -102,6 +107,9 @@ export async function GET(request: NextRequest) {
       cacheCreateTokens: 0,
       totalTokens: 0,
       costUsd: 0,
+      avgPromptBytes: null,
+      avgPromptTokens: null,
+      promptSamples: 0,
     };
     agentRow.runs += 1;
     agentRow.inputTokens += j.inputTokens ?? 0;
@@ -109,6 +117,13 @@ export async function GET(request: NextRequest) {
     agentRow.cacheReadTokens += j.cacheReadTokens ?? 0;
     agentRow.cacheCreateTokens += j.cacheCreateTokens ?? 0;
     byKind.set(j.kind, agentRow);
+
+    if (j.promptBytes != null && j.promptBytes > 0) {
+      const p = promptByKind.get(j.kind) ?? { totalBytes: 0, samples: 0 };
+      p.totalBytes += j.promptBytes;
+      p.samples += 1;
+      promptByKind.set(j.kind, p);
+    }
   }
 
   const projects = Array.from(byProject.values()).map((r) => {
@@ -121,6 +136,12 @@ export async function GET(request: NextRequest) {
   const agents = Array.from(byKind.values()).map((r) => {
     r.totalTokens = r.inputTokens + r.outputTokens + r.cacheReadTokens + r.cacheCreateTokens;
     r.costUsd = costUsd(r);
+    const p = promptByKind.get(r.kind);
+    if (p && p.samples > 0) {
+      r.avgPromptBytes = Math.round(p.totalBytes / p.samples);
+      r.avgPromptTokens = estimateTokens(r.avgPromptBytes);
+      r.promptSamples = p.samples;
+    }
     return r;
   });
   agents.sort((a, b) => b.costUsd - a.costUsd);
