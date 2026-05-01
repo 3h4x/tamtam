@@ -95,9 +95,44 @@ describe('detectTestCommand', () => {
     expect(detectTestCommand(projDir)).toBe('go test ./...');
   });
 
-  it('detects swift test when Package.swift exists', () => {
+  it('detects swift test when Package.swift exists and xcode-select succeeds', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp' }),
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn() }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: vi.fn(), listJobs: vi.fn().mockReturnValue([]),
+      probeJobStatus: vi.fn(), updateJob: vi.fn(), markDone: vi.fn(),
+    }));
+    vi.doMock('child_process', async (importOriginal) => ({
+      ...(await importOriginal<typeof import('child_process')>()),
+      execSync: vi.fn(), // no-op = success
+    }));
+    const mod = await import('@/lib/pipeline/start-test');
     writeFileSync(join(projDir, 'Package.swift'), '// swift-tools-version:5.5');
-    expect(detectTestCommand(projDir)).toBe('swift test');
+    expect(mod.detectTestCommand(projDir)).toBe('swift test');
+  });
+
+  it('returns null when Package.swift exists but xcode-select is not configured', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp' }),
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn() }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: vi.fn(), listJobs: vi.fn().mockReturnValue([]),
+      probeJobStatus: vi.fn(), updateJob: vi.fn(), markDone: vi.fn(),
+    }));
+    vi.doMock('child_process', async (importOriginal) => ({
+      ...(await importOriginal<typeof import('child_process')>()),
+      execSync: vi.fn().mockImplementation(() => { throw new Error('xcode-select: error: unable to get active developer directory'); }),
+    }));
+    const mod = await import('@/lib/pipeline/start-test');
+    writeFileSync(join(projDir, 'Package.swift'), '// swift-tools-version:5.5');
+    expect(mod.detectTestCommand(projDir)).toBeNull();
   });
 
   it('detects make test when Makefile has a test target', () => {
