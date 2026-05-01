@@ -176,6 +176,7 @@ export function TerminalToolbar({
                       key={item.id}
                       className="w-full px-3 py-2 text-left text-xs hover:bg-[#252525] cursor-pointer border-none bg-transparent text-[#ccc] font-mono flex items-center justify-between gap-2"
                       onClick={() => onToggleItem(item)}
+                      title={item.description || item.name}
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="truncate">{item.name}</span>
