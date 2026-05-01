@@ -13,7 +13,7 @@ import { withBasePrompt, getPermissionModeFlag } from '@/lib/shared/config';
 import { errMsg } from '@/lib/shared/types';
 import { parseFileAgentId, loadFileAgent } from '@/lib/agents/tamtam-file-agents';
 import { getAgentMemoryDir, getAgentMemoryPath, readAgentMemory, ensureAgentMemoryDir, buildMemoryBlock } from '@/lib/agents/agent-memory';
-import { jobsPausedResult } from '@/lib/shared/job-control';
+import { runGates } from '@/lib/shared/job-control';
 
 export async function POST(
   request: NextRequest,
@@ -75,7 +75,7 @@ export async function POST(
   if (!projPath) {
     return NextResponse.json({ detail: `project '${agent.project}' not found` }, { status: 404 });
   }
-  const paused = jobsPausedResult('start an agent run');
+  const paused = runGates('start an agent run');
   if (paused) return NextResponse.json({ detail: paused.detail }, { status: paused.status });
 
   // In Direct Branch mode, block agent runs while a fix/issue-* branch is

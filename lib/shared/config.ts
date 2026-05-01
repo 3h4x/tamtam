@@ -43,6 +43,10 @@ export interface TamTamConfig {
   pipeline_model_dod: string;
   pipeline_model_commit: string;
   review_retry_on_parse_failure: boolean;
+  budget_block_runs_enabled: boolean;
+  budget_block_at_pct: number;
+  budget_warn_at_pct: number;
+  notification_on_budget_blocked: boolean;
 }
 
 const DEFAULTS: TamTamConfig = {
@@ -88,6 +92,10 @@ const DEFAULTS: TamTamConfig = {
   pipeline_model_dod: '',
   pipeline_model_commit: '',
   review_retry_on_parse_failure: true,
+  budget_block_runs_enabled: false,
+  budget_block_at_pct: 95,
+  budget_warn_at_pct: 80,
+  notification_on_budget_blocked: false,
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
@@ -173,6 +181,10 @@ export function getSettings(): TamTamConfig {
       map.review_retry_on_parse_failure === undefined
         ? DEFAULTS.review_retry_on_parse_failure
         : map.review_retry_on_parse_failure === 'true',
+    budget_block_runs_enabled: map.budget_block_runs_enabled === 'true',
+    budget_block_at_pct: parseIntOr(map.budget_block_at_pct, DEFAULTS.budget_block_at_pct),
+    budget_warn_at_pct: parseIntOr(map.budget_warn_at_pct, DEFAULTS.budget_warn_at_pct),
+    notification_on_budget_blocked: map.notification_on_budget_blocked === 'true',
   };
 
   if (config.lmstudio_model) {

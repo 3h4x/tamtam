@@ -6,7 +6,7 @@ import { startJob } from '@/lib/jobs/pm2-jobs';
 import { getPermissionModeFlag, getSettings } from '@/lib/shared/config';
 import { errMsg } from '@/lib/shared/types';
 import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { jobsPausedResult } from '@/lib/shared/job-control';
+import { runGates } from '@/lib/shared/job-control';
 
 export type StartFixPushResult =
   | { ok: true; jobId: string; pid: number; logPath: string }
@@ -20,7 +20,7 @@ export type StartFixPushResult =
 export async function startFixPush(projectName: string, hookError: string): Promise<StartFixPushResult> {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
-  const paused = jobsPausedResult('start a fix-push job');
+  const paused = runGates('start a fix-push job');
   if (paused) return paused;
 
   const { claudeBin, logDir } = getImproveConfig();

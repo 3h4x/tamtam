@@ -200,6 +200,7 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 - `/api/monitoring/pm2-logs` — Tail tamtam PM2 log files (error + out from `~/.pm2/logs/`), last 64 KB; accepts `?limit=` (max 500) and `?out=0` to suppress stdout log (GET)
 - `/api/stats/usage` — Token usage statistics per project and per agent kind (GET, accepts `?window=24h|7d|30d|all`)
 - `/api/stats/pipeline` — Pipeline health metrics: verdict distribution, fix-loop stats, step durations, MTTR, per-project breakdown (GET, accepts `?window=24h|7d|30d|all` and `?project=`; 60s cache)
+- `/api/usage/quota` — Claude subscription quota snapshot from Anthropic OAuth usage API (GET returns `QuotaSnapshot` with fiveHour/sevenDay utilization; POST force-clears cache and re-fetches; 180s in-memory cache; returns 502 when token is unavailable)
 
 ## Testing Requirements
 - **All new API routes must have vitest tests** in `__tests__/api/`; lib logic tests go in `__tests__/lib/` or alongside the file.

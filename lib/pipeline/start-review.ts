@@ -8,7 +8,7 @@ import { exec } from '@/lib/shared/shell';
 import { CODE_REVIEWER_SKILL } from '@/lib/skills/skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings, getPipelineModel } from '@/lib/shared/config';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { jobsPausedResult } from '@/lib/shared/job-control';
+import { runGates } from '@/lib/shared/job-control';
 
 export type StartReviewResult =
   | { ok: true; jobId: string; pid: number; logPath: string }
@@ -63,7 +63,7 @@ export async function startProjectReview(projectName: string): Promise<StartRevi
   if (!projPath) {
     return { ok: false, status: 404, detail: `project '${projectName}' not found` };
   }
-  const paused = jobsPausedResult('start a review');
+  const paused = runGates('start a review');
   if (paused) return paused;
 
   // Check for existing pipeline lock — but allow running under a parent

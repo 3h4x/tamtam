@@ -9,6 +9,8 @@ import { AgentTemplatesTab } from '@/components/settings/AgentTemplatesTab'
 export type { AgentTemplateRecord } from '@/components/settings/AgentTemplatesTab'
 import { NotificationsTab } from '@/components/settings/NotificationsTab'
 import type { NotificationsSettings } from '@/components/settings/NotificationsTab'
+import { BudgetTab } from '@/components/settings/BudgetTab'
+import type { BudgetSettings } from '@/components/settings/BudgetTab'
 
 interface SettingsMap {
   workspace_path: string
@@ -42,6 +44,10 @@ interface SettingsMap {
   notification_on_fix_loop_exhausted: string
   notification_on_review_do_not_ship: string
   notification_on_agent_run_fail: string
+  notification_on_budget_blocked: string
+  budget_block_runs_enabled: string
+  budget_block_at_pct: string
+  budget_warn_at_pct: string
   pipeline_model_review: string
   pipeline_model_fix: string
   pipeline_model_dod: string
@@ -51,9 +57,13 @@ interface SettingsMap {
 const SETTINGS_DEFAULTS: SettingsMap = {
   ...DEFAULTS,
   jobs_paused: 'false',
+  notification_on_budget_blocked: 'false',
+  budget_block_runs_enabled: 'false',
+  budget_block_at_pct: '95',
+  budget_warn_at_pct: '80',
 }
 
-type TabId = 'agent' | 'pipeline' | 'general' | 'projects' | 'database' | 'templates' | 'notifications'
+type TabId = 'agent' | 'pipeline' | 'general' | 'projects' | 'database' | 'templates' | 'notifications' | 'budget'
 
 const GROUPS: {
   id: TabId
@@ -71,6 +81,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'pipeline',      label: 'Pipeline' },
   { id: 'general',       label: 'General' },
   { id: 'notifications', label: 'Notifications' },
+  { id: 'budget',        label: 'Budget' },
   { id: 'projects',      label: 'Projects' },
   { id: 'templates',     label: 'Templates' },
   { id: 'database',      label: 'Database' },
@@ -459,6 +470,14 @@ export function SettingsPage() {
           {activeTab === 'notifications' && (
             <NotificationsTab
               settings={settings as unknown as NotificationsSettings}
+              onChange={(key, value) => handleChange(key as keyof SettingsMap, value)}
+            />
+          )}
+
+          {/* Budget */}
+          {activeTab === 'budget' && (
+            <BudgetTab
+              settings={settings as unknown as BudgetSettings}
               onChange={(key, value) => handleChange(key as keyof SettingsMap, value)}
             />
           )}

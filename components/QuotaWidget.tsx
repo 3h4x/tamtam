@@ -1,0 +1,247 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+
+interface QuotaWindow {
+  utilization: number
+  resetsAt: string | null
+  msUntilReset: number | null
+}
+
+interface QuotaSnapshot {
+  fiveHour: QuotaWindow
+  sevenDay: QuotaWindow
+  sevenDaySonnet?: QuotaWindow | null
+  sevenDayOpus?: QuotaWindow | null
+  fetchedAt: number
+  stale: boolean
+}
+
+const FIVE_HOUR_MS = 5 * 60 * 60 * 1000
+const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1000
+
+function fmtCountdown(ms: number | null): string {
+  if (ms == null) return '—'
+  if (ms <= 0) return 'soon'
+  const s = Math.floor(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ${m % 60}m`
+  const d = Math.floor(h / 24)
+  return `${d}d ${h % 24}h`
+}
+
+function barClass(pct: number, warnAt: number, blockAt: number): string {
+  if (pct >= blockAt) return 'bg-status-error'
+  if (pct >= warnAt) return 'bg-status-warning'
+  return 'bg-accent'
+}
+
+interface Pace {
+  /** Fraction of the window that has elapsed, 0..1 */
+  elapsedFraction: number
+  /** elapsed % vs current utilization, where 1.0 means dead-on pace */
+  ratio: number
+  /** Linear projection of end-of-window utilization */
+  projectedEndPct: number
+  /** Status badge */
+  status: 'on-track' | 'over' | 'blown'
+}
+
+function computePace(win: QuotaWindow, windowMs: number): Pace | null {
+  if (win.msUntilReset == null) return null
+  const elapsed = Math.max(0, windowMs - win.msUntilReset)
+  const elapsedFraction = Math.min(1, elapsed / windowMs)
+  // Window just reset — no signal yet, treat as on-track.
+  if (elapsedFraction < 0.005) {
+    return { elapsedFraction, ratio: 0, projectedEndPct: win.utilization, status: 'on-track' }
+  }
+  const expectedPct = elapsedFraction * 100
+  const ratio = win.utilization / expectedPct
+  const projectedEndPct = win.utilization / elapsedFraction
+  const status: Pace['status'] = projectedEndPct >= 100 ? 'blown' : ratio >= 1.15 ? 'over' : 'on-track'
+  return { elapsedFraction, ratio, projectedEndPct, status }
+}
+
+function PaceBadge({ pace }: { pace: Pace | null }) {
+  if (!pace) return null
+  if (pace.status === 'on-track') {
+    return (
+      <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-success/15 text-status-success font-medium">
+        on pace
+      </span>
+    )
+  }
+  if (pace.status === 'over') {
+    return (
+      <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-warning/15 text-status-warning font-medium">
+        {pace.ratio.toFixed(1)}× pace · projects {pace.projectedEndPct.toFixed(0)}%
+      </span>
+    )
+  }
+  return (
+    <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-error/15 text-status-error font-semibold">
+      will exceed quota · projects {pace.projectedEndPct.toFixed(0)}%
+    </span>
+  )
+}
+
+function QuotaBar({
+  label,
+  win,
+  warnAt,
+  blockAt,
+  windowMs,
+}: {
+  label: string
+  win: QuotaWindow
+  warnAt: number
+  blockAt: number
+  windowMs?: number
+}) {
+  const pct = Math.max(0, Math.min(100, win.utilization))
+  const pace = windowMs ? computePace(win, windowMs) : null
+  const expectedMarkerPct = pace ? pace.elapsedFraction * 100 : null
+  return (
+    <div className="space-y-1">
+      <div className="flex items-baseline justify-between gap-2 text-xs flex-wrap">
+        <span className="font-medium text-text-secondary flex items-center gap-2">
+          {label}
+          <PaceBadge pace={pace} />
+        </span>
+        <span className="tabular-nums text-text-tertiary">
+          <span className="text-text-primary font-semibold">{pct.toFixed(0)}%</span>
+          {' · resets in '}
+          {fmtCountdown(win.msUntilReset)}
+        </span>
+      </div>
+      <div className="relative h-2 w-full bg-bg-tertiary rounded overflow-hidden">
+        <div
+          className={`h-full transition-all duration-500 ${barClass(pct, warnAt, blockAt)}`}
+          style={{ width: `${Math.max(2, pct)}%` }}
+        />
+        {expectedMarkerPct != null && expectedMarkerPct > 0 && expectedMarkerPct < 100 && (
+          <div
+            className="absolute top-0 h-full w-px bg-text-primary/60"
+            style={{ left: `${expectedMarkerPct}%` }}
+            title={`Fair-share pace marker: ${expectedMarkerPct.toFixed(0)}% elapsed`}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function DailyBurnRow({ sevenDay }: { sevenDay: QuotaWindow }) {
+  if (sevenDay.msUntilReset == null) return null
+  const elapsedMs = Math.max(0, SEVEN_DAY_MS - sevenDay.msUntilReset)
+  const elapsedDays = elapsedMs / (24 * 60 * 60 * 1000)
+  if (elapsedDays < 0.05) return null
+  const dailyAvg = sevenDay.utilization / elapsedDays
+  const dailyTarget = 100 / 7 // 14.29%
+  const ratio = dailyAvg / dailyTarget
+  const status: 'on-track' | 'over' | 'blown' =
+    dailyAvg * 7 >= 100 ? 'blown' : ratio >= 1.15 ? 'over' : 'on-track'
+  const tone =
+    status === 'blown'
+      ? 'text-status-error'
+      : status === 'over'
+        ? 'text-status-warning'
+        : 'text-status-success'
+  return (
+    <div className="flex items-baseline justify-between gap-2 text-xs px-3 py-2 rounded bg-bg-tertiary/50">
+      <span className="font-medium text-text-secondary">Daily burn</span>
+      <span className="tabular-nums">
+        <span className={`font-semibold ${tone}`}>{dailyAvg.toFixed(1)}%/day</span>
+        <span className="text-text-tertiary">
+          {' · target '}
+          {dailyTarget.toFixed(1)}%/day
+          {' · '}
+          {ratio.toFixed(1)}×
+        </span>
+      </span>
+    </div>
+  )
+}
+
+export function QuotaWidget({
+  warnAt = 80,
+  blockAt = 95,
+  refreshSeconds = 60,
+}: {
+  warnAt?: number
+  blockAt?: number
+  refreshSeconds?: number
+}) {
+  const [data, setData] = useState<QuotaSnapshot | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      try {
+        const res = await fetch('/api/usage/quota')
+        if (!res.ok) throw new Error((await res.json())?.error ?? `HTTP ${res.status}`)
+        const json = (await res.json()) as QuotaSnapshot
+        if (!cancelled) {
+          setData(json)
+          setError(null)
+        }
+      } catch (e: unknown) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    const id = setInterval(load, refreshSeconds * 1000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [refreshSeconds])
+
+  if (loading && !data) {
+    return <div className="skeleton h-24 rounded-lg" />
+  }
+  if (error || !data) {
+    return (
+      <div className="rounded-lg border border-border bg-bg-secondary p-4">
+        <div className="text-xs uppercase tracking-wide text-text-tertiary">Claude subscription quota</div>
+        <div className="text-sm text-status-error mt-1">{error ?? 'Quota unavailable'}</div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-bg-secondary p-4 space-y-3">
+      <div className="flex items-baseline justify-between">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-text-tertiary">Claude subscription quota</div>
+          <div className="text-[10px] text-text-tertiary mt-0.5">
+            {data.stale ? 'stale (last successful fetch)' : `updated ${new Date(data.fetchedAt).toLocaleTimeString()}`}
+          </div>
+        </div>
+        <div className="text-[10px] text-text-tertiary">
+          warn ≥ {warnAt}% · block ≥ {blockAt}%
+        </div>
+      </div>
+      <QuotaBar label="5-hour rolling" win={data.fiveHour} warnAt={warnAt} blockAt={blockAt} windowMs={FIVE_HOUR_MS} />
+      <QuotaBar label="7-day weekly" win={data.sevenDay} warnAt={warnAt} blockAt={blockAt} windowMs={SEVEN_DAY_MS} />
+      <DailyBurnRow sevenDay={data.sevenDay} />
+      {(data.sevenDaySonnet || data.sevenDayOpus) && (
+        <div className="grid grid-cols-2 gap-3 pt-1">
+          {data.sevenDaySonnet && (
+            <QuotaBar label="7d · Sonnet" win={data.sevenDaySonnet} warnAt={warnAt} blockAt={blockAt} windowMs={SEVEN_DAY_MS} />
+          )}
+          {data.sevenDayOpus && (
+            <QuotaBar label="7d · Opus" win={data.sevenDayOpus} warnAt={warnAt} blockAt={blockAt} windowMs={SEVEN_DAY_MS} />
+          )}
+        </div>
+      )}
+    </div>
+  )
+}

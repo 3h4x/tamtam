@@ -9,7 +9,7 @@ import { createJob, listJobs, markDone, updateJob } from '@/lib/jobs/job-storage
 import { wrapIfUntrusted, withUntrustedPreamble } from '@/lib/shared/untrusted';
 import { startJob, getJobStatus, deleteJob } from '@/lib/jobs/pm2-jobs';
 import { ensureBranchForCtx } from './mark-dod-branch';
-import { jobsPausedResult } from '@/lib/shared/job-control';
+import { runGates } from '@/lib/shared/job-control';
 
 export type MarkDodResult =
   | { ok: true; jobId: string; issueNumber: number; verified: number; total: number; changed: boolean }
@@ -103,7 +103,7 @@ export async function startMarkDod(
     isPr = !issueCtx && !!prCtx;
   }
   if (!ctx) return { ok: false, status: 400, detail: 'no issue or PR context on latest run' };
-  const paused = jobsPausedResult('start DoD verification');
+  const paused = runGates('start DoD verification');
   if (paused) return paused;
 
   const { logDir, claudeBin } = getImproveConfig();

@@ -6,7 +6,7 @@ import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/schedul
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { createJob, listJobs, probeJobStatus, updateJob, markDone } from '@/lib/jobs/job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { jobsPausedResult } from '@/lib/shared/job-control';
+import { runGates } from '@/lib/shared/job-control';
 
 export function detectTestCommand(projPath: string, projectName?: string): string | null {
   // Explicit off-switch — overrides user/auto-detected command. Wrapped in
@@ -65,7 +65,7 @@ export type StartTestResult =
 export async function startProjectTest(projectName: string): Promise<StartTestResult> {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
-  const paused = jobsPausedResult('start tests');
+  const paused = runGates('start tests');
   if (paused) return paused;
 
   // Check for existing pipeline lock — but allow running under a parent
