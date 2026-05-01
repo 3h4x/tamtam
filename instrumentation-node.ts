@@ -208,8 +208,38 @@ async function reapAbandonedInlineJobs(): Promise<void> {
   }
 }
 
+// One-shot backfill: populate the new `verdict` column for historical review
+// jobs whose log files are still on disk. Jobs whose logs have already been
+// pruned are irrecoverable and are left as null — they counted as parseFailed
+// before this migration and will continue to do so, but future reviews will
+// always have their verdict persisted at completion time.
+// On every boot: store the verdict for any finished review job whose log is
+// still on disk but whose verdict column is NULL. Runs in O(unpersisted_jobs)
+// which is cheap once the initial backfill is done (only newly-finished reviews
+// before their first `persistVerdict` call land here). This ensures verdicts
+// survive future log pruning even for runs that completed before this fix.
+async function backfillVerdicts(): Promise<void> {
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
+  try {
+    const { listJobs } = await import('./lib/jobs/job-storage');
+    const { getVerdict } = await import('./lib/jobs/verdict');
+    const { persistVerdict } = await import('./lib/jobs/storage');
+
+    const reviewJobs = listJobs().filter(j => j.kind === 'review' && j.finishedAt !== null && j.exitCode === 0 && !j.verdict && !j.logPruned);
+    let count = 0;
+    for (const job of reviewJobs) {
+      const v = getVerdict(job);
+      if (v) { persistVerdict(job.id, v); count++; }
+    }
+    if (count > 0) console.log(`[boot] persisted verdict for ${count} review job(s) (log still on disk)`);
+  } catch (err) {
+    console.error('[boot] verdict backfill failed:', err);
+  }
+}
+
 export async function registerNode(): Promise<void> {
   await migrateLegacyFileWorkflowFlags();
+  void backfillVerdicts();
   void reapAbandonedInlineJobs();
   void reinstallAgents();
 

@@ -51,6 +51,7 @@ export const jobs = sqliteTable('jobs', {
   ghIssueRepo: text('gh_issue_repo'),
   ghIssueTitle: text('gh_issue_title'),
   logPruned: integer('log_pruned', { mode: 'boolean' }).default(false),
+  verdict: text('verdict'),
   costUsd: real('cost_usd'),
   model: text('model'),
   releaseId: text('release_id'),

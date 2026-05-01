@@ -65,6 +65,8 @@ const verdictCache = new Map<string, string>();
 
 export function getVerdict(job: JobData): string | null {
   if (job.kind !== 'review' || job.finishedAt === null) return null;
+  // Stored verdict survives log pruning — use it directly when present.
+  if (job.verdict) return job.verdict;
   const cached = verdictCache.get(job.id);
   if (cached !== undefined) return cached;
   const v = computeVerdict(job);

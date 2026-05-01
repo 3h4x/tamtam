@@ -10,6 +10,7 @@ import {
   findActiveReleaseJob,
   listJobs,
   getJob,
+  persistVerdict,
 } from './storage';
 import { parentContext } from './parent-context';
 import type { JobData } from './types';
@@ -287,6 +288,10 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         const projPath = resolveProjectPath(job.project);
         if (projPath) await markReviewed(job.project, projPath);
       } catch {}
+      // Always persist verdict so it survives log pruning. Standalone reviews
+      // (not in a pipeline) reach this point but not the pipeline branch below.
+      const earlyVerdict = getVerdict(job);
+      if (earlyVerdict) persistVerdict(job.id, earlyVerdict);
     }
     // Release pipeline: review LGTM → push; NEEDS ATTENTION/DO NOT SHIP → fix
     try {
@@ -314,6 +319,9 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         if (!rawVerdict) {
           console.log(`[release] review ${job.id} emitted no verdict — defaulting to NEEDS ATTENTION`);
         }
+        // Persist verdict to DB so it survives log pruning and shows correctly
+        // in pipeline stats (avoids false "parseFailed" counts on pruned logs).
+        if (rawVerdict) persistVerdict(job.id, rawVerdict);
         if (verdict === 'LGTM') {
           // DoD verification only makes sense in PR Workflow mode AND when we
           // have a linked GitHub issue. On a direct-branch release (no PR, no

@@ -35,6 +35,7 @@ function createTestDb() {
       gh_issue_repo TEXT,
       gh_issue_title TEXT,
       log_pruned INTEGER DEFAULT 0,
+      verdict TEXT,
       cost_usd REAL,
       model TEXT,
       release_id TEXT,

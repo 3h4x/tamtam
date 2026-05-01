@@ -38,6 +38,7 @@ export function loadFromDb(): void {
         ghIssueRepo: row.ghIssueRepo ?? null,
         ghIssueTitle: row.ghIssueTitle ?? null,
         logPruned: row.logPruned ?? false,
+        verdict: row.verdict ?? null,
         costUsd: row.costUsd ?? null,
         model: row.model ?? null,
         releaseId: row.releaseId ?? null,
@@ -78,6 +79,7 @@ export function saveToDb(job: JobData): void {
         ghIssueRepo: job.ghIssueRepo ?? null,
         ghIssueTitle: job.ghIssueTitle ?? null,
         logPruned: job.logPruned ?? false,
+        verdict: job.verdict ?? null,
         costUsd: job.costUsd ?? null,
         model: job.model ?? null,
         releaseId: job.releaseId ?? null,
@@ -102,6 +104,7 @@ export function saveToDb(job: JobData): void {
           userPrompt: job.userPrompt,
           parentJobId: job.parentJobId ?? null,
           logPruned: job.logPruned ?? false,
+          verdict: job.verdict ?? null,
           costUsd: job.costUsd ?? null,
           model: job.model ?? null,
           releaseId: job.releaseId ?? null,
@@ -212,6 +215,7 @@ export function getJob(jobId: string): JobData | null {
     ghIssueRepo: row.ghIssueRepo ?? null,
     ghIssueTitle: row.ghIssueTitle ?? null,
     logPruned: row.logPruned ?? false,
+    verdict: row.verdict ?? null,
     costUsd: row.costUsd ?? null,
     model: row.model ?? null,
     releaseId: row.releaseId ?? null,
@@ -220,6 +224,21 @@ export function getJob(jobId: string): JobData | null {
   };
   jobsCache.set(jobId, job);
   return job;
+}
+
+// Persist verdict without a full job round-trip. Called right after a review
+// finishes so the verdict survives log pruning.
+export function persistVerdict(jobId: string, verdict: string): void {
+  const job = jobsCache.get(jobId);
+  if (job) job.verdict = verdict;
+  try {
+    db.update(schema.jobs)
+      .set({ verdict })
+      .where(eq(schema.jobs.id, jobId))
+      .run();
+  } catch (e) {
+    console.error(`Failed to persist verdict for ${jobId}:`, e);
+  }
 }
 
 export function listJobs(): JobData[] {
