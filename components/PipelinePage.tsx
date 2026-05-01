@@ -382,11 +382,35 @@ export function PipelinePage() {
                       </Link>
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">{r.releases}</td>
-                    <td className={`px-3 py-2.5 text-right tabular-nums font-medium ${r.successRate >= 0.9 ? 'text-status-success' : r.successRate >= 0.6 ? 'text-status-warning' : 'text-status-error'}`}>
-                      {fmtPct(r.successRate)}
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {r.releases > 0 && (
+                          <div className="w-16 h-1.5 rounded-full bg-bg-tertiary overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${r.successRate >= 0.9 ? 'bg-status-success' : r.successRate >= 0.6 ? 'bg-status-warning' : 'bg-status-error'}`}
+                              style={{ width: `${Math.round(r.successRate * 100)}%` }}
+                            />
+                          </div>
+                        )}
+                        <span className={`tabular-nums font-medium ${r.successRate >= 0.9 ? 'text-status-success' : r.successRate >= 0.6 ? 'text-status-warning' : 'text-status-error'}`}>
+                          {fmtPct(r.successRate)}
+                        </span>
+                      </div>
                     </td>
-                    <td className={`px-3 py-2.5 text-right tabular-nums ${r.reviewCount === 0 ? 'text-text-tertiary' : r.lgtmRate >= 0.8 ? 'text-status-success' : r.lgtmRate >= 0.5 ? 'text-status-warning' : 'text-status-error'}`}>
-                      {r.reviewCount > 0 ? fmtPct(r.lgtmRate) : '—'}
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {r.reviewCount > 0 && (
+                          <div className="w-16 h-1.5 rounded-full bg-bg-tertiary overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${r.lgtmRate >= 0.8 ? 'bg-status-success' : r.lgtmRate >= 0.5 ? 'bg-status-warning' : 'bg-status-error'}`}
+                              style={{ width: `${Math.round(r.lgtmRate * 100)}%` }}
+                            />
+                          </div>
+                        )}
+                        <span className={`tabular-nums ${r.reviewCount === 0 ? 'text-text-tertiary' : r.lgtmRate >= 0.8 ? 'text-status-success' : r.lgtmRate >= 0.5 ? 'text-status-warning' : 'text-status-error'}`}>
+                          {r.reviewCount > 0 ? fmtPct(r.lgtmRate) : '—'}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">
                       {r.fixIterationsAvg > 0 ? r.fixIterationsAvg : '—'}
