@@ -45,6 +45,15 @@ interface TerminalMessagesProps {
 
 const spinnerChars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
+function ThinkingBlock({ text }: { text: string }) {
+  return (
+    <div className="px-4 py-2 border-l-2 border-accent/35 ml-4 mr-4 my-1 bg-accent/[0.04] rounded-r">
+      <div className="text-[10px] text-accent/60 mb-1 uppercase tracking-wider">thinking</div>
+      <div className="text-text-tertiary text-xs whitespace-pre-wrap">{text}</div>
+    </div>
+  )
+}
+
 export function TerminalMessages({
   history,
   streaming,
@@ -102,17 +111,17 @@ export function TerminalMessages({
         {/* Empty state */}
         {history.length === 0 && !streaming && (
           <div className="flex-1 flex flex-col items-center justify-center gap-2 select-none py-16">
-            <span className="text-3xl font-mono text-[#2a2a2a]">_</span>
-            <span className="text-sm font-mono text-[#666]">start a conversation</span>
-            <span className="text-[11px] font-mono text-[#444]">type below · ⌘↵ to send</span>
+            <span className="text-3xl font-mono text-border">_</span>
+            <span className="text-sm font-mono text-text-tertiary">start a conversation</span>
+            <span className="text-[11px] font-mono text-text-tertiary/60">type below · ⌘↵ to send</span>
             {allItems.length > 0 && (
               <div className="flex flex-col items-center gap-2 mt-3">
-                <span className="text-[10px] font-mono text-[#3a3a3a] uppercase tracking-wider">attach a skill</span>
+                <span className="text-[10px] font-mono text-text-tertiary/40 uppercase tracking-wider">attach a skill</span>
                 <div className="flex flex-wrap justify-center gap-1.5 max-w-sm">
                   {allItems.slice(0, 4).map(item => (
                     <button
                       key={item.id}
-                      className="text-[11px] px-2 py-1 rounded bg-[#1e1e1e] text-[#777] hover:text-[#ccc] hover:bg-[#252525] cursor-pointer border border-[#2a2a2a] font-mono transition-colors"
+                      className="text-[11px] px-2 py-1 rounded bg-bg-secondary text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary cursor-pointer border border-border font-mono transition-colors"
                       onClick={() => onToggleItem(item)}
                       title={item.description}
                     >
@@ -127,12 +136,7 @@ export function TerminalMessages({
 
         {history.map((entry, i) => (
           entry.role === 'thinking' ? (
-            showThinking && (
-              <div key={i} className="px-4 py-2 border-l-2 border-accent/35 ml-4 mr-4 my-1 bg-accent/[0.04] rounded-r">
-                <div className="text-[10px] text-accent/60 mb-1 uppercase tracking-wider">thinking</div>
-                <div className="text-[#999] text-xs whitespace-pre-wrap">{entry.text}</div>
-              </div>
-            )
+            showThinking && <ThinkingBlock key={i} text={entry.text} />
           ) : entry.role === 'tool' && entry.tool ? (
             <ToolBlock key={i} tool={entry.tool} />
           ) : (
@@ -210,10 +214,7 @@ export function TerminalMessages({
         )}
 
         {streaming && showThinking && thinkingBuffer && (
-          <div className="px-4 py-2 border-l-2 border-accent/35 ml-4 mr-4 my-1 bg-accent/[0.04] rounded-r">
-            <div className="text-[10px] text-accent/60 mb-1 uppercase tracking-wider">thinking</div>
-            <div className="text-[#999] text-xs whitespace-pre-wrap">{thinkingBuffer}</div>
-          </div>
+          <ThinkingBlock text={thinkingBuffer} />
         )}
 
         {streaming && streamTools.length > 0 && (() => {

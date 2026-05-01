@@ -32,6 +32,30 @@ const DEPTH_PADDING: Record<number, string> = {
   6: 'pl-52',
 }
 
+function VerdictBadge({ verdict, isRunning, isFailed, exitCode }: { verdict: string | null | undefined; isRunning: boolean; isFailed: boolean; exitCode: number | null | undefined }) {
+  if (verdict && !isRunning && !isFailed) {
+    return (
+      <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium font-mono ${
+        verdict === 'LGTM' ? 'bg-status-success/15 text-status-success border border-status-success/30' :
+        verdict === 'DO NOT SHIP' ? 'bg-status-error/15 text-status-error border border-status-error/30' :
+        'bg-status-warning/15 text-status-warning border border-status-warning/30'
+      }`} title={`Review verdict: ${verdict}`}>
+        {verdict === 'LGTM' ? '✓ LGTM' : verdict === 'DO NOT SHIP' ? '✗ DNS' : '⚠ ATTN'}
+      </span>
+    )
+  }
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium ${
+      isRunning ? 'bg-status-warning/15 text-status-warning' :
+      isFailed ? 'bg-status-error/15 text-status-error' :
+      'bg-status-success/15 text-status-success'
+    }`}>
+      <span className={isRunning ? 'animate-pulse' : ''}>●</span>
+      {isRunning ? 'running' : isFailed ? `exit ${exitCode}` : 'done'}
+    </span>
+  )
+}
+
 export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summary, depth = 0, children }: RunRowProps) {
   const isRunning = e.status === 'running'
   const isFailed = !isRunning && e.exitCode !== null && e.exitCode !== 0
@@ -138,24 +162,7 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
                   pruned
                 </span>
               )}
-              {e.verdict && !isRunning && !isFailed ? (
-                <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium font-mono ${
-                  e.verdict === 'LGTM' ? 'bg-status-success/15 text-status-success border border-status-success/30' :
-                  e.verdict === 'DO NOT SHIP' ? 'bg-status-error/15 text-status-error border border-status-error/30' :
-                  'bg-status-warning/15 text-status-warning border border-status-warning/30'
-                }`} title={`Review verdict: ${e.verdict}`}>
-                  {e.verdict === 'LGTM' ? '✓ LGTM' : e.verdict === 'DO NOT SHIP' ? '✗ DNS' : '⚠ ATTN'}
-                </span>
-              ) : (
-                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium ${
-                  isRunning ? 'bg-status-warning/15 text-status-warning' :
-                  isFailed ? 'bg-status-error/15 text-status-error' :
-                  'bg-status-success/15 text-status-success'
-                }`}>
-                  <span className={isRunning ? 'animate-pulse' : ''}>●</span>
-                  {isRunning ? 'running' : isFailed ? `exit ${e.exitCode}` : 'done'}
-                </span>
-              )}
+              <VerdictBadge verdict={e.verdict} isRunning={isRunning} isFailed={isFailed} exitCode={e.exitCode} />
             </div>
           </div>
         ) : (
@@ -169,24 +176,7 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
                 pruned
               </span>
             )}
-            {e.verdict && !isRunning && !isFailed ? (
-              <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium font-mono ${
-                e.verdict === 'LGTM' ? 'bg-status-success/15 text-status-success border border-status-success/30' :
-                e.verdict === 'DO NOT SHIP' ? 'bg-status-error/15 text-status-error border border-status-error/30' :
-                'bg-status-warning/15 text-status-warning border border-status-warning/30'
-              }`} title={`Review verdict: ${e.verdict}`}>
-                {e.verdict === 'LGTM' ? '✓ LGTM' : e.verdict === 'DO NOT SHIP' ? '✗ DNS' : '⚠ ATTN'}
-              </span>
-            ) : (
-              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium ${
-                isRunning ? 'bg-status-warning/15 text-status-warning' :
-                isFailed ? 'bg-status-error/15 text-status-error' :
-                'bg-status-success/15 text-status-success'
-              }`}>
-                <span className={isRunning ? 'animate-pulse' : ''}>●</span>
-                {isRunning ? 'running' : isFailed ? `exit ${e.exitCode}` : 'done'}
-              </span>
-            )}
+            <VerdictBadge verdict={e.verdict} isRunning={isRunning} isFailed={isFailed} exitCode={e.exitCode} />
           </div>
         )}
       </div>
