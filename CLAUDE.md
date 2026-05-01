@@ -104,7 +104,7 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 - `data/` — SQLite database (gitignored)
 - `__tests__/` — vitest unit tests
 - `e2e/` — Playwright integration tests
-- `docs/` — architecture docs: `STREAMING.md` (job lifecycle + SSE), `PIPELINE.md` (release pipeline state machine), `DATABASE.md` (schema reference), `SETTINGS.md` (all config keys), `AGENT.md` (agent concepts), `CACHING.md` (layered TTL cache strategy), `PROFILING.md` (server / client / Turbopack profiling), `SECURITY.md` (security model and threat surface), `SHIM.md` (Gemini CLI compatibility layer), `UI.md` (design system: tokens, typography, components, voice — read before any visual change; canonical previews in `docs/ui-preview/*.html`)
+- `docs/` — architecture docs (see **Docs Reference** section below)
 
 **File size conventions (enforced by convention, not tooling):**
 - No new top-level files directly in `lib/` — all new lib modules must go in a domain subfolder
@@ -289,6 +289,25 @@ File agents appear in the Agents tab with a `file` badge and are read-only — e
 
 Reader: `lib/agents/tamtam-file-agents.ts` → `scanFileAgents(projectPath, projectName)` / `loadFileAgent(...)`.
 File agent IDs use the format `file:<project>:<name>` and are handled transparently in all agent API routes.
+
+## Docs Reference
+
+Detailed architecture documentation lives in `docs/`. Read the relevant file before touching the subsystem it covers.
+
+| File | Topic | Load when… |
+|------|-------|------------|
+| `docs/STREAMING.md` | Job lifecycle + SSE streaming infrastructure | Touching terminal runs, log tailing, SSE endpoints, or NDJSON parsing |
+| `docs/PIPELINE.md` | Release pipeline state machine (test→review→fix→commit→push→dod→merge) | Modifying any pipeline step, completion hooks, or pipeline orchestration |
+| `docs/DATABASE.md` | Drizzle schema reference — all tables, columns, indices | Adding/changing DB tables, writing migrations, or working with `lib/db/` |
+| `docs/SETTINGS.md` | All `settings` table keys, their types, and defaults | Adding a new setting, reading config in a new place, or changing defaults |
+| `docs/AGENT.md` | Agent concepts: skills composition, scheduling, runner lifecycle | Working on agents, the internal scheduler, or skill composition |
+| `docs/CACHING.md` | Layered TTL cache strategy (in-memory + SQLite) | Adding a new cache layer, changing TTLs, or debugging stale data |
+| `docs/PROFILING.md` | Server/client/Turbopack profiling guide | Investigating perf regressions or high CPU/memory |
+| `docs/SECURITY.md` | Security model: file-agent trust, untrusted input handling, threat surface | Any security-sensitive change: auth, file-agent parsing, untrusted content |
+| `docs/SHIM.md` | Gemini/LM Studio CLI shim compatibility layer | Touching `scripts/gemini-shim.js`, `lmstudio-shim.js`, or shim configuration |
+| `docs/UI.md` | Design system: tokens, typography, components, voice | Any visual/UI change — read before touching CSS or components; canonical previews in `docs/ui-preview/*.html` |
+| `docs/PROMPT-SIZE.md` | Prompt size & cache-read cost analysis | Changing skill/prompt composition, adding skills, or investigating token cost |
+| `docs/E2E.md` | Playwright pipeline e2e harness: mocks, scenarios, helpers | Writing or debugging pipeline e2e tests in `e2e/pipeline/` |
 
 ## Coding Conventions
 - **Runtime versions**: Next.js 16 (App Router), React 19, TypeScript 6 (strict), Tailwind CSS v4, pnpm 10. Do not use APIs or syntax that requires a higher version than what is pinned in `package.json`.

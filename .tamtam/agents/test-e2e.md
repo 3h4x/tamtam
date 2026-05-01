@@ -2,33 +2,49 @@
 model: sonnet
 ---
 
-Run the TamTam e2e test suite and fix any failures.
+Your goal is to improve TamTam's UI by writing and running Playwright tests that exercise job lifecycle transitions against a mocked backend — never against the production server on port 1337.
 
-## Steps
+## Context
 
-1. Check if the TamTam server is running on port 1337:
-   ```
-   curl -s http://localhost:1337/api/health
-   ```
-   If not running, start it: `pnpm start` then wait ~10s for it to be ready.
+TamTam already has a mocked test harness in `e2e/pipeline/`:
+- `playwright.pipeline.config.ts` — spins up Next.js on **port 1338** with `TAMTAM_DB_PATH` pointing to a temp SQLite DB
+- `e2e/pipeline/global-setup.ts` — seeds fake git repos, installs shim binaries (claude, git, gh) that intercept real calls
+- `e2e/pipeline/helpers.ts` — `writeScenario()` scripts Claude output; `readShimCalls()` asserts git/gh calls
+- `e2e/pipeline/mocks/` — shim binaries for claude, git, gh
 
-2. Run the full e2e suite:
-   ```
-   pnpm test:e2e
-   ```
+Read all of the above before writing any tests.
 
-3. If tests fail:
-   - Read the failing spec file(s) in `e2e/`
-   - Identify whether the failure is a product bug or a test issue
-   - Fix the root cause (prefer fixing the product over updating the test assertion unless the test expectation is genuinely wrong)
-   - Re-run only the failing spec: `pnpm test:e2e --grep "test name"`
-   - Repeat until green
+## What to test
 
-4. Run `pnpm type-check` after any code changes.
+Focus on **job lifecycle UI transitions** — scenarios where the UI must correctly reflect backend state changes:
 
-5. Report: how many tests passed/failed, which specs were fixed, and what changed.
+1. **Job starts → spinner shows in runs list and terminal**
+2. **Job completes (success) → status updates without page reload**
+3. **Job is cancelled mid-run → status shows cancelled, no orphaned spinner**
+4. **Job fails (exit code != 0) → failure badge + error message visible**
+5. **Pipeline strip** — each step (test → review → fix → commit → push) transitions correctly; strip disappears when done
+6. **Concurrent jobs** — two jobs running simultaneously; both show correct independent state
+7. **Jobs paused** — UI reflects paused state; release button is disabled
 
-## Notes
-- Specs live in `e2e/` (top-level) and `e2e/pipeline/` (pipeline integration tests)
-- Pipeline tests in `e2e/pipeline/` use a mock harness — see `docs/E2E.md` for the harness guide
-- Never skip failing tests; fix the underlying issue
+For each scenario you implement, write a Playwright spec that:
+1. Uses the port 1338 test server (never 1337)
+2. Uses `page.route()` to mock API responses OR uses `writeScenario()` to control shim behavior
+3. Asserts the specific UI element that should change (aria label, text, class, visibility)
+4. Is deterministic — no arbitrary `page.waitForTimeout()`; use `waitForSelector` or API polling with retries
+
+## Workflow
+
+1. Read `docs/E2E.md` for the full harness guide.
+2. Read existing specs in `e2e/pipeline/` to understand established patterns.
+3. Pick the 1–2 highest-value gaps from the list above that don't have coverage yet.
+4. Write the spec(s) in `e2e/pipeline/` (pipeline tests) or `e2e/` (UI-only tests with `page.route()`).
+5. Run with `pnpm exec playwright test --config=playwright.pipeline.config.ts <spec-file>`.
+6. Fix failures — if a test reveals a real UI bug, fix the component too.
+7. After green, check if the fix or new scenario exposes any improvement opportunity in the UI (loading states, error messages, empty states). If yes, implement it.
+
+## Rules
+- Never add `waitForTimeout`. Use proper selectors and retry-based waits.
+- Never test against port 1337.
+- Don't mock what you can shim — prefer the shim approach for server-side behavior.
+- Don't skip failing tests; fix the root cause.
+- Run `pnpm type-check` after any component changes.

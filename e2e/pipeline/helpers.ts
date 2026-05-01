@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import type { APIRequestContext } from '@playwright/test';
-import { SHIM_DIR } from './global-setup';
+import { SHIM_DIR, WORKSPACE_DIR } from './global-setup';
 
 // ---------------------------------------------------------------------------
 // Scenario + state management
@@ -52,20 +52,23 @@ export async function enableProject(
   project: string,
   opts: { testsDisabled?: boolean; autoPushEnabled?: boolean } = {},
 ): Promise<void> {
-  // PATCH the project in the config API (enables it + sets flags)
+  // Step 1: register (or update) the project in the DB with its path.
+  // PATCH /api/config/projects expects { name, path, enabled } — must include path or
+  // SQLite rejects the insert due to the NOT NULL constraint.
   await request.patch('/api/config/projects', {
     data: {
-      projects: [
-        {
-          project,
-          enabled: true,
-          tests_disabled: opts.testsDisabled ?? true,
-          auto_push_enabled: opts.autoPushEnabled ?? false,
-          review_disabled: false,
-          auto_commit_enabled: false,
-          pr_workflow_enabled: false,
-        },
-      ],
+      projects: [{ name: project, path: join(WORKSPACE_DIR, project), enabled: true }],
+    },
+  });
+
+  // Step 2: set per-project pipeline flags via the project config endpoint.
+  await request.patch(`/api/projects/by-project/${encodeURIComponent(project)}/config`, {
+    data: {
+      tests_disabled: opts.testsDisabled ?? true,
+      auto_push_enabled: opts.autoPushEnabled ?? false,
+      review_disabled: false,
+      auto_commit_enabled: false,
+      pr_workflow_enabled: false,
     },
   });
 }
@@ -103,6 +106,52 @@ export async function waitForPipelineCompletion(
     await new Promise(r => setTimeout(r, 300));
   }
   return { status: 'timeout' };
+}
+
+/**
+ * Polls until a job of the given kind is running (finishedAt == null) for the
+ * given project, or the timeout expires. Returns the job record or null.
+ */
+export async function waitForJobRunning(
+  request: APIRequestContext,
+  project: string,
+  kind: string,
+  timeoutMs = 30_000,
+): Promise<Record<string, unknown> | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const resp = await request.get(`/api/jobs?project=${encodeURIComponent(project)}`);
+    if (resp.ok()) {
+      const body = await resp.json() as { jobs: Array<Record<string, unknown>> };
+      const job = body.jobs?.find(
+        j => j['kind'] === kind && j['project'] === project && j['finished_at'] == null,
+      );
+      if (job) return job;
+    }
+    await new Promise(r => setTimeout(r, 300));
+  }
+  return null;
+}
+
+/**
+ * Polls a specific job ID until it has a non-null finished_at, or times out.
+ */
+export async function waitForJobCompletion(
+  request: APIRequestContext,
+  jobId: string,
+  timeoutMs = 60_000,
+): Promise<Record<string, unknown> | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const resp = await request.get(`/api/jobs/${encodeURIComponent(jobId)}`);
+    if (resp.ok()) {
+      // GET /api/jobs/[jobId] returns the job dict directly (not wrapped).
+      const job = await resp.json() as Record<string, unknown>;
+      if (job['finished_at'] != null) return job;
+    }
+    await new Promise(r => setTimeout(r, 300));
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

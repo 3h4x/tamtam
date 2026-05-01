@@ -129,7 +129,7 @@ Report: created, updated, deleted, no-change. Filter strictly by this project. K
     id: 'agent-docs-claude',
     name: 'agent:docs-claude',
     description: 'Fill gaps in CLAUDE.md.',
-    content: `Read CLAUDE.md (create if absent), package.json, README, top-level dirs, \`git log --oneline -20\`. Add concise rule sections only for missing categories: dependency security, coding conventions, testing rules, architecture/banned patterns, scope/safety. Rules are short imperatives, project-specific. Verify every command against actual scripts. Don't rewrite existing content. Commit: \`docs: fill CLAUDE.md gaps\`.`,
+    content: `Read CLAUDE.md (create if absent), package.json, README, top-level dirs, \`git log --oneline -20\`. If a \`docs/\` directory exists, read the first 30 lines of each \`*.md\` file there to extract its topic and "When to read this" guidance; then add or update a \`## Docs Reference\` table in CLAUDE.md with columns File | Topic | Load when — one row per doc file. Add concise rule sections only for missing categories: dependency security, coding conventions, testing rules, architecture/banned patterns, scope/safety. Rules are short imperatives, project-specific. Verify every command against actual scripts. Don't rewrite existing content. Commit: \`docs: fill CLAUDE.md gaps\`.`,
   },
   {
     id: 'agent-senior-fullstack',
@@ -156,7 +156,7 @@ const KNOWN_DEFAULT_CONTENT_HASHES: Record<string, string[]> = {
   'agent-tests': ['fb8477be3f13e216'],
   'agent-self-improve': ['a5a48f854a97f7b3'],
   'agent-manage-agents': ['6afb7cebf46efee8'],
-  'agent-docs-claude': ['53267ca2a0043218'],
+  'agent-docs-claude': ['53267ca2a0043218', 'c2a96b81a863ae7f'],
   'agent-senior-fullstack': ['ab7344ee6a0a7a21'],
 };
 

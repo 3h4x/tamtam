@@ -67,6 +67,12 @@ try {
   fs.writeFileSync(counterFile, String(counter + 1));
 } catch { /* best-effort */ }
 
+// If the step requests a delay, sleep synchronously before emitting.
+// Atomics.wait is interruptible by SIGTERM so abort tests work cleanly.
+if (step.sleep_ms && step.sleep_ms > 0) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, step.sleep_ms);
+}
+
 if (isStreamJson) {
   // Emit Claude-compatible NDJSON stream-json events
   function emit(obj) {

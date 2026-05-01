@@ -237,5 +237,20 @@ try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN aborted_at REAL');
 } catch {}
 
+// Migrate: add verdict to jobs — cached LGTM/NEEDS ATTENTION/DO NOT SHIP from review logs
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN verdict TEXT');
+} catch {}
+
+// Migrate: add prompt_bytes to jobs — byte size of the composed prompt for cost tracking
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN prompt_bytes INTEGER');
+} catch {}
+
+// Migrate: add doc_paths to agents — JSON array of project-relative doc paths
+try {
+  sqlite.exec("ALTER TABLE agents ADD COLUMN doc_paths TEXT NOT NULL DEFAULT '[]'");
+} catch {}
+
 export const db = drizzle(sqlite, { schema });
 export { schema };
