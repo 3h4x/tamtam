@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { fetchJobs } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
@@ -35,6 +36,21 @@ function formatCost(job: JobInfo): string | null {
   if (c < 0.0001) return '<$0.0001'
   if (c < 0.01) return `$${c.toFixed(4)}`
   return `$${c.toFixed(2)}`
+}
+
+// Short descriptive hint shown in the Prompt column when a pipeline job has no
+// user-visible prompt (review, commit, push, etc.).
+const KIND_HINTS: Record<string, string> = {
+  review: 'code review',
+  commit: 'generate commit',
+  push: 'git push',
+  test: 'run tests',
+  fix: 'apply fixes',
+  'fix-ci': 'fix CI failures',
+  'fix-push': 'fix push error',
+  'mark-dod': 'verify DoD',
+  'pr-wait': 'wait for CI & merge',
+  release: 'release pipeline',
 }
 
 // Mirror ProjectRunsTab color/label mapping so kind badges look the same
@@ -277,7 +293,15 @@ export function JobsPage() {
                       {job.verdict && !isRunning && <VerdictBadge verdict={job.verdict} />}
                     </div>
                   </td>
-                  <td className="px-4 py-2 font-medium text-text-primary whitespace-nowrap">{job.project}</td>
+                  <td className="px-4 py-2 whitespace-nowrap">
+                    <Link
+                      href={`/project/${job.project}`}
+                      className="font-medium text-text-primary hover:text-accent transition-colors"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      {job.project}
+                    </Link>
+                  </td>
                   <td className="px-4 py-2 whitespace-nowrap">
                     <KindBadge kind={job.kind} />
                   </td>
@@ -286,6 +310,8 @@ export function JobsPage() {
                       <span className="text-sm text-text-secondary truncate block" title={promptText}>
                         {promptText.split('\n')[0].slice(0, 80)}{promptText.length > 80 ? '…' : ''}
                       </span>
+                    ) : KIND_HINTS[job.kind] ? (
+                      <span className="text-xs text-text-tertiary italic">{KIND_HINTS[job.kind]}</span>
                     ) : (
                       <span className="text-text-tertiary">—</span>
                     )}
