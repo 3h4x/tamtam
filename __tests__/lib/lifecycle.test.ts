@@ -458,3 +458,164 @@ describe('reviewIsStuck convergence guard', () => {
     expect(startFixFromJobMock).toHaveBeenCalledWith('first-review');
   });
 });
+
+// ─── concurrent step finalization guard ──────────────────────────────────────
+
+describe('concurrent step finalization guard', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
+
+  function makeInMemoryJob(id: string, kind: string, overrides: Partial<JobData> = {}): JobData {
+    const now = Date.now() / 1000;
+    return {
+      id,
+      project: 'proj',
+      kind,
+      prompt: null,
+      pid: 0,
+      logPath: null,
+      startedAt: now,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+      getJobStatus: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/git/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({
+        autoPushEnabled: false,
+        autoCommitEnabled: false,
+        releaseAfterRun: false,
+        prWorkflowEnabled: false,
+      }),
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      releaseLock: vi.fn(),
+      getLock: vi.fn().mockReturnValue(null),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/jobs/retention', () => ({
+      pruneProjectLogs: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/notifications', () => ({
+      notify: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: vi.fn().mockReturnValue({
+        fix_ci_max_retries: 0,
+        fix_ci_retry_window_seconds: 120,
+        fix_ci_fast_crash_ms: 5000,
+      }),
+    }));
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('does NOT finalize the release when another pipeline step is still running', async () => {
+    const now = Date.now() / 1000;
+    // Insert an active release and a running test step (sibling, still running)
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: 'rel-1', project: 'proj', kind: 'release', startedAt: now - 120 }) as any,
+      makeJobRow({ id: 'test-1', project: 'proj', kind: 'test', startedAt: now - 60, finishedAt: null }) as any,
+    ]).run();
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+
+    // A review job finishes with exit 1 (crash/failure — no chaining path fires)
+    const reviewJob = makeInMemoryJob('review-1', 'review', {
+      startedAt: now - 30,
+      releaseId: 'rel-1',
+    });
+
+    await markDoneFn(reviewJob, 1);
+
+    // Release should NOT be finalized — the guard defers to the still-running test
+    const relRow = testDb.db
+      .select({ finishedAt: schema.jobs.finishedAt })
+      .from(schema.jobs)
+      .where(eq(schema.jobs.id, 'rel-1'))
+      .get();
+    expect(relRow?.finishedAt).toBeNull();
+  });
+
+  it('finalizes the release when no other step is running', async () => {
+    const now = Date.now() / 1000;
+    // Insert an active release with NO running siblings
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: 'rel-2', project: 'proj', kind: 'release', startedAt: now - 120 }) as any,
+    ]).run();
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+
+    const reviewJob = makeInMemoryJob('review-2', 'review', {
+      startedAt: now - 30,
+      releaseId: 'rel-2',
+    });
+
+    await markDoneFn(reviewJob, 1);
+
+    // Release SHOULD be finalized since no sibling is running
+    const relRow = testDb.db
+      .select({ finishedAt: schema.jobs.finishedAt })
+      .from(schema.jobs)
+      .where(eq(schema.jobs.id, 'rel-2'))
+      .get();
+    expect(relRow?.finishedAt).not.toBeNull();
+  });
+
+  it('does not count a finished sibling step as "still running"', async () => {
+    const now = Date.now() / 1000;
+    // Test step is already finished
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: 'rel-3', project: 'proj', kind: 'release', startedAt: now - 120 }) as any,
+      makeJobRow({ id: 'test-3', project: 'proj', kind: 'test', startedAt: now - 60, finishedAt: now - 30, exitCode: 0 }) as any,
+    ]).run();
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+
+    const reviewJob = makeInMemoryJob('review-3', 'review', {
+      startedAt: now - 25,
+      releaseId: 'rel-3',
+    });
+
+    await markDoneFn(reviewJob, 1);
+
+    // Finished sibling should NOT block finalization
+    const relRow = testDb.db
+      .select({ finishedAt: schema.jobs.finishedAt })
+      .from(schema.jobs)
+      .where(eq(schema.jobs.id, 'rel-3'))
+      .get();
+    expect(relRow?.finishedAt).not.toBeNull();
+  });
+});

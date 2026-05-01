@@ -8,6 +8,7 @@ import {
   bucketOf,
   buildReleaseSummary,
   dayLabel,
+  groupReleaseChildren,
 } from '@/components/project-runs/utils';
 import type { Entry } from '@/components/project-runs/utils';
 
@@ -231,5 +232,152 @@ describe('dayLabel', () => {
     expect(result).not.toBe('Today');
     expect(result).not.toBe('Yesterday');
     expect(['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']).not.toContain(result);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// groupReleaseChildren
+// ---------------------------------------------------------------------------
+
+function makeReleaseEntry(id: string, startedAt: number, finishedAt: number | null = startedAt + 10, parentJobId: string | null = null): Entry {
+  return {
+    key: `job:${id}`,
+    kind: 'release',
+    bucket: 'release',
+    title: 'Release pipeline',
+    subtitle: null,
+    startedAt,
+    lastActivityAt: finishedAt ?? startedAt,
+    finishedAt,
+    status: finishedAt !== null ? 'done' : 'running',
+    exitCode: finishedAt !== null ? 0 : null,
+    durationMs: null,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    costUsd: 0,
+    turns: 1,
+    model: null,
+    navJobId: id,
+    navSessionId: null,
+    verdict: undefined,
+    logPruned: false,
+    parentJobId,
+    parentLabel: parentJobId ? 'run' : null,
+    _jobIds: [id],
+  };
+}
+
+function makeStepEntry(id: string, kind: string, startedAt: number, parentJobId: string | null = null, exitCode = 0): Entry {
+  return {
+    key: `job:${id}`,
+    kind,
+    bucket: kind as Entry['bucket'],
+    title: kind,
+    subtitle: null,
+    startedAt,
+    lastActivityAt: startedAt + 5,
+    finishedAt: startedAt + 5,
+    status: 'done',
+    exitCode,
+    durationMs: 5000,
+    inputTokens: 100,
+    outputTokens: 50,
+    cacheReadTokens: 10,
+    costUsd: 0.001,
+    turns: 1,
+    model: null,
+    navJobId: id,
+    navSessionId: null,
+    verdict: undefined,
+    logPruned: false,
+    parentJobId,
+    parentLabel: parentJobId ? 'release' : null,
+    _jobIds: [id],
+  };
+}
+
+describe('groupReleaseChildren', () => {
+  it('returns empty for no entries', () => {
+    expect(groupReleaseChildren([])).toEqual([]);
+  });
+
+  it('release entries are always top-level — not nested under a triggering run', () => {
+    const run = makeStepEntry('run-1', 'run', 1000);
+    run.kind = 'run';
+    run.bucket = 'run';
+    const release = makeReleaseEntry('rel-1', 1010, 1020, 'run-1');
+    const out = groupReleaseChildren([run, release]);
+    // Both run and release should appear at top level; release must NOT be
+    // nested inside run's chainedChildren.
+    const releaseEntry = out.find(e => e.kind === 'release');
+    const runEntry = out.find(e => e.kind === 'run');
+    expect(releaseEntry).toBeTruthy();
+    expect(runEntry).toBeTruthy();
+    const runHasReleaseChild = runEntry?.chainedChildren?.some(c => c.kind === 'release') ?? false;
+    expect(runHasReleaseChild).toBe(false);
+  });
+
+  it('pipeline child steps are grouped under their containing release', () => {
+    const release = makeReleaseEntry('rel-1', 1000, null);
+    const test = makeStepEntry('test-1', 'test', 1005, 'rel-1');
+    const review = makeStepEntry('review-1', 'review', 1015, 'rel-1');
+    const out = groupReleaseChildren([release, test, review]);
+    const rel = out.find(e => e.navJobId === 'rel-1');
+    expect(rel?.children).toHaveLength(2);
+    expect(rel?.children?.map(c => c.kind).sort()).toEqual(['review', 'test']);
+  });
+
+  it('a single orphaned pipeline step is NOT clustered into a vgroup', () => {
+    const test = makeStepEntry('lone-test', 'test', 1000);
+    const out = groupReleaseChildren([test]);
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe('test');
+    expect(out[0].key).not.toMatch(/^vgroup:/);
+  });
+
+  it('two orphaned pipeline steps within 30 min are clustered into a virtual release row', () => {
+    const test = makeStepEntry('t1', 'test', 1000);
+    const review = makeStepEntry('r1', 'review', 1100); // 100s gap — within 30 min
+    const out = groupReleaseChildren([test, review]);
+    expect(out).toHaveLength(1);
+    const vg = out[0];
+    expect(vg.key).toMatch(/^vgroup:/);
+    expect(vg.kind).toBe('release');
+    expect(vg.title).toBe('Pipeline steps');
+    expect(vg.children).toHaveLength(2);
+  });
+
+  it('two orphaned pipeline steps more than 30 min apart are NOT clustered', () => {
+    const t1 = makeStepEntry('t1', 'test', 1000);
+    // 31 min gap
+    const r1 = makeStepEntry('r1', 'review', 1000 + 31 * 60);
+    const out = groupReleaseChildren([t1, r1]);
+    // Each is a single orphan → not clustered, stays as separate entries
+    expect(out).toHaveLength(2);
+    expect(out.every(e => !e.key.startsWith('vgroup:'))).toBe(true);
+  });
+
+  it('buildChain assigns direct parent→child edges via parent_job_id', () => {
+    const release = makeReleaseEntry('rel-1', 1000, null);
+    const test = makeStepEntry('test-1', 'test', 1005, 'rel-1');
+    const review = makeStepEntry('review-1', 'review', 1015, 'test-1');
+    const out = groupReleaseChildren([release, test, review]);
+    const rel = out.find(e => e.navJobId === 'rel-1');
+    // test should be the root of the chain, review a child of test
+    const chain = rel?.chainedChildren;
+    expect(chain).toHaveLength(1);
+    expect(chain![0].kind).toBe('test');
+    expect(chain![0].chainedChildren).toHaveLength(1);
+    expect(chain![0].chainedChildren![0].kind).toBe('review');
+  });
+
+  it('vgroup aggregates tokens and cost from its children', () => {
+    const t = makeStepEntry('t1', 'test', 1000);
+    const r = makeStepEntry('r1', 'review', 1100);
+    const out = groupReleaseChildren([t, r]);
+    const vg = out[0];
+    expect(vg.inputTokens).toBe(t.inputTokens + r.inputTokens);
+    expect(vg.costUsd).toBeCloseTo(t.costUsd + r.costUsd);
   });
 });
