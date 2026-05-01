@@ -124,9 +124,14 @@ if (sub === 'branch') {
 }
 
 if (sub === 'symbolic-ref') {
-  // detectMainBranch uses: git symbolic-ref --short refs/remotes/origin/HEAD
   if (cmd.includes('refs/remotes/origin/HEAD')) {
-    out('origin/master\n');
+    // detectMainBranch calls without --short; must return the full ref so the
+    // /refs\/remotes\/origin\/(.+)/ regex matches and yields 'master'.
+    if (cmd.includes('--short')) {
+      out('origin/master\n');
+    } else {
+      out('refs/remotes/origin/master\n');
+    }
     exit(0);
   }
   out('refs/heads/master\n');
