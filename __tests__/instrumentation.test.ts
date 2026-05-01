@@ -72,9 +72,13 @@ describe('instrumentation', () => {
       const { register } = await import('@/instrumentation');
       const returned = register();
       await returned;
-      await new Promise((r) => setTimeout(r, 10));
-
-      expect(startInternalSchedulerMock).toHaveBeenCalledTimes(1);
+      // reinstallAgents is fire-and-forget (`void reinstallAgents()`) and chains
+      // several dynamic imports — under load (full vitest suite) the 10ms wait
+      // we used to use was too short. Poll until the scheduler is armed.
+      await vi.waitFor(
+        () => expect(startInternalSchedulerMock).toHaveBeenCalledTimes(1),
+        { timeout: 2000 }
+      );
       expect(startInternalSchedulerMock.mock.calls[0][0]).toHaveLength(1);
     });
   });

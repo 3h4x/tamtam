@@ -42,6 +42,7 @@ export function loadFromDb(): void {
         model: row.model ?? null,
         releaseId: row.releaseId ?? null,
         abortedAt: row.abortedAt ?? null,
+        promptBytes: row.promptBytes ?? null,
       });
     }
     loaded = true;
@@ -81,6 +82,7 @@ export function saveToDb(job: JobData): void {
         model: job.model ?? null,
         releaseId: job.releaseId ?? null,
         abortedAt: job.abortedAt ?? null,
+        promptBytes: job.promptBytes ?? null,
       })
       .onConflictDoUpdate({
         target: schema.jobs.id,
@@ -104,6 +106,7 @@ export function saveToDb(job: JobData): void {
           model: job.model ?? null,
           releaseId: job.releaseId ?? null,
           abortedAt: job.abortedAt ?? null,
+          promptBytes: job.promptBytes ?? null,
         },
       })
       .run();
@@ -213,6 +216,7 @@ export function getJob(jobId: string): JobData | null {
     model: row.model ?? null,
     releaseId: row.releaseId ?? null,
     abortedAt: row.abortedAt ?? null,
+    promptBytes: row.promptBytes ?? null,
   };
   jobsCache.set(jobId, job);
   return job;
@@ -273,6 +277,7 @@ export function jobToDict(job: JobData): Record<string, unknown> {
   d.log_pruned = job.logPruned ?? false;
   d.release_id = job.releaseId ?? null;
   d.parent_job_id = job.parentJobId ?? null;
+  d.prompt_bytes = job.promptBytes ?? null;
   const verdict = getVerdict(job);
   if (verdict !== null) d.verdict = verdict;
   return d;

@@ -55,6 +55,7 @@ export const jobs = sqliteTable('jobs', {
   model: text('model'),
   releaseId: text('release_id'),
   abortedAt: real('aborted_at'),
+  promptBytes: integer('prompt_bytes'),
 });
 
 export const skills = sqliteTable('skills', {

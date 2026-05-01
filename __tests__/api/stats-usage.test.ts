@@ -137,6 +137,27 @@ describe('GET /api/stats/usage', () => {
     expect(reviewRow.outputTokens).toBe(600_000);
   });
 
+  it('aggregates avgPromptBytes / avgPromptTokens per agent kind', async () => {
+    listJobsMock.mockReturnValue([
+      makeJob({ id: 'a', project: 'p1', kind: 'review', promptBytes: 1000 }),
+      makeJob({ id: 'b', project: 'p1', kind: 'review', promptBytes: 3000 }),
+      makeJob({ id: 'c', project: 'p2', kind: 'review', promptBytes: 2000 }),
+      makeJob({ id: 'd', project: 'p1', kind: 'fix', promptBytes: null }),
+      makeJob({ id: 'e', project: 'p1', kind: 'fix', promptBytes: 0 }),
+    ]);
+    const res = await GET(new NextRequest('http://localhost/api/stats/usage?window=all'));
+    const data = await res.json();
+    const review = data.agents.find((r: any) => r.kind === 'review');
+    expect(review.promptSamples).toBe(3);
+    expect(review.avgPromptBytes).toBe(2000);
+    expect(review.avgPromptTokens).toBe(500);
+
+    const fix = data.agents.find((r: any) => r.kind === 'fix');
+    expect(fix.promptSamples).toBe(0);
+    expect(fix.avgPromptBytes).toBeNull();
+    expect(fix.avgPromptTokens).toBeNull();
+  });
+
   it('treats null token fields as zero', async () => {
     listJobsMock.mockReturnValue([
       makeJob({ id: 'a', project: 'p1', inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheCreateTokens: null }),

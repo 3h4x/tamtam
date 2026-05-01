@@ -26,4 +26,5 @@ export interface JobData {
   model?: string | null;
   releaseId?: string | null;
   abortedAt?: number | null;
+  promptBytes?: number | null;
 }
