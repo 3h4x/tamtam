@@ -8,7 +8,7 @@ export const WORKSPACE_DIR = join(E2E_BASE, 'workspace');
 export const CLAUDE_SHIM = join(__dirname, 'mocks', 'claude-shim.js');
 
 // Projects exercised by the pipeline specs.
-const PROJECTS = ['happy-path', 'needs-attention', 'abort', 'paused'];
+const PROJECTS = ['happy-path', 'needs-attention', 'abort', 'paused', 'ui-live'];
 
 export default async function globalSetup(): Promise<void> {
   // Clean up any previous run and start fresh.
