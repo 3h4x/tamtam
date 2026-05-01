@@ -411,13 +411,6 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
     releasesByKey.set(r.key, { ...r, children: kids, chainedChildren: buildChain(r, kids) })
   }
 
-  // All releases are top-level entries — do not nest them under their
-  // triggering run/agent. A release that was triggered by `release_after_run`
-  // has a parentJobId pointing to that run, but displaying it nested inside
-  // the run makes it invisible and gives the impression that no release was
-  // triggered.
-  const parents: Entry[] = Array.from(releasesByKey.values())
-
   // Cluster orphaned pipeline steps (no parent release) that are close in time
   // into virtual groups so they display as one collapsed row instead of many
   // individual entries. This handles pre-aggregator pipeline runs and manual
@@ -425,6 +418,26 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
   const CLUSTER_GAP = 30 * 60 // 30 minutes between steps = same pipeline run
   const pipelineOrphans = topLevel.filter(e => PIPELINE_CHILD_KINDS.has(e.kind))
   const otherTopLevel = topLevel.filter(e => !PIPELINE_CHILD_KINDS.has(e.kind))
+
+  // If a release's parentJobId points at an agent or run in the top-level
+  // list, nest the release under that parent so the history reads as one
+  // collapsible item instead of two separate rows.
+  const topLevelByJobId = new Map<string, Entry>()
+  for (const e of otherTopLevel) {
+    for (const jid of e._jobIds ?? [e.navJobId]) topLevelByJobId.set(jid, e)
+  }
+  const agentOwnedReleaseKeys = new Set<string>()
+  for (const rel of releasesByKey.values()) {
+    if (!rel.parentJobId) continue
+    const parentEntry = topLevelByJobId.get(rel.parentJobId)
+    if (!parentEntry) continue
+    parentEntry.chainedChildren = [...(parentEntry.chainedChildren ?? []), rel]
+    agentOwnedReleaseKeys.add(rel.key)
+  }
+
+  const parents: Entry[] = Array.from(releasesByKey.values()).filter(
+    r => !agentOwnedReleaseKeys.has(r.key)
+  )
   const clustered: Entry[] = []
 
   if (pipelineOrphans.length > 0) {

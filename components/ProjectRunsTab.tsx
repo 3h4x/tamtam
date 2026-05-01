@@ -37,9 +37,14 @@ function filterKey(f: Filter): string {
 // module scope so the recursive call shares one stable reference across
 // nested rows (avoids re-creating the function on each parent render).
 function renderChain(node: Entry, depth: number, navigate: (e: Entry) => void): React.ReactNode {
+  // Show the pipeline step summary on a release row inside a chain (e.g. when
+  // the release is nested under its triggering agent run).
+  const summary = node.kind === 'release' && (node.children?.length ?? 0) > 0
+    ? buildReleaseSummary(node.children!)
+    : null
   return (
     <Fragment key={node.key}>
-      <RunRow entry={node} onClick={() => navigate(node)} depth={depth} />
+      <RunRow entry={node} onClick={() => navigate(node)} depth={depth} summary={summary} />
       {node.chainedChildren?.map((c) => renderChain(c, depth + 1, navigate))}
     </Fragment>
   )
@@ -339,6 +344,16 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
                   const isReleaseParent = e.kind === 'release' && (e.children?.length ?? 0) > 0
                   const isExpandable = isReleaseParent || hasChainedKids
                   const isExpanded = expanded.has(e.key)
+                  // For an agent/run row that owns a nested release, surface that
+                  // release's pipeline summary so it's visible while collapsed.
+                  const ownedRelease = hasChainedKids && !isReleaseParent
+                    ? e.chainedChildren?.find(c => c.kind === 'release')
+                    : null
+                  const rowSummary = isReleaseParent
+                    ? buildReleaseSummary(e.children ?? [])
+                    : ownedRelease
+                      ? buildReleaseSummary(ownedRelease.children ?? [])
+                      : null
                   return (
                     <RunRow
                       key={e.key}
@@ -347,7 +362,7 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
                       expandable={isExpandable}
                       expanded={isExpanded}
                       onToggleExpand={() => toggleExpanded(e.key)}
-                      summary={isReleaseParent ? buildReleaseSummary(e.children ?? []) : null}
+                      summary={rowSummary}
                     >
                       {isExpandable && isExpanded && (
                         <div className="bg-bg-primary/40">

@@ -302,20 +302,18 @@ describe('groupReleaseChildren', () => {
     expect(groupReleaseChildren([])).toEqual([]);
   });
 
-  it('release entries are always top-level — not nested under a triggering run', () => {
+  it('nests a release under its triggering run when parentJobId matches', () => {
     const run = makeStepEntry('run-1', 'run', 1000);
     run.kind = 'run';
     run.bucket = 'run';
     const release = makeReleaseEntry('rel-1', 1010, 1020, 'run-1');
     const out = groupReleaseChildren([run, release]);
-    // Both run and release should appear at top level; release must NOT be
-    // nested inside run's chainedChildren.
-    const releaseEntry = out.find(e => e.kind === 'release');
+    // The run is the only top-level entry; the release is nested under it.
+    expect(out).toHaveLength(1);
     const runEntry = out.find(e => e.kind === 'run');
-    expect(releaseEntry).toBeTruthy();
     expect(runEntry).toBeTruthy();
     const runHasReleaseChild = runEntry?.chainedChildren?.some(c => c.kind === 'release') ?? false;
-    expect(runHasReleaseChild).toBe(false);
+    expect(runHasReleaseChild).toBe(true);
   });
 
   it('pipeline child steps are grouped under their containing release', () => {
