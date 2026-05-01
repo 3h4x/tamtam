@@ -1,0 +1,13 @@
+{
+  "description": "Happy path: review returns LGTM, commit and push succeed.",
+  "steps": [
+    {
+      "label": "review",
+      "text": "The implementation is clean and well-structured. All changes are safe to ship.\n\nVerdict: LGTM"
+    },
+    {
+      "label": "commit-message",
+      "text": "feat: implement pipeline harness"
+    }
+  ]
+}

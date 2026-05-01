@@ -19,6 +19,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:e2e:pipeline": "playwright test --config playwright.pipeline.config.ts",
     "check": "pnpm lint && pnpm type-check && pnpm test",
     "lint": "eslint app components lib hooks",
     "db:generate": "drizzle-kit generate",
