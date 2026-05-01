@@ -272,9 +272,13 @@ describe('instrumentation', () => {
   });
 
   describe('runProbeSweep()', () => {
-    function mockJobStorage(jobs: unknown[], probeJobStatus = vi.fn().mockResolvedValue(undefined)) {
-      vi.doMock('@/lib/jobs/job-storage', () => ({ listJobs: () => jobs, probeJobStatus }));
-      return { probeJobStatus };
+    function mockJobStorage(
+      jobs: unknown[],
+      probeJobStatus = vi.fn().mockResolvedValue(undefined),
+      reconcileStaleRelease = vi.fn().mockResolvedValue(undefined),
+    ) {
+      vi.doMock('@/lib/jobs/job-storage', () => ({ listJobs: () => jobs, probeJobStatus, reconcileStaleRelease, PIPELINE_STEP_KINDS: new Set(['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod']) }));
+      return { probeJobStatus, reconcileStaleRelease };
     }
 
     function makeJob(kind: string, finishedAt: number | null = null) {
@@ -357,6 +361,29 @@ describe('instrumentation', () => {
       await runProbeSweep();
 
       expect(probeJobStatus).not.toHaveBeenCalled();
+    });
+
+    it('reconciles stale release jobs via a finished step job', async () => {
+      const releaseJob = { id: 'job-release', kind: 'release', finishedAt: null, project: 'my-project', startedAt: 1000 };
+      const stepJob = { id: 'job-review', kind: 'review', finishedAt: 2000, project: 'my-project', startedAt: 1010 };
+      const { reconcileStaleRelease } = mockJobStorage([releaseJob, stepJob]);
+      mockDeps([]);
+
+      const { runProbeSweep } = await import('@/instrumentation-node');
+      await runProbeSweep();
+
+      expect(reconcileStaleRelease).toHaveBeenCalledWith(stepJob);
+    });
+
+    it('skips release reconciliation when no finished step jobs exist', async () => {
+      const releaseJob = { id: 'job-release', kind: 'release', finishedAt: null, project: 'my-project', startedAt: 1000 };
+      const { reconcileStaleRelease } = mockJobStorage([releaseJob]);
+      mockDeps([]);
+
+      const { runProbeSweep } = await import('@/instrumentation-node');
+      await runProbeSweep();
+
+      expect(reconcileStaleRelease).not.toHaveBeenCalled();
     });
   });
 });

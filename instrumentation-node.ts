@@ -88,6 +88,27 @@ export async function runProbeSweep(): Promise<void> {
   } catch (err) {
     console.error('[probe-sweep] error:', err);
   }
+  // Release meta-jobs have no PM2 process (pid=0) so probeJobStatus would
+  // incorrectly mark them exit -1. Instead, find any finished pipeline step
+  // for the project and let reconcileStaleRelease walk the chain — if all
+  // steps are done it finalizes the release, otherwise it's a no-op.
+  try {
+    const { listJobs, reconcileStaleRelease, PIPELINE_STEP_KINDS } = await import('./lib/jobs/job-storage');
+    const staleReleases = listJobs().filter(j => j.finishedAt === null && j.kind === 'release');
+    for (const release of staleReleases) {
+      const stepJob = listJobs().find(j =>
+        j.project === release.project
+        && PIPELINE_STEP_KINDS.has(j.kind)
+        && j.finishedAt !== null
+        && (j.startedAt ?? 0) >= (release.startedAt ?? 0) - 1
+      );
+      if (stepJob) {
+        try { await reconcileStaleRelease(stepJob); } catch {}
+      }
+    }
+  } catch (err) {
+    console.error('[probe-sweep] release reconcile error:', err);
+  }
 }
 
 /**
