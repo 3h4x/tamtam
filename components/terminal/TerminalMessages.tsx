@@ -229,8 +229,19 @@ export function TerminalMessages({
           const pendingTool = streamTools.length > 0 && !streamTools[streamTools.length - 1].result
             ? streamTools[streamTools.length - 1]
             : null
+          let pendingToolContext = ''
+          if (pendingTool) {
+            try {
+              const inp = JSON.parse(pendingTool.input || '{}')
+              const ctx = inp.file_path || inp.command || inp.pattern || inp.query || inp.url || inp.path || ''
+              if (ctx) {
+                const short = ctx.replace(/\s*\n\s*/g, ' ').trim().slice(0, 60)
+                pendingToolContext = short ? ` · ${short}` : ''
+              }
+            } catch { /* ignore */ }
+          }
           const label = pendingTool
-            ? `running ${pendingTool.name}…`
+            ? `${pendingTool.name}${pendingToolContext}…`
             : (lastStreamLine || 'thinking…')
           const isIdle = idleSec >= 5
           const idleLabel = isIdle ? ` · idle ${idleSec}s` : ''

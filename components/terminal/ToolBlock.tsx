@@ -21,7 +21,17 @@ export function ToolBlock({ tool, executing }: { tool: ToolEntry; executing?: bo
   let summary = ''
   try {
     const input = JSON.parse(tool.input || '{}')
-    summary = input.file_path || input.command || input.pattern || input.query || ''
+    summary =
+      input.file_path ||
+      input.command ||
+      input.pattern ||
+      input.query ||
+      input.url ||
+      input.path ||
+      input.description ||
+      ''
+    // Collapse multi-line commands to single line for compactness
+    if (summary) summary = summary.replace(/\s*\n\s*/g, ' ').trim()
   } catch {
     summary = tool.input?.slice(0, 60) || ''
   }

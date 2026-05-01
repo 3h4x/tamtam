@@ -34,18 +34,21 @@ export function SessionsPanel({ sessions, loadingSessions, onRestore }: Sessions
         sessions.map(session => {
           const isRunning = session.finishedAt === null && session.exitCode === null
           const isSuccess = session.exitCode === 0
+          const isFailed = session.exitCode !== null && session.exitCode !== 0
           const prompt = session.prompt
             ? session.prompt.length > 80 ? session.prompt.slice(0, 80) + '…' : session.prompt
             : '(no prompt)'
           const secs = Math.floor(Date.now() / 1000 - session.startedAt)
           const timeAgo = secs < 60 ? `${secs}s ago` : secs < 3600 ? `${Math.floor(secs / 60)}m ago` : `${Math.floor(secs / 3600)}h ago`
+          const dotClass = isRunning ? 'bg-status-warning animate-pulse' : isSuccess ? 'bg-status-success' : isFailed ? 'bg-status-error' : 'bg-[#555]'
+          const dotTitle = isRunning ? 'running' : isSuccess ? 'done' : isFailed ? `exit ${session.exitCode}` : 'unknown'
           return (
             <button
               key={session.id}
               className="flex items-center gap-3 w-full px-4 py-2 text-left hover:bg-[#1e1e1e] border-none bg-transparent border-b border-[#1d1d1d] last:border-b-0 cursor-pointer"
               onClick={() => onRestore(session)}
             >
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRunning ? 'bg-status-warning animate-pulse' : isSuccess ? 'bg-status-success' : 'bg-[#555]'}`} />
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotClass}`} title={dotTitle} />
               <span className="text-xs text-[#bbb] font-mono truncate flex-1">{prompt}</span>
               <span className="text-[10px] text-[#555] font-mono shrink-0">{timeAgo}</span>
             </button>

@@ -5,13 +5,32 @@ import { useRouter } from 'next/navigation'
 import { fetchProjects } from '@/lib/client-api'
 import type { Task } from '@/lib/shared/types'
 
-function formatFiresAt(firesAt: string): string {
-  return firesAt || '—'
+interface SchedulerEntry {
+  agentId: string
+  project: string
+  name: string
+  schedule: string
+  nextFireMs: number
+  fireCount: number
+  errorCount: number
+  lastError: string | null
+}
+
+function formatRelativeMs(ms: number): string {
+  const diffMs = ms - Date.now()
+  if (diffMs <= 0) return 'soon'
+  const totalSec = Math.floor(diffMs / 1000)
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m}m`
+  return `${totalSec}s`
 }
 
 export function AgentsPage() {
   const router = useRouter()
   const [tasks, setTasks] = useState<Task[]>([])
+  const [schedulerMap, setSchedulerMap] = useState<Map<string, SchedulerEntry>>(new Map())
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'running' | 'paused' | 'missing'>('all')
 
@@ -19,9 +38,19 @@ export function AgentsPage() {
     let active = true
     const poll = async () => {
       try {
-        const data = await fetchProjects()
+        const [data, health] = await Promise.all([
+          fetchProjects(),
+          fetch('/api/agents/scheduler-health').then(r => r.ok ? r.json() : null).catch(() => null),
+        ])
         if (active) {
           setTasks(data.tasks)
+          if (health?.internal?.entries) {
+            const map = new Map<string, SchedulerEntry>()
+            for (const e of health.internal.entries as SchedulerEntry[]) {
+              map.set(`${e.project}:${e.name}`, e)
+            }
+            setSchedulerMap(map)
+          }
           setLoading(false)
         }
       } catch { /* ignore */ }
@@ -101,6 +130,7 @@ export function AgentsPage() {
                 <th className="px-4 py-2 font-medium">Project</th>
                 <th className="px-4 py-2 font-medium">Agent</th>
                 <th className="px-4 py-2 font-medium">Schedule</th>
+                <th className="px-4 py-2 font-medium">Next Fire</th>
                 <th className="px-4 py-2 font-medium">Priority</th>
                 <th className="px-4 py-2 font-medium">Last Run</th>
                 <th className="px-4 py-2 font-medium text-right">Duration</th>
@@ -110,6 +140,7 @@ export function AgentsPage() {
             </thead>
             <tbody>
               {filtered.map((task) => {
+                const schedEntry = schedulerMap.get(`${task.project}:${task.job}`)
                 const exitFailed = task.last_run_exit !== null && task.last_run_exit !== 0
                 const accent =
                   task.launchctl === 'running' || task.launchctl === 'loaded'
@@ -124,14 +155,35 @@ export function AgentsPage() {
                     onClick={() => router.push(`/project/${task.project}`)}
                   >
                     <td className="px-4 py-2">
-                      <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${task.launchctl === 'running' || task.launchctl === 'loaded' ? 'bg-status-success/15 text-status-success' : task.launchctl === 'paused' ? 'bg-status-warning/15 text-status-warning' : task.launchctl === 'missing' ? 'bg-status-error/15 text-status-error' : 'bg-bg-tertiary text-text-secondary'}`}>
-                        {task.launchctl}
+                      <span
+                        className={`px-2 py-0.5 text-xs rounded-full font-medium ${task.launchctl === 'running' || task.launchctl === 'loaded' ? 'bg-status-success/15 text-status-success' : task.launchctl === 'paused' ? 'bg-status-warning/15 text-status-warning' : task.launchctl === 'missing' ? 'bg-status-error/15 text-status-error' : 'bg-bg-tertiary text-text-secondary'}`}
+                        title={task.launchctl}
+                      >
+                        {task.launchctl === 'running' || task.launchctl === 'loaded' ? 'active'
+                          : task.launchctl === 'installed' ? 'idle'
+                          : task.launchctl}
                       </span>
                     </td>
                     <td className="px-4 py-2 font-medium text-text-primary" data-private>{task.project}</td>
                     <td className="px-4 py-2 text-text-secondary" data-private>{task.job || '—'}</td>
                     <td className="px-4 py-2 text-text-secondary font-mono text-xs tabular-nums">
-                      {formatFiresAt(task.fires_at)}
+                      {task.fires_at || '—'}
+                    </td>
+                    <td className="px-4 py-2 text-xs tabular-nums">
+                      {schedEntry ? (() => {
+                        const isOverdue = schedEntry.nextFireMs < Date.now() - 30_000
+                        const hasErrors = schedEntry.errorCount > 0
+                        const tone = hasErrors ? 'text-status-warning' : isOverdue ? 'text-status-warning' : 'text-text-secondary'
+                        const label = isOverdue ? 'overdue' : `in ${formatRelativeMs(schedEntry.nextFireMs)}`
+                        const hint = hasErrors
+                          ? `${schedEntry.errorCount} error(s): ${schedEntry.lastError ?? ''}`
+                          : `${schedEntry.fireCount} fire(s) · next ${new Date(schedEntry.nextFireMs).toLocaleTimeString()}`
+                        return (
+                          <span className={`font-mono ${tone}`} title={hint}>{label}</span>
+                        )
+                      })() : (
+                        <span className="text-text-tertiary">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-2 text-xs">
                       {task.priority ? (
