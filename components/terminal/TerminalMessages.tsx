@@ -244,10 +244,16 @@ export function TerminalMessages({
             ? `${pendingTool.name}${pendingToolContext}…`
             : (lastStreamLine || 'thinking…')
           const isIdle = idleSec >= 5
+          const isVeryIdle = idleSec >= 10
           const idleLabel = isIdle ? ` · idle ${idleSec}s` : ''
           return (
             <div className="px-4 py-2 flex items-center gap-2 border-l-2 border-accent/30 bg-accent/[0.02]">
-              <span className="text-accent font-mono text-sm">{spinnerChars[spinnerFrame % spinnerChars.length]}</span>
+              <span className="relative inline-flex items-center justify-center w-5 h-5 shrink-0">
+                {isVeryIdle && (
+                  <span className="absolute inset-0 rounded-full bg-status-warning/20 animate-pulse" style={{ animationDuration: '2s' }} />
+                )}
+                <span className="text-accent font-mono text-sm relative z-10">{spinnerChars[spinnerFrame % spinnerChars.length]}</span>
+              </span>
               <span className={`text-xs font-mono shrink-0 tabular-nums ${isIdle ? 'text-status-warning' : 'text-[#888]'}`}>{(elapsedMs / 1000).toFixed(1)}s</span>
               <span className={`text-xs font-mono truncate flex-1 ${pendingTool ? 'text-status-warning' : isIdle ? 'text-status-warning/80' : 'text-[#888]'}`}>
                 {label}{idleLabel}
