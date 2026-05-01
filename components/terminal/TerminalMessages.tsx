@@ -140,8 +140,11 @@ export function TerminalMessages({
           ) : entry.role === 'tool' && entry.tool ? (
             <ToolBlock key={i} tool={entry.tool} />
           ) : (
+          <div key={i}>
+            {entry.role === 'user' && i > 0 && (
+              <div className="mx-4 my-2 border-t border-border/25" aria-hidden />
+            )}
           <div
-            key={i}
             className={`group relative px-4 py-2 ${
               entry.role === 'user' ? 'text-text-primary whitespace-pre-wrap border-l-2 border-accent/40' :
               entry.role === 'error' ? 'text-status-error whitespace-pre-wrap border-l-2 border-status-error/60 bg-status-error/8' :
@@ -187,6 +190,7 @@ export function TerminalMessages({
                 {copiedIdx === i ? 'copied' : 'copy'}
               </button>
             )}
+          </div>
           </div>
           )
         ))}

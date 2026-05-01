@@ -35,10 +35,10 @@ interface StatusCardProps {
 
 const TONE_RING: Record<StatusCardProps['tone'], string> = {
   neutral: 'border-border',
-  success: 'border-status-success/40',
-  warning: 'border-status-warning/40',
-  error: 'border-status-error/40',
-  info: 'border-status-info/40',
+  success: 'border-border border-l-2 border-l-status-success',
+  warning: 'border-border border-l-2 border-l-status-warning',
+  error: 'border-border border-l-2 border-l-status-error',
+  info: 'border-border border-l-2 border-l-status-info',
 }
 
 const TONE_DOT: Record<StatusCardProps['tone'], string> = {

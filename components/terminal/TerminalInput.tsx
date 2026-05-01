@@ -52,12 +52,12 @@ export function TerminalInput({
   return (
     <>
       {/* Input row — pinned below the scrollable body */}
-      <div className={`border-t flex items-start px-4 py-2 ${streaming ? 'border-[#1e1e1e]' : 'border-[#252525]'} bg-[#0e0e0e] shrink-0`}>
-          <span className={`shrink-0 mr-1 mt-0.5 ${streaming ? 'text-[#555]' : 'text-accent'}`}>{streaming ? '>' : '#'}</span>
+      <div className="border-t border-border flex items-start px-4 py-2 bg-bg-primary shrink-0">
+          <span className={`shrink-0 mr-1 mt-0.5 ${streaming ? 'text-text-tertiary' : 'text-accent'}`}>{streaming ? '>' : '#'}</span>
           <textarea
             ref={inputRef}
             rows={1}
-            className="flex-1 bg-transparent border-none outline-none text-[#e0e0e0] font-mono text-sm placeholder:text-[#444] resize-none overflow-y-auto leading-relaxed"
+            className="flex-1 bg-transparent border-none outline-none text-text-primary font-mono text-sm placeholder:text-text-tertiary/40 resize-none overflow-y-auto leading-relaxed"
             style={{ maxHeight: '200px' }}
             value={input}
             onChange={(e) => {
@@ -132,9 +132,9 @@ export function TerminalInput({
           />
           {messageQueue.length > 0 && (
             <div className="flex items-center gap-1 ml-2 shrink-0 mt-0.5">
-              <span className="text-[10px] text-[#555] font-mono">{messageQueue.length} queued</span>
+              <span className="text-xs text-text-tertiary font-mono">{messageQueue.length} queued</span>
               <button
-                className="text-[10px] text-[#555] hover:text-[#888] cursor-pointer border-none bg-transparent font-mono"
+                className="text-xs text-text-tertiary hover:text-text-secondary cursor-pointer border-none bg-transparent font-mono"
                 onClick={onClearQueue}
                 title="Clear queue"
               >✕</button>
@@ -142,14 +142,14 @@ export function TerminalInput({
           )}
         </div>
 
-        <div className="flex items-center gap-3 px-4 py-1.5 border-t border-[#1a1a1a] shrink-0 text-[10px] text-[#444] font-mono bg-[#0e0e0e]">
+        <div className="flex items-center gap-3 px-4 py-1.5 border-t border-border shrink-0 text-xs text-text-tertiary font-mono bg-bg-primary">
           {claudeSessionId ? (
             <>
-              <span className="text-[#555]">session</span>
-              <span className="text-[#666]">{claudeSessionId.slice(0, 16)}…</span>
+              <span className="text-text-tertiary">session</span>
+              <span className="text-text-secondary">{claudeSessionId.slice(0, 16)}…</span>
               {currentJobId && streaming && (
                 <>
-                  <span className="text-[#333]">•</span>
+                  <span className="text-text-tertiary/30">•</span>
                   <span className="text-status-warning">streaming</span>
                 </>
               )}
@@ -159,15 +159,15 @@ export function TerminalInput({
           )}
           {lastStats && (
             <>
-              <span className="text-[#333]">•</span>
-              <span className="text-[#666]" title="Duration">{(lastStats.duration / 1000).toFixed(1)}s</span>
-              <span className="text-[#666]" title="Input / output tokens">
+              <span className="text-text-tertiary/30">•</span>
+              <span className="text-text-secondary" title="Duration">{(lastStats.duration / 1000).toFixed(1)}s</span>
+              <span className="text-text-secondary" title="Input / output tokens">
                 <span className="text-status-success">↑{lastStats.inputTokens}</span>
                 {' / '}
                 <span className="text-accent">↓{lastStats.outputTokens}</span>
               </span>
               {(lastStats.cacheReadTokens > 0 || lastStats.cacheCreateTokens > 0) && (
-                <span className="text-[#555]" title="Cache read / create tokens">
+                <span className="text-text-tertiary" title="Cache read / create tokens">
                   cache {lastStats.cacheReadTokens}r
                   {lastStats.cacheCreateTokens > 0 ? ` / ${lastStats.cacheCreateTokens}w` : ''}
                 </span>
