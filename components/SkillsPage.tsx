@@ -118,7 +118,7 @@ function SkillRow({ skill, checked, onToggle, onEdit }: SkillRowProps) {
       </div>
 
       {/* Description */}
-      <span className="text-xs text-text-secondary truncate min-w-0">
+      <span className="text-xs text-text-secondary truncate min-w-0" title={skill.description || undefined}>
         {skill.description || <span className="text-text-tertiary italic">No description</span>}
       </span>
 

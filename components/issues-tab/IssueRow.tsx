@@ -123,11 +123,11 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <button
-            className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
+            className="px-2 py-1 text-xs text-text-tertiary hover:text-text-secondary cursor-pointer"
             onClick={discussInTerminal}
             title="Open a discussion about this issue in the terminal (no branch created)"
           >
-            Discuss
+            discuss
           </button>
           {hasContext ? (
             <button

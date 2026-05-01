@@ -537,6 +537,7 @@ export function ProjectDetailPage({
         activeTab={activeTab}
         totalChanges={project.totalChanges}
         issueCount={issueCount}
+        runningCount={runningJobs.length}
         onSetTab={setActiveTab}
       />
 
