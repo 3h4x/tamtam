@@ -211,8 +211,9 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
         </div>
       </div>
 
-      {/* Unified filter row: status shortcuts + kind breakdown, one axis. */}
-      <div className="flex items-center gap-1.5 flex-wrap mb-3">
+      {/* Unified filter row: status shortcuts + kind breakdown, one axis.
+          overflow-x-auto prevents 13+ kind buttons from wrapping to multiple lines on narrow screens. */}
+      <div className="flex items-center gap-1.5 overflow-x-auto mb-3 pb-0.5 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent" style={{ scrollbarWidth: 'thin' }}>
         {([
           { f: { kind: 'all' } as Filter, label: 'all', tone: 'neutral' },
           { f: { kind: 'running' } as Filter, label: 'running', tone: 'warning' },
@@ -228,14 +229,14 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
           return (
             <button
               key={label}
-              className={`px-2.5 py-1 text-xs rounded-full font-mono cursor-pointer border ${toneCls}`}
+              className={`shrink-0 px-2.5 py-1 text-xs rounded-full font-mono cursor-pointer border ${toneCls}`}
               onClick={() => setFilter(f)}
             >
               {label} <span className="opacity-70">{count}</span>
             </button>
           )
         })}
-        <span className="h-5 w-px bg-border mx-1" aria-hidden />
+        <span className="shrink-0 h-5 w-px bg-border mx-1" aria-hidden />
         {(['run', 'release', 'review', 'test', 'fix', 'fix-ci', 'fix-push', 'commit', 'push', 'mark-dod', 'pr-wait', 'agent', 'other'] as const).map((b) => {
           const count = counts[b] ?? 0
           const active = filter.kind === 'bucket' && filter.bucket === b
@@ -243,7 +244,7 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
           return (
             <button
               key={b}
-              className={`px-2.5 py-1 text-xs rounded-full font-mono cursor-pointer border ${
+              className={`shrink-0 px-2.5 py-1 text-xs rounded-full font-mono cursor-pointer border ${
                 active
                   ? 'border-accent bg-accent/15 text-accent'
                   : 'border-border bg-bg-secondary text-text-secondary hover:text-text-primary'
