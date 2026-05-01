@@ -32,20 +32,44 @@ function filterKey(f: Filter): string {
   return f.kind === 'bucket' ? `b:${f.bucket}` : f.kind
 }
 
-// Walk the chained children tree built by `groupReleaseChildren` and render
-// one `RunRow` per node, with depth-based indentation/connectors. Defined at
-// module scope so the recursive call shares one stable reference across
-// nested rows (avoids re-creating the function on each parent render).
+// Flatten the pipeline chain tree into a linear {entry, depth} list. Main
+// pipeline steps (test/review/commit/push/mark-dod/pr-wait) all appear at
+// `baseDepth`. fix/fix-push appear at baseDepth+1 so they read as an
+// indented remediation rather than as a separate tier. After any node its
+// chained children resume at `baseDepth` — a review that follows a fix is a
+// sibling of the preceding test, not its grandchild.
+function flattenPipelineSteps(roots: Entry[], baseDepth: number): Array<{ entry: Entry; depth: number }> {
+  const result: Array<{ entry: Entry; depth: number }> = []
+  const walk = (nodes: Entry[], stepDepth: number) => {
+    for (const node of nodes) {
+      const isFix = node.kind === 'fix' || node.kind === 'fix-push'
+      result.push({ entry: node, depth: isFix ? stepDepth + 1 : stepDepth })
+      walk(node.chainedChildren ?? [], baseDepth)
+    }
+  }
+  walk(roots, baseDepth)
+  return result
+}
+
+// Render a chained-child node (e.g. a release nested under an agent run).
+// For release nodes the pipeline steps are flattened so test/review/commit/push
+// all appear at the same depth; fix/fix-push are one level deeper.
 function renderChain(node: Entry, depth: number, navigate: (e: Entry) => void): React.ReactNode {
-  // Show the pipeline step summary on a release row inside a chain (e.g. when
-  // the release is nested under its triggering agent run).
   const summary = node.kind === 'release' && (node.children?.length ?? 0) > 0
     ? buildReleaseSummary(node.children!)
     : null
+  const pipelineFlat = node.kind === 'release'
+    ? flattenPipelineSteps(node.chainedChildren ?? [], depth + 1)
+    : []
   return (
     <Fragment key={node.key}>
       <RunRow entry={node} onClick={() => navigate(node)} depth={depth} summary={summary} />
-      {node.chainedChildren?.map((c) => renderChain(c, depth + 1, navigate))}
+      {node.kind === 'release'
+        ? pipelineFlat.map(({ entry, depth: d }) => (
+            <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
+          ))
+        : node.chainedChildren?.map((c) => renderChain(c, depth + 1, navigate))
+      }
     </Fragment>
   )
 }
@@ -366,15 +390,21 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
                     >
                       {isExpandable && isExpanded && (
                         <div className="bg-bg-primary/40">
-                          {/* Render the chain (test → review → fix → review …)
-                              by walking the parent_job_id tree. Agent/run
-                              rows nest their owned release here. Falls back
-                              to the flat children list for orphan-clusters
-                              (vgroup:*) that don't have a real release id. */}
-                          {(e.chainedChildren && e.chainedChildren.length > 0
-                            ? e.chainedChildren
-                            : (e.children ?? []).map(c => ({ ...c, chainedChildren: undefined }))
-                          ).map((root) => renderChain(root, 1, navigate))}
+                          {/* For release/vgroup rows: flatten the chain so test/review/commit/push
+                              all appear at depth 1 and fix/fix-push appear at depth 2.
+                              For agent/run rows that own a nested release: use renderChain
+                              so the release itself shows at depth 1 with its steps below it. */}
+                          {isReleaseParent
+                            ? flattenPipelineSteps(
+                                e.chainedChildren && e.chainedChildren.length > 0
+                                  ? e.chainedChildren
+                                  : (e.children ?? []).map(c => ({ ...c, chainedChildren: undefined })),
+                                1
+                              ).map(({ entry, depth: d }) => (
+                                <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
+                              ))
+                            : (e.chainedChildren ?? []).map((root) => renderChain(root, 1, navigate))
+                          }
                         </div>
                       )}
                     </RunRow>
