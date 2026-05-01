@@ -20,6 +20,7 @@ export interface VerdictDistribution {
   needsAttention: number;
   doNotShip: number;
   parseFailed: number;
+  prunedMissingVerdict: number;
   total: number;
 }
 
@@ -93,12 +94,15 @@ function fixChildrenOf(release: JobData, fixJobs: JobData[]): JobData[] {
 }
 
 function computeVerdicts(reviewJobs: JobData[]): VerdictDistribution {
-  const dist: VerdictDistribution = { lgtm: 0, needsAttention: 0, doNotShip: 0, parseFailed: 0, total: reviewJobs.length };
+  const dist: VerdictDistribution = { lgtm: 0, needsAttention: 0, doNotShip: 0, parseFailed: 0, prunedMissingVerdict: 0, total: reviewJobs.length };
   for (const j of reviewJobs) {
     const v = getVerdict(j);
     if (v === 'LGTM') dist.lgtm++;
     else if (v === 'NEEDS ATTENTION') dist.needsAttention++;
     else if (v === 'DO NOT SHIP') dist.doNotShip++;
+    // Distinguish log-pruned-no-verdict (retention gap, improves over time) from
+    // genuine parse failures (log available but verdict text not found).
+    else if (j.logPruned && !j.verdict) dist.prunedMissingVerdict++;
     else dist.parseFailed++;
   }
   return dist;

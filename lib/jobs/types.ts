@@ -22,6 +22,7 @@ export interface JobData {
   ghIssueRepo?: string | null;
   ghIssueTitle?: string | null;
   logPruned?: boolean | null;
+  verdict?: string | null;
   costUsd?: number | null;
   model?: string | null;
   releaseId?: string | null;

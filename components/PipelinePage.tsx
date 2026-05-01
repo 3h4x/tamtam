@@ -53,7 +53,7 @@ function StatCard({
 }
 
 function VerdictBar({ verdicts }: { verdicts: VerdictDistribution }) {
-  const { lgtm, needsAttention, doNotShip, parseFailed, total } = verdicts
+  const { lgtm, needsAttention, doNotShip, parseFailed, prunedMissingVerdict, total } = verdicts
   if (total === 0) {
     return <div className="text-sm text-text-tertiary py-2">No review data in this period.</div>
   }
@@ -63,6 +63,7 @@ function VerdictBar({ verdicts }: { verdicts: VerdictDistribution }) {
     { label: 'NEEDS ATTENTION', count: needsAttention, color: 'bg-status-warning', textColor: 'text-status-warning' },
     { label: 'DO NOT SHIP', count: doNotShip, color: 'bg-status-error', textColor: 'text-status-error' },
     { label: 'Parse failed', count: parseFailed, color: 'bg-text-tertiary', textColor: 'text-text-tertiary' },
+    { label: 'Log pruned', count: prunedMissingVerdict ?? 0, color: 'bg-border', textColor: 'text-text-tertiary' },
   ].filter((s) => s.count > 0)
 
   return (
@@ -197,7 +198,11 @@ export function PipelinePage() {
   const convColor =
     convRate == null ? undefined : convRate >= 0.8 ? 'green' : convRate >= 0.5 ? 'yellow' : 'red'
 
-  const parseFailRate = verdicts.total > 0 ? verdicts.parseFailed / verdicts.total : null
+  // True parser failures: log was available but verdict text couldn't be extracted.
+  // Excludes prunedMissingVerdict (log gone before verdict was persisted — a one-time
+  // historical gap that shrinks as old jobs age out of the window).
+  const parseable = verdicts.total - (verdicts.prunedMissingVerdict ?? 0)
+  const parseFailRate = parseable > 0 ? verdicts.parseFailed / parseable : null
   // Inverted scale: low parse-fail = good. Issue #62 target is < 10%.
   const parseFailColor =
     parseFailRate == null ? undefined : parseFailRate <= 0.1 ? 'green' : parseFailRate <= 0.25 ? 'yellow' : 'red'
@@ -263,8 +268,12 @@ export function PipelinePage() {
         />
         <StatCard
           label="Verdict parse fail"
-          value={verdicts.total > 0 ? fmtPct(parseFailRate) : '—'}
-          sub={verdicts.total > 0 ? `${verdicts.parseFailed}/${verdicts.total} unparseable` : 'No reviews'}
+          value={parseable > 0 ? fmtPct(parseFailRate) : '—'}
+          sub={
+            parseable > 0
+              ? `${verdicts.parseFailed}/${parseable} unparseable${(verdicts.prunedMissingVerdict ?? 0) > 0 ? ` · ${verdicts.prunedMissingVerdict} pruned` : ''}`
+              : 'No reviews'
+          }
           color={parseFailColor as 'green' | 'yellow' | 'red' | undefined}
         />
         <StatCard
