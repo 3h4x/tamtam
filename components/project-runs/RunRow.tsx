@@ -71,10 +71,16 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
   const isRunning = e.status === 'running'
   const isFailed = !isRunning && e.exitCode !== null && e.exitCode !== 0
   const totalTokens = e.inputTokens + e.outputTokens
+  // Top-level rows (depth=0) get a wider, always-colored status border so
+  // the outcome of every item is scannable at a glance. Child rows keep a
+  // thinner border and only color it for running/failed (success stays quiet).
+  const borderWidth = depth === 0 ? 'border-l-[3px]' : 'border-l-2'
   const accentBorder = isRunning
-    ? 'border-l-2 border-l-status-info'
+    ? `${borderWidth} border-l-status-info`
     : isFailed
-    ? 'border-l-2 border-l-status-error'
+    ? `${borderWidth} border-l-status-error`
+    : depth === 0
+    ? `${borderWidth} border-l-status-success`
     : 'border-l-2 border-l-transparent'
   const paddingLeft = DEPTH_PADDING[Math.min(depth, 6)] ?? 'pl-52'
 
