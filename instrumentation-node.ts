@@ -282,4 +282,29 @@ export async function registerNode(): Promise<void> {
 
   const probeIntervalMs = parseInt(process.env.TAMTAM_PROBE_INTERVAL_MS ?? '', 10) || 30_000;
   setInterval(runProbeSweep, probeIntervalMs);
+
+  // Quota drain ticker: every 60s, refresh the cached subscription quota and,
+  // if we're below the block threshold, drain any releases that were deferred
+  // while the 5h window was full.
+  const { prefetchQuota, peekQuotaCache } = await import('@/lib/usage/claude-quota');
+  const { listPendingReleaseProjects, drainPendingRelease } = await import('@/lib/pipeline/pending-release');
+  const { getSettings } = await import('@/lib/shared/config');
+  let lastDrainPct: number | null = null;
+  setInterval(async () => {
+    prefetchQuota();
+    // Wait a beat for the prefetch to settle, then re-read cache.
+    await new Promise((r) => setTimeout(r, 1500));
+    const snap = peekQuotaCache();
+    if (!snap) return;
+    const limit = getSettings().budget_block_at_pct;
+    const pct = snap.fiveHour.utilization;
+    // Edge: dropped from over-limit back under. Drain pending releases.
+    if (lastDrainPct != null && lastDrainPct >= limit && pct < limit) {
+      const projects = listPendingReleaseProjects();
+      for (const p of projects) {
+        try { await drainPendingRelease(p); } catch (e) { console.error('[budget-drain] failed for', p, e); }
+      }
+    }
+    lastDrainPct = pct;
+  }, 60_000);
 }

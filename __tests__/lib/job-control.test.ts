@@ -183,27 +183,23 @@ describe('job-control', () => {
       expect(budgetBlockedResult()).toBeNull();
     });
 
-    it('returns 409 when 5h utilization meets the limit', () => {
+    it('returns 429 when 5h utilization meets the limit', () => {
       peekQuotaCacheMock.mockReturnValue(makeSnapshot(95, 40));
       const result = budgetBlockedResult('start a run');
       expect(result).not.toBeNull();
       expect(result!.ok).toBe(false);
-      expect(result!.status).toBe(409);
+      expect(result!.status).toBe(429);
       expect(result!.window).toBe('5h');
       expect(result!.utilization).toBe(95);
       expect(result!.detail).toContain('5h');
-      expect(result!.detail).toContain('start a run');
     });
 
-    it('returns 409 when 7d utilization meets the limit', () => {
+    it('does not block when only 7d utilization exceeds the limit', () => {
       peekQuotaCacheMock.mockReturnValue(makeSnapshot(50, 96));
-      const result = budgetBlockedResult();
-      expect(result).not.toBeNull();
-      expect(result!.window).toBe('7d');
-      expect(result!.utilization).toBe(96);
+      expect(budgetBlockedResult()).toBeNull();
     });
 
-    it('prefers 5h window over 7d when both exceed the limit', () => {
+    it('blocks on 5h even when 7d is also over', () => {
       peekQuotaCacheMock.mockReturnValue(makeSnapshot(97, 99));
       const result = budgetBlockedResult();
       expect(result!.window).toBe('5h');
@@ -252,8 +248,8 @@ describe('job-control', () => {
       peekQuotaCacheMock.mockReturnValue(makeSnapshot(96, 40));
       const result = runGates('start a release');
       expect(result).not.toBeNull();
-      expect(result!.status).toBe(409);
-      expect(result!.detail).toContain('budget');
+      expect(result!.status).toBe(429);
+      expect(result!.detail).toContain('quota');
     });
 
     it('returns pause result before budget check when both gates would block', () => {
