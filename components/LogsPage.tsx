@@ -12,6 +12,16 @@ export function LogsPage() {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
+  const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set())
+
+  const toggleLog = (filename: string) => {
+    setExpandedLogs(prev => {
+      const next = new Set(prev)
+      if (next.has(filename)) next.delete(filename)
+      else next.add(filename)
+      return next
+    })
+  }
 
   const loadProjects = () => {
     setProjectsLoading(true)
@@ -136,10 +146,23 @@ export function LogsPage() {
             </div>
           ) : (
             filteredLogs.map((log) => (
-              <details key={log.filename} className="mb-2 border border-border rounded-lg overflow-hidden">
-                <summary className="px-4 py-2 bg-bg-secondary text-text-primary text-sm font-medium cursor-pointer hover:bg-bg-tertiary">{log.filename}</summary>
-                <pre className="font-mono text-sm text-text-primary whitespace-pre-wrap bg-bg-tertiary p-4 overflow-x-auto max-h-[500px] overflow-y-auto">{log.content}</pre>
-              </details>
+              <div key={log.filename} className="mb-2 border border-border rounded-lg overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between px-4 py-2.5 bg-bg-secondary text-text-primary text-sm font-medium cursor-pointer hover:bg-bg-tertiary transition-colors text-left"
+                  onClick={() => toggleLog(log.filename)}
+                >
+                  <span className="font-mono truncate">{log.filename}</span>
+                  <svg
+                    className={`w-3.5 h-3.5 text-text-tertiary transition-transform duration-150 shrink-0 ml-2 ${expandedLogs.has(log.filename) ? 'rotate-180' : ''}`}
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {expandedLogs.has(log.filename) && (
+                  <pre className="font-mono text-sm text-text-primary whitespace-pre-wrap bg-bg-tertiary p-4 overflow-x-auto max-h-[500px] overflow-y-auto border-t border-border">{log.content}</pre>
+                )}
+              </div>
             ))
           )}
         </>
