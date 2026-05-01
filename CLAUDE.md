@@ -62,7 +62,8 @@ Verdict detection (`getVerdict` in `lib/jobs/job-storage.ts`) reads the **last 2
 - `pnpm build` — production build.
 - `pnpm test` — run unit tests
 - `pnpm test:watch` — run vitest in watch mode
-- `pnpm test:e2e` — run Playwright e2e tests (requires dev server running)
+- `pnpm test:e2e` — run Playwright e2e tests (requires dev server running on port 1337)
+- `pnpm test:e2e:pipeline` — run pipeline e2e tests (`e2e/pipeline/`); spins up an isolated Next.js dev server on port 1338 with a temp DB at `/tmp/tamtam-e2e-pipeline/` — does NOT require the production server to be running
 - `pnpm lint` — ESLint on app, components, lib, hooks
 - `pnpm type-check` — TypeScript check
 - `pnpm check` — lint + type-check + test (all in one)
@@ -209,6 +210,8 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 - **`createTestDb()` pattern**: each test file defines its own local `createTestDb()` that opens `new Database(':memory:')` with `pragma journal_mode = WAL` and creates only the tables that test actually needs via raw SQL. There is no shared helper — copy the pattern from the nearest similar test file. Never import the real DB connection in tests.
 - **E2e vs unit**: three kinds of Playwright tests exist — (1) browser tests in `e2e/` for UI-only rendering and component state; (2) pipeline e2e tests in `e2e/pipeline/` for full pipeline chains (review → fix → commit → push) where completion hooks and PM2 job lifecycle must be exercised end-to-end; (3) API integration tests via `request` fixture. Write a pipeline e2e test when you need to verify that completion hooks chain correctly across multiple steps, or that the probe sweep picks up a PM2 job's exit code and triggers the right follow-on step — unit tests cannot catch these because they mock the async job lifecycle. See `docs/E2E.md` for the full pipeline harness guide (mocks, scenarios, helpers, how to add a new spec). All API routes and lib logic must have vitest unit tests. Component tests with `@testing-library/react` are available but optional — prefer testing behaviour through the API layer instead.
 - **What must be tested**: new API route handlers (happy path + error cases), new lib functions that contain branching logic or state mutations. Skip trivial passthrough functions and pure type definitions.
+- **Pipeline e2e isolation**: `pnpm test:e2e:pipeline` launches a dedicated Next.js dev server on port 1338, uses a temp SQLite DB (`/tmp/tamtam-e2e-pipeline/data/db/tamtam.db`), and intercepts all `git`/`gh` CLI calls via shims in `e2e/pipeline/mocks/bin/`. Tests run sequentially (`workers: 1`) to prevent shim-state collisions. Never run pipeline e2e against the production server or DB.
+- **Pre-push hook** (`.husky/pre-push`): runs `pnpm lint && pnpm type-check && pnpm test` before every push. If the hook fails, fix the root cause — do not bypass with `--no-verify`.
 
 ## Definition of Done for UI/Frontend Changes
 - Server must be running (`pnpm start` — or `pnpm rebuild` if a build is needed) before testing frontend changes

@@ -199,14 +199,17 @@ describe('gh-status ghRepo auto-detection via git remote', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let execMock: ReturnType<typeof vi.fn>;
   let ghStatusLookup: typeof import('@/lib/shared/gh-status').ghStatusLookup;
+  let mockGetSettings: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
     testDb = createTestDb();
     execMock = vi.fn();
+    mockGetSettings = vi.fn().mockReturnValue({ github_owner: '' });
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: mockGetSettings }));
 
     const mod = await import('@/lib/shared/gh-status');
     ghStatusLookup = mod.ghStatusLookup;
@@ -295,8 +298,9 @@ describe('gh-status ghRepo auto-detection via git remote', () => {
     }
   });
 
-  it('falls back to projName/projName when no GITHUB_OWNER and git remote fails', async () => {
+  it('falls back to projName/projName when no GITHUB_OWNER, no DB github_owner, and git remote fails', async () => {
     delete process.env.GITHUB_OWNER;
+    mockGetSettings.mockReturnValue({ github_owner: '' });
     execMock.mockResolvedValue({ exitCode: 1, stdout: '', stderr: '' });
 
     await ghStatusLookup({ p1: { project: 'standalone', path: '/p' } });
@@ -306,6 +310,22 @@ describe('gh-status ghRepo auto-detection via git remote', () => {
     );
     if (ghApiCalls.length > 0) {
       const repoArg = (ghApiCalls[0][1] as string[]).find((a) => a.includes('standalone/standalone'));
+      expect(repoArg).toBeTruthy();
+    }
+  });
+
+  it('uses DB github_owner setting when GITHUB_OWNER env var is not set and git remote fails', async () => {
+    delete process.env.GITHUB_OWNER;
+    mockGetSettings.mockReturnValue({ github_owner: '3h4x' });
+    execMock.mockResolvedValue({ exitCode: 1, stdout: '', stderr: '' });
+
+    await ghStatusLookup({ p1: { project: 'tamtam', path: '/workspace/tamtam' } });
+
+    const ghApiCalls = execMock.mock.calls.filter(
+      (c: any[]) => c[0] === 'gh' && c[1]?.[0] === 'api'
+    );
+    if (ghApiCalls.length > 0) {
+      const repoArg = (ghApiCalls[0][1] as string[]).find((a) => a.includes('3h4x/tamtam'));
       expect(repoArg).toBeTruthy();
     }
   });

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/shared/project-data';
 import { exec } from '@/lib/shared/shell';
+import { getSettings } from '@/lib/shared/config';
 import { db, schema } from '@/lib/db';
 import { homedir } from 'os';
 
@@ -18,7 +19,8 @@ async function getGhRepo(projectName: string, projPath: string): Promise<string 
       if (url && url.includes('/')) return url;
     }
   } catch {}
-  const owner = process.env.GITHUB_OWNER || projectName;
+  const { github_owner: dbGithubOwner } = getSettings();
+  const owner = process.env.GITHUB_OWNER || dbGithubOwner || projectName;
   return `${owner}/${projectName}`;
 }
 
