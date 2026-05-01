@@ -133,10 +133,13 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
                 redundant inline `← test` badge. */}
             {e.parentLabel && depth === 0 && (
               <span
-                className="font-mono text-text-tertiary"
+                className="inline-flex items-center gap-1 shrink-0"
                 title={`Started by ${e.parentLabel} (${e.parentJobId?.slice(-12) ?? ''})`}
               >
-                ← {e.parentLabel}
+                <span className="text-text-tertiary text-[10px]">←</span>
+                <span className="px-1.5 py-0.5 text-[10px] font-mono font-medium rounded bg-accent/10 text-accent border border-accent/25">
+                  {e.parentLabel}
+                </span>
               </span>
             )}
             {e.turns > 1 && <span className="font-mono">{e.turns} turns</span>}
