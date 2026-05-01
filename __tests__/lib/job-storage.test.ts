@@ -41,7 +41,8 @@ function createTestDb() {
       cost_usd REAL,
       model TEXT,
       release_id TEXT,
-      aborted_at REAL
+      aborted_at REAL,
+      prompt_bytes INTEGER
     );
     CREATE TABLE IF NOT EXISTS gh_issues_cache (
       project TEXT PRIMARY KEY,

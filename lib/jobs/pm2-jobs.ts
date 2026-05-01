@@ -3,6 +3,8 @@ import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { exec } from '@/lib/shared/shell';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
+import { measurePrompt, checkPromptSize } from './prompt-size';
+import { jobsCache, saveToDb } from './storage';
 
 function resolveLogDir(): string {
   try {
@@ -80,6 +82,14 @@ export async function startJob(
   // app/api/jobs/[jobId]/rerun/route.ts:46-48 reads this file to restore the
   // original prompt when re-running a job — keep writing it.
   writeFileSync(promptPath, prompt);
+
+  const promptBytes = measurePrompt(prompt);
+  const job = jobsCache.get(jobId);
+  if (job) {
+    job.promptBytes = promptBytes;
+    checkPromptSize(jobId, job.kind, promptBytes);
+    saveToDb(job);
+  }
 
   const cmdArgv = splitCommand(command);
   if (cmdArgv.length === 0) {

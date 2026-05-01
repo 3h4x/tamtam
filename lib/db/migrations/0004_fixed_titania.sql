@@ -1,0 +1,1 @@
+ALTER TABLE `jobs` ADD `prompt_bytes` integer;
