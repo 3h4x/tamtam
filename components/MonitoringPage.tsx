@@ -73,7 +73,7 @@ export function MonitoringPage() {
 
   if (loading && !data) {
     return (
-      <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-8">
+      <div className="max-w-5xl mx-auto space-y-8">
         <div className="skeleton h-11 w-full rounded-lg" />
         <div className="flex gap-1">
           {Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton h-9 w-24 rounded-md" />)}
@@ -89,7 +89,7 @@ export function MonitoringPage() {
 
   if (error || !data) {
     return (
-      <div className="p-4 sm:p-6 max-w-5xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         <ErrorState
           message={error ?? 'Monitoring data is not available.'}
           hint="Make sure Prometheus and Loki are reachable from the TamTam server."
@@ -142,7 +142,7 @@ export function MonitoringPage() {
   ]
 
   return (
-    <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-5">
+    <div className="max-w-5xl mx-auto space-y-5">
       {/* Summary bar */}
       <div className={`flex items-center gap-3 px-4 py-3 rounded-lg border text-sm font-medium ${
         data.hasIssues

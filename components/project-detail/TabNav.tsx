@@ -38,7 +38,7 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, onSet
   }
 
   return (
-    <nav className="flex gap-1 border-b border-border mb-4">
+    <nav className="flex gap-1 border-b border-border mb-3">
       <button className={tabClass('overview')} onClick={() => onSetTab('overview')}>
         Overview
       </button>

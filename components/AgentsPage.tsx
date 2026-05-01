@@ -44,7 +44,7 @@ export function AgentsPage() {
   const missingCount = tasks.filter(t => t.launchctl === 'missing').length
 
   return (
-    <div className="p-6">
+    <div>
       <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
         <h2 className="text-xl font-semibold text-text-primary">Agents</h2>
         <div className="flex gap-0.5 border-b border-border">
