@@ -655,6 +655,17 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   // purely advisory (issue checkbox updates); the release continues via its
   // invoker regardless of mark-dod's exit code.
   if (['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait'].includes(job.kind) && !chainedNext) {
+    // Guard: if another pipeline step is still running for this project, defer
+    // finalization to that step. This prevents a second test (or any other
+    // step started by a concurrent pending-release drain) from finalizing the
+    // release while review/commit/push from the first test are still in-flight.
+    const otherRunningStep = listJobs().find(
+      j => j.project === job.project && j.id !== job.id && PIPELINE_STEP_KINDS.has(j.kind) && j.finishedAt === null
+    );
+    if (otherRunningStep) {
+      console.log(`[release] ${job.kind} ${job.id} finished without chaining — deferring finalization (${otherRunningStep.kind} ${otherRunningStep.id} still running for ${job.project})`);
+      return;
+    }
     const release = findActiveReleaseJob(job.project);
     if (release) {
       const exitCode = (job.exitCode === 0) ? 0 : 1;
