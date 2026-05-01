@@ -21,6 +21,6 @@ export {
   persistVerdict,
 } from './storage';
 
-export { markDone, runCompletionHooks, reconcileStaleRelease } from './lifecycle';
+export { markDone, runCompletionHooks, reconcileStaleRelease, PIPELINE_STEP_KINDS } from './lifecycle';
 
 export { probeJobStatus } from './probe';
