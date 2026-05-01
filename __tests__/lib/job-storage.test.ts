@@ -3455,3 +3455,51 @@ describe('runCompletionHooks – abort short-circuit', () => {
     expect(startProjectReviewMock).not.toHaveBeenCalled();
   });
 });
+
+describe('persistVerdict', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let createJobFn: typeof import('@/lib/jobs/job-storage').createJob;
+  let getJobFn: typeof import('@/lib/jobs/job-storage').getJob;
+  let persistVerdictFn: typeof import('@/lib/jobs/job-storage').persistVerdict;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    const mod = await import('@/lib/jobs/job-storage');
+    createJobFn = mod.createJob;
+    getJobFn = mod.getJob;
+    persistVerdictFn = mod.persistVerdict;
+  });
+
+  afterEach(() => vi.resetModules());
+
+  it('writes verdict to DB and in-memory cache', () => {
+    const job = createJobFn('proj', 'review', 1, '/log');
+    persistVerdictFn(job.id, 'LGTM');
+
+    const stored = testDb.sqlite
+      .prepare('SELECT verdict FROM jobs WHERE id = ?')
+      .get(job.id) as { verdict: string };
+    expect(stored.verdict).toBe('LGTM');
+
+    const cached = getJobFn(job.id);
+    expect(cached?.verdict).toBe('LGTM');
+  });
+
+  it('updates an existing verdict', () => {
+    const job = createJobFn('proj', 'review', 2, '/log');
+    persistVerdictFn(job.id, 'NEEDS ATTENTION');
+    persistVerdictFn(job.id, 'DO NOT SHIP');
+
+    const stored = testDb.sqlite
+      .prepare('SELECT verdict FROM jobs WHERE id = ?')
+      .get(job.id) as { verdict: string };
+    expect(stored.verdict).toBe('DO NOT SHIP');
+    expect(getJobFn(job.id)?.verdict).toBe('DO NOT SHIP');
+  });
+
+  it('silently no-ops for an unknown jobId (no throw)', () => {
+    expect(() => persistVerdictFn('nonexistent-job', 'LGTM')).not.toThrow();
+  });
+});

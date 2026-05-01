@@ -168,6 +168,33 @@ describe('GET /api/stats/usage', () => {
     expect(data.totals.costUsd).toBe(0);
     expect(data.projects[0].runs).toBe(1);
   });
+
+  it('counts commitProducingRuns for commit jobs with exitCode 0 only', async () => {
+    listJobsMock.mockReturnValue([
+      makeJob({ id: 'a', project: 'p1', kind: 'commit', exitCode: 0 }),
+      makeJob({ id: 'b', project: 'p1', kind: 'commit', exitCode: 0 }),
+      makeJob({ id: 'c', project: 'p1', kind: 'commit', exitCode: 1 }),
+      makeJob({ id: 'd', project: 'p1', kind: 'commit', exitCode: null }),
+      makeJob({ id: 'e', project: 'p1', kind: 'review', exitCode: 0 }),
+    ]);
+    const res = await GET(new NextRequest('http://localhost/api/stats/usage?window=all'));
+    const data = await res.json();
+    const commit = data.agents.find((r: any) => r.kind === 'commit');
+    expect(commit.runs).toBe(4);
+    expect(commit.commitProducingRuns).toBe(2);
+  });
+
+  it('commitProducingRuns is 0 for non-commit kinds', async () => {
+    listJobsMock.mockReturnValue([
+      makeJob({ id: 'a', project: 'p1', kind: 'review', exitCode: 0 }),
+      makeJob({ id: 'b', project: 'p1', kind: 'fix', exitCode: 0 }),
+    ]);
+    const res = await GET(new NextRequest('http://localhost/api/stats/usage?window=all'));
+    const data = await res.json();
+    for (const row of data.agents) {
+      expect(row.commitProducingRuns).toBe(0);
+    }
+  });
 });
 
 describe('GET /api/stats/usage — response caching', () => {
