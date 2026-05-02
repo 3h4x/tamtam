@@ -4,7 +4,7 @@
 
 # TamTam
 
-The agent management dashboard built for Claude CLI. Define skills, compose agents, run them on demand or on a cron schedule — all from a single web interface that lives alongside your code.
+The agent management dashboard built for Claude-compatible CLIs. Define skills, compose agents, run them on demand or on an interval schedule — all from a single web interface that lives alongside your code.
 
 ## What it does
 
@@ -18,17 +18,17 @@ The agent management dashboard built for Claude CLI. Define skills, compose agen
 | **Interactive terminal** | Full Claude runner per project — model selector (haiku/sonnet/opus), skill picker, persistent sessions across reconnects |
 | **Smart push** | AI-generated commit messages, diff preview, one-click push |
 | **CI repair** | Failed CI run? One click sends Claude to fix it |
-| **Scheduling** | Built-in cron scheduler — daily reviews, nightly audits, whatever you need, running unattended |
+| **Scheduling** | Built-in interval scheduler — daily reviews, nightly audits, whatever you need, running unattended |
 | **Release pipeline** | Quality-gated: test → review → fix loop → commit → push, all driven by Claude |
 | **Custom actions** | Per-project bash commands (deploy, migrate, seed) as colored buttons |
-| **Notifications** | Unseen run alerts with bell badge; outbound webhooks (Slack, Discord, generic) for pipeline events |
+| **Notifications** | Unseen run alerts with bell badge; outbound webhooks (Slack, Discord, ntfy, generic) for pipeline and quota events |
 
 ## Stack
 
 - **Next.js 16** (App Router) — frontend + backend in one
 - **Drizzle ORM + SQLite** — WAL mode, zero infra
 - **Tailwind CSS v4**
-- **PM2** — process management for both dev and production
+- **PM2** — process management for the production server and one-shot agent jobs
 - **SSE** — real-time log streaming without WebSocket overhead
 - **vitest + Playwright** — unit and e2e tests
 
@@ -53,13 +53,13 @@ pnpm dev        # foreground next dev with HMR (local debugging only — stop PM
 
 ## Configuration
 
-All config lives in the SQLite database (`data/db/tamtam.db`). Nothing to edit by hand.
+Runtime config lives in the SQLite database (`data/db/tamtam.db`). Shared per-project settings can also be committed in `.tamtam/config.yml`, and file-agent prompts can live in `.tamtam/agents/*.md`.
 
 | Setting | Where |
 |---|---|
 | Workspace path | Settings page |
 | Global base prompt | Settings page |
-| Claude binary path | Settings page |
+| Agent provider and binary path | Settings page |
 | Per-project test commands | `/project/[name]/config` |
 | Custom actions | `/project/[name]/config` |
 
@@ -87,7 +87,7 @@ Agents live at `/agents`. Each agent has:
 - A name and optional prompt
 - A target project
 - A model (haiku / sonnet / opus)
-- An optional cron schedule
+- An optional interval schedule
 - A composed set of skills
 
 Prompt is optional when skills are attached — skills alone are enough to run an agent.

@@ -12,6 +12,8 @@ describe('startRelease — release pipeline entry decision tree', () => {
   let startProjectPushMock: ReturnType<typeof vi.fn>;
   let createJobMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
+  let runGatesMock: ReturnType<typeof vi.fn>;
+  let setPendingReleaseMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -30,6 +32,8 @@ describe('startRelease — release pipeline entry decision tree', () => {
       contextMeta: null, userPrompt: null,
     }));
     updateJobMock = vi.fn();
+    runGatesMock = vi.fn().mockReturnValue(null);
+    setPendingReleaseMock = vi.fn();
 
     // Default exec mock: PM2 calls succeed; git calls must be set per-test via
     // mockImplementationOnce (they take priority over this default).
@@ -69,7 +73,8 @@ describe('startRelease — release pipeline entry decision tree', () => {
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
       getLock: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/shared/job-control', () => ({ runGates: vi.fn().mockReturnValue(null) }));
+    vi.doMock('@/lib/shared/job-control', () => ({ runGates: runGatesMock }));
+    vi.doMock('@/lib/pipeline/pending-release', () => ({ setPendingRelease: setPendingReleaseMock }));
 
     ({ startRelease } = await import('@/lib/pipeline/start-release'));
   });
@@ -88,6 +93,40 @@ describe('startRelease — release pipeline entry decision tree', () => {
     const r = await startRelease('missing');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(404);
+  });
+
+  it('queues a pending release when the budget gate blocks startup', async () => {
+    runGatesMock.mockReturnValue({
+      ok: false,
+      status: 429,
+      detail: 'Claude quota exceeded',
+      window: '5h',
+      utilization: 99,
+      resetsAt: '2026-05-02T12:00:00.000Z',
+    });
+
+    const r = await startRelease('proj');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(429);
+    expect(setPendingReleaseMock).toHaveBeenCalledWith('proj');
+    expect(createJobMock).not.toHaveBeenCalled();
+    expect(execMock).not.toHaveBeenCalled();
+  });
+
+  it('does not queue a pending release for a manual global pause', async () => {
+    runGatesMock.mockReturnValue({
+      ok: false,
+      status: 409,
+      detail: 'Jobs are paused globally',
+    });
+
+    const r = await startRelease('proj');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(409);
+    expect(setPendingReleaseMock).not.toHaveBeenCalled();
+    expect(createJobMock).not.toHaveBeenCalled();
   });
 
   it('returns 409 when a pipeline job is already running for the project', async () => {
