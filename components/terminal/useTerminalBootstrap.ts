@@ -155,10 +155,18 @@ export function useTerminalBootstrap({
           const prompt = m.user_prompt || m.prompt
           if (prompt) entries.push({ role: 'user', text: prompt })
           const jobEntry = logData[i]
+          const exitCode = typeof jobEntry?.exit_code === 'number' ? jobEntry.exit_code : m.exit_code
           if (jobEntry?.log) {
-            entries.push({ role: 'assistant', text: jobEntry.log })
+            if (exitCode !== null && exitCode !== undefined && exitCode !== 0) {
+              entries.push({ role: 'error', text: 'claude run failed' })
+              entries.push({ role: 'error', text: jobEntry.log })
+            } else {
+              entries.push({ role: 'assistant', text: jobEntry.log })
+            }
           } else if (jobEntry?.log_pruned) {
             entries.push({ role: 'status', text: 'Log file deleted by retention policy' })
+          } else if (exitCode !== null && exitCode !== undefined && exitCode !== 0) {
+            entries.push({ role: 'error', text: `exit ${exitCode}` })
           }
         })
 

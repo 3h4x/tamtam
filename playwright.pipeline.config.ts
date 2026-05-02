@@ -3,6 +3,7 @@ import { join } from 'path';
 
 const shimBinDir = join(__dirname, 'e2e', 'pipeline', 'mocks', 'bin');
 const E2E_BASE = '/tmp/tamtam-e2e-pipeline';
+const codexBin = join(__dirname, 'e2e', 'pipeline', 'mocks', 'codex-bin.js');
 
 export default defineConfig({
   testDir: './e2e/pipeline',
@@ -35,6 +36,8 @@ export default defineConfig({
       PATH: `${shimBinDir}:${process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin'}`,
       // Shim state base directory (used by git + gh shims for inline server calls).
       TAMTAM_E2E_SHIM_DIR: `${E2E_BASE}/shim-state`,
+      // Used by Codex shim e2e tests so scripts/codex-shim.js never calls real Codex.
+      CODEX_BIN: codexBin,
     },
   },
 });

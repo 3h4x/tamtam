@@ -37,7 +37,7 @@ export function BudgetTab({
         <div className="px-5 py-3 border-b border-border flex items-baseline gap-3">
           <h3 className="text-sm font-semibold text-text-primary">Subscription Budget</h3>
           <p className="text-xs text-text-tertiary">
-            Pause new pipeline runs when the Claude Code subscription quota is close to exhausted
+            Pause new pipeline runs when the selected agent subscription quota is close to exhausted
           </p>
         </div>
         <div className="px-5 py-4 space-y-4">
@@ -51,8 +51,8 @@ export function BudgetTab({
             <div className="flex-1 min-w-0">
               <div className="font-medium text-sm text-text-primary">Block runs over budget</div>
               <div className="text-xs text-text-tertiary">
-                When enabled, agent runs, terminal runs, and the release pipeline are refused with HTTP 409 once
-                either the 5-hour or 7-day window crosses the block threshold.
+                When enabled, agent runs, terminal runs, and the release pipeline are refused once the
+                5-hour window crosses the block threshold.
               </div>
             </div>
           </label>
@@ -70,7 +70,7 @@ export function BudgetTab({
                 disabled={!enabled}
               />
               <p className="text-xs text-text-tertiary mt-1.5">
-                Refuse new runs when 5h or 7d utilization reaches this percentage. Default 95.
+                Refuse new runs when 5h utilization reaches this percentage. Default 95.
               </p>
             </div>
             <div>

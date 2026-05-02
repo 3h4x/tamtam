@@ -46,7 +46,7 @@ function logLine(line) {
 function isJobsPaused() {
   try {
     const root = process.env.TAMTAM_ROOT || path.resolve(__dirname, '..');
-    const dbPath = path.join(root, 'data', 'db', 'tamtam.db');
+    const dbPath = process.env.TAMTAM_DB_PATH || path.join(root, 'data', 'db', 'tamtam.db');
     if (!fs.existsSync(dbPath)) return false;
 
     // Loaded lazily so the runner still fail-opens if native bindings are not

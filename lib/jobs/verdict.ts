@@ -38,6 +38,9 @@ export function readParsedLog(job: JobData, tailBytes = 100_000): string {
     } else if (event.type === 'compacting') {
       textParts.push('\n[context compacted]\n');
     } else if (event.type === 'done') {
+      if (event.result.error && event.result.errorText) {
+        textParts.push(event.result.errorText);
+      }
       // Cost/duration stored in DB, not shown inline
     }
   }

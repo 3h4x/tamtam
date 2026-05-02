@@ -22,7 +22,7 @@
 import { stableHash } from './fire-times';
 import { getIssueBranchLock } from '@/lib/shared/project-branch-lock';
 import { getLock } from '@/lib/pipeline/pipeline-lock';
-import { scheduledBurnRateBlocked } from '@/lib/shared/job-control';
+import { budgetBlockedResult, scheduledBurnRateBlocked } from '@/lib/shared/job-control';
 import { db, schema } from '@/lib/db';
 import { eq } from 'drizzle-orm';
 
@@ -131,6 +131,15 @@ export function computeNextFire(schedule: string, agentId: string, fromMs: numbe
 async function fire(entry: ScheduleEntry): Promise<void> {
   if (getPaused() || !entry.enabled) return;
 
+  const budget = budgetBlockedResult('start scheduled agent');
+  if (budget) {
+    entry.skippedCount += 1;
+    entry.lastSkippedReason = budget.detail;
+    console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${budget.detail}`);
+    armNext(entry);
+    return;
+  }
+
   // Burn-rate gate: skip scheduled fires when 7d projection is over quota.
   // Manual buttons stay free (this gate is only consulted here). Re-arm so the
   // scheduler keeps probing — once usage decays under the cap or the window
@@ -193,6 +202,17 @@ async function fire(entry: ScheduleEntry): Promise<void> {
       body: JSON.stringify({ prompt: entry.prompt }),
     });
     if (!res.ok) {
+      if (res.status === 429) {
+        let detail = `HTTP ${res.status}`;
+        try {
+          const body = await res.json() as { detail?: string };
+          if (body.detail) detail = body.detail;
+        } catch {}
+        entry.skippedCount += 1;
+        entry.lastSkippedReason = detail;
+        console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${detail}`);
+        return;
+      }
       entry.errorCount += 1;
       entry.lastError = `HTTP ${res.status}`;
       console.error(`[internal-scheduler] ${entry.project}/${entry.name} fire failed: ${entry.lastError}`);

@@ -2,28 +2,7 @@ import { homedir } from 'os';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { exec } from '@/lib/shared/shell';
-
-export interface QuotaWindow {
-  utilization: number;
-  resetsAt: string | null;
-  msUntilReset: number | null;
-}
-
-export interface QuotaSnapshot {
-  fiveHour: QuotaWindow;
-  sevenDay: QuotaWindow;
-  sevenDaySonnet?: QuotaWindow | null;
-  sevenDayOpus?: QuotaWindow | null;
-  extra?: {
-    isEnabled: boolean;
-    monthlyLimit: number | null;
-    usedCredits: number | null;
-    utilization: number | null;
-    currency: string | null;
-  };
-  fetchedAt: number;
-  stale: boolean;
-}
+import type { QuotaSnapshot, QuotaWindow } from '@/lib/usage/quota-types';
 
 interface CacheState {
   snapshot: QuotaSnapshot | null;
@@ -123,6 +102,7 @@ function toOptionalWindow(raw: RawWindow | null | undefined, now: number): Quota
 
 function buildSnapshot(raw: RawUsageResponse, now: number, stale: boolean): QuotaSnapshot {
   return {
+    provider: 'claude',
     fiveHour: toWindow(raw.five_hour, now),
     sevenDay: toWindow(raw.seven_day, now),
     sevenDaySonnet: toOptionalWindow(raw.seven_day_sonnet, now),

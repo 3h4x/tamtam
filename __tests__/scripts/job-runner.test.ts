@@ -26,6 +26,14 @@ function createSettingsDb(root: string, jobsPaused: boolean): void {
   db.close();
 }
 
+function createSettingsDbAt(dbPath: string, jobsPaused: boolean): void {
+  mkdirSync(resolve(dbPath, '..'), { recursive: true });
+  const db = new Database(dbPath);
+  db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('jobs_paused', jobsPaused ? 'true' : 'false');
+  db.close();
+}
+
 describe('scripts/job-runner.js', () => {
   let dir: string;
 
@@ -86,6 +94,26 @@ describe('scripts/job-runner.js', () => {
     const log = readFileSync(logPath, 'utf-8');
     expect(log).toContain('[tamtam] launching:');
     expect(log).toContain('hello');
+    expect(log).toContain('done');
+  });
+
+  it('uses TAMTAM_DB_PATH for the pause check when provided', async () => {
+    const root = join(dir, 'root');
+    const tempDbPath = join(dir, 'e2e-db', 'tamtam.db');
+    const logPath = join(dir, 'custom-db.log');
+    const promptPath = join(dir, 'custom-db.prompt');
+    createSettingsDb(root, true);
+    createSettingsDbAt(tempDbPath, false);
+    writeFileSync(promptPath, 'hello');
+
+    const { exitCode } = await runRunner([
+      'job-custom-db', logPath, promptPath,
+      'bash', '-c', 'cat; echo done',
+    ], { TAMTAM_ROOT: root, TAMTAM_DB_PATH: tempDbPath });
+
+    expect(exitCode).toBe(0);
+    const log = readFileSync(logPath, 'utf-8');
+    expect(log).toContain('[tamtam] launching:');
     expect(log).toContain('done');
   });
 

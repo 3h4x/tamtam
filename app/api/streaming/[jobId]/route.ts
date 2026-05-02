@@ -202,6 +202,10 @@ export async function GET(
       // the full file on every poll once the job finishes.
       let seenResult = false;
 
+      function hasResultLine(text: string): boolean {
+        return text.includes('"type":"result"');
+      }
+
       // Read new bytes from offset using an open fd — avoids re-reading the
       // whole file on every fs.watch tick (critical for large logs).
       function readNewBytes(): string {
@@ -229,12 +233,16 @@ export async function GET(
           const content = readFileSync(logPath, 'utf-8');
           offset = Buffer.byteLength(content);
           sendContent(content);
-          if (content.includes('"type":"result"')) seenResult = true;
+          if (hasResultLine(content)) seenResult = true;
         } catch {}
       }
 
       // If job is already finished, close immediately (non-Claude jobs have no NDJSON done event)
       const jobRecord = getJob(jobId);
+      if (!raw && !passthrough && seenResult) {
+        try { controller.close(); } catch {}
+        return;
+      }
       if (jobRecord?.finishedAt) {
         if (raw || passthrough) {
           // raw: no NDJSON done; passthrough: suppresses result events — always emit synthetic done
@@ -274,7 +282,11 @@ export async function GET(
           const newContent = readNewBytes();
           if (newContent) {
             sendContent(newContent);
-            if (!seenResult && newContent.includes('"type":"result"')) seenResult = true;
+            if (!seenResult && hasResultLine(newContent)) seenResult = true;
+            if (!raw && !passthrough && seenResult) {
+              cleanup();
+              return true;
+            }
           }
           const job = getJob(jobId);
           if (!job?.finishedAt) return false;

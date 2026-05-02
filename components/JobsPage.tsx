@@ -74,7 +74,7 @@ function KindBadge({ kind }: { kind: string }) {
   const style = KIND_STYLES[kind]
   const label = isAgent ? kind.slice('agent:'.length) || 'agent' : style?.label ?? kind
   const cls = isAgent
-    ? 'bg-purple-500/15 text-purple-400'
+    ? 'bg-bg-tertiary text-text-secondary border border-border'
     : style?.cls ?? 'bg-text-tertiary/15 text-text-secondary'
   return (
     <span
@@ -281,7 +281,7 @@ export function JobsPage() {
               return (
                 <tr
                   key={job.id}
-                  className={`border-t border-border/60 hover:bg-bg-tertiary/40 cursor-pointer transition-colors border-l-2 ${isRunning ? 'border-l-status-warning' : isFailed ? 'border-l-status-error' : 'border-l-transparent'}`}
+                  className={`border-t border-border/60 hover:bg-bg-tertiary/40 cursor-pointer transition-colors border-l-[3px] ${isRunning ? 'border-l-status-warning' : isFailed ? 'border-l-status-error' : 'border-l-status-success'}`}
                   onClick={() => router.push(job.kind === 'run' && job.session_id ? `/project/${job.project}/terminal/${job.session_id}` : `/project/${job.project}/terminal?job=${encodeURIComponent(job.id)}`)}
                 >
                   <td className="px-4 py-2 whitespace-nowrap">
@@ -311,7 +311,7 @@ export function JobsPage() {
                         {promptText.split('\n')[0].slice(0, 80)}{promptText.length > 80 ? '…' : ''}
                       </span>
                     ) : KIND_HINTS[job.kind] ? (
-                      <span className="text-xs text-text-tertiary italic">{KIND_HINTS[job.kind]}</span>
+                      <span className="text-xs text-text-tertiary">{KIND_HINTS[job.kind]}</span>
                     ) : (
                       <span className="text-text-tertiary">—</span>
                     )}

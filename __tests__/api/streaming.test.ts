@@ -155,6 +155,27 @@ describe('GET /api/streaming/[jobId]', () => {
     expect(combined).toContain('"duration":1234');
   });
 
+  it('closes after replaying a result line even when the job row is still running', async () => {
+    const logFile = join(tempDir, 'stale-running-result.log');
+    const doneLine =
+      '{"type":"result","subtype":"error","is_error":true,"duration_ms":1234,"session_id":"s1","result":"[codex-shim] codex produced no assistant output"}';
+    writeFileSync(logFile, doneLine + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile, finishedAt: null, exitCode: null } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-1', {
+      signal: ac.signal,
+    });
+
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
+    const events = await collectSSEStream(response, ac, 1000);
+
+    const combined = events.join('');
+    expect(combined).toContain('event: done');
+    expect(combined).toContain('"error":true');
+    expect(combined).toContain('[codex-shim] codex produced no assistant output');
+  });
+
   it('sends thinking events as named SSE event', async () => {
     const logFile = join(tempDir, 'thinking.log');
     const thinkingLine =

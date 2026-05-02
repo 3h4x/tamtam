@@ -145,6 +145,16 @@ describe('config', () => {
       expect(config.claude_bin).toBe(`${process.cwd()}/scripts/lmstudio-shim.js`);
     });
 
+    it('resolves Codex provider to the bundled shim', () => {
+      const db = testDb.db;
+      db.insert(schema.settings).values({ key: 'claude_provider', value: 'codex' }).run();
+
+      const config = getSettings();
+
+      expect(config.claude_provider).toBe('codex');
+      expect(config.claude_bin).toBe(`${process.cwd()}/scripts/codex-shim.js`);
+    });
+
     it('exports configured LM Studio model to child process env', () => {
       const db = testDb.db;
       db.insert(schema.settings).values({ key: 'lmstudio_model', value: 'gemma-4-e4b-uncensored-hauhaucs-aggressive' }).run();
