@@ -29,33 +29,31 @@ export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
   const logoSrc = theme === 'dark' ? '/logo.png' : '/logo-light.png'
 
   return (
-    <header className="sticky top-0 z-50 flex items-center justify-between px-3 sm:px-6 py-2 border-b border-border bg-bg-primary gap-2">
-      <div className="flex items-center gap-1 sm:gap-4 min-w-0 overflow-hidden">
-        <div className="overflow-hidden shrink-0 -my-1" style={{ height: 36 }}>
-          <img src={logoSrc} alt="tamtam" style={{ height: 52, width: 'auto', marginTop: -8 }} />
-        </div>
-        <nav className="flex items-center gap-0.5 overflow-x-auto scrollbar-none">
-          {NAV_ITEMS.map((item) => {
-            const isActive = item.to === '/'
-              ? pathname === '/'
-              : pathname.startsWith(item.to)
-            return (
-              <Link
-                key={item.to}
-                href={item.to}
-                className={`px-2.5 sm:px-3 py-1.5 rounded-md text-sm no-underline transition-colors whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
-                  isActive
-                    ? 'bg-accent-light text-accent font-medium'
-                    : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
-                }`}
-              >
-                {item.label}
-              </Link>
-            )
-          })}
-        </nav>
+    <header className="sticky top-0 z-50 flex flex-wrap sm:flex-nowrap items-center px-3 sm:px-6 py-2 border-b border-border bg-bg-primary gap-x-2 gap-y-1 min-w-0">
+      <div className="overflow-hidden shrink-0 -my-1" style={{ height: 36 }}>
+        <img src={logoSrc} alt="tamtam" style={{ height: 52, width: 'auto', marginTop: -8 }} />
       </div>
-      <div className="flex items-center gap-2 shrink-0">
+      <nav className="order-3 sm:order-none flex flex-1 basis-full sm:basis-auto min-w-0 items-center gap-0.5 overflow-x-auto scrollbar-none" aria-label="Global sections">
+        {NAV_ITEMS.map((item) => {
+          const isActive = item.to === '/'
+            ? pathname === '/'
+            : pathname.startsWith(item.to)
+          return (
+            <Link
+              key={item.to}
+              href={item.to}
+              className={`px-2.5 sm:px-3 py-1.5 rounded-md text-sm no-underline transition-colors whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
+                isActive
+                  ? 'bg-accent-light text-accent font-medium'
+                  : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
+              }`}
+            >
+              {item.label}
+            </Link>
+          )
+        })}
+      </nav>
+      <div className="flex items-center gap-2 shrink-0 ml-auto">
         {loading && <span className="text-xs text-text-tertiary animate-spin" aria-label="Loading" role="status">{'\u27F3'}</span>}
         <PrivacyToggle />
         <JobsPauseToggle />
