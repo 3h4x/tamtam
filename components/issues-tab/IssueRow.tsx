@@ -95,33 +95,38 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
 
   return (
     <div className="border-b border-border last:border-b-0">
-      <div className="px-3 py-1.5 flex items-start gap-2.5 hover:bg-bg-tertiary/50 transition-colors">
-        <span className="mt-1 shrink-0 text-accent" title="Open Issue">
+      <div className="px-3 py-2 grid grid-cols-[16px_minmax(0,1fr)] md:grid-cols-[16px_minmax(0,1fr)_auto] items-start gap-2.5 hover:bg-bg-tertiary/50 transition-colors">
+        <span className="mt-0.5 shrink-0 text-accent" title="Open Issue">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
             <path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
             <path fillRule="evenodd" d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z" />
           </svg>
         </span>
         <div className="flex-1 min-w-0">
-          <div className="flex items-start gap-2 flex-wrap">
+          <div className="flex items-center gap-2 min-w-0">
             <button
-              className="text-sm text-text-primary font-medium hover:text-accent text-left cursor-pointer"
+              className="min-w-0 text-sm text-text-primary font-medium hover:text-accent text-left cursor-pointer truncate"
               onClick={() => setExpanded((v) => !v)}
+              title={issue.title}
             >
               {issue.title}
             </button>
-            <Labels labels={issue.labels} />
+            <span className="hidden sm:inline-flex shrink-0">
+              <Labels labels={issue.labels.slice(0, 3)} />
+            </span>
           </div>
           <div className="flex items-center gap-x-2 gap-y-1 mt-1 flex-wrap text-xs text-text-tertiary tabular-nums">
             <span className="font-mono text-text-secondary">#{issue.number}</span>
-            <span>{issue.author?.login}</span>
+            <span className="text-text-tertiary">by <span className="text-text-secondary">{issue.author?.login}</span></span>
             <span title={issue.createdAt}>{formatAgo(new Date(issue.createdAt).getTime() / 1000)}</span>
             {issue.assignees?.length > 0 && (
-              <span>→ {issue.assignees.map((a) => a.login).join(', ')}</span>
+              <span className="truncate max-w-[220px]" title={issue.assignees.map((a) => a.login).join(', ')}>
+                assigned {issue.assignees.map((a) => a.login).join(', ')}
+              </span>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="col-start-2 md:col-start-auto flex items-center justify-start md:justify-end gap-1.5 shrink-0 md:max-w-[260px] flex-wrap">
           <button
             className="px-2 py-1 text-xs text-text-tertiary hover:text-text-secondary cursor-pointer"
             onClick={discussInTerminal}
@@ -162,7 +167,7 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
         </div>
       </div>
       {expanded && issue.body && (
-        <div className="px-10 pb-3 text-xs text-text-secondary whitespace-pre-wrap max-h-48 overflow-y-auto border-t border-border/50 bg-bg-primary">
+        <div className="px-10 pb-3 pt-2 text-xs text-text-secondary whitespace-pre-wrap max-h-48 overflow-y-auto border-t border-border/50 bg-bg-primary">
           {issue.body}
         </div>
       )}

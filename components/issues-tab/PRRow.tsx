@@ -154,17 +154,18 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
 
   return (
     <div className={`border-b border-border last:border-b-0 transition-opacity ${merged ? 'opacity-50' : ''}`}>
-      <div className="px-3 py-1.5 flex items-start gap-2.5 hover:bg-bg-tertiary/50 transition-colors">
-        <span className={`mt-1 shrink-0 ${pr.isDraft ? 'text-text-tertiary' : 'text-status-success'}`} title={pr.isDraft ? 'Draft PR' : 'Open PR'}>
+      <div className="px-3 py-2 grid grid-cols-[16px_minmax(0,1fr)] md:grid-cols-[16px_minmax(0,1fr)_auto] items-start gap-2.5 hover:bg-bg-tertiary/50 transition-colors">
+        <span className={`mt-0.5 shrink-0 ${pr.isDraft ? 'text-text-tertiary' : 'text-status-success'}`} title={pr.isDraft ? 'Draft PR' : 'Open PR'}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
             <path d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
           </svg>
         </span>
         <div className="flex-1 min-w-0">
-          <div className="flex items-start gap-2 flex-wrap">
+          <div className="flex items-center gap-2 min-w-0">
             <button
-              className="text-sm text-text-primary font-medium hover:text-accent text-left cursor-pointer"
+              className="min-w-0 text-sm text-text-primary font-medium hover:text-accent text-left cursor-pointer truncate"
               onClick={() => setExpanded((v) => !v)}
+              title={pr.title}
             >
               {pr.title}
             </button>
@@ -178,13 +179,17 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
                 Draft
               </span>
             )}
-            <Labels labels={pr.labels} />
+            <span className="hidden sm:inline-flex shrink-0">
+              <Labels labels={pr.labels.slice(0, 3)} />
+            </span>
           </div>
           <div className="flex items-center gap-x-2 gap-y-1 mt-1 flex-wrap text-xs text-text-tertiary tabular-nums">
             <span className="font-mono text-text-secondary">#{pr.number}</span>
-            <span>{pr.author?.login}</span>
+            <span className="text-text-tertiary">by <span className="text-text-secondary">{pr.author?.login}</span></span>
             <span title={pr.createdAt}>{formatAgo(new Date(pr.createdAt).getTime() / 1000)}</span>
-            <code className="font-mono bg-bg-tertiary px-1.5 py-0.5 rounded text-[10px] text-text-secondary">{pr.headRefName}</code>
+            <code className="font-mono bg-bg-tertiary px-1.5 py-0.5 rounded text-[10px] text-text-secondary max-w-[260px] truncate" title={`${pr.headRefName} → ${pr.baseRefName}`}>
+              {pr.headRefName} → {pr.baseRefName}
+            </code>
             {reviewLabel && (
               <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${
                 pr.reviewDecision === 'APPROVED' ? 'bg-status-success/10 text-status-success border-status-success/30'
@@ -261,7 +266,7 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
             <div className="mt-1 text-xs text-status-error">DoD: {dodError}</div>
           )}
         </div>
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="col-start-2 md:col-start-auto flex items-center justify-start md:justify-end gap-1.5 shrink-0 md:max-w-[420px] flex-wrap">
           {!merged && needsApproval && (
             <button
               className="px-2 py-1 text-xs border border-accent/50 rounded-md bg-accent/10 text-accent hover:bg-accent/20 cursor-pointer disabled:opacity-50 inline-flex items-center gap-1.5"
@@ -360,7 +365,7 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
         </div>
       </div>
       {expanded && pr.body && (
-        <div className="px-10 pb-3 text-xs text-text-secondary whitespace-pre-wrap max-h-48 overflow-y-auto border-t border-border/50 bg-bg-primary">
+        <div className="px-10 pb-3 pt-2 text-xs text-text-secondary whitespace-pre-wrap max-h-48 overflow-y-auto border-t border-border/50 bg-bg-primary">
           {pr.body}
         </div>
       )}

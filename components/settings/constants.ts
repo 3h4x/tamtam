@@ -65,7 +65,7 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
   },
   permission_mode: {
     label: 'Permission Mode',
-    help: 'Controls which operations Claude can perform without prompting',
+    help: 'Controls provider permissions. For Codex, bypassPermissions runs without approvals or sandbox; plan is read-only.',
     group: 'agent',
     span: 1,
   },

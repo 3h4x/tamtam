@@ -126,6 +126,97 @@ for (const event of events) console.log(JSON.stringify(event));
     expect(final.is_error).toBe(false);
   });
 
+  it('maps bypassPermissions to Codex full approval and sandbox bypass', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
+    tempDirs.push(dir);
+    const fakeCodex = join(dir, 'codex');
+    const argsFile = join(dir, 'args.json');
+    await writeFile(fakeCodex, `#!/usr/bin/env node
+const fs = require('fs');
+fs.writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2)));
+console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'ok' } }));
+`);
+    await chmod(fakeCodex, 0o755);
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--output-format',
+      'stream-json',
+      '--model',
+      'sonnet',
+      '--permission-mode',
+      'bypassPermissions',
+    ], {
+      ...process.env,
+      CODEX_BIN: fakeCodex,
+    });
+
+    expect(result.code).toBe(0);
+    const codexArgs = JSON.parse(await readFile(argsFile, 'utf8'));
+    expect(codexArgs).toContain('--dangerously-bypass-approvals-and-sandbox');
+    expect(codexArgs).not.toContain('--sandbox');
+    expect(codexArgs).not.toContain('-a');
+  });
+
+  it('maps plan to read-only sandbox with on-request approval', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
+    tempDirs.push(dir);
+    const fakeCodex = join(dir, 'codex');
+    const argsFile = join(dir, 'args.json');
+    await writeFile(fakeCodex, `#!/usr/bin/env node
+const fs = require('fs');
+fs.writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2)));
+console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'ok' } }));
+`);
+    await chmod(fakeCodex, 0o755);
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--output-format',
+      'stream-json',
+      '--model',
+      'sonnet',
+      '--permission-mode=plan',
+    ], {
+      ...process.env,
+      CODEX_BIN: fakeCodex,
+    });
+
+    expect(result.code).toBe(0);
+    const codexArgs = JSON.parse(await readFile(argsFile, 'utf8'));
+    expect(codexArgs.slice(0, 5)).toEqual(['-a', 'on-request', '--sandbox', 'read-only', 'exec']);
+  });
+
+  it('maps dontAsk to workspace-write sandbox without approval prompts', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
+    tempDirs.push(dir);
+    const fakeCodex = join(dir, 'codex');
+    const argsFile = join(dir, 'args.json');
+    await writeFile(fakeCodex, `#!/usr/bin/env node
+const fs = require('fs');
+fs.writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2)));
+console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'ok' } }));
+`);
+    await chmod(fakeCodex, 0o755);
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--output-format',
+      'stream-json',
+      '--model',
+      'sonnet',
+      '--permission-mode',
+      'dontAsk',
+    ], {
+      ...process.env,
+      CODEX_BIN: fakeCodex,
+    });
+
+    expect(result.code).toBe(0);
+    const codexArgs = JSON.parse(await readFile(argsFile, 'utf8'));
+    expect(codexArgs.slice(0, 5)).toEqual(['-a', 'never', '--sandbox', 'workspace-write', 'exec']);
+  });
+
   it('parses real Codex item.completed agent_message events', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
     tempDirs.push(dir);

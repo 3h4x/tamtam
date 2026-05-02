@@ -33,7 +33,7 @@ function stepChipClass(s: StepState, isRunning: boolean): string {
   if (s === 'done') return 'bg-status-success/12 text-status-success border-status-success/25'
   if (s === 'failed') return 'bg-status-error/15 text-status-error border-status-error/40'
   if (s === 'warning') return 'bg-status-warning/15 text-status-warning border-status-warning/40'
-  if (s === 'running') return `bg-accent/15 text-accent border-accent/50 ring-2 ring-accent/25 ${isRunning ? 'shadow-sm' : ''}`
+  if (s === 'running') return `bg-accent/15 text-accent border-accent/50 ${isRunning ? 'ring-2 ring-accent/25' : ''}`
   // 'skipped' is rendered like 'done' but desaturated, so users can see at a
   // glance which steps the release legitimately bypassed (e.g. review skipped
   // because tests passed with no uncommitted changes — the short-circuit path)
@@ -42,13 +42,30 @@ function stepChipClass(s: StepState, isRunning: boolean): string {
   return 'bg-transparent text-text-tertiary border-border/50'
 }
 
+function stateLabel(s: StepState): string {
+  if (s === 'done') return 'done'
+  if (s === 'failed') return 'failed'
+  if (s === 'warning') return 'attention'
+  if (s === 'running') return 'running'
+  if (s === 'skipped') return 'skipped'
+  return 'pending'
+}
+
+function visibleStateLabel(s: StepState): string | null {
+  if (s === 'running') return 'running'
+  if (s === 'failed') return 'failed'
+  if (s === 'warning') return 'attention'
+  if (s === 'skipped') return 'skipped'
+  return null
+}
+
 function stepIcon(s: StepState) {
-  if (s === 'done') return <span className="text-[10px] leading-none">✓</span>
-  if (s === 'failed') return <span className="text-[10px] leading-none">✗</span>
-  if (s === 'warning') return <span className="text-[10px] leading-none">!</span>
-  if (s === 'running') return <span className="inline-block w-2.5 h-2.5 rounded-full border-2 border-current border-t-transparent animate-spin shrink-0" />
-  if (s === 'skipped') return <span className="text-[10px] leading-none opacity-70">⤼</span>
-  return <span className="text-[10px] leading-none opacity-50">○</span>
+  if (s === 'done') return <span className="text-[10px] leading-none" aria-hidden>✓</span>
+  if (s === 'failed') return <span className="text-[10px] leading-none" aria-hidden>✗</span>
+  if (s === 'warning') return <span className="text-[10px] leading-none" aria-hidden>!</span>
+  if (s === 'running') return <span className="inline-block w-2.5 h-2.5 rounded-full border-2 border-current border-t-transparent animate-spin shrink-0" aria-hidden />
+  if (s === 'skipped') return <span className="text-[10px] leading-none opacity-70" aria-hidden>⤼</span>
+  return <span className="text-[10px] leading-none opacity-50" aria-hidden>○</span>
 }
 
 function connectorClass(prev: StepState): string {
@@ -334,21 +351,46 @@ export function PipelineStrip({
   const runningStepIdx = steps.findIndex(s => s.state === 'running')
   const doneCount = steps.filter(s => s.state === 'done').length
   const totalSteps = steps.length
+  const activeStep = runningStepIdx >= 0 ? steps[runningStepIdx] : null
+  const attentionStep = steps.find(s => s.state === 'failed' || s.state === 'warning')
+  const summaryStep = activeStep ?? attentionStep
+  const summaryTone = summaryStep?.state === 'failed'
+    ? 'text-status-error'
+    : summaryStep?.state === 'warning'
+      ? 'text-status-warning'
+      : summaryStep?.state === 'running'
+        ? 'text-accent'
+        : 'text-text-tertiary'
+  const summaryText = summaryStep
+    ? `${summaryStep.label} ${stateLabel(summaryStep.state)}`
+    : `${doneCount}/${totalSteps} done`
 
   // suppress unused warning - verdict is available for future use
   void verdict
 
   return (
-    <div className="mt-3 mb-3 px-3 py-2 rounded-md border border-border bg-bg-secondary flex items-center gap-1 flex-wrap">
+    <div className="mt-3 mb-3 px-3 py-2 rounded-md border border-border bg-bg-secondary flex items-center gap-2 flex-wrap">
+      <div className="flex items-baseline gap-1.5 mr-1 shrink-0">
+        <span className="text-[10px] uppercase tracking-wider text-text-tertiary">pipeline</span>
+        <span className={`text-[11px] font-mono tabular-nums ${summaryTone}`}>{summaryText}</span>
+      </div>
       {steps.map((s, i) => {
         const clickable = !!s.action
         const dimmed = s.state === 'pending' && runningStepIdx >= 0 && i > runningStepIdx
         const isCurrent = i === runningStepIdx
-        const chipClass = `inline-flex items-center gap-1.5 px-2 py-1 rounded-md border font-mono text-[11px] font-medium transition-colors ${stepChipClass(s.state, isCurrent)} ${dimmed ? 'opacity-35' : ''} ${isCurrent ? 'font-semibold' : ''}`
+        const label = visibleStateLabel(s.state)
+        const chipClass = `inline-flex items-center gap-1.5 px-2 py-1 rounded-md border font-mono text-[11px] font-medium transition-colors min-h-[26px] ${stepChipClass(s.state, isCurrent)} ${dimmed ? 'opacity-35' : ''} ${isCurrent ? 'font-semibold' : ''}`
         const chip = (
           <>
-            {stepIcon(s.state)}
+            <span className="inline-flex items-center justify-center w-3.5 h-3.5 shrink-0">
+              {stepIcon(s.state)}
+            </span>
             <span>{s.label}</span>
+            {label && (
+              <span className="hidden md:inline font-sans text-[10px] font-medium leading-none opacity-80">
+                {label}
+              </span>
+            )}
           </>
         )
         return (
@@ -358,10 +400,18 @@ export function PipelineStrip({
                 type="button"
                 className={`${chipClass} cursor-pointer hover:brightness-110`}
                 onClick={s.action!}
+                aria-label={`${s.label}: ${stateLabel(s.state)}. ${s.hint}`}
                 title={s.hint}
               >{chip}</button>
             ) : (
-              <div className={chipClass} title={s.hint}>{chip}</div>
+              <div
+                className={chipClass}
+                title={s.hint}
+                role="group"
+                aria-label={`${s.label}: ${stateLabel(s.state)}. ${s.hint}`}
+              >
+                {chip}
+              </div>
             )}
             {s.retryAction && (
               <button
