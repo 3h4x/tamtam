@@ -36,7 +36,14 @@ Environment:
   CODEX_HAIKU_MODEL    Model used when TamTam asks for haiku (default: gpt-5.4-mini)
   CODEX_SONNET_MODEL   Model used when TamTam asks for sonnet (default: gpt-5.5)
   CODEX_OPUS_MODEL     Model used when TamTam asks for opus (default: gpt-5.5)
-  CODEX_DANGEROUS_BYPASS=1 maps bypassPermissions to danger-full-access
+
+Permission mode mapping:
+  bypassPermissions -> --dangerously-bypass-approvals-and-sandbox
+  dontAsk           -> --ask-for-approval never --sandbox workspace-write
+  auto              -> --ask-for-approval never --sandbox workspace-write
+  acceptEdits       -> --ask-for-approval on-request --sandbox workspace-write
+  default           -> --ask-for-approval on-request --sandbox workspace-write
+  plan              -> --ask-for-approval on-request --sandbox read-only
 `);
     process.exit(0);
   }
@@ -114,13 +121,19 @@ function resolveModel(model) {
 
 function sandboxFor(mode) {
   if (mode === 'plan') return 'read-only';
-  if (mode === 'bypassPermissions' && process.env.CODEX_DANGEROUS_BYPASS === '1') return 'danger-full-access';
   return 'workspace-write';
 }
 
 function approvalFor(mode) {
-  if (mode === 'plan' || mode === 'default') return 'on-request';
+  if (mode === 'plan' || mode === 'default' || mode === 'acceptEdits') return 'on-request';
   return 'never';
+}
+
+function permissionArgsFor(mode) {
+  if (mode === 'bypassPermissions') {
+    return ['--dangerously-bypass-approvals-and-sandbox'];
+  }
+  return ['-a', approvalFor(mode), '--sandbox', sandboxFor(mode)];
 }
 
 function emitJson(value) {
@@ -275,8 +288,7 @@ function launchCodex({ prompt, model, streamJson }) {
     const startedAt = Date.now();
     const codexBin = process.env.CODEX_BIN || 'codex';
     const codexArgs = [
-      '-a', approvalFor(permissionMode),
-      '--sandbox', sandboxFor(permissionMode),
+      ...permissionArgsFor(permissionMode),
       'exec',
     ];
     if (resumeSessionId && streamJson) {
