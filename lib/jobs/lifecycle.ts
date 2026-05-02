@@ -275,10 +275,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     }
   }
 
-  // Burn-rate gate: an auto-chain can keep firing for hours after one click.
-  // Halt chaining when budget_block_runs_enabled + 7d projection > 100%. The
-  // current step's results are already persisted; we just don't kick off the
-  // next one. User can re-trigger manually after the window decays.
+  // Auto-chain gate: the current step's results are already persisted; if a
+  // hard gate is closed (pause, 5h quota, credits), don't kick off the next one.
   if (['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'mark-dod'].includes(job.kind)) {
     const { runAutoChainGates } = await import('@/lib/shared/job-control');
     const gate = runAutoChainGates(`continue ${job.kind} chain`);
@@ -922,4 +920,3 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
     } catch {}
   }
 }
-

@@ -432,6 +432,22 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
     const parentEntry = topLevelByJobId.get(rel.parentJobId)
     if (!parentEntry) continue
     parentEntry.chainedChildren = [...(parentEntry.chainedChildren ?? []), rel]
+    // A terminal/agent row that auto-triggered a release is an aggregate from
+    // the operator's point of view. Surface the nested release outcome on the
+    // collapsed parent row so a green agent run cannot hide a failed test,
+    // halted release, or still-running pipeline.
+    parentEntry.lastActivityAt = Math.max(parentEntry.lastActivityAt, rel.lastActivityAt)
+    if (rel.status === 'running') {
+      parentEntry.status = 'running'
+      parentEntry.finishedAt = null
+      parentEntry.exitCode = null
+    } else if (rel.exitCode !== null && rel.exitCode !== 0) {
+      parentEntry.status = 'done'
+      parentEntry.finishedAt = rel.finishedAt ?? parentEntry.finishedAt
+      parentEntry.exitCode = rel.exitCode
+    } else if (parentEntry.exitCode === 0 && rel.finishedAt) {
+      parentEntry.finishedAt = Math.max(parentEntry.finishedAt ?? parentEntry.startedAt, rel.finishedAt)
+    }
     agentOwnedReleaseKeys.add(rel.key)
   }
 
@@ -506,7 +522,8 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
 export function buildReleaseSummary(children: Entry[]): string {
   if (children.length === 0) return '(no steps)'
   const parts: string[] = []
-  for (const c of children) {
+  const sorted = [...children].sort((a, b) => a.startedAt - b.startedAt)
+  for (const c of sorted) {
     const name = c.kind === 'mark-dod' ? 'dod' : c.kind
     let mark = '…'
     if (c.status === 'running') mark = '…'
@@ -514,6 +531,13 @@ export function buildReleaseSummary(children: Entry[]): string {
     else mark = `✗${c.exitCode ?? ''}`
     parts.push(`${name} ${mark}`)
   }
+  const last = sorted[sorted.length - 1]
+  const failedTestWithoutFix = last?.kind === 'test'
+    && last.status === 'done'
+    && last.exitCode !== null
+    && last.exitCode !== 0
+    && !sorted.some((c) => c.kind === 'fix' && c.startedAt > last.startedAt)
+  if (failedTestWithoutFix) parts.push('fix pending')
   return parts.join(' · ')
 }
 
