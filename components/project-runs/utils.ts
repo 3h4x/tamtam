@@ -146,6 +146,8 @@ export interface Entry {
   navJobId: string
   navSessionId: string | null
   verdict?: JobInfo['verdict']
+  failureLabel?: string | null
+  releaseOutcome?: ReleaseOutcome | null
   logPruned: boolean
   // Flat list of every pipeline child that ran inside this release's time
   // window — used by `buildReleaseSummary` for the one-line "test ✓ · review
@@ -165,6 +167,37 @@ export interface Entry {
   // `parent_job_id` edges when the parent might itself be a multi-turn
   // entry. Internal — callers shouldn't read this directly.
   _jobIds?: string[]
+}
+
+export type ReleaseOutcomeStatus = 'queued' | 'blocked' | 'running' | 'failed' | 'done'
+
+export interface ReleaseOutcome {
+  status: ReleaseOutcomeStatus
+  label: string
+  releaseJobId: string
+  blockingJobId?: string | null
+}
+
+function releaseOutcomeFor(rel: Entry): ReleaseOutcome {
+  if (rel.status === 'running') {
+    return { status: 'running', label: 'release running', releaseJobId: rel.navJobId }
+  }
+  if (rel.exitCode === 0) {
+    return { status: 'done', label: 'release done', releaseJobId: rel.navJobId }
+  }
+  if ((rel.children?.length ?? 0) === 0) {
+    return { status: 'blocked', label: 'release blocked', releaseJobId: rel.navJobId }
+  }
+  return { status: 'failed', label: 'release failed', releaseJobId: rel.navJobId }
+}
+
+export function entryIsRunning(e: Entry): boolean {
+  return e.status === 'running' || e.releaseOutcome?.status === 'running'
+}
+
+export function entryNeedsAttention(e: Entry): boolean {
+  if (e.status === 'done' && e.exitCode !== null && e.exitCode !== 0) return true
+  return e.releaseOutcome?.status === 'blocked' || e.releaseOutcome?.status === 'failed'
 }
 
 function truncate(s: string, n: number): string {
@@ -300,6 +333,8 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       navJobId: j.id,
       navSessionId: j.session_id ?? null,
       verdict: j.verdict,
+      failureLabel: null,
+      releaseOutcome: null,
       logPruned: !!j.log_pruned,
       parentJobId: j.parent_job_id ?? null,
       parentLabel: j.parent_job_id ? parentLabelFor(byId.get(j.parent_job_id)) : null,
@@ -408,7 +443,10 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
   const releasesByKey = new Map<string, Entry>()
   for (const r of releases) {
     const kids = (childrenByParent.get(r.key) ?? []).sort((a, b) => a.startedAt - b.startedAt)
-    releasesByKey.set(r.key, { ...r, children: kids, chainedChildren: buildChain(r, kids) })
+    const failureLabel = r.status === 'done' && r.exitCode !== null && r.exitCode !== 0
+      ? kids.length === 0 ? 'release blocked' : 'release failed'
+      : r.failureLabel
+    releasesByKey.set(r.key, { ...r, children: kids, chainedChildren: buildChain(r, kids), failureLabel })
   }
 
   // Cluster orphaned pipeline steps (no parent release) that are close in time
@@ -432,19 +470,19 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
     const parentEntry = topLevelByJobId.get(rel.parentJobId)
     if (!parentEntry) continue
     parentEntry.chainedChildren = [...(parentEntry.chainedChildren ?? []), rel]
+    parentEntry.releaseOutcome = releaseOutcomeFor(rel)
     // A terminal/agent row that auto-triggered a release is an aggregate from
-    // the operator's point of view. Surface the nested release outcome on the
-    // collapsed parent row so a green agent run cannot hide a failed test,
-    // halted release, or still-running pipeline.
+    // the operator's point of view, but it still has two separate outcomes:
+    // the agent/run itself and the release it triggered. Keep the parent
+    // job's own exit code intact and expose the release as a separate chip so
+    // "agent succeeded, release blocked" is not collapsed into a misleading
+    // raw `exit 1`.
     parentEntry.lastActivityAt = Math.max(parentEntry.lastActivityAt, rel.lastActivityAt)
     if (rel.status === 'running') {
-      parentEntry.status = 'running'
       parentEntry.finishedAt = null
-      parentEntry.exitCode = null
     } else if (rel.exitCode !== null && rel.exitCode !== 0) {
       parentEntry.status = 'done'
       parentEntry.finishedAt = rel.finishedAt ?? parentEntry.finishedAt
-      parentEntry.exitCode = rel.exitCode
     } else if (parentEntry.exitCode === 0 && rel.finishedAt) {
       parentEntry.finishedAt = Math.max(parentEntry.finishedAt ?? parentEntry.startedAt, rel.finishedAt)
     }
@@ -497,6 +535,8 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
           navJobId: last.navJobId,
           navSessionId: null,
           verdict: undefined,
+          failureLabel: anyFailed ? 'pipeline failed' : null,
+          releaseOutcome: null,
           logPruned: false,
           children: cluster,
           parentJobId: null,
@@ -519,8 +559,13 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
 
 // Compact one-line summary built from a release's children, e.g.
 // "test ✓ · review LGTM · commit ✓ · push ✓".
-export function buildReleaseSummary(children: Entry[]): string {
-  if (children.length === 0) return '(no steps)'
+export function buildReleaseSummary(children: Entry[], release?: Entry): string {
+  if (children.length === 0) {
+    if (release?.status === 'done' && release.exitCode !== null && release.exitCode !== 0) {
+      return 'release blocked before first step'
+    }
+    return '(no steps)'
+  }
   const parts: string[] = []
   const sorted = [...children].sort((a, b) => a.startedAt - b.startedAt)
   for (const c of sorted) {

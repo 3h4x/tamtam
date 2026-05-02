@@ -81,7 +81,7 @@ for (const event of events) console.log(JSON.stringify(event));
 
     expect(text).toBe('NEEDS ATTENTION');
     expect(final.session_id).toBe(sessionId);
-    expect(final.modelUsage['gpt-5.5']).toMatchObject({
+    expect(final.modelUsage['gpt-5.4']).toMatchObject({
       inputTokens: 12,
       outputTokens: 3,
       cacheReadInputTokens: 4,
@@ -255,7 +255,7 @@ for (const event of events) console.log(JSON.stringify(event));
     expect(text).toBe('Verdict: LGTM');
     expect(final.session_id).toBe(sessionId);
     expect(final.is_error).toBe(false);
-    expect(final.modelUsage['gpt-5.5']).toMatchObject({
+    expect(final.modelUsage['gpt-5.4']).toMatchObject({
       inputTokens: 12489,
       outputTokens: 20,
       cacheReadInputTokens: 10112,

@@ -2751,13 +2751,13 @@ describe('runCompletionHooks – release-after-run', () => {
   it('triggers startRelease after run job finishes with exit 0 when releaseAfterRun=true', async () => {
     const job = makeJob('run');
     await markDoneFn(job, 0);
-    expect(startReleaseMock).toHaveBeenCalledWith('my-proj');
+    expect(startReleaseMock).toHaveBeenCalledWith('my-proj', { queueIfBlocked: true });
   });
 
   it('triggers startRelease after agent:x job finishes with exit 0 when releaseAfterRun=true', async () => {
     const job = makeJob('agent:my-agent');
     await markDoneFn(job, 0);
-    expect(startReleaseMock).toHaveBeenCalledWith('my-proj');
+    expect(startReleaseMock).toHaveBeenCalledWith('my-proj', { queueIfBlocked: true });
   });
 
   it('does not trigger startRelease when run job exits non-zero', async () => {

@@ -1,7 +1,7 @@
 'use client'
 
 import { formatAgo } from '@/lib/shared/format'
-import { formatDuration, formatTokens, formatCost, KIND_LABEL, KIND_COLOR } from '@/components/project-runs/utils'
+import { formatDuration, formatTokens, formatCost, KIND_LABEL, KIND_COLOR, entryIsRunning, entryNeedsAttention } from '@/components/project-runs/utils'
 import type { Entry } from '@/components/project-runs/utils'
 
 export interface RunRowProps {
@@ -11,6 +11,7 @@ export interface RunRowProps {
   expanded?: boolean
   onToggleExpand?: () => void
   summary?: string | null
+  actions?: React.ReactNode
   // Depth in the chain tree. 0 = top-level row, 1 = direct child of release,
   // 2 = grandchild (e.g. review under test), etc. Drives left padding and
   // the connector tree on the row's left edge.
@@ -33,7 +34,19 @@ const DEPTH_PADDING: Record<number, string> = {
   6: 'pl-[186px]',
 }
 
-function VerdictBadge({ verdict, isRunning, isFailed, exitCode }: { verdict: string | null | undefined; isRunning: boolean; isFailed: boolean; exitCode: number | null | undefined }) {
+function VerdictBadge({
+  verdict,
+  isRunning,
+  isFailed,
+  exitCode,
+  failureLabel,
+}: {
+  verdict: string | null | undefined
+  isRunning: boolean
+  isFailed: boolean
+  exitCode: number | null | undefined
+  failureLabel?: string | null
+}) {
   if (verdict && !isRunning && !isFailed) {
     return (
       <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium font-mono ${
@@ -61,23 +74,41 @@ function VerdictBadge({ verdict, isRunning, isFailed, exitCode }: { verdict: str
       isFailed ? 'bg-status-error/15 text-status-error border-status-error/30' :
       'bg-status-success/15 text-status-success border-status-success/30'
     }`}>
-      {isFailed ? `exit ${exitCode}` : '✓ done'}
+      {isFailed ? (failureLabel ?? `exit ${exitCode}`) : '✓ done'}
     </span>
   )
 }
 
-export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summary, depth = 0, children }: RunRowProps) {
+function ReleaseOutcomeBadge({ entry }: { entry: Entry }) {
+  const outcome = entry.releaseOutcome
+  if (!outcome) return null
+  const cls =
+    outcome.status === 'running' ? 'bg-status-info/15 text-status-info border-status-info/30' :
+    outcome.status === 'done' ? 'bg-status-success/15 text-status-success border-status-success/30' :
+    outcome.status === 'blocked' ? 'bg-status-warning/15 text-status-warning border-status-warning/30' :
+    'bg-status-error/15 text-status-error border-status-error/30'
+  const label = outcome.status === 'done' ? '✓ release done' : outcome.label
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium border ${cls}`}>
+      {label}
+    </span>
+  )
+}
+
+export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summary, actions, depth = 0, children }: RunRowProps) {
   const isRunning = e.status === 'running'
   const isFailed = !isRunning && e.exitCode !== null && e.exitCode !== 0
+  const effectiveRunning = entryIsRunning(e)
+  const effectiveNeedsAttention = entryNeedsAttention(e)
   const totalTokens = e.inputTokens + e.outputTokens
   // Top-level rows (depth=0) get a wider, always-colored status border so
   // the outcome of every item is scannable at a glance. Child rows keep a
   // thinner border and only color it for running/failed (success stays quiet).
   const borderWidth = depth === 0 ? 'border-l-[3px]' : 'border-l-2'
-  const accentBorder = isRunning
+  const accentBorder = effectiveRunning
     ? `${borderWidth} border-l-status-info`
-    : isFailed
-    ? `${borderWidth} border-l-status-error`
+    : effectiveNeedsAttention
+    ? `${borderWidth} ${e.releaseOutcome?.status === 'blocked' ? 'border-l-status-warning' : 'border-l-status-error'}`
     : depth === 0
     ? `${borderWidth} border-l-status-success`
     : 'border-l-2 border-l-transparent'
@@ -151,6 +182,7 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
             {e.model && <span className="font-mono">{e.model}</span>}
             {e.navSessionId && <span className="font-mono">#{e.navSessionId.slice(0, 8)}</span>}
             {summary && <span className="font-mono text-text-secondary">{summary}</span>}
+            {e.releaseOutcome && !summary && <span className="font-mono text-text-secondary">{e.releaseOutcome.label}</span>}
             {e.subtitle && !summary && <span className="italic truncate">{e.subtitle}</span>}
           </div>
         </div>
@@ -181,12 +213,18 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
               </span>
             )}
             <span className="text-text-tertiary text-[11px]">{formatAgo(e.lastActivityAt)}</span>
+            {actions && (
+              <span onClick={(ev) => ev.stopPropagation()} onKeyDown={(ev) => ev.stopPropagation()}>
+                {actions}
+              </span>
+            )}
             {e.logPruned && (
               <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium bg-text-tertiary/15 text-text-tertiary" title="Log file deleted by retention policy">
                 pruned
               </span>
             )}
-            <VerdictBadge verdict={e.verdict} isRunning={isRunning} isFailed={isFailed} exitCode={e.exitCode} />
+            <VerdictBadge verdict={e.verdict} isRunning={isRunning} isFailed={isFailed} exitCode={e.exitCode} failureLabel={e.failureLabel} />
+            <ReleaseOutcomeBadge entry={e} />
           </div>
         </div>
       </div>

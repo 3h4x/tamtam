@@ -28,18 +28,27 @@ async function isReleasePipelineRunning(projectName: string): Promise<boolean> {
 
 export type ReleaseResult =
   | { ok: true; step: 'test' | 'review' | 'commit' | 'push'; jobId?: string; releaseJobId?: string; message: string }
+  | { ok: true; status: 'queued'; step?: undefined; jobId?: undefined; releaseJobId?: undefined; message: string; blockingJobId?: string }
   | { ok: false; status: number; detail: string; blockingJobId?: string };
+
+export interface StartReleaseOptions {
+  queueIfBlocked?: boolean;
+  sourceJobId?: string;
+}
 
 // Create a meta "release" job and start a PM2 monitor process for it.
 // The monitor polls the release log for the "# release finished" marker
 // written by finalizeReleaseJob() and exits with the embedded exit code,
 // giving the release job a real pid and PM2-managed lifecycle.
-async function createReleaseJob(projectName: string): Promise<{ id: string; releaseId: string; logPath: string } | null> {
+async function createReleaseJob(
+  projectName: string,
+  parentJobId?: string | null,
+): Promise<{ id: string; releaseId: string; logPath: string } | null> {
   try {
     const { logDir } = getImproveConfig();
     mkdirSync(logDir, { recursive: true });
 
-    const job = createJob(projectName, 'release', 0, '');
+    const job = createJob(projectName, 'release', 0, '', undefined, undefined, undefined, undefined, undefined, undefined, parentJobId);
     const logPath = join(logDir, `${job.id}.log`);
     const scriptPath = join(logDir, `${job.id}.sh`);
     const monitorLogPath = join(logDir, `${job.id}.monitor.log`);
@@ -175,9 +184,22 @@ export async function checkIssueBranchBlock(
   return branch.startsWith('fix/issue-') ? branch : null;
 }
 
-export async function startRelease(projectName: string): Promise<ReleaseResult> {
+async function queueRelease(projectName: string, blockingJobId?: string): Promise<ReleaseResult> {
+  const { setPendingRelease } = await import('./pending-release');
+  setPendingRelease(projectName);
+  return {
+    ok: true,
+    status: 'queued',
+    message: `Release queued for ${projectName}`,
+    blockingJobId,
+  };
+}
+
+export async function startRelease(projectName: string, options: StartReleaseOptions = {}): Promise<ReleaseResult> {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
+  const sourceJob = options.sourceJobId ? getJob(options.sourceJobId) : null;
+  const parentJobId = sourceJob?.project === projectName ? sourceJob.id : null;
   const paused = runGates('start a release');
   if (paused) {
     // For budget-blocked releases, enqueue so the periodic drain picks it up
@@ -186,6 +208,7 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
       const { setPendingRelease } = await import('./pending-release');
       setPendingRelease(projectName);
     }
+    if (options.queueIfBlocked) return queueRelease(projectName);
     return paused;
   }
 
@@ -211,6 +234,7 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
   }
 
   if (await isReleasePipelineRunning(projectName)) {
+    if (options.queueIfBlocked) return queueRelease(projectName);
     return { ok: false, status: 409, detail: `Release pipeline already running for ${projectName}` };
   }
 
@@ -229,11 +253,12 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
     const holder = listJobs().find(j => j.id === existingLock.lockedByJobId);
     const holderFinished = holder ? holder.finishedAt !== null : false;
     if (holder && !holderFinished) {
+      if (options.queueIfBlocked) return queueRelease(projectName, existingLock.lockedByJobId);
       return { ok: false, status: 409, detail: `Pipeline already running for ${projectName}`, blockingJobId: existingLock.lockedByJobId };
     }
   }
 
-  const release = await createReleaseJob(projectName);
+  const release = await createReleaseJob(projectName, parentJobId);
   if (!release) {
     return { ok: false, status: 500, detail: 'Failed to create release job' };
   }
@@ -245,8 +270,15 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
   if (!lockResult.acquired) {
     try {
       const jobRow = listJobs().find(j => j.id === releaseJobId);
-      if (jobRow) await markDone(jobRow, 1);
+      if (jobRow) {
+        appendFileSync(
+          jobRow.logPath || release.logPath,
+          `# release blocked — pipeline already running for ${projectName}${lockResult.blockingJobId ? ` (${lockResult.blockingJobId})` : ''}\n# release finished — exit 1 — ${new Date().toISOString()}\n`,
+        );
+        await markDone(jobRow, 1);
+      }
     } catch {}
+    if (options.queueIfBlocked) return queueRelease(projectName, lockResult.blockingJobId);
     return { ok: false, status: 409, detail: `Pipeline already running for ${projectName}`, blockingJobId: lockResult.blockingJobId };
   }
 

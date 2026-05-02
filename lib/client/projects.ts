@@ -86,9 +86,24 @@ export async function reviewProject(projectName: string): Promise<{ status: stri
   return response.json()
 }
 
-export async function releaseProject(projectName: string): Promise<{ status: string; step: 'test' | 'review' | 'push'; job_id?: string; release_job_id?: string; message: string }> {
+export interface ReleaseProjectOptions {
+  queueIfBlocked?: boolean
+  sourceJobId?: string
+}
+
+export async function releaseProject(
+  projectName: string,
+  options: ReleaseProjectOptions = {},
+): Promise<{ status: string; step?: 'test' | 'review' | 'commit' | 'push'; job_id?: string; release_job_id?: string; message: string; blocking_job_id?: string }> {
   const response = await fetch(`${API_BASE}/by-project/${projectName}/release`, {
     method: 'POST',
+    headers: options.queueIfBlocked || options.sourceJobId ? { 'Content-Type': 'application/json' } : undefined,
+    body: options.queueIfBlocked || options.sourceJobId
+      ? JSON.stringify({
+          queue_if_blocked: !!options.queueIfBlocked,
+          source_job_id: options.sourceJobId,
+        })
+      : undefined,
   })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
