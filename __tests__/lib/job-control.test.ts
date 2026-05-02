@@ -6,6 +6,7 @@ describe('job-control', () => {
   let syncJobsPauseState: typeof import('@/lib/shared/job-control').syncJobsPauseState;
   let budgetBlockedResult: typeof import('@/lib/shared/job-control').budgetBlockedResult;
   let runGates: typeof import('@/lib/shared/job-control').runGates;
+  let runAutoChainGates: typeof import('@/lib/shared/job-control').runAutoChainGates;
   let pauseInternalSchedulerMock: ReturnType<typeof vi.fn>;
   let resumeInternalSchedulerMock: ReturnType<typeof vi.fn>;
   let listPendingMock: ReturnType<typeof vi.fn>;
@@ -62,7 +63,7 @@ describe('job-control', () => {
     vi.doMock('@/lib/shared/notifications', () => ({
       notify: notifyMock,
     }));
-    ({ isJobsPaused, jobsPausedResult, syncJobsPauseState, budgetBlockedResult, runGates } =
+    ({ isJobsPaused, jobsPausedResult, syncJobsPauseState, budgetBlockedResult, runGates, runAutoChainGates } =
       await import('@/lib/shared/job-control'));
   });
 
@@ -284,6 +285,21 @@ describe('job-control', () => {
       peekQuotaCacheMock.mockReturnValue(makeSnapshot(99, 99));
       const result = runGates();
       expect(result!.detail).toContain('paused');
+    });
+  });
+
+  describe('runAutoChainGates', () => {
+    it('does not block an already-started release on the 7d weekly projection', () => {
+      peekQuotaCacheMock.mockReturnValue(makeSnapshot(50, 99));
+      expect(runAutoChainGates('continue test chain')).toBeNull();
+    });
+
+    it('still blocks auto-chain on the hard 5h quota gate', () => {
+      peekQuotaCacheMock.mockReturnValue(makeSnapshot(96, 40));
+      const result = runAutoChainGates('continue test chain');
+      expect(result).not.toBeNull();
+      expect(result!.status).toBe(429);
+      if (result && 'window' in result) expect(result.window).toBe('5h');
     });
   });
 });

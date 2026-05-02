@@ -143,28 +143,13 @@ export function runGates(action = 'start new jobs'): JobsPausedResult | BudgetBl
 }
 
 /**
- * Stricter gate for *auto-chained* pipeline re-entries (completion hooks).
- * Includes everything `runGates()` checks, plus the 7d burn-rate gate. A
- * single Release click can keep work flowing for hours through chained
- * steps; this gate halts the chain when the weekly window is on track to
- * blow. Manual button clicks should keep using `runGates()` so a human can
- * still finish in-progress work.
+ * Gate for auto-chained pipeline re-entries (completion hooks).
+ * Once a release is already in flight, the user's intent is test→fix→review
+ * →commit→push. Keep hard gates (pause, 5h quota, credits), but do not apply
+ * the scheduled-agent weekly burn projection mid-release.
  */
 export function runAutoChainGates(action = 'continue pipeline'): JobsPausedResult | BudgetBlockedResult | null {
-  const base = runGates(action);
-  if (base) return base;
-  const burn = scheduledBurnRateBlocked();
-  if (burn) {
-    return {
-      ok: false,
-      status: 429,
-      detail: `Auto-chain halted — ${burn.reason}. Manual restart available; chain resumes once usage decays under cap.`,
-      window: '7d',
-      utilization: burn.projectedPct,
-      resetsAt: peekQuotaCache()?.sevenDay.resetsAt ?? null,
-    };
-  }
-  return null;
+  return runGates(action);
 }
 
 /**

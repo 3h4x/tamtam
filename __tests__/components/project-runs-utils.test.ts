@@ -126,6 +126,7 @@ function makeEntry(partial: {
   status?: 'running' | 'done';
   exitCode?: number | null;
   verdict?: string;
+  startedAt?: number;
 }): Entry {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return {
@@ -134,8 +135,8 @@ function makeEntry(partial: {
     bucket: partial.kind as Entry['bucket'],
     title: partial.kind,
     subtitle: null,
-    startedAt: 1000,
-    lastActivityAt: 1000,
+    startedAt: partial.startedAt ?? 1000,
+    lastActivityAt: partial.startedAt ?? 1000,
     finishedAt: partial.status === 'running' ? null : 2000,
     status: partial.status ?? 'done',
     exitCode: partial.exitCode !== undefined ? partial.exitCode : 0,
@@ -171,8 +172,21 @@ describe('buildReleaseSummary', () => {
   });
 
   it('shows ✗ with exit code for failed steps', () => {
+    const kids = [makeEntry({ kind: 'push', exitCode: 1 })];
+    expect(buildReleaseSummary(kids)).toBe('push ✗1');
+  });
+
+  it('marks a failed test without a fix as pending remediation', () => {
     const kids = [makeEntry({ kind: 'test', exitCode: 1 })];
-    expect(buildReleaseSummary(kids)).toBe('test ✗1');
+    expect(buildReleaseSummary(kids)).toBe('test ✗1 · fix pending');
+  });
+
+  it('does not mark a failed test as pending once a fix has started', () => {
+    const kids = [
+      makeEntry({ kind: 'test', exitCode: 1, startedAt: 1000 }),
+      makeEntry({ kind: 'fix', status: 'running', exitCode: null, startedAt: 1010 }),
+    ];
+    expect(buildReleaseSummary(kids)).toBe('test ✗1 · fix …');
   });
 
   it('shows … for running steps', () => {
@@ -240,7 +254,13 @@ describe('dayLabel', () => {
 // groupReleaseChildren
 // ---------------------------------------------------------------------------
 
-function makeReleaseEntry(id: string, startedAt: number, finishedAt: number | null = startedAt + 10, parentJobId: string | null = null): Entry {
+function makeReleaseEntry(
+  id: string,
+  startedAt: number,
+  finishedAt: number | null = startedAt + 10,
+  parentJobId: string | null = null,
+  exitCode = 0,
+): Entry {
   return {
     key: `job:${id}`,
     kind: 'release',
@@ -251,7 +271,7 @@ function makeReleaseEntry(id: string, startedAt: number, finishedAt: number | nu
     lastActivityAt: finishedAt ?? startedAt,
     finishedAt,
     status: finishedAt !== null ? 'done' : 'running',
-    exitCode: finishedAt !== null ? 0 : null,
+    exitCode: finishedAt !== null ? exitCode : null,
     durationMs: null,
     inputTokens: 0,
     outputTokens: 0,
@@ -315,6 +335,20 @@ describe('groupReleaseChildren', () => {
     expect(runEntry).toBeTruthy();
     const runHasReleaseChild = runEntry?.chainedChildren?.some(c => c.kind === 'release') ?? false;
     expect(runHasReleaseChild).toBe(true);
+  });
+
+  it('surfaces a nested release failure on the triggering run row', () => {
+    const run = makeStepEntry('agent-1', 'agent:frontend', 1000, null, 0);
+    run.bucket = 'agent';
+    run.title = 'frontend';
+    const release = makeReleaseEntry('rel-1', 1010, 1050, 'agent-1', 1);
+    const test = makeStepEntry('test-1', 'test', 1020, 'rel-1', 1);
+    const out = groupReleaseChildren([run, release, test]);
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe('agent:frontend');
+    expect(out[0].exitCode).toBe(1);
+    expect(out[0].finishedAt).toBe(1050);
+    expect(out[0].chainedChildren?.[0].children?.[0].kind).toBe('test');
   });
 
   it('pipeline child steps are grouped under their containing release', () => {
