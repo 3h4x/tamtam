@@ -8,6 +8,10 @@ vi.mock('@/lib/usage/claude-quota', () => ({
   clearQuotaCache: clearQuotaCacheMock,
 }));
 
+vi.mock('@/lib/shared/config', () => ({
+  getSettings: vi.fn().mockReturnValue(null),
+}));
+
 describe('GET /api/usage/quota', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -25,6 +29,7 @@ describe('GET /api/usage/quota', () => {
       sevenDay: { utilization: 46, resetsAt: null, msUntilReset: null },
       fetchedAt: 1,
       stale: false,
+      gateEnabled: false,
     };
     getClaudeQuotaMock.mockResolvedValue(snapshot);
 
@@ -51,6 +56,7 @@ describe('GET /api/usage/quota', () => {
       sevenDay: { utilization: 5, resetsAt: null, msUntilReset: null },
       fetchedAt: 2,
       stale: false,
+      gateEnabled: false,
     };
     getClaudeQuotaMock.mockResolvedValue(snapshot);
 

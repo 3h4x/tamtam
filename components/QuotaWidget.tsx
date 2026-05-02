@@ -16,6 +16,7 @@ interface QuotaSnapshot {
   sevenDayOpus?: QuotaWindow | null
   fetchedAt: number
   stale: boolean
+  gateEnabled?: boolean
 }
 
 const FIVE_HOUR_MS = 5 * 60 * 60 * 1000
@@ -211,10 +212,13 @@ export function QuotaWidget({
   warnAt = 80,
   blockAt = 95,
   refreshSeconds = 60,
+  compact = false,
 }: {
   warnAt?: number
   blockAt?: number
   refreshSeconds?: number
+  /** Compact mode for /stats: pace bars only, no scheduled-agents row, no daily-burn row, no per-model split. */
+  compact?: boolean
 }) {
   const [data, setData] = useState<QuotaSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -272,9 +276,9 @@ export function QuotaWidget({
       </div>
       <QuotaBar label="5-hour rolling" win={data.fiveHour} warnAt={warnAt} blockAt={blockAt} windowMs={FIVE_HOUR_MS} />
       <QuotaBar label="7-day weekly" win={data.sevenDay} warnAt={warnAt} blockAt={blockAt} windowMs={SEVEN_DAY_MS} />
-      <DailyBurnRow sevenDay={data.sevenDay} />
-      <ScheduledAgentsRow sevenDay={data.sevenDay} />
-      {(data.sevenDaySonnet || data.sevenDayOpus) && (
+      {!compact && <DailyBurnRow sevenDay={data.sevenDay} />}
+      {!compact && data.gateEnabled && <ScheduledAgentsRow sevenDay={data.sevenDay} />}
+      {!compact && (data.sevenDaySonnet || data.sevenDayOpus) && (
         <div className="grid grid-cols-2 gap-3 pt-1">
           {data.sevenDaySonnet && (
             <QuotaBar label="7d · Sonnet" win={data.sevenDaySonnet} warnAt={warnAt} blockAt={blockAt} windowMs={SEVEN_DAY_MS} />

@@ -275,6 +275,24 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     }
   }
 
+  // Burn-rate gate: an auto-chain can keep firing for hours after one click.
+  // Halt chaining when budget_block_runs_enabled + 7d projection > 100%. The
+  // current step's results are already persisted; we just don't kick off the
+  // next one. User can re-trigger manually after the window decays.
+  if (['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'mark-dod'].includes(job.kind)) {
+    const { runAutoChainGates } = await import('@/lib/shared/job-control');
+    const gate = runAutoChainGates(`continue ${job.kind} chain`);
+    if (gate) {
+      console.log(`[release] auto-chain halted after ${job.kind} for ${job.project}: ${gate.detail}`);
+      const release = findActiveReleaseJob(job.project);
+      if (release) {
+        appendToReleaseLog(release, job.kind, { ...job, kind: 'chain-halt' as JobData['kind'] });
+        await finalizeReleaseJob(release, 1);
+      }
+      return;
+    }
+  }
+
   // Tracks whether this hook kicked off a downstream step. If not, the
   // release meta-job is at a natural endpoint and should be finalized so the
   // UI doesn't render it as "live" forever.

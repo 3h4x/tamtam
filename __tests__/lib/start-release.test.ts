@@ -69,6 +69,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
       getLock: vi.fn().mockReturnValue(null),
     }));
+    vi.doMock('@/lib/shared/job-control', () => ({ runGates: vi.fn().mockReturnValue(null) }));
 
     ({ startRelease } = await import('@/lib/pipeline/start-release'));
   });
@@ -209,6 +210,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
       getLock: vi.fn().mockReturnValue(null),
     }));
+    vi.doMock('@/lib/shared/job-control', () => ({ runGates: vi.fn().mockReturnValue(null) }));
 
     const { startRelease: fn } = await import('@/lib/pipeline/start-release');
     const r = await fn('proj');
@@ -314,6 +316,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
     vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
     vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
+    vi.doMock('@/lib/shared/job-control', () => ({ runGates: vi.fn().mockReturnValue(null) }));
 
     const { startRelease: fn } = await import('@/lib/pipeline/start-release');
     const r = await fn('proj');

@@ -208,7 +208,7 @@ export function StatsPage() {
       </div>
 
       {/* Live Claude subscription quota */}
-      <QuotaWidget warnAt={warnAt} blockAt={blockAt} />
+      <QuotaWidget warnAt={warnAt} blockAt={blockAt} compact />
 
       {/* Totals */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

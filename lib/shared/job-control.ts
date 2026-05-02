@@ -116,6 +116,31 @@ export function runGates(action = 'start new jobs'): JobsPausedResult | BudgetBl
 }
 
 /**
+ * Stricter gate for *auto-chained* pipeline re-entries (completion hooks).
+ * Includes everything `runGates()` checks, plus the 7d burn-rate gate. A
+ * single Release click can keep work flowing for hours through chained
+ * steps; this gate halts the chain when the weekly window is on track to
+ * blow. Manual button clicks should keep using `runGates()` so a human can
+ * still finish in-progress work.
+ */
+export function runAutoChainGates(action = 'continue pipeline'): JobsPausedResult | BudgetBlockedResult | null {
+  const base = runGates(action);
+  if (base) return base;
+  const burn = scheduledBurnRateBlocked();
+  if (burn) {
+    return {
+      ok: false,
+      status: 429,
+      detail: `Auto-chain halted — ${burn.reason}. Manual restart available; chain resumes once usage decays under cap.`,
+      window: '7d',
+      utilization: burn.projectedPct,
+      resetsAt: peekQuotaCache()?.sevenDay.resetsAt ?? null,
+    };
+  }
+  return null;
+}
+
+/**
  * Burn-rate gate for *scheduled* (non-interactive) work only. Returns a reason
  * string when the 7-day window is on pace to exceed quota before reset, so the
  * caller (the internal scheduler) can skip the fire. Manual buttons ignore
