@@ -63,7 +63,7 @@ export function SettingsField({
           ) : provider === 'codex' ? (
             <>
               <option value="haiku">haiku → gpt-5.4-mini</option>
-              <option value="sonnet">sonnet → gpt-5.5</option>
+              <option value="sonnet">sonnet → gpt-5.4</option>
               <option value="opus">opus → gpt-5.5</option>
             </>
           ) : (

@@ -34,7 +34,7 @@ Environment:
   CODEX_BIN            Codex executable (default: codex)
   CODEX_MODEL          Default Codex model
   CODEX_HAIKU_MODEL    Model used when TamTam asks for haiku (default: gpt-5.4-mini)
-  CODEX_SONNET_MODEL   Model used when TamTam asks for sonnet (default: gpt-5.5)
+  CODEX_SONNET_MODEL   Model used when TamTam asks for sonnet (default: gpt-5.4)
   CODEX_OPUS_MODEL     Model used when TamTam asks for opus (default: gpt-5.5)
 
 Permission mode mapping:
@@ -113,7 +113,7 @@ function readStdin() {
 function resolveModel(model) {
   const byAlias = {
     haiku: process.env.CODEX_HAIKU_MODEL || 'gpt-5.4-mini',
-    sonnet: process.env.CODEX_SONNET_MODEL || 'gpt-5.5',
+    sonnet: process.env.CODEX_SONNET_MODEL || 'gpt-5.4',
     opus: process.env.CODEX_OPUS_MODEL || 'gpt-5.5',
   };
   return byAlias[model] || process.env.CODEX_MODEL || model;

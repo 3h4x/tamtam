@@ -81,7 +81,7 @@ The `scripts/codex-shim.js` script launches `codex exec` and translates Codex JS
 Model aliases:
 
 - `haiku` → `gpt-5.4-mini`
-- `sonnet` → `gpt-5.5`
+- `sonnet` → `gpt-5.4`
 - `opus` → `gpt-5.5`
 
 Override with `CODEX_MODEL`, `CODEX_HAIKU_MODEL`, `CODEX_SONNET_MODEL`, or `CODEX_OPUS_MODEL`.

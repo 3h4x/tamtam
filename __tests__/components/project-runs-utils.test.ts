@@ -150,6 +150,7 @@ function makeEntry(partial: {
     navJobId: partial.kind,
     navSessionId: null,
     verdict: partial.verdict as Entry['verdict'],
+    failureLabel: null,
     logPruned: false,
     parentJobId: null,
     parentLabel: null,
@@ -159,6 +160,11 @@ function makeEntry(partial: {
 describe('buildReleaseSummary', () => {
   it('returns (no steps) for empty children', () => {
     expect(buildReleaseSummary([])).toBe('(no steps)');
+  });
+
+  it('explains a failed release that did not start a step', () => {
+    const release = makeEntry({ kind: 'release', exitCode: 1 });
+    expect(buildReleaseSummary([], release)).toBe('release blocked before first step');
   });
 
   it('shows ✓ for successful steps', () => {
@@ -282,6 +288,8 @@ function makeReleaseEntry(
     navJobId: id,
     navSessionId: null,
     verdict: undefined,
+    failureLabel: null,
+    releaseOutcome: null,
     logPruned: false,
     parentJobId,
     parentLabel: parentJobId ? 'run' : null,
@@ -311,6 +319,7 @@ function makeStepEntry(id: string, kind: string, startedAt: number, parentJobId:
     navJobId: id,
     navSessionId: null,
     verdict: undefined,
+    failureLabel: null,
     logPruned: false,
     parentJobId,
     parentLabel: parentJobId ? 'release' : null,
@@ -346,9 +355,32 @@ describe('groupReleaseChildren', () => {
     const out = groupReleaseChildren([run, release, test]);
     expect(out).toHaveLength(1);
     expect(out[0].kind).toBe('agent:frontend');
-    expect(out[0].exitCode).toBe(1);
+    expect(out[0].exitCode).toBe(0);
+    expect(out[0].releaseOutcome).toEqual({
+      status: 'failed',
+      label: 'release failed',
+      releaseJobId: 'rel-1',
+    });
     expect(out[0].finishedAt).toBe(1050);
     expect(out[0].chainedChildren?.[0].children?.[0].kind).toBe('test');
+  });
+
+  it('labels a nested failed release with no steps as blocked instead of a raw exit code', () => {
+    const run = makeStepEntry('agent-1', 'agent:improve', 1000, null, 0);
+    run.bucket = 'agent';
+    run.title = 'improve';
+    const release = makeReleaseEntry('rel-1', 1010, 1011, 'agent-1', 1);
+    const out = groupReleaseChildren([run, release]);
+    expect(out).toHaveLength(1);
+    expect(out[0].exitCode).toBe(0);
+    expect(out[0].failureLabel).toBeNull();
+    expect(out[0].releaseOutcome).toEqual({
+      status: 'blocked',
+      label: 'release blocked',
+      releaseJobId: 'rel-1',
+    });
+    expect(out[0].chainedChildren?.[0].failureLabel).toBe('release blocked');
+    expect(buildReleaseSummary(out[0].chainedChildren?.[0].children ?? [], out[0].chainedChildren?.[0])).toBe('release blocked before first step');
   });
 
   it('pipeline child steps are grouped under their containing release', () => {

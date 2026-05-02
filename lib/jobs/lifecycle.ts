@@ -767,9 +767,13 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
       const { releaseAfterRun } = await getProjectPipelineConfig(job.project);
       if (releaseAfterRun) {
         const { startRelease } = await import('@/lib/pipeline/start-release');
-        const r = await startRelease(job.project);
+        const r = await startRelease(job.project, { queueIfBlocked: true });
         if (r.ok) {
-          console.log(`[release-after-run] triggered release ${r.jobId} for ${job.project} after run ${job.id}`);
+          if ('status' in r && r.status === 'queued') {
+            console.log(`[release-after-run] queued release for ${job.project} after run ${job.id}`);
+          } else {
+            console.log(`[release-after-run] triggered release ${r.jobId} for ${job.project} after run ${job.id}`);
+          }
         } else {
           // Don't drop on the floor: queue a pending release and let the
           // pipeline-lock release hook (or `Resume jobs`) drain it. Covers
