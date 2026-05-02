@@ -112,7 +112,7 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
               {issue.title}
             </button>
             <span className="hidden sm:inline-flex shrink-0">
-              <Labels labels={issue.labels.slice(0, 3)} />
+              <Labels labels={issue.labels} limit={3} />
             </span>
           </div>
           <div className="flex items-center gap-x-2 gap-y-1 mt-1 flex-wrap text-xs text-text-tertiary tabular-nums">

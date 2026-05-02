@@ -180,7 +180,7 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
               </span>
             )}
             <span className="hidden sm:inline-flex shrink-0">
-              <Labels labels={pr.labels.slice(0, 3)} />
+              <Labels labels={pr.labels} limit={3} />
             </span>
           </div>
           <div className="flex items-center gap-x-2 gap-y-1 mt-1 flex-wrap text-xs text-text-tertiary tabular-nums">
