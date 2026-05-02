@@ -6,9 +6,10 @@ export const E2E_BASE = '/tmp/tamtam-e2e-pipeline';
 export const SHIM_DIR = join(E2E_BASE, 'shim-state');
 export const WORKSPACE_DIR = join(E2E_BASE, 'workspace');
 export const CLAUDE_SHIM = join(__dirname, 'mocks', 'claude-shim.js');
+export const CODEX_BIN = join(__dirname, 'mocks', 'codex-bin.js');
 
 // Projects exercised by the pipeline specs.
-const PROJECTS = ['happy-path', 'needs-attention', 'abort', 'paused', 'ui-live'];
+const PROJECTS = ['happy-path', 'needs-attention', 'abort', 'paused', 'ui-live', 'codex-shim'];
 
 export default async function globalSetup(): Promise<void> {
   // Clean up any previous run and start fresh.
@@ -42,6 +43,9 @@ export default async function globalSetup(): Promise<void> {
   }
   try {
     chmodSync(CLAUDE_SHIM, 0o755);
+  } catch { /* already executable */ }
+  try {
+    chmodSync(CODEX_BIN, 0o755);
   } catch { /* already executable */ }
 
   // Configure the test server: point workspace_path at our temp workspace,

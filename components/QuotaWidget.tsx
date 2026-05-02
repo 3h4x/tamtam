@@ -10,13 +10,27 @@ interface QuotaWindow {
 }
 
 interface QuotaSnapshot {
+  provider?: 'claude' | 'codex'
+  planType?: string | null
   fiveHour: QuotaWindow
   sevenDay: QuotaWindow
   sevenDaySonnet?: QuotaWindow | null
   sevenDayOpus?: QuotaWindow | null
+  extra?: {
+    isEnabled: boolean
+    monthlyLimit: number | null
+    usedCredits: number | null
+    utilization: number | null
+    currency: string | null
+  }
   fetchedAt: number
   stale: boolean
   gateEnabled?: boolean
+}
+
+interface QuotaState {
+  active: QuotaSnapshot | null
+  codex: QuotaSnapshot | null
 }
 
 const FIVE_HOUR_MS = 5 * 60 * 60 * 1000
@@ -104,6 +118,7 @@ function QuotaBar({
   windowMs?: number
 }) {
   const pct = Math.max(0, Math.min(100, win.utilization))
+  const fillPct = pct === 0 ? 0 : Math.max(2, pct)
   const pace = windowMs ? computePace(win, windowMs) : null
   const expectedMarkerPct = pace ? pace.elapsedFraction * 100 : null
   return (
@@ -122,7 +137,7 @@ function QuotaBar({
       <div className="relative h-2 w-full bg-bg-tertiary rounded overflow-hidden">
         <div
           className={`h-full transition-all duration-500 ${barClass(pct, warnAt, blockAt)}`}
-          style={{ width: `${Math.max(2, pct)}%` }}
+          style={{ width: `${fillPct}%` }}
         />
         {expectedMarkerPct != null && expectedMarkerPct > 0 && expectedMarkerPct < 100 && (
           <div
@@ -208,6 +223,31 @@ function DailyBurnRow({ sevenDay }: { sevenDay: QuotaWindow }) {
   )
 }
 
+function ExtraCreditsRow({
+  extra,
+  provider,
+}: {
+  extra: QuotaSnapshot['extra']
+  provider?: QuotaSnapshot['provider']
+}) {
+  if (!extra?.isEnabled || typeof extra.utilization !== 'number') return null
+  const exhausted = extra.utilization >= 100
+  const tone = exhausted ? 'text-status-error' : extra.utilization >= 80 ? 'text-status-warning' : 'text-status-success'
+  const isCodex = provider === 'codex'
+  const title = isCodex ? 'Model credit gate' : 'Extra usage'
+  const label = exhausted ? (isCodex ? 'blocked' : 'exhausted') : `${extra.utilization.toFixed(0)}% used`
+  const resetText = isCodex ? 'no reset reported' : 'no reset timestamp'
+  return (
+    <div className={`flex items-baseline justify-between gap-2 text-xs px-3 py-2 rounded ${exhausted ? 'bg-status-error/10 border border-status-error/20' : 'bg-bg-tertiary/50'}`}>
+      <span className={`font-medium ${exhausted ? 'text-status-error' : 'text-text-secondary'}`}>{title}</span>
+      <span className="tabular-nums">
+        <span className={`font-semibold ${tone}`}>{label}</span>
+        <span className="text-text-tertiary"> · {resetText}</span>
+      </span>
+    </div>
+  )
+}
+
 export function QuotaWidget({
   warnAt = 80,
   blockAt = 95,
@@ -217,10 +257,10 @@ export function QuotaWidget({
   warnAt?: number
   blockAt?: number
   refreshSeconds?: number
-  /** Compact mode for /stats: pace bars only, no scheduled-agents row, no daily-burn row, no per-model split. */
+  /** Compact mode for /stats: no scheduled-agents row, no daily-burn row, no per-model split. */
   compact?: boolean
 }) {
-  const [data, setData] = useState<QuotaSnapshot | null>(null)
+  const [data, setData] = useState<QuotaState>({ active: null, codex: null })
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -228,11 +268,15 @@ export function QuotaWidget({
     let cancelled = false
     async function load() {
       try {
-        const res = await fetch('/api/usage/quota')
-        if (!res.ok) throw new Error((await res.json())?.error ?? `HTTP ${res.status}`)
-        const json = (await res.json()) as QuotaSnapshot
+        const [activeRes, codexRes] = await Promise.all([
+          fetch('/api/usage/quota'),
+          fetch('/api/usage/quota?provider=codex'),
+        ])
+        if (!activeRes.ok) throw new Error((await activeRes.json())?.error ?? `HTTP ${activeRes.status}`)
+        const active = (await activeRes.json()) as QuotaSnapshot
+        const codex = codexRes.ok ? ((await codexRes.json()) as QuotaSnapshot) : null
         if (!cancelled) {
-          setData(json)
+          setData({ active, codex: active.provider === 'codex' ? null : codex })
           setError(null)
         }
       } catch (e: unknown) {
@@ -249,45 +293,55 @@ export function QuotaWidget({
     }
   }, [refreshSeconds])
 
-  if (loading && !data) {
+  if (loading && !data.active) {
     return <div className="skeleton h-24 rounded-lg" />
   }
-  if (error || !data) {
+  if (error || !data.active) {
     return (
       <div className="rounded-lg border border-border bg-bg-secondary p-4">
-        <div className="text-xs uppercase tracking-wide text-text-tertiary">Claude subscription quota</div>
+        <div className="text-xs uppercase tracking-wide text-text-tertiary">Agent subscription quota</div>
         <div className="text-sm text-status-error mt-1">{error ?? 'Quota unavailable'}</div>
       </div>
     )
   }
 
-  return (
+  const renderCard = (snapshot: QuotaSnapshot, options: { secondary?: boolean } = {}) => (
     <div className="rounded-lg border border-border bg-bg-secondary p-4 space-y-3">
       <div className="flex items-baseline justify-between">
         <div>
-          <div className="text-xs uppercase tracking-wide text-text-tertiary">Claude subscription quota</div>
+          <div className="text-xs uppercase tracking-wide text-text-tertiary">
+            {snapshot.provider === 'codex' ? 'Codex subscription quota' : 'Claude subscription quota'}
+          </div>
           <div className="text-[10px] text-text-tertiary mt-0.5">
-            {data.stale ? 'stale (last successful fetch)' : `updated ${new Date(data.fetchedAt).toLocaleTimeString()}`}
+            {snapshot.stale ? 'stale (last successful fetch)' : `updated ${new Date(snapshot.fetchedAt).toLocaleTimeString()}`}
           </div>
         </div>
         <div className="text-[10px] text-text-tertiary">
           warn ≥ {warnAt}% · block ≥ {blockAt}%
         </div>
       </div>
-      <QuotaBar label="5-hour rolling" win={data.fiveHour} warnAt={warnAt} blockAt={blockAt} windowMs={FIVE_HOUR_MS} />
-      <QuotaBar label="7-day weekly" win={data.sevenDay} warnAt={warnAt} blockAt={blockAt} windowMs={SEVEN_DAY_MS} />
-      {!compact && <DailyBurnRow sevenDay={data.sevenDay} />}
-      {!compact && data.gateEnabled && <ScheduledAgentsRow sevenDay={data.sevenDay} />}
-      {!compact && (data.sevenDaySonnet || data.sevenDayOpus) && (
+      <QuotaBar label="5-hour rolling" win={snapshot.fiveHour} warnAt={warnAt} blockAt={blockAt} windowMs={FIVE_HOUR_MS} />
+      <QuotaBar label="7-day weekly" win={snapshot.sevenDay} warnAt={warnAt} blockAt={blockAt} windowMs={SEVEN_DAY_MS} />
+      <ExtraCreditsRow extra={snapshot.extra} provider={snapshot.provider} />
+      {!compact && !options.secondary && <DailyBurnRow sevenDay={snapshot.sevenDay} />}
+      {!compact && !options.secondary && snapshot.gateEnabled && <ScheduledAgentsRow sevenDay={snapshot.sevenDay} />}
+      {!compact && !options.secondary && (snapshot.sevenDaySonnet || snapshot.sevenDayOpus) && (
         <div className="grid grid-cols-2 gap-3 pt-1">
-          {data.sevenDaySonnet && (
-            <QuotaBar label="7d · Sonnet" win={data.sevenDaySonnet} warnAt={warnAt} blockAt={blockAt} windowMs={SEVEN_DAY_MS} />
+          {snapshot.sevenDaySonnet && (
+            <QuotaBar label="7d · Sonnet" win={snapshot.sevenDaySonnet} warnAt={warnAt} blockAt={blockAt} windowMs={SEVEN_DAY_MS} />
           )}
-          {data.sevenDayOpus && (
-            <QuotaBar label="7d · Opus" win={data.sevenDayOpus} warnAt={warnAt} blockAt={blockAt} windowMs={SEVEN_DAY_MS} />
+          {snapshot.sevenDayOpus && (
+            <QuotaBar label="7d · Opus" win={snapshot.sevenDayOpus} warnAt={warnAt} blockAt={blockAt} windowMs={SEVEN_DAY_MS} />
           )}
         </div>
       )}
+    </div>
+  )
+
+  return (
+    <div className="space-y-3">
+      {renderCard(data.active)}
+      {data.codex && renderCard(data.codex, { secondary: true })}
     </div>
   )
 }

@@ -1035,6 +1035,14 @@ describe('readParsedLog', () => {
     expect(result).not.toContain('Completed');
   });
 
+  it('surfaces result error text when no assistant text was emitted', () => {
+    const logFile = join(tempDir, 'error-result.log');
+    const doneLine = '{"type":"result","subtype":"error","is_error":true,"duration_ms":1500,"session_id":"s1","result":"[codex-shim] codex produced no assistant output"}';
+    writeFileSync(logFile, doneLine + '\n');
+    const job = makeJob({ logPath: logFile });
+    expect(readParsedLog(job)).toBe('[codex-shim] codex produced no assistant output');
+  });
+
   it('concatenates multiple text events', () => {
     const logFile = join(tempDir, 'multi.log');
     const line1 = '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello "}}}';

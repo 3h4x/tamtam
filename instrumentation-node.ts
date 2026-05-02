@@ -286,7 +286,7 @@ export async function registerNode(): Promise<void> {
   // Quota drain ticker: every 60s, refresh the cached subscription quota and,
   // if we're below the block threshold, drain any releases that were deferred
   // while the 5h window was full.
-  const { prefetchQuota, peekQuotaCache } = await import('@/lib/usage/claude-quota');
+  const { prefetchQuota, peekQuotaCache } = await import('@/lib/usage/quota');
   const { listPendingReleaseProjects, drainPendingRelease } = await import('@/lib/pipeline/pending-release');
   const { getSettings } = await import('@/lib/shared/config');
   let lastDrainPct: number | null = null;

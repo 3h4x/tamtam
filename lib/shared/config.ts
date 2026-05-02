@@ -101,8 +101,8 @@ const DEFAULTS: TamTamConfig = {
 let _cache: { config: TamTamConfig; time: number } | null = null;
 const CACHE_TTL = 5; // seconds
 
-const VALID_CLAUDE_PROVIDERS = new Set(['claude', 'gemini', 'lmstudio', 'custom']);
-const PROJECT_MEMORY_PROVIDERS = new Set(['gemini', 'lmstudio']);
+const VALID_CLAUDE_PROVIDERS = new Set(['claude', 'gemini', 'lmstudio', 'codex', 'custom']);
+const PROJECT_MEMORY_PROVIDERS = new Set(['gemini', 'lmstudio', 'codex']);
 
 function shimPath(name: string): string {
   return join(process.env.TAMTAM_ROOT || process.cwd(), 'scripts', name);
@@ -110,13 +110,14 @@ function shimPath(name: string): string {
 
 function isShimPath(bin: string | undefined): boolean {
   if (!bin) return false;
-  return /scripts\/(gemini|lmstudio)-shim\.js$/.test(bin);
+  return /scripts\/(gemini|lmstudio|codex)-shim\.js$/.test(bin);
 }
 
 function inferClaudeProvider(claudeBin: string | undefined): string {
   if (!claudeBin) return DEFAULTS.claude_provider;
   if (claudeBin.endsWith('/scripts/gemini-shim.js') || claudeBin.endsWith('scripts/gemini-shim.js')) return 'gemini';
   if (claudeBin.endsWith('/scripts/lmstudio-shim.js') || claudeBin.endsWith('scripts/lmstudio-shim.js')) return 'lmstudio';
+  if (claudeBin.endsWith('/scripts/codex-shim.js') || claudeBin.endsWith('scripts/codex-shim.js')) return 'codex';
   if (claudeBin === DEFAULTS.claude_bin || claudeBin.endsWith('/claude') || claudeBin === 'claude') return 'claude';
   return 'custom';
 }
@@ -124,6 +125,7 @@ function inferClaudeProvider(claudeBin: string | undefined): string {
 function resolveClaudeBin(provider: string, storedBin: string | undefined): string {
   if (provider === 'gemini') return shimPath('gemini-shim.js');
   if (provider === 'lmstudio') return shimPath('lmstudio-shim.js');
+  if (provider === 'codex') return shimPath('codex-shim.js');
   // For claude/custom providers, ignore stored shim paths left over from a prior
   // gemini/lmstudio configuration — they would invoke the wrong backend.
   if (isShimPath(storedBin)) return DEFAULTS.claude_bin;

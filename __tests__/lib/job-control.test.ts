@@ -17,6 +17,7 @@ describe('job-control', () => {
 
   function makeSettings(overrides: Record<string, unknown> = {}) {
     return {
+      jobs_paused: false,
       budget_block_runs_enabled: true,
       budget_block_at_pct: 95,
       budget_warn_at_pct: 80,
@@ -54,7 +55,7 @@ describe('job-control', () => {
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: getSettingsMock,
     }));
-    vi.doMock('@/lib/usage/claude-quota', () => ({
+    vi.doMock('@/lib/usage/quota', () => ({
       peekQuotaCache: peekQuotaCacheMock,
       prefetchQuota: prefetchQuotaMock,
     }));
@@ -75,6 +76,12 @@ describe('job-control', () => {
     it('returns true after syncJobsPauseState(true)', () => {
       syncJobsPauseState(true);
       expect(isJobsPaused()).toBe(true);
+    });
+
+    it('returns true when persisted settings are paused even before runtime sync', () => {
+      getSettingsMock.mockReturnValue(makeSettings({ jobs_paused: true }));
+      expect(isJobsPaused()).toBe(true);
+      expect(jobsPausedResult('start a release')?.status).toBe(409);
     });
 
     it('returns false after syncJobsPauseState(false)', () => {
@@ -192,6 +199,26 @@ describe('job-control', () => {
       expect(result!.window).toBe('5h');
       expect(result!.utilization).toBe(95);
       expect(result!.detail).toContain('5h');
+    });
+
+    it('returns 429 when provider credits are exhausted', () => {
+      peekQuotaCacheMock.mockReturnValue({
+        ...makeSnapshot(10, 5),
+        provider: 'codex',
+        extra: {
+          isEnabled: true,
+          monthlyLimit: null,
+          usedCredits: null,
+          utilization: 100,
+          currency: null,
+        },
+      });
+      const result = budgetBlockedResult('start a run');
+      expect(result).not.toBeNull();
+      expect(result!.ok).toBe(false);
+      expect(result!.status).toBe(429);
+      expect(result!.window).toBe('credits');
+      expect(result!.detail).toContain('Codex model credit gate blocked');
     });
 
     it('does not block when only 7d utilization exceeds the limit', () => {

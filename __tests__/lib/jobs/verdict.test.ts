@@ -303,6 +303,19 @@ describe('readParsedLog', () => {
     expect(readParsedLog(makeJob({ logPath }))).toBe('Hello world');
   });
 
+  it('returns result error text when NDJSON has no assistant text', () => {
+    const resultLine = JSON.stringify({
+      type: 'result',
+      subtype: 'error',
+      is_error: true,
+      duration_ms: 100,
+      session_id: 's1',
+      result: '[codex-shim] codex produced no assistant output',
+    });
+    const logPath = writeLog(resultLine + '\n');
+    expect(readParsedLog(makeJob({ logPath }))).toBe('[codex-shim] codex produced no assistant output');
+  });
+
   it('includes tool_use annotation line', () => {
     // tool_use requires: content_block_start (type=tool_use) then content_block_stop
     const startLine = JSON.stringify({

@@ -1,14 +1,19 @@
-import { NextResponse } from 'next/server';
-import { getClaudeQuota, clearQuotaCache } from '@/lib/usage/claude-quota';
+import { NextRequest, NextResponse } from 'next/server';
+import { getQuotaForProvider, clearQuotaCache } from '@/lib/usage/quota';
 import { getSettings } from '@/lib/shared/config';
 
 function gateEnabled(): boolean {
   try { return getSettings()?.budget_block_runs_enabled === true; } catch { return false; }
 }
 
-export async function GET() {
+function providerFromRequest(request: NextRequest): 'active' | 'claude' | 'codex' {
+  const provider = request.nextUrl.searchParams.get('provider');
+  return provider === 'claude' || provider === 'codex' ? provider : 'active';
+}
+
+export async function GET(request: NextRequest) {
   try {
-    const snapshot = await getClaudeQuota();
+    const snapshot = await getQuotaForProvider(providerFromRequest(request));
     return NextResponse.json({ ...snapshot, gateEnabled: gateEnabled() });
   } catch (e) {
     return NextResponse.json(
@@ -18,10 +23,10 @@ export async function GET() {
   }
 }
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   clearQuotaCache();
   try {
-    const snapshot = await getClaudeQuota({ force: true });
+    const snapshot = await getQuotaForProvider(providerFromRequest(request), { force: true });
     return NextResponse.json({ ...snapshot, gateEnabled: gateEnabled() });
   } catch (e) {
     return NextResponse.json(

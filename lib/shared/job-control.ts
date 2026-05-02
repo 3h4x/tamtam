@@ -1,14 +1,15 @@
 import * as internalScheduler from '@/lib/scheduling/internal-scheduler';
 import { getSettings } from '@/lib/shared/config';
-import { peekQuotaCache, prefetchQuota } from '@/lib/usage/claude-quota';
+import { peekQuotaCache, prefetchQuota } from '@/lib/usage/quota';
 import { notify } from '@/lib/shared/notifications';
+import { computeWeeklyBurnThrottle } from '@/lib/shared/budget-throttle';
 
 export type JobsPausedResult = { ok: false; status: 409; detail: string };
 export type BudgetBlockedResult = {
   ok: false;
   status: 429;
   detail: string;
-  window: '5h' | '7d';
+  window: '5h' | '7d' | 'credits';
   utilization: number;
   resetsAt: string | null;
 };
@@ -16,7 +17,12 @@ export type BudgetBlockedResult = {
 let runtimeJobsPaused = false;
 
 export function isJobsPaused(): boolean {
-  return runtimeJobsPaused;
+  if (runtimeJobsPaused) return true;
+  try {
+    return !!getSettings().jobs_paused;
+  } catch {
+    return false;
+  }
 }
 
 export function jobsPausedResult(action = 'start new jobs'): JobsPausedResult | null {
@@ -48,17 +54,38 @@ export function budgetBlockedResult(action = 'start new jobs'): BudgetBlockedRes
   // Refresh in background so the next call sees fresh data.
   prefetchQuota();
   if (!snapshot) return null;
+
+  const extraUtilization = snapshot.extra?.utilization;
+  if (snapshot.extra?.isEnabled && typeof extraUtilization === 'number' && extraUtilization >= limit) {
+    const provider = snapshot.provider === 'codex' ? 'Codex' : 'Claude';
+    const detail = snapshot.provider === 'codex'
+      ? `${provider} model credit gate blocked (${extraUtilization.toFixed(0)}%). Will resume when Codex reports model credits are available.`
+      : `${provider} credits exhausted (${extraUtilization.toFixed(0)}%). Will resume when quota or credits are available.`;
+    fireBudgetBlockedNotification('credits', extraUtilization, null, action);
+    return {
+      ok: false,
+      status: 429,
+      detail,
+      window: 'credits',
+      utilization: extraUtilization,
+      resetsAt: null,
+    };
+  }
+
   // Only the 5-hour rolling window gates pipeline actions. The 7-day window
   // is informational — for active users it's structurally always over-pace
   // and would otherwise wedge the pipeline for days at a time.
   const win = snapshot.fiveHour;
   if (win.utilization < limit) return null;
   fireBudgetBlockedNotification('5h', win.utilization, win.resetsAt, action);
-  const resetsLabel = win.resetsAt ? new Date(win.resetsAt).toLocaleTimeString() : 'reset';
+  const provider = snapshot.provider === 'codex' ? 'Codex' : 'Claude';
+  const resumesLabel = win.resetsAt
+    ? `Will resume after ${new Date(win.resetsAt).toLocaleTimeString()}.`
+    : 'Will resume when quota or credits are available.';
   return {
     ok: false,
     status: 429,
-    detail: `Claude quota exceeded (5h at ${win.utilization.toFixed(0)}%). Will resume after ${resetsLabel}.`,
+    detail: `${provider} quota exceeded (5h at ${win.utilization.toFixed(0)}%). ${resumesLabel}`,
     window: '5h',
     utilization: win.utilization,
     resetsAt: win.resetsAt,
@@ -70,7 +97,7 @@ export function budgetBlockedResult(action = 'start new jobs'): BudgetBlockedRes
 // timestamp rolls over, the next block will notify again.
 const lastNotifiedKey = new Map<string, number>();
 function fireBudgetBlockedNotification(
-  window: '5h' | '7d',
+  window: '5h' | '7d' | 'credits',
   utilization: number,
   resetsAt: string | null,
   action: string,
@@ -149,23 +176,15 @@ export function runAutoChainGates(action = 'continue pipeline'): JobsPausedResul
  *
  * Fails OPEN when no snapshot is cached or the 7d reset timestamp is missing.
  */
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 export function scheduledBurnRateBlocked(): { reason: string; projectedPct: number } | null {
   let cfg;
   try { cfg = getSettings(); } catch { return null; }
   if (!cfg?.budget_block_runs_enabled) return null;
   const snapshot = peekQuotaCache();
   if (!snapshot) return null;
-  const win = snapshot.sevenDay;
-  if (win.msUntilReset == null || win.msUntilReset <= 0) return null;
-  const elapsedMs = SEVEN_DAYS_MS - win.msUntilReset;
-  if (elapsedMs <= 0) return null;
-  const projectedPct = win.utilization * (SEVEN_DAYS_MS / elapsedMs);
-  if (projectedPct <= 100) return null;
-  return {
-    reason: `7d burn rate too high: ${win.utilization.toFixed(0)}% used, projected ${projectedPct.toFixed(0)}%`,
-    projectedPct,
-  };
+  const burn = computeWeeklyBurnThrottle(snapshot.sevenDay);
+  if (!burn) return null;
+  return { reason: burn.reason, projectedPct: burn.projectedPct };
 }
 
 async function drainAllPendingReleasesAsync(): Promise<void> {

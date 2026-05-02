@@ -191,9 +191,9 @@ export function SettingsPage() {
     setSettings((prev) => {
       const next = { ...prev, [key]: value }
       if (key === 'claude_provider' && (value === 'claude' || value === 'custom')) {
-        // Drop stale shim paths left over from a prior gemini/lmstudio selection
+        // Drop stale shim paths left over from a prior shim selection
         // so the Claude CLI Path field shows the real default instead.
-        if (/scripts\/(gemini|lmstudio)-shim\.js$/.test(prev.claude_bin)) {
+        if (/scripts\/(gemini|lmstudio|codex)-shim\.js$/.test(prev.claude_bin)) {
           next.claude_bin = value === 'claude' ? SETTINGS_DEFAULTS.claude_bin : ''
         }
       }

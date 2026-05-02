@@ -47,7 +47,7 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
   },
   claude_bin: {
     label: 'Claude CLI Path',
-    help: 'Used for Claude or Custom provider. Gemini and LM Studio resolve to TamTam shim scripts.',
+    help: 'Used for Claude or Custom provider. Gemini, LM Studio, and Codex resolve to TamTam shim scripts.',
     group: 'agent',
     span: 1,
   },

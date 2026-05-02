@@ -110,7 +110,7 @@ export const KIND_COLOR: Record<KindBucket, string> = {
   push: 'bg-status-success/15 text-status-success',
   'mark-dod': 'bg-status-info/15 text-status-info',
   'pr-wait': 'bg-status-info/15 text-status-info',
-  agent: 'bg-purple-500/15 text-purple-400',
+  agent: 'bg-bg-tertiary text-text-secondary border border-border',
   other: 'bg-text-tertiary/15 text-text-secondary',
 }
 
