@@ -322,12 +322,14 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 - **TypeScript**: strict mode is on. Avoid `any`; ESLint allows it but prefer explicit types. Never use `// @ts-ignore` — fix the type instead.
 - **Error handling**: throw exceptions for unexpected failures; return typed result objects (`{ ok, error }`) only where callers need to branch on failure without crashing. Log errors to `console.error` before re-throwing in API routes.
 - **Async**: use `async/await` throughout. No raw `.then()` chains. Parallelise independent async work with `Promise.all`.
+- **UI styling**: use the design tokens and component patterns documented in `docs/UI.md`; do not introduce one-off color scales, spacing systems, or global CSS outside the existing Tailwind v4 token setup.
 - **Linting**: `pnpm lint` runs ESLint on `app/`, `components/`, `lib/`, `hooks/`. Auto-fix with `--fix` is acceptable. Run after significant edits.
 - **Type checking**: `pnpm type-check` runs `tsc --noEmit`. Run before committing any TypeScript change.
 
 ## Dependency & Supply-Chain Security
 - **Lock file**: always commit `pnpm-lock.yaml`. Never install packages with `--no-lockfile` or `--frozen-lockfile` bypassed.
-- **Allowed build scripts**: `package.json` pins `pnpm.onlyBuiltDependencies` to `[better-sqlite3, esbuild, sharp, unrs-resolver]`. Do not add a new package to this list without explicit user approval; postinstall scripts run arbitrary code.
+- **Install scripts**: inspect `postinstall`, `prepare`, `preinstall`, and `install` scripts before adding or updating any dependency. Treat them as arbitrary code execution during `pnpm install`.
+- **Allowed build scripts**: `package.json` pins `pnpm.onlyBuiltDependencies` to `[better-sqlite3, esbuild, sharp, unrs-resolver]`. Do not add a new package to this list without explicit user approval.
 - **No silent additions**: never add a new dependency not already in `package.json` without explicit user approval. Justify every new dep in the commit message (why it's needed, why no existing dep covers it).
 - **Verify before adding**: check new packages on npmjs.com for download count, publish date, and maintainer history before adding. Prefer packages with >1 M weekly downloads and >1 year of history.
 - **Audit after changes**: run `pnpm audit` after any `pnpm add`/`pnpm remove` and fix or document any high-severity findings before committing.
@@ -338,3 +340,9 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 - **DB schema changes**: always pair a schema edit in `lib/db/schema.ts` with `pnpm db:generate` (creates migration file) and `pnpm db:migrate` (applies it). Never edit migration files by hand; never delete them.
 - **Never bypass hooks**: do not pass `--no-verify` to `git commit`. If a hook fails, fix the underlying issue.
 - **No secrets in code**: use environment variables for all credentials. Never commit `.env` files or hardcode tokens/keys.
+
+## Scope & Safety Rules
+- **Destructive git operations**: do not run `git reset --hard`, `git clean`, force pushes, branch deletion, or history rewrites unless the user explicitly asks for that exact operation.
+- **Production data**: do not delete or rewrite `data/db/tamtam.db`, run destructive SQL, or remove project log directories without an explicit backup plan and user approval.
+- **Schema safety**: migrations must be additive or carefully backfilled when existing data matters; document any irreversible data loss before applying the migration.
+- **External side effects**: treat `git push`, GitHub issue edits, PR merge actions, webhook sends, and PM2 process changes as real side effects. Run them only when they are required by the task and the expected target is clear from the code or user request.
