@@ -7,7 +7,7 @@ import { fmtAbsolute } from '@/lib/shared/format-date'
 const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1000
 
 interface QuotaWindow { utilization: number; resetsAt: string | null; msUntilReset: number | null }
-interface QuotaSnapshot { fiveHour: QuotaWindow; sevenDay: QuotaWindow }
+interface QuotaSnapshot { fiveHour: QuotaWindow; sevenDay: QuotaWindow; gateEnabled?: boolean }
 
 export function JobsPauseToggle() {
   const [jobsPaused, setJobsPaused] = useState(false)
@@ -41,6 +41,9 @@ export function JobsPauseToggle() {
         if (!res.ok) return
         const snap = (await res.json()) as QuotaSnapshot
         if (!live) return
+        // Only flag throttle when the server-side gate is enabled — otherwise
+        // the indicator would lie about scheduled agents being paused.
+        if (!snap.gateEnabled) { setAutoThrottle(null); return }
         const win = snap.sevenDay
         if (win.msUntilReset == null || win.msUntilReset <= 0) {
           setAutoThrottle(null)
