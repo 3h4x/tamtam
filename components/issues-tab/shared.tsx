@@ -2,11 +2,13 @@
 
 import type { GhLabel } from '@/lib/client-api'
 
-export function Labels({ labels }: { labels: GhLabel[] }) {
+export function Labels({ labels, limit }: { labels: GhLabel[]; limit?: number }) {
   if (!labels.length) return null
+  const visible = typeof limit === 'number' ? labels.slice(0, limit) : labels
+  const hidden = labels.length - visible.length
   return (
     <span className="flex items-center gap-1 flex-wrap">
-      {labels.map((l) => (
+      {visible.map((l) => (
         <span
           key={l.name}
           className="px-1.5 py-0.5 text-[10px] rounded-full font-medium"
@@ -15,6 +17,14 @@ export function Labels({ labels }: { labels: GhLabel[] }) {
           {l.name}
         </span>
       ))}
+      {hidden > 0 && (
+        <span
+          className="px-1.5 py-0.5 text-[10px] rounded-full font-medium bg-bg-tertiary text-text-tertiary border border-border"
+          title={labels.slice(visible.length).map((l) => l.name).join(', ')}
+        >
+          +{hidden}
+        </span>
+      )}
     </span>
   )
 }
