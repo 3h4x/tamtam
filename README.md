@@ -15,7 +15,7 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 | **Multi-project overview** | All your git repos at a glance — uncommitted changes, CI status, last run |
 | **Skill composition** | DB-backed skills + file-based skills from the `claude-skills` submodule. Mix and match into agents |
 | **Real-time streaming** | Token-by-token output via SSE. Watch Claude think as it works |
-| **Interactive terminal** | Full Claude runner per project — model selector (haiku/sonnet/opus), skill picker, persistent sessions across reconnects |
+| **Interactive terminal** | Full Claude runner per project — model tier selector (Fast / Normal / Smart), skill picker, persistent sessions across reconnects |
 | **Smart push** | AI-generated commit messages, diff preview, one-click push |
 | **CI repair** | Failed CI run? One click sends Claude to fix it |
 | **Scheduling** | Built-in interval scheduler — daily reviews, nightly audits, whatever you need, running unattended |
@@ -92,7 +92,7 @@ Agents are built by selecting a model, writing a prompt, and attaching any numbe
 Agents live at `/agents`. Each agent has:
 - A name and optional prompt
 - A target project
-- A model (haiku / sonnet / opus)
+- A model tier (`fast` / `normal` / `smart`; legacy `haiku` / `sonnet` / `opus` still work)
 - An optional interval schedule
 - A composed set of skills
 

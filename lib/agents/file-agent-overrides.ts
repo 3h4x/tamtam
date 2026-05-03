@@ -1,5 +1,6 @@
 import { db, schema } from '@/lib/db';
 import { eq } from 'drizzle-orm';
+import { normalizeModelInput } from '@/lib/agents/model-aliases';
 
 // Per-file-agent runtime overrides. The .md file in `.tamtam/agents/<name>.md`
 // owns the agent's existence and its prompt body — anything that's part of
@@ -32,7 +33,12 @@ export function getFileAgentOverride(project: string, name: string): FileAgentOv
       .get();
     if (!row?.value) return null;
     const parsed = JSON.parse(row.value) as FileAgentOverride;
-    if (parsed && typeof parsed === 'object') return parsed;
+    if (parsed && typeof parsed === 'object') {
+      return {
+        ...parsed,
+        model: parsed.model === undefined ? undefined : normalizeModelInput(parsed.model, 'normal'),
+      };
+    }
     return null;
   } catch {
     return null;
@@ -44,7 +50,7 @@ export function setFileAgentOverride(project: string, name: string, patch: FileA
   const next: FileAgentOverride = { ...existing };
   if (patch.enabled !== undefined) next.enabled = patch.enabled;
   if (patch.schedule !== undefined) next.schedule = patch.schedule;
-  if (patch.model !== undefined) next.model = patch.model;
+  if (patch.model !== undefined) next.model = normalizeModelInput(patch.model, 'normal');
   if (patch.runner !== undefined) next.runner = patch.runner;
   if (patch.skillIds !== undefined) next.skillIds = patch.skillIds;
   const value = JSON.stringify(next);

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile
 import { join } from 'path';
 import { getBranchContext, gitLsTreeSync, gitShowSync } from '@/lib/git/git-branch';
 import { getFileAgentOverride } from '@/lib/agents/file-agent-overrides';
+import { normalizeModelInput } from '@/lib/agents/model-aliases';
 
 export interface FileAgent {
   id: string;
@@ -87,7 +88,7 @@ function buildFileAgent(
     project: projectName,
     skillIds: override?.skillIds ?? fileSkillIds,
     docPaths: [],
-    model: override?.model ?? meta.model ?? 'sonnet',
+    model: normalizeModelInput(override?.model ?? meta.model, 'normal'),
     prompt: body,
     schedule:
       override?.schedule !== undefined
@@ -232,7 +233,7 @@ export function writeFileAgent(
       })()
     : null;
 
-  const model = updates.model ?? current?.model ?? 'sonnet';
+  const model = normalizeModelInput(updates.model ?? current?.model, 'normal');
   const schedule = updates.schedule !== undefined ? (updates.schedule || null) : (current?.schedule ?? null);
   const skillIds = updates.skillIds ?? current?.skillIds ?? [];
   const runner = updates.runner ?? current?.runner ?? 'pm2';

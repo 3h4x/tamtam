@@ -214,9 +214,24 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(startJobMock).toHaveBeenCalledOnce();
     const [, cmd, fullPrompt, projPath] = startJobMock.mock.calls[0];
     expect(cmd).toContain('claude');
-    expect(cmd).toContain('--model sonnet');
+    expect(cmd).toContain('--model normal');
     expect(fullPrompt).toContain('run tests');
     expect(projPath).toBe('/path/to/proj');
+  });
+
+  it('sanitizes an invalid stored model before building the command', async () => {
+    insertAgent({ model: 'smart --resume injected' });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'run tests' }),
+    });
+
+    await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    const [, cmd] = startJobMock.mock.calls[0];
+    expect(cmd).toContain('--model normal');
+    expect(cmd).not.toContain('--resume');
+    expect(cmd).not.toContain('injected');
   });
 
   it('calls updateJob after startJob', async () => {

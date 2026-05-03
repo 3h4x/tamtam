@@ -9,13 +9,18 @@
 const { spawn } = require('child_process');
 const readline = require('readline');
 
-// Mapping TamTam/Claude models to Gemini CLI models
-const MODEL_MAP = {
-  'haiku': 'flash',
-  'sonnet': 'pro',
-  'opus': 'pro',
-  'thinking': 'thinking'
-};
+function resolveGeminiModel(model) {
+  const aliases = {
+    fast: process.env.GEMINI_FAST_MODEL || process.env.GEMINI_HAIKU_MODEL || 'flash',
+    normal: process.env.GEMINI_NORMAL_MODEL || process.env.GEMINI_SONNET_MODEL || 'pro',
+    smart: process.env.GEMINI_SMART_MODEL || process.env.GEMINI_OPUS_MODEL || 'pro',
+    haiku: process.env.GEMINI_FAST_MODEL || process.env.GEMINI_HAIKU_MODEL || 'flash',
+    sonnet: process.env.GEMINI_NORMAL_MODEL || process.env.GEMINI_SONNET_MODEL || 'pro',
+    opus: process.env.GEMINI_SMART_MODEL || process.env.GEMINI_OPUS_MODEL || 'pro',
+    thinking: process.env.GEMINI_THINKING_MODEL || 'thinking',
+  };
+  return aliases[model] || process.env.GEMINI_MODEL || model;
+}
 
 // Mapping Claude permission modes to Gemini approval modes
 const APPROVAL_MAP = {
@@ -28,7 +33,7 @@ const APPROVAL_MAP = {
 const args = process.argv.slice(2);
 const geminiArgs = ['--prompt', '-'];
 
-let model = 'flash';
+let model = resolveGeminiModel('fast');
 let approvalMode = 'yolo';
 let cwd = process.cwd();
 
@@ -38,11 +43,11 @@ for (let i = 0; i < args.length; i++) {
   if (arg === '--model') {
     if (i + 1 < args.length) {
       const val = args[++i];
-      model = MODEL_MAP[val] || val;
+      model = resolveGeminiModel(val);
     }
   } else if (arg.startsWith('--model=')) {
     const val = arg.substring('--model='.length);
-    model = MODEL_MAP[val] || val;
+    model = resolveGeminiModel(val);
   } else if (arg === '--permission-mode') {
     if (i + 1 < args.length) {
       const val = args[++i];

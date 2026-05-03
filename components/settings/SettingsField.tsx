@@ -2,6 +2,7 @@
 
 import { FIELDS, DEFAULTS, COL_SPAN, SELECT_CLASS, INPUT_CLASS } from '@/components/settings/constants'
 import type { SettingsFieldKey } from '@/components/settings/constants'
+import { MODEL_TIERS, MODEL_LABELS, getProviderModelHint } from '@/lib/agents/model-aliases'
 
 export type { SettingsFieldKey }
 
@@ -54,32 +55,15 @@ export function SettingsField({
         </select>
       ) : fieldKey === 'default_model' ? (
         <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
-          {provider === 'gemini' ? (
-            <>
-              <option value="haiku">haiku → flash</option>
-              <option value="sonnet">sonnet → pro</option>
-              <option value="opus">opus → pro</option>
-            </>
-          ) : provider === 'codex' ? (
-            <>
-              <option value="haiku">haiku → gpt-5.4-mini</option>
-              <option value="sonnet">sonnet → gpt-5.4</option>
-              <option value="opus">opus → gpt-5.5</option>
-            </>
-          ) : (
-            <>
-              <option value="haiku">haiku</option>
-              <option value="sonnet">sonnet</option>
-              <option value="opus">opus</option>
-            </>
-          )}
+          {MODEL_TIERS.map((model) => {
+            const hint = getProviderModelHint(provider, model)
+            return <option key={model} value={model}>{hint ? `${MODEL_LABELS[model]} → ${hint}` : MODEL_LABELS[model]}</option>
+          })}
         </select>
       ) : fieldKey === 'pipeline_model_review' || fieldKey === 'pipeline_model_fix' || fieldKey === 'pipeline_model_dod' || fieldKey === 'pipeline_model_commit' ? (
         <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
-          <option value="">{(fieldKey === 'pipeline_model_dod' || fieldKey === 'pipeline_model_commit') ? 'Default (haiku)' : 'Default (workspace)'}</option>
-          <option value="haiku">haiku</option>
-          <option value="sonnet">sonnet</option>
-          <option value="opus">opus</option>
+          <option value="">{(fieldKey === 'pipeline_model_dod' || fieldKey === 'pipeline_model_commit') ? 'Default (Fast)' : 'Default (workspace)'}</option>
+          {MODEL_TIERS.map((model) => <option key={model} value={model}>{MODEL_LABELS[model]}</option>)}
         </select>
       ) : fieldKey === 'permission_mode' ? (
         <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>

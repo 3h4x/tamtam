@@ -11,6 +11,7 @@ import { startJob } from '@/lib/jobs/pm2-jobs';
 import { withBasePrompt, getPermissionModeFlag } from '@/lib/shared/config';
 import { errMsg } from '@/lib/shared/types';
 import { runGates } from '@/lib/shared/job-control';
+import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 
 export async function POST(
   request: NextRequest,
@@ -27,14 +28,13 @@ export async function POST(
   let prompt = '';
   let personaPaths: string[] = [];
   const attachmentPaths: string[] = [];
-  let model = 'haiku';
+  let model = 'fast';
   let resumeSessionId = '';
   let contextMeta = '';
   let userPrompt = '';
   let ghIssueNumber: number | null = null;
   let ghIssueRepo = '';
   let ghIssueTitle = '';
-  const ALLOWED_MODELS = ['haiku', 'sonnet', 'opus'];
 
   const contentType = request.headers.get('content-type') ?? '';
   if (contentType.includes('multipart/form-data')) {
@@ -44,8 +44,9 @@ export async function POST(
     if (persona) personaPaths = [persona];
     const personasJson = form.get('personas') as string;
     if (personasJson) { try { personaPaths = JSON.parse(personasJson) } catch {} }
-    const formModel = (form.get('model') as string) ?? '';
-    if (formModel && ALLOWED_MODELS.includes(formModel)) model = formModel;
+    const { model: parsedModel, error: modelError } = parseOptionalKnownModelInput(form.get('model'), 'fast');
+    if (modelError) return NextResponse.json({ detail: modelError }, { status: 400 });
+    if (parsedModel) model = parsedModel;
     const formResumeId = form.get('resumeSessionId') as string;
     if (formResumeId) resumeSessionId = formResumeId;
     const formContextMeta = form.get('contextMeta') as string;
@@ -77,8 +78,9 @@ export async function POST(
     prompt = body.prompt ?? '';
     if (body.persona) personaPaths = [body.persona];
     if (body.personas) personaPaths = body.personas;
-    const bodyModel = body.model ?? '';
-    if (bodyModel && ALLOWED_MODELS.includes(bodyModel)) model = bodyModel;
+    const { model: parsedModel, error: modelError } = parseOptionalKnownModelInput(body.model, 'fast');
+    if (modelError) return NextResponse.json({ detail: modelError }, { status: 400 });
+    if (parsedModel) model = parsedModel;
     if (body.resumeSessionId) resumeSessionId = body.resumeSessionId;
     if (body.contextMeta) contextMeta = body.contextMeta;
     if (body.userPrompt) userPrompt = body.userPrompt;

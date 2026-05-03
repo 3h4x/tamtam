@@ -5,6 +5,7 @@ import {
   normalizeBudgetSubscriptionProviders,
   type BudgetSubscriptionProvider,
 } from '@/lib/usage/subscription-providers';
+import { normalizeModelInput, resolveModelAlias } from '@/lib/agents/model-aliases';
 
 /**
  * Read all settings from the DB and return as a config object.
@@ -66,7 +67,7 @@ const DEFAULTS: TamTamConfig = {
   weekends: false,
   launchagent_prefix: 'com.tamtam',
   base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
-  default_model: 'haiku',
+  default_model: 'fast',
   permission_mode: 'bypassPermissions',
   commit_style: 'Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Types: feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert.',
   review_verdict_rules: `Pragmatic verdict rules — the release pipeline needs to actually reach LGTM sometimes:
@@ -91,7 +92,7 @@ const DEFAULTS: TamTamConfig = {
   notification_on_review_do_not_ship: false,
   notification_on_agent_run_fail: false,
   // Empty string = use the per-step sensible default (review/fix → workspace
-  // default_model; dod/commit → haiku since they're cheap classification tasks).
+  // default_model; dod/commit → fast since they're cheap classification tasks).
   pipeline_model_review: '',
   pipeline_model_fix: '',
   pipeline_model_dod: '',
@@ -162,7 +163,7 @@ export function getSettings(): TamTamConfig {
     weekends: map.weekends === 'on',
     launchagent_prefix: map.launchagent_prefix ?? DEFAULTS.launchagent_prefix,
     base_prompt: map.base_prompt ?? DEFAULTS.base_prompt,
-    default_model: map.default_model ?? DEFAULTS.default_model,
+    default_model: normalizeModelInput(map.default_model, DEFAULTS.default_model as 'fast'),
     permission_mode: map.permission_mode ?? DEFAULTS.permission_mode,
     commit_style: map.commit_style ?? DEFAULTS.commit_style,
     review_verdict_rules: map.review_verdict_rules ?? DEFAULTS.review_verdict_rules,
@@ -181,10 +182,10 @@ export function getSettings(): TamTamConfig {
     notification_on_fix_loop_exhausted: map.notification_on_fix_loop_exhausted === 'true',
     notification_on_review_do_not_ship: map.notification_on_review_do_not_ship === 'true',
     notification_on_agent_run_fail: map.notification_on_agent_run_fail === 'true',
-    pipeline_model_review: map.pipeline_model_review ?? DEFAULTS.pipeline_model_review,
-    pipeline_model_fix: map.pipeline_model_fix ?? DEFAULTS.pipeline_model_fix,
-    pipeline_model_dod: map.pipeline_model_dod ?? DEFAULTS.pipeline_model_dod,
-    pipeline_model_commit: map.pipeline_model_commit ?? DEFAULTS.pipeline_model_commit,
+    pipeline_model_review: resolveModelAlias(map.pipeline_model_review),
+    pipeline_model_fix: resolveModelAlias(map.pipeline_model_fix),
+    pipeline_model_dod: resolveModelAlias(map.pipeline_model_dod),
+    pipeline_model_commit: resolveModelAlias(map.pipeline_model_commit),
     review_retry_on_parse_failure:
       map.review_retry_on_parse_failure === undefined
         ? DEFAULTS.review_retry_on_parse_failure
@@ -223,7 +224,7 @@ const VALID_PERMISSION_MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'def
  * user-configured override (Settings → Pipeline) when set; otherwise falls
  * back to the per-step default. `review` and `fix` default to the workspace
  * default_model (the user's general-purpose model); `dod` and `commit`
- * default to haiku because they're cheap, well-scoped tasks where stronger
+ * default to fast because they're cheap, well-scoped tasks where stronger
  * models would be wasteful.
  */
 export type PipelineStepKind = 'review' | 'fix' | 'dod' | 'commit';
@@ -236,9 +237,9 @@ export function getPipelineModel(step: PipelineStepKind): string {
     step === 'dod'    ? cfg.pipeline_model_dod    :
                         cfg.pipeline_model_commit
   );
-  if (override) return override;
-  if (step === 'dod' || step === 'commit') return 'haiku';
-  return cfg.default_model;
+  if (override) return normalizeModelInput(override);
+  if (step === 'dod' || step === 'commit') return 'fast';
+  return normalizeModelInput(cfg.default_model);
 }
 
 /** Returns the --permission-mode flag string for the Claude CLI. */
