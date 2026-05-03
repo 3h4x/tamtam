@@ -251,18 +251,22 @@ function unwrapCodexEvent(event) {
 function usageFromTokenCount(event) {
   const directUsage = event?.usage || event?.payload?.usage;
   if (directUsage) {
+    const cachedInputTokens = directUsage.cached_input_tokens || 0;
+    const inputTokens = directUsage.input_tokens || 0;
     return {
-      inputTokens: directUsage.input_tokens || 0,
+      inputTokens: Math.max(0, inputTokens - cachedInputTokens),
       outputTokens: directUsage.output_tokens || 0,
-      cacheReadInputTokens: directUsage.cached_input_tokens || 0,
+      cacheReadInputTokens: cachedInputTokens,
     };
   }
   const info = event?.info || event?.payload?.info || {};
   const usage = info.last_token_usage || info.total_token_usage || {};
+  const cachedInputTokens = usage.cached_input_tokens || 0;
+  const inputTokens = usage.input_tokens || 0;
   return {
-    inputTokens: usage.input_tokens || 0,
+    inputTokens: Math.max(0, inputTokens - cachedInputTokens),
     outputTokens: usage.output_tokens || 0,
-    cacheReadInputTokens: usage.cached_input_tokens || 0,
+    cacheReadInputTokens: cachedInputTokens,
   };
 }
 

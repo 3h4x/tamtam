@@ -82,7 +82,7 @@ for (const event of events) console.log(JSON.stringify(event));
     expect(text).toBe('NEEDS ATTENTION');
     expect(final.session_id).toBe(sessionId);
     expect(final.modelUsage['gpt-5.4']).toMatchObject({
-      inputTokens: 12,
+      inputTokens: 8,
       outputTokens: 3,
       cacheReadInputTokens: 4,
     });
@@ -256,9 +256,45 @@ for (const event of events) console.log(JSON.stringify(event));
     expect(final.session_id).toBe(sessionId);
     expect(final.is_error).toBe(false);
     expect(final.modelUsage['gpt-5.4']).toMatchObject({
-      inputTokens: 12489,
+      inputTokens: 2377,
       outputTokens: 20,
       cacheReadInputTokens: 10112,
+    });
+  });
+
+  it('reports Codex cached input separately instead of double-counting it as full-price input', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
+    tempDirs.push(dir);
+    const fakeCodex = join(dir, 'codex');
+    await writeFile(fakeCodex, `#!/usr/bin/env node
+const events = [
+  { type: 'thread.started', thread_id: 'sess-cache' },
+  { type: 'item.completed', item: { type: 'agent_message', text: 'done' } },
+  { type: 'turn.completed', usage: { input_tokens: 1000, cached_input_tokens: 900, output_tokens: 50 } },
+];
+for (const event of events) console.log(JSON.stringify(event));
+`);
+    await chmod(fakeCodex, 0o755);
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--output-format',
+      'stream-json',
+      '--model',
+      'sonnet',
+    ], {
+      ...process.env,
+      CODEX_BIN: fakeCodex,
+    });
+
+    expect(result.code).toBe(0);
+    const lines = result.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    const final = lines.find((line) => line.type === 'result');
+
+    expect(final.modelUsage['gpt-5.4']).toMatchObject({
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadInputTokens: 900,
     });
   });
 
