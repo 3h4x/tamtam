@@ -299,17 +299,20 @@ describe('GET /api/jobs/notifications', () => {
   let GET: any;
   let unseenFinishedMock: ReturnType<typeof vi.fn>;
   let jobToDictMock: ReturnType<typeof vi.fn>;
+  let probeJobStatusMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
 
     unseenFinishedMock = vi.fn().mockReturnValue([]);
     jobToDictMock = vi.fn().mockImplementation((j: JobData) => ({ id: j.id }));
+    probeJobStatusMock = vi.fn().mockResolvedValue('running');
 
     vi.doMock('@/lib/jobs/job-storage', () => ({
       unseenFinished: unseenFinishedMock,
       jobToDict: jobToDictMock,
       listJobs: vi.fn().mockReturnValue([]),
+      probeJobStatus: probeJobStatusMock,
     }));
 
     const mod = await import('@/app/api/jobs/notifications/route');

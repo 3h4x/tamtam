@@ -1,4 +1,15 @@
 tools:
+  - name: tamtam_api_get
+    description: Fetch any TamTam API route under http://127.0.0.1:1337/api
+    url: http://127.0.0.1:1337/api/{+path}
+    timeout: 10000
+    params:
+      - name: path
+        description: API path without leading slash, for example jobs/notifications or projects/by-project/tamtam/recommendations
+        required: true
+    response:
+      type: json
+
   - name: tamtam_health
     description: Check TamTam health
     url: http://127.0.0.1:1337/api/health
@@ -52,6 +63,13 @@ tools:
       - name: jobId
         description: TamTam job ID
         required: true
+    response:
+      type: json
+
+  - name: tamtam_notifications
+    description: Fetch TamTam notification dropdown data
+    url: http://127.0.0.1:1337/api/jobs/notifications
+    timeout: 10000
     response:
       type: json
 
