@@ -22,9 +22,10 @@ It acts as a translation layer: intercepting Claude-style commands, launching th
 The shim takes incoming arguments designed for Claude and translates them to their Gemini CLI equivalents:
 
 *   **Models:**
-    *   `haiku` → `flash`
-    *   `sonnet` → `pro`
-    *   `opus` → `pro`
+    *   `fast` → `flash`
+    *   `normal` → `pro`
+    *   `smart` → `pro`
+    *   legacy `haiku` / `sonnet` / `opus` still map to the same tiers
     *   `thinking` → `thinking`
 *   **Permission / Approval Modes:**
     *   `bypassPermissions` → `yolo`
@@ -33,6 +34,13 @@ The shim takes incoming arguments designed for Claude and translates them to the
     *   `default` → `default`
 
 Other standard arguments like `--cwd` are passed through appropriately, and the `--output-format stream-json` flag is supplied to ensure the Gemini CLI outputs structured JSON lines.
+
+Optional model overrides:
+
+- `GEMINI_FAST_MODEL`
+- `GEMINI_NORMAL_MODEL`
+- `GEMINI_SMART_MODEL`
+- legacy `GEMINI_HAIKU_MODEL`, `GEMINI_SONNET_MODEL`, and `GEMINI_OPUS_MODEL` are still honored as fallbacks
 
 ### Event Stream Translation
 
@@ -80,19 +88,20 @@ The `scripts/codex-shim.js` script launches `codex exec` and translates Codex JS
 
 Model aliases:
 
-- `haiku` → `gpt-5.4-mini`
-- `sonnet` → `gpt-5.4`
-- `opus` → `gpt-5.5`
+- `fast` → `gpt-5.4-mini`
+- `normal` → `gpt-5.4`
+- `smart` → `gpt-5.5`
+- legacy `haiku` / `sonnet` / `opus` are still accepted as aliases
 
-Override with `CODEX_MODEL`, `CODEX_HAIKU_MODEL`, `CODEX_SONNET_MODEL`, or `CODEX_OPUS_MODEL`.
+Override with `CODEX_MODEL`, `CODEX_FAST_MODEL`, `CODEX_NORMAL_MODEL`, or `CODEX_SMART_MODEL`. Legacy `CODEX_HAIKU_MODEL`, `CODEX_SONNET_MODEL`, and `CODEX_OPUS_MODEL` still work as fallbacks.
 
 Permission mapping defaults to Codex `workspace-write` sandbox with `-a never` for non-interactive runs. `plan` uses `read-only`. Set `CODEX_DANGEROUS_BYPASS=1` only if you intentionally want TamTam's `bypassPermissions` mode to run Codex with `danger-full-access`.
 
 Manual usage:
 
 ```bash
-node scripts/codex-shim.js --print --model sonnet -p "Write one sentence."
-node scripts/codex-shim.js --print --output-format stream-json --model sonnet < prompt.txt
+node scripts/codex-shim.js --print --model normal -p "Write one sentence."
+node scripts/codex-shim.js --print --output-format stream-json --model normal < prompt.txt
 ```
 
 ### Codex Quota
@@ -140,10 +149,13 @@ Environment variables:
 LMSTUDIO_BASE_URL=http://127.0.0.1:1234
 LMSTUDIO_MODEL=your-loaded-model
 
-# Optional per-TamTam-model aliases:
+# Optional per-tier aliases:
+LMSTUDIO_FAST_MODEL=your-fast-model
+LMSTUDIO_NORMAL_MODEL=your-default-model
+LMSTUDIO_SMART_MODEL=your-largest-model
+
+# Legacy aliases still honored:
 LMSTUDIO_HAIKU_MODEL=your-fast-model
-LMSTUDIO_SONNET_MODEL=your-default-model
-LMSTUDIO_OPUS_MODEL=your-largest-model
 
 # Optional:
 LMSTUDIO_API_KEY=...
@@ -151,7 +163,7 @@ LMSTUDIO_TEMPERATURE=0.2
 LMSTUDIO_CONTEXT_LENGTH=8192
 ```
 
-If no alias is set, `LMSTUDIO_MODEL` is used. If neither is set, the shim passes through TamTam's requested model name (`haiku`, `sonnet`, or `opus`). `LMSTUDIO_BASE_URL` may include a trailing `/v1` from older OpenAI-compatible setup examples; the shim normalizes it back to the server root before calling `/api/v1/chat`.
+If no alias is set, `LMSTUDIO_MODEL` is used. If neither is set, the shim passes through TamTam's requested model name (`fast`, `normal`, or `smart`, with legacy `haiku` / `sonnet` / `opus` still accepted). `LMSTUDIO_BASE_URL` may include a trailing `/v1` from older OpenAI-compatible setup examples; the shim normalizes it back to the server root before calling `/api/v1/chat`.
 
 ### Event Translation
 
@@ -167,7 +179,7 @@ For plain `--print` calls without `--output-format stream-json`, the shim writes
 ### Usage
 
 ```bash
-LMSTUDIO_MODEL=qwen3-coder node scripts/lmstudio-shim.js --print --model haiku -p "Write one sentence."
-LMSTUDIO_MODEL=qwen3-coder node scripts/lmstudio-shim.js --print --output-format stream-json --model sonnet < prompt.txt
-LMSTUDIO_MODEL=qwen3-coder node scripts/lmstudio-shim.js --print --output-format stream-json --model sonnet --resume resp_abc123 < followup.txt
+LMSTUDIO_MODEL=qwen3-coder node scripts/lmstudio-shim.js --print --model fast -p "Write one sentence."
+LMSTUDIO_MODEL=qwen3-coder node scripts/lmstudio-shim.js --print --output-format stream-json --model normal < prompt.txt
+LMSTUDIO_MODEL=qwen3-coder node scripts/lmstudio-shim.js --print --output-format stream-json --model normal --resume resp_abc123 < followup.txt
 ```

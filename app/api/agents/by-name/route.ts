@@ -6,6 +6,7 @@ import { errMsg } from '@/lib/shared/types';
 import { clearAgentsCache, normalizeAgent } from '@/lib/agents/agents-cache';
 import { loadFileAgent, writeFileAgent } from '@/lib/agents/tamtam-file-agents';
 import { resolveProjectPath } from '@/lib/shared/project-data';
+import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 
 // PATCH /api/agents/by-name
 // Lets an agent update itself by project+name without knowing its UUID.
@@ -18,6 +19,8 @@ export async function PATCH(request: NextRequest) {
   if (!project?.trim() || !name?.trim()) {
     return NextResponse.json({ detail: 'project and name are required' }, { status: 400 });
   }
+  const { model: parsedModel, error: modelError } = parseOptionalKnownModelInput(fields.model, 'normal');
+  if (modelError) return NextResponse.json({ detail: modelError }, { status: 400 });
 
   // Try DB agent first
   const existing = db
@@ -29,7 +32,7 @@ export async function PATCH(request: NextRequest) {
   if (existing) {
     const updates: Record<string, unknown> = { updatedAt: Date.now() / 1000 };
     if (fields.skillIds !== undefined) updates.skillIds = JSON.stringify(fields.skillIds);
-    if (fields.model !== undefined) updates.model = fields.model;
+    if (fields.model !== undefined) updates.model = parsedModel ?? 'normal';
     if (fields.prompt !== undefined) updates.prompt = fields.prompt;
     if (fields.schedule !== undefined) updates.schedule = fields.schedule || null;
     if (fields.runner !== undefined) updates.runner = fields.runner;
@@ -79,7 +82,7 @@ export async function PATCH(request: NextRequest) {
       try {
         const updated = writeFileAgent(projPath, project.trim(), name.trim(), {
           prompt: fields.prompt,
-          model: fields.model,
+          model: parsedModel ?? undefined,
           schedule: fields.schedule,
           skillIds: fields.skillIds,
           runner: fields.runner,

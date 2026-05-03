@@ -6,6 +6,7 @@ import { errMsg } from '@/lib/shared/types';
 import { getAllAgentsCached, clearAgentsCache, normalizeAgent } from '@/lib/agents/agents-cache';
 import { scanFileAgents, writeFileAgent, type FileAgent } from '@/lib/agents/tamtam-file-agents';
 import { resolveProjectPath } from '@/lib/shared/project-data';
+import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 
 const ALL_FILE_AGENTS_TTL_MS = 10_000;
 let _allFileAgentsCache: { agents: FileAgent[]; time: number } | null = null;
@@ -72,6 +73,10 @@ export async function POST(request: NextRequest) {
   if (!project?.trim()) {
     return NextResponse.json({ detail: 'project is required' }, { status: 400 });
   }
+  const { model: parsedModel, error: modelError } = parseOptionalKnownModelInput(model, 'normal');
+  if (modelError) {
+    return NextResponse.json({ detail: modelError }, { status: 400 });
+  }
 
   const now = Date.now() / 1000;
   const id = `agent-${Date.now()}`;
@@ -81,7 +86,7 @@ export async function POST(request: NextRequest) {
     project: project.trim(),
     skillIds: JSON.stringify(skillIds || []),
     docPaths: JSON.stringify(docPaths || []),
-    model: model || 'sonnet',
+    model: parsedModel ?? 'normal',
     prompt: prompt || '',
     schedule: schedule || null,
     runner: runner || 'pm2',

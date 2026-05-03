@@ -117,7 +117,7 @@ Configuration for scheduled automated agents.
 | `name` | TEXT | — | NOT NULL |
 | `project` | TEXT | — | NOT NULL; project name |
 | `skillIds` | TEXT | `'[]'` | JSON array of skill IDs |
-| `model` | TEXT | `'sonnet'` | `haiku` / `sonnet` / `opus` |
+| `model` | TEXT | `'normal'` | Semantic tier stored by new writes: `fast` / `normal` / `smart`. Legacy rows may still contain `haiku` / `sonnet` / `opus` aliases and are normalized on read. |
 | `prompt` | TEXT | `''` | Task prompt for scheduled runs |
 | `schedule` | TEXT | — | nullable; e.g. "1h", "30m"; null = manual only |
 | `runner` | TEXT | `'pm2'` | `pm2` or `launchctl` |

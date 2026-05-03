@@ -4,16 +4,11 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { fetchProjectDocs } from '@/lib/client-api'
 import type { Agent, Skill, Persona, ProjectDoc } from '@/lib/client-api'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
+import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, normalizeModelInput } from '@/lib/agents/model-aliases'
 
-const MODELS = ['sonnet', 'opus', 'haiku']
+const MODELS = [...MODEL_TIERS]
 const RUNNERS = ['pm2', 'launchctl']
 const SCHEDULES = ['', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h']
-
-const MODEL_LABELS: Record<string, { label: string; desc: string }> = {
-  sonnet: { label: 'Sonnet', desc: 'Fast & capable' },
-  opus: { label: 'Opus', desc: 'Most intelligent' },
-  haiku: { label: 'Haiku', desc: 'Quick & light' },
-}
 
 export function AgentModal({
   agent,
@@ -40,7 +35,7 @@ export function AgentModal({
   const [selectedDocPaths, setSelectedDocPaths] = useState<string[]>(agent?.docPaths || [])
   const [availableDocs, setAvailableDocs] = useState<ProjectDoc[]>([])
   const [contextTab, setContextTab] = useState<'skills' | 'docs'>('skills')
-  const [model, setModel] = useState(agent?.model || template?.model || 'sonnet')
+  const [model, setModel] = useState(normalizeModelInput(agent?.model || template?.model, 'normal'))
   const [schedule, setSchedule] = useState(agent?.schedule || template?.schedule || '')
   const [runner, setRunner] = useState(agent?.runner || template?.runner || 'pm2')
   const [enabled, setEnabled] = useState<boolean>(agent ? agent.enabled : true)
@@ -77,7 +72,7 @@ export function AgentModal({
     setAgentPrompt(src.prompt || '')
     setSelectedSkills(src.skillIds || [])
     setSelectedDocPaths((agent?.docPaths) || [])
-    setModel(src.model || 'sonnet')
+    setModel(normalizeModelInput(src.model, 'normal'))
     setSchedule(src.schedule || '')
     setRunner(src.runner || 'pm2')
     if (agent) setEnabled(agent.enabled)
@@ -170,13 +165,14 @@ export function AgentModal({
               <div className="mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Model</div>
               <div className="flex gap-px p-0.5 rounded-lg bg-bg-secondary border border-border">
                 {MODELS.map(m => {
-                  const info = MODEL_LABELS[m]
+                  const label = MODEL_LABELS[m]
+                  const desc = MODEL_DESCRIPTIONS[m]
                   const sel = model === m
                   return (
                     <button
                       key={m}
                       type="button"
-                      title={info.desc}
+                      title={desc}
                       className={`px-4 py-2 rounded-md text-sm font-medium cursor-pointer transition-all whitespace-nowrap ${
                         sel
                           ? 'bg-accent text-white shadow-sm'
@@ -184,7 +180,7 @@ export function AgentModal({
                       }`}
                       onClick={() => setModel(m)}
                     >
-                      {info.label}
+                      {label}
                     </button>
                   )
                 })}

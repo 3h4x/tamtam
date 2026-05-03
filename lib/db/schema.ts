@@ -91,7 +91,7 @@ export const agents = sqliteTable('agents', {
   name: text('name').notNull(),
   project: text('project').notNull(),
   skillIds: text('skill_ids').notNull().default('[]'),  // JSON array of skill IDs
-  model: text('model').notNull().default('sonnet'),
+  model: text('model').notNull().default('normal'),
   prompt: text('prompt').notNull().default(''),  // default task prompt for scheduled runs
   schedule: text('schedule'),  // e.g. "1h", "30m", "8h", null = manual only
   runner: text('runner').notNull().default('pm2'),  // "launchctl" or "pm2"

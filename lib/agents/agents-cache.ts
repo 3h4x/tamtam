@@ -1,4 +1,5 @@
 import { db, schema } from '@/lib/db';
+import { normalizeModelInput } from '@/lib/agents/model-aliases';
 
 export type AgentRow = typeof schema.agents.$inferSelect;
 export type NormalizedAgent = Omit<AgentRow, 'skillIds' | 'docPaths'> & { skillIds: string[]; docPaths: string[] };
@@ -6,6 +7,7 @@ export type NormalizedAgent = Omit<AgentRow, 'skillIds' | 'docPaths'> & { skillI
 export function normalizeAgent(row: AgentRow): NormalizedAgent {
   return {
     ...row,
+    model: normalizeModelInput(row.model, 'normal'),
     skillIds: JSON.parse(row.skillIds || '[]'),
     docPaths: JSON.parse(row.docPaths || '[]'),
   };

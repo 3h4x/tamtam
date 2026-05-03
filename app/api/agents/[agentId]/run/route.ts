@@ -15,6 +15,7 @@ import { exec } from '@/lib/shared/shell';
 import { parseFileAgentId, loadFileAgent } from '@/lib/agents/tamtam-file-agents';
 import { getAgentMemoryDir, getAgentMemoryPath, readAgentMemory, ensureAgentMemoryDir, buildMemoryBlock } from '@/lib/agents/agent-memory';
 import { runGates } from '@/lib/shared/job-control';
+import { normalizeModelInput } from '@/lib/agents/model-aliases';
 
 export async function POST(
   request: NextRequest,
@@ -186,7 +187,7 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   // Build command. We prepend the composed skills directly to the prompt
   // (stdin) rather than using --append-system-prompt, which requires a value
   // argument and would need escaping for multi-line content.
-  const modelFlag = agent.model ? `--model ${agent.model}` : '';
+  const modelFlag = agent.model ? `--model ${normalizeModelInput(agent.model, 'normal')}` : '';
   const cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()} ${modelFlag}`;
 
   const corePrompt = systemPrompt && taskPrompt

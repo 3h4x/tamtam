@@ -215,7 +215,7 @@ export function SkillsPage() {
           name: agentName,
           project: selectedProject,
           skillIds: [skill.id],
-          model: 'sonnet',
+          model: 'normal',
           prompt: skill.description || '',
           schedule: SUGGESTED_SCHEDULES[skill.id] || null,
           runner: 'pm2',

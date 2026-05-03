@@ -10,6 +10,7 @@ import { useToast } from '@/components/Toast'
 import { AgentModal } from '@/components/agents-tab/AgentModal'
 import { AgentRow } from '@/components/agents-tab/AgentRow'
 import { RecommendedAgents } from '@/components/agents-tab/RecommendedAgents'
+import { normalizeModelInput } from '@/lib/agents/model-aliases'
 
 interface RecommendedAgent extends AgentTemplateRecord {
   skillIds: string[]
@@ -21,7 +22,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
   {
     name: 'security-review',
     description: 'Scans uncommitted diffs for OWASP issues, secrets, and vulnerabilities.',
-    model: 'sonnet',
+    model: 'normal',
     schedule: '24h',
     runner: 'pm2',
     prompt: '',
@@ -30,7 +31,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
   {
     name: 'dependency-check',
     description: 'Scans for outdated or vulnerable dependencies and suggests updates.',
-    model: 'sonnet',
+    model: 'normal',
     schedule: '24h',
     runner: 'pm2',
     prompt: '',
@@ -39,7 +40,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
   {
     name: 'ci-monitor',
     description: 'Checks GitHub Actions status and applies fixes when the latest run fails.',
-    model: 'sonnet',
+    model: 'normal',
     schedule: '30m',
     runner: 'pm2',
     prompt: '',
@@ -48,7 +49,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
   {
     name: 'release-ready',
     description: 'Pre-flight check: runs tests and surfaces whether the project is ready to ship.',
-    model: 'sonnet',
+    model: 'normal',
     schedule: '24h',
     runner: 'pm2',
     prompt: '',
@@ -57,7 +58,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
   {
     name: 'tests',
     description: 'Adds missing tests for recently changed code and fills gaps in coverage.',
-    model: 'sonnet',
+    model: 'normal',
     schedule: '24h',
     runner: 'pm2',
     prompt: '',
@@ -66,7 +67,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
   {
     name: 'cto',
     description: 'Thinks from a CTO perspective about product direction and creates prioritized GitHub issues for missing features, gaps, and strategic improvements.',
-    model: 'opus',
+    model: 'smart',
     schedule: '24h',
     runner: 'pm2',
     prompt: '',
@@ -75,7 +76,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
   {
     name: 'gha-audit',
     description: 'Audits GitHub Actions workflows and creates missing ones for CI, release, and labels.',
-    model: 'sonnet',
+    model: 'normal',
     schedule: '24h',
     runner: 'pm2',
     prompt: '',
@@ -84,7 +85,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
   {
     name: 'readme-sync',
     description: 'Verifies README.md is accurate and updates it to reflect the current state of the project.',
-    model: 'sonnet',
+    model: 'normal',
     schedule: '24h',
     runner: 'pm2',
     prompt: '',
@@ -93,7 +94,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
   {
     name: 'docs-claude',
     description: 'Audits CLAUDE.md for completeness — adds missing guidance on security, coding conventions, testing rules, and best patterns so Claude behaves correctly on every run.',
-    model: 'sonnet',
+    model: 'normal',
     schedule: '24h',
     runner: 'pm2',
     prompt: '',
@@ -103,7 +104,7 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
   {
     name: 'manage-agents',
     description: 'Audits TamTam agents for this project and creates, updates, or removes them to match current project needs.',
-    model: 'sonnet',
+    model: 'normal',
     schedule: '24h',
     runner: 'pm2',
     prompt: '',
@@ -205,6 +206,7 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled, proje
   const handleSaveAgent = async (data: { name: string; prompt: string; skillIds: string[]; docPaths: string[]; model: string; schedule: string | null; runner: string; enabled: boolean }) => {
     const parseAgent = (a: Agent & { skillIds: string | string[]; docPaths?: string | string[] }): Agent => ({
       ...a,
+      model: normalizeModelInput(a.model, 'normal'),
       skillIds: typeof a.skillIds === 'string' ? JSON.parse(a.skillIds) : a.skillIds,
       docPaths: typeof a.docPaths === 'string' ? JSON.parse(a.docPaths) : (a.docPaths ?? []),
     })

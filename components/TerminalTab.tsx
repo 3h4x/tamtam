@@ -17,6 +17,7 @@ import { TerminalToolbar } from '@/components/terminal/TerminalToolbar'
 import { useSessionManager } from '@/components/terminal/useSessionManager'
 import { useHandleSubmit } from '@/components/terminal/useHandleSubmit'
 import { useTerminalBootstrap } from '@/components/terminal/useTerminalBootstrap'
+import { MODEL_TIERS, normalizeModelInput, type ModelTier } from '@/lib/agents/model-aliases'
 
 // Exported for unit testing — determines whether a job kind uses Claude's
 // stream-json output format (parsed path) vs raw log output.
@@ -117,7 +118,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
 
   // Purely local UI state
   const [input, setInput] = useState('')
-  const [model, setModel] = useState<'haiku' | 'sonnet' | 'opus'>('haiku')
+  const [model, setModel] = useState<ModelTier>('fast')
   const [spinnerFrame, setSpinnerFrame] = useState(0)
   const [showThinking, setShowThinking] = useState(false)
   const [pendingImages, setPendingImages] = useState<File[]>([])
@@ -163,7 +164,9 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
       .then((r) => r.json())
       .then((data) => {
         const m = data.settings?.default_model
-        if (m && ['haiku', 'sonnet', 'opus'].includes(m)) setModel(m as 'haiku' | 'sonnet' | 'opus')
+        if (m && MODEL_TIERS.includes(normalizeModelInput(m, 'fast') as ModelTier)) {
+          setModel(normalizeModelInput(m, 'fast') as ModelTier)
+        }
       })
       .catch(() => {})
   }, [])

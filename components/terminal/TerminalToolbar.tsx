@@ -3,6 +3,7 @@
 import React, { useRef, useEffect } from 'react'
 import Link from 'next/link'
 import type { SkillItem, DocItem } from '@/lib/terminal/terminal-session-store'
+import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, type ModelTier } from '@/lib/agents/model-aliases'
 
 interface TerminalToolbarProps {
   projectName: string
@@ -20,7 +21,7 @@ interface TerminalToolbarProps {
   skillUsage: Record<string, number>
   docsSearch: string
   showDocsPicker: boolean
-  model: 'haiku' | 'sonnet' | 'opus'
+  model: ModelTier
   filteredItems: SkillItem[]
   filteredDocs: DocItem[]
   onNewSession: () => void
@@ -32,7 +33,7 @@ interface TerminalToolbarProps {
   onToggleSkillPicker: () => void
   onDocsSearchChange: (v: string) => void
   onToggleDocsPicker: () => void
-  onModelChange: (m: 'haiku' | 'sonnet' | 'opus') => void
+  onModelChange: (m: ModelTier) => void
 }
 
 export function TerminalToolbar({
@@ -253,7 +254,7 @@ export function TerminalToolbar({
         </div>
         <div className="inline-flex items-center gap-1 rounded-md border border-border bg-bg-primary px-1.5 h-7">
           <span className="text-[10px] uppercase tracking-wider text-text-tertiary font-mono">model</span>
-          {(['haiku', 'sonnet', 'opus'] as const).map((m) => (
+          {MODEL_TIERS.map((m) => (
             <button
               key={m}
               className={`h-5 rounded px-1.5 text-[10px] cursor-pointer border-none font-mono leading-none transition-colors ${
@@ -270,12 +271,10 @@ export function TerminalToolbar({
                 }).catch(() => {})
               }}
               title={
-                m === 'haiku' ? 'haiku — fastest, lowest cost' :
-                m === 'sonnet' ? 'sonnet — balanced speed and quality' :
-                'opus — most capable, highest quality'
+                `${MODEL_LABELS[m]} — ${MODEL_DESCRIPTIONS[m]}`
               }
             >
-              {m}
+              {MODEL_LABELS[m]}
             </button>
           ))}
         </div>

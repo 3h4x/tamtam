@@ -60,7 +60,7 @@ sqlite.exec(`
     name TEXT NOT NULL,
     project TEXT NOT NULL,
     skill_ids TEXT NOT NULL DEFAULT '[]',
-    model TEXT NOT NULL DEFAULT 'sonnet',
+    model TEXT NOT NULL DEFAULT 'normal',
     prompt TEXT NOT NULL DEFAULT '',
     schedule TEXT,
     runner TEXT NOT NULL DEFAULT 'pm2',

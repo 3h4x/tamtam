@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import { runProject } from '@/lib/client-api'
 import { terminalStore, type SkillItem, type DocItem } from '@/lib/terminal/terminal-session-store'
+import type { ModelTier } from '@/lib/agents/model-aliases'
 
 interface SubmitDeps {
   projectName: string
@@ -10,7 +11,7 @@ interface SubmitDeps {
   pendingImageUrls: string[]
   selectedItems: SkillItem[]
   selectedDocs: DocItem[]
-  model: 'haiku' | 'sonnet' | 'opus'
+  model: ModelTier
   issueContextRef: React.RefObject<{ number: number; repo: string; title: string } | null>
   draftBeforeHistoryRef: React.MutableRefObject<string>
   setInput: (v: string) => void
