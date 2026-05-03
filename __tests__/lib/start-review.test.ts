@@ -213,6 +213,35 @@ describe('startProjectReview', () => {
     }
   });
 
+  it('returns 400 when the worktree is clean and there are no unpushed commits', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, ''))
+      .mockResolvedValueOnce(resp(0, '0\n'));
+
+    const r = await startProjectReview('proj');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(400);
+      expect(r.detail).toContain('No uncommitted changes or unpushed commits');
+    }
+  });
+
+  it('reviews unpushed local commits when the worktree is clean', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, ''))      // git status → clean
+      .mockResolvedValueOnce(resp(0, '2\n'));  // git rev-list @{u}..HEAD → ahead
+
+    const r = await startProjectReview('proj');
+
+    expect(r.ok).toBe(true);
+    expect(startJobMock).toHaveBeenCalled();
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('working tree is clean');
+    expect(prompt).toContain('2 local commits not yet pushed');
+    expect(prompt).toContain('git diff @{u}..HEAD');
+  });
+
   it('returns ok with jobId and pid when review starts successfully', async () => {
     execMock.mockResolvedValueOnce(resp(0, 'M lib/foo.ts')); // git status → has changes
     const r = await startProjectReview('proj');

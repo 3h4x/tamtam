@@ -15,6 +15,7 @@ import {
 import { parentContext } from './parent-context';
 import type { JobData } from './types';
 import { findingsIdentity } from '@/lib/pipeline/review-contract';
+import { hasFreshLgtm, hasLocalCommitsAhead } from '@/lib/pipeline/release-state';
 
 async function getProjectPipelineConfig(projectName: string): Promise<{ autoCommitEnabled: boolean; autoPushEnabled: boolean; releaseAfterRun: boolean; autoPrMergeEnabled: boolean; prWorkflowEnabled: boolean }> {
   try {
@@ -539,12 +540,29 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           ? await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 })
           : null;
         const hasUncommittedChanges = changesR?.exitCode === 0 && changesR.stdout.trim().length > 0;
+        const hasUnpushedCommits = projPath && !hasUncommittedChanges
+          ? await hasLocalCommitsAhead(projPath)
+          : false;
+        const freshLgtm = projPath && !hasUncommittedChanges && hasUnpushedCommits
+          ? await hasFreshLgtm(job.project, projPath)
+          : false;
 
-        if (hasUncommittedChanges) {
+        if (hasUncommittedChanges || hasUnpushedCommits) {
           // Review disabled → skip straight to commit (agent prompt covers review).
           const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
           const reviewDisabled = !!getProjectTestConfig(job.project)?.reviewDisabled;
-          if (reviewDisabled) {
+          if (freshLgtm) {
+            const { startProjectPush } = await import('@/lib/pipeline/start-push');
+            const r = await startProjectPush(job.project);
+            if (r.ok) {
+              console.log(`[release] tests passed + fresh LGTM → push ${job.project}`);
+              chainedNext = true;
+            } else {
+              releaseStopReason = `test→push skipped for ${job.project}: ${r.detail}`;
+              noteReleaseStop(releaseStopReason);
+              forcedReleaseExitCode = 1;
+            }
+          } else if (reviewDisabled && hasUncommittedChanges) {
             const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
             const r = await startProjectCommit(job.project);
             if (r.ok) {
@@ -552,6 +570,17 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
               chainedNext = true;
             } else {
               releaseStopReason = `test→commit skipped for ${job.project}: ${r.detail}`;
+              noteReleaseStop(releaseStopReason);
+              forcedReleaseExitCode = 1;
+            }
+          } else if (reviewDisabled && hasUnpushedCommits) {
+            const { startProjectPush } = await import('@/lib/pipeline/start-push');
+            const r = await startProjectPush(job.project);
+            if (r.ok) {
+              console.log(`[release] tests passed + review disabled + existing commits → push ${job.project}`);
+              chainedNext = true;
+            } else {
+              releaseStopReason = `test→push skipped for ${job.project}: ${r.detail}`;
               noteReleaseStop(releaseStopReason);
               forcedReleaseExitCode = 1;
             }

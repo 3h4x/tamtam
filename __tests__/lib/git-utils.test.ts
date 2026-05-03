@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -38,6 +38,22 @@ describe('git-utils', () => {
               return { exitCode: 0, stdout: '' };
             } else if (path === join(tempDir, 'dirty')) {
               return { exitCode: 0, stdout: 'M file1.ts\nA file2.ts\n' };
+            }
+          } else if (args[2] === 'rev-parse' && args[3] === 'HEAD') {
+            if (path === join(tempDir, 'clean')) {
+              return { exitCode: 0, stdout: 'head-a\n', stderr: '' };
+            } else if (path === join(tempDir, 'clean-new-head')) {
+              return { exitCode: 0, stdout: 'head-b\n', stderr: '' };
+            } else if (path === join(tempDir, 'dirty')) {
+              return { exitCode: 0, stdout: 'head-b\n', stderr: '' };
+            }
+          } else if (args[2] === 'rev-parse' && args[3] === '@{u}') {
+            if (path === join(tempDir, 'clean')) {
+              return { exitCode: 0, stdout: 'upstream-a\n', stderr: '' };
+            } else if (path === join(tempDir, 'clean-new-head')) {
+              return { exitCode: 0, stdout: 'upstream-a\n', stderr: '' };
+            } else if (path === join(tempDir, 'dirty')) {
+              return { exitCode: 0, stdout: 'upstream-a\n', stderr: '' };
             }
           }
         }
@@ -151,6 +167,34 @@ describe('git-utils', () => {
     it('returns false when git command fails', async () => {
       const result = await isReviewed('test-project', '/nonexistent/path');
       expect(result).toBe(false);
+    });
+
+    it('returns false when HEAD changes even if the worktree stays clean', async () => {
+      const projectPath = join(tempDir, 'clean');
+      const changedPath = join(tempDir, 'clean-new-head');
+
+      await markReviewed('test-project', projectPath);
+
+      const result = await isReviewed('test-project', projectPath);
+      expect(result).toBe(true);
+      const changedResult = await isReviewed('test-project', changedPath);
+      expect(changedResult).toBe(false);
+    });
+
+    it('accepts legacy plain-hash review stamps and migrates them to JSON', async () => {
+      const projectPath = join(tempDir, 'clean');
+      const legacyPath = join(cacheDir, '.cache', 'tamtam', 'schedule-reviews', 'legacy-project.hash');
+      const statusHash = await gitStatusHash(projectPath);
+      expect(statusHash).toBeTruthy();
+      mkdirSync(join(cacheDir, '.cache', 'tamtam', 'schedule-reviews'), { recursive: true });
+      writeFileSync(legacyPath, `${statusHash}\n`);
+
+      const result = await isReviewed('legacy-project', projectPath);
+      expect(result).toBe(true);
+
+      const migrated = JSON.parse(readFileSync(legacyPath, 'utf-8')) as { version?: number; statusHash?: string };
+      expect(migrated.version).toBe(1);
+      expect(migrated.statusHash).toBe(statusHash);
     });
   });
 

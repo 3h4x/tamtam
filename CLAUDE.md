@@ -11,8 +11,8 @@ TamTam's north star is a **quality-gated release pipeline** for each tracked rep
 
 Steps are pluggable per project and coordinated by completion hooks in `lib/jobs/job-storage.ts`:
 
-- **test** — runs the project's test command (auto-detected from `package.json`, `pyproject.toml`/`requirements.txt`, `foundry.toml`, `Package.swift`, `Cargo.toml`, `go.mod`, `pom.xml`, `build.gradle`/`build.gradle.kts`, `Makefile:test`, or user-configured). Skipped if none. If tests pass and there are no uncommitted changes, the pipeline short-circuits directly to push (skipping review).
-- **review** — Claude reads the uncommitted diff and emits a verdict: `LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP` (verdict rules are configurable in Settings).
+- **test** — runs the project's test command (auto-detected from `package.json`, `pyproject.toml`/`requirements.txt`, `foundry.toml`, `Package.swift`, `Cargo.toml`, `go.mod`, `pom.xml`, `build.gradle`/`build.gradle.kts`, `Makefile:test`, or user-configured). Skipped if none. If tests pass with no uncommitted changes but local commits are ahead of upstream, the pipeline still runs review against `@{u}..HEAD` before push.
+- **review** — Claude reads the uncommitted diff or, for a clean branch with unpushed commits, the committed diff against upstream, then emits a verdict: `LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP` (verdict rules are configurable in Settings). Fresh-LGTM skips are commit-aware: they only apply when the reviewed `git status` fingerprint, `HEAD`, and upstream base still match.
 - **fix** — on `NEEDS ATTENTION` / `DO NOT SHIP`, Claude resumes the review session and applies fixes. Capped at 3 iterations per 30-minute window to prevent loops. On success it chains back to review.
 - **commit + push** — on `LGTM`, staged changes are committed with a Claude-generated message (respecting the `commit_style` setting) and pushed. All changes (including untracked files) are staged via `git add -A`; `.gitignore` is trusted to exclude secrets.
 - **mark-dod** *(PR Workflow only)* — after push, Claude inspects the codebase with tool access (Read/Grep/Glob) to verify which acceptance-criteria checkboxes in the linked GitHub issue are actually implemented, then ticks only the verified ones. Best-effort and non-fatal.
@@ -223,7 +223,7 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 ## Key Patterns
 - Runtime config is stored in DB (`settings`, `projects`, `skills`, `agents` tables); shared per-project config and file-agent prompts can also live in committed `.tamtam/` files.
 - Workspace path configured in Settings UI, projects discovered by scanning for git repos
-- All CLI calls (git, gh, launchctl, pm2) go through `lib/shared/shell.ts`
+- Most CLI calls (git, gh, launchctl, pm2) go through `lib/shared/shell.ts`; a few specialized helpers use direct `child_process` spawning when they need tighter process control.
 - `lib/shared/project-data.ts` assembles project data with 10s TTL cache
 - Terminal runs use `claude --output-format stream-json` for token-by-token streaming via PM2 + log file + fs.watch + NDJSON parser (see `docs/STREAMING.md`)
 - SSE at `/api/streaming/[jobId]` parses NDJSON and sends text deltas + `done` event (`?raw=1` for raw mode)

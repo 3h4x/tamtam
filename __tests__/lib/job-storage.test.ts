@@ -1617,6 +1617,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
   let tempDir: string;
   let execMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
+  let isReviewedMock: ReturnType<typeof vi.fn>;
 
   function makeJob(kind: string, logPath: string | null, overrides: Partial<JobData> = {}): JobData {
     return {
@@ -1651,6 +1652,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     getProjectTestConfigMock = vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoPushEnabled: true });
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     resolveProjectPathMock = vi.fn().mockReturnValue('/proj');
+    isReviewedMock = vi.fn().mockResolvedValue(false);
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
@@ -1662,6 +1664,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     }));
     vi.doMock('@/lib/git/git-utils', () => ({
       markReviewed: vi.fn().mockResolvedValue(undefined),
+      isReviewed: isReviewedMock,
     }));
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
@@ -1940,6 +1943,84 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
     expect(startProjectPushMock).toHaveBeenCalledWith('my-proj');
     expect(startProjectReviewMock).not.toHaveBeenCalled();
+  });
+
+  it('starts review when tests pass, worktree is clean, and local commits are unpushed', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })    // git status → clean
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '1\n', stderr: '' }); // git rev-list @{u}..HEAD → ahead
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectReviewMock).toHaveBeenCalledWith('my-proj');
+    expect(startProjectPushMock).not.toHaveBeenCalled();
+  });
+
+  it('pushes directly when tests pass, worktree is clean, and a fresh LGTM already exists', async () => {
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.jobs).values({
+      id: 'fresh-lgtm-review',
+      project: 'my-proj',
+      kind: 'review',
+      prompt: null,
+      pid: 777,
+      logPath: join(tempDir, 'fresh-lgtm-review.log'),
+      startedAt: now - 60,
+      finishedAt: now - 10,
+      exitCode: 0,
+      seen: 1,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    } as any).run();
+    writeFileSync(join(tempDir, 'fresh-lgtm-review.log'), 'Verdict: LGTM\n');
+    isReviewedMock.mockResolvedValue(true);
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '1\n', stderr: '' });
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj');
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+  });
+
+  it('re-runs review when tests pass, worktree is clean, and the LGTM is stale after a new commit', async () => {
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.jobs).values({
+      id: 'stale-lgtm-review',
+      project: 'my-proj',
+      kind: 'review',
+      prompt: null,
+      pid: 777,
+      logPath: join(tempDir, 'stale-lgtm-review.log'),
+      startedAt: now - 60,
+      finishedAt: now - 10,
+      exitCode: 0,
+      seen: 1,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    } as any).run();
+    writeFileSync(join(tempDir, 'stale-lgtm-review.log'), 'Verdict: LGTM\n');
+    isReviewedMock.mockResolvedValue(false);
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '1\n', stderr: '' });
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectReviewMock).toHaveBeenCalledWith('my-proj');
+    expect(startProjectPushMock).not.toHaveBeenCalled();
   });
 
   it('pushes directly when tests pass and project path cannot be resolved', async () => {
@@ -2227,6 +2308,20 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     expect(startProjectCommitMock).toHaveBeenCalledWith('my-proj');
     expect(startProjectReviewMock).not.toHaveBeenCalled();
     expect(startProjectPushMock).not.toHaveBeenCalled();
+  });
+
+  it('auto-chains test→push when reviewDisabled=true and only unpushed commits remain', async () => {
+    getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: true, autoPushEnabled: false, releaseAfterRun: false, reviewDisabled: true });
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '1\n', stderr: '' });
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj');
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
   });
 
   describe('fix-ci auto-retry on fast crash', () => {

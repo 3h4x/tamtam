@@ -130,6 +130,7 @@ export function computeNextFire(schedule: string, agentId: string, fromMs: numbe
 
 async function fire(entry: ScheduleEntry): Promise<void> {
   if (getPaused() || !entry.enabled) return;
+  let shouldRearm = true;
 
   const budget = budgetBlockedResult('start scheduled agent');
   if (budget) {
@@ -213,6 +214,14 @@ async function fire(entry: ScheduleEntry): Promise<void> {
         console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${detail}`);
         return;
       }
+      if (res.status === 404) {
+        entry.errorCount += 1;
+        entry.lastError = `HTTP ${res.status}`;
+        console.warn(`[internal-scheduler] ${entry.project}/${entry.name} removed — ${entry.lastError}`);
+        removeAgentSchedule(entry.agentId);
+        shouldRearm = false;
+        return;
+      }
       entry.errorCount += 1;
       entry.lastError = `HTTP ${res.status}`;
       console.error(`[internal-scheduler] ${entry.project}/${entry.name} fire failed: ${entry.lastError}`);
@@ -226,7 +235,7 @@ async function fire(entry: ScheduleEntry): Promise<void> {
     console.error(`[internal-scheduler] ${entry.project}/${entry.name} fire threw:`, entry.lastError);
   } finally {
     // Always re-arm — a failed fire shouldn't disable the schedule.
-    armNext(entry);
+    if (shouldRearm) armNext(entry);
   }
 }
 
