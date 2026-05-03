@@ -4,6 +4,16 @@ import { formatAgo } from '@/lib/shared/format'
 import { formatDuration, formatTokens, formatCost, KIND_LABEL, KIND_COLOR, entryIsRunning, entryNeedsAttention } from '@/components/project-runs/utils'
 import type { Entry } from '@/components/project-runs/utils'
 
+function modifiedFileCount(raw: string | null): number {
+  if (!raw) return 0
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.length : 0
+  } catch {
+    return 0
+  }
+}
+
 export interface RunRowProps {
   entry: Entry
   onClick: () => void
@@ -135,6 +145,7 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
   const effectiveRunning = entryIsRunning(e)
   const effectiveNeedsAttention = entryNeedsAttention(e)
   const totalTokens = e.inputTokens + e.outputTokens
+  const fileCount = modifiedFileCount(e.modifiedFiles)
   const statusBadge = (
     <RowStateBadge
       isRunning={isRunning}
@@ -259,6 +270,14 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
             {summary && <span className="font-mono text-text-secondary">{summary}</span>}
             {e.releaseOutcome && !summary && <span className="font-mono text-text-secondary">{e.releaseOutcome.label}</span>}
             {e.subtitle && !summary && <span className="italic truncate">{e.subtitle}</span>}
+            {e.workSummary && e.bucket === 'agent' && (
+              <span className="text-text-secondary truncate">{e.workSummary}</span>
+            )}
+            {fileCount > 0 && e.bucket === 'agent' && (
+              <span className="font-mono rounded bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-secondary border border-border">
+                {fileCount} file{fileCount === 1 ? '' : 's'}
+              </span>
+            )}
           </div>
         </div>
 

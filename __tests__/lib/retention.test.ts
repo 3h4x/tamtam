@@ -40,7 +40,9 @@ function createTestDb() {
       model TEXT,
       release_id TEXT,
       aborted_at REAL,
-      prompt_bytes INTEGER
+      prompt_bytes INTEGER,
+      work_summary TEXT,
+      modified_files TEXT
     );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };

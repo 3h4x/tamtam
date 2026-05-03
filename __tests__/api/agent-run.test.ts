@@ -357,6 +357,21 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(fileChip?.name).toBe('Senior Fullstack');
   });
 
+  it('records the trigger source in contextMeta for the report finalizer', async () => {
+    insertAgent({ schedule: '2h' });
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'task' }),
+    });
+    await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    const createArgs = createJobMock.mock.calls[0];
+    const contextMeta = JSON.parse(createArgs[5]);
+    expect(contextMeta.agent.triggeredBy).toBe('schedule');
+  });
+
   it('silently skips persona paths whose file does not exist', async () => {
     insertAgent({ skillIds: '["persona:nonexistent/missing"]' });
 

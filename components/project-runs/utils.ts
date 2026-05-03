@@ -149,6 +149,8 @@ export interface Entry {
   failureLabel?: string | null
   releaseOutcome?: ReleaseOutcome | null
   logPruned: boolean
+  workSummary: string | null
+  modifiedFiles: string | null
   // Flat list of every pipeline child that ran inside this release's time
   // window — used by `buildReleaseSummary` for the one-line "test ✓ · review
   // LGTM · …" recap on the collapsed parent row.
@@ -301,6 +303,8 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
         existing.cacheReadTokens += j.cache_read_tokens ?? 0
         existing.costUsd += jobCost(j)
         existing.navJobId = j.id
+        existing.workSummary = j.work_summary ?? existing.workSummary
+        existing.modifiedFiles = j.modified_files ?? existing.modifiedFiles
         existing._jobIds!.push(j.id)
         continue
       }
@@ -336,6 +340,8 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       failureLabel: null,
       releaseOutcome: null,
       logPruned: !!j.log_pruned,
+      workSummary: j.work_summary ?? null,
+      modifiedFiles: j.modified_files ?? null,
       parentJobId: j.parent_job_id ?? null,
       parentLabel: j.parent_job_id ? parentLabelFor(byId.get(j.parent_job_id)) : null,
       _jobIds: [j.id],
@@ -538,6 +544,8 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
           failureLabel: anyFailed ? 'pipeline failed' : null,
           releaseOutcome: null,
           logPruned: false,
+          workSummary: null,
+          modifiedFiles: null,
           children: cluster,
           parentJobId: null,
           parentLabel: null,

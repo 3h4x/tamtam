@@ -152,6 +152,8 @@ function makeEntry(partial: {
     verdict: partial.verdict as Entry['verdict'],
     failureLabel: null,
     logPruned: false,
+    workSummary: null,
+    modifiedFiles: null,
     parentJobId: null,
     parentLabel: null,
   } as Entry;
@@ -293,6 +295,8 @@ function makeReleaseEntry(
     logPruned: false,
     parentJobId,
     parentLabel: parentJobId ? 'run' : null,
+    workSummary: null,
+    modifiedFiles: null,
     _jobIds: [id],
   };
 }
@@ -323,6 +327,8 @@ function makeStepEntry(id: string, kind: string, startedAt: number, parentJobId:
     logPruned: false,
     parentJobId,
     parentLabel: parentJobId ? 'release' : null,
+    workSummary: null,
+    modifiedFiles: null,
     _jobIds: [id],
   };
 }

@@ -964,6 +964,14 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
       job.exitCode = 1;
     }
   }
+  if (job.kind.startsWith('agent:')) {
+    try {
+      const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+      await finalizeAgentRunReport(job, rawLog);
+    } catch (e) {
+      console.log(`[job ${job.id}] failed to finalize agent run report:`, e);
+    }
+  }
   saveToDb(job);
   try {
     db.delete(schema.ghIssuesCache).where(eq(schema.ghIssuesCache.project, job.project)).run();

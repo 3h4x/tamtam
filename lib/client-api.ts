@@ -19,6 +19,8 @@ export type {
   ChangeDiffResponse,
   ProjectConfig,
   JobInfo,
+  ModifiedFileSummary,
+  Recommendation,
   CustomAction,
   Skill,
   Agent,
@@ -61,6 +63,8 @@ export {
   saveCustomActions,
   runCustomAction,
   fetchProjectDocs,
+  fetchRecommendations,
+  updateRecommendation,
 } from './client/projects'
 
 export {
