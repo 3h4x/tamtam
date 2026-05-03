@@ -1,9 +1,16 @@
 'use client'
 
 import { QuotaWidget } from '@/components/QuotaWidget'
+import {
+  BUDGET_SUBSCRIPTION_PROVIDERS,
+  encodeBudgetSubscriptionProviders,
+  normalizeBudgetSubscriptionProviders,
+  type BudgetSubscriptionProvider,
+} from '@/lib/usage/subscription-providers'
 
 export interface BudgetSettings {
   budget_block_runs_enabled: string
+  budget_subscription_providers: string
   budget_block_at_pct: string
   budget_warn_at_pct: string
   [key: string]: string
@@ -26,12 +33,21 @@ export function BudgetTab({
   onChange: (key: string, value: string) => void
 }) {
   const enabled = settings.budget_block_runs_enabled === 'true'
+  const providers = normalizeBudgetSubscriptionProviders(settings.budget_subscription_providers)
   const warnAt = parseInt(settings.budget_warn_at_pct || '80', 10) || 80
   const blockAt = parseInt(settings.budget_block_at_pct || '95', 10) || 95
 
+  function toggleProvider(provider: BudgetSubscriptionProvider, checked: boolean) {
+    if (!checked && providers.length === 1 && providers.includes(provider)) return
+    const next = checked
+      ? [...providers, provider]
+      : providers.filter((value) => value !== provider)
+    onChange('budget_subscription_providers', encodeBudgetSubscriptionProviders(next))
+  }
+
   return (
     <section className="space-y-4">
-      <QuotaWidget warnAt={warnAt} blockAt={blockAt} refreshSeconds={30} />
+      <QuotaWidget providers={providers} warnAt={warnAt} blockAt={blockAt} refreshSeconds={30} />
 
       <div className="bg-bg-secondary rounded-lg border border-border">
         <div className="px-5 py-3 border-b border-border flex items-baseline gap-3">
@@ -41,6 +57,37 @@ export function BudgetTab({
           </p>
         </div>
         <div className="px-5 py-4 space-y-4">
+          <div>
+            <div className="font-medium text-sm text-text-primary mb-1.5">Tracked subscriptions</div>
+            <div className="grid grid-cols-2 gap-3">
+              {BUDGET_SUBSCRIPTION_PROVIDERS.map((provider) => (
+                <label
+                  key={provider}
+                  className="flex items-start gap-3 p-3 rounded-lg hover:bg-bg-tertiary/50 cursor-pointer transition-colors"
+                >
+                  <input
+                    type="checkbox"
+                    checked={providers.includes(provider)}
+                    disabled={providers.length === 1 && providers.includes(provider)}
+                    onChange={(e) => toggleProvider(provider, e.target.checked)}
+                    className="w-4 h-4 accent-accent rounded mt-0.5 shrink-0 cursor-pointer"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm text-text-primary">
+                      {provider === 'claude' ? 'Claude' : 'Codex'}
+                    </div>
+                    <div className="text-xs text-text-tertiary">
+                      Show pace and quota state for this subscription in Settings and Stats.
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-text-tertiary mt-1.5">
+              Runs still use the selected agent provider. These checkboxes control which subscriptions TamTam tracks in budget views.
+            </p>
+          </div>
+
           <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-bg-tertiary/50 cursor-pointer transition-colors">
             <input
               type="checkbox"

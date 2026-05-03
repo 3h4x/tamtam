@@ -2,9 +2,13 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
-import type { UsageResponse, ProjectUsageRow, AgentUsageRow } from '@/app/api/stats/usage/route'
+import type { UsageResponse, ProjectUsageRow } from '@/app/api/stats/usage/route'
 import { ErrorState } from './ErrorState'
 import { QuotaWidget } from './QuotaWidget'
+import {
+  normalizeBudgetSubscriptionProviders,
+  type BudgetSubscriptionProvider,
+} from '@/lib/usage/subscription-providers'
 
 type Window = '24h' | '7d' | '30d' | 'all'
 const WINDOW_LABELS: Record<Window, string> = { '24h': '24 hours', '7d': '7 days', '30d': '30 days', all: 'All time' }
@@ -91,6 +95,9 @@ export function StatsPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [warnAt, setWarnAt] = useState(80)
   const [blockAt, setBlockAt] = useState(95)
+  const [budgetProviders, setBudgetProviders] = useState<BudgetSubscriptionProvider[]>(
+    normalizeBudgetSubscriptionProviders(null)
+  )
 
   const load = useCallback(async (w: Window) => {
     try {
@@ -115,12 +122,14 @@ export function StatsPage() {
   useEffect(() => {
     fetch('/api/settings')
       .then((r) => r.ok ? r.json() : null)
-      .then((s: Record<string, string> | null) => {
+      .then((payload: { settings?: Record<string, string> } | null) => {
+        const s = payload?.settings
         if (!s) return
         const w = parseInt(s.budget_warn_at_pct, 10)
         const b = parseInt(s.budget_block_at_pct, 10)
         if (!isNaN(w)) setWarnAt(w)
         if (!isNaN(b)) setBlockAt(b)
+        setBudgetProviders(normalizeBudgetSubscriptionProviders(s.budget_subscription_providers))
       })
       .catch(() => { /* keep defaults on error */ })
   }, [])
@@ -207,8 +216,7 @@ export function StatsPage() {
         </div>
       </div>
 
-      {/* Live Claude subscription quota */}
-      <QuotaWidget warnAt={warnAt} blockAt={blockAt} compact />
+      <QuotaWidget providers={budgetProviders} warnAt={warnAt} blockAt={blockAt} compact />
 
       {/* Totals */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -343,7 +351,7 @@ export function StatsPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.agents.slice(0, 5).map((r: AgentUsageRow) => (
+                {data.agents.slice(0, 5).map((r) => (
                   <tr key={r.kind} className="border-b border-border/40 last:border-b-0 hover:bg-bg-tertiary/40 transition-colors">
                     <td className="px-3 py-2.5 font-mono text-text-primary">{r.kind}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">

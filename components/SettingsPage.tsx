@@ -46,6 +46,7 @@ interface SettingsMap {
   notification_on_agent_run_fail: string
   notification_on_budget_blocked: string
   budget_block_runs_enabled: string
+  budget_subscription_providers: string
   budget_block_at_pct: string
   budget_warn_at_pct: string
   pipeline_model_review: string
@@ -59,6 +60,7 @@ const SETTINGS_DEFAULTS: SettingsMap = {
   jobs_paused: 'false',
   notification_on_budget_blocked: 'false',
   budget_block_runs_enabled: 'false',
+  budget_subscription_providers: 'claude,codex',
   budget_block_at_pct: '95',
   budget_warn_at_pct: '80',
 }

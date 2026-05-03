@@ -1,6 +1,10 @@
 import { db, schema } from '@/lib/db';
 import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
+import {
+  normalizeBudgetSubscriptionProviders,
+  type BudgetSubscriptionProvider,
+} from '@/lib/usage/subscription-providers';
 
 /**
  * Read all settings from the DB and return as a config object.
@@ -44,6 +48,7 @@ export interface TamTamConfig {
   pipeline_model_commit: string;
   review_retry_on_parse_failure: boolean;
   budget_block_runs_enabled: boolean;
+  budget_subscription_providers: BudgetSubscriptionProvider[];
   budget_block_at_pct: number;
   budget_warn_at_pct: number;
   notification_on_budget_blocked: boolean;
@@ -93,6 +98,7 @@ const DEFAULTS: TamTamConfig = {
   pipeline_model_commit: '',
   review_retry_on_parse_failure: true,
   budget_block_runs_enabled: false,
+  budget_subscription_providers: ['claude', 'codex'],
   budget_block_at_pct: 95,
   budget_warn_at_pct: 80,
   notification_on_budget_blocked: false,
@@ -184,6 +190,7 @@ export function getSettings(): TamTamConfig {
         ? DEFAULTS.review_retry_on_parse_failure
         : map.review_retry_on_parse_failure === 'true',
     budget_block_runs_enabled: map.budget_block_runs_enabled === 'true',
+    budget_subscription_providers: normalizeBudgetSubscriptionProviders(map.budget_subscription_providers),
     budget_block_at_pct: parseIntOr(map.budget_block_at_pct, DEFAULTS.budget_block_at_pct),
     budget_warn_at_pct: parseIntOr(map.budget_warn_at_pct, DEFAULTS.budget_warn_at_pct),
     notification_on_budget_blocked: map.notification_on_budget_blocked === 'true',

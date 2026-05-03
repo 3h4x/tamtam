@@ -3,6 +3,10 @@ import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { getSettings, reloadConfig } from '@/lib/shared/config';
 import { syncJobsPauseState } from '@/lib/shared/job-control';
+import {
+  encodeBudgetSubscriptionProviders,
+  normalizeBudgetSubscriptionProviders,
+} from '@/lib/usage/subscription-providers';
 const SETTING_KEYS = [
   'github_owner',
   'claude_provider',
@@ -37,6 +41,7 @@ const SETTING_KEYS = [
   'notification_on_agent_run_fail',
   'notification_on_budget_blocked',
   'budget_block_runs_enabled',
+  'budget_subscription_providers',
   'budget_block_at_pct',
   'budget_warn_at_pct',
   'pipeline_model_review',
@@ -45,11 +50,18 @@ const SETTING_KEYS = [
   'pipeline_model_commit',
 ] as const;
 
+function serializeSettingValue(key: string, value: unknown): string {
+  if (key === 'budget_subscription_providers') {
+    return encodeBudgetSubscriptionProviders(normalizeBudgetSubscriptionProviders(String(value)));
+  }
+  return String(value);
+}
+
 export async function GET() {
   const rows = db.select().from(schema.settings).all();
   const settings: Record<string, string> = {};
   for (const row of rows) {
-    settings[row.key] = row.value;
+    settings[row.key] = serializeSettingValue(row.key, row.value);
   }
   return NextResponse.json({ settings });
 }
@@ -62,11 +74,12 @@ export async function PATCH(request: NextRequest) {
     if (value === null || value === '') {
       db.delete(schema.settings).where(eq(schema.settings.key, key)).run();
     } else {
+      const serializedValue = serializeSettingValue(key, value);
       db.insert(schema.settings)
-        .values({ key, value: String(value) })
+        .values({ key, value: serializedValue })
         .onConflictDoUpdate({
           target: schema.settings.key,
-          set: { value: String(value) },
+          set: { value: serializedValue },
         })
         .run();
     }

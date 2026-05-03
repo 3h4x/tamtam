@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import { fmtAbsolute } from '@/lib/shared/format-date'
+import {
+  BUDGET_SUBSCRIPTION_PROVIDERS,
+  type BudgetSubscriptionProvider,
+} from '@/lib/usage/subscription-providers'
 
 interface QuotaWindow {
   utilization: number
@@ -28,9 +32,11 @@ interface QuotaSnapshot {
   gateEnabled?: boolean
 }
 
-interface QuotaState {
-  active: QuotaSnapshot | null
-  codex: QuotaSnapshot | null
+interface QuotaCardState {
+  provider: BudgetSubscriptionProvider
+  snapshot: QuotaSnapshot | null
+  error: string | null
+  isPrimary: boolean
 }
 
 const FIVE_HOUR_MS = 5 * 60 * 60 * 1000
@@ -249,35 +255,83 @@ function ExtraCreditsRow({
 }
 
 export function QuotaWidget({
+  providers = [...BUDGET_SUBSCRIPTION_PROVIDERS],
   warnAt = 80,
   blockAt = 95,
   refreshSeconds = 60,
   compact = false,
 }: {
+  providers?: BudgetSubscriptionProvider[]
   warnAt?: number
   blockAt?: number
   refreshSeconds?: number
   /** Compact mode for /stats: no scheduled-agents row, no daily-burn row, no per-model split. */
   compact?: boolean
 }) {
-  const [data, setData] = useState<QuotaState>({ active: null, codex: null })
+  const [cards, setCards] = useState<QuotaCardState[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const providerKey = providers.join(',')
 
   useEffect(() => {
     let cancelled = false
+    const selectedProviders = Array.from(new Set(providers))
+
+    async function fetchSnapshot(provider: 'active' | BudgetSubscriptionProvider) {
+      try {
+        const query = provider === 'active' ? '' : `?provider=${provider}`
+        const res = await fetch(`/api/usage/quota${query}`)
+        if (!res.ok) throw new Error((await res.json())?.error ?? `HTTP ${res.status}`)
+        return { snapshot: (await res.json()) as QuotaSnapshot, error: null }
+      } catch (e: unknown) {
+        return {
+          snapshot: null,
+          error: e instanceof Error ? e.message : String(e),
+        }
+      }
+    }
+
     async function load() {
       try {
-        const [activeRes, codexRes] = await Promise.all([
-          fetch('/api/usage/quota'),
-          fetch('/api/usage/quota?provider=codex'),
+        const [activeResult, providerResults] = await Promise.all([
+          fetchSnapshot('active'),
+          Promise.all(selectedProviders.map((provider) => fetchSnapshot(provider))),
         ])
-        if (!activeRes.ok) throw new Error((await activeRes.json())?.error ?? `HTTP ${activeRes.status}`)
-        const active = (await activeRes.json()) as QuotaSnapshot
-        const codex = codexRes.ok ? ((await codexRes.json()) as QuotaSnapshot) : null
+        const activeProvider = activeResult.snapshot?.provider
+        const mergedCards = selectedProviders.map((provider, index) => {
+          if (activeProvider === provider && activeResult.snapshot) {
+            return {
+              provider,
+              snapshot: activeResult.snapshot,
+              error: null,
+              isPrimary: false,
+            }
+          }
+          const result = providerResults[index]
+          return {
+            provider,
+            snapshot: result.snapshot,
+            error: result.error,
+            isPrimary: false,
+          }
+        })
+        const primaryProvider =
+          (activeProvider && mergedCards.find((card) => card.provider === activeProvider && card.snapshot)?.provider)
+          ?? mergedCards.find((card) => card.snapshot)?.provider
+          ?? null
+        const nextCards = mergedCards
+          .map((card) => ({
+            ...card,
+            isPrimary: card.provider === primaryProvider,
+          }))
+          .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
         if (!cancelled) {
-          setData({ active, codex: active.provider === 'codex' ? null : codex })
-          setError(null)
+          setCards(nextCards)
+          setError(
+            nextCards.some((card) => card.snapshot)
+              ? null
+              : activeResult.error ?? nextCards[0]?.error ?? 'Quota unavailable'
+          )
         }
       } catch (e: unknown) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
@@ -291,12 +345,14 @@ export function QuotaWidget({
       cancelled = true
       clearInterval(id)
     }
-  }, [refreshSeconds])
+  }, [providerKey, refreshSeconds])
 
-  if (loading && !data.active) {
+  const visibleCards = cards.filter((card) => card.snapshot)
+
+  if (loading && visibleCards.length === 0) {
     return <div className="skeleton h-24 rounded-lg" />
   }
-  if (error || !data.active) {
+  if (error || visibleCards.length === 0) {
     return (
       <div className="rounded-lg border border-border bg-bg-secondary p-4">
         <div className="text-xs uppercase tracking-wide text-text-tertiary">Agent subscription quota</div>
@@ -305,7 +361,7 @@ export function QuotaWidget({
     )
   }
 
-  const renderCard = (snapshot: QuotaSnapshot, options: { secondary?: boolean } = {}) => (
+  const renderCard = (snapshot: QuotaSnapshot, options: { primary?: boolean } = {}) => (
     <div className="rounded-lg border border-border bg-bg-secondary p-4 space-y-3">
       <div className="flex items-baseline justify-between">
         <div>
@@ -323,9 +379,9 @@ export function QuotaWidget({
       <QuotaBar label="5-hour rolling" win={snapshot.fiveHour} warnAt={warnAt} blockAt={blockAt} windowMs={FIVE_HOUR_MS} />
       <QuotaBar label="7-day weekly" win={snapshot.sevenDay} warnAt={warnAt} blockAt={blockAt} windowMs={SEVEN_DAY_MS} />
       <ExtraCreditsRow extra={snapshot.extra} provider={snapshot.provider} />
-      {!compact && !options.secondary && <DailyBurnRow sevenDay={snapshot.sevenDay} />}
-      {!compact && !options.secondary && snapshot.gateEnabled && <ScheduledAgentsRow sevenDay={snapshot.sevenDay} />}
-      {!compact && !options.secondary && (snapshot.sevenDaySonnet || snapshot.sevenDayOpus) && (
+      {!compact && options.primary && <DailyBurnRow sevenDay={snapshot.sevenDay} />}
+      {!compact && options.primary && snapshot.gateEnabled && <ScheduledAgentsRow sevenDay={snapshot.sevenDay} />}
+      {!compact && options.primary && (snapshot.sevenDaySonnet || snapshot.sevenDayOpus) && (
         <div className="grid grid-cols-2 gap-3 pt-1">
           {snapshot.sevenDaySonnet && (
             <QuotaBar label="7d · Sonnet" win={snapshot.sevenDaySonnet} warnAt={warnAt} blockAt={blockAt} windowMs={SEVEN_DAY_MS} />
@@ -340,8 +396,19 @@ export function QuotaWidget({
 
   return (
     <div className="space-y-3">
-      {renderCard(data.active)}
-      {data.codex && renderCard(data.codex, { secondary: true })}
+      {cards.map((card) => {
+        if (!card.snapshot) {
+          return (
+            <div key={card.provider} className="rounded-lg border border-border bg-bg-secondary p-4 space-y-2">
+              <div className="text-xs uppercase tracking-wide text-text-tertiary">
+                {card.provider === 'codex' ? 'Codex subscription quota' : 'Claude subscription quota'}
+              </div>
+              <div className="text-sm text-status-error">{card.error ?? 'Quota unavailable'}</div>
+            </div>
+          )
+        }
+        return <div key={card.provider}>{renderCard(card.snapshot, { primary: card.isPrimary })}</div>
+      })}
     </div>
   )
 }
