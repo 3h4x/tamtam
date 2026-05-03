@@ -113,6 +113,7 @@ Live subscription quota (5-hour rolling + 7-day weekly window) is surfaced on `/
 | Key | Type | Default | Effect |
 |-----|------|---------|--------|
 | `budget_block_runs_enabled` | boolean | `false` | When true, pipeline routes (run, review, fix, push, release, rerun, fix-ci, agent run) return HTTP 429 once the 5-hour window crosses `budget_block_at_pct` |
+| `budget_subscription_providers` | string | `'claude,codex'` | Comma-separated provider list shown in Settings → Budget and `/stats` so TamTam tracks pace for each selected subscription |
 | `budget_block_at_pct` | number | `95` | Block threshold in percent (0–100). Applies to the 5-hour window; scheduled/auto-chain work also considers weekly burn rate |
 | `budget_warn_at_pct` | number | `80` | Cosmetic warn threshold; quota bars turn yellow at this percentage |
 
@@ -180,16 +181,20 @@ const isValid = timingSafeEqual(Buffer.from(expected), Buffer.from(req.headers['
 **PATCH `/api/settings`** — accepts a partial object; writes changed keys to DB, deletes null/empty values, invalidates cache. Only keys in `SETTING_KEYS` are accepted:
 
 ```
-github_owner, claude_bin, log_dir, frequency, daytime, weekends,
-launchagent_prefix, workspace_path, base_prompt, default_model,
-permission_mode, commit_style, review_verdict_rules,
+github_owner, claude_provider, claude_bin, lmstudio_model, log_dir,
+frequency, daytime, weekends, launchagent_prefix, workspace_path,
+base_prompt, default_model, permission_mode, commit_style,
+review_verdict_rules, jobs_paused,
 fix_ci_max_retries, fix_ci_retry_window_seconds, fix_ci_fast_crash_ms,
-agent_templates,
-log_retention_count, log_retention_days, job_row_retention_days,
-notification_webhook_url, notification_webhook_secret,
-notification_on_release_success, notification_on_release_fail,
+agent_templates, log_retention_count, log_retention_days,
+job_row_retention_days, notification_webhook_url,
+notification_webhook_secret, notification_on_release_success,
+notification_on_release_fail, notification_on_release_aborted,
 notification_on_fix_loop_exhausted, notification_on_review_do_not_ship,
-notification_on_agent_run_fail
+notification_on_agent_run_fail, notification_on_budget_blocked,
+budget_block_runs_enabled, budget_subscription_providers,
+budget_block_at_pct, budget_warn_at_pct, pipeline_model_review,
+pipeline_model_fix, pipeline_model_dod, pipeline_model_commit
 ```
 
 **POST `/api/settings/test-notification`** — sends a test notification to verify webhook connectivity. Request body: `{ webhook_url: string, webhook_secret?: string }`. Response: `{ ok: boolean, error?: string }`.

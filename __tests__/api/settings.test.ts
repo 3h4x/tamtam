@@ -66,6 +66,17 @@ describe('settings API', () => {
       expect(data.settings.github_owner).toBe('octocat');
     });
 
+    it('canonicalizes budget subscription providers in the API response', async () => {
+      testDb.db
+        .insert(schema.settings)
+        .values({ key: 'budget_subscription_providers', value: 'codex,gemini,codex' })
+        .run();
+
+      const response = await GET();
+      const data = await response.json();
+
+      expect(data.settings.budget_subscription_providers).toBe('codex');
+    });
   });
 
   describe('PATCH /settings', () => {
@@ -213,6 +224,7 @@ describe('settings API', () => {
         'notification_on_fix_loop_exhausted',
         'notification_on_review_do_not_ship',
         'notification_on_agent_run_fail',
+        'budget_subscription_providers',
       ];
 
       const body = Object.fromEntries(validKeys.map((k) => [k, 'test-value']));
@@ -235,6 +247,28 @@ describe('settings API', () => {
 
       const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'commit_style');
       expect(row?.value).toBe('squash everything into one commit');
+    });
+
+    it('saves budget subscription providers as a comma list', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ budget_subscription_providers: 'claude,codex' }),
+      });
+      await PATCH(request);
+
+      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'budget_subscription_providers');
+      expect(row?.value).toBe('claude,codex');
+    });
+
+    it('canonicalizes budget subscription providers before persisting them', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ budget_subscription_providers: 'codex,gemini,codex' }),
+      });
+      await PATCH(request);
+
+      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'budget_subscription_providers');
+      expect(row?.value).toBe('codex');
     });
 
     it('saves fix_ci_max_retries setting', async () => {

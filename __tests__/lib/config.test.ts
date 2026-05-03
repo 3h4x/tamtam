@@ -86,6 +86,7 @@ describe('config', () => {
         notification_on_agent_run_fail: false,
         notification_on_budget_blocked: false,
         budget_block_runs_enabled: false,
+        budget_subscription_providers: ['claude', 'codex'],
         budget_block_at_pct: 95,
         budget_warn_at_pct: 80,
         pipeline_model_review: '',
@@ -122,6 +123,15 @@ describe('config', () => {
       const config = getSettings();
 
       expect(config.claude_bin).toBe('/usr/bin/claude');
+    });
+
+    it('parses budget subscription providers from settings', () => {
+      const db = testDb.db;
+      db.insert(schema.settings).values({ key: 'budget_subscription_providers', value: 'codex,claude,codex' }).run();
+
+      const config = getSettings();
+
+      expect(config.budget_subscription_providers).toEqual(['codex', 'claude']);
     });
 
     it('resolves Gemini provider to the bundled shim', () => {
