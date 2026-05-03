@@ -138,6 +138,7 @@ async function fire(entry: ScheduleEntry): Promise<void> {
     entry.lastSkippedReason = budget.detail;
     console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${budget.detail}`);
     armNext(entry);
+    shouldRearm = false;
     return;
   }
 
@@ -151,6 +152,7 @@ async function fire(entry: ScheduleEntry): Promise<void> {
     entry.lastSkippedReason = burn.reason;
     console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${burn.reason}`);
     armNext(entry);
+    shouldRearm = false;
     return;
   }
 
@@ -168,6 +170,7 @@ async function fire(entry: ScheduleEntry): Promise<void> {
         entry.lastSkippedReason = `release pipeline active: ${holderRow.kind} ${holderRow.id}`;
         console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${entry.lastSkippedReason}`);
         armNext(entry);
+        shouldRearm = false;
         return;
       }
     }
@@ -187,6 +190,7 @@ async function fire(entry: ScheduleEntry): Promise<void> {
       entry.lastSkippedReason = `issue branch active: ${lockedBranch}`;
       console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${entry.lastSkippedReason}`);
       armNext(entry);
+      shouldRearm = false;
       return;
     }
   } catch {
