@@ -37,7 +37,7 @@ Verdict detection (`getVerdict` in `lib/jobs/verdict.ts`, re-exported via the `j
 
 ## Concepts
 - **Skills** — reusable prompt/instruction blocks (DB-backed + file-based personas from `skills/docs/skills/` and `data/skills/`)
-- **Agents** — composed from skills + model + prompt (optional when skills are set) + interval schedule + runner. Only `pm2` runner is supported; `launchctl` is **deprecated** (legacy DB rows still load with a `[agent-scheduler] launchctl runner is deprecated` warning, but new agents should always use `pm2`).
+- **Agents** — composed from skills + model + prompt (optional when skills are set) + interval schedule + runner. `pm2` is the default and recommended runner; `launchctl` remains for backward compatibility and emits a `[agent-scheduler] launchctl runner is deprecated` warning.
 - **Runs** — individual executions of an agent (what was previously called "jobs")
 - **Custom Actions** — per-project bash commands (e.g. deploy) with configurable button color
 - **Release Pipeline** — two modes: *Direct Branch* (`test → review → fix → commit → push`) or *PR Workflow* (adds `dod → merge`), driven by Claude and configurable per project

@@ -109,7 +109,7 @@ pnpm type-check     # TypeScript
 pnpm check          # lint + type-check + test (all in one)
 ```
 
-All API routes have corresponding tests in `__tests__/`. Follow the existing pattern: in-memory SQLite, mocked shell/PM2 calls.
+API routes are covered by vitest tests in `__tests__/api/`, often with combined route coverage files. Follow the existing pattern: in-memory SQLite, mocked shell/PM2 calls.
 
 ## Architecture notes
 
