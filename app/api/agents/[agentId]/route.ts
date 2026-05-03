@@ -7,6 +7,7 @@ import { clearAgentsCache, normalizeAgent } from '@/lib/agents/agents-cache';
 import { parseFileAgentId, loadFileAgent, writeFileAgent, deleteFileAgent } from '@/lib/agents/tamtam-file-agents';
 import { setFileAgentOverride, deleteFileAgentOverride } from '@/lib/agents/file-agent-overrides';
 import { resolveProjectPath } from '@/lib/shared/project-data';
+import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 
 export async function GET(
   _request: NextRequest,
@@ -35,13 +36,16 @@ export async function PATCH(
   const { agentId } = await params;
 
   const parsedFile = parseFileAgentId(agentId);
+  const body = await request.json();
+  const { model: parsedModel, error: modelError } = parseOptionalKnownModelInput(body.model, 'normal');
+  if (modelError) return NextResponse.json({ detail: modelError }, { status: 400 });
+
   if (parsedFile) {
     const projPath = resolveProjectPath(parsedFile.project);
     if (!projPath) return NextResponse.json({ detail: 'not found' }, { status: 404 });
     if (!loadFileAgent(projPath, parsedFile.project, parsedFile.name)) {
       return NextResponse.json({ detail: 'not found' }, { status: 404 });
     }
-    const body = await request.json();
     try {
       // Operational config goes to the DB override so the toggle/edit UI
       // doesn't dirty a tracked .md file. Only the prompt belongs in the
@@ -56,7 +60,7 @@ export async function PATCH(
         setFileAgentOverride(parsedFile.project, parsedFile.name, {
           enabled: body.enabled,
           schedule: body.schedule,
-          model: body.model,
+          model: parsedModel ?? undefined,
           runner: body.runner,
           skillIds: body.skillIds,
         });
@@ -93,12 +97,11 @@ export async function PATCH(
   const oldProject = existing.project;
   const oldRunner = existing.runner;
 
-  const body = await request.json();
   const updates: Record<string, unknown> = { updatedAt: Date.now() / 1000 };
   if (body.name !== undefined) updates.name = body.name.trim();
   if (body.skillIds !== undefined) updates.skillIds = JSON.stringify(body.skillIds);
   if (body.docPaths !== undefined) updates.docPaths = JSON.stringify(body.docPaths);
-  if (body.model !== undefined) updates.model = body.model;
+  if (body.model !== undefined) updates.model = parsedModel ?? 'normal';
   if (body.prompt !== undefined) updates.prompt = body.prompt;
   if (body.schedule !== undefined) updates.schedule = body.schedule || null;
   if (body.runner !== undefined) updates.runner = body.runner;

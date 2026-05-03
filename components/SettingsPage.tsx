@@ -323,7 +323,7 @@ export function SettingsPage() {
             const allGroupFields = (Object.keys(FIELDS) as SettingsFieldKey[]).filter(
               (k) => FIELDS[k].group === group.id
             ).filter((k) => {
-              // LM Studio replaces the haiku/sonnet/opus default model selector with
+              // LM Studio replaces the semantic fast/normal/smart selector with
               // its own model identifier field — show one or the other, never both.
               if (k === 'lmstudio_model') return settings.claude_provider === 'lmstudio'
               if (k === 'default_model') return settings.claude_provider !== 'lmstudio'

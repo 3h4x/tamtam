@@ -128,6 +128,73 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     expect(projPath).toBe('/path/to/project');
   });
 
+  it('defaults terminal runs to the fast tier', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'test prompt' }),
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    const [, cmd] = startJobMock.mock.calls[0];
+    expect(cmd).toContain('--model fast');
+  });
+
+  it('accepts canonical semantic tiers', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'test prompt', model: 'smart' }),
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    const [, cmd] = startJobMock.mock.calls[0];
+    expect(cmd).toContain('--model smart');
+  });
+
+  it('accepts legacy aliases and resolves them to canonical tiers', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'test prompt', model: 'sonnet' }),
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    const [, cmd] = startJobMock.mock.calls[0];
+    expect(cmd).toContain('--model normal');
+    expect(cmd).not.toContain('--model sonnet');
+  });
+
+  it('rejects invalid JSON models and does not start a job', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'test prompt', model: 'smart --resume injected' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      detail: expect.stringContaining('Invalid model'),
+    });
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid multipart models and does not start a job', async () => {
+    const form = new FormData();
+    form.set('prompt', 'test prompt');
+    form.set('model', 'smart --resume injected');
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: form,
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      detail: expect.stringContaining('Invalid model'),
+    });
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
   it('calls createJob and updateJob', async () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
       method: 'POST',

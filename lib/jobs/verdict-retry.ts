@@ -1,5 +1,5 @@
 // One-shot verdict-extraction retry. When the primary `getVerdict` parser
-// fails on a finished review log, we burn a tiny haiku Claude call to
+// fails on a finished review log, we burn a tiny fast-tier Claude call to
 // classify the existing review text rather than wasting the entire run by
 // defaulting to NEEDS ATTENTION (which costs another full review + fix
 // iteration). Gated by the `review_retry_on_parse_failure` setting.
@@ -83,7 +83,7 @@ export async function retryVerdictWithClaude(job: JobData): Promise<string | nul
 
     let child;
     try {
-      child = spawn(claudeBin, ['--print', '--model', 'haiku', '--permission-mode', 'bypassPermissions'], {
+      child = spawn(claudeBin, ['--print', '--model', 'fast', '--permission-mode', 'bypassPermissions'], {
         env: enrichEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
       });

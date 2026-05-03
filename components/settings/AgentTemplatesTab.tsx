@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { MODEL_TIERS, MODEL_LABELS, normalizeModelInput } from '@/lib/agents/model-aliases'
 
 export interface AgentTemplateRecord {
   name: string
@@ -12,11 +13,11 @@ export interface AgentTemplateRecord {
   skillIds?: string[]
 }
 
-const TEMPLATE_MODELS = ['sonnet', 'opus', 'haiku']
+const TEMPLATE_MODELS = [...MODEL_TIERS]
 const TEMPLATE_SCHEDULES = ['', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h']
 const TEMPLATE_RUNNERS = ['pm2', 'launchctl']
 
-const EMPTY_TEMPLATE: AgentTemplateRecord = { name: '', description: '', model: 'sonnet', schedule: '24h', runner: 'pm2', prompt: '' }
+const EMPTY_TEMPLATE: AgentTemplateRecord = { name: '', description: '', model: 'normal', schedule: '24h', runner: 'pm2', prompt: '' }
 
 function TemplateForm({
   form, setField, onSave, onCancel, isEdit,
@@ -57,7 +58,7 @@ function TemplateForm({
             onChange={e => setField('model', e.target.value)}
             className="w-full px-3 py-2 text-sm bg-bg-primary border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent cursor-pointer"
           >
-            {TEMPLATE_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
+            {TEMPLATE_MODELS.map(m => <option key={m} value={m}>{MODEL_LABELS[m]}</option>)}
           </select>
         </div>
         <div>
@@ -112,7 +113,16 @@ function TemplateForm({
 }
 
 export function AgentTemplatesTab({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const parse = (v: string): AgentTemplateRecord[] => { try { return JSON.parse(v) } catch { return [] } }
+  const parse = (v: string): AgentTemplateRecord[] => {
+    try {
+      const parsed = JSON.parse(v)
+      return Array.isArray(parsed)
+        ? parsed.map((template) => ({ ...template, model: normalizeModelInput(template?.model, 'normal') }))
+        : []
+    } catch {
+      return []
+    }
+  }
   const [templates, setTemplates] = useState<AgentTemplateRecord[]>(() => parse(value))
   const [editing, setEditing] = useState<number | 'new' | null>(null)
   const [form, setForm] = useState<AgentTemplateRecord>(EMPTY_TEMPLATE)
@@ -141,7 +151,7 @@ export function AgentTemplatesTab({ value, onChange }: { value: string; onChange
     if (editing === i) setEditing(null)
   }
 
-  const setField = (k: keyof AgentTemplateRecord, v: string) => setForm(f => ({ ...f, [k]: v }))
+  const setField = (k: keyof AgentTemplateRecord, v: string) => setForm(f => ({ ...f, [k]: k === 'model' ? normalizeModelInput(v, 'normal') : v }))
 
   return (
     <section className="bg-bg-secondary rounded-lg border border-border">

@@ -51,7 +51,7 @@ describe('scanFileAgents', () => {
     expect(agents[0].id).toBe('file:myproject:simple');
     expect(agents[0].project).toBe('myproject');
     expect(agents[0].prompt).toBe('Run tests and report failures.');
-    expect(agents[0].model).toBe('sonnet');
+    expect(agents[0].model).toBe('normal');
     expect(agents[0].runner).toBe('pm2');
     expect(agents[0].enabled).toBe(true);
     expect(agents[0].source).toBe('file');
@@ -71,7 +71,7 @@ Improve the UI of tamtam.`);
     const agents = scanFileAgents(tmpDir, 'testproject');
     expect(agents).toHaveLength(1);
     const a = agents[0];
-    expect(a.model).toBe('opus');
+    expect(a.model).toBe('smart');
     expect(a.schedule).toBe('4h');
     expect(a.runner).toBe('launchctl');
     expect(a.enabled).toBe(true);
@@ -135,8 +135,18 @@ Run pnpm test.`);
     const a = loadFileAgent(tmpDir, 'proj', 'tests');
     expect(a).not.toBeNull();
     expect(a!.name).toBe('tests');
-    expect(a!.model).toBe('haiku');
+    expect(a!.model).toBe('fast');
     expect(a!.prompt).toBe('Run pnpm test.');
+  });
+
+  it('sanitizes invalid frontmatter models back to normal', () => {
+    writeAgent(tmpDir, 'tests', `---
+model: smart --resume injected
+---
+Run pnpm test.`);
+    const a = loadFileAgent(tmpDir, 'proj', 'tests');
+    expect(a).not.toBeNull();
+    expect(a!.model).toBe('normal');
   });
 });
 
@@ -147,16 +157,16 @@ describe('writeFileAgent', () => {
   afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('creates .tamtam/agents/<name>.md when it does not exist', () => {
-    writeFileAgent(tmpDir, 'proj', 'new-agent', { prompt: 'Do something.', model: 'sonnet' });
+    writeFileAgent(tmpDir, 'proj', 'new-agent', { prompt: 'Do something.', model: 'normal' });
     const filePath = join(tmpDir, '.tamtam', 'agents', 'new-agent.md');
     expect(existsSync(filePath)).toBe(true);
   });
 
   it('returns a FileAgent with source: file', () => {
-    const a = writeFileAgent(tmpDir, 'proj', 'improve', { prompt: 'Fix UI.', model: 'opus' });
+    const a = writeFileAgent(tmpDir, 'proj', 'improve', { prompt: 'Fix UI.', model: 'smart' });
     expect(a.source).toBe('file');
     expect(a.name).toBe('improve');
-    expect(a.model).toBe('opus');
+    expect(a.model).toBe('smart');
     expect(a.prompt).toBe('Fix UI.');
     expect(a.id).toBe('file:proj:improve');
   });
@@ -173,7 +183,7 @@ Original prompt.`);
 
     const a = loadFileAgent(tmpDir, 'proj', 'improve');
     expect(a!.prompt).toBe('Updated prompt.');
-    expect(a!.model).toBe('opus');
+    expect(a!.model).toBe('smart');
     expect(a!.schedule).toBe('4h');
     expect(a!.skillIds).toEqual(['agent-tests']);
   });
@@ -181,7 +191,7 @@ Original prompt.`);
   it('updates model when provided', () => {
     writeAgent(tmpDir, 'agent', `---\nmodel: sonnet\n---\nDo stuff.`);
     writeFileAgent(tmpDir, 'proj', 'agent', { model: 'haiku' });
-    expect(loadFileAgent(tmpDir, 'proj', 'agent')!.model).toBe('haiku');
+    expect(loadFileAgent(tmpDir, 'proj', 'agent')!.model).toBe('fast');
   });
 
   it('clears schedule when set to null', () => {
@@ -218,10 +228,10 @@ Original prompt.`);
   it('round-trips through load', () => {
     const skillIds = ['persona:engineering-team/senior-fullstack', 'agent-tests'];
     writeFileAgent(tmpDir, 'proj', 'agent', {
-      model: 'opus', schedule: '8h', skillIds, runner: 'launchctl', prompt: 'Run stuff.',
+      model: 'smart', schedule: '8h', skillIds, runner: 'launchctl', prompt: 'Run stuff.',
     });
     const a = loadFileAgent(tmpDir, 'proj', 'agent')!;
-    expect(a.model).toBe('opus');
+    expect(a.model).toBe('smart');
     expect(a.schedule).toBe('8h');
     expect(a.skillIds).toEqual(skillIds);
     expect(a.runner).toBe('launchctl');

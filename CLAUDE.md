@@ -130,7 +130,7 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 - `/` — Projects list with status, changes, CI
 - `/project/[name]` — Project overview
 - `/project/[name]/[tab]` — Project detail tabs (`overview`, `config`, `history`, `terminal`, `changes`, `issues`, `docs`, `recommendations`)
-- `/project/[name]/terminal/[sessionId]` — Interactive Claude runner with model selector (haiku/sonnet/opus), skill picker, and real-time token streaming via SSE (see `docs/STREAMING.md`)
+- `/project/[name]/terminal/[sessionId]` — Interactive Claude runner with model tier selector (fast/normal/smart; legacy haiku/sonnet/opus aliases still accepted), skill picker, and real-time token streaming via SSE (see `docs/STREAMING.md`)
 - `/project/[name]/task/[task]` — Task detail view
 - `/project/[name]/release/[releaseId]` — Release trace view: pipeline steps, per-step verdicts and log excerpts for a specific release run
 - `/agents` — Agents management page
@@ -281,7 +281,7 @@ Each `.md` file defines one agent scoped to the project. Filename (minus `.md`) 
 
 ```markdown
 ---
-model: sonnet          # sonnet | opus | haiku
+model: normal          # fast | normal | smart (legacy haiku | sonnet | opus still read)
 schedule: 4h           # optional: 15m 30m 1h 2h 4h 8h 12h 24h
 skillIds: ["agent-tests"]   # JSON array or space-separated skill IDs
 runner: pm2            # pm2 | launchctl

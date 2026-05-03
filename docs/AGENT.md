@@ -27,7 +27,7 @@ Agents are reusable automation units that combine skills, a model, a prompt temp
 | `name` | string | required | Display name (e.g., "Daily Tests") |
 | `project` | string | required | Project name (must exist in workspace) |
 | `skillIds` | string (JSON array) | `[]` | Array of skill IDs to compose as system prompt |
-| `model` | string | `sonnet` | Claude model: `haiku`, `sonnet`, or `opus` |
+| `model` | string | `normal` | Semantic model tier: `fast`, `normal`, or `smart`. Legacy `haiku`, `sonnet`, and `opus` aliases are still accepted. |
 | `prompt` | string | `''` | Default task prompt for scheduled runs |
 | `schedule` | string | `null` | Run interval for scheduling: `"30m"`, `"1h"`, `"8h"`, etc. or `null` for manual only |
 | `runner` | string | `pm2` | Scheduler: `"pm2"` or `"launchctl"` (macOS only) |
@@ -55,7 +55,7 @@ curl -X POST http://localhost:1337/api/agents \
     "name": "Weekly Code Review",
     "project": "myapp",
     "skillIds": ["skill-123", "skill-456"],
-    "model": "sonnet",
+    "model": "normal",
     "prompt": "Review uncommitted changes in the project and suggest improvements",
     "schedule": "1w",
     "runner": "pm2",
@@ -71,7 +71,7 @@ curl -X POST http://localhost:1337/api/agents \
     "name": "Weekly Code Review",
     "project": "myapp",
     "skillIds": "[\"skill-123\", \"skill-456\"]",
-    "model": "sonnet",
+    "model": "normal",
     "prompt": "Review uncommitted changes...",
     "schedule": "1w",
     "runner": "pm2",
@@ -199,7 +199,7 @@ curl -X PATCH http://localhost:1337/api/agents/agent-1705276800000 \
   -H "Content-Type: application/json" \
   -d '{
     "skillIds": ["skill-789"],
-    "model": "opus",
+    "model": "smart",
     "schedule": "2h"
   }'
 ```
@@ -319,7 +319,7 @@ Job rows are inserted with `pid=0` and the real pid is persisted asynchronously 
        "name": "Weekly Code Review",
        "project": "myapp",
        "skillIds": ["skill-abc123"],
-       "model": "sonnet",
+       "model": "normal",
        "prompt": "Review all uncommitted changes and provide feedback",
        "schedule": "1w",
        "runner": "pm2",

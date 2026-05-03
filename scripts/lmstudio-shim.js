@@ -13,7 +13,7 @@ const DEFAULT_BASE_URL = 'http://127.0.0.1:1234';
 
 const args = process.argv.slice(2);
 
-let requestedModel = 'haiku';
+let requestedModel = 'fast';
 let outputFormat = 'text';
 let promptArg = '';
 let systemPrompt = '';
@@ -34,9 +34,12 @@ for (let i = 0; i < args.length; i++) {
 Environment:
   LMSTUDIO_BASE_URL       LM Studio server URL (default: ${DEFAULT_BASE_URL})
   LMSTUDIO_MODEL          Default LM Studio model name
-  LMSTUDIO_HAIKU_MODEL    Model used when TamTam asks for haiku
-  LMSTUDIO_SONNET_MODEL   Model used when TamTam asks for sonnet
-  LMSTUDIO_OPUS_MODEL     Model used when TamTam asks for opus
+  LMSTUDIO_FAST_MODEL     Model used when TamTam asks for fast
+  LMSTUDIO_NORMAL_MODEL   Model used when TamTam asks for normal
+  LMSTUDIO_SMART_MODEL    Model used when TamTam asks for smart
+  LMSTUDIO_HAIKU_MODEL    Legacy alias for LMSTUDIO_FAST_MODEL
+  LMSTUDIO_SONNET_MODEL   Legacy alias for LMSTUDIO_NORMAL_MODEL
+  LMSTUDIO_OPUS_MODEL     Legacy alias for LMSTUDIO_SMART_MODEL
   LMSTUDIO_API_KEY        Optional bearer token
   LMSTUDIO_TEMPERATURE    Optional numeric temperature
   LMSTUDIO_CONTEXT_LENGTH Optional native API context_length
@@ -117,9 +120,12 @@ function readStdin() {
 
 function resolveModel(model) {
   const byAlias = {
-    haiku: process.env.LMSTUDIO_HAIKU_MODEL,
-    sonnet: process.env.LMSTUDIO_SONNET_MODEL,
-    opus: process.env.LMSTUDIO_OPUS_MODEL,
+    fast: process.env.LMSTUDIO_FAST_MODEL || process.env.LMSTUDIO_HAIKU_MODEL,
+    normal: process.env.LMSTUDIO_NORMAL_MODEL || process.env.LMSTUDIO_SONNET_MODEL,
+    smart: process.env.LMSTUDIO_SMART_MODEL || process.env.LMSTUDIO_OPUS_MODEL,
+    haiku: process.env.LMSTUDIO_FAST_MODEL || process.env.LMSTUDIO_HAIKU_MODEL,
+    sonnet: process.env.LMSTUDIO_NORMAL_MODEL || process.env.LMSTUDIO_SONNET_MODEL,
+    opus: process.env.LMSTUDIO_SMART_MODEL || process.env.LMSTUDIO_OPUS_MODEL,
   };
   return byAlias[model] || process.env.LMSTUDIO_MODEL || model;
 }

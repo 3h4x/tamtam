@@ -217,6 +217,64 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_messag
     expect(codexArgs.slice(0, 5)).toEqual(['-a', 'never', '--sandbox', 'workspace-write', 'exec']);
   });
 
+  it('resolves semantic tiers through the new env vars', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
+    tempDirs.push(dir);
+    const fakeCodex = join(dir, 'codex');
+    const argsFile = join(dir, 'args.json');
+    await writeFile(fakeCodex, `#!/usr/bin/env node
+const fs = require('fs');
+fs.writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2)));
+console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'ok' } }));
+`);
+    await chmod(fakeCodex, 0o755);
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--output-format',
+      'stream-json',
+      '--model',
+      'smart',
+    ], {
+      ...process.env,
+      CODEX_BIN: fakeCodex,
+      CODEX_SMART_MODEL: 'gpt-test-smart',
+    });
+
+    expect(result.code).toBe(0);
+    const codexArgs = JSON.parse(await readFile(argsFile, 'utf8'));
+    expect(codexArgs).toContain('gpt-test-smart');
+  });
+
+  it('keeps honoring legacy env var aliases', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
+    tempDirs.push(dir);
+    const fakeCodex = join(dir, 'codex');
+    const argsFile = join(dir, 'args.json');
+    await writeFile(fakeCodex, `#!/usr/bin/env node
+const fs = require('fs');
+fs.writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2)));
+console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'ok' } }));
+`);
+    await chmod(fakeCodex, 0o755);
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--output-format',
+      'stream-json',
+      '--model',
+      'haiku',
+    ], {
+      ...process.env,
+      CODEX_BIN: fakeCodex,
+      CODEX_HAIKU_MODEL: 'gpt-test-fast',
+    });
+
+    expect(result.code).toBe(0);
+    const codexArgs = JSON.parse(await readFile(argsFile, 'utf8'));
+    expect(codexArgs).toContain('gpt-test-fast');
+  });
+
   it('parses real Codex item.completed agent_message events', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
     tempDirs.push(dir);

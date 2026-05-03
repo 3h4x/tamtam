@@ -77,6 +77,17 @@ describe('settings API', () => {
 
       expect(data.settings.budget_subscription_providers).toBe('codex');
     });
+
+    it('sanitizes invalid stored model settings in the API response', async () => {
+      testDb.db.insert(schema.settings).values({ key: 'default_model', value: 'smart --resume injected' }).run();
+      testDb.db.insert(schema.settings).values({ key: 'pipeline_model_review', value: 'normal --danger' }).run();
+
+      const response = await GET();
+      const data = await response.json();
+
+      expect(data.settings.default_model).toBe('fast');
+      expect(data.settings.pipeline_model_review).toBe('');
+    });
   });
 
   describe('PATCH /settings', () => {
@@ -183,6 +194,34 @@ describe('settings API', () => {
       expect(row?.value).toBe('Be direct. No questions.');
     });
 
+    it('rejects invalid default_model values', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ default_model: 'smart --resume injected' }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('Invalid model'),
+      });
+      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
+    });
+
+    it('rejects invalid pipeline model overrides', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ pipeline_model_review: 'normal --danger' }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('Invalid model'),
+      });
+      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
+    });
+
     it('saves jobs_paused and applies scheduler pause immediately', async () => {
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',
@@ -227,7 +266,14 @@ describe('settings API', () => {
         'budget_subscription_providers',
       ];
 
-      const body = Object.fromEntries(validKeys.map((k) => [k, 'test-value']));
+      const body = Object.fromEntries(validKeys.map((k) => [
+        k,
+        k === 'default_model' ? 'fast'
+          : k.startsWith('pipeline_model_') ? 'normal'
+          : k === 'agent_templates'
+            ? JSON.stringify([{ name: 'template', description: 'desc', model: 'smart', schedule: '', runner: 'pm2', prompt: '' }])
+            : 'test-value',
+      ]));
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',
         body: JSON.stringify(body),
@@ -297,6 +343,9 @@ describe('settings API', () => {
       const templates = [
         { name: 'security-review', description: 'Scans for OWASP issues', model: 'sonnet', schedule: '24h', runner: 'pm2', prompt: 'Review the diff for security issues.' },
       ];
+      const canonicalTemplates = [
+        { ...templates[0], model: 'normal' },
+      ];
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',
         body: JSON.stringify({ agent_templates: JSON.stringify(templates) }),
@@ -304,8 +353,25 @@ describe('settings API', () => {
       await PATCH(request);
 
       const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'agent_templates');
-      expect(row?.value).toBe(JSON.stringify(templates));
-      expect(JSON.parse(row!.value)).toEqual(templates);
+      expect(row?.value).toBe(JSON.stringify(canonicalTemplates));
+      expect(JSON.parse(row!.value)).toEqual(canonicalTemplates);
+    });
+
+    it('rejects agent_templates with invalid model values', async () => {
+      const templates = [
+        { name: 'security-review', description: 'Scans for OWASP issues', model: 'smart --resume injected', schedule: '24h', runner: 'pm2', prompt: 'Review the diff for security issues.' },
+      ];
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ agent_templates: JSON.stringify(templates) }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('Invalid model'),
+      });
+      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
     });
 
     it('deletes agent_templates when set to empty string', async () => {

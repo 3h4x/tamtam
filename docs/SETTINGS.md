@@ -27,7 +27,7 @@ All settings stored in the `settings` table (key-value, both TEXT). Accessed via
 |-----|------|---------|--------|
 | `claude_bin` | string | `~/.local/bin/claude` | Path to Claude CLI binary; used for every review/fix/run/agent job |
 | `permission_mode` | string | `bypassPermissions` | Passed as `--permission-mode` flag. Allowed: `acceptEdits`, `auto`, `bypassPermissions`, `default`, `dontAsk`, `plan` — invalid values fall back to `bypassPermissions` |
-| `default_model` | string | `haiku` | Pre-selected model in the terminal UI. Options: `haiku`, `sonnet`, `opus` |
+| `default_model` | string | `fast` | Pre-selected semantic tier in the terminal UI. Primary options: `fast`, `normal`, `smart`. Legacy `haiku`, `sonnet`, `opus` values are still accepted and normalized. |
 
 ### Scheduling
 
@@ -164,7 +164,7 @@ const isValid = timingSafeEqual(Buffer.from(expected), Buffer.from(req.headers['
 {
   name: string         // template identifier
   description: string
-  model: string        // 'haiku' | 'sonnet' | 'opus'
+  model: string        // 'fast' | 'normal' | 'smart' (legacy 'haiku' | 'sonnet' | 'opus' still accepted)
   schedule: string     // '' (manual) | '15m' | '30m' | '1h' | '2h' | '4h' | '8h' | '12h' | '24h'
   runner: string       // 'pm2' | 'launchctl'
   prompt: string

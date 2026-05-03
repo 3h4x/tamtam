@@ -27,6 +27,7 @@ describe('config', () => {
   let reloadConfig: typeof import('@/lib/shared/config').reloadConfig;
   let withBasePrompt: typeof import('@/lib/shared/config').withBasePrompt;
   let getPermissionModeFlag: typeof import('@/lib/shared/config').getPermissionModeFlag;
+  let getPipelineModel: typeof import('@/lib/shared/config').getPipelineModel;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -43,6 +44,7 @@ describe('config', () => {
     reloadConfig = config.reloadConfig;
     withBasePrompt = config.withBasePrompt;
     getPermissionModeFlag = config.getPermissionModeFlag;
+    getPipelineModel = config.getPipelineModel;
   });
 
   afterEach(() => {
@@ -65,7 +67,7 @@ describe('config', () => {
         weekends: false,
         launchagent_prefix: 'com.tamtam',
         base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
-        default_model: 'haiku',
+        default_model: 'fast',
         permission_mode: 'bypassPermissions',
         commit_style: 'Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Types: feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert.',
         review_verdict_rules: expect.stringContaining('Pragmatic verdict rules'),
@@ -123,6 +125,19 @@ describe('config', () => {
       const config = getSettings();
 
       expect(config.claude_bin).toBe('/usr/bin/claude');
+    });
+
+    it('canonicalizes legacy model aliases from settings', () => {
+      const db = testDb.db;
+      db.insert(schema.settings).values({ key: 'default_model', value: 'sonnet' }).run();
+      db.insert(schema.settings).values({ key: 'pipeline_model_dod', value: 'haiku' }).run();
+      db.insert(schema.settings).values({ key: 'pipeline_model_commit', value: 'opus' }).run();
+
+      const config = getSettings();
+
+      expect(config.default_model).toBe('normal');
+      expect(config.pipeline_model_dod).toBe('fast');
+      expect(config.pipeline_model_commit).toBe('smart');
     });
 
     it('parses budget subscription providers from settings', () => {
@@ -516,6 +531,43 @@ describe('config', () => {
       testDb.db.insert(schema.settings).values({ key: 'review_verdict_rules', value: 'always LGTM' }).run();
       reloadConfig();
       expect(getSettings().review_verdict_rules).toBe('always LGTM');
+    });
+  });
+
+  describe('getPipelineModel', () => {
+    it('defaults review and fix to the workspace default tier', () => {
+      expect(getPipelineModel('review')).toBe('fast');
+      expect(getPipelineModel('fix')).toBe('fast');
+    });
+
+    it('defaults DoD and commit to fast', () => {
+      expect(getPipelineModel('dod')).toBe('fast');
+      expect(getPipelineModel('commit')).toBe('fast');
+    });
+
+    it('canonicalizes legacy overrides', () => {
+      testDb.db.insert(schema.settings).values({ key: 'default_model', value: 'opus' }).run();
+      testDb.db.insert(schema.settings).values({ key: 'pipeline_model_review', value: 'sonnet' }).run();
+      testDb.db.insert(schema.settings).values({ key: 'pipeline_model_dod', value: 'haiku' }).run();
+      reloadConfig();
+
+      expect(getPipelineModel('review')).toBe('normal');
+      expect(getPipelineModel('fix')).toBe('smart');
+      expect(getPipelineModel('dod')).toBe('fast');
+      expect(getPipelineModel('commit')).toBe('fast');
+    });
+
+    it('falls back to safe tiers when stored model settings are invalid', () => {
+      testDb.db.insert(schema.settings).values({ key: 'default_model', value: 'smart --resume injected' }).run();
+      testDb.db.insert(schema.settings).values({ key: 'pipeline_model_review', value: 'normal --danger' }).run();
+      testDb.db.insert(schema.settings).values({ key: 'pipeline_model_dod', value: 'fast --tools injected' }).run();
+      reloadConfig();
+
+      expect(getSettings().default_model).toBe('fast');
+      expect(getSettings().pipeline_model_review).toBe('');
+      expect(getSettings().pipeline_model_dod).toBe('');
+      expect(getPipelineModel('review')).toBe('fast');
+      expect(getPipelineModel('dod')).toBe('fast');
     });
   });
 });

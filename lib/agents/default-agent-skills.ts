@@ -119,7 +119,7 @@ Fetch: \`curl -s "http://localhost:1337/api/agents?project=<name>"\` — fields:
 
 Decide changes: missing test agent? stale agents referencing dead paths? duplicate purpose? missing schedule? Don't create for hypothetical needs.
 
-Create: \`POST /api/agents\` with \`{project, name, prompt, skillIds: [], model, schedule, runner: "pm2", enabled: true}\`. Models: haiku for cheap tasks, sonnet default, opus only for hard reasoning.
+Create: \`POST /api/agents\` with \`{project, name, prompt, skillIds: [], model, schedule, runner: "pm2", enabled: true}\`. Prefer semantic tiers: fast for cheap tasks, normal for the default, smart only for hard reasoning. Legacy haiku/sonnet/opus aliases still resolve.
 Update: \`PATCH /api/agents/by-name\` (\`prompt\` only unless asked).
 Delete: \`DELETE /api/agents/<id>\` only when stale/broken.
 

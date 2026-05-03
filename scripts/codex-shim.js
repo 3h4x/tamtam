@@ -13,7 +13,7 @@ const { spawn } = require('child_process');
 
 const args = process.argv.slice(2);
 
-let requestedModel = 'haiku';
+let requestedModel = 'fast';
 let outputFormat = 'text';
 let promptArg = '';
 let cwd = '';
@@ -33,9 +33,12 @@ for (let i = 0; i < args.length; i++) {
 Environment:
   CODEX_BIN            Codex executable (default: codex)
   CODEX_MODEL          Default Codex model
-  CODEX_HAIKU_MODEL    Model used when TamTam asks for haiku (default: gpt-5.4-mini)
-  CODEX_SONNET_MODEL   Model used when TamTam asks for sonnet (default: gpt-5.4)
-  CODEX_OPUS_MODEL     Model used when TamTam asks for opus (default: gpt-5.5)
+  CODEX_FAST_MODEL     Model used when TamTam asks for fast (default: gpt-5.4-mini)
+  CODEX_NORMAL_MODEL   Model used when TamTam asks for normal (default: gpt-5.4)
+  CODEX_SMART_MODEL    Model used when TamTam asks for smart (default: gpt-5.5)
+  CODEX_HAIKU_MODEL    Legacy alias for CODEX_FAST_MODEL
+  CODEX_SONNET_MODEL   Legacy alias for CODEX_NORMAL_MODEL
+  CODEX_OPUS_MODEL     Legacy alias for CODEX_SMART_MODEL
 
 Permission mode mapping:
   bypassPermissions -> --dangerously-bypass-approvals-and-sandbox
@@ -112,9 +115,12 @@ function readStdin() {
 
 function resolveModel(model) {
   const byAlias = {
-    haiku: process.env.CODEX_HAIKU_MODEL || 'gpt-5.4-mini',
-    sonnet: process.env.CODEX_SONNET_MODEL || 'gpt-5.4',
-    opus: process.env.CODEX_OPUS_MODEL || 'gpt-5.5',
+    fast: process.env.CODEX_FAST_MODEL || process.env.CODEX_HAIKU_MODEL || 'gpt-5.4-mini',
+    normal: process.env.CODEX_NORMAL_MODEL || process.env.CODEX_SONNET_MODEL || 'gpt-5.4',
+    smart: process.env.CODEX_SMART_MODEL || process.env.CODEX_OPUS_MODEL || 'gpt-5.5',
+    haiku: process.env.CODEX_FAST_MODEL || process.env.CODEX_HAIKU_MODEL || 'gpt-5.4-mini',
+    sonnet: process.env.CODEX_NORMAL_MODEL || process.env.CODEX_SONNET_MODEL || 'gpt-5.4',
+    opus: process.env.CODEX_SMART_MODEL || process.env.CODEX_OPUS_MODEL || 'gpt-5.5',
   };
   return byAlias[model] || process.env.CODEX_MODEL || model;
 }

@@ -75,8 +75,14 @@ describe('normalizeAgent', () => {
     const result = normalizeAgent(row);
     expect(result.name).toBe('my-agent');
     expect(result.project).toBe('proj');
-    expect(result.model).toBe('opus');
+    expect(result.model).toBe('smart');
     expect(result.prompt).toBe('hello');
+  });
+
+  it('falls back to normal when a stored agent model is invalid', () => {
+    const row = makeAgentRow({ model: 'smart --resume injected' });
+    const result = normalizeAgent(row);
+    expect(result.model).toBe('normal');
   });
 
   it('handles null/missing skillIds gracefully', () => {

@@ -48,7 +48,16 @@ describe('file-agent-overrides', () => {
         JSON.stringify({ enabled: false, model: 'haiku' }),
       );
       const result = getFileAgentOverride('myproject', 'myagent');
-      expect(result).toEqual({ enabled: false, model: 'haiku' });
+      expect(result).toEqual({ enabled: false, model: 'fast' });
+    });
+
+    it('sanitizes an invalid stored model override back to normal', () => {
+      testDb.sqlite.prepare(`INSERT INTO settings (key, value) VALUES (?, ?)`).run(
+        'agent_override:myproject:myagent',
+        JSON.stringify({ enabled: true, model: 'smart --resume injected' }),
+      );
+      const result = getFileAgentOverride('myproject', 'myagent');
+      expect(result).toEqual({ enabled: true, model: 'normal' });
     });
 
     it('returns null for invalid JSON value', () => {
@@ -87,13 +96,13 @@ describe('file-agent-overrides', () => {
     it('merges patch with existing override (non-destructive)', () => {
       setFileAgentOverride('proj', 'agent', { enabled: true, model: 'sonnet' });
       const result = setFileAgentOverride('proj', 'agent', { schedule: '4h' });
-      expect(result).toEqual({ enabled: true, model: 'sonnet', schedule: '4h' });
+      expect(result).toEqual({ enabled: true, model: 'normal', schedule: '4h' });
     });
 
     it('overwrites individual fields on re-patch', () => {
       setFileAgentOverride('proj', 'agent', { enabled: true, model: 'sonnet' });
       const result = setFileAgentOverride('proj', 'agent', { model: 'opus' });
-      expect(result.model).toBe('opus');
+      expect(result.model).toBe('smart');
       expect(result.enabled).toBe(true);
     });
 
@@ -113,6 +122,7 @@ describe('file-agent-overrides', () => {
       const result = setFileAgentOverride('proj', 'agent', { model: 'haiku' });
       expect(result.runner).toBe('pm2');
       expect(result.enabled).toBe(true);
+      expect(result.model).toBe('fast');
     });
 
     it('returns the merged value (not just the patch)', () => {

@@ -338,7 +338,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         // (Claude will re-review and emit LGTM if nothing's broken).
         let rawVerdict = getVerdict(job);
         if (!rawVerdict) {
-          // One-shot rescue: ask haiku to classify the existing review text
+          // One-shot rescue: ask the fast tier to classify the existing review text
           // before we burn a full fix iteration on a parsing artifact.
           // Gated by `review_retry_on_parse_failure` (default on).
           try {

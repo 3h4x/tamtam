@@ -134,7 +134,7 @@ Streamed text → `streamBuffer`. `requestAnimationFrame` loop advances `display
 
 ### Model selection
 
-Model picker (haiku/sonnet/opus) persists via `PATCH /api/settings` (`default_model`). On mount reads current setting.
+Model picker (Fast / Normal / Smart) persists via `PATCH /api/settings` (`default_model`). Legacy `haiku` / `sonnet` / `opus` values are still accepted and normalized on read.
 
 ---
 
@@ -262,7 +262,7 @@ The `?job=` param is used during live streaming because the session ID isn't kno
 ### Toolbar controls
 
 ```
-[ new ] [ recent ] [ ● live ]          [ thinking ] [ +skill ] [ +docs ] [ sonnet ▾ ]
+[ new ] [ recent ] [ ● live ]          [ thinking ] [ +skill ] [ +docs ] [ Normal ▾ ]
 ```
 
 - **new** — clears the terminal and starts a fresh session (prompt: `type a message...`)
@@ -271,7 +271,7 @@ The `?job=` param is used during live streaming because the session ID isn't kno
 - **thinking** — toggles visibility of Claude's `<thinking>` blocks
 - **+skill** — opens skill picker; selected skills appear as removable tags (e.g. `Senior Fullstack ×`) and are injected as context on the *first* message only
 - **+docs** — injects project `docs/*.md` files into the next submission
-- **model selector** — haiku / sonnet / opus; persists to `default_model` setting
+- **model selector** — Fast / Normal / Smart; persists to `default_model` setting, with legacy Claude-family aliases still readable
 - **trace ↙** — appears only during an active release pipeline run; links to `/project/[name]/release/[releaseId]` trace view showing per-step verdicts and log excerpts
 - **abort** — appears alongside **trace** during a release; stops the running pipeline step
 

@@ -321,7 +321,7 @@ describe('agents API', () => {
 
       expect(data.agent.name).toBe('New Agent');
       expect(data.agent.project).toBe('proj1');
-      expect(data.agent.model).toBe('sonnet');
+      expect(data.agent.model).toBe('normal');
       expect(data.agent.runner).toBe('pm2');
     });
 
@@ -359,7 +359,7 @@ describe('agents API', () => {
       const response = await POST(request);
       const data = await response.json();
 
-      expect(data.agent.model).toBe('sonnet');
+      expect(data.agent.model).toBe('normal');
       expect(data.agent.runner).toBe('pm2');
     });
 
@@ -380,11 +380,25 @@ describe('agents API', () => {
       const response = await POST(request);
       const data = await response.json();
 
-      expect(data.agent.model).toBe('opus');
+      expect(data.agent.model).toBe('smart');
       expect(data.agent.prompt).toBe('Do something');
       expect(data.agent.schedule).toBe('30m');
       expect(data.agent.runner).toBe('launchctl');
       expect(data.agent.skillIds).toEqual(['skill1', 'skill2']);
+    });
+
+    it('rejects invalid model values on create', async () => {
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Agent', project: 'proj1', model: 'smart --resume injected' }),
+      });
+
+      const response = await POST(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('Invalid model'),
+      });
     });
 
     it('stores agent in database', async () => {
@@ -527,8 +541,41 @@ describe('agents API', () => {
       });
 
       const data = await response.json();
-      expect(data.agent.model).toBe('opus');
+      expect(data.agent.model).toBe('smart');
       expect(data.agent.prompt).toBe('new prompt');
+    });
+
+    it('rejects invalid model values on update', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Agent',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: 'old prompt',
+          schedule: null,
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const request = new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ model: 'smart --resume injected' }),
+      });
+
+      const response = await PATCH(request, {
+        params: Promise.resolve({ agentId: 'agent-123' }),
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('Invalid model'),
+      });
     });
 
     it('updates skillIds as JSON array', async () => {
@@ -672,6 +719,30 @@ describe('agents API', () => {
       const data = await response.json();
       expect(data.agent.id).toBe('file:myproj:my-agent');
       expect(writeFileAgentMock).toHaveBeenCalledOnce();
+    });
+
+    it('rejects invalid model values for file agents', async () => {
+      const fakeAgent = {
+        id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
+        skillIds: [] as string[], model: 'sonnet', prompt: 'new prompt', schedule: null,
+        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+        source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
+      };
+      parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      loadFileAgentMock.mockReturnValue(fakeAgent);
+
+      const request = new NextRequest('http://localhost/api/agents/file:myproj:my-agent', {
+        method: 'PATCH',
+        body: JSON.stringify({ model: 'smart --resume injected' }),
+      });
+      const response = await PATCH(request, { params: Promise.resolve({ agentId: 'file:myproj:my-agent' }) });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('Invalid model'),
+      });
+      expect(writeFileAgentMock).not.toHaveBeenCalled();
     });
 
     it('calls installAgentSchedule for file agent with schedule, enabled, and prompt', async () => {
@@ -1042,7 +1113,19 @@ describe('agents API', () => {
         body: JSON.stringify({ project: 'myproj', name: 'Self', model: 'opus' }),
       }));
       const data = await res.json();
-      expect(data.agent.model).toBe('opus');
+      expect(data.agent.model).toBe('smart');
+    });
+
+    it('rejects invalid model values by project+name', async () => {
+      seedAgent(testDb.db);
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'Self', model: 'smart --resume injected' }),
+      }));
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('Invalid model'),
+      });
     });
 
     it('does not affect an agent with the same name in a different project', async () => {
@@ -1125,6 +1208,27 @@ describe('agents API', () => {
       const data = await res.json();
       expect(data.agent.id).toBe('file:myproj:my-agent');
       expect(writeFileAgentMock).toHaveBeenCalledOnce();
+    });
+
+    it('rejects invalid model values for by-name file agent fallback', async () => {
+      const fakeAgent = {
+        id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
+        skillIds: [] as string[], model: 'sonnet', prompt: 'updated', schedule: null,
+        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+        source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
+      };
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      loadFileAgentMock.mockReturnValueOnce(fakeAgent);
+
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'my-agent', model: 'smart --resume injected' }),
+      }));
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('Invalid model'),
+      });
+      expect(writeFileAgentMock).not.toHaveBeenCalled();
     });
 
     it('returns 404 when no DB agent and no file agent found', async () => {

@@ -7,6 +7,11 @@ import {
   encodeBudgetSubscriptionProviders,
   normalizeBudgetSubscriptionProviders,
 } from '@/lib/usage/subscription-providers';
+import {
+  normalizeModelInput,
+  parseOptionalKnownModelInput,
+  resolveModelAlias,
+} from '@/lib/agents/model-aliases';
 const SETTING_KEYS = [
   'github_owner',
   'claude_provider',
@@ -54,7 +59,85 @@ function serializeSettingValue(key: string, value: unknown): string {
   if (key === 'budget_subscription_providers') {
     return encodeBudgetSubscriptionProviders(normalizeBudgetSubscriptionProviders(String(value)));
   }
+  if (key === 'default_model') {
+    return normalizeModelInput(String(value), 'fast');
+  }
+  if (
+    key === 'pipeline_model_review' ||
+    key === 'pipeline_model_fix' ||
+    key === 'pipeline_model_dod' ||
+    key === 'pipeline_model_commit'
+  ) {
+    return resolveModelAlias(String(value));
+  }
+  if (key === 'agent_templates') {
+    try {
+      const templates = JSON.parse(String(value));
+      if (Array.isArray(templates)) {
+        return JSON.stringify(templates.map((template) => (
+          template && typeof template === 'object'
+            ? { ...template, model: normalizeModelInput(String(template.model ?? ''), 'normal') }
+            : template
+        )));
+      }
+    } catch {}
+  }
   return String(value);
+}
+
+function validateAndSerializeSettingValue(
+  key: (typeof SETTING_KEYS)[number],
+  value: unknown
+): { value: string | null; error: string | null } {
+  if (value === null || value === '') {
+    return { value: null, error: null };
+  }
+
+  if (key === 'default_model') {
+    const parsed = parseOptionalKnownModelInput(value, 'fast');
+    if (parsed.error) return { value: null, error: parsed.error };
+    return { value: parsed.model ?? 'fast', error: null };
+  }
+
+  if (
+    key === 'pipeline_model_review' ||
+    key === 'pipeline_model_fix' ||
+    key === 'pipeline_model_dod' ||
+    key === 'pipeline_model_commit'
+  ) {
+    const parsed = parseOptionalKnownModelInput(value, 'fast');
+    if (parsed.error) return { value: null, error: parsed.error };
+    return { value: parsed.model, error: null };
+  }
+
+  if (key === 'agent_templates') {
+    try {
+      const templates = JSON.parse(String(value));
+      if (!Array.isArray(templates)) {
+        return { value: null, error: 'Invalid agent_templates payload.' };
+      }
+      const normalizedTemplates = templates.map((template) => {
+        if (!template || typeof template !== 'object') return template;
+        const parsed = parseOptionalKnownModelInput(
+          'model' in template ? (template as Record<string, unknown>).model : undefined,
+          'normal'
+        );
+        if (parsed.error) throw new Error(parsed.error);
+        return {
+          ...template,
+          model: parsed.model ?? 'normal',
+        };
+      });
+      return { value: JSON.stringify(normalizedTemplates), error: null };
+    } catch (error) {
+      return {
+        value: null,
+        error: error instanceof Error && error.message ? error.message : 'Invalid agent_templates payload.',
+      };
+    }
+  }
+
+  return { value: serializeSettingValue(key, value), error: null };
 }
 
 export async function GET() {
@@ -68,18 +151,26 @@ export async function GET() {
 
 export async function PATCH(request: NextRequest) {
   const body = await request.json();
+  const serializedEntries: Array<{ key: (typeof SETTING_KEYS)[number]; value: string | null }> = [];
 
   for (const [key, value] of Object.entries(body)) {
     if (!SETTING_KEYS.includes(key as (typeof SETTING_KEYS)[number])) continue;
-    if (value === null || value === '') {
+    const validated = validateAndSerializeSettingValue(key as (typeof SETTING_KEYS)[number], value);
+    if (validated.error) {
+      return NextResponse.json({ detail: validated.error }, { status: 400 });
+    }
+    serializedEntries.push({ key: key as (typeof SETTING_KEYS)[number], value: validated.value });
+  }
+
+  for (const { key, value } of serializedEntries) {
+    if (value === null) {
       db.delete(schema.settings).where(eq(schema.settings.key, key)).run();
     } else {
-      const serializedValue = serializeSettingValue(key, value);
       db.insert(schema.settings)
-        .values({ key, value: serializedValue })
+        .values({ key, value })
         .onConflictDoUpdate({
           target: schema.settings.key,
-          set: { value: serializedValue },
+          set: { value },
         })
         .run();
     }

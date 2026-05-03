@@ -60,7 +60,7 @@ function renderTerminalToolbar(overrides: Partial<React.ComponentProps<typeof Te
       skillUsage: { s1: 2 },
       docsSearch: '',
       showDocsPicker: false,
-      model: 'sonnet',
+      model: 'normal',
       filteredItems,
       filteredDocs,
       onNewSession: vi.fn(),
