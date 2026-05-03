@@ -2,13 +2,15 @@ import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/scheduling';
 import { resolveProjectPath } from '@/lib/shared/project-data';
-import { createJob, listJobs, probeJobStatus, updateJob } from '@/lib/jobs/job-storage';
+import { createJob, listJobs, probeJobStatus, readParsedLog, updateJob } from '@/lib/jobs/job-storage';
 import { startJob } from '@/lib/jobs/pm2-jobs';
 import { exec } from '@/lib/shared/shell';
 import { CODE_REVIEWER_SKILL } from '@/lib/skills/skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings, getPipelineModel } from '@/lib/shared/config';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { runGates } from '@/lib/shared/job-control';
+import { extractFindingIds, REVIEW_OUTPUT_CONTRACT, stripFinalVerdict } from './review-contract';
+import type { JobData } from '@/lib/jobs/types';
 
 export type StartReviewResult =
   | { ok: true; jobId: string; pid: number; logPath: string }
@@ -31,6 +33,8 @@ function loadReviewPrompt(): string {
     'There are uncommitted changes in this repository. Use git and any other tools ' +
     'you need to inspect the changes yourself (git status, git diff, read files, ' +
     'etc.), then review them.\n\n' +
+    '{release_context}\n\n' +
+    REVIEW_OUTPUT_CONTRACT + '\n\n' +
     'OUTPUT FORMAT — strict. Your final non-empty line must be exactly one of:\n\n' +
     '    Verdict: LGTM\n' +
     '    Verdict: NEEDS ATTENTION\n' +
@@ -46,6 +50,51 @@ function loadReviewPrompt(): string {
     'If you omit the verdict line, the release pipeline treats the review as ' +
     'NEEDS ATTENTION and runs a fix loop — wasted spend. Always emit one.\n\n' +
     review_verdict_rules;
+}
+
+function releaseContextForReview(projectName: string): string {
+  const jobs = listJobs();
+  const release = jobs
+    .filter((j) => j.project === projectName && j.kind === 'release' && j.finishedAt === null)
+    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0];
+  if (!release) {
+    return 'PREVIOUS RELEASE REVIEW/FIX CONTEXT:\nNo active release context. Review the current uncommitted changes from first principles.';
+  }
+
+  const prior = jobs
+    .filter((j) =>
+      j.project === projectName &&
+      j.releaseId === release.id &&
+      (j.kind === 'review' || j.kind === 'fix') &&
+      j.finishedAt !== null
+    )
+    .sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
+
+  if (prior.length === 0) {
+    return `PREVIOUS RELEASE REVIEW/FIX CONTEXT:\nRelease ${release.id} has no previous review/fix iterations.`;
+  }
+
+  const blocks: string[] = [];
+  for (const job of prior.slice(-6)) {
+    blocks.push(describePriorReviewStep(job));
+  }
+  return `PREVIOUS RELEASE REVIEW/FIX CONTEXT:
+Use this as review memory. First verify whether earlier findings were actually fixed, then search sibling paths before adding new findings.
+
+${blocks.join('\n\n')}`;
+}
+
+function describePriorReviewStep(job: JobData): string {
+  let log = '';
+  try {
+    log = stripFinalVerdict(readParsedLog(job)).trim();
+  } catch {
+    log = '';
+  }
+  const ids = log ? extractFindingIds(log) : [];
+  const excerpt = log.length > 1800 ? `...(truncated)...\n${log.slice(-1800)}` : log;
+  return `- ${job.kind} ${job.id} (${job.exitCode === 0 ? 'exit 0' : `exit ${job.exitCode ?? '?'}`}${ids.length ? `, findings ${ids.join(', ')}` : ''})
+${excerpt || '(no log excerpt)'}`;
 }
 
 /** Start a code review for the given project. Returns the new job id or a structured error. */
@@ -94,7 +143,8 @@ export async function startProjectReview(projectName: string): Promise<StartRevi
   const prompt = withBasePrompt(
     loadReviewPrompt()
       .replace('{project}', projectName)
-      .replace('{path}', projPath),
+      .replace('{path}', projPath)
+      .replace('{release_context}', releaseContextForReview(projectName)),
     { projectPath: projPath }
   );
 

@@ -36,14 +36,14 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 
 ```bash
 pnpm install
-pnpm build && pnpm start   # builds and starts on :1337 under PM2 (canonical)
+pnpm run rebuild   # build + restart on :1337 under PM2 (canonical after edits)
 ```
 
 Open `http://localhost:1337`, go to Settings, set your workspace path. TamTam scans for git repos and populates the projects list automatically.
 
 ```bash
-pnpm run rebuild  # build + restart the PM2 server (use after code changes)
-pnpm restart      # same as rebuild — build + restart (alias)
+pnpm build && pnpm start  # same end result as rebuild, but split into separate commands
+pnpm restart      # same result as rebuild — build + restart
 pnpm stop       # stop the PM2 server
 pnpm logs       # PM2 log tail
 pnpm dev        # foreground next dev with HMR (local debugging only — stop PM2 first)
@@ -112,5 +112,6 @@ All API routes have corresponding tests in `__tests__/`. Follow the existing pat
 
 - All CLI calls (git, gh, pm2, launchctl) go through `lib/shared/shell.ts`
 - `lib/shared/project-data.ts` assembles project state with a 10s TTL cache
+- Project detail tabs live at `/project/[name]` and `/project/[name]/[tab]`
 - Streaming uses `claude --output-format stream-json` → PM2 log file → `fs.watch` → NDJSON parser → SSE
 - See `docs/STREAMING.md` for the full terminal streaming architecture

@@ -4,7 +4,7 @@ import { db, schema } from '@/lib/db';
 import { markReviewed } from '@/lib/git/git-utils';
 import { parseStreamLines } from './claude-stream-parser';
 import { costUsd } from '@/lib/shared/usage-pricing';
-import { getVerdict, readLog } from './verdict';
+import { getVerdict, readLog, readParsedLog } from './verdict';
 import {
   saveToDb,
   findActiveReleaseJob,
@@ -14,6 +14,7 @@ import {
 } from './storage';
 import { parentContext } from './parent-context';
 import type { JobData } from './types';
+import { findingsIdentity } from '@/lib/pipeline/review-contract';
 
 async function getProjectPipelineConfig(projectName: string): Promise<{ autoCommitEnabled: boolean; autoPushEnabled: boolean; releaseAfterRun: boolean; autoPrMergeEnabled: boolean; prWorkflowEnabled: boolean }> {
   try {
@@ -96,6 +97,8 @@ function recentFixCount(projectName: string, currentJob?: JobData): number {
 // and the verdict line itself — only the *content* of the findings should
 // drive the hash, not formatting churn.
 function findingsFingerprint(reviewLogText: string): string {
+  const structured = findingsIdentity(reviewLogText);
+  if (structured) return `ids:${structured}`;
   let s = reviewLogText.trim();
   const verdictMatch = s.match(/\n[ \t]*Verdict:[^\n]*\s*$/i);
   if (verdictMatch) s = s.slice(0, verdictMatch.index);
@@ -110,6 +113,20 @@ function findingsFingerprint(reviewLogText: string): string {
   let h = 5381;
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
   return h.toString(36);
+}
+
+function pipelineExitCodeForStep(job: JobData): number {
+  if (job.exitCode !== 0) return 1;
+  if (job.kind === 'review') {
+    const verdict = getVerdict(job);
+    if (verdict && verdict !== 'LGTM') return 1;
+    if (!verdict) return 1;
+  }
+  return 0;
+}
+
+function noteReleaseStop(reason: string): void {
+  console.log(`[release] ${reason}`);
 }
 
 // True if the previous review in the same release window produced the same
@@ -129,8 +146,8 @@ function reviewIsStuck(currentReview: JobData): boolean {
   if (reviews.length === 0) return false;
   const prev = reviews[0];
   try {
-    const cur = findingsFingerprint(readLog(currentReview));
-    const old = findingsFingerprint(readLog(prev));
+    const cur = findingsFingerprint(readParsedLog(currentReview));
+    const old = findingsFingerprint(readParsedLog(prev));
     return cur === old && cur.length > 1;
   } catch {
     return false;
@@ -219,10 +236,7 @@ export async function reconcileStaleRelease(job: JobData): Promise<void> {
     /* DB error → fall through; better to potentially over-finalize than to
        leave the release "running" forever if the DB is unreachable. */
   }
-  const worstExit = chain.reduce(
-    (acc, c) => (c.exitCode != null && c.exitCode !== 0 ? 1 : acc),
-    0,
-  );
+  const worstExit = chain.reduce((acc, c) => Math.max(acc, pipelineExitCodeForStep(c)), 0);
   try {
     await finalizeReleaseJob(release, worstExit);
     console.log(`[release] reconciled stale release ${release.id} (${job.project}) — ${chain.length} chained step${chain.length === 1 ? '' : 's'}, exit ${worstExit}`);
@@ -296,6 +310,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   // UI doesn't render it as "live" forever.
   let chainedNext = false;
   let notificationEvent: import('@/lib/shared/notifications').NotificationEvent | null = null;
+  let forcedReleaseExitCode: number | null = null;
+  let releaseStopReason: string | null = null;
 
   if (job.kind === 'review') {
     if (job.exitCode === 0) {
@@ -373,13 +389,15 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
           const r = await startProjectCommit(job.project);
           if (!r.ok) {
-            console.log(`[release] commit failed for ${job.project}: ${r.detail}`);
+            releaseStopReason = `commit failed for ${job.project}: ${r.detail}`;
+            noteReleaseStop(releaseStopReason);
+            forcedReleaseExitCode = 1;
           } else {
             console.log(`[release] review LGTM → committed ${job.project} (${r.commitSha || 'no-op'})`);
+            // startProjectCommit creates a 'commit' job that will itself chain to push
+            // (or finalize the release) via its own completion hook.
+            chainedNext = true;
           }
-          // startProjectCommit creates a 'commit' job that will itself chain to push
-          // (or finalize the release) via its own completion hook.
-          chainedNext = true;
         } else if (verdict === 'NEEDS ATTENTION' || verdict === 'DO NOT SHIP') {
           if (verdict === 'DO NOT SHIP') {
             notificationEvent = 'review_do_not_ship';
@@ -390,8 +408,10 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           // instead of wasting another iteration on the same nits.
           const stuck = reviewIsStuck(job);
           if (stuck) {
-            console.log(`[release] review findings unchanged from previous iteration for ${job.project} — fix not converging, stopping`);
+            releaseStopReason = `review findings unchanged from previous iteration for ${job.project} — fix not converging, stopping`;
+            noteReleaseStop(releaseStopReason);
             notificationEvent = 'fix_loop_exhausted';
+            forcedReleaseExitCode = 1;
           } else if (count < MAX_FIX_ITERATIONS) {
             const { startFixFromJob } = await import('@/lib/pipeline/start-fix');
             const r = await startFixFromJob(job.id);
@@ -399,11 +419,15 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
               console.log(`[release] review ${verdict} → started fix ${r.jobId} (iter ${count + 1})`);
               chainedNext = true;
             } else {
-              console.log(`[release] skipped fix for ${job.project}: ${r.detail}`);
+              releaseStopReason = `skipped fix for ${job.project}: ${r.detail}`;
+              noteReleaseStop(releaseStopReason);
+              forcedReleaseExitCode = 1;
             }
           } else {
-            console.log(`[release] fix cap reached for ${job.project} (${count}/${MAX_FIX_ITERATIONS}) — stopping`);
+            releaseStopReason = `fix cap reached for ${job.project} (${count}/${MAX_FIX_ITERATIONS}) — unresolved ${verdict} review`;
+            noteReleaseStop(releaseStopReason);
             notificationEvent = 'fix_loop_exhausted';
+            forcedReleaseExitCode = 1;
           }
         }
         // With the default-to-NEEDS-ATTENTION above, verdict is always one of
@@ -434,8 +458,10 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           // can't churn test→fix→test→fix forever.
           const count = recentFixCount(job.project, job);
           if (count >= MAX_FIX_ITERATIONS) {
-            console.log(`[fix→test] fix cap reached for ${job.project} (${count}/${MAX_FIX_ITERATIONS}) — stopping`);
+            releaseStopReason = `fix→test cap reached for ${job.project} (${count}/${MAX_FIX_ITERATIONS}) — tests still need verification`;
+            noteReleaseStop(releaseStopReason);
             notificationEvent = 'fix_loop_exhausted';
+            forcedReleaseExitCode = 1;
           } else {
             const { startProjectTest } = await import('@/lib/pipeline/start-test');
             const r = await startProjectTest(job.project);
@@ -443,7 +469,9 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
               console.log(`[fix→test] re-running tests after fix ${job.id} (iter ${count})`);
               chainedNext = true;
             } else {
-              console.log(`[fix→test] skipped re-test for ${job.project}: ${r.detail}`);
+              releaseStopReason = `skipped re-test for ${job.project}: ${r.detail}`;
+              noteReleaseStop(releaseStopReason);
+              forcedReleaseExitCode = 1;
             }
           }
         } else {
@@ -453,7 +481,9 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
             console.log(`[fix→review] auto-started review ${r.jobId} for ${job.project}`);
             chainedNext = true;
           } else {
-            console.log(`[fix→review] skipped auto-review for ${job.project}: ${r.detail}`);
+            releaseStopReason = `skipped auto-review for ${job.project}: ${r.detail}`;
+            noteReleaseStop(releaseStopReason);
+            forcedReleaseExitCode = 1;
           }
         }
       }
@@ -484,7 +514,9 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           chainedNext = true;
           console.log(`[commit→push] pushed ${job.project} (${r.commitSha || 'no-op'})`);
         } else {
-          console.log(`[commit→push] push failed for ${job.project}: ${r.detail}`);
+          releaseStopReason = `push failed for ${job.project}: ${r.detail}`;
+          noteReleaseStop(releaseStopReason);
+          forcedReleaseExitCode = 1;
         }
       } else if (autoCommitEnabled && !autoPushEnabled) {
         // commit-only mode: commit is done, no push needed — finalize here
@@ -519,7 +551,9 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
               console.log(`[release] tests passed + review disabled → commit for ${job.project}`);
               chainedNext = true;
             } else {
-              console.log(`[release] test→commit skipped for ${job.project}: ${r.detail}`);
+              releaseStopReason = `test→commit skipped for ${job.project}: ${r.detail}`;
+              noteReleaseStop(releaseStopReason);
+              forcedReleaseExitCode = 1;
             }
           } else {
             const { startProjectReview } = await import('@/lib/pipeline/start-review');
@@ -528,7 +562,9 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
               console.log(`[release] tests passed → started review ${r.jobId} for ${job.project}`);
               chainedNext = true;
             } else {
-              console.log(`[release] test→review skipped for ${job.project}: ${r.detail}`);
+              releaseStopReason = `test→review skipped for ${job.project}: ${r.detail}`;
+              noteReleaseStop(releaseStopReason);
+              forcedReleaseExitCode = 1;
             }
           }
         } else {
@@ -539,7 +575,9 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
             console.log(`[release] tests passed (no changes) → push ${job.project}`);
             chainedNext = true;
           } else {
-            console.log(`[release] test→push skipped for ${job.project}: ${r.detail}`);
+            releaseStopReason = `test→push skipped for ${job.project}: ${r.detail}`;
+            noteReleaseStop(releaseStopReason);
+            forcedReleaseExitCode = 1;
           }
         }
       }
@@ -564,11 +602,15 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
             console.log(`[release] test failed → started fix ${r.jobId} (iter ${count + 1})`);
             chainedNext = true;
           } else {
-            console.log(`[release] test→fix skipped for ${job.project}: ${r.detail}`);
+            releaseStopReason = `test→fix skipped for ${job.project}: ${r.detail}`;
+            noteReleaseStop(releaseStopReason);
+            forcedReleaseExitCode = 1;
           }
         } else {
-          console.log(`[release] test→fix cap reached for ${job.project} (${count}/${MAX_FIX_ITERATIONS}) — stopping`);
+          releaseStopReason = `test→fix cap reached for ${job.project} (${count}/${MAX_FIX_ITERATIONS}) — tests still failing`;
+          noteReleaseStop(releaseStopReason);
           notificationEvent = 'fix_loop_exhausted';
+          forcedReleaseExitCode = 1;
         }
       }
     } catch (e) {
@@ -684,7 +726,12 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     }
     const release = findActiveReleaseJob(job.project);
     if (release) {
-      const exitCode = (job.exitCode === 0) ? 0 : 1;
+      const exitCode = forcedReleaseExitCode ?? pipelineExitCodeForStep(job);
+      if (releaseStopReason && release.logPath) {
+        try {
+          appendFileSync(release.logPath, `\n# release stopped — ${releaseStopReason}\n`);
+        } catch {}
+      }
       // Emit release success/fail notification before finalizing
       if (!notificationEvent) {
         notificationEvent = exitCode === 0 ? 'release_success' : 'release_fail';
@@ -709,7 +756,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         event: notificationEvent,
         project: job.project,
         job_id: job.id,
-        status: job.exitCode === 0 ? 'success' : 'failed',
+        status: (forcedReleaseExitCode ?? pipelineExitCodeForStep(job)) === 0 ? 'success' : 'failed',
         verdict: verdict ?? undefined,
         log_url: logUrl,
         timestamp: Date.now(),

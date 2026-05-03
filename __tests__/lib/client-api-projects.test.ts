@@ -141,3 +141,104 @@ describe('project config client helpers', () => {
     await expect(fetchProjectConfig('proj')).rejects.toThrow('Failed to fetch project config: Service Unavailable');
   });
 });
+
+describe('project client helper fallbacks', () => {
+  async function getClientApi() {
+    const {
+      createProjectPR,
+      fetchBehind,
+      fetchCustomActions,
+      runMarkDod,
+      runCustomAction,
+      saveCustomActions,
+    } = await import('@/lib/client-api');
+    return {
+      createProjectPR,
+      fetchBehind,
+      fetchCustomActions,
+      runMarkDod,
+      runCustomAction,
+      saveCustomActions,
+    };
+  }
+
+  it('fetchBehind falls back to zero counts on non-ok responses', async () => {
+    stubFetch(false, { detail: 'boom' }, 500, 'Server Error');
+    const { fetchBehind } = await getClientApi();
+
+    await expect(fetchBehind('proj')).resolves.toEqual({ behind: 0, ahead: 0 });
+  });
+
+  it('fetchCustomActions encodes the project name and falls back to an empty list', async () => {
+    const fetchMock = stubFetch(false, { detail: 'nope' }, 404, 'Not Found');
+    const { fetchCustomActions } = await getClientApi();
+
+    await expect(fetchCustomActions('owner/repo name')).resolves.toEqual({ actions: [] });
+    expect((fetchMock.mock.calls[0] as [string])[0]).toContain('/by-project/owner%2Frepo%20name/action');
+  });
+
+  it('createProjectPR uses API detail errors and otherwise falls back to the default message', async () => {
+    stubFetch(false, { detail: 'branch is default' }, 400, 'Bad Request');
+    const { createProjectPR } = await getClientApi();
+
+    await expect(createProjectPR('proj')).rejects.toThrow('branch is default');
+  });
+
+  it('createProjectPR falls back when the API does not return detail', async () => {
+    stubFetch(false, {}, 500, 'Internal Server Error');
+    const { createProjectPR } = await getClientApi();
+
+    await expect(createProjectPR('proj')).rejects.toThrow('Failed to create PR');
+  });
+
+  it('runMarkDod posts JSON context and surfaces fallback errors', async () => {
+    const fetchMock = stubFetch(true, { status: 'ok', updated: 2, checked: ['A'] });
+    const { runMarkDod } = await getClientApi();
+
+    await expect(runMarkDod('proj', { issue_number: 12, repo: 'owner/repo' })).resolves.toEqual({
+      status: 'ok',
+      updated: 2,
+      checked: ['A'],
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/by-project/proj/mark-dod');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
+    expect(JSON.parse(init.body as string)).toEqual({ issue_number: 12, repo: 'owner/repo' });
+  });
+
+  it('runMarkDod uses the generic fallback error when detail is absent', async () => {
+    stubFetch(false, {}, 500, 'Internal Server Error');
+    const { runMarkDod } = await getClientApi();
+
+    await expect(runMarkDod('proj', { pr_number: 7, repo: 'owner/repo' })).rejects.toThrow(
+      'Failed to run DoD verification',
+    );
+  });
+
+  it('saveCustomActions sends the actions payload and runCustomAction surfaces detail errors', async () => {
+    const fetchMock = stubFetch(true, {
+      status: 'ok',
+      actions: [{ name: 'Deploy', command: 'pnpm deploy', color: 'green' }],
+    });
+    const { runCustomAction, saveCustomActions } = await getClientApi();
+
+    await expect(
+      saveCustomActions('owner/repo name', [{ name: 'Deploy', command: 'pnpm deploy', color: 'green' }]),
+    ).resolves.toEqual({
+      status: 'ok',
+      actions: [{ name: 'Deploy', command: 'pnpm deploy', color: 'green' }],
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/by-project/owner%2Frepo%20name/action');
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body as string)).toEqual({
+      actions: [{ name: 'Deploy', command: 'pnpm deploy', color: 'green' }],
+    });
+
+    stubFetch(false, { detail: 'action disabled' }, 409, 'Conflict');
+    await expect(runCustomAction('proj', 'Deploy')).rejects.toThrow('action disabled');
+  });
+});

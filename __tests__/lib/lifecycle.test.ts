@@ -90,6 +90,17 @@ function makeJobRow(overrides: Record<string, unknown>) {
   };
 }
 
+function ndjsonText(text: string): string {
+  return JSON.stringify({
+    type: 'stream_event',
+    event: {
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'text_delta', text },
+    },
+  });
+}
+
 // ─── reconcileStaleRelease ────────────────────────────────────────────────────
 
 describe('reconcileStaleRelease', () => {
@@ -434,10 +445,117 @@ describe('reviewIsStuck convergence guard', () => {
     expect(startFixFromJobMock).not.toHaveBeenCalled();
   });
 
+  it('does NOT start a fix when structured finding IDs repeat with different wording', async () => {
+    const now = Date.now() / 1000;
+    const prevLog = join(tempDir, 'prev-structured-review.log');
+    writeFileSync(prevLog, ndjsonText('Findings:\n- Finding ID: server-url-bypass\n  Root cause: missing server validation\nVerdict: DO NOT SHIP\n'));
+
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: 'release-structured-stuck', project: 'proj', kind: 'release', startedAt: now - 120 }) as any,
+      makeJobRow({
+        id: 'prev-structured-review',
+        project: 'proj',
+        kind: 'review',
+        releaseId: 'release-structured-stuck',
+        logPath: prevLog,
+        startedAt: now - 90,
+        finishedAt: now - 80,
+        exitCode: 0,
+      }) as any,
+    ]).run();
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+
+    const curLog = join(tempDir, 'cur-structured-review.log');
+    writeFileSync(curLog, ndjsonText('Findings:\n- Finding ID: server-url-bypass\n  Root cause: alternate API still bypasses canonical parser\nVerdict: DO NOT SHIP\n'));
+    const curReview = makeReviewJob('cur-structured-review', curLog, {
+      releaseId: 'release-structured-stuck',
+      startedAt: now - 60,
+    });
+
+    await markDoneFn(curReview, 0);
+
+    expect(startFixFromJobMock).not.toHaveBeenCalled();
+  });
+
+  it('does NOT treat incidental id lines as structured finding IDs', async () => {
+    const now = Date.now() / 1000;
+    const prevLog = join(tempDir, 'prev-incidental-id-review.log');
+    writeFileSync(prevLog, ndjsonText('Findings:\n- Root cause: missing auth\n  id: shared-placeholder\nVerdict: DO NOT SHIP\n'));
+
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: 'release-incidental-id', project: 'proj', kind: 'release', startedAt: now - 120 }) as any,
+      makeJobRow({
+        id: 'prev-incidental-id-review',
+        project: 'proj',
+        kind: 'review',
+        releaseId: 'release-incidental-id',
+        logPath: prevLog,
+        startedAt: now - 90,
+        finishedAt: now - 80,
+        exitCode: 0,
+      }) as any,
+    ]).run();
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+
+    const curLog = join(tempDir, 'cur-incidental-id-review.log');
+    writeFileSync(curLog, ndjsonText('Findings:\n- Root cause: missing cache invalidation\n  id: shared-placeholder\nVerdict: DO NOT SHIP\n'));
+    const curReview = makeReviewJob('cur-incidental-id-review', curLog, {
+      releaseId: 'release-incidental-id',
+      startedAt: now - 60,
+    });
+
+    await markDoneFn(curReview, 0);
+
+    expect(startFixFromJobMock).toHaveBeenCalledOnce();
+  });
+
+  it('finalizes release with exit 1 when repeated review findings stop convergence', async () => {
+    const now = Date.now() / 1000;
+    const releaseLog = join(tempDir, 'release-stuck-final.log');
+    writeFileSync(releaseLog, '# release\n');
+    const findings = 'Findings:\n- Finding ID: duplicate-bypass\n  Root cause: duplicate canonicalization missing\n';
+    const prevLog = join(tempDir, 'prev-review-final.log');
+    writeFileSync(prevLog, ndjsonText(findings + 'Verdict: NEEDS ATTENTION\n'));
+
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: 'release-stuck-final', project: 'proj', kind: 'release', logPath: releaseLog, startedAt: now - 120 }) as any,
+      makeJobRow({
+        id: 'prev-review-final',
+        project: 'proj',
+        kind: 'review',
+        releaseId: 'release-stuck-final',
+        logPath: prevLog,
+        startedAt: now - 90,
+        finishedAt: now - 80,
+        exitCode: 0,
+      }) as any,
+    ]).run();
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+
+    const curLog = join(tempDir, 'cur-review-final.log');
+    writeFileSync(curLog, ndjsonText(findings + 'Verdict: DO NOT SHIP\n'));
+    const curReview = makeReviewJob('cur-review-final', curLog, {
+      releaseId: 'release-stuck-final',
+      startedAt: now - 60,
+    });
+
+    await markDoneFn(curReview, 0);
+
+    const row = testDb.db.select().from(schema.jobs).all().find((r) => r.id === 'release-stuck-final');
+    expect(row?.exitCode).toBe(1);
+    expect(row?.finishedAt).not.toBeNull();
+  });
+
   it('DOES start a fix when the previous review has different findings', async () => {
     const now = Date.now() / 1000;
     const prevLog = join(tempDir, 'prev-review2.log');
-    writeFileSync(prevLog, '## Findings\n- old bug in foo.ts\nVerdict: NEEDS ATTENTION\n');
+    writeFileSync(prevLog, ndjsonText('## Findings\n- old bug in foo.ts\nVerdict: NEEDS ATTENTION\n'));
 
     testDb.db.insert(schema.jobs).values([
       makeJobRow({ id: 'release-diff', project: 'proj', kind: 'release', startedAt: now - 120 }) as any,

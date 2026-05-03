@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/lib/db/schema';
 import { JobData } from '@/lib/jobs/job-storage';
-import { writeFileSync, mkdtempSync, rmSync } from 'fs';
+import { writeFileSync, readFileSync, mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -2026,6 +2026,66 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     await markDoneFn(job, 0);
 
     expect(startFixFromJobMock).not.toHaveBeenCalled();
+  });
+
+  it('finalizes active release with exit 1 when review still needs attention after fix cap', async () => {
+    const now = Date.now() / 1000;
+    const releaseLog = join(tempDir, 'release-cap.log');
+    writeFileSync(releaseLog, '# release start\n');
+    testDb.db.insert(schema.jobs).values({
+      id: 'release-cap',
+      project: 'my-proj',
+      kind: 'release',
+      prompt: null,
+      pid: 1,
+      logPath: releaseLog,
+      startedAt: now - 300,
+      finishedAt: null,
+      exitCode: null,
+      seen: 0,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    } as any).run();
+    for (let i = 0; i < 3; i++) {
+      testDb.db.insert(schema.jobs).values({
+        id: `release-cap-fix-${i}`,
+        project: 'my-proj',
+        kind: 'fix',
+        prompt: null,
+        pid: 500 + i,
+        logPath: null,
+        startedAt: now - 240 + i,
+        finishedAt: now - 230 + i,
+        exitCode: 0,
+        seen: 1,
+        durationMs: null,
+        inputTokens: null,
+        outputTokens: null,
+        cacheReadTokens: null,
+        cacheCreateTokens: null,
+        sessionId: null,
+        releaseId: 'release-cap',
+      } as any).run();
+    }
+
+    const logFile = join(tempDir, 'review-cap.log');
+    writeFileSync(logFile, 'Findings:\n- Finding ID: still-broken\n  Root cause: server bypass\nVerdict: DO NOT SHIP\n');
+    const job = makeJob('review', logFile, { id: 'review-cap-final', releaseId: 'release-cap' });
+
+    await markDoneFn(job, 0);
+
+    expect(startFixFromJobMock).not.toHaveBeenCalled();
+    const releaseRow = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-cap');
+    expect(releaseRow?.finishedAt).not.toBeNull();
+    expect(releaseRow?.exitCode).toBe(1);
+    const releaseText = readFileSync(releaseLog, 'utf-8');
+    expect(releaseText).toContain('# release stopped');
+    expect(releaseText).toContain('fix cap reached');
+    expect(releaseText).toContain('# release finished — exit 1');
   });
 
   it('counts fix cap per release when job has releaseId — fixes in same release block', async () => {

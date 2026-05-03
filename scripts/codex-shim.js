@@ -199,6 +199,16 @@ function estimateTokens(text) {
   return Math.ceil(String(text || '').length / 4);
 }
 
+function errorResultText({ code, signal, stderr, fullText }) {
+  const trimmedStderr = stderr.trim();
+  if (trimmedStderr) return trimmedStderr;
+  const trimmedText = fullText.trim();
+  if (trimmedText) {
+    return `[codex-shim] codex exited ${code ?? `via ${signal || 'unknown signal'}`} after assistant output with no stderr`;
+  }
+  return `[codex-shim] codex exited ${code ?? `via ${signal || 'unknown signal'}`} with no stderr or assistant output`;
+}
+
 function parseJsonLine(line) {
   try {
     return JSON.parse(line);
@@ -415,7 +425,7 @@ function launchCodex({ prompt, model, streamJson }) {
           error: code !== 0 || noAssistantOutput,
           result: code === 0
             ? (noAssistantOutput ? '[codex-shim] codex produced no assistant output' : '')
-            : stderr.trim(),
+            : errorResultText({ code, signal, stderr, fullText }),
         });
       } else if (code !== 0 && stderr.trim()) {
         process.stderr.write(stderr);
