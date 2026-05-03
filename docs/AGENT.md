@@ -115,6 +115,8 @@ The `prompt` field is required for each run — it overrides the agent's default
 
 The agent starts immediately as a PM2 process. Output is streamed to a log file and can be watched via SSE at `/api/streaming/{job_id}`.
 
+When an agent finishes, TamTam asks it to include a short `TamTam Run Report` in the final response. The lifecycle parser stores a concise `work_summary` and `modified_files` JSON array on the job row. If a scheduled agent repeatedly finds no actionable work and changes no files, TamTam creates an open project recommendation instead of silently changing the schedule.
+
 ### Scheduled Runs
 
 If an agent has both `schedule` and `prompt`, the schedule is installed automatically on creation/update:
@@ -163,6 +165,8 @@ User/scheduler triggers
       → Start via PM2 with composed prompt as stdin
       → Return job ID and PID
   → Process runs → writes NDJSON log
+  → Lifecycle stores agent run summary and changed-file metadata
+  → No-op scheduled runs may create project recommendations
   → Client polls /api/streaming/{job_id} to watch output
 ```
 

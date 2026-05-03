@@ -28,4 +28,6 @@ export interface JobData {
   releaseId?: string | null;
   abortedAt?: number | null;
   promptBytes?: number | null;
+  workSummary?: string | null;
+  modifiedFiles?: string | null;
 }

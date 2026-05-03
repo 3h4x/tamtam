@@ -9,6 +9,7 @@ import type {
   ChangeDiffResponse,
   ProjectConfig,
   MarkDodResult,
+  Recommendation,
 } from './types'
 
 export const API_BASE = '/api/projects'
@@ -437,5 +438,24 @@ export async function runCustomAction(projectName: string, actionName: string): 
 export async function fetchProjectDocs(projectName: string): Promise<{ docs: import('./types').ProjectDoc[] }> {
   const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/docs`)
   if (!response.ok) throw new Error('Failed to fetch docs')
+  return response.json()
+}
+
+export async function fetchRecommendations(projectName: string): Promise<{ recommendations: Recommendation[] }> {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/recommendations`)
+  if (!response.ok) throw new Error(`Failed to fetch recommendations: ${response.statusText}`)
+  return response.json()
+}
+
+export async function updateRecommendation(projectName: string, recommendationId: string, status: Recommendation['status']): Promise<{ recommendation: Recommendation }> {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/recommendations`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: recommendationId, status }),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || `Failed to update recommendation: ${response.statusText}`)
+  }
   return response.json()
 }

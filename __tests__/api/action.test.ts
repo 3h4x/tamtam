@@ -48,7 +48,28 @@ function createTestDb() {
       started_at REAL NOT NULL,
       finished_at REAL,
       exit_code INTEGER,
-      seen INTEGER DEFAULT 0
+      seen INTEGER DEFAULT 0,
+      duration_ms INTEGER,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      cache_read_tokens INTEGER,
+      cache_create_tokens INTEGER,
+      session_id TEXT,
+      user_prompt TEXT,
+      context_meta TEXT,
+      parent_job_id TEXT,
+      gh_issue_number INTEGER,
+      gh_issue_repo TEXT,
+      gh_issue_title TEXT,
+      log_pruned INTEGER DEFAULT 0,
+      verdict TEXT,
+      cost_usd REAL,
+      model TEXT,
+      release_id TEXT,
+      aborted_at REAL,
+      prompt_bytes INTEGER,
+      work_summary TEXT,
+      modified_files TEXT
     );
   `);
 

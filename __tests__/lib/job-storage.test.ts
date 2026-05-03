@@ -43,7 +43,24 @@ function createTestDb() {
       model TEXT,
       release_id TEXT,
       aborted_at REAL,
-      prompt_bytes INTEGER
+      prompt_bytes INTEGER,
+      work_summary TEXT,
+      modified_files TEXT
+    );
+    CREATE TABLE IF NOT EXISTS recommendations (
+      id TEXT PRIMARY KEY,
+      project TEXT NOT NULL,
+      source_kind TEXT NOT NULL,
+      source_id TEXT,
+      agent_id TEXT,
+      agent_name TEXT,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      detail TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      payload TEXT,
+      created_at REAL NOT NULL,
+      updated_at REAL NOT NULL
     );
     CREATE TABLE IF NOT EXISTS gh_issues_cache (
       project TEXT PRIMARY KEY,

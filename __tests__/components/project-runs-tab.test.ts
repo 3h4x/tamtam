@@ -77,6 +77,16 @@ describe('buildEntries session grouping', () => {
     expect(entry.startedAt).toBe(100)
   })
 
+  it('carries latest agent summary metadata through session grouping', () => {
+    const jobs = [
+      job({ id: 'agent1', kind: 'agent:tests', started_at: 100, session_id: 'S1', work_summary: 'Checked coverage.', modified_files: '[]' }),
+      job({ id: 'chat1', kind: 'run', started_at: 200, session_id: 'S1', user_prompt: 'follow-up', work_summary: 'Followed up.', modified_files: '[{"path":"src/a.ts","status":"M"}]' }),
+    ]
+    const [entry] = buildEntries(jobs)
+    expect(entry.workSummary).toBe('Followed up.')
+    expect(entry.modifiedFiles).toContain('src/a.ts')
+  })
+
   it('reflects the latest job status on the merged entry', () => {
     const jobs = [
       job({ id: 'a', kind: 'run', started_at: 100, session_id: 'S1', status: 'done', finished_at: 150, exit_code: 0 }),

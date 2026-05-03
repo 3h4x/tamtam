@@ -57,6 +57,24 @@ export const jobs = sqliteTable('jobs', {
   releaseId: text('release_id'),
   abortedAt: real('aborted_at'),
   promptBytes: integer('prompt_bytes'),
+  workSummary: text('work_summary'),
+  modifiedFiles: text('modified_files'),
+});
+
+export const recommendations = sqliteTable('recommendations', {
+  id: text('id').primaryKey(),
+  project: text('project').notNull(),
+  sourceKind: text('source_kind').notNull(),
+  sourceId: text('source_id'),
+  agentId: text('agent_id'),
+  agentName: text('agent_name'),
+  type: text('type').notNull(),
+  title: text('title').notNull(),
+  detail: text('detail').notNull(),
+  status: text('status').notNull().default('open'),
+  payload: text('payload'),
+  createdAt: real('created_at').notNull(),
+  updatedAt: real('updated_at').notNull(),
 });
 
 export const skills = sqliteTable('skills', {

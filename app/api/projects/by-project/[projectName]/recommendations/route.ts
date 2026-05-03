@@ -1,0 +1,28 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { listRecommendations, updateRecommendationStatus } from '@/lib/recommendations/recommendations';
+
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ projectName: string }> },
+) {
+  const { projectName } = await params;
+  return NextResponse.json({ recommendations: listRecommendations(projectName) });
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ projectName: string }> },
+) {
+  const { projectName } = await params;
+  const body = await request.json();
+  const id = typeof body.id === 'string' ? body.id : '';
+  const status = typeof body.status === 'string' ? body.status : '';
+  if (!id || !['open', 'dismissed', 'applied'].includes(status)) {
+    return NextResponse.json({ detail: 'id and valid status are required' }, { status: 400 });
+  }
+  const recommendation = updateRecommendationStatus(projectName, id, status as 'open' | 'dismissed' | 'applied');
+  if (!recommendation) {
+    return NextResponse.json({ detail: 'recommendation not found' }, { status: 404 });
+  }
+  return NextResponse.json({ recommendation });
+}

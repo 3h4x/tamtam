@@ -44,6 +44,8 @@ export function loadFromDb(): void {
         releaseId: row.releaseId ?? null,
         abortedAt: row.abortedAt ?? null,
         promptBytes: row.promptBytes ?? null,
+        workSummary: row.workSummary ?? null,
+        modifiedFiles: row.modifiedFiles ?? null,
       });
     }
     loaded = true;
@@ -85,6 +87,8 @@ export function saveToDb(job: JobData): void {
         releaseId: job.releaseId ?? null,
         abortedAt: job.abortedAt ?? null,
         promptBytes: job.promptBytes ?? null,
+        workSummary: job.workSummary ?? null,
+        modifiedFiles: job.modifiedFiles ?? null,
       })
       .onConflictDoUpdate({
         target: schema.jobs.id,
@@ -110,6 +114,8 @@ export function saveToDb(job: JobData): void {
           releaseId: job.releaseId ?? null,
           abortedAt: job.abortedAt ?? null,
           promptBytes: job.promptBytes ?? null,
+          workSummary: job.workSummary ?? null,
+          modifiedFiles: job.modifiedFiles ?? null,
         },
       })
       .run();
@@ -176,6 +182,8 @@ export function createJob(
     ghIssueRepo: ghIssueRepo ?? null,
     ghIssueTitle: ghIssueTitle ?? null,
     releaseId: autoReleaseId,
+    workSummary: null,
+    modifiedFiles: null,
   };
   jobsCache.set(jobId, job);
   saveToDb(job);
@@ -221,6 +229,8 @@ export function getJob(jobId: string): JobData | null {
     releaseId: row.releaseId ?? null,
     abortedAt: row.abortedAt ?? null,
     promptBytes: row.promptBytes ?? null,
+    workSummary: row.workSummary ?? null,
+    modifiedFiles: row.modifiedFiles ?? null,
   };
   jobsCache.set(jobId, job);
   return job;
@@ -297,6 +307,8 @@ export function jobToDict(job: JobData): Record<string, unknown> {
   d.release_id = job.releaseId ?? null;
   d.parent_job_id = job.parentJobId ?? null;
   d.prompt_bytes = job.promptBytes ?? null;
+  d.work_summary = job.workSummary ?? null;
+  d.modified_files = job.modifiedFiles ?? null;
   const verdict = getVerdict(job);
   if (verdict !== null) d.verdict = verdict;
   return d;

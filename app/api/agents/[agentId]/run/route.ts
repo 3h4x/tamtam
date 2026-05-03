@@ -11,6 +11,7 @@ import { createJob, updateJob, listJobs, probeJobStatus } from '@/lib/jobs/job-s
 import { startJob } from '@/lib/jobs/pm2-jobs';
 import { withBasePrompt, getPermissionModeFlag } from '@/lib/shared/config';
 import { errMsg } from '@/lib/shared/types';
+import { exec } from '@/lib/shared/shell';
 import { parseFileAgentId, loadFileAgent } from '@/lib/agents/tamtam-file-agents';
 import { getAgentMemoryDir, getAgentMemoryPath, readAgentMemory, ensureAgentMemoryDir, buildMemoryBlock } from '@/lib/agents/agent-memory';
 import { runGates } from '@/lib/shared/job-control';
@@ -150,8 +151,28 @@ export async function POST(
     }
   }
   const allParts = [...docParts, ...parts];
-  const systemPrompt = allParts.join('\n\n---\n\n');
-  const contextMeta = JSON.stringify({ skills: metaSkills, docs: metaDocs });
+  const reportContract = `## TamTam Run Report
+
+At the end of your run, include a short final section exactly named "TamTam Run Report" with:
+- Summary: one sentence describing what happened
+- Files changed: comma-separated repo-relative paths, or "none"
+- Actionable work: "yes" or "no"
+- Schedule recommendation: optional; only suggest a less frequent schedule when this run found no actionable work`;
+  const systemPrompt = [...allParts, reportContract].filter(Boolean).join('\n\n---\n\n');
+  const [headR, statusR] = await Promise.all([
+    exec('git', ['-C', projPath, 'rev-parse', 'HEAD'], { timeout: 5000 }),
+    exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 }),
+  ]);
+  const contextMeta = JSON.stringify({
+    skills: metaSkills,
+    docs: metaDocs,
+    agent: { id: agent.id, name: agent.name, schedule: agent.schedule, triggeredBy },
+    baseline: {
+      head: headR.exitCode === 0 ? headR.stdout.trim() : null,
+      status: statusR.exitCode === 0 ? statusR.stdout : null,
+      dirty: statusR.exitCode === 0 ? statusR.stdout.trim().length > 0 : null,
+    },
+  });
 
   const { claudeBin, logDir } = getImproveConfig();
 

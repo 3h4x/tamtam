@@ -128,7 +128,7 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 ## Pages
 - `/` — Projects list with status, changes, CI
 - `/project/[name]` — Project overview
-- `/project/[name]/[tab]` — Project detail tabs (`overview`, `config`, `history`, `terminal`, `changes`, `issues`, `docs`)
+- `/project/[name]/[tab]` — Project detail tabs (`overview`, `config`, `history`, `terminal`, `changes`, `issues`, `docs`, `recommendations`)
 - `/project/[name]/terminal/[sessionId]` — Interactive Claude runner with model selector (haiku/sonnet/opus), skill picker, and real-time token streaming via SSE (see `docs/STREAMING.md`)
 - `/project/[name]/task/[task]` — Task detail view
 - `/project/[name]/release/[releaseId]` — Release trace view: pipeline steps, per-step verdicts and log excerpts for a specific release run
@@ -181,6 +181,7 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 - `/api/projects/by-project/[name]/behind` — Ahead/behind commit counts vs remote (GET)
 - `/api/projects/by-project/[name]/logs` — Project run log files (GET)
 - `/api/projects/by-project/[name]/docs` — Project documentation files (GET)
+- `/api/projects/by-project/[name]/recommendations` — Project recommendations (GET); update recommendation status (PATCH: `{ id, status }`)
 - `/api/config/projects` — Scan workspace for git repos and configure projects (GET, PATCH)
 - `/api/jobs` — All runs across projects (GET)
 - `/api/jobs/[jobId]` — Job detail (GET, DELETE)
