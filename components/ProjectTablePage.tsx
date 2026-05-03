@@ -173,8 +173,8 @@ export function ProjectTablePage({ fleet, issueCounts = {} }: ProjectTablePagePr
   const [agentsByProject, setAgentsByProject] = useState<Record<string, Agent[]>>({})
   const [schedulerByProject, setSchedulerByProject] = useState<Record<string, SchedulerEntry[]>>({})
   const [schedulerPaused, setSchedulerPaused] = useState(false)
-  const [sortKey, setSortKey] = useState<SortKey>('last_run')
-  const [sortDir, setSortDir] = useState<SortDir>('desc')
+  const [sortKey, setSortKey] = useState<SortKey>('project')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
 
   useEffect(() => {
     let active = true
