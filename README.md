@@ -110,7 +110,7 @@ All API routes have corresponding tests in `__tests__/`. Follow the existing pat
 
 ## Architecture notes
 
-- All CLI calls (git, gh, pm2, launchctl) go through `lib/shared/shell.ts`
+- Most CLI calls (git, gh, pm2, launchctl) go through `lib/shared/shell.ts`; a few specialized helpers use direct `child_process` spawning when they need tighter process control.
 - `lib/shared/project-data.ts` assembles project state with a 10s TTL cache
 - Project detail tabs live at `/project/[name]` and `/project/[name]/[tab]`
 - Streaming uses `claude --output-format stream-json` → PM2 log file → `fs.watch` → NDJSON parser → SSE

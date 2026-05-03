@@ -30,9 +30,7 @@ function loadReviewPrompt(): string {
     '\n\n---\n\n' +
     'Project: {project}\n' +
     'Path: {path}\n\n' +
-    'There are uncommitted changes in this repository. Use git and any other tools ' +
-    'you need to inspect the changes yourself (git status, git diff, read files, ' +
-    'etc.), then review them.\n\n' +
+    '{review_scope}\n\n' +
     '{release_context}\n\n' +
     REVIEW_OUTPUT_CONTRACT + '\n\n' +
     'OUTPUT FORMAT — strict. Your final non-empty line must be exactly one of:\n\n' +
@@ -50,6 +48,38 @@ function loadReviewPrompt(): string {
     'If you omit the verdict line, the release pipeline treats the review as ' +
     'NEEDS ATTENTION and runs a fix loop — wasted spend. Always emit one.\n\n' +
     review_verdict_rules;
+}
+
+type ReviewScope =
+  | { ok: true; prompt: string }
+  | { ok: false; detail: string };
+
+async function determineReviewScope(projPath: string): Promise<ReviewScope> {
+  const statusR = await exec('git', ['-C', projPath, 'status', '--porcelain', '--ignore-submodules'], { timeout: 5000 });
+  const hasUncommittedChanges = statusR.exitCode === 0 && statusR.stdout.trim().length > 0;
+  if (hasUncommittedChanges) {
+    return {
+      ok: true,
+      prompt:
+        'There are uncommitted changes in this repository. Use git and any other tools ' +
+        'you need to inspect the changes yourself (git status, git diff, read files, ' +
+        'etc.), then review them.',
+    };
+  }
+
+  const aheadR = await exec('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
+  const ahead = parseInt(aheadR?.stdout?.trim() ?? '', 10);
+  if (aheadR?.exitCode === 0 && Number.isFinite(ahead) && ahead > 0) {
+    return {
+      ok: true,
+      prompt:
+        `The working tree is clean, but this branch has ${ahead} local commit${ahead === 1 ? '' : 's'} not yet pushed. ` +
+        'Review the committed diff against upstream before it is pushed. Use git and any other tools you need, especially ' +
+        '`git log --oneline @{u}..HEAD`, `git diff --stat @{u}..HEAD`, and `git diff @{u}..HEAD`, then review those changes.',
+    };
+  }
+
+  return { ok: false, detail: 'No uncommitted changes or unpushed commits to review' };
 }
 
 function releaseContextForReview(projectName: string): string {
@@ -135,15 +165,16 @@ export async function startProjectReview(projectName: string): Promise<StartRevi
     }
   }
 
-  const statusR = await exec('git', ['-C', projPath, 'status', '--porcelain', '--ignore-submodules'], { timeout: 5000 });
-  if (!statusR.stdout.trim()) {
-    return { ok: false, status: 400, detail: 'No uncommitted changes to review' };
+  const scope = await determineReviewScope(projPath);
+  if (!scope.ok) {
+    return { ok: false, status: 400, detail: scope.detail };
   }
 
   const prompt = withBasePrompt(
     loadReviewPrompt()
       .replace('{project}', projectName)
       .replace('{path}', projPath)
+      .replace('{review_scope}', scope.prompt)
       .replace('{release_context}', releaseContextForReview(projectName)),
     { projectPath: projPath }
   );

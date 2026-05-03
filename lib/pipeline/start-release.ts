@@ -6,13 +6,13 @@ import { startProjectTest, detectTestCommand } from './start-test';
 import { startProjectReview } from './start-review';
 import { startProjectPush } from './start-push';
 import { startProjectCommit } from './start-commit';
-import { listJobs, probeJobStatus, createJob, updateJob, getJob, getVerdict, markDone, runWithParent } from '@/lib/jobs/job-storage';
-import { isReviewed } from '@/lib/git/git-utils';
+import { listJobs, probeJobStatus, createJob, updateJob, getJob, markDone, runWithParent } from '@/lib/jobs/job-storage';
 import { exec } from '@/lib/shared/shell';
 import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/scheduling';
 import { acquireLock, getLock } from './pipeline-lock';
 import { detectMainBranch } from './start-commit';
 import { runGates } from '@/lib/shared/job-control';
+import { hasFreshLgtm, hasLocalCommitsAhead } from './release-state';
 
 const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push', 'pr-wait', 'mark-dod', 'release']);
 
@@ -148,13 +148,6 @@ async function hasChanges(projPath: string): Promise<boolean> {
   return r.stdout.split('\n').some((l) => l.trim());
 }
 
-async function hasUnpushedCommits(projPath: string): Promise<boolean> {
-  const r = await exec('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
-  if (!r.stdout.trim() || r.exitCode !== 0) return false;
-  const n = parseInt(r.stdout.trim(), 10);
-  return !isNaN(n) && n > 0;
-}
-
 /**
  * Pluggable release pipeline entry point.
  *
@@ -166,8 +159,7 @@ async function hasUnpushedCommits(projPath: string): Promise<boolean> {
  * Decision order:
  *  1. If no changes and no unpushed commits → nothing to release
  *  2. If a test command is configured/detected → start tests
- *  3. If there are changes → start review
- *  4. If only unpushed commits → push directly
+ *  3. If there are changes or unpushed commits → start review
  */
 /**
  * Returns the current branch name if agent runs should be blocked (Direct Branch
@@ -239,7 +231,7 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
   }
 
   const changes = await hasChanges(projPath);
-  const unpushed = await hasUnpushedCommits(projPath);
+  const unpushed = await hasLocalCommitsAhead(projPath);
   if (!changes && !unpushed) {
     return { ok: false, status: 400, detail: 'Nothing to release — no changes and no unpushed commits' };
   }
@@ -296,17 +288,29 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
   // here makes the chain read as: agent → release → test → review → commit → push.
   return runWithParent(releaseJobId, async () => {
     // No uncommitted changes — run tests first (if configured + not disabled) to
-    // verify committed code before pushing. Completion hook handles test→push.
-    // If no test command or tests disabled, push the existing commits directly.
+    // verify committed code before review/push. Completion hook handles test→review
+    // when local commits are ahead of upstream.
     if (!changes) {
       if (testCmd && !testsDisabled) {
         const r = await startProjectTest(projectName);
         if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
         return { ok: true, step: 'test' as const, jobId: r.jobId, releaseJobId, message: `Running tests (${r.testCmd})` };
       }
-      const r = await startProjectPush(projectName);
+      const freshLgtm = await hasFreshLgtm(projectName, projPath);
+      if (freshLgtm) {
+        const r = await startProjectPush(projectName);
+        if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+        return { ok: true, step: 'push' as const, releaseJobId, message: r.message };
+      }
+      const reviewDisabled = !!getProjectTestConfig(projectName)?.reviewDisabled;
+      if (reviewDisabled) {
+        const r = await startProjectPush(projectName);
+        if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+        return { ok: true, step: 'push' as const, releaseJobId, message: r.message };
+      }
+      const r = await startProjectReview(projectName);
       if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
-      return { ok: true, step: 'push' as const, releaseJobId, message: r.message };
+      return { ok: true, step: 'review' as const, jobId: r.jobId, releaseJobId, message: 'Running review' };
     }
 
     // Fresh LGTM and there are uncommitted changes — commit them first, then push.
@@ -343,15 +347,3 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
 // Returns true when the project's most recent finished review is LGTM AND
 // the working-tree hash still matches the one markReviewed captured. That's
 // the signal that re-running tests + review would add nothing.
-async function hasFreshLgtm(projectName: string, projPath: string): Promise<boolean> {
-  try {
-    const latestReview = listJobs()
-      .filter(j => j.project === projectName && j.kind === 'review' && j.finishedAt !== null && j.exitCode === 0)
-      .sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0))[0];
-    if (!latestReview) return false;
-    if (getVerdict(latestReview) !== 'LGTM') return false;
-    return await isReviewed(projectName, projPath);
-  } catch {
-    return false;
-  }
-}

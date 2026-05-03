@@ -164,6 +164,20 @@ describe('internal-scheduler', () => {
       expect(dump.entries[0].nextFireMs).toBeGreaterThan(Date.now());
     });
 
+    it('removes stale schedules when the agent endpoint returns 404', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+      vi.stubGlobal('fetch', fetchMock);
+      setSchedulerBaseUrl('http://test');
+
+      upsertAgentSchedule({ id: 'a1', project: 'p', name: 'n', schedule: '1m', prompt: 'x', enabled: true });
+
+      await vi.advanceTimersByTimeAsync(60_000 + 100);
+      for (let i = 0; i < 8; i++) await Promise.resolve();
+
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(dumpInternalScheduler().entries).toHaveLength(0);
+    });
+
     it('pause stops future fires until resume is called', async () => {
       const fetchMock = vi.fn().mockResolvedValue({ ok: true });
       vi.stubGlobal('fetch', fetchMock);
