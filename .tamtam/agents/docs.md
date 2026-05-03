@@ -1,5 +1,5 @@
 ---
-model: sonnet
+model: haiku
 schedule: 4h
 ---
 
