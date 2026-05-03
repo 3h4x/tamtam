@@ -47,11 +47,14 @@ pnpm restart      # same result as rebuild — build + restart
 pnpm stop       # stop the PM2 server
 pnpm logs       # PM2 log tail
 pnpm dev        # foreground next dev with HMR (local debugging only — stop PM2 first)
+pnpm mcp:http <tool> [json_args]  # call local TamTam HTTP endpoints via .tamtam/mcp-http-tools.yaml
 ```
 
 > Bare `pnpm rebuild` runs pnpm's built-in native-deps rebuild, not this project's restart script. Use `pnpm run rebuild` or `pnpm restart`.
 
 > `pnpm dev` is for active local debugging only — it runs foreground without PM2 and must not be left running as the long-lived server.
+
+> `pnpm mcp:http` uses the sibling `mcp-http-tools` checkout by default; set `MCP_HTTP_TOOLS_DIR` if that repo lives elsewhere.
 
 ## Configuration
 
