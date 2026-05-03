@@ -7,6 +7,8 @@ describe('startProjectReview', () => {
   let createJobMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
   let listJobsMock: ReturnType<typeof vi.fn>;
+  let readLogMock: ReturnType<typeof vi.fn>;
+  let readParsedLogMock: ReturnType<typeof vi.fn>;
   let probeJobStatusMock: ReturnType<typeof vi.fn>;
   let getLockMock: ReturnType<typeof vi.fn>;
   let acquireLockMock: ReturnType<typeof vi.fn>;
@@ -30,6 +32,8 @@ describe('startProjectReview', () => {
     startJobMock = vi.fn().mockResolvedValue(9999);
     updateJobMock = vi.fn();
     listJobsMock = vi.fn().mockReturnValue([]);
+    readLogMock = vi.fn().mockReturnValue('');
+    readParsedLogMock = vi.fn().mockReturnValue('');
     probeJobStatusMock = vi.fn().mockResolvedValue('done');
     getLockMock = vi.fn().mockReturnValue(null);
     acquireLockMock = vi.fn().mockResolvedValue({ acquired: true });
@@ -51,6 +55,8 @@ describe('startProjectReview', () => {
       createJob: createJobMock,
       updateJob: updateJobMock,
       listJobs: listJobsMock,
+      readLog: readLogMock,
+      readParsedLog: readParsedLogMock,
       probeJobStatus: probeJobStatusMock,
     }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
@@ -92,7 +98,7 @@ describe('startProjectReview', () => {
     }));
     vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock, updateJob: updateJobMock,
-      listJobs: vi.fn().mockReturnValue([]), probeJobStatus: probeJobStatusMock,
+      listJobs: vi.fn().mockReturnValue([]), readLog: readLogMock, readParsedLog: readParsedLogMock, probeJobStatus: probeJobStatusMock,
     }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
     vi.doMock('@/lib/shared/config', () => ({
@@ -127,7 +133,7 @@ describe('startProjectReview', () => {
     }));
     vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock, updateJob: updateJobMock,
-      listJobs: vi.fn().mockReturnValue([]), probeJobStatus: probeJobStatusMock,
+      listJobs: vi.fn().mockReturnValue([]), readLog: readLogMock, readParsedLog: readParsedLogMock, probeJobStatus: probeJobStatusMock,
     }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
     vi.doMock('@/lib/shared/config', () => ({
@@ -263,6 +269,78 @@ describe('startProjectReview', () => {
     await startProjectReview('proj');
     const prompt: string = startJobMock.mock.calls[0][2];
     expect(prompt).toContain('Use LGTM / NEEDS ATTENTION / DO NOT SHIP.');
+  });
+
+  it('requires structured findings with blast-radius review context', async () => {
+    execMock.mockResolvedValueOnce(resp(0, 'M lib/foo.ts'));
+    await startProjectReview('proj');
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('Finding ID: stable-kebab-case-id');
+    expect(prompt).toContain('Root cause:');
+    expect(prompt).toContain('Affected paths:');
+    expect(prompt).toContain('Documentation:');
+    expect(prompt).toContain('Required tests:');
+    expect(prompt).toContain('blast-radius checklist');
+    expect(prompt).toContain('alternate routes or background jobs');
+    expect(prompt).toContain('docs/*.md');
+    expect(prompt).toContain('Do not require docs for trivial refactors');
+  });
+
+  it('includes prior release review and fix context in follow-up reviews', async () => {
+    listJobsMock.mockReturnValue([
+      makeJob({ id: 'release-1', kind: 'release', finishedAt: null, startedAt: 10 }),
+      makeJob({ id: 'prev-review', kind: 'review', releaseId: 'release-1', finishedAt: 20, startedAt: 20, exitCode: 0 }),
+      makeJob({ id: 'prev-fix', kind: 'fix', releaseId: 'release-1', finishedAt: 30, startedAt: 30, exitCode: 0 }),
+    ]);
+    readLogMock.mockImplementation((job: { id: string }) => {
+      if (job.id === 'prev-review') {
+        return '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Findings:\\n- Finding ID: shared-server-validation\\n  Root cause: server route bypass\\nVerdict: DO NOT SHIP"}}}';
+      }
+      if (job.id === 'prev-fix') {
+        return '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Fix checklist:\\n- Finding ID: shared-server-validation\\n  Status: fixed"}}}';
+      }
+      return '';
+    });
+    readParsedLogMock.mockImplementation((job: { id: string }) => {
+      if (job.id === 'prev-review') {
+        return 'Findings:\n- Finding ID: shared-server-validation\n  Root cause: server route bypass\nVerdict: DO NOT SHIP\n';
+      }
+      return 'Fix checklist:\n- Finding ID: shared-server-validation\n  Status: fixed\n';
+    });
+    execMock.mockResolvedValueOnce(resp(0, 'M lib/foo.ts'));
+
+    await startProjectReview('proj');
+
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('PREVIOUS RELEASE REVIEW/FIX CONTEXT');
+    expect(prompt).toContain('prev-review');
+    expect(prompt).toContain('shared-server-validation');
+    expect(prompt).toContain('First verify whether earlier findings were actually fixed');
+    expect(prompt).not.toContain('"type":"stream_event"');
+    expect(readParsedLogMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'prev-review' }));
+    expect(readParsedLogMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'prev-fix' }));
+  });
+
+  it('does not surface incidental id lines as findings in prior release context', async () => {
+    listJobsMock.mockReturnValue([
+      makeJob({ id: 'release-2', kind: 'release', finishedAt: null, startedAt: 10 }),
+      makeJob({ id: 'prev-review-2', kind: 'review', releaseId: 'release-2', finishedAt: 20, startedAt: 20, exitCode: 0 }),
+      makeJob({ id: 'prev-fix-2', kind: 'fix', releaseId: 'release-2', finishedAt: 30, startedAt: 30, exitCode: 0 }),
+    ]);
+    readParsedLogMock.mockImplementation((job: { id: string }) => {
+      if (job.id === 'prev-review-2') {
+        return 'Findings:\n- Finding ID: shared-server-validation\n  Root cause: server route bypass\nVerdict: DO NOT SHIP\n';
+      }
+      return 'Fix checklist:\n- Root cause: updated cache flush path\n  id: shared-placeholder\n';
+    });
+    execMock.mockResolvedValueOnce(resp(0, 'M lib/foo.ts'));
+
+    await startProjectReview('proj');
+
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('prev-review-2');
+    expect(prompt).toContain('shared-server-validation');
+    expect(prompt).not.toContain(', findings shared-placeholder');
   });
 
   it('only checks running jobs of kind "review" (ignores other kinds)', async () => {

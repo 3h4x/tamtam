@@ -95,12 +95,64 @@ function ReleaseOutcomeBadge({ entry }: { entry: Entry }) {
   )
 }
 
+function RowStateBadge({
+  isRunning,
+  isFailed,
+  exitCode,
+  failureLabel,
+}: {
+  isRunning: boolean
+  isFailed: boolean
+  exitCode: number | null | undefined
+  failureLabel?: string | null
+}) {
+  if (isRunning) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-status-info/30 bg-status-info/15 px-1.5 py-0.5 text-[10px] font-medium text-status-info">
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-status-info opacity-60" />
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-status-info" />
+        </span>
+        running
+      </span>
+    )
+  }
+
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${
+      isFailed
+        ? 'border-status-error/30 bg-status-error/15 text-status-error'
+        : 'border-status-success/30 bg-status-success/15 text-status-success'
+    }`}>
+      {isFailed ? (failureLabel ?? `exit ${exitCode}`) : 'done'}
+    </span>
+  )
+}
+
 export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summary, actions, depth = 0, children }: RunRowProps) {
   const isRunning = e.status === 'running'
   const isFailed = !isRunning && e.exitCode !== null && e.exitCode !== 0
   const effectiveRunning = entryIsRunning(e)
   const effectiveNeedsAttention = entryNeedsAttention(e)
   const totalTokens = e.inputTokens + e.outputTokens
+  const statusBadge = (
+    <RowStateBadge
+      isRunning={isRunning}
+      isFailed={isFailed}
+      exitCode={e.exitCode}
+      failureLabel={e.failureLabel}
+    />
+  )
+  const verdictBadge = (
+    <VerdictBadge
+      verdict={e.verdict}
+      isRunning={isRunning}
+      isFailed={isFailed}
+      exitCode={e.exitCode}
+      failureLabel={e.failureLabel}
+    />
+  )
+  const releaseBadge = <ReleaseOutcomeBadge entry={e} />
   // Top-level rows (depth=0) get a wider, always-colored status border so
   // the outcome of every item is scannable at a glance. Child rows keep a
   // thinner border and only color it for running/failed (success stays quiet).
@@ -153,15 +205,37 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
           <span className="shrink-0 mt-0.5 w-5 h-5" aria-hidden="true" />
         )}
 
-        <span className={`shrink-0 mt-0.5 inline-flex items-center justify-center w-[64px] px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded ${KIND_COLOR[e.bucket]}`}>
+        <span className={`shrink-0 mt-0.5 inline-flex items-center justify-center min-w-[58px] px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded ${KIND_COLOR[e.bucket]}`}>
           {KIND_LABEL[e.bucket]}
         </span>
 
         <div className="flex-1 min-w-0">
-          <div className="text-sm text-text-primary font-medium truncate group-hover:text-accent">
-            {e.title}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-text-primary font-medium truncate group-hover:text-accent">
+                {e.title}
+              </div>
+              <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                {statusBadge}
+                {e.logPruned && (
+                  <span className="inline-flex items-center rounded-full bg-text-tertiary/15 px-1.5 py-0.5 text-[10px] font-medium text-text-tertiary" title="Log file deleted by retention policy">
+                    pruned
+                  </span>
+                )}
+                {verdictBadge}
+                {releaseBadge}
+              </div>
+            </div>
+            <div className="shrink-0 text-right">
+              <div className="font-mono text-xs text-text-primary tabular-nums">
+                {formatDuration(e.startedAt, e.finishedAt)}
+              </div>
+              <div className="mt-0.5 font-mono text-[11px] text-text-tertiary tabular-nums">
+                {formatAgo(e.lastActivityAt)}
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5 flex-wrap">
+          <div className="flex items-center gap-x-2 gap-y-1 text-xs text-text-tertiary mt-1.5 flex-wrap">
             {/* When depth > 0 the chain visualization on the left edge already
                 shows what spawned this row — the badge becomes noisy. Keep
                 the parent label as a hover title on the chain connector for
@@ -181,13 +255,14 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
             {e.turns > 1 && <span className="font-mono">{e.turns} turns</span>}
             {e.model && <span className="font-mono">{e.model}</span>}
             {e.navSessionId && <span className="font-mono">#{e.navSessionId.slice(0, 8)}</span>}
+            <span className="font-mono tabular-nums">started {formatAgo(e.startedAt)}</span>
             {summary && <span className="font-mono text-text-secondary">{summary}</span>}
             {e.releaseOutcome && !summary && <span className="font-mono text-text-secondary">{e.releaseOutcome.label}</span>}
             {e.subtitle && !summary && <span className="italic truncate">{e.subtitle}</span>}
           </div>
         </div>
 
-        <div className="shrink-0 flex flex-col items-end gap-0.5 text-xs">
+        <div className="shrink-0 flex flex-col items-end gap-1 text-xs">
           {(totalTokens > 0 || e.costUsd > 0) && (
             <div className="flex items-center gap-2">
               {totalTokens > 0 && (
@@ -201,30 +276,14 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
                   {formatCost(e.costUsd)}
                 </span>
               )}
-              <span className="font-mono text-text-secondary">
-                {formatDuration(e.startedAt, e.finishedAt)}
-              </span>
             </div>
           )}
           <div className="flex items-center gap-2">
-            {totalTokens === 0 && e.costUsd === 0 && (
-              <span className="font-mono text-text-secondary">
-                {formatDuration(e.startedAt, e.finishedAt)}
-              </span>
-            )}
-            <span className="text-text-tertiary text-[11px]">{formatAgo(e.lastActivityAt)}</span>
             {actions && (
               <span onClick={(ev) => ev.stopPropagation()} onKeyDown={(ev) => ev.stopPropagation()}>
                 {actions}
               </span>
             )}
-            {e.logPruned && (
-              <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium bg-text-tertiary/15 text-text-tertiary" title="Log file deleted by retention policy">
-                pruned
-              </span>
-            )}
-            <VerdictBadge verdict={e.verdict} isRunning={isRunning} isFailed={isFailed} exitCode={e.exitCode} failureLabel={e.failureLabel} />
-            <ReleaseOutcomeBadge entry={e} />
           </div>
         </div>
       </div>

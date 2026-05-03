@@ -83,6 +83,11 @@ REVIEW
   │   └─ No verdict found  → finalize release (exit 1)
   └─ exit ≠0 → completion hook → finalize release (exit 1)
 
+When a release enters a follow-up review after a fix, TamTam feeds the review job the
+parsed output from earlier review/fix steps in the same release. Repeated structured
+`Finding ID:` entries are treated as the same underlying issue even if the wording
+changes, so the fix loop can stop when the review findings are not converging.
+
 FIX
   ├─ exit 0  → completion hook → start REVIEW (loop)
   └─ exit ≠0 → completion hook → finalize release (exit 1)

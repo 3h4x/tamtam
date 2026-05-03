@@ -290,6 +290,35 @@ console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', 
     expect(final.result).toBe('[codex-shim] codex produced no assistant output');
   });
 
+  it('emits a useful error when Codex exits non-zero without stderr', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
+    tempDirs.push(dir);
+    const fakeCodex = join(dir, 'codex');
+    await writeFile(fakeCodex, `#!/usr/bin/env node
+console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'working on it' } }));
+process.exit(1);
+`);
+    await chmod(fakeCodex, 0o755);
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--output-format',
+      'stream-json',
+      '--model',
+      'sonnet',
+    ], {
+      ...process.env,
+      CODEX_BIN: fakeCodex,
+    });
+
+    expect(result.code).toBe(1);
+    const lines = result.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    const final = lines.find((line) => line.type === 'result');
+
+    expect(final.is_error).toBe(true);
+    expect(final.result).toContain('codex exited 1 after assistant output with no stderr');
+  });
+
   it('forwards termination signals to the Codex child process', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
     tempDirs.push(dir);

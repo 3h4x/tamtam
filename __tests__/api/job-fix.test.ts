@@ -25,7 +25,7 @@ describe('POST /api/jobs/[jobId]/fix', () => {
   let POST: any;
   let getJobMock: ReturnType<typeof vi.fn>;
   let probeJobStatusMock: ReturnType<typeof vi.fn>;
-  let readLogMock: ReturnType<typeof vi.fn>;
+  let readParsedLogMock: ReturnType<typeof vi.fn>;
   let createJobMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
@@ -37,7 +37,7 @@ describe('POST /api/jobs/[jobId]/fix', () => {
 
     getJobMock = vi.fn().mockReturnValue(null);
     probeJobStatusMock = vi.fn().mockResolvedValue('done');
-    readLogMock = vi.fn().mockReturnValue('Error: something failed\nline 2');
+    readParsedLogMock = vi.fn().mockReturnValue('Error: something failed\nline 2');
     createJobMock = vi.fn().mockImplementation(() =>
       makeJob({ id: 'fix-job-1', kind: 'fix', pid: 0, logPath: null, finishedAt: null, exitCode: null })
     );
@@ -47,9 +47,10 @@ describe('POST /api/jobs/[jobId]/fix', () => {
     vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
       probeJobStatus: probeJobStatusMock,
-      readLog: readLogMock,
+      readParsedLog: readParsedLogMock,
       createJob: createJobMock,
       updateJob: updateJobMock,
+      markDone: vi.fn(),
     }));
 
     vi.doMock('@/lib/scheduling/scheduling', () => ({
@@ -106,7 +107,7 @@ describe('POST /api/jobs/[jobId]/fix', () => {
 
   it('returns 400 if log output is empty', async () => {
     getJobMock.mockReturnValue(makeJob());
-    readLogMock.mockReturnValue('   ');
+    readParsedLogMock.mockReturnValue('   ');
 
     const req = new NextRequest('http://localhost/api/jobs/job-source/fix', { method: 'POST' });
     const res = await POST(req, { params: Promise.resolve({ jobId: 'job-source' }) });

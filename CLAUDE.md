@@ -57,7 +57,7 @@ Verdict detection (`getVerdict` in `lib/jobs/verdict.ts`, re-exported via the `j
 - `pnpm dev` — run `next dev` directly in the foreground on port 1337 (HMR enabled, no PM2). Use only for active local development; never for the long-lived TamTam server.
 - `pnpm start` — start (or idempotently restart) the production server via PM2 on port 1337. Delegates to `scripts/pm2-start.sh`, which spawns `next` directly under PM2 (`--interpreter node`, no shell wrapper) so PM2 tracks the actual server PID — no orphans on stop/restart. Self-heals if a previous orphan is still squatting on port 1337. This is the canonical way to run TamTam.
 - `pnpm run rebuild` — `pnpm build && pnpm start` — production mode has no HMR, so rebuild always rebuilds first to pick up code changes. This is the canonical post-edit command.
-- `pnpm restart` — equivalent to `pnpm run rebuild` (alias). Note: bare `pnpm rebuild` invokes pnpm's built-in native-deps rebuild instead — use `pnpm run rebuild` or `pnpm restart`.
+- `pnpm restart` — same end result as `pnpm run rebuild`. Note: bare `pnpm rebuild` invokes pnpm's built-in native-deps rebuild instead — use `pnpm run rebuild` or `pnpm restart`.
 - `pnpm stop` — stop the PM2 server.
 - `pnpm logs` — view PM2 logs.
 - `pnpm build` — production build.
@@ -127,20 +127,17 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 
 ## Pages
 - `/` — Projects list with status, changes, CI
-- `/project/[name]` — Project overview with agents, status bar (changes/review/tests)
-- `/project/[name]/config` — Test command, pipeline mode (Direct Branch / PR Workflow), automation flags, custom actions editor; single **Save** button at top covers all sections (config + custom actions saved together)
-- `/project/[name]/history` — Project runs with filter tabs (all/running/failed/done)
-- `/project/[name]/changes` — Git diff viewer for uncommitted changes
-- `/project/[name]/issues` — GitHub PRs and issues viewer (open PRs with review status, open issues)
+- `/project/[name]` — Project overview
+- `/project/[name]/[tab]` — Project detail tabs (`overview`, `config`, `history`, `terminal`, `changes`, `issues`, `docs`)
 - `/project/[name]/terminal/[sessionId]` — Interactive Claude runner with model selector (haiku/sonnet/opus), skill picker, and real-time token streaming via SSE (see `docs/STREAMING.md`)
-- `/project/[name]/docs` — Project documentation files viewer
 - `/project/[name]/task/[task]` — Task detail view
 - `/project/[name]/release/[releaseId]` — Release trace view: pipeline steps, per-step verdicts and log excerpts for a specific release run
 - `/agents` — Agents management page
 - `/monitoring` — Prometheus + Loki health dashboard (alerts, service up/down, log errors)
 - `/pipeline` — Pipeline health metrics dashboard (verdict distribution, fix-loop stats, step durations, MTTR, per-project breakdown; filterable by 24h/7d/30d/all)
 - `/stats` — Token usage dashboard (runs, input/output/cache tokens, cost per project and per agent kind, filterable by 24h/7d/30d/all)
-- `/runs` — All runs across projects (replaces `/jobs`, which now redirects here)
+- `/runs` — All runs across projects
+- `/jobs` — Redirects to `/runs`
 - `/logs` — Log viewer
 - `/skills` — Skill editor (CRUD for DB-backed skills)
 - `/settings` — Workspace path, project enablement, agent provider/binary, default model, permission mode, agent templates, pipeline behavior/model settings, budget gates, notifications, retention, DB backup
