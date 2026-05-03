@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/lib/db/schema';
 import { JobData } from '@/lib/jobs/job-storage';
-import { writeFileSync, mkdtempSync, rmSync } from 'fs';
+import { writeFileSync, readFileSync, mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -38,10 +38,29 @@ function createTestDb() {
       gh_issue_repo TEXT,
       gh_issue_title TEXT,
       log_pruned INTEGER DEFAULT 0,
+      verdict TEXT,
       cost_usd REAL,
       model TEXT,
       release_id TEXT,
-      aborted_at REAL
+      aborted_at REAL,
+      prompt_bytes INTEGER,
+      work_summary TEXT,
+      modified_files TEXT
+    );
+    CREATE TABLE IF NOT EXISTS recommendations (
+      id TEXT PRIMARY KEY,
+      project TEXT NOT NULL,
+      source_kind TEXT NOT NULL,
+      source_id TEXT,
+      agent_id TEXT,
+      agent_name TEXT,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      detail TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      payload TEXT,
+      created_at REAL NOT NULL,
+      updated_at REAL NOT NULL
     );
     CREATE TABLE IF NOT EXISTS gh_issues_cache (
       project TEXT PRIMARY KEY,
@@ -1033,6 +1052,14 @@ describe('readParsedLog', () => {
     expect(result).not.toContain('Completed');
   });
 
+  it('surfaces result error text when no assistant text was emitted', () => {
+    const logFile = join(tempDir, 'error-result.log');
+    const doneLine = '{"type":"result","subtype":"error","is_error":true,"duration_ms":1500,"session_id":"s1","result":"[codex-shim] codex produced no assistant output"}';
+    writeFileSync(logFile, doneLine + '\n');
+    const job = makeJob({ logPath: logFile });
+    expect(readParsedLog(job)).toBe('[codex-shim] codex produced no assistant output');
+  });
+
   it('concatenates multiple text events', () => {
     const logFile = join(tempDir, 'multi.log');
     const line1 = '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello "}}}';
@@ -1607,6 +1634,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
   let tempDir: string;
   let execMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
+  let isReviewedMock: ReturnType<typeof vi.fn>;
 
   function makeJob(kind: string, logPath: string | null, overrides: Partial<JobData> = {}): JobData {
     return {
@@ -1641,6 +1669,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     getProjectTestConfigMock = vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoPushEnabled: true });
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     resolveProjectPathMock = vi.fn().mockReturnValue('/proj');
+    isReviewedMock = vi.fn().mockResolvedValue(false);
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
@@ -1652,6 +1681,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     }));
     vi.doMock('@/lib/git/git-utils', () => ({
       markReviewed: vi.fn().mockResolvedValue(undefined),
+      isReviewed: isReviewedMock,
     }));
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
@@ -1932,6 +1962,84 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     expect(startProjectReviewMock).not.toHaveBeenCalled();
   });
 
+  it('starts review when tests pass, worktree is clean, and local commits are unpushed', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })    // git status → clean
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '1\n', stderr: '' }); // git rev-list @{u}..HEAD → ahead
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectReviewMock).toHaveBeenCalledWith('my-proj');
+    expect(startProjectPushMock).not.toHaveBeenCalled();
+  });
+
+  it('pushes directly when tests pass, worktree is clean, and a fresh LGTM already exists', async () => {
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.jobs).values({
+      id: 'fresh-lgtm-review',
+      project: 'my-proj',
+      kind: 'review',
+      prompt: null,
+      pid: 777,
+      logPath: join(tempDir, 'fresh-lgtm-review.log'),
+      startedAt: now - 60,
+      finishedAt: now - 10,
+      exitCode: 0,
+      seen: 1,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    } as any).run();
+    writeFileSync(join(tempDir, 'fresh-lgtm-review.log'), 'Verdict: LGTM\n');
+    isReviewedMock.mockResolvedValue(true);
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '1\n', stderr: '' });
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj');
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+  });
+
+  it('re-runs review when tests pass, worktree is clean, and the LGTM is stale after a new commit', async () => {
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.jobs).values({
+      id: 'stale-lgtm-review',
+      project: 'my-proj',
+      kind: 'review',
+      prompt: null,
+      pid: 777,
+      logPath: join(tempDir, 'stale-lgtm-review.log'),
+      startedAt: now - 60,
+      finishedAt: now - 10,
+      exitCode: 0,
+      seen: 1,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    } as any).run();
+    writeFileSync(join(tempDir, 'stale-lgtm-review.log'), 'Verdict: LGTM\n');
+    isReviewedMock.mockResolvedValue(false);
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '1\n', stderr: '' });
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectReviewMock).toHaveBeenCalledWith('my-proj');
+    expect(startProjectPushMock).not.toHaveBeenCalled();
+  });
+
   it('pushes directly when tests pass and project path cannot be resolved', async () => {
     // resolveProjectPath returns null → cannot check changes → treat as no changes → push
     resolveProjectPathMock.mockReturnValueOnce(null);
@@ -2016,6 +2124,66 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     await markDoneFn(job, 0);
 
     expect(startFixFromJobMock).not.toHaveBeenCalled();
+  });
+
+  it('finalizes active release with exit 1 when review still needs attention after fix cap', async () => {
+    const now = Date.now() / 1000;
+    const releaseLog = join(tempDir, 'release-cap.log');
+    writeFileSync(releaseLog, '# release start\n');
+    testDb.db.insert(schema.jobs).values({
+      id: 'release-cap',
+      project: 'my-proj',
+      kind: 'release',
+      prompt: null,
+      pid: 1,
+      logPath: releaseLog,
+      startedAt: now - 300,
+      finishedAt: null,
+      exitCode: null,
+      seen: 0,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    } as any).run();
+    for (let i = 0; i < 3; i++) {
+      testDb.db.insert(schema.jobs).values({
+        id: `release-cap-fix-${i}`,
+        project: 'my-proj',
+        kind: 'fix',
+        prompt: null,
+        pid: 500 + i,
+        logPath: null,
+        startedAt: now - 240 + i,
+        finishedAt: now - 230 + i,
+        exitCode: 0,
+        seen: 1,
+        durationMs: null,
+        inputTokens: null,
+        outputTokens: null,
+        cacheReadTokens: null,
+        cacheCreateTokens: null,
+        sessionId: null,
+        releaseId: 'release-cap',
+      } as any).run();
+    }
+
+    const logFile = join(tempDir, 'review-cap.log');
+    writeFileSync(logFile, 'Findings:\n- Finding ID: still-broken\n  Root cause: server bypass\nVerdict: DO NOT SHIP\n');
+    const job = makeJob('review', logFile, { id: 'review-cap-final', releaseId: 'release-cap' });
+
+    await markDoneFn(job, 0);
+
+    expect(startFixFromJobMock).not.toHaveBeenCalled();
+    const releaseRow = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-cap');
+    expect(releaseRow?.finishedAt).not.toBeNull();
+    expect(releaseRow?.exitCode).toBe(1);
+    const releaseText = readFileSync(releaseLog, 'utf-8');
+    expect(releaseText).toContain('# release stopped');
+    expect(releaseText).toContain('fix cap reached');
+    expect(releaseText).toContain('# release finished — exit 1');
   });
 
   it('counts fix cap per release when job has releaseId — fixes in same release block', async () => {
@@ -2157,6 +2325,20 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     expect(startProjectCommitMock).toHaveBeenCalledWith('my-proj');
     expect(startProjectReviewMock).not.toHaveBeenCalled();
     expect(startProjectPushMock).not.toHaveBeenCalled();
+  });
+
+  it('auto-chains test→push when reviewDisabled=true and only unpushed commits remain', async () => {
+    getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: true, autoPushEnabled: false, releaseAfterRun: false, reviewDisabled: true });
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '1\n', stderr: '' });
+    const job = makeJob('test', null);
+
+    await markDoneFn(job, 0);
+
+    expect(startProjectPushMock).toHaveBeenCalledWith('my-proj');
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
   });
 
   describe('fix-ci auto-retry on fast crash', () => {
@@ -2741,13 +2923,13 @@ describe('runCompletionHooks – release-after-run', () => {
   it('triggers startRelease after run job finishes with exit 0 when releaseAfterRun=true', async () => {
     const job = makeJob('run');
     await markDoneFn(job, 0);
-    expect(startReleaseMock).toHaveBeenCalledWith('my-proj');
+    expect(startReleaseMock).toHaveBeenCalledWith('my-proj', { queueIfBlocked: true });
   });
 
   it('triggers startRelease after agent:x job finishes with exit 0 when releaseAfterRun=true', async () => {
     const job = makeJob('agent:my-agent');
     await markDoneFn(job, 0);
-    expect(startReleaseMock).toHaveBeenCalledWith('my-proj');
+    expect(startReleaseMock).toHaveBeenCalledWith('my-proj', { queueIfBlocked: true });
   });
 
   it('does not trigger startRelease when run job exits non-zero', async () => {
@@ -3451,5 +3633,53 @@ describe('runCompletionHooks – abort short-circuit', () => {
     await markDoneFn(fixJob, 0);
 
     expect(startProjectReviewMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('persistVerdict', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let createJobFn: typeof import('@/lib/jobs/job-storage').createJob;
+  let getJobFn: typeof import('@/lib/jobs/job-storage').getJob;
+  let persistVerdictFn: typeof import('@/lib/jobs/job-storage').persistVerdict;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    const mod = await import('@/lib/jobs/job-storage');
+    createJobFn = mod.createJob;
+    getJobFn = mod.getJob;
+    persistVerdictFn = mod.persistVerdict;
+  });
+
+  afterEach(() => vi.resetModules());
+
+  it('writes verdict to DB and in-memory cache', () => {
+    const job = createJobFn('proj', 'review', 1, '/log');
+    persistVerdictFn(job.id, 'LGTM');
+
+    const stored = testDb.sqlite
+      .prepare('SELECT verdict FROM jobs WHERE id = ?')
+      .get(job.id) as { verdict: string };
+    expect(stored.verdict).toBe('LGTM');
+
+    const cached = getJobFn(job.id);
+    expect(cached?.verdict).toBe('LGTM');
+  });
+
+  it('updates an existing verdict', () => {
+    const job = createJobFn('proj', 'review', 2, '/log');
+    persistVerdictFn(job.id, 'NEEDS ATTENTION');
+    persistVerdictFn(job.id, 'DO NOT SHIP');
+
+    const stored = testDb.sqlite
+      .prepare('SELECT verdict FROM jobs WHERE id = ?')
+      .get(job.id) as { verdict: string };
+    expect(stored.verdict).toBe('DO NOT SHIP');
+    expect(getJobFn(job.id)?.verdict).toBe('DO NOT SHIP');
+  });
+
+  it('silently no-ops for an unknown jobId (no throw)', () => {
+    expect(() => persistVerdictFn('nonexistent-job', 'LGTM')).not.toThrow();
   });
 });

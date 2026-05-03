@@ -2,11 +2,17 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { errMsg } from '@/lib/shared/types'
+import { fmtAbsolute } from '@/lib/shared/format-date'
+import { computeWeeklyBurnThrottle, type WeeklyBurnThrottle } from '@/lib/shared/budget-throttle'
+
+interface QuotaWindow { utilization: number; resetsAt: string | null; msUntilReset: number | null }
+interface QuotaSnapshot { fiveHour: QuotaWindow; sevenDay: QuotaWindow; gateEnabled?: boolean }
 
 export function JobsPauseToggle() {
   const [jobsPaused, setJobsPaused] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [autoThrottle, setAutoThrottle] = useState<WeeklyBurnThrottle | null>(null)
 
   useEffect(() => {
     let live = true
@@ -24,6 +30,27 @@ export function JobsPauseToggle() {
     }
     void load()
     return () => { live = false }
+  }, [])
+
+  useEffect(() => {
+    let live = true
+    const loadQuota = async () => {
+      try {
+        const res = await fetch('/api/usage/quota')
+        if (!res.ok) return
+        const snap = (await res.json()) as QuotaSnapshot
+        if (!live) return
+        // Only flag throttle when the server-side gate is enabled — otherwise
+        // the indicator would lie about scheduled agents being paused.
+        if (!snap.gateEnabled) { setAutoThrottle(null); return }
+        setAutoThrottle(computeWeeklyBurnThrottle(snap.sevenDay))
+      } catch {
+        // ignore — fail open
+      }
+    }
+    void loadQuota()
+    const id = setInterval(loadQuota, 60_000)
+    return () => { live = false; clearInterval(id) }
   }, [])
 
   const toggle = useCallback(async () => {
@@ -49,31 +76,40 @@ export function JobsPauseToggle() {
     }
   }, [jobsPaused, saving])
 
+  // Three visible states:
+  //   1. jobs_paused=true (manual pause) → "jobs paused"
+  //   2. autoThrottle (burn-rate gate active) → "scheduled paused"; manual buttons still work
+  //   3. neither → "jobs running"
+  const showThrottle = !jobsPaused && autoThrottle != null
+  const label = jobsPaused
+    ? 'jobs paused'
+    : showThrottle
+      ? 'scheduled paused'
+      : 'jobs running'
+  const title = jobsPaused
+    ? 'Jobs paused — click to resume'
+    : showThrottle
+      ? `Scheduled agents paused by weekly budget (7d projects ${autoThrottle!.projectedPct.toFixed(0)}%) — resume ${fmtAbsolute(autoThrottle!.resumesAtMs)}. Click to also pause manual runs.`
+      : 'Pause jobs'
+
   return (
     <button
       type="button"
       role="switch"
       aria-checked={jobsPaused}
       onClick={toggle}
-      title={jobsPaused ? 'Resume jobs' : 'Pause jobs'}
-      aria-label={jobsPaused ? 'Resume jobs' : 'Pause jobs'}
+      title={title}
+      aria-label={title}
       disabled={loading || saving}
-      className={`w-9 h-9 flex items-center justify-center rounded-lg border transition-colors cursor-pointer ${
+      className={`h-9 px-3 flex items-center justify-center rounded-lg border transition-colors cursor-pointer text-xs font-medium whitespace-nowrap ${
         jobsPaused
           ? 'border-status-error/60 bg-status-error/10 text-status-error hover:bg-status-error/20'
-          : 'border-border bg-bg-secondary text-text-secondary hover:bg-bg-tertiary hover:text-text-primary'
+          : showThrottle
+            ? 'border-status-warning/60 bg-status-warning/10 text-status-warning hover:bg-status-warning/20'
+            : 'border-border bg-bg-secondary text-text-secondary hover:bg-bg-tertiary hover:text-text-primary'
       } ${loading || saving ? 'opacity-70 cursor-wait' : ''}`}
     >
-      {jobsPaused ? (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M8 5v14" />
-          <path d="M16 5v14" />
-        </svg>
-      ) : (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M5 3l14 9-14 9V3z" />
-        </svg>
-      )}
+      {label}
     </button>
   )
 }

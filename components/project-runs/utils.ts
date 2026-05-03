@@ -110,7 +110,7 @@ export const KIND_COLOR: Record<KindBucket, string> = {
   push: 'bg-status-success/15 text-status-success',
   'mark-dod': 'bg-status-info/15 text-status-info',
   'pr-wait': 'bg-status-info/15 text-status-info',
-  agent: 'bg-purple-500/15 text-purple-400',
+  agent: 'bg-bg-tertiary text-text-secondary border border-border',
   other: 'bg-text-tertiary/15 text-text-secondary',
 }
 
@@ -146,7 +146,11 @@ export interface Entry {
   navJobId: string
   navSessionId: string | null
   verdict?: JobInfo['verdict']
+  failureLabel?: string | null
+  releaseOutcome?: ReleaseOutcome | null
   logPruned: boolean
+  workSummary: string | null
+  modifiedFiles: string | null
   // Flat list of every pipeline child that ran inside this release's time
   // window — used by `buildReleaseSummary` for the one-line "test ✓ · review
   // LGTM · …" recap on the collapsed parent row.
@@ -165,6 +169,37 @@ export interface Entry {
   // `parent_job_id` edges when the parent might itself be a multi-turn
   // entry. Internal — callers shouldn't read this directly.
   _jobIds?: string[]
+}
+
+export type ReleaseOutcomeStatus = 'queued' | 'blocked' | 'running' | 'failed' | 'done'
+
+export interface ReleaseOutcome {
+  status: ReleaseOutcomeStatus
+  label: string
+  releaseJobId: string
+  blockingJobId?: string | null
+}
+
+function releaseOutcomeFor(rel: Entry): ReleaseOutcome {
+  if (rel.status === 'running') {
+    return { status: 'running', label: 'release running', releaseJobId: rel.navJobId }
+  }
+  if (rel.exitCode === 0) {
+    return { status: 'done', label: 'release done', releaseJobId: rel.navJobId }
+  }
+  if ((rel.children?.length ?? 0) === 0) {
+    return { status: 'blocked', label: 'release blocked', releaseJobId: rel.navJobId }
+  }
+  return { status: 'failed', label: 'release failed', releaseJobId: rel.navJobId }
+}
+
+export function entryIsRunning(e: Entry): boolean {
+  return e.status === 'running' || e.releaseOutcome?.status === 'running'
+}
+
+export function entryNeedsAttention(e: Entry): boolean {
+  if (e.status === 'done' && e.exitCode !== null && e.exitCode !== 0) return true
+  return e.releaseOutcome?.status === 'blocked' || e.releaseOutcome?.status === 'failed'
 }
 
 function truncate(s: string, n: number): string {
@@ -268,6 +303,8 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
         existing.cacheReadTokens += j.cache_read_tokens ?? 0
         existing.costUsd += jobCost(j)
         existing.navJobId = j.id
+        existing.workSummary = j.work_summary ?? existing.workSummary
+        existing.modifiedFiles = j.modified_files ?? existing.modifiedFiles
         existing._jobIds!.push(j.id)
         continue
       }
@@ -300,7 +337,11 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       navJobId: j.id,
       navSessionId: j.session_id ?? null,
       verdict: j.verdict,
+      failureLabel: null,
+      releaseOutcome: null,
       logPruned: !!j.log_pruned,
+      workSummary: j.work_summary ?? null,
+      modifiedFiles: j.modified_files ?? null,
       parentJobId: j.parent_job_id ?? null,
       parentLabel: j.parent_job_id ? parentLabelFor(byId.get(j.parent_job_id)) : null,
       _jobIds: [j.id],
@@ -408,35 +449,11 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
   const releasesByKey = new Map<string, Entry>()
   for (const r of releases) {
     const kids = (childrenByParent.get(r.key) ?? []).sort((a, b) => a.startedAt - b.startedAt)
-    releasesByKey.set(r.key, { ...r, children: kids, chainedChildren: buildChain(r, kids) })
+    const failureLabel = r.status === 'done' && r.exitCode !== null && r.exitCode !== 0
+      ? kids.length === 0 ? 'release blocked' : 'release failed'
+      : r.failureLabel
+    releasesByKey.set(r.key, { ...r, children: kids, chainedChildren: buildChain(r, kids), failureLabel })
   }
-
-  // Index every entry by its absorbed job ids so we can resolve a release's
-  // parent_job_id to a concrete Entry (release.parent might be an agent run
-  // or a chat run that triggered the release-after-run hook).
-  const entryByJobId = new Map<string, Entry>()
-  for (const e of entries) {
-    for (const jid of e._jobIds ?? [e.navJobId]) entryByJobId.set(jid, e)
-  }
-
-  // Releases that were triggered by an agent/run nest under that owner so
-  // the runs view reads as `agent → release → test → review → …`. Releases
-  // without a parent (or whose parent is itself a release) stay top-level.
-  const releasesNestedUnderParent = new Set<string>()
-  const releaseChildrenByParentKey = new Map<string, Entry[]>()
-  for (const r of releasesByKey.values()) {
-    if (!r.parentJobId) continue
-    const parentEntry = entryByJobId.get(r.parentJobId)
-    if (!parentEntry || parentEntry.kind === 'release') continue
-    releasesNestedUnderParent.add(r.key)
-    const arr = releaseChildrenByParentKey.get(parentEntry.key) ?? []
-    arr.push(r)
-    releaseChildrenByParentKey.set(parentEntry.key, arr)
-  }
-
-  const parents: Entry[] = Array.from(releasesByKey.values()).filter(
-    (r) => !releasesNestedUnderParent.has(r.key),
-  )
 
   // Cluster orphaned pipeline steps (no parent release) that are close in time
   // into virtual groups so they display as one collapsed row instead of many
@@ -445,6 +462,42 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
   const CLUSTER_GAP = 30 * 60 // 30 minutes between steps = same pipeline run
   const pipelineOrphans = topLevel.filter(e => PIPELINE_CHILD_KINDS.has(e.kind))
   const otherTopLevel = topLevel.filter(e => !PIPELINE_CHILD_KINDS.has(e.kind))
+
+  // If a release's parentJobId points at an agent or run in the top-level
+  // list, nest the release under that parent so the history reads as one
+  // collapsible item instead of two separate rows.
+  const topLevelByJobId = new Map<string, Entry>()
+  for (const e of otherTopLevel) {
+    for (const jid of e._jobIds ?? [e.navJobId]) topLevelByJobId.set(jid, e)
+  }
+  const agentOwnedReleaseKeys = new Set<string>()
+  for (const rel of releasesByKey.values()) {
+    if (!rel.parentJobId) continue
+    const parentEntry = topLevelByJobId.get(rel.parentJobId)
+    if (!parentEntry) continue
+    parentEntry.chainedChildren = [...(parentEntry.chainedChildren ?? []), rel]
+    parentEntry.releaseOutcome = releaseOutcomeFor(rel)
+    // A terminal/agent row that auto-triggered a release is an aggregate from
+    // the operator's point of view, but it still has two separate outcomes:
+    // the agent/run itself and the release it triggered. Keep the parent
+    // job's own exit code intact and expose the release as a separate chip so
+    // "agent succeeded, release blocked" is not collapsed into a misleading
+    // raw `exit 1`.
+    parentEntry.lastActivityAt = Math.max(parentEntry.lastActivityAt, rel.lastActivityAt)
+    if (rel.status === 'running') {
+      parentEntry.finishedAt = null
+    } else if (rel.exitCode !== null && rel.exitCode !== 0) {
+      parentEntry.status = 'done'
+      parentEntry.finishedAt = rel.finishedAt ?? parentEntry.finishedAt
+    } else if (parentEntry.exitCode === 0 && rel.finishedAt) {
+      parentEntry.finishedAt = Math.max(parentEntry.finishedAt ?? parentEntry.startedAt, rel.finishedAt)
+    }
+    agentOwnedReleaseKeys.add(rel.key)
+  }
+
+  const parents: Entry[] = Array.from(releasesByKey.values()).filter(
+    r => !agentOwnedReleaseKeys.has(r.key)
+  )
   const clustered: Entry[] = []
 
   if (pipelineOrphans.length > 0) {
@@ -488,7 +541,11 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
           navJobId: last.navJobId,
           navSessionId: null,
           verdict: undefined,
+          failureLabel: anyFailed ? 'pipeline failed' : null,
+          releaseOutcome: null,
           logPruned: false,
+          workSummary: null,
+          modifiedFiles: null,
           children: cluster,
           parentJobId: null,
           parentLabel: null,
@@ -503,28 +560,23 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
     }
   }
 
-  // Attach nested releases to their parent agent/run entries. We mutate
-  // copies (spread) so the original Entry instances aren't aliased between
-  // the flat children list and the chained tree.
-  const otherWithReleaseChildren = otherTopLevel.map((e) => {
-    const releaseKids = releaseChildrenByParentKey.get(e.key)
-    if (!releaseKids || releaseKids.length === 0) return e
-    const sortedKids = [...releaseKids].sort((a, b) => a.startedAt - b.startedAt)
-    const existing = e.chainedChildren ?? []
-    return { ...e, chainedChildren: [...existing, ...sortedKids] }
-  })
-
-  const out = [...parents, ...clustered, ...otherWithReleaseChildren]
+  const out = [...parents, ...clustered, ...otherTopLevel]
   out.sort((a, b) => b.lastActivityAt - a.lastActivityAt)
   return out
 }
 
 // Compact one-line summary built from a release's children, e.g.
 // "test ✓ · review LGTM · commit ✓ · push ✓".
-export function buildReleaseSummary(children: Entry[]): string {
-  if (children.length === 0) return '(no steps)'
+export function buildReleaseSummary(children: Entry[], release?: Entry): string {
+  if (children.length === 0) {
+    if (release?.status === 'done' && release.exitCode !== null && release.exitCode !== 0) {
+      return 'release blocked before first step'
+    }
+    return '(no steps)'
+  }
   const parts: string[] = []
-  for (const c of children) {
+  const sorted = [...children].sort((a, b) => a.startedAt - b.startedAt)
+  for (const c of sorted) {
     const name = c.kind === 'mark-dod' ? 'dod' : c.kind
     let mark = '…'
     if (c.status === 'running') mark = '…'
@@ -532,5 +584,31 @@ export function buildReleaseSummary(children: Entry[]): string {
     else mark = `✗${c.exitCode ?? ''}`
     parts.push(`${name} ${mark}`)
   }
+  const last = sorted[sorted.length - 1]
+  const failedTestWithoutFix = last?.kind === 'test'
+    && last.status === 'done'
+    && last.exitCode !== null
+    && last.exitCode !== 0
+    && !sorted.some((c) => c.kind === 'fix' && c.startedAt > last.startedAt)
+  if (failedTestWithoutFix) parts.push('fix pending')
   return parts.join(' · ')
+}
+
+// Flatten the pipeline chain tree into a linear {entry, depth} list. Main
+// pipeline steps (test/review/commit/push/mark-dod/pr-wait) all appear at
+// `baseDepth`. fix/fix-push appear at baseDepth+1 so they read as an
+// indented remediation rather than as a separate tier. After any node its
+// chained children resume at `baseDepth` — a review that follows a fix is a
+// sibling of the preceding test, not its grandchild.
+export function flattenPipelineSteps(roots: Entry[], baseDepth: number): Array<{ entry: Entry; depth: number }> {
+  const result: Array<{ entry: Entry; depth: number }> = []
+  const walk = (nodes: Entry[], stepDepth: number) => {
+    for (const node of nodes) {
+      const isFix = node.kind === 'fix' || node.kind === 'fix-push'
+      result.push({ entry: node, depth: isFix ? stepDepth + 1 : stepDepth })
+      walk(node.chainedChildren ?? [], baseDepth)
+    }
+  }
+  walk(roots, baseDepth)
+  return result
 }

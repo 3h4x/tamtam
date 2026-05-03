@@ -88,6 +88,27 @@ export async function runProbeSweep(): Promise<void> {
   } catch (err) {
     console.error('[probe-sweep] error:', err);
   }
+  // Release meta-jobs have no PM2 process (pid=0) so probeJobStatus would
+  // incorrectly mark them exit -1. Instead, find any finished pipeline step
+  // for the project and let reconcileStaleRelease walk the chain — if all
+  // steps are done it finalizes the release, otherwise it's a no-op.
+  try {
+    const { listJobs, reconcileStaleRelease, PIPELINE_STEP_KINDS } = await import('./lib/jobs/job-storage');
+    const staleReleases = listJobs().filter(j => j.finishedAt === null && j.kind === 'release');
+    for (const release of staleReleases) {
+      const stepJob = listJobs().find(j =>
+        j.project === release.project
+        && PIPELINE_STEP_KINDS.has(j.kind)
+        && j.finishedAt !== null
+        && (j.startedAt ?? 0) >= (release.startedAt ?? 0) - 1
+      );
+      if (stepJob) {
+        try { await reconcileStaleRelease(stepJob); } catch {}
+      }
+    }
+  } catch (err) {
+    console.error('[probe-sweep] release reconcile error:', err);
+  }
 }
 
 /**
@@ -208,8 +229,38 @@ async function reapAbandonedInlineJobs(): Promise<void> {
   }
 }
 
+// One-shot backfill: populate the new `verdict` column for historical review
+// jobs whose log files are still on disk. Jobs whose logs have already been
+// pruned are irrecoverable and are left as null — they counted as parseFailed
+// before this migration and will continue to do so, but future reviews will
+// always have their verdict persisted at completion time.
+// On every boot: store the verdict for any finished review job whose log is
+// still on disk but whose verdict column is NULL. Runs in O(unpersisted_jobs)
+// which is cheap once the initial backfill is done (only newly-finished reviews
+// before their first `persistVerdict` call land here). This ensures verdicts
+// survive future log pruning even for runs that completed before this fix.
+async function backfillVerdicts(): Promise<void> {
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
+  try {
+    const { listJobs } = await import('./lib/jobs/job-storage');
+    const { getVerdict } = await import('./lib/jobs/verdict');
+    const { persistVerdict } = await import('./lib/jobs/storage');
+
+    const reviewJobs = listJobs().filter(j => j.kind === 'review' && j.finishedAt !== null && j.exitCode === 0 && !j.verdict && !j.logPruned);
+    let count = 0;
+    for (const job of reviewJobs) {
+      const v = getVerdict(job);
+      if (v) { persistVerdict(job.id, v); count++; }
+    }
+    if (count > 0) console.log(`[boot] persisted verdict for ${count} review job(s) (log still on disk)`);
+  } catch (err) {
+    console.error('[boot] verdict backfill failed:', err);
+  }
+}
+
 export async function registerNode(): Promise<void> {
   await migrateLegacyFileWorkflowFlags();
+  void backfillVerdicts();
   void reapAbandonedInlineJobs();
   void reinstallAgents();
 
@@ -229,5 +280,31 @@ export async function registerNode(): Promise<void> {
   runCleanup();
   setInterval(runCleanup, 24 * 60 * 60 * 1000);
 
-  setInterval(runProbeSweep, 30_000);
+  const probeIntervalMs = parseInt(process.env.TAMTAM_PROBE_INTERVAL_MS ?? '', 10) || 30_000;
+  setInterval(runProbeSweep, probeIntervalMs);
+
+  // Quota drain ticker: every 60s, refresh the cached subscription quota and,
+  // if we're below the block threshold, drain any releases that were deferred
+  // while the 5h window was full.
+  const { prefetchQuota, peekQuotaCache } = await import('@/lib/usage/quota');
+  const { listPendingReleaseProjects, drainPendingRelease } = await import('@/lib/pipeline/pending-release');
+  const { getSettings } = await import('@/lib/shared/config');
+  let lastDrainPct: number | null = null;
+  setInterval(async () => {
+    prefetchQuota();
+    // Wait a beat for the prefetch to settle, then re-read cache.
+    await new Promise((r) => setTimeout(r, 1500));
+    const snap = peekQuotaCache();
+    if (!snap) return;
+    const limit = getSettings().budget_block_at_pct;
+    const pct = snap.fiveHour.utilization;
+    // Edge: dropped from over-limit back under. Drain pending releases.
+    if (lastDrainPct != null && lastDrainPct >= limit && pct < limit) {
+      const projects = listPendingReleaseProjects();
+      for (const p of projects) {
+        try { await drainPendingRelease(p); } catch (e) { console.error('[budget-drain] failed for', p, e); }
+      }
+    }
+    lastDrainPct = pct;
+  }, 60_000);
 }

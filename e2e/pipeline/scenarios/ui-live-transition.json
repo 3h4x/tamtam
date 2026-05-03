@@ -1,0 +1,14 @@
+{
+  "description": "UI live transition: review sleeps 3 s so the browser can observe the running state before the job completes.",
+  "steps": [
+    {
+      "label": "review",
+      "sleep_ms": 3000,
+      "text": "Implementation looks clean.\n\nVerdict: LGTM"
+    },
+    {
+      "label": "commit-message",
+      "text": "feat: ui live transition test commit"
+    }
+  ]
+}

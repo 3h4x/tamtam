@@ -7,7 +7,7 @@ import { getImproveConfig, setProjectPushResult } from '@/lib/scheduling/schedul
 import { buildDiffContext } from '@/lib/git/diff-context';
 import { createJob, markDone, updateJob, listJobs } from '@/lib/jobs/job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { jobsPausedResult } from '@/lib/shared/job-control';
+import { runGates } from '@/lib/shared/job-control';
 
 export type CommitResult =
   | { ok: true; commitSha: string; message: string; jobId?: string }
@@ -295,7 +295,7 @@ export async function startProjectCommit(projectName: string): Promise<CommitRes
     setProjectPushResult(projectName, 'project not found');
     return { ok: false, status: 404, detail: 'project not found' };
   }
-  const paused = jobsPausedResult('start a commit');
+  const paused = runGates('start a commit');
   if (paused) {
     setProjectPushResult(projectName, paused.detail);
     return paused;

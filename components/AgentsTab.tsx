@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { fetchAgents, createAgent, updateAgent, deleteAgent, runAgent, fetchSkills, fetchPersonas } from '@/lib/client-api'
-import type { Agent, Skill, Persona } from '@/lib/client-api'
+import type { Agent, Skill, Persona, JobInfo } from '@/lib/client-api'
+import { formatAgo } from '@/lib/shared/format'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { useToast } from '@/components/Toast'
 import { AgentModal } from '@/components/agents-tab/AgentModal'
@@ -115,9 +116,10 @@ interface AgentsTabProps {
   projectName: string
   currentBranch?: string | null
   prWorkflowEnabled?: boolean
+  projectJobs?: JobInfo[]
 }
 
-export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled }: AgentsTabProps) {
+export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled, projectJobs = [] }: AgentsTabProps) {
   // Server rejects agent runs in Direct Branch mode while a fix/issue-* branch
   // is checked out (see app/api/agents/[agentId]/run/route.ts). Mirror that
   // check on the client so the buttons reflect reality.
@@ -218,6 +220,16 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled }: Age
     closeModal()
   }
 
+  // Derive last-run timestamp per agent from project jobs (kind = "agent:name")
+  const lastRunByAgent = new Map<string, { ts: number; exitCode: number | null }>()
+  for (const job of projectJobs) {
+    if (!job.kind.startsWith('agent:')) continue
+    const name = job.kind.slice('agent:'.length)
+    const ts = job.finished_at ?? job.started_at ?? 0
+    const prev = lastRunByAgent.get(name)
+    if (!prev || ts > prev.ts) lastRunByAgent.set(name, { ts, exitCode: job.exit_code })
+  }
+
   if (loading) return (
     <div className="mt-4 flex flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -280,24 +292,31 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled }: Age
       )}
 
       <div className="flex flex-col gap-2">
-        {agents.map(agent => (
-          <AgentRow
-            key={agent.id}
-            agent={agent}
-            skills={skills}
-            editing={editing}
-            runSubmitting={runSubmitting}
-            runPromptAgent={runPromptAgent}
-            runPrompt={runPrompt}
-            agentRunsBlocked={agentRunsBlocked}
-            blockedReason={blockedReason}
-            onEdit={(a) => { setEditing(a); setCreating(false) }}
-            onToggleEnabled={handleToggleEnabled}
-            onRun={handleRun}
-            onToggleRunPrompt={(id) => { setRunPromptAgent(runPromptAgent === id ? null : id); setRunPrompt('') }}
-            onRunPromptChange={setRunPrompt}
-          />
-        ))}
+        {agents.map(agent => {
+          const lastRun = lastRunByAgent.get(agent.name)
+          const lastRunAgo = lastRun ? formatAgo(lastRun.ts) : null
+          const lastRunFailed = lastRun ? (lastRun.exitCode !== null && lastRun.exitCode !== 0) : false
+          return (
+            <AgentRow
+              key={agent.id}
+              agent={agent}
+              skills={skills}
+              editing={editing}
+              runSubmitting={runSubmitting}
+              runPromptAgent={runPromptAgent}
+              runPrompt={runPrompt}
+              agentRunsBlocked={agentRunsBlocked}
+              blockedReason={blockedReason}
+              lastRunAgo={lastRunAgo}
+              lastRunFailed={lastRunFailed}
+              onEdit={(a) => { setEditing(a); setCreating(false) }}
+              onToggleEnabled={handleToggleEnabled}
+              onRun={handleRun}
+              onToggleRunPrompt={(id) => { setRunPromptAgent(runPromptAgent === id ? null : id); setRunPrompt('') }}
+              onRunPromptChange={setRunPrompt}
+            />
+          )
+        })}
       </div>
 
       {/* Recommended agents */}

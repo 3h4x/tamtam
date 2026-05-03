@@ -68,6 +68,7 @@ export function NotificationsTab({
     { key: 'notification_on_fix_loop_exhausted' as const, label: 'Fix Loop Exhausted', description: 'When the fix loop reaches its retry limit' },
     { key: 'notification_on_review_do_not_ship' as const, label: 'Review: Do Not Ship', description: 'When a review verdict is "DO NOT SHIP"' },
     { key: 'notification_on_agent_run_fail' as const, label: 'Agent Run Failure', description: 'When an agent run fails' },
+    { key: 'notification_on_budget_blocked' as const, label: 'Budget Blocked', description: 'When a run is refused because the Claude subscription budget threshold is exceeded' },
   ]
 
   return (

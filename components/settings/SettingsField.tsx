@@ -18,9 +18,9 @@ export function SettingsField({
 }) {
   const field = FIELDS[fieldKey]
   const colSpanClass = COL_SPAN[field.span ?? 1] ?? 'col-span-1'
-  const shimManaged = fieldKey === 'claude_bin' && (provider === 'gemini' || provider === 'lmstudio')
+  const shimManaged = fieldKey === 'claude_bin' && (provider === 'gemini' || provider === 'lmstudio' || provider === 'codex')
   const shimDisplay = shimManaged
-    ? `<TamTam>/scripts/${provider === 'gemini' ? 'gemini-shim.js' : 'lmstudio-shim.js'}`
+    ? `<TamTam>/scripts/${provider === 'gemini' ? 'gemini-shim.js' : provider === 'lmstudio' ? 'lmstudio-shim.js' : 'codex-shim.js'}`
     : ''
 
   return (
@@ -49,6 +49,7 @@ export function SettingsField({
           <option value="claude">Claude CLI</option>
           <option value="gemini">Gemini shim</option>
           <option value="lmstudio">LM Studio shim</option>
+          <option value="codex">Codex shim</option>
           <option value="custom">Custom executable</option>
         </select>
       ) : fieldKey === 'default_model' ? (
@@ -58,6 +59,12 @@ export function SettingsField({
               <option value="haiku">haiku → flash</option>
               <option value="sonnet">sonnet → pro</option>
               <option value="opus">opus → pro</option>
+            </>
+          ) : provider === 'codex' ? (
+            <>
+              <option value="haiku">haiku → gpt-5.4-mini</option>
+              <option value="sonnet">sonnet → gpt-5.4</option>
+              <option value="opus">opus → gpt-5.5</option>
             </>
           ) : (
             <>

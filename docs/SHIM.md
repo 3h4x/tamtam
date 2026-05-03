@@ -69,9 +69,35 @@ Settings → Workspace → **Agent CLI Provider** controls which binary TamTam i
 - `claude` — uses the path in **Claude CLI Path** (default `~/.local/bin/claude`)
 - `gemini` — TamTam resolves the binary to `<TamTam>/scripts/gemini-shim.js` automatically; the Claude CLI Path field is read-only
 - `lmstudio` — TamTam resolves the binary to `<TamTam>/scripts/lmstudio-shim.js` automatically
+- `codex` — TamTam resolves the binary to `<TamTam>/scripts/codex-shim.js` automatically
 - `custom` — uses the path in **Claude CLI Path** verbatim (for forks of the Claude CLI or wrapper scripts)
 
-Switching the provider away from `gemini`/`lmstudio` clears any leftover shim path from the Claude CLI Path field so a stale `…/scripts/gemini-shim.js` doesn't keep getting executed under the `claude` provider. `lib/config.ts` enforces the same rule on the server side: a shim path stored under `claude` or `custom` is treated as unset and falls back to the default.
+Switching the provider away from `gemini`/`lmstudio`/`codex` clears any leftover shim path from the Claude CLI Path field so a stale `…/scripts/gemini-shim.js` doesn't keep getting executed under the `claude` provider. `lib/config.ts` enforces the same rule on the server side: a shim path stored under `claude` or `custom` is treated as unset and falls back to the default.
+
+## Codex CLI Shim
+
+The `scripts/codex-shim.js` script launches `codex exec` and translates Codex JSONL events into Claude-style `stream-json` events.
+
+Model aliases:
+
+- `haiku` → `gpt-5.4-mini`
+- `sonnet` → `gpt-5.4`
+- `opus` → `gpt-5.5`
+
+Override with `CODEX_MODEL`, `CODEX_HAIKU_MODEL`, `CODEX_SONNET_MODEL`, or `CODEX_OPUS_MODEL`.
+
+Permission mapping defaults to Codex `workspace-write` sandbox with `-a never` for non-interactive runs. `plan` uses `read-only`. Set `CODEX_DANGEROUS_BYPASS=1` only if you intentionally want TamTam's `bypassPermissions` mode to run Codex with `danger-full-access`.
+
+Manual usage:
+
+```bash
+node scripts/codex-shim.js --print --model sonnet -p "Write one sentence."
+node scripts/codex-shim.js --print --output-format stream-json --model sonnet < prompt.txt
+```
+
+### Codex Quota
+
+When the provider is `codex`, `/api/usage/quota` reads Codex's latest local `token_count.rate_limits` event from `~/.codex/sessions/**/*.jsonl`. Codex records the same 5-hour and weekly windows shown by `/status`, so TamTam's Budget tab and budget gates can reuse the existing quota shape without calling Anthropic's usage API.
 
 ## LM Studio Shim
 

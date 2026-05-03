@@ -84,10 +84,15 @@ describe('config', () => {
         notification_on_fix_loop_exhausted: false,
         notification_on_review_do_not_ship: false,
         notification_on_agent_run_fail: false,
+        notification_on_budget_blocked: false,
+        budget_block_runs_enabled: false,
+        budget_block_at_pct: 95,
+        budget_warn_at_pct: 80,
         pipeline_model_review: '',
         pipeline_model_fix: '',
         pipeline_model_dod: '',
         pipeline_model_commit: '',
+        review_retry_on_parse_failure: true,
       });
     });
 
@@ -138,6 +143,16 @@ describe('config', () => {
 
       expect(config.claude_provider).toBe('lmstudio');
       expect(config.claude_bin).toBe(`${process.cwd()}/scripts/lmstudio-shim.js`);
+    });
+
+    it('resolves Codex provider to the bundled shim', () => {
+      const db = testDb.db;
+      db.insert(schema.settings).values({ key: 'claude_provider', value: 'codex' }).run();
+
+      const config = getSettings();
+
+      expect(config.claude_provider).toBe('codex');
+      expect(config.claude_bin).toBe(`${process.cwd()}/scripts/codex-shim.js`);
     });
 
     it('exports configured LM Studio model to child process env', () => {

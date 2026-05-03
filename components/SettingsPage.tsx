@@ -9,6 +9,8 @@ import { AgentTemplatesTab } from '@/components/settings/AgentTemplatesTab'
 export type { AgentTemplateRecord } from '@/components/settings/AgentTemplatesTab'
 import { NotificationsTab } from '@/components/settings/NotificationsTab'
 import type { NotificationsSettings } from '@/components/settings/NotificationsTab'
+import { BudgetTab } from '@/components/settings/BudgetTab'
+import type { BudgetSettings } from '@/components/settings/BudgetTab'
 
 interface SettingsMap {
   workspace_path: string
@@ -42,6 +44,10 @@ interface SettingsMap {
   notification_on_fix_loop_exhausted: string
   notification_on_review_do_not_ship: string
   notification_on_agent_run_fail: string
+  notification_on_budget_blocked: string
+  budget_block_runs_enabled: string
+  budget_block_at_pct: string
+  budget_warn_at_pct: string
   pipeline_model_review: string
   pipeline_model_fix: string
   pipeline_model_dod: string
@@ -51,9 +57,13 @@ interface SettingsMap {
 const SETTINGS_DEFAULTS: SettingsMap = {
   ...DEFAULTS,
   jobs_paused: 'false',
+  notification_on_budget_blocked: 'false',
+  budget_block_runs_enabled: 'false',
+  budget_block_at_pct: '95',
+  budget_warn_at_pct: '80',
 }
 
-type TabId = 'agent' | 'pipeline' | 'general' | 'projects' | 'database' | 'templates' | 'notifications'
+type TabId = 'agent' | 'pipeline' | 'general' | 'projects' | 'database' | 'templates' | 'notifications' | 'budget'
 
 const GROUPS: {
   id: TabId
@@ -71,6 +81,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'pipeline',      label: 'Pipeline' },
   { id: 'general',       label: 'General' },
   { id: 'notifications', label: 'Notifications' },
+  { id: 'budget',        label: 'Budget' },
   { id: 'projects',      label: 'Projects' },
   { id: 'templates',     label: 'Templates' },
   { id: 'database',      label: 'Database' },
@@ -180,9 +191,9 @@ export function SettingsPage() {
     setSettings((prev) => {
       const next = { ...prev, [key]: value }
       if (key === 'claude_provider' && (value === 'claude' || value === 'custom')) {
-        // Drop stale shim paths left over from a prior gemini/lmstudio selection
+        // Drop stale shim paths left over from a prior shim selection
         // so the Claude CLI Path field shows the real default instead.
-        if (/scripts\/(gemini|lmstudio)-shim\.js$/.test(prev.claude_bin)) {
+        if (/scripts\/(gemini|lmstudio|codex)-shim\.js$/.test(prev.claude_bin)) {
           next.claude_bin = value === 'claude' ? SETTINGS_DEFAULTS.claude_bin : ''
         }
       }
@@ -252,12 +263,13 @@ export function SettingsPage() {
           <button
             onClick={handleSave}
             disabled={saving || !isDirty}
-            className={`px-4 py-2 text-white border-none rounded-lg font-semibold text-sm transition-colors ${
+            className={`px-4 py-2 text-white border-none rounded-lg font-semibold text-sm transition-colors inline-flex items-center gap-1.5 ${
               saved      ? 'bg-status-success cursor-default' :
               isDirty    ? 'bg-accent hover:bg-accent-hover cursor-pointer' :
                            'bg-accent/40 cursor-default'
-            } ${saving ? 'opacity-50 cursor-wait' : ''}`}
+            } ${saving ? 'opacity-70 cursor-wait' : ''}`}
           >
+            {saving && <span className="inline-block w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin shrink-0" />}
             {saving ? 'Saving…' : saved ? 'Saved!' : 'Save Settings'}
           </button>
         </div>
@@ -428,10 +440,11 @@ export function SettingsPage() {
                       <button
                         onClick={saveProjects}
                         disabled={projectsSaving}
-                        className={`px-4 py-1.5 text-white border-none rounded-lg font-semibold text-sm cursor-pointer transition-colors ${
+                        className={`px-4 py-1.5 text-white border-none rounded-lg font-semibold text-sm cursor-pointer transition-colors inline-flex items-center gap-1.5 ${
                           projectsSaved ? 'bg-status-success' : 'bg-accent hover:bg-accent-hover'
-                        } ${projectsSaving ? 'opacity-50 cursor-wait' : ''}`}
+                        } ${projectsSaving ? 'opacity-70 cursor-wait' : ''}`}
                       >
+                        {projectsSaving && <span className="inline-block w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin shrink-0" />}
                         {projectsSaving ? 'Saving…' : projectsSaved ? 'Saved!' : `Save (${enabledCount} enabled)`}
                       </button>
                     </div>
@@ -459,6 +472,14 @@ export function SettingsPage() {
           {activeTab === 'notifications' && (
             <NotificationsTab
               settings={settings as unknown as NotificationsSettings}
+              onChange={(key, value) => handleChange(key as keyof SettingsMap, value)}
+            />
+          )}
+
+          {/* Budget */}
+          {activeTab === 'budget' && (
+            <BudgetTab
+              settings={settings as unknown as BudgetSettings}
               onChange={(key, value) => handleChange(key as keyof SettingsMap, value)}
             />
           )}

@@ -2,13 +2,15 @@ import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/scheduling';
 import { resolveProjectPath } from '@/lib/shared/project-data';
-import { createJob, listJobs, probeJobStatus, updateJob } from '@/lib/jobs/job-storage';
+import { createJob, listJobs, probeJobStatus, readParsedLog, updateJob } from '@/lib/jobs/job-storage';
 import { startJob } from '@/lib/jobs/pm2-jobs';
 import { exec } from '@/lib/shared/shell';
 import { CODE_REVIEWER_SKILL } from '@/lib/skills/skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings, getPipelineModel } from '@/lib/shared/config';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { jobsPausedResult } from '@/lib/shared/job-control';
+import { runGates } from '@/lib/shared/job-control';
+import { extractFindingIds, REVIEW_OUTPUT_CONTRACT, stripFinalVerdict } from './review-contract';
+import type { JobData } from '@/lib/jobs/types';
 
 export type StartReviewResult =
   | { ok: true; jobId: string; pid: number; logPath: string }
@@ -28,18 +30,101 @@ function loadReviewPrompt(): string {
     '\n\n---\n\n' +
     'Project: {project}\n' +
     'Path: {path}\n\n' +
-    'There are uncommitted changes in this repository. Use git and any other tools ' +
-    'you need to inspect the changes yourself (git status, git diff, read files, ' +
-    'etc.), then review them.\n\n' +
-    'You MUST end your response with a line in this exact format, on its own line, ' +
-    'as the final non-empty line of your output:\n\n' +
-    '    Verdict: LGTM\n\n' +
-    'or:\n\n' +
-    '    Verdict: NEEDS ATTENTION\n\n' +
+    '{review_scope}\n\n' +
+    '{release_context}\n\n' +
+    REVIEW_OUTPUT_CONTRACT + '\n\n' +
+    'OUTPUT FORMAT — strict. Your final non-empty line must be exactly one of:\n\n' +
+    '    Verdict: LGTM\n' +
+    '    Verdict: NEEDS ATTENTION\n' +
     '    Verdict: DO NOT SHIP\n\n' +
-    'No other text may follow the verdict line. If you omit it, the release ' +
-    'pipeline will treat the review as NEEDS ATTENTION and run a fix loop.\n\n' +
+    'Rules:\n' +
+    '- The verdict line MUST be the very last non-empty line of your response.\n' +
+    '- No markdown decoration (no `**`, no `#`, no backticks, no bullet, no quote).\n' +
+    '- No trailing punctuation, no rationale on the same line, no extra words.\n' +
+    '- Put rationale BEFORE the verdict line, not after.\n\n' +
+    'Example ending:\n\n' +
+    '    The diff updates two helpers and adds matching tests. Tests pass.\n' +
+    '\n    Verdict: LGTM\n\n' +
+    'If you omit the verdict line, the release pipeline treats the review as ' +
+    'NEEDS ATTENTION and runs a fix loop — wasted spend. Always emit one.\n\n' +
     review_verdict_rules;
+}
+
+type ReviewScope =
+  | { ok: true; prompt: string }
+  | { ok: false; detail: string };
+
+async function determineReviewScope(projPath: string): Promise<ReviewScope> {
+  const statusR = await exec('git', ['-C', projPath, 'status', '--porcelain', '--ignore-submodules'], { timeout: 5000 });
+  const hasUncommittedChanges = statusR.exitCode === 0 && statusR.stdout.trim().length > 0;
+  if (hasUncommittedChanges) {
+    return {
+      ok: true,
+      prompt:
+        'There are uncommitted changes in this repository. Use git and any other tools ' +
+        'you need to inspect the changes yourself (git status, git diff, read files, ' +
+        'etc.), then review them.',
+    };
+  }
+
+  const aheadR = await exec('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
+  const ahead = parseInt(aheadR?.stdout?.trim() ?? '', 10);
+  if (aheadR?.exitCode === 0 && Number.isFinite(ahead) && ahead > 0) {
+    return {
+      ok: true,
+      prompt:
+        `The working tree is clean, but this branch has ${ahead} local commit${ahead === 1 ? '' : 's'} not yet pushed. ` +
+        'Review the committed diff against upstream before it is pushed. Use git and any other tools you need, especially ' +
+        '`git log --oneline @{u}..HEAD`, `git diff --stat @{u}..HEAD`, and `git diff @{u}..HEAD`, then review those changes.',
+    };
+  }
+
+  return { ok: false, detail: 'No uncommitted changes or unpushed commits to review' };
+}
+
+function releaseContextForReview(projectName: string): string {
+  const jobs = listJobs();
+  const release = jobs
+    .filter((j) => j.project === projectName && j.kind === 'release' && j.finishedAt === null)
+    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0];
+  if (!release) {
+    return 'PREVIOUS RELEASE REVIEW/FIX CONTEXT:\nNo active release context. Review the current uncommitted changes from first principles.';
+  }
+
+  const prior = jobs
+    .filter((j) =>
+      j.project === projectName &&
+      j.releaseId === release.id &&
+      (j.kind === 'review' || j.kind === 'fix') &&
+      j.finishedAt !== null
+    )
+    .sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
+
+  if (prior.length === 0) {
+    return `PREVIOUS RELEASE REVIEW/FIX CONTEXT:\nRelease ${release.id} has no previous review/fix iterations.`;
+  }
+
+  const blocks: string[] = [];
+  for (const job of prior.slice(-6)) {
+    blocks.push(describePriorReviewStep(job));
+  }
+  return `PREVIOUS RELEASE REVIEW/FIX CONTEXT:
+Use this as review memory. First verify whether earlier findings were actually fixed, then search sibling paths before adding new findings.
+
+${blocks.join('\n\n')}`;
+}
+
+function describePriorReviewStep(job: JobData): string {
+  let log = '';
+  try {
+    log = stripFinalVerdict(readParsedLog(job)).trim();
+  } catch {
+    log = '';
+  }
+  const ids = log ? extractFindingIds(log) : [];
+  const excerpt = log.length > 1800 ? `...(truncated)...\n${log.slice(-1800)}` : log;
+  return `- ${job.kind} ${job.id} (${job.exitCode === 0 ? 'exit 0' : `exit ${job.exitCode ?? '?'}`}${ids.length ? `, findings ${ids.join(', ')}` : ''})
+${excerpt || '(no log excerpt)'}`;
 }
 
 /** Start a code review for the given project. Returns the new job id or a structured error. */
@@ -57,7 +142,7 @@ export async function startProjectReview(projectName: string): Promise<StartRevi
   if (!projPath) {
     return { ok: false, status: 404, detail: `project '${projectName}' not found` };
   }
-  const paused = jobsPausedResult('start a review');
+  const paused = runGates('start a review');
   if (paused) return paused;
 
   // Check for existing pipeline lock — but allow running under a parent
@@ -80,15 +165,17 @@ export async function startProjectReview(projectName: string): Promise<StartRevi
     }
   }
 
-  const statusR = await exec('git', ['-C', projPath, 'status', '--porcelain', '--ignore-submodules'], { timeout: 5000 });
-  if (!statusR.stdout.trim()) {
-    return { ok: false, status: 400, detail: 'No uncommitted changes to review' };
+  const scope = await determineReviewScope(projPath);
+  if (!scope.ok) {
+    return { ok: false, status: 400, detail: scope.detail };
   }
 
   const prompt = withBasePrompt(
     loadReviewPrompt()
       .replace('{project}', projectName)
-      .replace('{path}', projPath),
+      .replace('{path}', projPath)
+      .replace('{review_scope}', scope.prompt)
+      .replace('{release_context}', releaseContextForReview(projectName)),
     { projectPath: projPath }
   );
 

@@ -1,13 +1,14 @@
 import { spawn } from 'child_process';
 import { join } from 'path';
 import { homedir } from 'os';
-import { mkdirSync, openSync, closeSync } from 'fs';
+import { mkdirSync, openSync, closeSync, writeFileSync } from 'fs';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { resolveProjectPath } from '@/lib/shared/project-data';
-import { getJob, createJob, readLog, probeJobStatus, updateJob, markDone } from '@/lib/jobs/job-storage';
+import { getJob, createJob, readParsedLog, probeJobStatus, updateJob, markDone } from '@/lib/jobs/job-storage';
 import { getPermissionModeFlag, getPipelineModel } from '@/lib/shared/config';
 import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { jobsPausedResult } from '@/lib/shared/job-control';
+import { runGates } from '@/lib/shared/job-control';
+import { FIX_OUTPUT_CONTRACT, stripFinalVerdict } from './review-contract';
 
 export type StartFixResult =
   | { ok: true; jobId: string; pid: number }
@@ -24,7 +25,7 @@ export async function startFixFromJob(sourceJobId: string): Promise<StartFixResu
   const { claudeBin, logDir } = getImproveConfig();
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
-  const paused = jobsPausedResult('start a fix job');
+  const paused = runGates('start a fix job');
   if (paused) return paused;
 
   const resumeSessionId = sourceJob.sessionId ?? null;
@@ -36,11 +37,8 @@ export async function startFixFromJob(sourceJobId: string): Promise<StartFixResu
   // Claude's session memory — which can drop earlier turns under context
   // pressure or after long delays. Embedding the findings makes the work
   // explicit and reproducible.
-  const rawLog = readLog(sourceJob);
-  let findingsBlock = rawLog.trim();
-  // Strip the trailing "Verdict: ..." line so the fix doesn't echo it back.
-  const verdictMatch = findingsBlock.match(/\n[ \t]*Verdict:[^\n]*\s*$/i);
-  if (verdictMatch) findingsBlock = findingsBlock.slice(0, verdictMatch.index).trimEnd();
+  const rawLog = readParsedLog(sourceJob);
+  let findingsBlock = stripFinalVerdict(rawLog);
   // Cap to keep the resumed-session token budget sane — same 12 KB cap
   // used by the no-resume path below.
   if (findingsBlock.length > 12000) {
@@ -56,9 +54,15 @@ export async function startFixFromJob(sourceJobId: string): Promise<StartFixResu
 ${findingsBlock}
 ---
 
-Edit the files directly. After fixing, run the relevant tests or linter locally to confirm. Do not commit — just make the code changes.`;
+${FIX_OUTPUT_CONTRACT}
+
+Edit the files directly. Do not commit — just make the code changes.`;
     } else {
-      prompt = 'Please fix ALL the issues identified in your review above. Apply the changes directly to the codebase. After fixing, run the relevant tests or linter locally to confirm the fixes work. Do not commit — just make the code changes.';
+      prompt = `Please fix ALL the issues identified in your review above. Apply the changes directly to the codebase.
+
+${FIX_OUTPUT_CONTRACT}
+
+Do not commit — just make the code changes.`;
     }
   } else {
     if (!findingsBlock) return { ok: false, status: 400, detail: 'No output to fix from' };
@@ -69,7 +73,7 @@ ${findingsBlock}
 \`\`\`
 
 Please fix ALL the issues identified above. Apply the changes directly to the codebase.
-After fixing, run the relevant tests or linter locally to confirm the fixes work.
+${FIX_OUTPUT_CONTRACT}
 Do not commit — just make the code changes.
 `;
   }
@@ -78,8 +82,15 @@ Do not commit — just make the code changes.
 
   const job = createJob(projectName, 'fix', 0, '');
   const logPath = join(logDir, `${job.id}.log`);
+  const promptPath = join(logDir, `${job.id}.prompt`);
   job.logPath = logPath;
   if (resumeSessionId) job.sessionId = resumeSessionId;
+  job.promptBytes = Buffer.byteLength(prompt, 'utf8');
+  try {
+    writeFileSync(promptPath, prompt);
+  } catch (e) {
+    console.log(`[start-fix] failed to write prompt sidecar for ${job.id}:`, e);
+  }
 
   const claudeArgs = [
     '--print',

@@ -2,26 +2,76 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { fetchProjects } from '@/lib/client-api'
-import type { Task } from '@/lib/shared/types'
+import { fetchAgents } from '@/lib/client-api'
+import type { Agent } from '@/lib/client-api'
 
-function formatFiresAt(firesAt: string): string {
-  return firesAt || '—'
+interface SchedulerEntry {
+  agentId: string
+  project: string
+  name: string
+  schedule: string
+  nextFireMs: number
+  lastFireMs: number | null
+  fireCount: number
+  errorCount: number
+  lastError: string | null
+}
+
+function formatRelativeMs(ms: number): string {
+  const diffMs = ms - Date.now()
+  if (diffMs <= 0) return 'soon'
+  const totalSec = Math.floor(diffMs / 1000)
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m}m`
+  return `${totalSec}s`
+}
+
+function formatAgoMs(ms: number): string {
+  const diffMs = Date.now() - ms
+  if (diffMs < 0) return 'just now'
+  const totalSec = Math.floor(diffMs / 1000)
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  if (h > 0) return `${h}h ${m}m ago`
+  if (m > 0) return `${m}m ago`
+  return `${totalSec}s ago`
+}
+
+type AgentState = 'active' | 'on-demand' | 'disabled' | 'unscheduled'
+
+function agentState(agent: Agent, schedEntry: SchedulerEntry | undefined): AgentState {
+  if (!agent.enabled) return 'disabled'
+  if (!agent.schedule) return 'on-demand'
+  if (schedEntry) return 'active'
+  return 'unscheduled'
 }
 
 export function AgentsPage() {
   const router = useRouter()
-  const [tasks, setTasks] = useState<Task[]>([])
+  const [agents, setAgents] = useState<Agent[]>([])
+  const [schedulerMap, setSchedulerMap] = useState<Map<string, SchedulerEntry>>(new Map())
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<'all' | 'running' | 'paused' | 'missing'>('all')
+  const [filter, setFilter] = useState<'all' | 'active' | 'on-demand' | 'disabled'>('all')
 
   useEffect(() => {
     let active = true
     const poll = async () => {
       try {
-        const data = await fetchProjects()
+        const [{ agents: allAgents }, health] = await Promise.all([
+          fetchAgents(),
+          fetch('/api/agents/scheduler-health').then(r => r.ok ? r.json() : null).catch(() => null),
+        ])
         if (active) {
-          setTasks(data.tasks)
+          setAgents(allAgents)
+          if (health?.internal?.entries) {
+            const map = new Map<string, SchedulerEntry>()
+            for (const e of health.internal.entries as SchedulerEntry[]) {
+              map.set(e.agentId, e)
+            }
+            setSchedulerMap(map)
+          }
           setLoading(false)
         }
       } catch { /* ignore */ }
@@ -31,30 +81,43 @@ export function AgentsPage() {
     return () => { active = false; clearInterval(interval) }
   }, [])
 
-  const filtered = tasks.filter((t) => {
+  const getState = (a: Agent) => agentState(a, schedulerMap.get(a.id))
+
+  const filtered = agents.filter((a) => {
     if (filter === 'all') return true
-    if (filter === 'running') return t.launchctl === 'running' || t.launchctl === 'loaded'
-    if (filter === 'paused') return t.launchctl === 'paused'
-    if (filter === 'missing') return t.launchctl === 'missing'
-    return true
+    return getState(a) === filter
   })
 
-  const runningCount = tasks.filter(t => t.launchctl === 'running' || t.launchctl === 'loaded').length
-  const pausedCount = tasks.filter(t => t.launchctl === 'paused').length
-  const missingCount = tasks.filter(t => t.launchctl === 'missing').length
+  const activeCount = agents.filter(a => getState(a) === 'active').length
+  const onDemandCount = agents.filter(a => getState(a) === 'on-demand').length
+  const disabledCount = agents.filter(a => getState(a) === 'disabled').length
+
+  const stateStyle: Record<AgentState, string> = {
+    active: 'bg-status-success/15 text-status-success',
+    'on-demand': 'bg-accent/10 text-accent',
+    disabled: 'bg-bg-tertiary text-text-tertiary',
+    unscheduled: 'bg-status-warning/15 text-status-warning',
+  }
+
+  const stateLabel: Record<AgentState, string> = {
+    active: 'active',
+    'on-demand': 'on-demand',
+    disabled: 'disabled',
+    unscheduled: 'unscheduled',
+  }
 
   return (
     <div>
       <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
         <h2 className="text-xl font-semibold text-text-primary">Agents</h2>
         <div className="flex gap-0.5 border-b border-border">
-          {(['all', 'running', 'paused', 'missing'] as const).map((f) => {
+          {(['all', 'active', 'on-demand', 'disabled'] as const).map((f) => {
             const count =
-              f === 'all' ? tasks.length :
-              f === 'running' ? runningCount :
-              f === 'paused' ? pausedCount :
-              missingCount
-            const label = f === 'running' ? 'Active' : f[0].toUpperCase() + f.slice(1)
+              f === 'all' ? agents.length :
+              f === 'active' ? activeCount :
+              f === 'on-demand' ? onDemandCount :
+              disabledCount
+            const label = f === 'on-demand' ? 'On-demand' : f[0].toUpperCase() + f.slice(1)
             return (
               <button
                 key={f}
@@ -82,9 +145,9 @@ export function AgentsPage() {
           <p className="text-sm text-text-secondary">
             {filter === 'all'
               ? 'No agents configured yet'
-              : filter === 'running' ? 'No active agents'
-              : filter === 'paused' ? 'No paused agents'
-              : 'No missing agents — scheduler is in sync'}
+              : filter === 'active' ? 'No active scheduled agents'
+              : filter === 'on-demand' ? 'No on-demand agents'
+              : 'No disabled agents'}
           </p>
           {filter === 'all' && (
             <p className="text-xs text-text-tertiary">
@@ -100,73 +163,78 @@ export function AgentsPage() {
                 <th className="px-4 py-2 font-medium">State</th>
                 <th className="px-4 py-2 font-medium">Project</th>
                 <th className="px-4 py-2 font-medium">Agent</th>
+                <th className="px-4 py-2 font-medium">Model</th>
                 <th className="px-4 py-2 font-medium">Schedule</th>
-                <th className="px-4 py-2 font-medium">Priority</th>
-                <th className="px-4 py-2 font-medium">Last Run</th>
-                <th className="px-4 py-2 font-medium text-right">Duration</th>
-                <th className="px-4 py-2 font-medium text-center">Exit</th>
-                <th className="px-4 py-2 font-medium text-center">Sync</th>
+                <th className="px-4 py-2 font-medium">Next Fire</th>
+                <th className="px-4 py-2 font-medium">Last Fire</th>
+                <th className="px-4 py-2 font-medium text-center">Fires</th>
+                <th className="px-4 py-2 font-medium text-center">Errors</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((task) => {
-                const exitFailed = task.last_run_exit !== null && task.last_run_exit !== 0
-                const accent =
-                  task.launchctl === 'running' || task.launchctl === 'loaded'
-                    ? exitFailed ? 'border-l-status-error' : 'border-l-status-success/40'
-                    : task.launchctl === 'paused' ? 'border-l-status-warning/50'
-                    : task.launchctl === 'missing' ? 'border-l-status-error/60'
-                    : 'border-l-transparent'
+              {filtered.map((agent) => {
+                const schedEntry = schedulerMap.get(agent.id)
+                const state = getState(agent)
+                const accentBorder =
+                  state === 'active' ? 'border-l-status-success/40' :
+                  state === 'unscheduled' ? 'border-l-status-warning/60' :
+                  state === 'disabled' ? 'border-l-transparent' :
+                  'border-l-accent/30'
                 return (
                   <tr
-                    key={task.id}
-                    className={`border-t border-border hover:bg-bg-secondary/50 cursor-pointer border-l-2 ${accent}`}
-                    onClick={() => router.push(`/project/${task.project}`)}
+                    key={agent.id}
+                    className={`border-t border-border hover:bg-bg-secondary/50 cursor-pointer border-l-2 ${accentBorder}`}
+                    onClick={() => router.push(`/project/${encodeURIComponent(agent.project)}`)}
                   >
                     <td className="px-4 py-2">
-                      <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${task.launchctl === 'running' || task.launchctl === 'loaded' ? 'bg-status-success/15 text-status-success' : task.launchctl === 'paused' ? 'bg-status-warning/15 text-status-warning' : task.launchctl === 'missing' ? 'bg-status-error/15 text-status-error' : 'bg-bg-tertiary text-text-secondary'}`}>
-                        {task.launchctl}
+                      <span
+                        className={`px-2 py-0.5 text-xs rounded-full font-medium ${stateStyle[state]}`}
+                        title={state === 'unscheduled' ? 'Scheduled but not registered in internal scheduler' : undefined}
+                      >
+                        {stateLabel[state]}
                       </span>
                     </td>
-                    <td className="px-4 py-2 font-medium text-text-primary" data-private>{task.project}</td>
-                    <td className="px-4 py-2 text-text-secondary" data-private>{task.job || '—'}</td>
+                    <td className="px-4 py-2 font-medium text-text-primary" data-private>{agent.project}</td>
+                    <td className="px-4 py-2 text-text-secondary font-mono text-xs" data-private>
+                      {agent.name}
+                      {agent.source === 'file' && (
+                        <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-bg-tertiary text-text-tertiary border border-border">file</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-text-tertiary text-xs font-mono">{agent.model}</td>
                     <td className="px-4 py-2 text-text-secondary font-mono text-xs tabular-nums">
-                      {formatFiresAt(task.fires_at)}
+                      {agent.schedule || <span className="text-text-tertiary">—</span>}
                     </td>
-                    <td className="px-4 py-2 text-xs">
-                      {task.priority ? (
-                        <span className={`${task.priority === 'critical' ? 'text-status-error' : task.priority === 'high' ? 'text-orange-500' : task.priority === 'medium' ? 'text-accent' : 'text-text-secondary'}`}>
-                          {task.priority}
-                        </span>
-                      ) : <span className="text-text-tertiary">—</span>}
+                    <td className="px-4 py-2 text-xs tabular-nums">
+                      {schedEntry ? (() => {
+                        const isOverdue = schedEntry.nextFireMs < Date.now() - 30_000
+                        const hasErrors = schedEntry.errorCount > 0
+                        const tone = hasErrors ? 'text-status-warning' : isOverdue ? 'text-status-warning' : 'text-text-secondary'
+                        const label = isOverdue ? 'overdue' : `in ${formatRelativeMs(schedEntry.nextFireMs)}`
+                        const hint = hasErrors
+                          ? `${schedEntry.errorCount} error(s): ${schedEntry.lastError ?? ''}`
+                          : `${schedEntry.fireCount} fire(s) · next ${new Date(schedEntry.nextFireMs).toLocaleTimeString()}`
+                        return <span className={`font-mono ${tone}`} title={hint}>{label}</span>
+                      })() : (
+                        <span className="text-text-tertiary">—</span>
+                      )}
                     </td>
-                    <td className="px-4 py-2 text-text-secondary text-sm tabular-nums">
-                      {task.last_run_ago ? `${task.last_run_ago} ago` : <span className="text-text-tertiary">—</span>}
+                    <td className="px-4 py-2 text-text-tertiary text-xs tabular-nums font-mono">
+                      {schedEntry
+                        ? schedEntry.lastFireMs
+                          ? formatAgoMs(schedEntry.lastFireMs)
+                          : <span className="text-text-tertiary/50 italic">never fired</span>
+                        : <span>—</span>}
                     </td>
-                    <td className="px-4 py-2 text-text-secondary text-sm tabular-nums text-right">
-                      {task.last_run_duration_s !== null
-                        ? task.last_run_duration_s < 60
-                          ? `${task.last_run_duration_s}s`
-                          : `${Math.floor(task.last_run_duration_s / 60)}m ${task.last_run_duration_s % 60}s`
+                    <td className="px-4 py-2 text-center tabular-nums text-xs text-text-secondary">
+                      {schedEntry ? schedEntry.fireCount : <span className="text-text-tertiary">—</span>}
+                    </td>
+                    <td className="px-4 py-2 text-center tabular-nums text-xs">
+                      {schedEntry
+                        ? schedEntry.errorCount > 0
+                          ? <span className="text-status-warning font-medium" title={schedEntry.lastError ?? ''}>{schedEntry.errorCount}</span>
+                          : <span className="text-text-tertiary">0</span>
                         : <span className="text-text-tertiary">—</span>}
-                    </td>
-                    <td className="px-4 py-2 text-center tabular-nums text-sm">
-                      {task.last_run_exit === null ? (
-                        <span className="text-text-tertiary">—</span>
-                      ) : task.last_run_exit === 0 ? (
-                        <span className="text-status-success">0</span>
-                      ) : (
-                        <span className="text-status-error font-medium">{task.last_run_exit}</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2 text-center">
-                      {task.sync === null ? (
-                        <span className="text-text-tertiary">—</span>
-                      ) : task.sync ? (
-                        <span className="text-status-success" title="In sync">✓</span>
-                      ) : (
-                        <span className="text-status-warning" title="Out of sync">✗</span>
-                      )}
                     </td>
                   </tr>
                 )

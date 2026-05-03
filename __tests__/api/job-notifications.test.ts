@@ -63,16 +63,19 @@ describe('GET /api/jobs/notifications', () => {
   let unseenFinishedMock: ReturnType<typeof vi.fn>;
   let listJobsMock: ReturnType<typeof vi.fn>;
   let jobToDictMock: ReturnType<typeof vi.fn>;
+  let probeJobStatusMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
     unseenFinishedMock = vi.fn().mockReturnValue([]);
     listJobsMock = vi.fn().mockReturnValue([]);
     jobToDictMock = vi.fn().mockImplementation((j: JobData) => ({ id: j.id, project: j.project }));
+    probeJobStatusMock = vi.fn().mockResolvedValue('running');
     vi.doMock('@/lib/jobs/job-storage', () => ({
       unseenFinished: unseenFinishedMock,
       listJobs: listJobsMock,
       jobToDict: jobToDictMock,
+      probeJobStatus: probeJobStatusMock,
     }));
     const mod = await import('@/app/api/jobs/notifications/route');
     GET = mod.GET;
@@ -109,6 +112,7 @@ describe('GET /api/jobs/notifications', () => {
     const data = await res.json();
     expect(data.runningCount).toBe(1);
     expect(data.runningJobs[0].id).toBe('r1');
+    expect(probeJobStatusMock).toHaveBeenCalledWith(running);
   });
 
   it('excludes finished jobs from runningJobs', async () => {
@@ -129,6 +133,23 @@ describe('GET /api/jobs/notifications', () => {
     const data = await res.json();
     expect(data.count).toBe(1);
     expect(data.runningCount).toBe(1);
+  });
+
+  it('omits bulky prompt fields from notification jobs', async () => {
+    const unseen = makeJob({ id: 'u1', prompt: 'large prompt', userPrompt: 'large user prompt', contextMeta: '{"large":true}' });
+    unseenFinishedMock.mockReturnValue([unseen]);
+    jobToDictMock.mockReturnValue({
+      id: 'u1',
+      project: 'proj1',
+      prompt: 'large prompt',
+      user_prompt: 'large user prompt',
+      context_meta: '{"large":true}',
+    });
+    const res = await GET();
+    const data = await res.json();
+    expect(data.jobs[0].prompt).toBeNull();
+    expect(data.jobs[0].user_prompt).toBeNull();
+    expect(data.jobs[0].context_meta).toBeNull();
   });
 });
 

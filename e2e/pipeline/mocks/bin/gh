@@ -1,0 +1,66 @@
+#!/usr/bin/env node
+/* eslint-env node */
+/**
+ * TamTam e2e gh (GitHub CLI) shim.
+ *
+ * Records calls and returns canned responses. In the basic happy-path and
+ * needs-attention scenarios no real GitHub calls are needed, so this shim
+ * just records invocations and exits cleanly.
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+const SHIM_DIR = process.env.TAMTAM_E2E_SHIM_DIR || '/tmp/tamtam-e2e-pipeline/shim-state';
+const args = process.argv.slice(2);
+
+// Try to determine project from CWD
+const projectName = path.basename(process.cwd());
+const projectShimDir = path.join(SHIM_DIR, projectName);
+
+function recordCall() {
+  try {
+    fs.mkdirSync(projectShimDir, { recursive: true });
+    const entry = JSON.stringify({ cmd: 'gh', args, ts: Date.now() }) + '\n';
+    fs.appendFileSync(path.join(projectShimDir, 'git-calls.jsonl'), entry);
+  } catch { /* best-effort */ }
+}
+
+recordCall();
+
+const sub = args[0] ?? '';
+
+if (sub === 'pr') {
+  const action = args[1] ?? '';
+  if (action === 'create') {
+    // Return a fake PR URL
+    process.stdout.write('https://github.com/test/repo/pull/1\n');
+    process.exit(0);
+  }
+  if (action === 'checks') {
+    // All checks pass
+    process.stdout.write(JSON.stringify([{ name: 'CI', conclusion: 'success' }]) + '\n');
+    process.exit(0);
+  }
+  if (action === 'merge') {
+    process.stdout.write('PR #1 merged\n');
+    process.exit(0);
+  }
+  if (action === 'view') {
+    process.stdout.write(JSON.stringify({ number: 1, url: 'https://github.com/test/repo/pull/1', state: 'OPEN' }) + '\n');
+    process.exit(0);
+  }
+}
+
+if (sub === 'issue') {
+  process.stdout.write(JSON.stringify({ number: 1, title: 'Test issue', body: '- [ ] Task 1' }) + '\n');
+  process.exit(0);
+}
+
+if (sub === 'repo') {
+  process.stdout.write(JSON.stringify({ nameWithOwner: 'test/repo' }) + '\n');
+  process.exit(0);
+}
+
+// Default: succeed silently
+process.exit(0);

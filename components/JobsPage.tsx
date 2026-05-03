@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { fetchJobs } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
@@ -37,6 +38,21 @@ function formatCost(job: JobInfo): string | null {
   return `$${c.toFixed(2)}`
 }
 
+// Short descriptive hint shown in the Prompt column when a pipeline job has no
+// user-visible prompt (review, commit, push, etc.).
+const KIND_HINTS: Record<string, string> = {
+  review: 'code review',
+  commit: 'generate commit',
+  push: 'git push',
+  test: 'run tests',
+  fix: 'apply fixes',
+  'fix-ci': 'fix CI failures',
+  'fix-push': 'fix push error',
+  'mark-dod': 'verify DoD',
+  'pr-wait': 'wait for CI & merge',
+  release: 'release pipeline',
+}
+
 // Mirror ProjectRunsTab color/label mapping so kind badges look the same
 // across the global Runs view and project-scoped runs.
 const KIND_STYLES: Record<string, { label: string; cls: string }> = {
@@ -58,7 +74,7 @@ function KindBadge({ kind }: { kind: string }) {
   const style = KIND_STYLES[kind]
   const label = isAgent ? kind.slice('agent:'.length) || 'agent' : style?.label ?? kind
   const cls = isAgent
-    ? 'bg-purple-500/15 text-purple-400'
+    ? 'bg-bg-tertiary text-text-secondary border border-border'
     : style?.cls ?? 'bg-text-tertiary/15 text-text-secondary'
   return (
     <span
@@ -265,7 +281,7 @@ export function JobsPage() {
               return (
                 <tr
                   key={job.id}
-                  className={`border-t border-border/60 hover:bg-bg-tertiary/40 cursor-pointer transition-colors border-l-2 ${isRunning ? 'border-l-status-warning' : isFailed ? 'border-l-status-error' : 'border-l-transparent'}`}
+                  className={`border-t border-border/60 hover:bg-bg-tertiary/40 cursor-pointer transition-colors border-l-[3px] ${isRunning ? 'border-l-status-warning' : isFailed ? 'border-l-status-error' : 'border-l-status-success'}`}
                   onClick={() => router.push(job.kind === 'run' && job.session_id ? `/project/${job.project}/terminal/${job.session_id}` : `/project/${job.project}/terminal?job=${encodeURIComponent(job.id)}`)}
                 >
                   <td className="px-4 py-2 whitespace-nowrap">
@@ -277,7 +293,15 @@ export function JobsPage() {
                       {job.verdict && !isRunning && <VerdictBadge verdict={job.verdict} />}
                     </div>
                   </td>
-                  <td className="px-4 py-2 font-medium text-text-primary whitespace-nowrap">{job.project}</td>
+                  <td className="px-4 py-2 whitespace-nowrap">
+                    <Link
+                      href={`/project/${job.project}`}
+                      className="font-medium text-text-primary hover:text-accent transition-colors"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      {job.project}
+                    </Link>
+                  </td>
                   <td className="px-4 py-2 whitespace-nowrap">
                     <KindBadge kind={job.kind} />
                   </td>
@@ -286,6 +310,8 @@ export function JobsPage() {
                       <span className="text-sm text-text-secondary truncate block" title={promptText}>
                         {promptText.split('\n')[0].slice(0, 80)}{promptText.length > 80 ? '…' : ''}
                       </span>
+                    ) : KIND_HINTS[job.kind] ? (
+                      <span className="text-xs text-text-tertiary">{KIND_HINTS[job.kind]}</span>
                     ) : (
                       <span className="text-text-tertiary">—</span>
                     )}
@@ -312,9 +338,11 @@ export function JobsPage() {
       {/* Infinite-scroll sentinel + status. Hidden until the initial page
           finished loading so the skeleton doesn't fight with this. */}
       {!loading && filtered.length > 0 && (
-        <div ref={sentinelRef} className="flex justify-center py-6 text-xs text-text-tertiary font-mono">
+        <div ref={sentinelRef} className="flex justify-center items-center gap-2 py-6 text-xs text-text-tertiary font-mono">
           {hasMore
-            ? (loadingMore ? 'Loading more…' : `Showing ${filtered.length} of ${jobs.length}+`)
+            ? loadingMore
+              ? <><span className="inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin" />Loading more…</>
+              : `Showing ${filtered.length} of ${jobs.length}+`
             : (search || filter !== 'all'
                 ? `${filtered.length} match${filtered.length === 1 ? '' : 'es'}`
                 : `End of runs · ${jobs.length} total`)}

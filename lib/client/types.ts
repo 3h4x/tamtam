@@ -177,6 +177,31 @@ export interface JobInfo {
   model?: string | null
   release_id?: string | null
   parent_job_id?: string | null
+  work_summary?: string | null
+  modified_files?: string | null
+}
+
+export interface ModifiedFileSummary {
+  path: string
+  status: string
+  summary?: string
+  confidence?: 'high' | 'low'
+}
+
+export interface Recommendation {
+  id: string
+  project: string
+  source_kind: string
+  source_id: string | null
+  agent_id: string | null
+  agent_name: string | null
+  type: string
+  title: string
+  detail: string
+  status: 'open' | 'dismissed' | 'applied'
+  payload: Record<string, unknown> | null
+  created_at: number
+  updated_at: number
 }
 
 export interface CustomAction {

@@ -104,6 +104,17 @@ Outbound webhook fired when the release pipeline reaches a terminal state. Suppo
 | `notification_on_fix_loop_exhausted` | boolean | `false` | Fire when the fix-iteration cap (3/30 min) is reached without achieving LGTM |
 | `notification_on_review_do_not_ship` | boolean | `false` | Fire when a review returns a DO NOT SHIP verdict |
 | `notification_on_agent_run_fail` | boolean | `false` | Fire when any scheduled agent job exits non-zero |
+| `notification_on_budget_blocked` | boolean | `false` | Fire when a run is refused because the selected agent subscription budget threshold is exceeded (debounced once per window+resetsAt) |
+
+### Subscription Budget
+
+Live subscription quota (5-hour rolling + 7-day weekly window) is surfaced on `/stats` and Settings → Budget. For the `claude` provider, TamTam fetches `https://api.anthropic.com/api/oauth/usage` using the OAuth token from the macOS Keychain (`security find-generic-password -s "Claude Code-credentials" -w`) or `~/.claude/.credentials.json` and caches the snapshot for 180 s. For the `codex` provider, TamTam reads the latest local Codex `token_count.rate_limits` event from `~/.codex/sessions/**/*.jsonl`, matching the windows shown by Codex `/status`.
+
+| Key | Type | Default | Effect |
+|-----|------|---------|--------|
+| `budget_block_runs_enabled` | boolean | `false` | When true, pipeline routes (run, review, fix, push, release, rerun, fix-ci, agent run) return HTTP 429 once the 5-hour window crosses `budget_block_at_pct` |
+| `budget_block_at_pct` | number | `95` | Block threshold in percent (0–100). Applies to the 5-hour window; scheduled/auto-chain work also considers weekly burn rate |
+| `budget_warn_at_pct` | number | `80` | Cosmetic warn threshold; quota bars turn yellow at this percentage |
 
 **Payload shape** (generic JSON POST):
 

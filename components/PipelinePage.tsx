@@ -53,7 +53,7 @@ function StatCard({
 }
 
 function VerdictBar({ verdicts }: { verdicts: VerdictDistribution }) {
-  const { lgtm, needsAttention, doNotShip, parseFailed, total } = verdicts
+  const { lgtm, needsAttention, doNotShip, parseFailed, prunedMissingVerdict, total } = verdicts
   if (total === 0) {
     return <div className="text-sm text-text-tertiary py-2">No review data in this period.</div>
   }
@@ -63,6 +63,7 @@ function VerdictBar({ verdicts }: { verdicts: VerdictDistribution }) {
     { label: 'NEEDS ATTENTION', count: needsAttention, color: 'bg-status-warning', textColor: 'text-status-warning' },
     { label: 'DO NOT SHIP', count: doNotShip, color: 'bg-status-error', textColor: 'text-status-error' },
     { label: 'Parse failed', count: parseFailed, color: 'bg-text-tertiary', textColor: 'text-text-tertiary' },
+    { label: 'Log pruned', count: prunedMissingVerdict ?? 0, color: 'bg-border', textColor: 'text-text-tertiary' },
   ].filter((s) => s.count > 0)
 
   return (
@@ -197,6 +198,15 @@ export function PipelinePage() {
   const convColor =
     convRate == null ? undefined : convRate >= 0.8 ? 'green' : convRate >= 0.5 ? 'yellow' : 'red'
 
+  // True parser failures: log was available but verdict text couldn't be extracted.
+  // Excludes prunedMissingVerdict (log gone before verdict was persisted — a one-time
+  // historical gap that shrinks as old jobs age out of the window).
+  const parseable = verdicts.total - (verdicts.prunedMissingVerdict ?? 0)
+  const parseFailRate = parseable > 0 ? verdicts.parseFailed / parseable : null
+  // Inverted scale: low parse-fail = good. Issue #62 target is < 10%.
+  const parseFailColor =
+    parseFailRate == null ? undefined : parseFailRate <= 0.1 ? 'green' : parseFailRate <= 0.25 ? 'yellow' : 'red'
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {/* Header */}
@@ -243,7 +253,7 @@ export function PipelinePage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <StatCard
           label="Pipeline success"
           value={pipelineSuccess.total > 0 ? fmtPct(pipelineSuccess.rate) : '—'}
@@ -255,6 +265,16 @@ export function PipelinePage() {
           value={verdicts.total > 0 ? fmtPct(lgtmRate) : '—'}
           sub={verdicts.total > 0 ? `${verdicts.lgtm}/${verdicts.total} reviews` : 'No reviews'}
           color={lgtmColor as 'green' | 'yellow' | 'red' | undefined}
+        />
+        <StatCard
+          label="Verdict parse fail"
+          value={parseable > 0 ? fmtPct(parseFailRate) : '—'}
+          sub={
+            parseable > 0
+              ? `${verdicts.parseFailed}/${parseable} unparseable${(verdicts.prunedMissingVerdict ?? 0) > 0 ? ` · ${verdicts.prunedMissingVerdict} pruned` : ''}`
+              : 'No reviews'
+          }
+          color={parseFailColor as 'green' | 'yellow' | 'red' | undefined}
         />
         <StatCard
           label="Fix convergence"
@@ -382,11 +402,35 @@ export function PipelinePage() {
                       </Link>
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">{r.releases}</td>
-                    <td className={`px-3 py-2.5 text-right tabular-nums font-medium ${r.successRate >= 0.9 ? 'text-status-success' : r.successRate >= 0.6 ? 'text-status-warning' : 'text-status-error'}`}>
-                      {fmtPct(r.successRate)}
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {r.releases > 0 && (
+                          <div className="w-16 h-1.5 rounded-full bg-bg-tertiary overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${r.successRate >= 0.9 ? 'bg-status-success' : r.successRate >= 0.6 ? 'bg-status-warning' : 'bg-status-error'}`}
+                              style={{ width: `${Math.round(r.successRate * 100)}%` }}
+                            />
+                          </div>
+                        )}
+                        <span className={`tabular-nums font-medium ${r.successRate >= 0.9 ? 'text-status-success' : r.successRate >= 0.6 ? 'text-status-warning' : 'text-status-error'}`}>
+                          {fmtPct(r.successRate)}
+                        </span>
+                      </div>
                     </td>
-                    <td className={`px-3 py-2.5 text-right tabular-nums ${r.reviewCount === 0 ? 'text-text-tertiary' : r.lgtmRate >= 0.8 ? 'text-status-success' : r.lgtmRate >= 0.5 ? 'text-status-warning' : 'text-status-error'}`}>
-                      {r.reviewCount > 0 ? fmtPct(r.lgtmRate) : '—'}
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {r.reviewCount > 0 && (
+                          <div className="w-16 h-1.5 rounded-full bg-bg-tertiary overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${r.lgtmRate >= 0.8 ? 'bg-status-success' : r.lgtmRate >= 0.5 ? 'bg-status-warning' : 'bg-status-error'}`}
+                              style={{ width: `${Math.round(r.lgtmRate * 100)}%` }}
+                            />
+                          </div>
+                        )}
+                        <span className={`tabular-nums ${r.reviewCount === 0 ? 'text-text-tertiary' : r.lgtmRate >= 0.8 ? 'text-status-success' : r.lgtmRate >= 0.5 ? 'text-status-warning' : 'text-status-error'}`}>
+                          {r.reviewCount > 0 ? fmtPct(r.lgtmRate) : '—'}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">
                       {r.fixIterationsAvg > 0 ? r.fixIterationsAvg : '—'}

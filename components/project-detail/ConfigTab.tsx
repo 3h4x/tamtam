@@ -117,14 +117,15 @@ export function ConfigTab({
             <span className="text-xs text-text-tertiary">Unsaved changes</span>
           )}
           <button
-            className={`px-4 py-1.5 text-white border-none rounded-md font-semibold text-sm transition-colors ${
+            className={`px-4 py-1.5 text-white border-none rounded-md font-semibold text-sm transition-colors inline-flex items-center gap-1.5 ${
               allSaved    ? 'bg-status-success cursor-default' :
               anyDirty    ? 'bg-accent hover:bg-accent-hover cursor-pointer' :
                             'bg-accent/40 cursor-default'
-            } ${anySaving ? 'opacity-50 cursor-wait' : ''}`}
+            } ${anySaving ? 'opacity-70 cursor-wait' : ''}`}
             onClick={onSaveAll}
             disabled={anySaving || !anyDirty}
           >
+            {anySaving && <span className="inline-block w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin shrink-0" />}
             {anySaving ? 'Saving…' : allSaved ? 'Saved!' : 'Save'}
           </button>
         </div>

@@ -17,9 +17,10 @@ describe('POST /api/projects/by-project/{projectName}/release', () => {
     vi.resetModules();
   });
 
-  function req(name = 'proj1') {
+  function req(name = 'proj1', body?: unknown) {
     return new NextRequest(`http://localhost/api/projects/by-project/${name}/release`, {
       method: 'POST',
+      body: body ? JSON.stringify(body) : undefined,
     });
   }
 
@@ -74,7 +75,31 @@ describe('POST /api/projects/by-project/{projectName}/release', () => {
   it('passes projectName through to startRelease', async () => {
     startReleaseMock.mockResolvedValue({ ok: true, step: 'push', message: 'No changes to push' });
     await POST(req('my-proj'), { params: Promise.resolve({ projectName: 'my-proj' }) });
-    expect(startReleaseMock).toHaveBeenCalledWith('my-proj');
+    expect(startReleaseMock).toHaveBeenCalledWith('my-proj', { queueIfBlocked: false, sourceJobId: undefined });
+  });
+
+  it('passes source_job_id through to startRelease', async () => {
+    startReleaseMock.mockResolvedValue({ ok: true, step: 'review', jobId: 'r1', message: 'Running review' });
+    await POST(req('proj1', { source_job_id: 'job-123' }), { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(startReleaseMock).toHaveBeenCalledWith('proj1', { queueIfBlocked: false, sourceJobId: 'job-123' });
+  });
+
+  it('queues instead of failing when queue_if_blocked is true', async () => {
+    startReleaseMock.mockResolvedValue({
+      ok: true,
+      status: 'queued',
+      message: 'Release queued for proj1',
+      blockingJobId: 'blocker-job-42',
+    });
+    const res = await POST(req('proj1', { queue_if_blocked: true }), { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(startReleaseMock).toHaveBeenCalledWith('proj1', { queueIfBlocked: true, sourceJobId: undefined });
+    expect(res.status).toBe(202);
+    const data = await res.json();
+    expect(data).toEqual({
+      status: 'queued',
+      message: 'Release queued for proj1',
+      blocking_job_id: 'blocker-job-42',
+    });
   });
 
   it('includes blocking_job_id in 409 response when pipeline is locked', async () => {

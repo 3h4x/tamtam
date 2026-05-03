@@ -9,6 +9,7 @@ interface ProjectsContextType {
   tasks: Task[]
   priorities: string[]
   loading: boolean
+  refreshing: boolean
   error: string | null
   lastRefresh: number
   fleet: FleetHealth
@@ -34,15 +35,17 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
   const [priorities, setPriorities] = useState<string[]>([])
   const [issueCounts, setIssueCounts] = useState<Record<string, { prs: number; issues: number }>>({})
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastRefresh, setLastRefresh] = useState<number>(Date.now())
   const fastPollUntil = useRef<number>(0)
   const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const loadProjects = useCallback(async () => {
+  const loadProjects = useCallback(async (mode: 'initial' | 'refresh' = 'refresh') => {
+    const setPending = mode === 'initial' ? setLoading : setRefreshing
     try {
       setError(null)
-      setLoading(true)
+      setPending(true)
       const data = await fetchProjects()
       setTasks(data.tasks)
       setPriorities(data.priorities)
@@ -52,7 +55,7 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
       const message = err instanceof Error ? err.message : 'Failed to load projects'
       setError(message)
     } finally {
-      setLoading(false)
+      setPending(false)
     }
   }, [])
 
@@ -61,12 +64,12 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    loadProjects()
+    loadProjects('initial')
     const tick = () => {
       const isFast = Date.now() < fastPollUntil.current
       const delay = isFast ? 10_000 : 30_000
       intervalRef.current = setTimeout(() => {
-        loadProjects().then(tick)
+        loadProjects('refresh').then(tick)
       }, delay)
     }
     tick()
@@ -107,8 +110,13 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
   return (
     <ProjectsContext.Provider
       value={{
-        tasks, priorities, loading, error, lastRefresh, fleet, issueCounts,
-        setError, loadProjects, handlePriorityChange, handlePause, handleResume, startFastPolling,
+        tasks, priorities, loading, refreshing, error, lastRefresh, fleet, issueCounts,
+        setError,
+        loadProjects: () => loadProjects('refresh'),
+        handlePriorityChange,
+        handlePause,
+        handleResume,
+        startFastPolling,
       }}
     >
       {children}

@@ -85,17 +85,17 @@ export function TerminalToolbar({
   const overflow = allSelected.length - SHOW
 
   return (
-    <div className="flex items-center justify-between gap-2 px-3 py-2 bg-[#1a1a1a] border-b border-[#2a2a2a] shrink-0">
-      <div className="flex items-center gap-1.5">
+    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2 bg-bg-secondary border-b border-border shrink-0">
+      <div className="flex flex-wrap items-center gap-1.5">
         <button
-          className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-[#888] hover:text-[#ccc] cursor-pointer border-none font-mono leading-none"
+          className="inline-flex items-center h-7 px-2 rounded-md border border-border bg-bg-primary text-[11px] text-text-tertiary hover:text-text-primary cursor-pointer font-mono leading-none transition-colors"
           onClick={onNewSession}
           title="New session"
         >
           new
         </button>
         <button
-          className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-[#888] hover:text-[#ccc] cursor-pointer border-none font-mono leading-none flex items-center gap-1"
+          className="inline-flex items-center h-7 px-2 rounded-md border border-border bg-bg-primary text-[11px] text-text-tertiary hover:text-text-primary cursor-pointer font-mono leading-none gap-1 transition-colors"
           onClick={onToggleSessions}
           title="Recent sessions"
         >
@@ -113,7 +113,7 @@ export function TerminalToolbar({
         {currentReleaseId && (
           <Link
             href={`/project/${encodeURIComponent(projectName)}/release/${encodeURIComponent(currentReleaseId)}`}
-            className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-accent hover:text-accent/80 font-mono leading-none flex items-center"
+            className="inline-flex items-center h-7 px-2 rounded-md border border-border bg-bg-primary text-[11px] text-accent hover:text-accent/80 font-mono leading-none transition-colors"
             title="View unified release trace"
           >
             trace ↗
@@ -121,42 +121,44 @@ export function TerminalToolbar({
         )}
       </div>
 
-      <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center justify-end gap-1.5">
         <button
-          className={`text-[11px] px-2 py-1 h-[26px] rounded cursor-pointer border-none font-mono leading-none ${showThinking ? 'bg-accent/20 text-accent' : 'bg-[#252525] text-[#888] hover:text-[#ccc]'}`}
+          className={`inline-flex items-center h-7 px-2 rounded-md border border-border cursor-pointer font-mono text-[11px] leading-none transition-colors ${showThinking ? 'bg-accent/15 text-accent' : 'bg-bg-primary text-text-tertiary hover:text-text-primary'}`}
           onClick={onToggleThinking}
           title="Toggle thinking blocks"
         >
           thinking
         </button>
         {visible.map(item => (
-          <span key={item.key} className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent font-mono gap-0.5 max-w-[100px]">
+          <span key={item.key} className="inline-flex items-center h-6 max-w-[120px] gap-1 rounded-full border border-accent/20 bg-accent/10 px-2 text-[10px] text-accent font-mono">
             <span className="truncate">{item.label}</span>
-            <button className="text-accent/40 hover:text-accent cursor-pointer border-none bg-transparent leading-none shrink-0" onClick={item.remove} title={`Remove ${item.label}`}>×</button>
+            <button className="text-accent/45 hover:text-accent cursor-pointer border-none bg-transparent leading-none shrink-0" onClick={item.remove} title={`Remove ${item.label}`}>×</button>
           </span>
         ))}
         {overflow > 0 && (
           <span
-            className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-accent/10 text-accent/70 font-mono cursor-pointer hover:bg-accent/20"
+            className="inline-flex items-center h-6 rounded-full border border-border bg-bg-primary px-2 text-[10px] text-text-tertiary font-mono cursor-pointer hover:bg-accent/10 hover:text-text-primary transition-colors"
             title={allSelected.slice(SHOW).map(i => i.label).join(', ')}
             onClick={onToggleSkillPicker}
           >
-            +{overflow} more
+            +{overflow}
           </span>
         )}
         <div className="relative">
           <button
-            className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-[#888] hover:text-[#ccc] cursor-pointer border-none font-mono leading-none"
+            className={`inline-flex items-center h-7 rounded-md border px-2 font-mono text-[11px] leading-none transition-colors cursor-pointer ${
+              showSkillPicker ? 'border-accent bg-accent/10 text-accent' : 'border-border bg-bg-primary text-text-tertiary hover:text-text-primary'
+            }`}
             onClick={onToggleSkillPicker}
           >
-            +skill
+            skills{selectedItems.length > 0 ? ` ${selectedItems.length}` : ''}
           </button>
           {showSkillPicker && (
-            <div className="absolute top-full right-0 mt-1 w-96 bg-[#1a1a1a] border border-[#333] rounded-lg shadow-lg z-50 overflow-hidden">
+            <div className="absolute top-full right-0 mt-1 w-96 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden">
               <input
                 ref={skillSearchRef}
                 type="text"
-                className="w-full px-3 py-2.5 text-sm bg-[#111] border-b border-[#333] text-[#ccc] outline-none placeholder:text-[#555] font-mono"
+                className="w-full px-3 py-2.5 text-sm bg-bg-primary border-b border-border text-text-primary outline-none placeholder:text-text-tertiary/40 font-mono"
                 value={skillSearch}
                 onChange={(e) => onSkillSearchChange(e.target.value)}
                 placeholder="search skills..."
@@ -167,25 +169,34 @@ export function TerminalToolbar({
               />
               <div className="max-h-80 overflow-y-auto">
                 {filteredItems.length === 0 ? (
-                  <div className="px-3 py-3 text-xs text-[#555]">
+                  <div className="px-3 py-3 text-xs text-text-tertiary/50">
                     {allItems.length === 0 ? 'no skills' : 'no matches'}
                   </div>
                 ) : (
-                  filteredItems.slice(0, 50).map(item => (
-                    <button
-                      key={item.id}
-                      className="w-full px-3 py-2 text-left text-xs hover:bg-[#252525] cursor-pointer border-none bg-transparent text-[#ccc] font-mono flex items-center justify-between gap-2"
-                      onClick={() => onToggleItem(item)}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="truncate">{item.name}</span>
-                        <span className="text-[#444] shrink-0">{item.source === 'db' ? 'db' : 'file'}</span>
-                      </div>
-                      {(skillUsage[item.id] || 0) > 0 && (
-                        <span className="text-[10px] text-[#555] shrink-0">{skillUsage[item.id]}</span>
-                      )}
-                    </button>
-                  ))
+                  filteredItems.slice(0, 50).map(item => {
+                    const isSelected = selectedItems.some(s => s.id === item.id)
+                    return (
+                      <button
+                        key={item.id}
+                        className={`w-full px-3 py-2 text-left text-xs cursor-pointer border-none font-mono flex items-center justify-between gap-2 transition-colors ${
+                          isSelected
+                            ? 'bg-accent/10 hover:bg-accent/15 text-accent'
+                            : 'hover:bg-bg-tertiary bg-transparent text-text-primary'
+                        }`}
+                        onClick={() => onToggleItem(item)}
+                        title={item.description || item.name}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="shrink-0 w-3 text-center text-[10px]">{isSelected ? '✓' : ''}</span>
+                          <span className="truncate">{item.name}</span>
+                          <span className="text-text-tertiary/50 shrink-0">{item.source === 'db' ? 'db' : 'file'}</span>
+                        </div>
+                        {(skillUsage[item.id] || 0) > 0 && (
+                          <span className="text-[10px] text-text-tertiary/40 shrink-0">{skillUsage[item.id]}</span>
+                        )}
+                      </button>
+                    )
+                  })
                 )}
               </div>
             </div>
@@ -193,17 +204,19 @@ export function TerminalToolbar({
         </div>
         <div className="relative">
           <button
-            className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-[#888] hover:text-[#ccc] cursor-pointer border-none font-mono leading-none"
+            className={`inline-flex items-center h-7 rounded-md border px-2 font-mono text-[11px] leading-none transition-colors cursor-pointer ${
+              showDocsPicker ? 'border-accent bg-accent/10 text-accent' : 'border-border bg-bg-primary text-text-tertiary hover:text-text-primary'
+            }`}
             onClick={onToggleDocsPicker}
           >
-            +docs
+            docs{selectedDocs.length > 0 ? ` ${selectedDocs.length}` : ''}
           </button>
           {showDocsPicker && (
-            <div className="absolute top-full right-0 mt-1 w-72 bg-[#1a1a1a] border border-[#333] rounded-lg shadow-lg z-50 overflow-hidden">
+            <div className="absolute top-full right-0 mt-1 w-72 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden">
               <input
                 ref={docsSearchRef}
                 type="text"
-                className="w-full px-3 py-2.5 text-sm bg-[#111] border-b border-[#333] text-[#ccc] outline-none placeholder:text-[#555] font-mono"
+                className="w-full px-3 py-2.5 text-sm bg-bg-primary border-b border-border text-text-primary outline-none placeholder:text-text-tertiary/40 font-mono"
                 value={docsSearch}
                 onChange={(e) => onDocsSearchChange(e.target.value)}
                 placeholder="search docs..."
@@ -214,41 +227,58 @@ export function TerminalToolbar({
               />
               <div className="max-h-80 overflow-y-auto">
                 {filteredDocs.length === 0 ? (
-                  <div className="px-3 py-3 text-xs text-[#555]">
+                  <div className="px-3 py-3 text-xs text-text-tertiary/50">
                     {allDocs.length === 0 ? 'no docs' : 'no matches'}
                   </div>
                 ) : (
-                  filteredDocs.map(doc => (
-                    <button
-                      key={doc.name}
-                      className="w-full px-3 py-2 text-left text-xs hover:bg-[#252525] cursor-pointer border-none bg-transparent text-[#ccc] font-mono"
-                      onClick={() => onToggleDoc(doc)}
-                    >
-                      {doc.name}
-                    </button>
-                  ))
+                  filteredDocs.map(doc => {
+                    const isSelected = selectedDocs.some(d => d.name === doc.name)
+                    return (
+                      <button
+                        key={doc.name}
+                        className={`w-full px-3 py-2 text-left text-xs cursor-pointer border-none font-mono flex items-center gap-2 transition-colors ${
+                          isSelected ? 'bg-accent/10 hover:bg-accent/15 text-accent' : 'hover:bg-bg-tertiary bg-transparent text-text-primary'
+                        }`}
+                        onClick={() => onToggleDoc(doc)}
+                      >
+                        <span className="shrink-0 w-3 text-center text-[10px]">{isSelected ? '✓' : ''}</span>
+                        <span className="truncate">{doc.name}</span>
+                      </button>
+                    )
+                  })
                 )}
               </div>
             </div>
           )}
         </div>
-        <select
-          className="text-[11px] px-2 py-1 h-[26px] rounded bg-[#252525] text-[#888] cursor-pointer outline-none border-none font-mono leading-none"
-          value={model}
-          onChange={async (e) => {
-            const m = e.target.value as 'haiku' | 'sonnet' | 'opus'
-            onModelChange(m)
-            await fetch('/api/settings', {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ default_model: m }),
-            }).catch(() => {})
-          }}
-        >
-          <option value="haiku">haiku</option>
-          <option value="sonnet">sonnet</option>
-          <option value="opus">opus</option>
-        </select>
+        <div className="inline-flex items-center gap-1 rounded-md border border-border bg-bg-primary px-1.5 h-7">
+          <span className="text-[10px] uppercase tracking-wider text-text-tertiary font-mono">model</span>
+          {(['haiku', 'sonnet', 'opus'] as const).map((m) => (
+            <button
+              key={m}
+              className={`h-5 rounded px-1.5 text-[10px] cursor-pointer border-none font-mono leading-none transition-colors ${
+                model === m
+                  ? 'bg-accent/15 text-accent'
+                  : 'bg-transparent text-text-tertiary hover:text-text-primary'
+              }`}
+              onClick={async () => {
+                onModelChange(m)
+                await fetch('/api/settings', {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ default_model: m }),
+                }).catch(() => {})
+              }}
+              title={
+                m === 'haiku' ? 'haiku — fastest, lowest cost' :
+                m === 'sonnet' ? 'sonnet — balanced speed and quality' :
+                'opus — most capable, highest quality'
+              }
+            >
+              {m}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )

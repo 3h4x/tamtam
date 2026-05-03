@@ -1,13 +1,12 @@
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { mkdirSync } from 'fs';
 
-const dbDir = join(process.cwd(), 'data', 'db');
+const dbPath = process.env.TAMTAM_DB_PATH ?? join(process.cwd(), 'data', 'db', 'tamtam.db');
+const dbDir = dirname(dbPath);
 mkdirSync(dbDir, { recursive: true });
-
-const dbPath = join(dbDir, 'tamtam.db');
 
 const sqlite = new Database(dbPath);
 sqlite.pragma('journal_mode = WAL');
@@ -237,6 +236,48 @@ try {
 try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN aborted_at REAL');
 } catch {}
+
+// Migrate: add verdict to jobs — cached LGTM/NEEDS ATTENTION/DO NOT SHIP from review logs
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN verdict TEXT');
+} catch {}
+
+// Migrate: add prompt_bytes to jobs — byte size of the composed prompt for cost tracking
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN prompt_bytes INTEGER');
+} catch {}
+
+// Migrate: add agent-run summary columns to jobs
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN work_summary TEXT');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN modified_files TEXT');
+} catch {}
+
+// Migrate: add doc_paths to agents — JSON array of project-relative doc paths
+try {
+  sqlite.exec("ALTER TABLE agents ADD COLUMN doc_paths TEXT NOT NULL DEFAULT '[]'");
+} catch {}
+
+// Project/agent recommendations generated from completed runs.
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS recommendations (
+    id TEXT PRIMARY KEY,
+    project TEXT NOT NULL,
+    source_kind TEXT NOT NULL,
+    source_id TEXT,
+    agent_id TEXT,
+    agent_name TEXT,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    payload TEXT,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+  );
+`);
 
 export const db = drizzle(sqlite, { schema });
 export { schema };

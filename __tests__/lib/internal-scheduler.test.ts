@@ -164,6 +164,20 @@ describe('internal-scheduler', () => {
       expect(dump.entries[0].nextFireMs).toBeGreaterThan(Date.now());
     });
 
+    it('removes stale schedules when the agent endpoint returns 404', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+      vi.stubGlobal('fetch', fetchMock);
+      setSchedulerBaseUrl('http://test');
+
+      upsertAgentSchedule({ id: 'a1', project: 'p', name: 'n', schedule: '1m', prompt: 'x', enabled: true });
+
+      await vi.advanceTimersByTimeAsync(60_000 + 100);
+      for (let i = 0; i < 8; i++) await Promise.resolve();
+
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(dumpInternalScheduler().entries).toHaveLength(0);
+    });
+
     it('pause stops future fires until resume is called', async () => {
       const fetchMock = vi.fn().mockResolvedValue({ ok: true });
       vi.stubGlobal('fetch', fetchMock);
@@ -292,5 +306,91 @@ describe('internal-scheduler — issue-branch skip', () => {
     const dump = dumpInternalSchedulerDynamic();
     expect(dump.entries[0].skippedCount).toBe(0);
     expect(dump.entries[0].fireCount).toBe(1);
+  });
+});
+
+describe('internal-scheduler — budget skip', () => {
+  let upsertAgentScheduleDynamic: typeof import('@/lib/scheduling/internal-scheduler').upsertAgentSchedule;
+  let dumpInternalSchedulerDynamic: typeof import('@/lib/scheduling/internal-scheduler').dumpInternalScheduler;
+  let stopInternalSchedulerDynamic: typeof import('@/lib/scheduling/internal-scheduler').stopInternalScheduler;
+  let setSchedulerBaseUrlDynamic: typeof import('@/lib/scheduling/internal-scheduler').setSchedulerBaseUrl;
+  let budgetBlockedResultMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.useFakeTimers();
+
+    budgetBlockedResultMock = vi.fn().mockReturnValue(null);
+    vi.doMock('@/lib/shared/job-control', () => ({
+      budgetBlockedResult: budgetBlockedResultMock,
+      scheduledBurnRateBlocked: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/shared/project-branch-lock', () => ({
+      getIssueBranchLock: vi.fn().mockResolvedValue(null),
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+    }));
+
+    const mod = await import('@/lib/scheduling/internal-scheduler');
+    upsertAgentScheduleDynamic = mod.upsertAgentSchedule;
+    dumpInternalSchedulerDynamic = mod.dumpInternalScheduler;
+    stopInternalSchedulerDynamic = mod.stopInternalScheduler;
+    setSchedulerBaseUrlDynamic = mod.setSchedulerBaseUrl;
+
+    stopInternalSchedulerDynamic();
+  });
+
+  afterEach(() => {
+    stopInternalSchedulerDynamic();
+    vi.useRealTimers();
+    vi.resetModules();
+    vi.restoreAllMocks();
+  });
+
+  it('skips scheduled fire when the subscription budget gate is closed', async () => {
+    budgetBlockedResultMock.mockReturnValue({
+      ok: false,
+      status: 429,
+      detail: 'Codex model credit gate blocked (100%).',
+      window: 'credits',
+      utilization: 100,
+      resetsAt: null,
+    });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+    setSchedulerBaseUrlDynamic('http://test');
+
+    upsertAgentScheduleDynamic({ id: 'a1', project: 'myproj', name: 'tests', schedule: '1m', prompt: 'run tests', enabled: true });
+
+    await vi.advanceTimersByTimeAsync(60_000 + 100);
+    for (let _i = 0; _i < 20; _i++) await Promise.resolve();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    const dump = dumpInternalSchedulerDynamic();
+    expect(dump.entries[0].skippedCount).toBe(1);
+    expect(dump.entries[0].lastSkippedReason).toContain('Codex model credit gate blocked');
+    expect(dump.entries[0].errorCount).toBe(0);
+  });
+
+  it('treats route-level HTTP 429 as a skip, not a scheduler error', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: vi.fn().mockResolvedValue({ detail: 'Codex quota exceeded' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    setSchedulerBaseUrlDynamic('http://test');
+
+    upsertAgentScheduleDynamic({ id: 'a1', project: 'myproj', name: 'tests', schedule: '1m', prompt: 'run tests', enabled: true });
+
+    await vi.advanceTimersByTimeAsync(60_000 + 100);
+    for (let _i = 0; _i < 20; _i++) await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const dump = dumpInternalSchedulerDynamic();
+    expect(dump.entries[0].skippedCount).toBe(1);
+    expect(dump.entries[0].lastSkippedReason).toContain('Codex quota exceeded');
+    expect(dump.entries[0].errorCount).toBe(0);
   });
 });

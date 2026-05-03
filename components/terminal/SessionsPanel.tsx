@@ -17,7 +17,7 @@ interface SessionsPanelProps {
 
 export function SessionsPanel({ sessions, loadingSessions, onRestore }: SessionsPanelProps) {
   return (
-    <div className="border-b border-[#2a2a2a] bg-[#151515] shrink-0">
+    <div className="border-b border-border bg-bg-secondary shrink-0">
       {loadingSessions ? (
         <div className="px-4 py-2 flex flex-col gap-1.5">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -29,25 +29,28 @@ export function SessionsPanel({ sessions, loadingSessions, onRestore }: Sessions
           ))}
         </div>
       ) : sessions.length === 0 ? (
-        <div className="px-4 py-3 text-xs text-[#555] font-mono">no recent sessions</div>
+        <div className="px-4 py-3 text-xs text-text-tertiary font-mono">no recent sessions</div>
       ) : (
         sessions.map(session => {
           const isRunning = session.finishedAt === null && session.exitCode === null
           const isSuccess = session.exitCode === 0
+          const isFailed = session.exitCode !== null && session.exitCode !== 0
           const prompt = session.prompt
             ? session.prompt.length > 80 ? session.prompt.slice(0, 80) + '…' : session.prompt
             : '(no prompt)'
           const secs = Math.floor(Date.now() / 1000 - session.startedAt)
           const timeAgo = secs < 60 ? `${secs}s ago` : secs < 3600 ? `${Math.floor(secs / 60)}m ago` : `${Math.floor(secs / 3600)}h ago`
+          const dotClass = isRunning ? 'bg-status-warning animate-pulse' : isSuccess ? 'bg-status-success' : isFailed ? 'bg-status-error' : 'bg-text-tertiary'
+          const dotTitle = isRunning ? 'running' : isSuccess ? 'done' : isFailed ? `exit ${session.exitCode}` : 'unknown'
           return (
             <button
               key={session.id}
-              className="flex items-center gap-3 w-full px-4 py-2 text-left hover:bg-[#1e1e1e] border-none bg-transparent border-b border-[#1d1d1d] last:border-b-0 cursor-pointer"
+              className="flex items-center gap-3 w-full px-4 py-2 text-left hover:bg-bg-tertiary border-none bg-transparent border-b border-border/50 last:border-b-0 cursor-pointer"
               onClick={() => onRestore(session)}
             >
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRunning ? 'bg-status-warning animate-pulse' : isSuccess ? 'bg-status-success' : 'bg-[#555]'}`} />
-              <span className="text-xs text-[#bbb] font-mono truncate flex-1">{prompt}</span>
-              <span className="text-[10px] text-[#555] font-mono shrink-0">{timeAgo}</span>
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotClass}`} title={dotTitle} />
+              <span className="text-xs text-text-primary font-mono truncate flex-1">{prompt}</span>
+              <span className="text-xs text-text-tertiary font-mono shrink-0">{timeAgo}</span>
             </button>
           )
         })

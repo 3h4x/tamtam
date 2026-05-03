@@ -7,7 +7,8 @@ export type NotificationEvent =
   | 'release_aborted'
   | 'fix_loop_exhausted'
   | 'review_do_not_ship'
-  | 'agent_run_fail';
+  | 'agent_run_fail'
+  | 'budget_blocked';
 
 export interface NotificationPayload {
   event: NotificationEvent;
@@ -53,6 +54,9 @@ function getNotificationConfig(event: NotificationEvent): NotificationConfig {
       break;
     case 'agent_run_fail':
       enabled = settings.notification_on_agent_run_fail || false;
+      break;
+    case 'budget_blocked':
+      enabled = settings.notification_on_budget_blocked || false;
       break;
   }
 

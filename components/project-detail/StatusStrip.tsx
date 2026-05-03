@@ -35,10 +35,10 @@ interface StatusCardProps {
 
 const TONE_RING: Record<StatusCardProps['tone'], string> = {
   neutral: 'border-border',
-  success: 'border-status-success/40',
-  warning: 'border-status-warning/40',
-  error: 'border-status-error/40',
-  info: 'border-status-info/40',
+  success: 'border-border border-l-2 border-l-status-success',
+  warning: 'border-border border-l-2 border-l-status-warning',
+  error: 'border-border border-l-2 border-l-status-error',
+  info: 'border-border border-l-2 border-l-status-info',
 }
 
 const TONE_DOT: Record<StatusCardProps['tone'], string> = {
@@ -68,6 +68,15 @@ function StatusCard({ label, primary, detail, tone, onClick, disabled, running }
         <span className="text-text-tertiary text-xs opacity-0 group-hover:opacity-100 transition-opacity shrink-0" aria-hidden>›</span>
       )}
     </button>
+  )
+}
+
+function StartingDetail() {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-bg-tertiary/70 px-1.5 py-0.5 text-[11px] leading-none text-text-secondary">
+      <span className="spinner-sm !h-2.5 !w-2.5 !border-[1.5px]" aria-hidden />
+      starting
+    </span>
   )
 }
 
@@ -107,8 +116,8 @@ export function StatusStrip({
     reviewCard = (
       <StatusCard
         label="Review"
-        primary="In progress"
-        detail={latestReview ? `started ${formatAgo(latestReview.started_at)}` : 'starting...'}
+        primary="running"
+        detail={latestReview ? `started ${formatAgo(latestReview.started_at)}` : <StartingDetail />}
         tone="warning"
         running
         onClick={latestReview ? () => onOpenJob(latestReview.id) : undefined}
@@ -153,8 +162,17 @@ export function StatusStrip({
     testsCard = (
       <StatusCard
         label="Tests"
-        primary="Running"
-        detail={(latestTest ? `started ${formatAgo(latestTest.started_at)}` : 'starting...') + cronSuffix}
+        primary="running"
+        detail={
+          latestTest
+            ? `started ${formatAgo(latestTest.started_at)}${cronSuffix}`
+            : (
+              <>
+                <StartingDetail />
+                {cronSuffix}
+              </>
+            )
+        }
         tone="warning"
         running
         onClick={latestTest ? () => onOpenJob(latestTest.id) : undefined}
@@ -188,7 +206,7 @@ export function StatusStrip({
     ciCard = (
       <StatusCard
         label="CI"
-        primary="Passing"
+        primary="passing"
         detail={releaseTag ? `release ${releaseTag}` : 'latest commit'}
         tone="success"
         onClick={ciFailedUrl ? () => window.open(ciFailedUrl, '_blank') : undefined}
@@ -198,7 +216,7 @@ export function StatusStrip({
     ciCard = (
       <StatusCard
         label="CI"
-        primary="Failing"
+        primary="failing"
         detail={ciFailedUrl ? 'open on GitHub' : 'no run url'}
         tone="error"
         onClick={ciFailedUrl ? () => window.open(ciFailedUrl, '_blank') : undefined}
@@ -208,7 +226,7 @@ export function StatusStrip({
     ciCard = (
       <StatusCard
         label="CI"
-        primary="In progress"
+        primary="running"
         detail={ciFailedUrl ? 'open on GitHub' : undefined}
         tone="warning"
         running

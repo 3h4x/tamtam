@@ -42,6 +42,11 @@ export interface TamTamConfig {
   pipeline_model_fix: string;
   pipeline_model_dod: string;
   pipeline_model_commit: string;
+  review_retry_on_parse_failure: boolean;
+  budget_block_runs_enabled: boolean;
+  budget_block_at_pct: number;
+  budget_warn_at_pct: number;
+  notification_on_budget_blocked: boolean;
 }
 
 const DEFAULTS: TamTamConfig = {
@@ -86,13 +91,18 @@ const DEFAULTS: TamTamConfig = {
   pipeline_model_fix: '',
   pipeline_model_dod: '',
   pipeline_model_commit: '',
+  review_retry_on_parse_failure: true,
+  budget_block_runs_enabled: false,
+  budget_block_at_pct: 95,
+  budget_warn_at_pct: 80,
+  notification_on_budget_blocked: false,
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
 const CACHE_TTL = 5; // seconds
 
-const VALID_CLAUDE_PROVIDERS = new Set(['claude', 'gemini', 'lmstudio', 'custom']);
-const PROJECT_MEMORY_PROVIDERS = new Set(['gemini', 'lmstudio']);
+const VALID_CLAUDE_PROVIDERS = new Set(['claude', 'gemini', 'lmstudio', 'codex', 'custom']);
+const PROJECT_MEMORY_PROVIDERS = new Set(['gemini', 'lmstudio', 'codex']);
 
 function shimPath(name: string): string {
   return join(process.env.TAMTAM_ROOT || process.cwd(), 'scripts', name);
@@ -100,13 +110,14 @@ function shimPath(name: string): string {
 
 function isShimPath(bin: string | undefined): boolean {
   if (!bin) return false;
-  return /scripts\/(gemini|lmstudio)-shim\.js$/.test(bin);
+  return /scripts\/(gemini|lmstudio|codex)-shim\.js$/.test(bin);
 }
 
 function inferClaudeProvider(claudeBin: string | undefined): string {
   if (!claudeBin) return DEFAULTS.claude_provider;
   if (claudeBin.endsWith('/scripts/gemini-shim.js') || claudeBin.endsWith('scripts/gemini-shim.js')) return 'gemini';
   if (claudeBin.endsWith('/scripts/lmstudio-shim.js') || claudeBin.endsWith('scripts/lmstudio-shim.js')) return 'lmstudio';
+  if (claudeBin.endsWith('/scripts/codex-shim.js') || claudeBin.endsWith('scripts/codex-shim.js')) return 'codex';
   if (claudeBin === DEFAULTS.claude_bin || claudeBin.endsWith('/claude') || claudeBin === 'claude') return 'claude';
   return 'custom';
 }
@@ -114,6 +125,7 @@ function inferClaudeProvider(claudeBin: string | undefined): string {
 function resolveClaudeBin(provider: string, storedBin: string | undefined): string {
   if (provider === 'gemini') return shimPath('gemini-shim.js');
   if (provider === 'lmstudio') return shimPath('lmstudio-shim.js');
+  if (provider === 'codex') return shimPath('codex-shim.js');
   // For claude/custom providers, ignore stored shim paths left over from a prior
   // gemini/lmstudio configuration — they would invoke the wrong backend.
   if (isShimPath(storedBin)) return DEFAULTS.claude_bin;
@@ -167,6 +179,14 @@ export function getSettings(): TamTamConfig {
     pipeline_model_fix: map.pipeline_model_fix ?? DEFAULTS.pipeline_model_fix,
     pipeline_model_dod: map.pipeline_model_dod ?? DEFAULTS.pipeline_model_dod,
     pipeline_model_commit: map.pipeline_model_commit ?? DEFAULTS.pipeline_model_commit,
+    review_retry_on_parse_failure:
+      map.review_retry_on_parse_failure === undefined
+        ? DEFAULTS.review_retry_on_parse_failure
+        : map.review_retry_on_parse_failure === 'true',
+    budget_block_runs_enabled: map.budget_block_runs_enabled === 'true',
+    budget_block_at_pct: parseIntOr(map.budget_block_at_pct, DEFAULTS.budget_block_at_pct),
+    budget_warn_at_pct: parseIntOr(map.budget_warn_at_pct, DEFAULTS.budget_warn_at_pct),
+    notification_on_budget_blocked: map.notification_on_budget_blocked === 'true',
   };
 
   if (config.lmstudio_model) {

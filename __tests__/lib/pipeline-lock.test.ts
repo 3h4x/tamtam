@@ -35,10 +35,14 @@ function createTestDb() {
       gh_issue_repo TEXT,
       gh_issue_title TEXT,
       log_pruned INTEGER DEFAULT 0,
+      verdict TEXT,
       cost_usd REAL,
       model TEXT,
       release_id TEXT,
-      aborted_at REAL
+      aborted_at REAL,
+      prompt_bytes INTEGER,
+      work_summary TEXT,
+      modified_files TEXT
     );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };

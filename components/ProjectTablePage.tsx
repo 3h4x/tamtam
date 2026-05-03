@@ -7,6 +7,7 @@ import type { JobInfo, Agent } from '@/lib/client-api'
 import type { FleetHealth } from '@/hooks/useProjectHealth'
 import { formatAgo } from '@/lib/shared/format'
 import { getAggregateCi, getCiFailedUrl } from '@/lib/shared/statusConstants'
+import { LoadingState } from '@/components/LoadingState'
 import { useToast } from '@/components/Toast'
 
 type SortKey = 'project' | 'status' | 'changes' | 'last_run' | 'next_run' | 'ci'
@@ -47,6 +48,7 @@ function formatNextFire(ms: number): { text: string; tone: 'overdue' | 'imminent
 interface ProjectTablePageProps {
   fleet: FleetHealth
   issueCounts?: Record<string, { prs: number; issues: number }>
+  loading?: boolean
 }
 
 function StatusDot({ ok }: { ok: boolean }) {
@@ -102,9 +104,11 @@ function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
 function AgentPills({
   agents,
   runningNames,
+  schedulerEntries,
 }: {
   agents: Agent[]
   runningNames: Set<string>
+  schedulerEntries: SchedulerEntry[]
 }) {
   if (agents.length === 0) return <span className="text-text-tertiary">—</span>
 
@@ -116,10 +120,31 @@ function AgentPills({
     <div className="flex flex-wrap gap-1">
       {visible.map((agent) => {
         const isRunning = runningNames.has(agent.name)
+        const sched = schedulerEntries.find(e => e.name === agent.name)
+        let tooltipParts: string[] = []
+        if (agent.schedule) tooltipParts.push(`schedule: ${agent.schedule}`)
+        if (sched) {
+          const now = Date.now()
+          const delta = sched.nextFireMs - now
+          if (delta > 0) {
+            const min = Math.round(delta / 60000)
+            tooltipParts.push(min < 60 ? `next in ${min}m` : `next in ${Math.round(min / 60)}h`)
+          } else if (delta > -30000) {
+            tooltipParts.push('next: now')
+          }
+          if (sched.lastFireMs) {
+            const agoMin = Math.round((now - sched.lastFireMs) / 60000)
+            tooltipParts.push(agoMin < 60 ? `last ${agoMin}m ago` : `last ${Math.round(agoMin / 60)}h ago`)
+          } else {
+            tooltipParts.push('never fired')
+          }
+        } else if (!agent.schedule) {
+          tooltipParts.push('on-demand')
+        }
         return (
           <span
             key={agent.id}
-            title={agent.schedule ? `schedule: ${agent.schedule}` : 'manual'}
+            title={tooltipParts.join(' · ')}
             className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium transition-colors ${
               isRunning
                 ? 'bg-accent/15 text-accent border border-accent/30'
@@ -143,15 +168,30 @@ function AgentPills({
 const healthOrder: Record<string, number> = { error: 0, warning: 1, unknown: 2, healthy: 3 }
 const ciOrder: Record<string, number> = { failure: 0, in_progress: 1, success: 2 }
 
-export function ProjectTablePage({ fleet, issueCounts = {} }: ProjectTablePageProps) {
+export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: ProjectTablePageProps) {
   const router = useRouter()
   const { toast } = useToast()
   const [allJobs, setAllJobs] = useState<JobInfo[]>([])
   const [agentsByProject, setAgentsByProject] = useState<Record<string, Agent[]>>({})
   const [schedulerByProject, setSchedulerByProject] = useState<Record<string, SchedulerEntry[]>>({})
   const [schedulerPaused, setSchedulerPaused] = useState(false)
-  const [sortKey, setSortKey] = useState<SortKey>('last_run')
-  const [sortDir, setSortDir] = useState<SortDir>('desc')
+  const [sortKey, setSortKey] = useState<SortKey>('project')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const [sortReady, setSortReady] = useState(false)
+
+  useEffect(() => {
+    const savedKey = window.localStorage.getItem('tamtam.projects.sortKey')
+    const savedDir = window.localStorage.getItem('tamtam.projects.sortDir')
+
+    if (savedKey === 'project' || savedKey === 'status' || savedKey === 'changes' || savedKey === 'last_run' || savedKey === 'next_run' || savedKey === 'ci') {
+      setSortKey(savedKey)
+    }
+    if (savedDir === 'asc' || savedDir === 'desc') {
+      setSortDir(savedDir)
+    }
+
+    setSortReady(true)
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -171,9 +211,22 @@ export function ProjectTablePage({ fleet, issueCounts = {} }: ProjectTablePagePr
       } catch { /* ignore */ }
     }
     load()
-    const interval = setInterval(load, 15000)
+    // Poll scheduler health every 45s (was 15s). Reduced frequency to cut server load;
+    // next-fire predictions may be stale for up to 45s, but this is acceptable since
+    // scheduler state changes infrequently.
+    const interval = setInterval(load, 45000)
     return () => { active = false; clearInterval(interval) }
   }, [])
+
+  useEffect(() => {
+    if (!sortReady) return
+    window.localStorage.setItem('tamtam.projects.sortKey', sortKey)
+  }, [sortKey, sortReady])
+
+  useEffect(() => {
+    if (!sortReady) return
+    window.localStorage.setItem('tamtam.projects.sortDir', sortDir)
+  }, [sortDir, sortReady])
 
   useEffect(() => {
     let active = true
@@ -184,7 +237,10 @@ export function ProjectTablePage({ fleet, issueCounts = {} }: ProjectTablePagePr
       } catch { /* ignore */ }
     }
     poll()
-    const interval = setInterval(poll, 5000)
+    // Poll jobs every 30s (was 5s). Reduced frequency to cut server load; job status
+    // (running → done) may be stale for up to 30s. This is acceptable for the
+    // dashboard since detailed job status is visible in the Terminal/Release views.
+    const interval = setInterval(poll, 30000)
     return () => { active = false; clearInterval(interval) }
   }, [])
 
@@ -203,7 +259,10 @@ export function ProjectTablePage({ fleet, issueCounts = {} }: ProjectTablePagePr
       } catch { /* ignore */ }
     }
     load()
-    const interval = setInterval(load, 10000)
+    // Poll agents every 30s (was 10s). Reduced frequency to cut server load; agent
+    // list changes (enable/disable, new agents) may be stale for up to 30s, but
+    // this is acceptable since agent configuration changes infrequently.
+    const interval = setInterval(load, 30000)
     return () => { active = false; clearInterval(interval) }
   }, [])
 
@@ -293,8 +352,41 @@ const isReviewRunning = (projectName: string) =>
   const thClass = (key: SortKey) =>
     `px-4 py-2.5 font-medium cursor-pointer select-none hover:text-text-secondary transition-colors ${sortKey === key ? 'text-text-secondary' : ''}`
 
+  if (!sortReady) return <LoadingState />
+
+  const showLoadingOverlay = loading
+
   return (
-    <div className="overflow-x-auto">
+    <div className="relative overflow-x-auto" aria-busy={showLoadingOverlay}>
+      {showLoadingOverlay && (
+        <div className="absolute inset-0 z-10 bg-bg-primary">
+          <div className="pointer-events-none">
+            <div className="px-4 py-3">
+              <div className="skeleton h-7 w-32" />
+            </div>
+            <div className="border-t border-border">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_1fr] gap-4 px-4 py-4 border-b border-border last:border-0"
+                  style={{ opacity: 1 - i * 0.12 }}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="skeleton h-4 w-4 rounded-full" />
+                    <div className="skeleton h-4 w-36" />
+                  </div>
+                  <div className="skeleton h-5 w-20 rounded-full" />
+                  <div className="skeleton h-4 w-12" />
+                  <div className="skeleton h-4 w-8" />
+                  <div className="skeleton h-5 w-20 rounded-full" />
+                  <div className="skeleton h-4 w-10" />
+                  <div className="skeleton h-4 w-8" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       <table className="w-full border-collapse">
         <thead>
           <tr className="text-left text-xs text-text-tertiary uppercase tracking-wider border-b border-border">
@@ -381,7 +473,7 @@ const isReviewRunning = (projectName: string) =>
 
                 {/* Agents */}
                 <td className="px-4 py-2 max-w-[280px]" onClick={e => e.stopPropagation()}>
-                  <AgentPills agents={agents} runningNames={runningAgentNames} />
+                  <AgentPills agents={agents} runningNames={runningAgentNames} schedulerEntries={schedulerByProject[project.project] ?? []} />
                 </td>
 
                 {/* Status */}
@@ -478,7 +570,7 @@ const isReviewRunning = (projectName: string) =>
                 {/* Last Run */}
                 <td className="px-4 py-2">
                   {lastJob ? (
-                    <span className="flex items-center gap-1.5">
+                    <span className="flex items-center gap-1.5 flex-wrap">
                       {lastJob.status === 'running' ? (
                         <SpinnerIcon />
                       ) : (
@@ -490,6 +582,15 @@ const isReviewRunning = (projectName: string) =>
                           ? `running · started ${formatAgo(lastJob.started_at)}`
                           : formatAgo(lastJob.finished_at ?? lastJob.started_at)}
                       </span>
+                      {lastJob.verdict && lastJob.status !== 'running' && (
+                        <span className={`text-[10px] px-1 py-0.5 rounded font-mono font-medium ${
+                          lastJob.verdict === 'LGTM' ? 'bg-status-success/15 text-status-success' :
+                          lastJob.verdict === 'DO NOT SHIP' ? 'bg-status-error/15 text-status-error' :
+                          'bg-status-warning/15 text-status-warning'
+                        }`}>
+                          {lastJob.verdict === 'LGTM' ? 'lgtm' : lastJob.verdict === 'DO NOT SHIP' ? 'dns' : 'attn'}
+                        </span>
+                      )}
                     </span>
                   ) : (
                     <span className="text-text-tertiary text-sm">—</span>

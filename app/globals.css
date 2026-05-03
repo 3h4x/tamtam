@@ -112,6 +112,12 @@ html.privacy-mode [data-private] {
 .scrollbar-none { scrollbar-width: none; }
 .scrollbar-none::-webkit-scrollbar { display: none; }
 
+/* GPU-accelerate Tailwind's animate-spin */
+.animate-spin {
+  will-change: transform;
+  transform: translateZ(0);
+}
+
 /* Spinner animation */
 .spinner {
   width: 20px;
@@ -120,6 +126,7 @@ html.privacy-mode [data-private] {
   border-top-color: var(--color-accent);
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
+  will-change: transform;
 }
 
 .spinner-sm {
@@ -129,6 +136,7 @@ html.privacy-mode [data-private] {
   border-top-color: var(--color-accent);
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
+  will-change: transform;
 }
 
 /* Skeleton loading */

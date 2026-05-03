@@ -1,8 +1,18 @@
 'use client'
 
 import { formatAgo } from '@/lib/shared/format'
-import { formatDuration, formatTokens, formatCost, KIND_LABEL, KIND_COLOR } from '@/components/project-runs/utils'
+import { formatDuration, formatTokens, formatCost, KIND_LABEL, KIND_COLOR, entryIsRunning, entryNeedsAttention } from '@/components/project-runs/utils'
 import type { Entry } from '@/components/project-runs/utils'
+
+function modifiedFileCount(raw: string | null): number {
+  if (!raw) return 0
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.length : 0
+  } catch {
+    return 0
+  }
+}
 
 export interface RunRowProps {
   entry: Entry
@@ -11,6 +21,7 @@ export interface RunRowProps {
   expanded?: boolean
   onToggleExpand?: () => void
   summary?: string | null
+  actions?: React.ReactNode
   // Depth in the chain tree. 0 = top-level row, 1 = direct child of release,
   // 2 = grandchild (e.g. review under test), etc. Drives left padding and
   // the connector tree on the row's left edge.
@@ -22,38 +33,160 @@ export interface RunRowProps {
 // padding-left classes. Anything past depth 6 saturates at the same padding
 // — we don't expect chains longer than test → review → fix → review → commit
 // → push → mark-dod (depth 6) in practice.
+// Steps of 7 (28px) match the connector rail spacing (16 + depth*28 px).
 const DEPTH_PADDING: Record<number, string> = {
   0: 'pl-4',
-  1: 'pl-12',
-  2: 'pl-20',
-  3: 'pl-28',
-  4: 'pl-36',
-  5: 'pl-44',
-  6: 'pl-52',
+  1: 'pl-11',
+  2: 'pl-[74px]',
+  3: 'pl-[102px]',
+  4: 'pl-[130px]',
+  5: 'pl-[158px]',
+  6: 'pl-[186px]',
 }
 
-export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summary, depth = 0, children }: RunRowProps) {
+function VerdictBadge({
+  verdict,
+  isRunning,
+  isFailed,
+  exitCode,
+  failureLabel,
+}: {
+  verdict: string | null | undefined
+  isRunning: boolean
+  isFailed: boolean
+  exitCode: number | null | undefined
+  failureLabel?: string | null
+}) {
+  if (verdict && !isRunning && !isFailed) {
+    return (
+      <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium font-mono ${
+        verdict === 'LGTM' ? 'bg-status-success/15 text-status-success border border-status-success/30' :
+        verdict === 'DO NOT SHIP' ? 'bg-status-error/15 text-status-error border border-status-error/30' :
+        'bg-status-warning/15 text-status-warning border border-status-warning/30'
+      }`} title={`Review verdict: ${verdict}`}>
+        {verdict === 'LGTM' ? '✓ LGTM' : verdict === 'DO NOT SHIP' ? '✗ DNS' : '⚠ ATTN'}
+      </span>
+    )
+  }
+  if (isRunning) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-1.5 py-0.5 text-[10px] rounded-full font-medium bg-status-info/15 text-status-info border border-status-info/30">
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-status-info opacity-60" />
+          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-status-info" />
+        </span>
+        running
+      </span>
+    )
+  }
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium border ${
+      isFailed ? 'bg-status-error/15 text-status-error border-status-error/30' :
+      'bg-status-success/15 text-status-success border-status-success/30'
+    }`}>
+      {isFailed ? (failureLabel ?? `exit ${exitCode}`) : '✓ done'}
+    </span>
+  )
+}
+
+function ReleaseOutcomeBadge({ entry }: { entry: Entry }) {
+  const outcome = entry.releaseOutcome
+  if (!outcome) return null
+  const cls =
+    outcome.status === 'running' ? 'bg-status-info/15 text-status-info border-status-info/30' :
+    outcome.status === 'done' ? 'bg-status-success/15 text-status-success border-status-success/30' :
+    outcome.status === 'blocked' ? 'bg-status-warning/15 text-status-warning border-status-warning/30' :
+    'bg-status-error/15 text-status-error border-status-error/30'
+  const label = outcome.status === 'done' ? '✓ release done' : outcome.label
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium border ${cls}`}>
+      {label}
+    </span>
+  )
+}
+
+function RowStateBadge({
+  isRunning,
+  isFailed,
+  exitCode,
+  failureLabel,
+}: {
+  isRunning: boolean
+  isFailed: boolean
+  exitCode: number | null | undefined
+  failureLabel?: string | null
+}) {
+  if (isRunning) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-status-info/30 bg-status-info/15 px-1.5 py-0.5 text-[10px] font-medium text-status-info">
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-status-info opacity-60" />
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-status-info" />
+        </span>
+        running
+      </span>
+    )
+  }
+
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${
+      isFailed
+        ? 'border-status-error/30 bg-status-error/15 text-status-error'
+        : 'border-status-success/30 bg-status-success/15 text-status-success'
+    }`}>
+      {isFailed ? (failureLabel ?? `exit ${exitCode}`) : 'done'}
+    </span>
+  )
+}
+
+export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summary, actions, depth = 0, children }: RunRowProps) {
   const isRunning = e.status === 'running'
   const isFailed = !isRunning && e.exitCode !== null && e.exitCode !== 0
+  const effectiveRunning = entryIsRunning(e)
+  const effectiveNeedsAttention = entryNeedsAttention(e)
   const totalTokens = e.inputTokens + e.outputTokens
-  const accentBorder = isRunning
-    ? 'border-l-2 border-l-status-warning'
-    : isFailed
-    ? 'border-l-2 border-l-status-error'
+  const fileCount = modifiedFileCount(e.modifiedFiles)
+  const statusBadge = (
+    <RowStateBadge
+      isRunning={isRunning}
+      isFailed={isFailed}
+      exitCode={e.exitCode}
+      failureLabel={e.failureLabel}
+    />
+  )
+  const verdictBadge = (
+    <VerdictBadge
+      verdict={e.verdict}
+      isRunning={isRunning}
+      isFailed={isFailed}
+      exitCode={e.exitCode}
+      failureLabel={e.failureLabel}
+    />
+  )
+  const releaseBadge = <ReleaseOutcomeBadge entry={e} />
+  // Top-level rows (depth=0) get a wider, always-colored status border so
+  // the outcome of every item is scannable at a glance. Child rows keep a
+  // thinner border and only color it for running/failed (success stays quiet).
+  const borderWidth = depth === 0 ? 'border-l-[3px]' : 'border-l-2'
+  const accentBorder = effectiveRunning
+    ? `${borderWidth} border-l-status-info`
+    : effectiveNeedsAttention
+    ? `${borderWidth} ${e.releaseOutcome?.status === 'blocked' ? 'border-l-status-warning' : 'border-l-status-error'}`
+    : depth === 0
+    ? `${borderWidth} border-l-status-success`
     : 'border-l-2 border-l-transparent'
   const paddingLeft = DEPTH_PADDING[Math.min(depth, 6)] ?? 'pl-52'
 
-  // Connector glyphs for nested rows. The vertical pipes show the chain
-  // walking down through ancestor depths; the angled `└─` puts the row
-  // visually under its direct parent. Rendered as absolute-positioned spans
-  // so they don't fight the existing flex layout.
+  // Tree connector lines. Ancestor levels get a full-height vertical rail;
+  // the current depth gets a half-height vertical + horizontal stub (└─ shape).
+  // Using a stronger color so the hierarchy is clearly readable.
   const connectors: React.ReactNode = depth > 0 ? (
-    <span aria-hidden className="absolute left-0 top-0 bottom-0 pointer-events-none select-none font-mono text-text-tertiary/50 text-[12px]">
+    <span aria-hidden className="absolute left-0 top-0 bottom-0 pointer-events-none select-none">
       {Array.from({ length: depth - 1 }).map((_, i) => (
-        <span key={i} className="absolute top-0 bottom-0 border-l border-border/50" style={{ left: `${20 + i * 32}px` }} />
+        <span key={i} className="absolute top-0 bottom-0 border-l border-border" style={{ left: `${16 + i * 28}px` }} />
       ))}
-      <span className="absolute border-l border-border/50" style={{ left: `${20 + (depth - 1) * 32}px`, top: 0, height: '50%' }} />
-      <span className="absolute border-t border-border/50" style={{ left: `${20 + (depth - 1) * 32}px`, top: '50%', width: '12px' }} />
+      <span className="absolute border-l border-border" style={{ left: `${16 + (depth - 1) * 28}px`, top: 0, height: '50%' }} />
+      <span className="absolute border-t border-border" style={{ left: `${16 + (depth - 1) * 28}px`, top: '50%', width: '10px' }} />
     </span>
   ) : null
 
@@ -83,15 +216,37 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
           <span className="shrink-0 mt-0.5 w-5 h-5" aria-hidden="true" />
         )}
 
-        <span className={`shrink-0 mt-0.5 inline-flex items-center justify-center w-[64px] px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded ${KIND_COLOR[e.bucket]}`}>
+        <span className={`shrink-0 mt-0.5 inline-flex items-center justify-center min-w-[58px] px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded ${KIND_COLOR[e.bucket]}`}>
           {KIND_LABEL[e.bucket]}
         </span>
 
         <div className="flex-1 min-w-0">
-          <div className="text-sm text-text-primary font-medium truncate group-hover:text-accent">
-            {e.title}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-text-primary font-medium truncate group-hover:text-accent">
+                {e.title}
+              </div>
+              <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                {statusBadge}
+                {e.logPruned && (
+                  <span className="inline-flex items-center rounded-full bg-text-tertiary/15 px-1.5 py-0.5 text-[10px] font-medium text-text-tertiary" title="Log file deleted by retention policy">
+                    pruned
+                  </span>
+                )}
+                {verdictBadge}
+                {releaseBadge}
+              </div>
+            </div>
+            <div className="shrink-0 text-right">
+              <div className="font-mono text-xs text-text-primary tabular-nums">
+                {formatDuration(e.startedAt, e.finishedAt)}
+              </div>
+              <div className="mt-0.5 font-mono text-[11px] text-text-tertiary tabular-nums">
+                {formatAgo(e.lastActivityAt)}
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5 flex-wrap">
+          <div className="flex items-center gap-x-2 gap-y-1 text-xs text-text-tertiary mt-1.5 flex-wrap">
             {/* When depth > 0 the chain visualization on the left edge already
                 shows what spawned this row — the badge becomes noisy. Keep
                 the parent label as a hover title on the chain connector for
@@ -99,22 +254,35 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
                 redundant inline `← test` badge. */}
             {e.parentLabel && depth === 0 && (
               <span
-                className="font-mono text-text-tertiary"
+                className="inline-flex items-center gap-1 shrink-0"
                 title={`Started by ${e.parentLabel} (${e.parentJobId?.slice(-12) ?? ''})`}
               >
-                ← {e.parentLabel}
+                <span className="text-text-tertiary text-[10px]">←</span>
+                <span className="px-1.5 py-0.5 text-[10px] font-mono font-medium rounded bg-accent/10 text-accent border border-accent/25">
+                  {e.parentLabel}
+                </span>
               </span>
             )}
             {e.turns > 1 && <span className="font-mono">{e.turns} turns</span>}
             {e.model && <span className="font-mono">{e.model}</span>}
             {e.navSessionId && <span className="font-mono">#{e.navSessionId.slice(0, 8)}</span>}
+            <span className="font-mono tabular-nums">started {formatAgo(e.startedAt)}</span>
             {summary && <span className="font-mono text-text-secondary">{summary}</span>}
+            {e.releaseOutcome && !summary && <span className="font-mono text-text-secondary">{e.releaseOutcome.label}</span>}
             {e.subtitle && !summary && <span className="italic truncate">{e.subtitle}</span>}
+            {e.workSummary && e.bucket === 'agent' && (
+              <span className="text-text-secondary truncate">{e.workSummary}</span>
+            )}
+            {fileCount > 0 && e.bucket === 'agent' && (
+              <span className="font-mono rounded bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-secondary border border-border">
+                {fileCount} file{fileCount === 1 ? '' : 's'}
+              </span>
+            )}
           </div>
         </div>
 
-        {totalTokens > 0 || e.costUsd > 0 ? (
-          <div className="shrink-0 flex flex-col items-end gap-0.5 text-xs">
+        <div className="shrink-0 flex flex-col items-end gap-1 text-xs">
+          {(totalTokens > 0 || e.costUsd > 0) && (
             <div className="flex items-center gap-2">
               {totalTokens > 0 && (
                 <span className="font-mono text-text-tertiary" title="Input / output tokens">
@@ -127,68 +295,16 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
                   {formatCost(e.costUsd)}
                 </span>
               )}
-              <span className="font-mono text-text-secondary">
-                {formatDuration(e.startedAt, e.finishedAt)}
-              </span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-text-tertiary text-[11px]">{formatAgo(e.lastActivityAt)}</span>
-              {e.logPruned && (
-                <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium bg-text-tertiary/15 text-text-tertiary" title="Log file deleted by retention policy">
-                  pruned
-                </span>
-              )}
-              {e.verdict && !isRunning && !isFailed ? (
-                <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium font-mono ${
-                  e.verdict === 'LGTM' ? 'bg-status-success/15 text-status-success border border-status-success/30' :
-                  e.verdict === 'DO NOT SHIP' ? 'bg-status-error/15 text-status-error border border-status-error/30' :
-                  'bg-status-warning/15 text-status-warning border border-status-warning/30'
-                }`} title={`Review verdict: ${e.verdict}`}>
-                  {e.verdict === 'LGTM' ? '✓ LGTM' : e.verdict === 'DO NOT SHIP' ? '✗ DNS' : '⚠ ATTN'}
-                </span>
-              ) : (
-                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium ${
-                  isRunning ? 'bg-status-warning/15 text-status-warning' :
-                  isFailed ? 'bg-status-error/15 text-status-error' :
-                  'bg-status-success/15 text-status-success'
-                }`}>
-                  <span className={isRunning ? 'animate-pulse' : ''}>●</span>
-                  {isRunning ? 'running' : isFailed ? `exit ${e.exitCode}` : 'done'}
-                </span>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="shrink-0 flex items-center gap-2 text-xs">
-            <span className="font-mono text-text-secondary">
-              {formatDuration(e.startedAt, e.finishedAt)}
-            </span>
-            <span className="text-text-tertiary text-[11px]">{formatAgo(e.lastActivityAt)}</span>
-            {e.logPruned && (
-              <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium bg-text-tertiary/15 text-text-tertiary" title="Log file deleted by retention policy">
-                pruned
-              </span>
-            )}
-            {e.verdict && !isRunning && !isFailed ? (
-              <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium font-mono ${
-                e.verdict === 'LGTM' ? 'bg-status-success/15 text-status-success border border-status-success/30' :
-                e.verdict === 'DO NOT SHIP' ? 'bg-status-error/15 text-status-error border border-status-error/30' :
-                'bg-status-warning/15 text-status-warning border border-status-warning/30'
-              }`} title={`Review verdict: ${e.verdict}`}>
-                {e.verdict === 'LGTM' ? '✓ LGTM' : e.verdict === 'DO NOT SHIP' ? '✗ DNS' : '⚠ ATTN'}
-              </span>
-            ) : (
-              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium ${
-                isRunning ? 'bg-status-warning/15 text-status-warning' :
-                isFailed ? 'bg-status-error/15 text-status-error' :
-                'bg-status-success/15 text-status-success'
-              }`}>
-                <span className={isRunning ? 'animate-pulse' : ''}>●</span>
-                {isRunning ? 'running' : isFailed ? `exit ${e.exitCode}` : 'done'}
+          )}
+          <div className="flex items-center gap-2">
+            {actions && (
+              <span onClick={(ev) => ev.stopPropagation()} onKeyDown={(ev) => ev.stopPropagation()}>
+                {actions}
               </span>
             )}
           </div>
-        )}
+        </div>
       </div>
       {children}
     </div>

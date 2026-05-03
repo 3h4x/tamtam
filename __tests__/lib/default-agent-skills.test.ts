@@ -67,8 +67,8 @@ describe('seedDefaultSkills', () => {
     const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-cto');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:cto');
-    expect(skill!.content).toContain('You are the CTO of this project');
-    expect(skill!.description).toContain('GitHub issues');
+    expect(skill!.content).toContain('You are the CTO');
+    expect(skill!.content).toContain('gh issue create');
   });
 
   it('inserts agent-senior-fullstack with correct fields', () => {
@@ -76,10 +76,8 @@ describe('seedDefaultSkills', () => {
     const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-senior-fullstack');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:senior-fullstack');
-    expect(skill!.description).toContain('Fullstack engineer');
-    expect(skill!.content).toContain('senior fullstack engineer');
-    expect(skill!.content).toContain('Stack Decision Matrix');
-    expect(skill!.content).toContain('npm audit');
+    expect(skill!.content).toContain('Senior fullstack engineer');
+    expect(skill!.content).toContain('CLAUDE.md');
   });
 
   it('inserts agent-security-review with correct fields', () => {
@@ -88,8 +86,8 @@ describe('seedDefaultSkills', () => {
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:security-review');
     expect(skill!.description).toContain('OWASP');
-    expect(skill!.content).toContain('senior security engineer');
-    expect(skill!.content).toContain('critical, high, medium, low');
+    expect(skill!.content).toContain('git diff HEAD');
+    expect(skill!.content).toContain('CLEAN | FINDINGS');
   });
 
   it('inserts agent-dependency-check with correct fields', () => {
@@ -97,9 +95,9 @@ describe('seedDefaultSkills', () => {
     const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-dependency-check');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:dependency-check');
-    expect(skill!.description).toContain('outdated');
-    expect(skill!.content).toContain('npm audit');
-    expect(skill!.content).toContain('pip-audit');
+    expect(skill!.description).toContain('staleness');
+    expect(skill!.content).toContain('audit');
+    expect(skill!.content).toContain('outdated');
   });
 
   it('inserts agent-blog with correct fields', () => {
@@ -107,7 +105,7 @@ describe('seedDefaultSkills', () => {
     const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-blog');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:blog');
-    expect(skill!.description).toContain('daily post');
+    expect(skill!.description).toContain('blog');
     expect(skill!.content).toContain('git log');
     expect(skill!.content).toContain('blog/');
   });
@@ -117,7 +115,7 @@ describe('seedDefaultSkills', () => {
     const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-ci-monitor');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:ci-monitor');
-    expect(skill!.description).toContain('GitHub Actions');
+    expect(skill!.description).toContain('CI');
     expect(skill!.content).toContain('gh run list');
     expect(skill!.content).toContain('gh run view');
   });
@@ -137,9 +135,27 @@ describe('seedDefaultSkills', () => {
     const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-gha-audit');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:gha-audit');
-    expect(skill!.description).toContain('GitHub Actions');
+    expect(skill!.description).toContain('.github/workflows');
     expect(skill!.content).toContain('.github/workflows/');
-    expect(skill!.content).toContain('actions/checkout');
+    expect(skill!.content).toContain('CI workflow');
+  });
+
+  it('inserts agent-tests with correct fields', () => {
+    seedFn();
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-tests');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:tests');
+    expect(skill!.content).toContain('git log');
+    expect(skill!.content).toContain('test');
+  });
+
+  it('inserts agent-manage-agents with correct fields', () => {
+    seedFn();
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-manage-agents');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:manage-agents');
+    expect(skill!.content).toContain('http://localhost:1337');
+    expect(skill!.content).toContain('/api/agents');
   });
 
   it('inserts agent-readme-sync with correct fields', () => {
@@ -148,7 +164,7 @@ describe('seedDefaultSkills', () => {
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:readme-sync');
     expect(skill!.description).toContain('README');
-    expect(skill!.content).toContain('README.md');
+    expect(skill!.content).toContain('README');
     expect(skill!.content).toContain('git log');
   });
 
@@ -206,8 +222,71 @@ describe('seedDefaultSkills', () => {
     seedFn();
 
     const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-cto');
-    expect(skill!.content).toContain('You are the CTO of this project');
-    expect(skill!.description).toContain('GitHub issues');
+    expect(skill!.content).toContain('You are the CTO');
+    expect(skill!.description.length).toBeGreaterThan(0);
+  });
+
+  // Issue #64: when a seeded skill's content matches a hash in
+  // KNOWN_DEFAULT_CONTENT_HASHES, seedDefaultSkills must overwrite it with the
+  // current (shorter) default. This is the mechanism that actually shrinks
+  // prompts on running installs — a typo in the hash list would silently
+  // break the upgrade and let the cache-read regression persist.
+  it('overwrites a seeded default whose content matches a known hash', () => {
+    const now = Date.now() / 1000;
+    // Verbatim content of agent-cto from before the issue-#64 rewrite.
+    // sha256(...).slice(0,16) === 'a13c143efc007ea5', which is registered in
+    // KNOWN_DEFAULT_CONTENT_HASHES['agent-cto'].
+    const previousDefault = `You are the CTO of this project. Think strategically about the highest-leverage next steps and create actionable GitHub issues.
+
+1. Read \`CLAUDE.md\` to understand the project vision.
+2. Run \`git log --oneline -30\` to see recent momentum.
+3. Run \`gh issue list --limit 20 --state open\` — do not duplicate existing issues.
+4. Pick 2–3 highest-leverage gaps: missing features, blocking tech debt, user-facing pain points.
+5. For each, create an issue with \`gh issue create\`:
+   - Title: clear outcome ("Add X so that Y")
+   - Body: problem statement → proposed approach → acceptance criteria
+   - Labels: one type (\`enhancement\` / \`bug\` / \`tech-debt\`) + one priority (\`priority: high/medium/low\`)
+
+Be opinionated. Prioritize ruthlessly.
+
+## Gotchas
+- This is a solo project — do not create issues that assume team coordination or PR reviews.
+- Check \`git log\` for in-progress work before creating issues; duplicate tracking wastes cycles.
+- Issues must be self-contained: a solo developer should be able to pick one up cold.`;
+
+    testDb.db.insert(schema.skills).values({
+      id: 'agent-cto',
+      name: 'agent:cto',
+      description: 'old',
+      content: previousDefault,
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+
+    seedFn();
+
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-cto');
+    expect(skill!.content).not.toBe(previousDefault);
+    // Current default is much shorter; the whole point of the upgrade.
+    expect(skill!.content.length).toBeLessThan(previousDefault.length);
+  });
+
+  it('preserves a user-customised skill (hash does not match a known default)', () => {
+    const now = Date.now() / 1000;
+    const customised = 'You are the CTO. My custom instructions go here.';
+    testDb.db.insert(schema.skills).values({
+      id: 'agent-cto',
+      name: 'agent:cto',
+      description: 'mine',
+      content: customised,
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+
+    seedFn();
+
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-cto');
+    expect(skill!.content).toBe(customised);
   });
 
   it('does not modify updatedAt for skills that already have content', () => {

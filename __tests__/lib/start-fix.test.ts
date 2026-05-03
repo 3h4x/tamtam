@@ -19,7 +19,7 @@ describe('startFixFromJob', () => {
   let getJobMock: ReturnType<typeof vi.fn>;
   let probeJobStatusMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
-  let readLogMock: ReturnType<typeof vi.fn>;
+  let readParsedLogMock: ReturnType<typeof vi.fn>;
   let createJobMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
   let markDoneMock: ReturnType<typeof vi.fn>;
@@ -28,6 +28,7 @@ describe('startFixFromJob', () => {
   let isLockOwnedByActiveReleaseMock: ReturnType<typeof vi.fn>;
   let openSyncMock: ReturnType<typeof vi.fn>;
   let mkdirSyncMock: ReturnType<typeof vi.fn>;
+  let writeFileSyncMock: ReturnType<typeof vi.fn>;
 
   function makeSourceJob(overrides: Record<string, unknown> = {}) {
     return {
@@ -45,10 +46,11 @@ describe('startFixFromJob', () => {
     spawnMock = vi.fn().mockReturnValue(makeProc());
     openSyncMock = vi.fn().mockReturnValue(5); // fake fd
     mkdirSyncMock = vi.fn();
+    writeFileSyncMock = vi.fn();
     getJobMock = vi.fn().mockReturnValue(makeSourceJob());
     probeJobStatusMock = vi.fn().mockResolvedValue('done');
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/myproject');
-    readLogMock = vi.fn().mockReturnValue('Error: test failure at line 42\n');
+    readParsedLogMock = vi.fn().mockReturnValue('Error: test failure at line 42\n');
     createJobMock = vi.fn().mockImplementation((project: string, kind: string) => ({
       id: `${project}-${kind}-id`, project, kind, pid: 0, logPath: '',
       prompt: null, startedAt: 0, finishedAt: null, exitCode: null, seen: false,
@@ -64,11 +66,12 @@ describe('startFixFromJob', () => {
       mkdirSync: mkdirSyncMock,
       openSync: openSyncMock,
       closeSync: vi.fn(),
+      writeFileSync: writeFileSyncMock,
     }));
     vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
       createJob: createJobMock,
-      readLog: readLogMock,
+      readParsedLog: readParsedLogMock,
       probeJobStatus: probeJobStatusMock,
       updateJob: updateJobMock,
       markDone: markDoneMock,
@@ -90,6 +93,7 @@ describe('startFixFromJob', () => {
     }));
     vi.doMock('@/lib/shared/job-control', () => ({
       jobsPausedResult: vi.fn().mockReturnValue(null),
+      runGates: vi.fn().mockReturnValue(null),
     }));
 
     ({ startFixFromJob } = await import('@/lib/pipeline/start-fix'));
@@ -128,7 +132,7 @@ describe('startFixFromJob', () => {
   });
 
   it('returns 400 when log output is empty and no sessionId', async () => {
-    readLogMock.mockReturnValue('   ');
+    readParsedLogMock.mockReturnValue('   ');
     const r = await startFixFromJob('src-job-1');
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -167,6 +171,20 @@ describe('startFixFromJob', () => {
     expect(prompt).toContain('review');
   });
 
+  it('uses parsed source output rather than raw stream-json in the fix prompt', async () => {
+    readParsedLogMock.mockReturnValue('Findings:\n- Finding ID: canonical-url\n  Required fix: persist canonical URL\nVerdict: DO NOT SHIP\n');
+    const proc = makeProc();
+    spawnMock.mockReturnValue(proc);
+
+    await startFixFromJob('src-job-1');
+
+    const prompt: string = (proc.stdin!.write as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(prompt).toContain('Finding ID: canonical-url');
+    expect(prompt).not.toContain('"type":"stream_event"');
+    expect(prompt).not.toContain('[tamtam] launching');
+    expect(prompt).not.toContain('Verdict: DO NOT SHIP');
+  });
+
   it('embeds review findings in the prompt even when sessionId is present (resume)', async () => {
     // Resume keeps the Claude session for full context, but we still embed
     // the findings so the contract is explicit in the fix log and doesn't
@@ -181,11 +199,24 @@ describe('startFixFromJob', () => {
     const prompt: string = (proc.stdin!.write as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(prompt).toContain('Apply fixes for ALL the findings');
     expect(prompt).toContain('Error: test failure');
+    expect(prompt).toContain('FIX METHOD');
+    expect(prompt).toContain('alternate route');
+    expect(prompt).toContain('Fix checklist');
+  });
+
+  it('writes a prompt sidecar for fix jobs and records promptBytes', async () => {
+    await startFixFromJob('src-job-1');
+    expect(writeFileSyncMock).toHaveBeenCalledOnce();
+    const [path, prompt] = writeFileSyncMock.mock.calls[0];
+    expect(path).toBe('/tmp/logs/myproject-fix-id.prompt');
+    expect(prompt).toContain('Please fix ALL the issues identified above');
+    const updatedJob = updateJobMock.mock.calls[0][0];
+    expect(updatedJob.promptBytes).toBeGreaterThan(0);
   });
 
   it('truncates log output exceeding 12000 chars', async () => {
     const longLog = 'x'.repeat(15000);
-    readLogMock.mockReturnValue(longLog);
+    readParsedLogMock.mockReturnValue(longLog);
     const proc = makeProc();
     spawnMock.mockReturnValue(proc);
     await startFixFromJob('src-job-1');
@@ -242,9 +273,9 @@ describe('startFixFromJob', () => {
   it('returns 409 when jobs are globally paused', async () => {
     vi.resetModules();
     vi.doMock('child_process', () => ({ spawn: spawnMock }));
-    vi.doMock('fs', () => ({ mkdirSync: mkdirSyncMock, openSync: openSyncMock, closeSync: vi.fn() }));
+    vi.doMock('fs', () => ({ mkdirSync: mkdirSyncMock, openSync: openSyncMock, closeSync: vi.fn(), writeFileSync: writeFileSyncMock }));
     vi.doMock('@/lib/jobs/job-storage', () => ({
-      getJob: getJobMock, createJob: createJobMock, readLog: readLogMock,
+      getJob: getJobMock, createJob: createJobMock, readParsedLog: readParsedLogMock,
       probeJobStatus: probeJobStatusMock, updateJob: updateJobMock, markDone: markDoneMock,
     }));
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
@@ -259,6 +290,7 @@ describe('startFixFromJob', () => {
     }));
     vi.doMock('@/lib/shared/job-control', () => ({
       jobsPausedResult: vi.fn().mockReturnValue({ ok: false, status: 409, detail: 'Jobs are paused globally.' }),
+      runGates: vi.fn().mockReturnValue({ ok: false, status: 409, detail: 'Jobs are paused globally.' }),
     }));
     const { startFixFromJob: startFixPaused } = await import('@/lib/pipeline/start-fix');
     const r = await startFixPaused('src-job-1');

@@ -2,7 +2,7 @@
 
 import { Fragment, useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { fetchJobs } from '@/lib/client-api'
+import { fetchJobs, releaseProject } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import {
   formatTokens,
@@ -12,7 +12,10 @@ import {
   buildEntries,
   groupReleaseChildren,
   buildReleaseSummary,
+  flattenPipelineSteps,
   KIND_LABEL,
+  entryIsRunning,
+  entryNeedsAttention,
 } from '@/components/project-runs/utils'
 import type { Entry, KindBucket } from '@/components/project-runs/utils'
 import { RunRow } from '@/components/project-runs/RunRow'
@@ -32,15 +35,25 @@ function filterKey(f: Filter): string {
   return f.kind === 'bucket' ? `b:${f.bucket}` : f.kind
 }
 
-// Walk the chained children tree built by `groupReleaseChildren` and render
-// one `RunRow` per node, with depth-based indentation/connectors. Defined at
-// module scope so the recursive call shares one stable reference across
-// nested rows (avoids re-creating the function on each parent render).
+// Render a chained-child node (e.g. a release nested under an agent run).
+// For release nodes the pipeline steps are flattened so test/review/commit/push
+// all appear at the same depth; fix/fix-push are one level deeper.
 function renderChain(node: Entry, depth: number, navigate: (e: Entry) => void): React.ReactNode {
+  const summary = node.kind === 'release'
+    ? buildReleaseSummary(node.children ?? [], node)
+    : null
+  const pipelineFlat = node.kind === 'release'
+    ? flattenPipelineSteps(node.chainedChildren ?? [], depth + 1)
+    : []
   return (
     <Fragment key={node.key}>
-      <RunRow entry={node} onClick={() => navigate(node)} depth={depth} />
-      {node.chainedChildren?.map((c) => renderChain(c, depth + 1, navigate))}
+      <RunRow entry={node} onClick={() => navigate(node)} depth={depth} summary={summary} />
+      {node.kind === 'release'
+        ? pipelineFlat.map(({ entry, depth: d }) => (
+            <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
+          ))
+        : node.chainedChildren?.map((c) => renderChain(c, depth + 1, navigate))
+      }
     </Fragment>
   )
 }
@@ -53,6 +66,7 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
   const [filter, setFilter] = useState<Filter>({ kind: 'all' })
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [releaseActionState, setReleaseActionState] = useState<{ jobId: string; label: string } | null>(null)
   const toggleExpanded = (key: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -80,6 +94,13 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
   }, [projectName])
 
   const entries = useMemo(() => buildEntries(jobs), [jobs])
+  const loadJobs = async () => {
+    const data = await fetchJobs(projectName, { limit: 0 })
+    setJobs(data.jobs)
+    setPendingReleaseQueued(!!data.pendingReleaseProjects?.includes(projectName))
+    setLoading(false)
+    return data
+  }
 
   // Counts reflect the flat entry list (pre-grouping) so the chip numbers
   // match what you'd see if you clicked into that filter.
@@ -91,16 +112,16 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
     } as Record<string, number>
     for (const e of entries) {
       c[e.bucket] += 1
-      if (e.status === 'running') c.running += 1
-      else if (e.exitCode !== null && e.exitCode !== 0) c.failed += 1
+      if (entryIsRunning(e)) c.running += 1
+      else if (entryNeedsAttention(e)) c.failed += 1
     }
     return c
   }, [entries])
 
   const matches = (e: Entry, f: Filter): boolean => {
     if (f.kind === 'all') return true
-    if (f.kind === 'running') return e.status === 'running'
-    if (f.kind === 'failed') return e.status === 'done' && e.exitCode !== null && e.exitCode !== 0
+    if (f.kind === 'running') return entryIsRunning(e)
+    if (f.kind === 'failed') return entryNeedsAttention(e)
     return e.bucket === f.bucket
   }
 
@@ -119,7 +140,7 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
     return source.filter((e) => {
       if (!matches(e, filter)) return false
       if (!q) return true
-      const hay = `${e.title} ${e.subtitle ?? ''} ${e.model ?? ''} ${e.navSessionId ?? ''} ${e.kind}`.toLowerCase()
+      const hay = `${e.title} ${e.subtitle ?? ''} ${e.releaseOutcome?.label ?? ''} ${e.model ?? ''} ${e.navSessionId ?? ''} ${e.kind}`.toLowerCase()
       return hay.includes(q)
     })
   }, [entries, filter, search])
@@ -142,7 +163,7 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
       tokens += e.inputTokens + e.outputTokens
       durationMs += e.durationMs ?? 0
       costUsd += e.costUsd
-      if (e.status === 'running') running += 1
+      if (entryIsRunning(e)) running += 1
     }
     return { tokens, running, durationMs, costUsd }
   }, [filtered])
@@ -159,6 +180,44 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
     } else {
       router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(e.navJobId)}`)
     }
+  }
+
+  const retryRelease = async (source: Entry) => {
+    setReleaseActionState({ jobId: source.navJobId, label: 'starting' })
+    try {
+      const result = await releaseProject(projectName, { queueIfBlocked: true, sourceJobId: source.navJobId })
+      await loadJobs()
+      if (result.release_job_id) {
+        setExpanded((prev) => new Set(prev).add(source.key))
+      }
+    } catch (error) {
+      console.error('[history] release retry failed', error)
+      setReleaseActionState({ jobId: source.navJobId, label: 'failed' })
+      setTimeout(() => setReleaseActionState(null), 2500)
+      return
+    }
+    setReleaseActionState(null)
+  }
+
+  const releaseActionsFor = (e: Entry): React.ReactNode => {
+    const outcomeStatus = e.releaseOutcome?.status
+      ?? (e.kind === 'release' && e.status === 'done' && e.exitCode !== null && e.exitCode !== 0
+        ? (e.children?.length ?? 0) === 0 ? 'blocked' : 'failed'
+        : null)
+    if (outcomeStatus !== 'blocked' && outcomeStatus !== 'failed') return null
+    const active = releaseActionState?.jobId === e.navJobId
+    const label = active ? releaseActionState.label : outcomeStatus === 'blocked' ? 'Retry release' : 'Continue release'
+    return (
+      <button
+        type="button"
+        className="px-2 py-0.5 text-[10px] rounded border border-accent/40 text-accent bg-accent/10 hover:bg-accent/15 disabled:opacity-60 cursor-pointer"
+        disabled={active}
+        onClick={() => retryRelease(e)}
+        title="Start a new release attempt from the current project state"
+      >
+        {label}
+      </button>
+    )
   }
 
   return (
@@ -211,8 +270,9 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
         </div>
       </div>
 
-      {/* Unified filter row: status shortcuts + kind breakdown, one axis. */}
-      <div className="flex items-center gap-1.5 flex-wrap mb-3">
+      {/* Unified filter row: status shortcuts + kind breakdown, one axis.
+          overflow-x-auto prevents 13+ kind buttons from wrapping to multiple lines on narrow screens. */}
+      <div className="flex items-center gap-1.5 overflow-x-auto mb-3 pb-0.5 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent" style={{ scrollbarWidth: 'thin' }}>
         {([
           { f: { kind: 'all' } as Filter, label: 'all', tone: 'neutral' },
           { f: { kind: 'running' } as Filter, label: 'running', tone: 'warning' },
@@ -228,14 +288,14 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
           return (
             <button
               key={label}
-              className={`px-2.5 py-1 text-xs rounded-full font-mono cursor-pointer border ${toneCls}`}
+              className={`shrink-0 px-2.5 py-1 text-xs rounded-full font-mono cursor-pointer border ${toneCls}`}
               onClick={() => setFilter(f)}
             >
               {label} <span className="opacity-70">{count}</span>
             </button>
           )
         })}
-        <span className="h-5 w-px bg-border mx-1" aria-hidden />
+        <span className="shrink-0 h-5 w-px bg-border mx-1" aria-hidden />
         {(['run', 'release', 'review', 'test', 'fix', 'fix-ci', 'fix-push', 'commit', 'push', 'mark-dod', 'pr-wait', 'agent', 'other'] as const).map((b) => {
           const count = counts[b] ?? 0
           const active = filter.kind === 'bucket' && filter.bucket === b
@@ -243,7 +303,7 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
           return (
             <button
               key={b}
-              className={`px-2.5 py-1 text-xs rounded-full font-mono cursor-pointer border ${
+              className={`shrink-0 px-2.5 py-1 text-xs rounded-full font-mono cursor-pointer border ${
                 active
                   ? 'border-accent bg-accent/15 text-accent'
                   : 'border-border bg-bg-secondary text-text-secondary hover:text-text-primary'
@@ -338,6 +398,16 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
                   const isReleaseParent = e.kind === 'release' && (e.children?.length ?? 0) > 0
                   const isExpandable = isReleaseParent || hasChainedKids
                   const isExpanded = expanded.has(e.key)
+                  // For an agent/run row that owns a nested release, surface that
+                  // release's pipeline summary so it's visible while collapsed.
+                  const ownedRelease = hasChainedKids && !isReleaseParent
+                    ? e.chainedChildren?.find(c => c.kind === 'release')
+                    : null
+                  const rowSummary = isReleaseParent
+                    ? buildReleaseSummary(e.children ?? [], e)
+                    : ownedRelease
+                      ? buildReleaseSummary(ownedRelease.children ?? [], ownedRelease)
+                      : null
                   return (
                     <RunRow
                       key={e.key}
@@ -346,19 +416,26 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
                       expandable={isExpandable}
                       expanded={isExpanded}
                       onToggleExpand={() => toggleExpanded(e.key)}
-                      summary={isReleaseParent ? buildReleaseSummary(e.children ?? []) : null}
+                      summary={rowSummary}
+                      actions={releaseActionsFor(e)}
                     >
                       {isExpandable && isExpanded && (
                         <div className="bg-bg-primary/40">
-                          {/* Render the chain (test → review → fix → review …)
-                              by walking the parent_job_id tree. Agent/run
-                              rows nest their owned release here. Falls back
-                              to the flat children list for orphan-clusters
-                              (vgroup:*) that don't have a real release id. */}
-                          {(e.chainedChildren && e.chainedChildren.length > 0
-                            ? e.chainedChildren
-                            : (e.children ?? []).map(c => ({ ...c, chainedChildren: undefined }))
-                          ).map((root) => renderChain(root, 1, navigate))}
+                          {/* For release/vgroup rows: flatten the chain so test/review/commit/push
+                              all appear at depth 1 and fix/fix-push appear at depth 2.
+                              For agent/run rows that own a nested release: use renderChain
+                              so the release itself shows at depth 1 with its steps below it. */}
+                          {isReleaseParent
+                            ? flattenPipelineSteps(
+                                e.chainedChildren && e.chainedChildren.length > 0
+                                  ? e.chainedChildren
+                                  : (e.children ?? []).map(c => ({ ...c, chainedChildren: undefined })),
+                                1
+                              ).map(({ entry, depth: d }) => (
+                                <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
+                              ))
+                            : (e.chainedChildren ?? []).map((root) => renderChain(root, 1, navigate))
+                          }
                         </div>
                       )}
                     </RunRow>

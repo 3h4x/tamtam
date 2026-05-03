@@ -1,0 +1,10 @@
+{
+  "description": "Abort: review sleeps so the test can abort mid-run before any commit/push.",
+  "steps": [
+    {
+      "label": "review",
+      "sleep_ms": 15000,
+      "text": "The implementation looks good.\n\nVerdict: LGTM"
+    }
+  ]
+}

@@ -72,6 +72,8 @@ Audit trail for every run, review, fix, test, push, agent execution.
 | `contextMeta` | TEXT | — | nullable; JSON `{ skills, docs }` for terminal sessions |
 | `userPrompt` | TEXT | — | nullable; user-supplied prompt override |
 | `parentJobId` | TEXT | — | nullable; parent job in pipeline chain |
+| `workSummary` | TEXT | — | nullable; concise agent-reported outcome summary |
+| `modifiedFiles` | TEXT | — | nullable; JSON array of files changed by an agent run |
 
 #### Job Kinds
 
@@ -122,6 +124,28 @@ Configuration for scheduled automated agents.
 | `enabled` | INTEGER | `true` | Boolean |
 | `createdAt` | REAL | — | NOT NULL |
 | `updatedAt` | REAL | — | NOT NULL |
+
+---
+
+### `recommendations`
+
+Actionable project suggestions derived from agent outcomes and scheduler signals.
+
+| Column | Type | Default | Notes |
+|--------|------|---------|-------|
+| `id` | TEXT | — | PRIMARY KEY; stable per project/type/agent |
+| `project` | TEXT | — | NOT NULL; project name |
+| `sourceKind` | TEXT | — | NOT NULL; job kind or subsystem that produced the recommendation |
+| `sourceId` | TEXT | — | nullable; originating job ID |
+| `agentId` | TEXT | — | nullable; related agent ID |
+| `agentName` | TEXT | — | nullable; related agent display name |
+| `type` | TEXT | — | NOT NULL; e.g. `agent_schedule_backoff` |
+| `title` | TEXT | — | NOT NULL; short display title |
+| `detail` | TEXT | — | NOT NULL; operator-facing explanation |
+| `status` | TEXT | `open` | `open`, `dismissed`, or `applied` |
+| `payload` | TEXT | — | nullable; JSON metadata for UI/actions |
+| `createdAt` | REAL | — | NOT NULL; Unix timestamp |
+| `updatedAt` | REAL | — | NOT NULL; Unix timestamp |
 
 ---
 
@@ -184,6 +208,7 @@ db.select().from(schema.jobs).where(eq(schema.jobs.project, name)).all()
 | Global config (workspace path, Claude bin, verdict rules…) | `settings` | `key` |
 | Project metadata + per-project pipeline flags | `projects` | `name` |
 | Every run / review / fix / push / agent execution | `jobs` | `id` |
+| Project recommendations from agent/scheduler signals | `recommendations` | `id` |
 | Reusable prompt blocks | `skills` | `id` |
 | Scheduled automation configs | `agents` | `id` |
 | GitHub CI status + release tag cache | `ghStatus` | `project` |

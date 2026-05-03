@@ -22,6 +22,7 @@
 import { stableHash } from './fire-times';
 import { getIssueBranchLock } from '@/lib/shared/project-branch-lock';
 import { getLock } from '@/lib/pipeline/pipeline-lock';
+import { budgetBlockedResult, scheduledBurnRateBlocked } from '@/lib/shared/job-control';
 import { db, schema } from '@/lib/db';
 import { eq } from 'drizzle-orm';
 
@@ -129,6 +130,31 @@ export function computeNextFire(schedule: string, agentId: string, fromMs: numbe
 
 async function fire(entry: ScheduleEntry): Promise<void> {
   if (getPaused() || !entry.enabled) return;
+  let shouldRearm = true;
+
+  const budget = budgetBlockedResult('start scheduled agent');
+  if (budget) {
+    entry.skippedCount += 1;
+    entry.lastSkippedReason = budget.detail;
+    console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${budget.detail}`);
+    armNext(entry);
+    shouldRearm = false;
+    return;
+  }
+
+  // Burn-rate gate: skip scheduled fires when 7d projection is over quota.
+  // Manual buttons stay free (this gate is only consulted here). Re-arm so the
+  // scheduler keeps probing — once usage decays under the cap or the window
+  // resets, scheduled work resumes automatically without user intervention.
+  const burn = scheduledBurnRateBlocked();
+  if (burn) {
+    entry.skippedCount += 1;
+    entry.lastSkippedReason = burn.reason;
+    console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${burn.reason}`);
+    armNext(entry);
+    shouldRearm = false;
+    return;
+  }
 
   // Don't fire while a release pipeline is running for the project. The
   // pipeline owns the working tree (commit/push are inline; review/fix run
@@ -144,6 +170,7 @@ async function fire(entry: ScheduleEntry): Promise<void> {
         entry.lastSkippedReason = `release pipeline active: ${holderRow.kind} ${holderRow.id}`;
         console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${entry.lastSkippedReason}`);
         armNext(entry);
+        shouldRearm = false;
         return;
       }
     }
@@ -163,6 +190,7 @@ async function fire(entry: ScheduleEntry): Promise<void> {
       entry.lastSkippedReason = `issue branch active: ${lockedBranch}`;
       console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${entry.lastSkippedReason}`);
       armNext(entry);
+      shouldRearm = false;
       return;
     }
   } catch {
@@ -179,6 +207,25 @@ async function fire(entry: ScheduleEntry): Promise<void> {
       body: JSON.stringify({ prompt: entry.prompt }),
     });
     if (!res.ok) {
+      if (res.status === 429) {
+        let detail = `HTTP ${res.status}`;
+        try {
+          const body = await res.json() as { detail?: string };
+          if (body.detail) detail = body.detail;
+        } catch {}
+        entry.skippedCount += 1;
+        entry.lastSkippedReason = detail;
+        console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${detail}`);
+        return;
+      }
+      if (res.status === 404) {
+        entry.errorCount += 1;
+        entry.lastError = `HTTP ${res.status}`;
+        console.warn(`[internal-scheduler] ${entry.project}/${entry.name} removed — ${entry.lastError}`);
+        removeAgentSchedule(entry.agentId);
+        shouldRearm = false;
+        return;
+      }
       entry.errorCount += 1;
       entry.lastError = `HTTP ${res.status}`;
       console.error(`[internal-scheduler] ${entry.project}/${entry.name} fire failed: ${entry.lastError}`);
@@ -192,7 +239,7 @@ async function fire(entry: ScheduleEntry): Promise<void> {
     console.error(`[internal-scheduler] ${entry.project}/${entry.name} fire threw:`, entry.lastError);
   } finally {
     // Always re-arm — a failed fire shouldn't disable the schedule.
-    armNext(entry);
+    if (shouldRearm) armNext(entry);
   }
 }
 

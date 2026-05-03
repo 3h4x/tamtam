@@ -7,7 +7,7 @@ import { getImproveConfig, setProjectPushResult } from '@/lib/scheduling/schedul
 import { createJob, markDone, updateJob } from '@/lib/jobs/job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { generateCommitMessage, findIssueContext, detectMainBranch } from './start-commit';
-import { jobsPausedResult } from '@/lib/shared/job-control';
+import { runGates } from '@/lib/shared/job-control';
 import { createGenericPR, createIssuePR } from './pr-create';
 
 export type PushResult =
@@ -31,7 +31,7 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
     setProjectPushResult(projectName, 'project not found');
     return { ok: false, status: 404, detail: 'project not found' };
   }
-  const paused = jobsPausedResult('start a push');
+  const paused = runGates('start a push');
   if (paused) {
     setProjectPushResult(projectName, paused.detail);
     return paused;
@@ -97,7 +97,7 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
 export function launchProjectPush(projectName: string): { jobId: string } | { error: string; status?: number } {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { error: 'project not found' };
-  const paused = jobsPausedResult('start a push');
+  const paused = runGates('start a push');
   if (paused) return { error: paused.detail, status: paused.status };
 
   // If a release pipeline is in flight, the auto-chain will push at the right

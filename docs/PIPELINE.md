@@ -68,10 +68,11 @@ startRelease()
       ├─ testCommand configured → start TEST
       └─ No testCommand:
           ├─ Has uncommitted changes → start REVIEW
-          └─ Only unpushed commits → start PUSH directly
+          └─ Only unpushed commits → start REVIEW against @{u}..HEAD
 
 TEST
-  ├─ exit 0  → completion hook → start REVIEW
+  ├─ exit 0  → completion hook → start REVIEW when uncommitted changes or unpushed commits exist
+  │                              → otherwise start PUSH/no-op
   └─ exit ≠0 → completion hook → start FIX (if iterations < 3 per 30 min)
                                  → otherwise finalize release (exit 1)
 
@@ -82,6 +83,11 @@ REVIEW
   │   ├─ DO NOT SHIP       → start FIX (if iterations < 3 per 30 min)
   │   └─ No verdict found  → finalize release (exit 1)
   └─ exit ≠0 → completion hook → finalize release (exit 1)
+
+When a release enters a follow-up review after a fix, TamTam feeds the review job the
+parsed output from earlier review/fix steps in the same release. Repeated structured
+`Finding ID:` entries are treated as the same underlying issue even if the wording
+changes, so the fix loop can stop when the review findings are not converging.
 
 FIX
   ├─ exit 0  → completion hook → start REVIEW (loop)
@@ -128,7 +134,7 @@ In the per-project **History** tab, pipeline children (`test`, `review`, `fix`, 
 Called by `markDone()` after every job finishes. Hooks run in order:
 
 1. **Release meta-log**: For pipeline jobs, if an active release exists for the project, append a log section.
-2. **Review mark**: If `review` exits 0, call `markReviewed(project, path)` to store the working-tree hash (used by the fresh-LGTM skip).
+2. **Review mark**: If `review` exits 0, call `markReviewed(project, path)` to store a commit-aware review fingerprint (`git status` + `HEAD` + upstream) used by the fresh-LGTM skip.
 3. **Review chaining**: If `review` exits 0 AND (in-release OR `auto_push_enabled`): LGTM → start PUSH; NEEDS ATTENTION / DO NOT SHIP → start FIX (within iteration cap).
 4. **Fix chaining**: If `fix` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW.
 5. **Test chaining**: If `test` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW.
@@ -227,7 +233,7 @@ Checks the push job log for strings from husky, lint-staged, eslint, pre-commit 
 |-----------|--------|
 | No uncommitted changes + no unpushed commits | 400 error — nothing to release |
 | Fresh LGTM exists for current working-tree hash | Skip review+fix, go straight to PUSH |
-| No `testCommand` configured, only unpushed commits | Skip review, go straight to PUSH |
+| No `testCommand` configured, only unpushed commits | Review committed diff against `@{u}..HEAD` before push |
 
 ### Verdict detection cheat sheet
 

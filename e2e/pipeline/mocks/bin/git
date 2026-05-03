@@ -1,0 +1,204 @@
+#!/usr/bin/env node
+/* eslint-env node */
+/**
+ * TamTam e2e git shim.
+ *
+ * Records every invocation to a per-project JSONL calls log and returns
+ * scripted responses. State (committed / pushed) is tracked in a JSON file
+ * so the pipeline's branch-ahead checks see realistic output.
+ *
+ * State dir: $TAMTAM_E2E_SHIM_DIR/<project>/
+ * Project name: value of the -C <path> flag, or CWD basename as fallback.
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+const SHIM_DIR = process.env.TAMTAM_E2E_SHIM_DIR || '/tmp/tamtam-e2e-pipeline/shim-state';
+const args = process.argv.slice(2);
+
+// Extract project path from -C flag or fall back to CWD
+function projectPath() {
+  const idx = args.indexOf('-C');
+  if (idx !== -1 && args[idx + 1]) return args[idx + 1];
+  return process.cwd();
+}
+
+const projPath = projectPath();
+const projectName = path.basename(projPath);
+const projectShimDir = path.join(SHIM_DIR, projectName);
+
+// --- Helpers ---
+
+function readState() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(projectShimDir, 'git-state.json'), 'utf-8'));
+  } catch {
+    return { committed: false, pushed: false };
+  }
+}
+
+function writeState(s) {
+  try {
+    fs.mkdirSync(projectShimDir, { recursive: true });
+    fs.writeFileSync(path.join(projectShimDir, 'git-state.json'), JSON.stringify(s));
+  } catch { /* best-effort */ }
+}
+
+function recordCall() {
+  try {
+    fs.mkdirSync(projectShimDir, { recursive: true });
+    const entry = JSON.stringify({ args, ts: Date.now() }) + '\n';
+    fs.appendFileSync(path.join(projectShimDir, 'git-calls.jsonl'), entry);
+  } catch { /* best-effort */ }
+}
+
+function out(text) {
+  process.stdout.write(text);
+}
+
+function exit(code) {
+  process.exit(code);
+}
+
+// --- Command dispatch ---
+
+recordCall();
+
+// Strip any -C <path> prefix to identify the real subcommand
+function subcmd() {
+  let i = 0;
+  while (i < args.length) {
+    if (args[i] === '-C') { i += 2; continue; }
+    if (args[i].startsWith('-C')) { i += 1; continue; }
+    return args.slice(i);
+  }
+  return [];
+}
+
+const cmd = subcmd();
+const sub = cmd[0] ?? '';
+
+if (sub === 'status') {
+  const st = readState();
+  // Return a fake changed file when not yet committed
+  if (!st.committed) {
+    out('M  src/index.js\n');
+  }
+  exit(0);
+}
+
+if (sub === 'rev-list' && cmd.includes('--count')) {
+  const st = readState();
+  if (st.committed && !st.pushed) {
+    out('1\n');
+    exit(0);
+  }
+  // No upstream configured → exit non-zero so hasUnpushedCommits returns false
+  exit(1);
+}
+
+if (sub === 'add') {
+  // Record staging — state stays as-is (committed=false)
+  exit(0);
+}
+
+if (sub === 'commit') {
+  const st = readState();
+  st.committed = true;
+  writeState(st);
+  exit(0);
+}
+
+if (sub === 'push') {
+  const st = readState();
+  st.pushed = true;
+  writeState(st);
+  exit(0);
+}
+
+if (sub === 'branch') {
+  // --show-current → current branch name
+  out('master\n');
+  exit(0);
+}
+
+if (sub === 'symbolic-ref') {
+  if (cmd.includes('refs/remotes/origin/HEAD')) {
+    // detectMainBranch calls without --short; must return the full ref so the
+    // /refs\/remotes\/origin\/(.+)/ regex matches and yields 'master'.
+    if (cmd.includes('--short')) {
+      out('origin/master\n');
+    } else {
+      out('refs/remotes/origin/master\n');
+    }
+    exit(0);
+  }
+  out('refs/heads/master\n');
+  exit(0);
+}
+
+if (sub === 'rev-parse') {
+  if (cmd.includes('--git-dir')) {
+    out('.git\n');
+    exit(0);
+  }
+  if (cmd.includes('--abbrev-ref') && cmd.includes('HEAD')) {
+    out('master\n');
+    exit(0);
+  }
+  out('abc1234567890abcdef\n');
+  exit(0);
+}
+
+if (sub === 'diff') {
+  if (cmd.includes('--stat')) {
+    out(' src/index.js | 2 ++\n 1 file changed, 2 insertions(+)\n');
+    exit(0);
+  }
+  // Full diff output for commit message generation
+  out([
+    'diff --git a/src/index.js b/src/index.js',
+    'index abc123..def456 100644',
+    '--- a/src/index.js',
+    '+++ b/src/index.js',
+    '@@ -1,3 +1,5 @@',
+    ' const x = 1;',
+    '+const y = 2;',
+    '+module.exports = { x, y };',
+  ].join('\n') + '\n');
+  exit(0);
+}
+
+if (sub === 'log') {
+  out('abc1234 initial commit\n');
+  exit(0);
+}
+
+if (sub === 'remote') {
+  // Return empty (no remotes configured in fake repo)
+  exit(0);
+}
+
+if (sub === 'config') {
+  if (cmd.includes('init.defaultBranch')) {
+    out('master\n');
+    exit(0);
+  }
+  exit(0);
+}
+
+if (sub === 'fetch' || sub === 'pull') {
+  exit(0);
+}
+
+if (sub === 'stash') {
+  exit(0);
+}
+
+if (sub === 'rebase') {
+  exit(0);
+}
+
+// Default: succeed silently
+exit(0);

@@ -6,13 +6,13 @@ import { startProjectTest, detectTestCommand } from './start-test';
 import { startProjectReview } from './start-review';
 import { startProjectPush } from './start-push';
 import { startProjectCommit } from './start-commit';
-import { listJobs, probeJobStatus, createJob, updateJob, getJob, getVerdict, markDone, runWithParent } from '@/lib/jobs/job-storage';
-import { isReviewed } from '@/lib/git/git-utils';
+import { listJobs, probeJobStatus, createJob, updateJob, getJob, markDone, runWithParent } from '@/lib/jobs/job-storage';
 import { exec } from '@/lib/shared/shell';
 import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/scheduling';
 import { acquireLock, getLock } from './pipeline-lock';
 import { detectMainBranch } from './start-commit';
-import { jobsPausedResult } from '@/lib/shared/job-control';
+import { runGates } from '@/lib/shared/job-control';
+import { hasFreshLgtm, hasLocalCommitsAhead } from './release-state';
 
 const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push', 'pr-wait', 'mark-dod', 'release']);
 
@@ -28,18 +28,27 @@ async function isReleasePipelineRunning(projectName: string): Promise<boolean> {
 
 export type ReleaseResult =
   | { ok: true; step: 'test' | 'review' | 'commit' | 'push'; jobId?: string; releaseJobId?: string; message: string }
+  | { ok: true; status: 'queued'; step?: undefined; jobId?: undefined; releaseJobId?: undefined; message: string; blockingJobId?: string }
   | { ok: false; status: number; detail: string; blockingJobId?: string };
+
+export interface StartReleaseOptions {
+  queueIfBlocked?: boolean;
+  sourceJobId?: string;
+}
 
 // Create a meta "release" job and start a PM2 monitor process for it.
 // The monitor polls the release log for the "# release finished" marker
 // written by finalizeReleaseJob() and exits with the embedded exit code,
 // giving the release job a real pid and PM2-managed lifecycle.
-async function createReleaseJob(projectName: string): Promise<{ id: string; releaseId: string; logPath: string } | null> {
+async function createReleaseJob(
+  projectName: string,
+  parentJobId?: string | null,
+): Promise<{ id: string; releaseId: string; logPath: string } | null> {
   try {
     const { logDir } = getImproveConfig();
     mkdirSync(logDir, { recursive: true });
 
-    const job = createJob(projectName, 'release', 0, '');
+    const job = createJob(projectName, 'release', 0, '', undefined, undefined, undefined, undefined, undefined, undefined, parentJobId);
     const logPath = join(logDir, `${job.id}.log`);
     const scriptPath = join(logDir, `${job.id}.sh`);
     const monitorLogPath = join(logDir, `${job.id}.monitor.log`);
@@ -139,13 +148,6 @@ async function hasChanges(projPath: string): Promise<boolean> {
   return r.stdout.split('\n').some((l) => l.trim());
 }
 
-async function hasUnpushedCommits(projPath: string): Promise<boolean> {
-  const r = await exec('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
-  if (!r.stdout.trim() || r.exitCode !== 0) return false;
-  const n = parseInt(r.stdout.trim(), 10);
-  return !isNaN(n) && n > 0;
-}
-
 /**
  * Pluggable release pipeline entry point.
  *
@@ -157,8 +159,7 @@ async function hasUnpushedCommits(projPath: string): Promise<boolean> {
  * Decision order:
  *  1. If no changes and no unpushed commits → nothing to release
  *  2. If a test command is configured/detected → start tests
- *  3. If there are changes → start review
- *  4. If only unpushed commits → push directly
+ *  3. If there are changes or unpushed commits → start review
  */
 /**
  * Returns the current branch name if agent runs should be blocked (Direct Branch
@@ -175,11 +176,33 @@ export async function checkIssueBranchBlock(
   return branch.startsWith('fix/issue-') ? branch : null;
 }
 
-export async function startRelease(projectName: string): Promise<ReleaseResult> {
+async function queueRelease(projectName: string, blockingJobId?: string): Promise<ReleaseResult> {
+  const { setPendingRelease } = await import('./pending-release');
+  setPendingRelease(projectName);
+  return {
+    ok: true,
+    status: 'queued',
+    message: `Release queued for ${projectName}`,
+    blockingJobId,
+  };
+}
+
+export async function startRelease(projectName: string, options: StartReleaseOptions = {}): Promise<ReleaseResult> {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
-  const paused = jobsPausedResult('start a release');
-  if (paused) return paused;
+  const sourceJob = options.sourceJobId ? getJob(options.sourceJobId) : null;
+  const parentJobId = sourceJob?.project === projectName ? sourceJob.id : null;
+  const paused = runGates('start a release');
+  if (paused) {
+    // For budget-blocked releases, enqueue so the periodic drain picks it up
+    // when the 5h window resets. For pause, the existing resume hook drains.
+    if ('window' in paused) {
+      const { setPendingRelease } = await import('./pending-release');
+      setPendingRelease(projectName);
+    }
+    if (options.queueIfBlocked) return queueRelease(projectName);
+    return paused;
+  }
 
   // In Direct Branch mode, guard against releasing from an unexpected branch.
   // fix/issue-* branches are "expected" (issue work), but any other non-default
@@ -203,11 +226,12 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
   }
 
   if (await isReleasePipelineRunning(projectName)) {
+    if (options.queueIfBlocked) return queueRelease(projectName);
     return { ok: false, status: 409, detail: `Release pipeline already running for ${projectName}` };
   }
 
   const changes = await hasChanges(projPath);
-  const unpushed = await hasUnpushedCommits(projPath);
+  const unpushed = await hasLocalCommitsAhead(projPath);
   if (!changes && !unpushed) {
     return { ok: false, status: 400, detail: 'Nothing to release — no changes and no unpushed commits' };
   }
@@ -221,11 +245,12 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
     const holder = listJobs().find(j => j.id === existingLock.lockedByJobId);
     const holderFinished = holder ? holder.finishedAt !== null : false;
     if (holder && !holderFinished) {
+      if (options.queueIfBlocked) return queueRelease(projectName, existingLock.lockedByJobId);
       return { ok: false, status: 409, detail: `Pipeline already running for ${projectName}`, blockingJobId: existingLock.lockedByJobId };
     }
   }
 
-  const release = await createReleaseJob(projectName);
+  const release = await createReleaseJob(projectName, parentJobId);
   if (!release) {
     return { ok: false, status: 500, detail: 'Failed to create release job' };
   }
@@ -237,8 +262,15 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
   if (!lockResult.acquired) {
     try {
       const jobRow = listJobs().find(j => j.id === releaseJobId);
-      if (jobRow) await markDone(jobRow, 1);
+      if (jobRow) {
+        appendFileSync(
+          jobRow.logPath || release.logPath,
+          `# release blocked — pipeline already running for ${projectName}${lockResult.blockingJobId ? ` (${lockResult.blockingJobId})` : ''}\n# release finished — exit 1 — ${new Date().toISOString()}\n`,
+        );
+        await markDone(jobRow, 1);
+      }
     } catch {}
+    if (options.queueIfBlocked) return queueRelease(projectName, lockResult.blockingJobId);
     return { ok: false, status: 409, detail: `Pipeline already running for ${projectName}`, blockingJobId: lockResult.blockingJobId };
   }
 
@@ -256,17 +288,29 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
   // here makes the chain read as: agent → release → test → review → commit → push.
   return runWithParent(releaseJobId, async () => {
     // No uncommitted changes — run tests first (if configured + not disabled) to
-    // verify committed code before pushing. Completion hook handles test→push.
-    // If no test command or tests disabled, push the existing commits directly.
+    // verify committed code before review/push. Completion hook handles test→review
+    // when local commits are ahead of upstream.
     if (!changes) {
       if (testCmd && !testsDisabled) {
         const r = await startProjectTest(projectName);
         if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
         return { ok: true, step: 'test' as const, jobId: r.jobId, releaseJobId, message: `Running tests (${r.testCmd})` };
       }
-      const r = await startProjectPush(projectName);
+      const freshLgtm = await hasFreshLgtm(projectName, projPath);
+      if (freshLgtm) {
+        const r = await startProjectPush(projectName);
+        if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+        return { ok: true, step: 'push' as const, releaseJobId, message: r.message };
+      }
+      const reviewDisabled = !!getProjectTestConfig(projectName)?.reviewDisabled;
+      if (reviewDisabled) {
+        const r = await startProjectPush(projectName);
+        if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
+        return { ok: true, step: 'push' as const, releaseJobId, message: r.message };
+      }
+      const r = await startProjectReview(projectName);
       if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
-      return { ok: true, step: 'push' as const, releaseJobId, message: r.message };
+      return { ok: true, step: 'review' as const, jobId: r.jobId, releaseJobId, message: 'Running review' };
     }
 
     // Fresh LGTM and there are uncommitted changes — commit them first, then push.
@@ -303,15 +347,3 @@ export async function startRelease(projectName: string): Promise<ReleaseResult> 
 // Returns true when the project's most recent finished review is LGTM AND
 // the working-tree hash still matches the one markReviewed captured. That's
 // the signal that re-running tests + review would add nothing.
-async function hasFreshLgtm(projectName: string, projPath: string): Promise<boolean> {
-  try {
-    const latestReview = listJobs()
-      .filter(j => j.project === projectName && j.kind === 'review' && j.finishedAt !== null && j.exitCode === 0)
-      .sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0))[0];
-    if (!latestReview) return false;
-    if (getVerdict(latestReview) !== 'LGTM') return false;
-    return await isReviewed(projectName, projPath);
-  } catch {
-    return false;
-  }
-}

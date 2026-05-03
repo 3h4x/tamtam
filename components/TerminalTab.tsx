@@ -198,17 +198,25 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     }
   }, [showDocsPicker, projectName, allDocs.length])
 
-  const filteredItems = allItems.filter(item =>
-    !selectedItems.some(sel => sel.id === item.id) &&
-    (skillSearch === '' ||
-      item.name.toLowerCase().includes(skillSearch.toLowerCase()) ||
-      item.description.toLowerCase().includes(skillSearch.toLowerCase()) ||
-      item.id.toLowerCase().includes(skillSearch.toLowerCase()))
-  ).sort((a, b) => (skillUsage[b.id] || 0) - (skillUsage[a.id] || 0))
+  const filteredItems = (() => {
+    const q = skillSearch.toLowerCase()
+    const matchesSearch = (item: SkillItem) =>
+      !q ||
+      item.name.toLowerCase().includes(q) ||
+      item.description.toLowerCase().includes(q) ||
+      item.id.toLowerCase().includes(q)
+    const isSelected = (item: SkillItem) => selectedItems.some(sel => sel.id === item.id)
+    const selected = allItems.filter(i => isSelected(i) && matchesSearch(i))
+    const rest = allItems
+      .filter(i => !isSelected(i) && matchesSearch(i))
+      .sort((a, b) => (skillUsage[b.id] || 0) - (skillUsage[a.id] || 0))
+    return [...selected, ...rest]
+  })()
 
   const toggleItem = (item: SkillItem) => {
     if (selectedItems.some(s => s.id === item.id)) {
       setSelectedItems(prev => prev.filter(s => s.id !== item.id))
+      // keep picker open so the user can see the deselection and pick another
     } else {
       setSelectedItems(prev => [...prev, item])
       setSkillSearch('')
@@ -379,7 +387,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className={`flex-1 bg-[#111] rounded-lg border ${dragOver ? 'border-accent' : 'border-[#2a2a2a]'} flex flex-col overflow-hidden relative`}>
+      <div className={`flex-1 bg-bg-primary rounded-lg border ${dragOver ? 'border-accent' : 'border-border'} flex flex-col overflow-hidden relative`}>
         {dragOver && (
           <div className="absolute inset-0 bg-accent/10 z-50 flex items-center justify-center pointer-events-none rounded-lg">
             <span className="text-accent text-sm font-mono">drop image</span>

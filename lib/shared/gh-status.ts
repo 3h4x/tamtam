@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { exec } from '@/lib/shared/shell';
+import { getSettings } from '@/lib/shared/config';
 import { homedir } from 'os';
 
 const GH_CACHE_TTL = 3600;
@@ -111,7 +112,7 @@ async function ghRepo(
       }
     } catch {}
   }
-  const owner = process.env.GITHUB_OWNER || projName;
+  const owner = process.env.GITHUB_OWNER || getSettings().github_owner || projName;
   return `${owner}/${projName}`;
 }
 
