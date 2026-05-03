@@ -7,6 +7,7 @@ import type { JobInfo, Agent } from '@/lib/client-api'
 import type { FleetHealth } from '@/hooks/useProjectHealth'
 import { formatAgo } from '@/lib/shared/format'
 import { getAggregateCi, getCiFailedUrl } from '@/lib/shared/statusConstants'
+import { LoadingState } from '@/components/LoadingState'
 import { useToast } from '@/components/Toast'
 
 type SortKey = 'project' | 'status' | 'changes' | 'last_run' | 'next_run' | 'ci'
@@ -174,17 +175,23 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
   const [agentsByProject, setAgentsByProject] = useState<Record<string, Agent[]>>({})
   const [schedulerByProject, setSchedulerByProject] = useState<Record<string, SchedulerEntry[]>>({})
   const [schedulerPaused, setSchedulerPaused] = useState(false)
-  const [sortKey, setSortKey] = useState<SortKey>(() => {
-    if (typeof window === 'undefined') return 'project'
-    const saved = window.localStorage.getItem('tamtam.projects.sortKey')
-    return saved === 'project' || saved === 'status' || saved === 'changes' || saved === 'last_run' || saved === 'next_run' || saved === 'ci'
-      ? saved
-      : 'project'
-  })
-  const [sortDir, setSortDir] = useState<SortDir>(() => {
-    if (typeof window === 'undefined') return 'asc'
-    return window.localStorage.getItem('tamtam.projects.sortDir') === 'desc' ? 'desc' : 'asc'
-  })
+  const [sortKey, setSortKey] = useState<SortKey>('project')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const [sortReady, setSortReady] = useState(false)
+
+  useEffect(() => {
+    const savedKey = window.localStorage.getItem('tamtam.projects.sortKey')
+    const savedDir = window.localStorage.getItem('tamtam.projects.sortDir')
+
+    if (savedKey === 'project' || savedKey === 'status' || savedKey === 'changes' || savedKey === 'last_run' || savedKey === 'next_run' || savedKey === 'ci') {
+      setSortKey(savedKey)
+    }
+    if (savedDir === 'asc' || savedDir === 'desc') {
+      setSortDir(savedDir)
+    }
+
+    setSortReady(true)
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -212,12 +219,14 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
   }, [])
 
   useEffect(() => {
+    if (!sortReady) return
     window.localStorage.setItem('tamtam.projects.sortKey', sortKey)
-  }, [sortKey])
+  }, [sortKey, sortReady])
 
   useEffect(() => {
+    if (!sortReady) return
     window.localStorage.setItem('tamtam.projects.sortDir', sortDir)
-  }, [sortDir])
+  }, [sortDir, sortReady])
 
   useEffect(() => {
     let active = true
@@ -343,7 +352,9 @@ const isReviewRunning = (projectName: string) =>
   const thClass = (key: SortKey) =>
     `px-4 py-2.5 font-medium cursor-pointer select-none hover:text-text-secondary transition-colors ${sortKey === key ? 'text-text-secondary' : ''}`
 
-  const showLoadingOverlay = loading && fleet.projects.length === 0
+  if (!sortReady) return <LoadingState />
+
+  const showLoadingOverlay = loading
 
   return (
     <div className="relative overflow-x-auto" aria-busy={showLoadingOverlay}>

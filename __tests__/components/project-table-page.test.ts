@@ -84,7 +84,7 @@ describe('ProjectTablePage', () => {
     document.body.innerHTML = ''
   })
 
-  it('shows the loading overlay only for the empty bootstrap state', async () => {
+  it('shows a skeleton before sort hydration and during refreshes', async () => {
     const fleet = createFleetHealth([])
     const { container, rerender, unmount } = renderProjectTablePage({
       fleet,
@@ -93,7 +93,6 @@ describe('ProjectTablePage', () => {
     })
 
     expect(container.querySelectorAll('.skeleton').length).toBeGreaterThan(0)
-    expect(container.querySelector('[aria-busy="true"]')).not.toBeNull()
 
     const loadedFleet = createFleetHealth([
       {
@@ -135,6 +134,18 @@ describe('ProjectTablePage', () => {
       fleet: loadedFleet,
       issueCounts: {},
       loading: true,
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('acme/widgets')
+      expect(container.querySelectorAll('.skeleton').length).toBeGreaterThan(0)
+      expect(container.querySelector('[aria-busy="true"]')).not.toBeNull()
+    })
+
+    rerender({
+      fleet: loadedFleet,
+      issueCounts: {},
+      loading: false,
     })
 
     await vi.waitFor(() => {
