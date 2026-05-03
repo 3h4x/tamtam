@@ -31,7 +31,7 @@ export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
   return (
     <header className="sticky top-0 z-50 flex flex-wrap sm:flex-nowrap items-center px-3 sm:px-6 py-2 border-b border-border bg-bg-primary gap-x-2 gap-y-1 min-w-0">
       <div className="overflow-hidden shrink-0 -my-1" style={{ height: 36 }}>
-        <img src={logoSrc} alt="tamtam" style={{ height: 52, width: 'auto', marginTop: -8 }} />
+        <img src={logoSrc} alt="tamtam" width={122} height={52} style={{ height: 52, width: 122, marginTop: -8, display: 'block' }} />
       </div>
       <nav className="order-3 sm:order-none flex flex-1 basis-full sm:basis-auto min-w-0 items-center gap-0.5 overflow-x-auto scrollbar-none" aria-label="Global sections">
         {NAV_ITEMS.map((item) => {

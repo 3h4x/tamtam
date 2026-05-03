@@ -194,7 +194,10 @@ export function ProjectTablePage({ fleet, issueCounts = {} }: ProjectTablePagePr
       } catch { /* ignore */ }
     }
     load()
-    const interval = setInterval(load, 15000)
+    // Poll scheduler health every 45s (was 15s). Reduced frequency to cut server load;
+    // next-fire predictions may be stale for up to 45s, but this is acceptable since
+    // scheduler state changes infrequently.
+    const interval = setInterval(load, 45000)
     return () => { active = false; clearInterval(interval) }
   }, [])
 
@@ -207,7 +210,10 @@ export function ProjectTablePage({ fleet, issueCounts = {} }: ProjectTablePagePr
       } catch { /* ignore */ }
     }
     poll()
-    const interval = setInterval(poll, 5000)
+    // Poll jobs every 30s (was 5s). Reduced frequency to cut server load; job status
+    // (running → done) may be stale for up to 30s. This is acceptable for the
+    // dashboard since detailed job status is visible in the Terminal/Release views.
+    const interval = setInterval(poll, 30000)
     return () => { active = false; clearInterval(interval) }
   }, [])
 
@@ -226,7 +232,10 @@ export function ProjectTablePage({ fleet, issueCounts = {} }: ProjectTablePagePr
       } catch { /* ignore */ }
     }
     load()
-    const interval = setInterval(load, 10000)
+    // Poll agents every 30s (was 10s). Reduced frequency to cut server load; agent
+    // list changes (enable/disable, new agents) may be stale for up to 30s, but
+    // this is acceptable since agent configuration changes infrequently.
+    const interval = setInterval(load, 30000)
     return () => { active = false; clearInterval(interval) }
   }, [])
 
