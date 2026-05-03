@@ -34,7 +34,7 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<ProjectsResponse['tasks']>([])
   const [priorities, setPriorities] = useState<string[]>([])
   const [issueCounts, setIssueCounts] = useState<Record<string, { prs: number; issues: number }>>({})
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastRefresh, setLastRefresh] = useState<number>(Date.now())
