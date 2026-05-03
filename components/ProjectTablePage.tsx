@@ -47,6 +47,7 @@ function formatNextFire(ms: number): { text: string; tone: 'overdue' | 'imminent
 interface ProjectTablePageProps {
   fleet: FleetHealth
   issueCounts?: Record<string, { prs: number; issues: number }>
+  loading?: boolean
 }
 
 function StatusDot({ ok }: { ok: boolean }) {
@@ -166,15 +167,24 @@ function AgentPills({
 const healthOrder: Record<string, number> = { error: 0, warning: 1, unknown: 2, healthy: 3 }
 const ciOrder: Record<string, number> = { failure: 0, in_progress: 1, success: 2 }
 
-export function ProjectTablePage({ fleet, issueCounts = {} }: ProjectTablePageProps) {
+export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: ProjectTablePageProps) {
   const router = useRouter()
   const { toast } = useToast()
   const [allJobs, setAllJobs] = useState<JobInfo[]>([])
   const [agentsByProject, setAgentsByProject] = useState<Record<string, Agent[]>>({})
   const [schedulerByProject, setSchedulerByProject] = useState<Record<string, SchedulerEntry[]>>({})
   const [schedulerPaused, setSchedulerPaused] = useState(false)
-  const [sortKey, setSortKey] = useState<SortKey>('project')
-  const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const [sortKey, setSortKey] = useState<SortKey>(() => {
+    if (typeof window === 'undefined') return 'project'
+    const saved = window.localStorage.getItem('tamtam.projects.sortKey')
+    return saved === 'project' || saved === 'status' || saved === 'changes' || saved === 'last_run' || saved === 'next_run' || saved === 'ci'
+      ? saved
+      : 'project'
+  })
+  const [sortDir, setSortDir] = useState<SortDir>(() => {
+    if (typeof window === 'undefined') return 'asc'
+    return window.localStorage.getItem('tamtam.projects.sortDir') === 'desc' ? 'desc' : 'asc'
+  })
 
   useEffect(() => {
     let active = true
@@ -200,6 +210,14 @@ export function ProjectTablePage({ fleet, issueCounts = {} }: ProjectTablePagePr
     const interval = setInterval(load, 45000)
     return () => { active = false; clearInterval(interval) }
   }, [])
+
+  useEffect(() => {
+    window.localStorage.setItem('tamtam.projects.sortKey', sortKey)
+  }, [sortKey])
+
+  useEffect(() => {
+    window.localStorage.setItem('tamtam.projects.sortDir', sortDir)
+  }, [sortDir])
 
   useEffect(() => {
     let active = true
@@ -325,8 +343,39 @@ const isReviewRunning = (projectName: string) =>
   const thClass = (key: SortKey) =>
     `px-4 py-2.5 font-medium cursor-pointer select-none hover:text-text-secondary transition-colors ${sortKey === key ? 'text-text-secondary' : ''}`
 
+  const showLoadingOverlay = loading && fleet.projects.length === 0
+
   return (
-    <div className="overflow-x-auto">
+    <div className="relative overflow-x-auto" aria-busy={showLoadingOverlay}>
+      {showLoadingOverlay && (
+        <div className="absolute inset-0 z-10 bg-bg-primary">
+          <div className="pointer-events-none">
+            <div className="px-4 py-3">
+              <div className="skeleton h-7 w-32" />
+            </div>
+            <div className="border-t border-border">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_1fr] gap-4 px-4 py-4 border-b border-border last:border-0"
+                  style={{ opacity: 1 - i * 0.12 }}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="skeleton h-4 w-4 rounded-full" />
+                    <div className="skeleton h-4 w-36" />
+                  </div>
+                  <div className="skeleton h-5 w-20 rounded-full" />
+                  <div className="skeleton h-4 w-12" />
+                  <div className="skeleton h-4 w-8" />
+                  <div className="skeleton h-5 w-20 rounded-full" />
+                  <div className="skeleton h-4 w-10" />
+                  <div className="skeleton h-4 w-8" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       <table className="w-full border-collapse">
         <thead>
           <tr className="text-left text-xs text-text-tertiary uppercase tracking-wider border-b border-border">
