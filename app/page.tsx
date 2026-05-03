@@ -33,6 +33,7 @@ export default function Home() {
     <ProjectTablePage
       fleet={fleet}
       issueCounts={issueCounts}
+      loading={loading}
     />
   )
 }

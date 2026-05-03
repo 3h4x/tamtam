@@ -6,11 +6,11 @@ import { Header } from '@/components/Header'
 import { ErrorBanner } from '@/components/ErrorBanner'
 
 function AppShellInner({ children }: { children: React.ReactNode }) {
-  const { loading, lastRefresh, error, setError } = useProjects()
+  const { loading, refreshing, lastRefresh, error, setError } = useProjects()
 
   return (
     <div className="min-h-screen flex flex-col bg-bg-primary text-text-primary">
-      <Header loading={loading} lastRefresh={lastRefresh} />
+      <Header loading={loading || refreshing} lastRefresh={lastRefresh} />
       <main className="flex-1 p-4 sm:p-6">
         {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
         {children}
