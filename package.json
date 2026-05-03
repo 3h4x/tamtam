@@ -12,6 +12,7 @@
     "dev:flamegraph": "pm2 start node --name tamtam --cwd . --time --update-env --interpreter none -- --cpu-prof --cpu-prof-dir=./.profiles ./node_modules/next/dist/bin/next dev --port 1337 --hostname 127.0.0.1 && echo '\\n[dev:flamegraph] reproduce the slow state, then `pnpm stop` to flush the V8 CPU profile to ./.profiles/CPU.*.cpuprofile — open in Chrome DevTools (Performance → Load profile) or drop into https://www.speedscope.app/ for a flamegraph view\\n' && pm2 logs tamtam",
     "stop": "pm2 stop tamtam",
     "logs": "pm2 logs tamtam",
+    "mcp:http": "node scripts/mcp-http-tools-call.mjs",
     "build": "NODE_ENV=production next build",
     "start": "bash scripts/pm2-start.sh",
     "restart": "pnpm build && bash scripts/pm2-start.sh",
