@@ -45,6 +45,98 @@ interface TerminalMessagesProps {
 
 const spinnerChars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
+type LogTone = 'default' | 'info' | 'success' | 'warning' | 'error'
+
+const LOG_TONE_STYLES: Record<LogTone, { badge: string; line: string; text: string }> = {
+  default: {
+    badge: 'bg-bg-tertiary text-text-tertiary',
+    line: 'border-border/30',
+    text: 'text-text-secondary',
+  },
+  info: {
+    badge: 'bg-accent/15 text-accent',
+    line: 'border-accent/25',
+    text: 'text-text-secondary',
+  },
+  success: {
+    badge: 'bg-status-success/15 text-status-success',
+    line: 'border-status-success/25',
+    text: 'text-text-secondary',
+  },
+  warning: {
+    badge: 'bg-status-warning/15 text-status-warning',
+    line: 'border-status-warning/25',
+    text: 'text-text-secondary',
+  },
+  error: {
+    badge: 'bg-status-error/15 text-status-error',
+    line: 'border-status-error/25',
+    text: 'text-status-error',
+  },
+}
+
+function classifyLogLine(text: string, fallback: LogTone = 'default'): LogTone {
+  const line = text.trim()
+  if (!line) return fallback
+  if (/\b(error|failed|failure|fatal|panic|exception|traceback|not found|exit [1-9]\d*|do not ship)\b/i.test(line)) return 'error'
+  if (/\b(warn(?:ing)?|needs attention|deprecated|retry|timeout|idle)\b/i.test(line)) return 'warning'
+  if (/\b(done|passed|success|succeeded|complete(?:d)?|lgtm|ok)\b/i.test(line)) return 'success'
+  if (/\b(start(?:ed|ing)?|running|review|testing|pushing|committing|building|loading|fetching)\b/i.test(line)) return 'info'
+  return fallback
+}
+
+function RoleBadge({ label, tone = 'default' }: { label: string; tone?: LogTone }) {
+  const style = LOG_TONE_STYLES[tone]
+  return (
+    <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono ${style.badge}`}>
+      {label}
+    </span>
+  )
+}
+
+function LogBlock({
+  text,
+  fallbackTone = 'default',
+  allowAnsi = false,
+  structured = true,
+}: {
+  text: string
+  fallbackTone?: LogTone
+  allowAnsi?: boolean
+  structured?: boolean
+}) {
+  const collapsed = collapseCarriageReturns(text)
+  if (!structured) {
+    if (allowAnsi && hasAnsi(text)) {
+      return <pre className="m-0 whitespace-pre-wrap text-xs text-text-secondary">{renderAnsi(collapsed)}</pre>
+    }
+    return <pre className="m-0 whitespace-pre-wrap text-xs text-text-secondary">{collapsed}</pre>
+  }
+
+  if (allowAnsi && hasAnsi(text)) {
+    return <pre className="m-0 whitespace-pre-wrap text-xs text-text-secondary">{renderAnsi(collapsed)}</pre>
+  }
+
+  return (
+    <div className="space-y-1">
+      {collapsed.split('\n').map((line, index) => {
+        const tone = classifyLogLine(line, fallbackTone)
+        const style = LOG_TONE_STYLES[tone]
+        return (
+          <div key={`${index}:${line}`} className={`flex items-start gap-2 border-l pl-2 ${style.line}`}>
+            <span className={`mt-0.5 inline-flex min-w-12 justify-center rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono ${style.badge}`}>
+              {tone}
+            </span>
+            <span className={`min-w-0 flex-1 whitespace-pre-wrap break-words ${style.text}`}>
+              {line || ' '}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function ThinkingBlock({ text }: { text: string }) {
   return (
     <div className="px-4 py-2 border-l-2 border-accent/35 ml-4 mr-4 my-1 bg-accent/[0.04] rounded-r">
@@ -145,25 +237,32 @@ export function TerminalMessages({
               <div className="mx-4 my-2 border-t border-border/25" aria-hidden />
             )}
           <div
-            className={`group relative px-4 py-2 ${
-              entry.role === 'user' ? 'text-text-primary whitespace-pre-wrap border-l-2 border-accent/40' :
-              entry.role === 'error' ? 'text-status-error whitespace-pre-wrap border-l-2 border-status-error/60 bg-status-error/8' :
-              entry.role === 'status' ? 'text-text-tertiary whitespace-pre-wrap text-[11px] border-l-2 border-border bg-bg-primary' :
-              entry.role === 'raw' ? 'text-[#b0b8b0] font-mono text-xs whitespace-pre-wrap border-l-2 border-[#3a4a3a] bg-[#0e120e]' :
-              'text-text-secondary terminal-markdown'
+            className={`group relative mx-3 my-1 rounded-r-md px-4 py-2 ${
+              entry.role === 'user' ? 'border-l-2 border-accent/45 bg-accent/[0.03] text-text-primary whitespace-pre-wrap' :
+              entry.role === 'error' ? 'border-l-2 border-status-error/60 bg-status-error/[0.06] text-text-secondary text-xs' :
+              entry.role === 'status' ? 'border-l-2 border-accent/30 bg-bg-primary text-text-secondary text-xs' :
+              entry.role === 'raw' ? 'border-l-2 border-border/60 bg-[#101214] text-text-secondary text-xs' :
+              'border-l-2 border-border/30 bg-transparent text-text-secondary terminal-markdown'
             }`}
           >
-            {entry.role === 'user' && <span className="text-accent mr-2">#</span>}
-            {entry.role === 'status' && <span className="text-text-tertiary/60 mr-2 select-none">›</span>}
-            {entry.role === 'error' && <span className="text-status-error mr-2 select-none">!</span>}
+            {(entry.role === 'assistant' || entry.role === 'user' || entry.role === 'status' || entry.role === 'error' || entry.role === 'raw') && (
+              <div className="mb-1.5">
+                <RoleBadge
+                  label={entry.role === 'assistant' ? 'agent' : entry.role === 'user' ? 'you' : entry.role}
+                  tone={entry.role === 'error' ? 'error' : entry.role === 'status' ? 'info' : entry.role === 'user' ? 'info' : 'default'}
+                />
+              </div>
+            )}
             {entry.role === 'assistant'
               ? (hasAnsi(entry.text)
                   ? <pre className="whitespace-pre-wrap font-mono text-xs m-0">{renderAnsi(entry.text)}</pre>
                   : <Markdown remarkPlugins={[remarkGfm]}>{entry.text}</Markdown>)
               : entry.role === 'raw'
-                ? (hasAnsi(entry.text)
-                    ? <pre className="whitespace-pre-wrap font-mono text-xs m-0 inline">{renderAnsi(collapseCarriageReturns(entry.text))}</pre>
-                    : collapseCarriageReturns(entry.text))
+                ? <LogBlock text={entry.text} allowAnsi fallbackTone="default" structured={false} />
+              : entry.role === 'status'
+                ? <LogBlock text={entry.text} fallbackTone="info" />
+              : entry.role === 'error'
+                ? <LogBlock text={entry.text} fallbackTone="error" />
               : hasAnsi(entry.text)
                 ? <pre className="whitespace-pre-wrap font-mono text-xs m-0 inline">{renderAnsi(entry.text)}</pre>
                 : entry.text}
@@ -197,20 +296,22 @@ export function TerminalMessages({
 
         {/* Live raw lines from passthrough streaming (test output, section headers, etc.) */}
         {streaming && rawBuffer && (
-          <div className="px-4 py-2 text-[#b0b8b0] font-mono text-xs whitespace-pre-wrap border-l-2 border-[#3a4a3a] bg-[#0e120e]">
-            {hasAnsi(rawBuffer)
-              ? <pre className="whitespace-pre-wrap font-mono text-xs m-0 inline">{renderAnsi(collapseCarriageReturns(rawBuffer))}</pre>
-              : collapseCarriageReturns(rawBuffer)}
+          <div className="mx-3 my-1 rounded-r-md border-l-2 border-border/60 bg-[#101214] px-4 py-2 text-xs text-text-secondary">
+            <div className="mb-1.5">
+              <RoleBadge label="raw" />
+            </div>
+            <LogBlock text={rawBuffer} allowAnsi fallbackTone="default" structured={false} />
           </div>
         )}
 
         {/* Live streamed assistant text */}
         {streaming && streamBuffer && (
-          <div className={`px-4 py-2 ${streamIsRaw ? 'text-text-secondary font-mono text-xs whitespace-pre-wrap' : 'text-text-secondary terminal-markdown'}`}>
+          <div className={`mx-3 my-1 rounded-r-md border-l-2 px-4 py-2 ${streamIsRaw ? 'border-border/60 bg-[#101214] text-text-secondary font-mono text-xs' : 'border-border/30 text-text-secondary terminal-markdown'}`}>
+            <div className="mb-1.5">
+              <RoleBadge label={streamIsRaw ? 'raw' : 'agent'} tone={streamIsRaw ? 'default' : 'info'} />
+            </div>
             {streamIsRaw
-              ? (hasAnsi(streamBuffer)
-                  ? <pre className="whitespace-pre-wrap font-mono text-xs m-0 inline">{renderAnsi(collapseCarriageReturns(streamBuffer))}</pre>
-                  : collapseCarriageReturns(streamBuffer))
+              ? <LogBlock text={streamBuffer} allowAnsi fallbackTone="default" structured={false} />
               : hasAnsi(streamBuffer)
                 ? <pre className="whitespace-pre-wrap font-mono text-xs m-0">{renderAnsi(streamBuffer)}</pre>
                 : <Markdown remarkPlugins={[remarkGfm]}>{streamBuffer}</Markdown>}

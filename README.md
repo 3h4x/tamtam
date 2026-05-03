@@ -19,7 +19,7 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 | **Smart push** | AI-generated commit messages, diff preview, one-click push |
 | **CI repair** | Failed CI run? One click sends Claude to fix it |
 | **Scheduling** | Built-in interval scheduler — daily reviews, nightly audits, whatever you need, running unattended |
-| **Release pipeline** | Quality-gated: test → review → fix loop → commit → push, all driven by Claude |
+| **Release pipeline** | Quality-gated Direct Branch or PR Workflow: test → review → fix loop → commit → push (→ DoD → merge), all driven by Claude |
 | **Custom actions** | Per-project bash commands (deploy, migrate, seed) as colored buttons |
 | **Notifications** | Unseen run alerts with bell badge; outbound webhooks (Slack, Discord, ntfy, generic) for pipeline and quota events |
 
@@ -42,12 +42,14 @@ pnpm build && pnpm start   # builds and starts on :1337 under PM2 (canonical)
 Open `http://localhost:1337`, go to Settings, set your workspace path. TamTam scans for git repos and populates the projects list automatically.
 
 ```bash
-pnpm rebuild    # build + restart the PM2 server (use after code changes)
-pnpm restart    # same as rebuild — build + restart (alias)
+pnpm run rebuild  # build + restart the PM2 server (use after code changes)
+pnpm restart      # same as rebuild — build + restart (alias)
 pnpm stop       # stop the PM2 server
 pnpm logs       # PM2 log tail
 pnpm dev        # foreground next dev with HMR (local debugging only — stop PM2 first)
 ```
+
+> Bare `pnpm rebuild` runs pnpm's built-in native-deps rebuild, not this project's restart script. Use `pnpm run rebuild` or `pnpm restart`.
 
 > `pnpm dev` is for active local debugging only — it runs foreground without PM2 and must not be left running as the long-lived server.
 
@@ -60,6 +62,7 @@ Runtime config lives in the SQLite database (`data/db/tamtam.db`). Shared per-pr
 | Workspace path | Settings page |
 | Global base prompt | Settings page |
 | Agent provider and binary path | Settings page |
+| Agent templates | Settings page |
 | Per-project test commands | `/project/[name]/config` |
 | Custom actions | `/project/[name]/config` |
 

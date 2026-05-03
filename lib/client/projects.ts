@@ -95,7 +95,7 @@ export async function releaseProject(
   projectName: string,
   options: ReleaseProjectOptions = {},
 ): Promise<{ status: string; step?: 'test' | 'review' | 'commit' | 'push'; job_id?: string; release_job_id?: string; message: string; blocking_job_id?: string }> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/release`, {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/release`, {
     method: 'POST',
     headers: options.queueIfBlocked || options.sourceJobId ? { 'Content-Type': 'application/json' } : undefined,
     body: options.queueIfBlocked || options.sourceJobId

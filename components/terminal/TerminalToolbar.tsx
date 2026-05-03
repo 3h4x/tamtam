@@ -85,17 +85,17 @@ export function TerminalToolbar({
   const overflow = allSelected.length - SHOW
 
   return (
-    <div className="flex items-center justify-between gap-2 px-3 py-2 bg-bg-secondary border-b border-border shrink-0">
-      <div className="flex items-center gap-1.5">
+    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2 bg-bg-secondary border-b border-border shrink-0">
+      <div className="flex flex-wrap items-center gap-1.5">
         <button
-          className="text-[11px] px-2 py-1 h-[26px] rounded bg-bg-tertiary text-text-tertiary hover:text-text-primary cursor-pointer border-none font-mono leading-none"
+          className="inline-flex items-center h-7 px-2 rounded-md border border-border bg-bg-primary text-[11px] text-text-tertiary hover:text-text-primary cursor-pointer font-mono leading-none transition-colors"
           onClick={onNewSession}
           title="New session"
         >
           new
         </button>
         <button
-          className="text-[11px] px-2 py-1 h-[26px] rounded bg-bg-tertiary text-text-tertiary hover:text-text-primary cursor-pointer border-none font-mono leading-none flex items-center gap-1"
+          className="inline-flex items-center h-7 px-2 rounded-md border border-border bg-bg-primary text-[11px] text-text-tertiary hover:text-text-primary cursor-pointer font-mono leading-none gap-1 transition-colors"
           onClick={onToggleSessions}
           title="Recent sessions"
         >
@@ -113,7 +113,7 @@ export function TerminalToolbar({
         {currentReleaseId && (
           <Link
             href={`/project/${encodeURIComponent(projectName)}/release/${encodeURIComponent(currentReleaseId)}`}
-            className="text-[11px] px-2 py-1 h-[26px] rounded bg-bg-tertiary text-accent hover:text-accent/80 font-mono leading-none flex items-center"
+            className="inline-flex items-center h-7 px-2 rounded-md border border-border bg-bg-primary text-[11px] text-accent hover:text-accent/80 font-mono leading-none transition-colors"
             title="View unified release trace"
           >
             trace ↗
@@ -121,35 +121,37 @@ export function TerminalToolbar({
         )}
       </div>
 
-      <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center justify-end gap-1.5">
         <button
-          className={`text-[11px] px-2 py-1 h-[26px] rounded cursor-pointer border-none font-mono leading-none ${showThinking ? 'bg-accent/20 text-accent' : 'bg-bg-tertiary text-text-tertiary hover:text-text-primary'}`}
+          className={`inline-flex items-center h-7 px-2 rounded-md border border-border cursor-pointer font-mono text-[11px] leading-none transition-colors ${showThinking ? 'bg-accent/15 text-accent' : 'bg-bg-primary text-text-tertiary hover:text-text-primary'}`}
           onClick={onToggleThinking}
           title="Toggle thinking blocks"
         >
           thinking
         </button>
         {visible.map(item => (
-          <span key={item.key} className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent font-mono gap-0.5 max-w-[100px]">
+          <span key={item.key} className="inline-flex items-center h-6 max-w-[120px] gap-1 rounded-full border border-accent/20 bg-accent/10 px-2 text-[10px] text-accent font-mono">
             <span className="truncate">{item.label}</span>
-            <button className="text-accent/40 hover:text-accent cursor-pointer border-none bg-transparent leading-none shrink-0" onClick={item.remove} title={`Remove ${item.label}`}>×</button>
+            <button className="text-accent/45 hover:text-accent cursor-pointer border-none bg-transparent leading-none shrink-0" onClick={item.remove} title={`Remove ${item.label}`}>×</button>
           </span>
         ))}
         {overflow > 0 && (
           <span
-            className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-accent/10 text-accent/70 font-mono cursor-pointer hover:bg-accent/20"
+            className="inline-flex items-center h-6 rounded-full border border-border bg-bg-primary px-2 text-[10px] text-text-tertiary font-mono cursor-pointer hover:bg-accent/10 hover:text-text-primary transition-colors"
             title={allSelected.slice(SHOW).map(i => i.label).join(', ')}
             onClick={onToggleSkillPicker}
           >
-            +{overflow} more
+            +{overflow}
           </span>
         )}
         <div className="relative">
           <button
-            className="text-[11px] px-2 py-1 h-[26px] rounded bg-bg-tertiary text-text-tertiary hover:text-text-primary cursor-pointer border-none font-mono leading-none"
+            className={`inline-flex items-center h-7 rounded-md border px-2 font-mono text-[11px] leading-none transition-colors cursor-pointer ${
+              showSkillPicker ? 'border-accent bg-accent/10 text-accent' : 'border-border bg-bg-primary text-text-tertiary hover:text-text-primary'
+            }`}
             onClick={onToggleSkillPicker}
           >
-            +skill
+            skills{selectedItems.length > 0 ? ` ${selectedItems.length}` : ''}
           </button>
           {showSkillPicker && (
             <div className="absolute top-full right-0 mt-1 w-96 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden">
@@ -202,10 +204,12 @@ export function TerminalToolbar({
         </div>
         <div className="relative">
           <button
-            className="text-[11px] px-2 py-1 h-[26px] rounded bg-bg-tertiary text-text-tertiary hover:text-text-primary cursor-pointer border-none font-mono leading-none"
+            className={`inline-flex items-center h-7 rounded-md border px-2 font-mono text-[11px] leading-none transition-colors cursor-pointer ${
+              showDocsPicker ? 'border-accent bg-accent/10 text-accent' : 'border-border bg-bg-primary text-text-tertiary hover:text-text-primary'
+            }`}
             onClick={onToggleDocsPicker}
           >
-            +docs
+            docs{selectedDocs.length > 0 ? ` ${selectedDocs.length}` : ''}
           </button>
           {showDocsPicker && (
             <div className="absolute top-full right-0 mt-1 w-72 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden">
@@ -247,14 +251,15 @@ export function TerminalToolbar({
             </div>
           )}
         </div>
-        <div className="flex items-center h-[26px] rounded overflow-hidden border border-border">
+        <div className="inline-flex items-center gap-1 rounded-md border border-border bg-bg-primary px-1.5 h-7">
+          <span className="text-[10px] uppercase tracking-wider text-text-tertiary font-mono">model</span>
           {(['haiku', 'sonnet', 'opus'] as const).map((m) => (
             <button
               key={m}
-              className={`text-[11px] px-2 h-full cursor-pointer border-none font-mono leading-none transition-colors ${
+              className={`h-5 rounded px-1.5 text-[10px] cursor-pointer border-none font-mono leading-none transition-colors ${
                 model === m
-                  ? 'bg-accent/20 text-accent'
-                  : 'bg-bg-tertiary text-text-tertiary hover:text-text-primary'
+                  ? 'bg-accent/15 text-accent'
+                  : 'bg-transparent text-text-tertiary hover:text-text-primary'
               }`}
               onClick={async () => {
                 onModelChange(m)

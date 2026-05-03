@@ -56,8 +56,8 @@ Verdict detection (`getVerdict` in `lib/jobs/verdict.ts`, re-exported via the `j
 ## Commands
 - `pnpm dev` — run `next dev` directly in the foreground on port 1337 (HMR enabled, no PM2). Use only for active local development; never for the long-lived TamTam server.
 - `pnpm start` — start (or idempotently restart) the production server via PM2 on port 1337. Delegates to `scripts/pm2-start.sh`, which spawns `next` directly under PM2 (`--interpreter node`, no shell wrapper) so PM2 tracks the actual server PID — no orphans on stop/restart. Self-heals if a previous orphan is still squatting on port 1337. This is the canonical way to run TamTam.
-- `pnpm rebuild` — `pnpm build && pnpm start` — production mode has no HMR, so rebuild always rebuilds first to pick up code changes. This is the canonical post-edit command.
-- `pnpm restart` — equivalent to `pnpm rebuild` (alias). Note: bare `pnpm rebuild` (without `run`) invokes pnpm's built-in native-deps rebuild instead — use `pnpm run rebuild` or `pnpm restart`.
+- `pnpm run rebuild` — `pnpm build && pnpm start` — production mode has no HMR, so rebuild always rebuilds first to pick up code changes. This is the canonical post-edit command.
+- `pnpm restart` — equivalent to `pnpm run rebuild` (alias). Note: bare `pnpm rebuild` invokes pnpm's built-in native-deps rebuild instead — use `pnpm run rebuild` or `pnpm restart`.
 - `pnpm stop` — stop the PM2 server.
 - `pnpm logs` — view PM2 logs.
 - `pnpm build` — production build.
@@ -73,13 +73,13 @@ Verdict detection (`getVerdict` in `lib/jobs/verdict.ts`, re-exported via the `j
 - `pnpm dev:profile` — start dev server with Turbopack tracing enabled; stop server to flush trace to `.next/dev/trace-turbopack`, then open via `npx next internal trace` or https://trace.nextjs.org/
 - `pnpm dev:flamegraph` — start dev server with V8 CPU profiling; stop server to flush `.profiles/CPU.*.cpuprofile`, then open in Chrome DevTools or https://www.speedscope.app/
 
-**Always run TamTam under PM2 via `pnpm start` / `pnpm rebuild`.** `pnpm dev` is foreground-only and intended for ad-hoc local debugging — it does not register with PM2, so the rest of the harness (logs, restart, stop scripts) won't see it.
+**Always run TamTam under PM2 via `pnpm start` / `pnpm run rebuild` (or `pnpm restart`).** `pnpm dev` is foreground-only and intended for ad-hoc local debugging — it does not register with PM2, so the rest of the harness (logs, restart, stop scripts) won't see it.
 
 ### Applying code changes
 
 TamTam runs in **production mode** (`next start`) under PM2 — no HMR, no auto-reload. After any code change:
 
-1. `pnpm rebuild` — builds and restarts the PM2 server in one step (preferred)
+1. `pnpm run rebuild` — builds and restarts the PM2 server in one step (preferred)
 2. Or: `pnpm build` then `pnpm start`
 
 `pnpm start` is idempotent: if a `tamtam` PM2 entry already exists it is restarted in place (no port kill, no dropped in-flight requests); otherwise a new entry is created.
@@ -143,7 +143,7 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 - `/runs` — All runs across projects (replaces `/jobs`, which now redirects here)
 - `/logs` — Log viewer
 - `/skills` — Skill editor (CRUD for DB-backed skills)
-- `/settings` — Workspace path, agent provider/binary, default model, permission mode, pipeline behavior/model settings, budget gates, notifications, retention, DB backup
+- `/settings` — Workspace path, project enablement, agent provider/binary, default model, permission mode, agent templates, pipeline behavior/model settings, budget gates, notifications, retention, DB backup
 
 ## API Routes
 - `/api/agents` — CRUD for agents (GET: accepts `?project=` and `?name=` filters, POST)
@@ -310,7 +310,7 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 | `docs/CACHING.md` | Layered TTL cache strategy (in-memory + SQLite) | Adding a new cache layer, changing TTLs, or debugging stale data |
 | `docs/PROFILING.md` | Server/client/Turbopack profiling guide | Investigating perf regressions or high CPU/memory |
 | `docs/SECURITY.md` | Security model: file-agent trust, untrusted input handling, threat surface | Any security-sensitive change: auth, file-agent parsing, untrusted content |
-| `docs/SHIM.md` | Gemini/LM Studio CLI shim compatibility layer | Touching `scripts/gemini-shim.js`, `lmstudio-shim.js`, or shim configuration |
+| `docs/SHIM.md` | Gemini/Codex/LM Studio CLI shim compatibility layer | Touching `scripts/gemini-shim.js`, `codex-shim.js`, `lmstudio-shim.js`, or shim configuration |
 | `docs/UI.md` | Design system: tokens, typography, components, voice | Any visual/UI change — read before touching CSS or components; canonical previews in `docs/ui-preview/*.html` |
 | `docs/PROMPT-SIZE.md` | Prompt size & cache-read cost analysis | Changing skill/prompt composition, adding skills, or investigating token cost |
 | `docs/E2E.md` | Playwright pipeline e2e harness: mocks, scenarios, helpers | Writing or debugging pipeline e2e tests in `e2e/pipeline/` |
