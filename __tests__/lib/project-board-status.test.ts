@@ -58,4 +58,61 @@ describe('deriveBoardTransition', () => {
       summary: 'run started',
     });
   });
+
+  it('maps aborted job to Blocked regardless of kind', () => {
+    expect(deriveBoardTransition(makeJob({ kind: 'push', exitCode: 1, finishedAt: 2, abortedAt: 1.5 }), 'finished').status).toBe('Blocked');
+    expect(deriveBoardTransition(makeJob({ kind: 'review', exitCode: 0, verdict: 'LGTM', finishedAt: 2, abortedAt: 1.5 }), 'finished').status).toBe('Blocked');
+  });
+
+  it('maps review with non-zero exit code to Failed', () => {
+    expect(deriveBoardTransition(makeJob({ kind: 'review', exitCode: 1, finishedAt: 2 }), 'finished').status).toBe('Failed');
+  });
+
+  it('maps review finished without a matching verdict to Failed', () => {
+    expect(deriveBoardTransition(makeJob({ kind: 'review', exitCode: 0, verdict: null, finishedAt: 2 }), 'finished').status).toBe('Failed');
+  });
+
+  it('maps test job pass to Running and fail to Blocked', () => {
+    expect(deriveBoardTransition(makeJob({ kind: 'test', exitCode: 0, finishedAt: 2 }), 'finished')).toEqual({
+      status: 'Running',
+      summary: 'tests passed',
+    });
+    expect(deriveBoardTransition(makeJob({ kind: 'test', exitCode: 1, finishedAt: 2 }), 'finished')).toEqual({
+      status: 'Blocked',
+      summary: 'tests failed (exit 1)',
+    });
+  });
+
+  it('maps commit started to Ready to Push', () => {
+    expect(deriveBoardTransition(makeJob({ kind: 'commit' }), 'started').status).toBe('Ready to Push');
+  });
+
+  it('maps commit finished pass/fail correctly', () => {
+    expect(deriveBoardTransition(makeJob({ kind: 'commit', exitCode: 0, finishedAt: 2 }), 'finished').status).toBe('Ready to Push');
+    expect(deriveBoardTransition(makeJob({ kind: 'commit', exitCode: 1, finishedAt: 2 }), 'finished').status).toBe('Failed');
+  });
+
+  it('maps fix-push and fix-ci started to Fixing', () => {
+    expect(deriveBoardTransition(makeJob({ kind: 'fix-push' }), 'started').status).toBe('Fixing');
+    expect(deriveBoardTransition(makeJob({ kind: 'fix-ci' }), 'started').status).toBe('Fixing');
+  });
+
+  it('maps fix-push and fix-ci finished pass/fail correctly', () => {
+    expect(deriveBoardTransition(makeJob({ kind: 'fix-push', exitCode: 0, finishedAt: 2 }), 'finished').status).toBe('Running');
+    expect(deriveBoardTransition(makeJob({ kind: 'fix-ci', exitCode: 1, finishedAt: 2 }), 'finished').status).toBe('Failed');
+  });
+
+  it('maps mark-dod and pr-wait finished pass/fail correctly', () => {
+    expect(deriveBoardTransition(makeJob({ kind: 'mark-dod', exitCode: 0, finishedAt: 2 }), 'finished').status).toBe('Done');
+    expect(deriveBoardTransition(makeJob({ kind: 'pr-wait', exitCode: 1, finishedAt: 2 }), 'finished').status).toBe('Failed');
+  });
+
+  it('maps unknown kind to generic Done/Failed fallback', () => {
+    expect(deriveBoardTransition(makeJob({ kind: 'agent:cto', exitCode: 0, finishedAt: 2 }), 'finished').status).toBe('Done');
+    expect(deriveBoardTransition(makeJob({ kind: 'agent:cto', exitCode: 2, finishedAt: 2 }), 'finished').status).toBe('Failed');
+  });
+
+  it('manual sync uses finishedStatus for completed jobs', () => {
+    expect(deriveBoardTransition(makeJob({ kind: 'push', exitCode: 0, finishedAt: 2 }), 'manual').status).toBe('Done');
+  });
 });
