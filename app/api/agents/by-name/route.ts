@@ -7,6 +7,7 @@ import { clearAgentsCache, normalizeAgent } from '@/lib/agents/agents-cache';
 import { loadFileAgent, writeFileAgent } from '@/lib/agents/tamtam-file-agents';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
+import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 
 // PATCH /api/agents/by-name
 // Lets an agent update itself by project+name without knowing its UUID.
@@ -21,6 +22,10 @@ export async function PATCH(request: NextRequest) {
   }
   const { model: parsedModel, error: modelError } = parseOptionalKnownModelInput(fields.model, 'normal');
   if (modelError) return NextResponse.json({ detail: modelError }, { status: 400 });
+  const parsedSchedule = fields.schedule !== undefined
+    ? parseOptionalAgentScheduleInput(fields.schedule)
+    : { schedule: undefined, error: null };
+  if (parsedSchedule.error) return NextResponse.json({ detail: parsedSchedule.error }, { status: 400 });
 
   // Try DB agent first
   const existing = db
@@ -34,7 +39,7 @@ export async function PATCH(request: NextRequest) {
     if (fields.skillIds !== undefined) updates.skillIds = JSON.stringify(fields.skillIds);
     if (fields.model !== undefined) updates.model = parsedModel ?? 'normal';
     if (fields.prompt !== undefined) updates.prompt = fields.prompt;
-    if (fields.schedule !== undefined) updates.schedule = fields.schedule || null;
+    if (fields.schedule !== undefined) updates.schedule = parsedSchedule.schedule;
     if (fields.runner !== undefined) updates.runner = fields.runner;
     if (fields.enabled !== undefined) updates.enabled = fields.enabled;
 
@@ -83,7 +88,7 @@ export async function PATCH(request: NextRequest) {
         const updated = writeFileAgent(projPath, project.trim(), name.trim(), {
           prompt: fields.prompt,
           model: parsedModel ?? undefined,
-          schedule: fields.schedule,
+          schedule: fields.schedule !== undefined ? parsedSchedule.schedule : undefined,
           skillIds: fields.skillIds,
           runner: fields.runner,
           enabled: fields.enabled,

@@ -31,6 +31,7 @@ The **🚀 Release** button triggers the pipeline at the right starting step. Wh
 - `lib/pipeline/start-pr-review.ts` → `startPrReview` (AI review of a GitHub PR)
 - `lib/pipeline/start-mark-dod.ts` → `startMarkDod` (DoD verification + GitHub issue checkbox update)
 - `lib/pipeline/start-pr-wait.ts` → `launchPrWait` (background PR poller: polls CI checks, auto-merges once they pass, switches working copy back to default branch, then runs mark-dod)
+- `lib/pipeline/release-state.ts` → `hasFreshLgtm` / `hasLocalCommitsAhead` (release skip detection and upstream-ahead checks)
 - `lib/shared/notifications.ts` → `notify` / `sendTestNotification` (outbound webhook delivery)
 
 Verdict detection (`getVerdict` in `lib/jobs/verdict.ts`, re-exported via the `job-storage` barrel) reads the **last 2000 chars** of the parsed Claude log and looks for an explicit "Verdict: X" marker or a bare token on the final line — deliberately lenient across markdown formatting (`## Verdict\n**NEEDS ATTENTION**`) but robust against false positives from code snippets higher up in the log.
@@ -92,16 +93,16 @@ If you genuinely need HMR for an interactive session, run `pnpm dev` in a separa
 - `components/` — React client components; large pages have a co-located subfolder (e.g. `components/monitoring/`, `components/settings/`, `components/project-detail/`, `components/project-runs/`, `components/terminal/`)
 - `hooks/` — Custom React hooks
 - `lib/` — Server-side business logic, organised into domain folders:
-  - `lib/pipeline/` — release pipeline orchestration (`start-*`, `pipeline-lock`, `pipeline-status`, `pipeline-steps`, `mark-dod-branch`, `pr-create`, `pending-release`)
+  - `lib/pipeline/` — release pipeline orchestration (`start-*`, `pipeline-lock`, `pipeline-status`, `pipeline-steps`, `mark-dod-branch`, `pr-create`, `pending-release`, `review-contract`, `release-state`)
   - `lib/scheduling/` — agent/test scheduling (`agent-scheduler`, `internal-scheduler`, `test-scheduler`, `scheduling`, `fire-times`, `launchagent`)
   - `lib/git/` — git operations (`git-branch`, `git-utils`, `diff-context`)
   - `lib/jobs/` — job lifecycle (`job-storage` barrel + `storage`, `lifecycle`, `verdict`, `verdict-retry`, `probe`, `types`, `parent-context`, `prompt-size`; also `pm2-jobs`, `run-history`, `log-persistence`, `retention`, `claude-stream-parser`)
   - `lib/terminal/` — terminal streaming (`terminal-session-store`, `ansi-render`)
   - `lib/agents/` — agent management (`agent-memory`, `agents-cache`, `default-agent-skills`, `file-agent-overrides`, `tamtam-file-agents`)
   - `lib/skills/` — skills (`skills`, `tamtam-file-config`)
-  - `lib/shared/` — cross-cutting utilities (`shell`, `types`, `format`, `config`, `untrusted`, `usage-pricing`, `notifications`, `job-control`, `statusConstants`, `gh-status`, `project-data`, `project-branch-lock`)
+  - `lib/shared/` — cross-cutting utilities (`shell`, `types`, `format`, `config`, `untrusted`, `usage-pricing`, `notifications`, `job-control`, `budget-throttle`, `statusConstants`, `gh-status`, `project-data`, `project-branch-lock`)
   - `lib/usage/` — Claude/Codex quota snapshots and provider-specific quota fetchers
-  - `lib/db/` — Drizzle schema and connection (tables: settings, projects, jobs, gh_status, gh_issues_cache, skills, agents, pipeline_locks)
+  - `lib/db/` — Drizzle schema and connection (tables: settings, projects, jobs, recommendations, gh_status, gh_issues_cache, skills, agents, pipeline_locks)
   - `lib/client-api.ts` — barrel re-exporting from `lib/client/` (split by resource: `projects`, `jobs`, `agents`, `skills`, `types`)
 - `scripts/` — server startup, job runners, and CLI shims (`pm2-start.sh`, `job-runner.js`, `gemini-shim.js`, `lmstudio-shim.js`, `codex-shim.js`)
 - `skills/` — claude-skills submodule

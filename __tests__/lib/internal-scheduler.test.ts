@@ -125,6 +125,13 @@ describe('internal-scheduler', () => {
       upsertAgentSchedule({ id: 'a1', project: 'p', name: 'n', schedule: '' as string, prompt: 'x', enabled: true });
       expect(dumpInternalScheduler().entries).toHaveLength(0);
     });
+
+    it('rejects invalid schedules instead of arming them', () => {
+      expect(() => upsertAgentSchedule({
+        id: 'a1', project: 'p', name: 'n', schedule: '1w', prompt: 'x', enabled: true,
+      })).toThrow('Invalid schedule');
+      expect(dumpInternalScheduler().entries).toHaveLength(0);
+    });
   });
 
   describe('startInternalScheduler', () => {
@@ -142,6 +149,20 @@ describe('internal-scheduler', () => {
       const after = dumpInternalScheduler();
       expect(after.entries).toHaveLength(1);
       expect(after.entries[0].agentId).toBe('a3');
+    });
+
+    it('skips invalid schedules during boot-time install', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      startInternalScheduler([
+        { id: 'a1', project: 'p1', name: 'bad', schedule: '1w', prompt: 'x', enabled: true },
+        { id: 'a2', project: 'p2', name: 'good', schedule: '2h', prompt: 'y', enabled: true },
+      ]);
+
+      const after = dumpInternalScheduler();
+      expect(after.entries).toHaveLength(1);
+      expect(after.entries[0].agentId).toBe('a2');
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('skipping p1/bad'));
     });
 
     it('records errorCount on failed fire and re-arms next', async () => {

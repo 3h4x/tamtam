@@ -20,6 +20,7 @@
 //   cover it without adding a dependency.
 
 import { stableHash } from './fire-times';
+import { normalizeAgentScheduleOrThrow } from './agent-schedule';
 import { getIssueBranchLock } from '@/lib/shared/project-branch-lock';
 import { getLock } from '@/lib/pipeline/pipeline-lock';
 import { budgetBlockedResult, scheduledBurnRateBlocked } from '@/lib/shared/job-control';
@@ -88,7 +89,7 @@ export function setSchedulerBaseUrl(url: string): void {
  * agents with the same period don't all fire on the same minute.
  */
 export function computeNextFire(schedule: string, agentId: string, fromMs: number = Date.now()): number {
-  const s = schedule.trim();
+  const s = normalizeAgentScheduleOrThrow(schedule);
   let periodMs = 0;
   let useHourGrid = false;
 
@@ -303,11 +304,12 @@ export type AgentInput = {
 export function upsertAgentSchedule(agent: AgentInput): void {
   removeAgentSchedule(agent.id);
   if (!agent.enabled || !agent.schedule) return;
+  const normalizedSchedule = normalizeAgentScheduleOrThrow(agent.schedule);
   const entry: ScheduleEntry = {
     agentId: agent.id,
     project: agent.project,
     name: agent.name,
-    schedule: agent.schedule,
+    schedule: normalizedSchedule,
     prompt: agent.prompt ?? '',
     enabled: true,
     nextFireMs: 0,
@@ -336,7 +338,15 @@ export function startInternalScheduler(agents: AgentInput[]): void {
     if (e.timer) clearTimeout(e.timer);
   }
   entries.clear();
-  for (const a of agents) upsertAgentSchedule(a);
+  for (const a of agents) {
+    try {
+      upsertAgentSchedule(a);
+    } catch (err) {
+      console.warn(
+        `[internal-scheduler] skipping ${a.project}/${a.name} — ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
   setStarted(true);
   console.log(`[internal-scheduler] armed ${entries.size} schedule(s)`);
 }
