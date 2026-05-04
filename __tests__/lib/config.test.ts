@@ -58,6 +58,13 @@ describe('config', () => {
       expect(config).toEqual({
         workspace_path: '',
         github_owner: '',
+        github_board_sync_enabled: false,
+        github_board_project_owner: '',
+        github_board_project_title: 'TamTam',
+        github_board_project_number: '',
+        github_board_project_id: '',
+        github_board_status_field_id: '',
+        github_board_status_option_ids: {},
         claude_provider: 'claude',
         claude_bin: '~/.local/bin/claude',
         lmstudio_model: '',
@@ -116,6 +123,21 @@ describe('config', () => {
       const config = getSettings();
 
       expect(config.github_owner).toBe('octocat');
+    });
+
+    it('parses stored GitHub board settings', () => {
+      const db = testDb.db;
+      db.insert(schema.settings).values({ key: 'github_board_sync_enabled', value: 'true' }).run();
+      db.insert(schema.settings).values({ key: 'github_board_project_owner', value: 'acme' }).run();
+      db.insert(schema.settings).values({ key: 'github_board_project_title', value: 'TamTam Ops' }).run();
+      db.insert(schema.settings).values({ key: 'github_board_status_option_ids', value: JSON.stringify({ Running: 'opt-1' }) }).run();
+
+      const config = getSettings();
+
+      expect(config.github_board_sync_enabled).toBe(true);
+      expect(config.github_board_project_owner).toBe('acme');
+      expect(config.github_board_project_title).toBe('TamTam Ops');
+      expect(config.github_board_status_option_ids).toEqual({ Running: 'opt-1' });
     });
 
     it('returns config with overridden claude_bin', () => {

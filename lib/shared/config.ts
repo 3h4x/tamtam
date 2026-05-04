@@ -15,6 +15,13 @@ import { normalizeModelInput, resolveModelAlias } from '@/lib/agents/model-alias
 export interface TamTamConfig {
   workspace_path: string;
   github_owner: string;
+  github_board_sync_enabled: boolean;
+  github_board_project_owner: string;
+  github_board_project_title: string;
+  github_board_project_number: string;
+  github_board_project_id: string;
+  github_board_status_field_id: string;
+  github_board_status_option_ids: Partial<Record<import('@/lib/github/project-board-status').BoardStatus, string>>;
   claude_provider: string;
   claude_bin: string;
   lmstudio_model: string;
@@ -58,6 +65,13 @@ export interface TamTamConfig {
 const DEFAULTS: TamTamConfig = {
   workspace_path: '',
   github_owner: '',
+  github_board_sync_enabled: false,
+  github_board_project_owner: '',
+  github_board_project_title: 'TamTam',
+  github_board_project_number: '',
+  github_board_project_id: '',
+  github_board_status_field_id: '',
+  github_board_status_option_ids: {},
   claude_provider: 'claude',
   claude_bin: '~/.local/bin/claude',
   lmstudio_model: '',
@@ -154,6 +168,13 @@ export function getSettings(): TamTamConfig {
   const config: TamTamConfig = {
     workspace_path: map.workspace_path ?? DEFAULTS.workspace_path,
     github_owner: map.github_owner ?? DEFAULTS.github_owner,
+    github_board_sync_enabled: map.github_board_sync_enabled === 'true',
+    github_board_project_owner: map.github_board_project_owner ?? DEFAULTS.github_board_project_owner,
+    github_board_project_title: map.github_board_project_title ?? DEFAULTS.github_board_project_title,
+    github_board_project_number: map.github_board_project_number ?? DEFAULTS.github_board_project_number,
+    github_board_project_id: map.github_board_project_id ?? DEFAULTS.github_board_project_id,
+    github_board_status_field_id: map.github_board_status_field_id ?? DEFAULTS.github_board_status_field_id,
+    github_board_status_option_ids: parseJsonObject(map.github_board_status_option_ids),
     claude_provider: provider,
     claude_bin: resolveClaudeBin(provider, map.claude_bin),
     lmstudio_model: map.lmstudio_model ?? DEFAULTS.lmstudio_model,
@@ -215,6 +236,16 @@ function parseIntOr(v: string | undefined, fallback: number): number {
   if (v === undefined || v === '') return fallback;
   const n = parseInt(v, 10);
   return isNaN(n) ? fallback : n;
+}
+
+function parseJsonObject(v: string | undefined): Record<string, string> {
+  if (!v) return {};
+  try {
+    const parsed = JSON.parse(v);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, string> : {};
+  } catch {
+    return {};
+  }
 }
 
 const VALID_PERMISSION_MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'default', 'dontAsk', 'plan'] as const;

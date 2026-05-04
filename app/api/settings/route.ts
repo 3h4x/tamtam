@@ -14,6 +14,13 @@ import {
 } from '@/lib/agents/model-aliases';
 const SETTING_KEYS = [
   'github_owner',
+  'github_board_sync_enabled',
+  'github_board_project_owner',
+  'github_board_project_title',
+  'github_board_project_number',
+  'github_board_project_id',
+  'github_board_status_field_id',
+  'github_board_status_option_ids',
   'claude_provider',
   'claude_bin',
   'lmstudio_model',
@@ -56,6 +63,11 @@ const SETTING_KEYS = [
 ] as const;
 
 function serializeSettingValue(key: string, value: unknown): string {
+  if (key === 'github_board_status_option_ids') {
+    if (typeof value === 'string') return value;
+    if (value && typeof value === 'object') return JSON.stringify(value);
+    return '';
+  }
   if (key === 'budget_subscription_providers') {
     return encodeBudgetSubscriptionProviders(normalizeBudgetSubscriptionProviders(String(value)));
   }
@@ -160,6 +172,39 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ detail: validated.error }, { status: 400 });
     }
     serializedEntries.push({ key: key as (typeof SETTING_KEYS)[number], value: validated.value });
+  }
+
+  const desired = {
+    ...getSettings(),
+    ...Object.fromEntries(serializedEntries.map((entry) => [entry.key, entry.value])),
+  } as Record<string, unknown>;
+  if (desired.github_board_sync_enabled === 'true') {
+    try {
+      const { ensureProjectBoard } = await import('@/lib/github/project-board');
+      const ensured = await ensureProjectBoard({
+        enabled: true,
+        owner: String(desired.github_board_project_owner || desired.github_owner || ''),
+        title: String(desired.github_board_project_title || 'TamTam'),
+      });
+      const ensuredEntries: Array<{ key: (typeof SETTING_KEYS)[number]; value: string }> = [
+        { key: 'github_board_project_owner', value: ensured.owner },
+        { key: 'github_board_project_title', value: ensured.title },
+        { key: 'github_board_project_number', value: ensured.projectNumber },
+        { key: 'github_board_project_id', value: ensured.projectId },
+        { key: 'github_board_status_field_id', value: ensured.statusFieldId },
+        { key: 'github_board_status_option_ids', value: JSON.stringify(ensured.optionIds) },
+      ];
+      for (const entry of ensuredEntries) {
+        const existing = serializedEntries.find((candidate) => candidate.key === entry.key);
+        if (existing) existing.value = entry.value;
+        else serializedEntries.push(entry);
+      }
+    } catch (error) {
+      return NextResponse.json(
+        { detail: error instanceof Error ? error.message : 'Failed to configure GitHub board sync.' },
+        { status: 502 }
+      );
+    }
   }
 
   for (const { key, value } of serializedEntries) {

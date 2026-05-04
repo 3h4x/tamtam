@@ -187,6 +187,11 @@ export function createJob(
   };
   jobsCache.set(jobId, job);
   saveToDb(job);
+  void import('@/lib/github/project-board')
+    .then(({ queueJobBoardSync }) => queueJobBoardSync(job, 'started'))
+    .catch((error) => {
+      console.error(`[github-board] failed to queue start sync for ${job.id}`, error);
+    });
   return job;
 }
 

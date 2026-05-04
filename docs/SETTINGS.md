@@ -20,6 +20,50 @@ All settings stored in the `settings` table (key-value, both TEXT). Accessed via
 |-----|------|---------|--------|
 | `workspace_path` | string | `''` | Root directory scanned for git repos; drives the projects list |
 | `github_owner` | string | `''` | Default GitHub org/user for repos without an explicit remote URL |
+| `github_board_sync_enabled` | boolean | `false` | Stored as `'true'`/`'false'`. Enables GitHub Project sync for run/release lifecycle updates |
+| `github_board_project_owner` | string | `''` | GitHub org/user that owns the shared TamTam project board. Falls back to `github_owner` when blank |
+| `github_board_project_title` | string | `'TamTam'` | Project board title TamTam creates or reuses when sync is enabled |
+| `github_board_project_number` | string | `''` | Persisted GitHub Project number discovered during provisioning |
+| `github_board_project_id` | string | `''` | Persisted GitHub Project node id discovered during provisioning |
+| `github_board_status_field_id` | string | `''` | Persisted single-select field id for the `TamTam Status` field |
+| `github_board_status_option_ids` | JSON object | `{}` | Persisted map of board status labels to GitHub option ids |
+
+### GitHub Project Board Sync
+
+TamTam can mirror job lifecycle into a shared GitHub Project board. When enabled from Settings, TamTam uses the local `gh` CLI to create or reuse a project named by `github_board_project_title` under `github_board_project_owner`, then ensures a `TamTam Status` single-select field with these options:
+
+- `Queued`
+- `Running`
+- `Review`
+- `Fixing`
+- `Ready to Push`
+- `Blocked`
+- `Done`
+- `Failed`
+
+Prerequisites:
+
+- `gh` must be installed and available on `PATH`
+- the authenticated GitHub account must have project read/write scope for the target owner
+- `github_owner` or `github_board_project_owner` must be configured before enabling sync
+
+Provisioning behavior:
+
+- `PATCH /api/settings` auto-provisions the board when `github_board_sync_enabled` is set to `true`
+- successful provisioning writes `github_board_project_number`, `github_board_project_id`, `github_board_status_field_id`, and `github_board_status_option_ids` back into the `settings` table
+- provisioning failures return HTTP 502 and do not partially enable the feature
+
+Run lifecycle behavior:
+
+- background run/release sync is best-effort and never blocks job creation or completion
+- the sync metadata is stored on each root job in `context_meta.githubBoard` and includes the board item id, resolved branch name, and recent activity lines
+- pipeline child jobs update the release root item instead of creating separate board items
+
+Manual sync behavior:
+
+- the History UI exposes `Sync board` only for finished jobs
+- `POST /api/jobs/[jobId]/board-sync` is strict, not best-effort: it rejects running jobs, returns HTTP 409 when board sync is disabled or not fully configured, and returns HTTP 502 when the underlying GitHub sync fails
+- manual sync reuses the existing board item when possible and refreshes the item body/status from the current persisted job state
 
 ### Claude CLI
 
@@ -181,7 +225,10 @@ const isValid = timingSafeEqual(Buffer.from(expected), Buffer.from(req.headers['
 **PATCH `/api/settings`** — accepts a partial object; writes changed keys to DB, deletes null/empty values, invalidates cache. Only keys in `SETTING_KEYS` are accepted:
 
 ```
-github_owner, claude_provider, claude_bin, lmstudio_model, log_dir,
+github_owner, github_board_sync_enabled, github_board_project_owner,
+github_board_project_title, github_board_project_number, github_board_project_id,
+github_board_status_field_id, github_board_status_option_ids,
+claude_provider, claude_bin, lmstudio_model, log_dir,
 frequency, daytime, weekends, launchagent_prefix, workspace_path,
 base_prompt, default_model, permission_mode, commit_style,
 review_verdict_rules, jobs_paused,

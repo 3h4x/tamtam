@@ -872,6 +872,13 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   } catch (e) {
     console.error(`[retention] pruneProjectLogs failed for ${job.project}:`, e);
   }
+
+  try {
+    const { queueJobBoardSync } = await import('@/lib/github/project-board');
+    await queueJobBoardSync(job, 'finished');
+  } catch (e) {
+    console.error(`[github-board] failed to sync finished job ${job.id}:`, e);
+  }
 }
 
 async function retryFixCi(projectName: string): Promise<void> {

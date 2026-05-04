@@ -24,11 +24,20 @@ describe('settings API', () => {
   let GET: any;
   let PATCH: any;
   let syncJobsPauseStateMock: ReturnType<typeof vi.fn>;
+  let ensureProjectBoardMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
     testDb = createTestDb();
     syncJobsPauseStateMock = vi.fn();
+    ensureProjectBoardMock = vi.fn().mockResolvedValue({
+      owner: 'octocat',
+      title: 'TamTam',
+      projectNumber: '7',
+      projectId: 'PVT_x',
+      statusFieldId: 'F_x',
+      optionIds: { Queued: '1', Running: '2', Review: '3', Fixing: '4', 'Ready to Push': '5', Blocked: '6', Done: '7', Failed: '8' },
+    });
 
     vi.doMock('@/lib/db', () => ({
       db: testDb.db,
@@ -36,6 +45,9 @@ describe('settings API', () => {
     }));
     vi.doMock('@/lib/shared/job-control', () => ({
       syncJobsPauseState: syncJobsPauseStateMock,
+    }));
+    vi.doMock('@/lib/github/project-board', () => ({
+      ensureProjectBoard: ensureProjectBoardMock,
     }));
 
     const mod = await import('@/app/api/settings/route');
@@ -237,6 +249,13 @@ describe('settings API', () => {
     it('accepts all valid setting keys', async () => {
       const validKeys = [
         'github_owner',
+        'github_board_sync_enabled',
+        'github_board_project_owner',
+        'github_board_project_title',
+        'github_board_project_number',
+        'github_board_project_id',
+        'github_board_status_field_id',
+        'github_board_status_option_ids',
         'claude_provider',
         'claude_bin',
         'lmstudio_model',
@@ -385,6 +404,69 @@ describe('settings API', () => {
 
       const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'agent_templates');
       expect(row).toBeUndefined();
+    });
+
+    it('configures GitHub board settings when sync is enabled', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          github_owner: 'octocat',
+          github_board_sync_enabled: 'true',
+          github_board_project_owner: 'octocat',
+          github_board_project_title: 'TamTam',
+        }),
+      });
+
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(200);
+      expect(ensureProjectBoardMock).toHaveBeenCalledWith({
+        enabled: true,
+        owner: 'octocat',
+        title: 'TamTam',
+      });
+      const rows = Object.fromEntries(testDb.db.select().from(schema.settings).all().map((row) => [row.key, row.value]));
+      expect(rows.github_board_project_number).toBe('7');
+      expect(rows.github_board_project_id).toBe('PVT_x');
+      expect(rows.github_board_status_field_id).toBe('F_x');
+      expect(rows.github_board_status_option_ids).toContain('"Running":"2"');
+    });
+
+    it('persists github_board_status_option_ids as JSON when given an object', async () => {
+      const optionIds = { Queued: 'Q', Running: 'R', Review: 'REV', Fixing: 'F', 'Ready to Push': 'P', Blocked: 'B', Done: 'D', Failed: 'X' };
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ github_board_status_option_ids: optionIds }),
+      });
+      await PATCH(request);
+
+      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'github_board_status_option_ids');
+      expect(row?.value).toBe(JSON.stringify(optionIds));
+      expect(JSON.parse(row!.value)).toEqual(optionIds);
+    });
+
+    it('round-trips github_board_status_option_ids through GET', async () => {
+      const optionIds = { Queued: 'Q', Running: 'R' };
+      testDb.db.insert(schema.settings).values({ key: 'github_board_status_option_ids', value: JSON.stringify(optionIds) }).run();
+      const response = await GET();
+      const data = await response.json();
+      expect(JSON.parse(data.settings.github_board_status_option_ids)).toEqual(optionIds);
+    });
+
+    it('returns 502 when enabling GitHub board sync fails', async () => {
+      ensureProjectBoardMock.mockRejectedValueOnce(new Error('missing project scope'));
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          github_board_sync_enabled: 'true',
+          github_board_project_owner: 'octocat',
+        }),
+      });
+
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(502);
+      await expect(response.json()).resolves.toMatchObject({ detail: 'missing project scope' });
     });
   });
 

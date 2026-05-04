@@ -72,6 +72,7 @@ export {
   fetchNotifications,
   markJobSeen,
   markNotificationsSeen,
+  syncJobBoard,
 } from './client/jobs'
 
 export {
