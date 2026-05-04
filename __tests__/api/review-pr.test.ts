@@ -74,6 +74,12 @@ describe('POST /api/projects/by-project/{projectName}/review-pr', () => {
       CODE_REVIEWER_SKILL: '/nonexistent/skill.md',
     }));
 
+    vi.doMock('@/lib/shared/job-control', () => ({
+      runGates: () => null,
+      runAutoChainGates: () => null,
+      isJobsPaused: () => false,
+    }));
+
     const mod = await import('@/app/api/projects/by-project/[projectName]/review-pr/route');
     POST = mod.POST;
   });

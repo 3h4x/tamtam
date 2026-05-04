@@ -58,8 +58,15 @@ describe('config', () => {
       expect(config).toEqual({
         workspace_path: '',
         github_owner: '',
+        github_board_sync_enabled: false,
+        github_board_project_owner: '',
+        github_board_project_title: 'TamTam',
+        github_board_project_number: '',
+        github_board_project_id: '',
+        github_board_status_field_id: '',
+        github_board_status_option_ids: {},
         claude_provider: 'claude',
-        claude_bin: '~/.local/bin/claude',
+        claude_bin: `${process.cwd()}/scripts/claude-shim.js`,
         lmstudio_model: '',
         log_dir: './data/logs',
         frequency: '1h',
@@ -106,7 +113,8 @@ describe('config', () => {
       const config = getSettings();
 
       expect(config.workspace_path).toBe('/home/user/projects');
-      expect(config.claude_bin).toBe('~/.local/bin/claude');
+      // claude provider routes through the tier-name shim regardless of stored value.
+      expect(config.claude_bin).toBe(`${process.cwd()}/scripts/claude-shim.js`);
     });
 
     it('returns config with overridden github_owner', () => {
@@ -118,13 +126,31 @@ describe('config', () => {
       expect(config.github_owner).toBe('octocat');
     });
 
+    it('parses stored GitHub board settings', () => {
+      const db = testDb.db;
+      db.insert(schema.settings).values({ key: 'github_board_sync_enabled', value: 'true' }).run();
+      db.insert(schema.settings).values({ key: 'github_board_project_owner', value: 'acme' }).run();
+      db.insert(schema.settings).values({ key: 'github_board_project_title', value: 'TamTam Ops' }).run();
+      db.insert(schema.settings).values({ key: 'github_board_status_option_ids', value: JSON.stringify({ Running: 'opt-1' }) }).run();
+
+      const config = getSettings();
+
+      expect(config.github_board_sync_enabled).toBe(true);
+      expect(config.github_board_project_owner).toBe('acme');
+      expect(config.github_board_project_title).toBe('TamTam Ops');
+      expect(config.github_board_status_option_ids).toEqual({ Running: 'opt-1' });
+    });
+
     it('returns config with overridden claude_bin', () => {
       const db = testDb.db;
       db.insert(schema.settings).values({ key: 'claude_bin', value: '/usr/bin/claude' }).run();
 
       const config = getSettings();
 
-      expect(config.claude_bin).toBe('/usr/bin/claude');
+      // For provider=claude, the resolved claude_bin is always the shim path —
+      // the user's stored value is forwarded to the underlying binary via the
+      // CLAUDE_BIN env var at spawn time, not by overriding claude_bin itself.
+      expect(config.claude_bin).toBe(`${process.cwd()}/scripts/claude-shim.js`);
     });
 
     it('canonicalizes legacy model aliases from settings', () => {
@@ -283,7 +309,7 @@ describe('config', () => {
       expect(config.workspace_path).toBe('/projects');
       expect(config.github_owner).toBe('user123');
       expect(config.frequency).toBe('2h');
-      expect(config.claude_bin).toBe('~/.local/bin/claude');
+      expect(config.claude_bin).toBe(`${process.cwd()}/scripts/claude-shim.js`);
     });
 
     it('caches config for CACHE_TTL seconds', () => {

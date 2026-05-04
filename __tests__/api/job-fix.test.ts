@@ -76,6 +76,12 @@ describe('POST /api/jobs/[jobId]/fix', () => {
       return { ...actual, spawn: vi.fn().mockReturnValue(mockProc) };
     });
 
+    vi.doMock('@/lib/shared/job-control', () => ({
+      runGates: () => null,
+      runAutoChainGates: () => null,
+      isJobsPaused: () => false,
+    }));
+
     const mod = await import('@/app/api/jobs/[jobId]/fix/route');
     POST = mod.POST;
   });

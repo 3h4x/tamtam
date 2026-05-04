@@ -129,8 +129,8 @@ export async function GET(
 
       function extractLogDetail(): string | null {
         try {
-          if (!existsSync(logPath)) return 'log file missing';
-          const content = readFileSync(logPath, 'utf-8');
+          if (!existsSync(/*turbopackIgnore: true*/ logPath)) return 'log file missing';
+          const content = readFileSync(/*turbopackIgnore: true*/ logPath, 'utf-8');
           if (!content.trim()) return 'log file empty — claude CLI exited without writing anything. Common causes: rate-limited (5-hour window), cold-start crash, or auth/session conflict with a concurrent run. Retrying usually works.';
           const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
           // If every non-empty line is a [tamtam] wrapper marker (the launch
@@ -209,10 +209,10 @@ export async function GET(
       // Read new bytes from offset using an open fd — avoids re-reading the
       // whole file on every fs.watch tick (critical for large logs).
       function readNewBytes(): string {
-        if (!existsSync(logPath)) return '';
+        if (!existsSync(/*turbopackIgnore: true*/ logPath)) return '';
         let fd = -1;
         try {
-          fd = openSync(logPath, 'r');
+          fd = openSync(/*turbopackIgnore: true*/ logPath, 'r');
           const size = fstatSync(fd).size;
           if (size <= offset) return '';
           const len = size - offset;
@@ -228,9 +228,9 @@ export async function GET(
       }
 
       // Replay existing content
-      if (existsSync(logPath)) {
+      if (existsSync(/*turbopackIgnore: true*/ logPath)) {
         try {
-          const content = readFileSync(logPath, 'utf-8');
+          const content = readFileSync(/*turbopackIgnore: true*/ logPath, 'utf-8');
           offset = Buffer.byteLength(content);
           sendContent(content);
           if (hasResultLine(content)) seenResult = true;
@@ -259,7 +259,7 @@ export async function GET(
       }
 
       // If log file doesn't exist, there's nothing to watch (fs.watch would throw).
-      if (!existsSync(logPath)) {
+      if (!existsSync(/*turbopackIgnore: true*/ logPath)) {
         try { controller.close(); } catch {}
         return;
       }
@@ -326,7 +326,7 @@ export async function GET(
       }
 
       try {
-        watcher = watch(logPath, () => { checkFinished(); });
+        watcher = watch(/*turbopackIgnore: true*/ logPath, () => { checkFinished(); });
       } catch {}
 
       // Poll every 1s as a safety net — fs.watch can miss the finishedAt

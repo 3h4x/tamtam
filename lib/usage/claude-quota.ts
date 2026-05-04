@@ -40,12 +40,12 @@ export async function readOauthToken(): Promise<string | null> {
   }
 
   const candidates = [
-    join(homedir(), '.claude', '.credentials.json'),
-    join(homedir(), '.claude', 'config', '.credentials.json'),
+    join(/*turbopackIgnore: true*/ homedir(), '.claude', '.credentials.json'),
+    join(/*turbopackIgnore: true*/ homedir(), '.claude', 'config', '.credentials.json'),
   ];
   for (const path of candidates) {
     try {
-      const raw = await readFile(path, 'utf8');
+      const raw = await readFile(/*turbopackIgnore: true*/ path, 'utf8');
       const tok = parseTokenFromCredentials(raw);
       if (tok) return tok;
     } catch {

@@ -299,7 +299,7 @@ function expandHome(p: string): string {
   // defaults like `./data/logs` land inside the project, not wherever the
   // command was launched from.
   if (p.startsWith('./') || p.startsWith('../') || (!p.startsWith('/') && p !== '')) {
-    return join(process.cwd(), p);
+    return join(/*turbopackIgnore: true*/ process.cwd(), p);
   }
   return p;
 }

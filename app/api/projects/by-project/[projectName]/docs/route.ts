@@ -17,22 +17,22 @@ export async function GET(
 
   // README at project root
   for (const candidate of ['README.md', 'readme.md', 'Readme.md']) {
-    const p = join(projPath, candidate);
-    if (existsSync(p)) {
+    const p = join(/*turbopackIgnore: true*/ projPath, candidate);
+    if (existsSync(/*turbopackIgnore: true*/ p)) {
       try {
-        docs.push({ name: 'README.md', path: candidate, content: readFileSync(p, 'utf-8') });
+        docs.push({ name: 'README.md', path: candidate, content: readFileSync(/*turbopackIgnore: true*/ p, 'utf-8') });
       } catch {}
       break;
     }
   }
 
   // docs/ directory
-  const docsDir = join(projPath, 'docs');
+  const docsDir = join(/*turbopackIgnore: true*/ projPath, 'docs');
   if (existsSync(docsDir)) {
-    for (const entry of readdirSync(docsDir, { withFileTypes: true })) {
+    for (const entry of readdirSync(/*turbopackIgnore: true*/ docsDir, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
       try {
-        const content = readFileSync(join(docsDir, entry.name), 'utf-8');
+        const content = readFileSync(join(/*turbopackIgnore: true*/ docsDir, entry.name), 'utf-8');
         docs.push({ name: entry.name, path: `docs/${entry.name}`, content });
       } catch {}
     }
