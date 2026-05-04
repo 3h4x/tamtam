@@ -218,6 +218,42 @@ async function fire(entry: ScheduleEntry): Promise<void> {
         console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${detail}`);
         return;
       }
+      if (res.status === 409) {
+        let detail = `HTTP ${res.status}`;
+        try {
+          const body = await res.json() as { detail?: string };
+          if (body.detail) detail = body.detail;
+        } catch {}
+        if (detail.includes('already running')) {
+          entry.skippedCount += 1;
+          entry.lastSkippedReason = detail;
+          console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${detail}`);
+          return;
+        }
+        if (detail.includes('Jobs are paused globally')) {
+          entry.errorCount += 1;
+          entry.lastError = detail;
+          console.warn(`[internal-scheduler] pausing after route rejected scheduled fire: ${detail}`);
+          pauseInternalScheduler();
+          return;
+        }
+        if (detail.includes('is disabled') || detail.includes('has no schedule')) {
+          console.warn(`[internal-scheduler] removing stale schedule for ${entry.project}/${entry.name} — ${detail}`);
+          removeAgentSchedule(entry.agentId);
+          shouldRearm = false;
+          return;
+        }
+        if (detail.includes('issue branch')) {
+          entry.skippedCount += 1;
+          entry.lastSkippedReason = detail;
+          console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${detail}`);
+          return;
+        }
+        entry.errorCount += 1;
+        entry.lastError = detail;
+        console.error(`[internal-scheduler] ${entry.project}/${entry.name} conflict: ${detail}`);
+        return;
+      }
       if (res.status === 404) {
         entry.errorCount += 1;
         entry.lastError = `HTTP ${res.status}`;
