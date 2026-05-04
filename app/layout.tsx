@@ -1,3 +1,4 @@
+// tamtam
 import type { Metadata } from 'next';
 import { AppShell } from '@/components/AppShell';
 import './globals.css';
