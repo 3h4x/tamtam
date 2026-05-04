@@ -7,7 +7,9 @@ import { startJob } from '@/lib/jobs/pm2-jobs';
 import { exec } from '@/lib/shared/shell';
 import { getPermissionModeFlag, getSettings } from '@/lib/shared/config';
 import { errMsg } from '@/lib/shared/types';
-import { runGates } from '@/lib/shared/job-control';
+import { resolveCliBin, resolveCliDefaultModel, resolveCliEnv } from '@/lib/shared/cli-bin';
+import { checkCliStartGate } from '@/lib/usage/resolve-provider';
+import { isCliProvider } from '@/lib/usage/cli-providers';
 
 export async function POST(
   request: NextRequest,
@@ -28,12 +30,20 @@ export async function POST(
     }
   }
 
-  const { projects, claudeBin, logDir } = getImproveConfig();
-  const { default_model, github_owner: dbGithubOwner } = getSettings();
+  const { projects, logDir } = getImproveConfig();
+  const settings = getSettings();
+  const { github_owner: dbGithubOwner } = settings;
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
-  const paused = runGates('start a CI fix');
-  if (paused) return NextResponse.json({ detail: paused.detail }, { status: paused.status });
+  const preferredProviderHeader = request.headers.get('x-tamtam-provider-preferred');
+  const gate = await checkCliStartGate('start a CI fix', {
+    preferred: isCliProvider(preferredProviderHeader) ? preferredProviderHeader : null,
+  });
+  if (!gate.ok) return NextResponse.json({ detail: gate.detail }, { status: gate.status });
+  const provider = gate.provider;
+  const claudeBin = resolveCliBin(provider, settings);
+  const cliEnv = resolveCliEnv(provider, settings);
+  const defaultModel = resolveCliDefaultModel(provider, settings);
 
   const owner = process.env.GITHUB_OWNER || dbGithubOwner || projectName;
   let repo = `${owner}/${projectName}`;
@@ -82,15 +92,17 @@ Do not commit — just make the code changes.
 `;
 
   const job = createJob(projectName, 'fix-ci', 0, '');
+  job.provider = provider;
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
 
   try {
     const pid = await startJob(
       job.id,
-      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${default_model} ${getPermissionModeFlag()}`,
+      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${defaultModel} ${getPermissionModeFlag()}`,
       prompt,
-      projPath
+      projPath,
+      { env: cliEnv }
     );
     job.pid = pid;
   } catch (e: unknown) {

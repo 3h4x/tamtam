@@ -6,7 +6,9 @@ import { startJob } from '@/lib/jobs/pm2-jobs';
 import { getPermissionModeFlag, getSettings } from '@/lib/shared/config';
 import { errMsg } from '@/lib/shared/types';
 import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { runGates } from '@/lib/shared/job-control';
+import { resolveCliBin, resolveCliDefaultModel, resolveCliEnv } from '@/lib/shared/cli-bin';
+import { checkCliStartGate } from '@/lib/usage/resolve-provider';
+import { currentParent } from '@/lib/jobs/parent-context';
 
 export type StartFixPushResult =
   | { ok: true; jobId: string; pid: number; logPath: string }
@@ -20,11 +22,15 @@ export type StartFixPushResult =
 export async function startFixPush(projectName: string, hookError: string): Promise<StartFixPushResult> {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
-  const paused = runGates('start a fix-push job');
-  if (paused) return paused;
 
-  const { claudeBin, logDir } = getImproveConfig();
-  const { default_model } = getSettings();
+  const { logDir } = getImproveConfig();
+  const settings = getSettings();
+  const gate = await checkCliStartGate('start a fix-push job', { parentJobId: currentParent() });
+  if (!gate.ok) return gate;
+  const provider = gate.provider;
+  const claudeBin = resolveCliBin(provider, settings);
+  const cliEnv = resolveCliEnv(provider, settings);
+  const defaultModel = resolveCliDefaultModel(provider, settings);
   let errorContext = hookError.trim();
   if (errorContext.length > 8000) errorContext = '...(truncated)...\n' + errorContext.slice(-8000);
 
@@ -44,15 +50,17 @@ Please:
 `;
 
   const job = createJob(projectName, 'fix-push', 0, '');
+  job.provider = provider;
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
 
   try {
     const pid = await startJob(
       job.id,
-      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${default_model} ${getPermissionModeFlag()}`,
+      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${defaultModel} ${getPermissionModeFlag()}`,
       prompt,
-      projPath
+      projPath,
+      { env: cliEnv }
     );
     job.pid = pid;
   } catch (e: unknown) {

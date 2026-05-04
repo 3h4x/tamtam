@@ -1,5 +1,5 @@
 import type { QuotaSnapshot } from '@/lib/usage/quota-types';
-import { getSettings } from '@/lib/shared/config';
+import { getActiveCliProvider, getSettings } from '@/lib/shared/config';
 import {
   getClaudeQuota,
   clearQuotaCache as clearClaudeQuotaCache,
@@ -15,7 +15,7 @@ import {
 
 function isCodexProvider(): boolean {
   try {
-    return getSettings().claude_provider === 'codex';
+    return getActiveCliProvider(getSettings()) === 'codex';
   } catch {
     return false;
   }
@@ -48,4 +48,36 @@ export function peekQuotaCache(): QuotaSnapshot | null {
 export function prefetchQuota(): void {
   if (isCodexProvider()) prefetchCodexQuota();
   else prefetchClaudeQuota();
+}
+
+import type { CliProvider } from '@/lib/usage/cli-providers';
+
+/**
+ * Fetch quota snapshots for the given providers in parallel. Providers
+ * without a fetcher (gemini, lmstudio) and any fetcher failure resolve to
+ * `null` so callers can treat them as "unknown / always-available". Cached
+ * upstream by each provider's fetcher.
+ */
+export async function getQuotaSnapshots(
+  providers: CliProvider[],
+  options: { force?: boolean } = {},
+): Promise<Map<CliProvider, QuotaSnapshot | null>> {
+  const out = new Map<CliProvider, QuotaSnapshot | null>();
+  const tasks: Promise<void>[] = [];
+  for (const provider of providers) {
+    if (provider === 'claude') {
+      tasks.push(
+        getClaudeQuota(options).then((s) => { out.set(provider, s); }).catch(() => { out.set(provider, null); }),
+      );
+    } else if (provider === 'codex') {
+      tasks.push(
+        getCodexQuota(options).then((s) => { out.set(provider, s); }).catch(() => { out.set(provider, null); }),
+      );
+    } else {
+      // No fetcher today — treat as null so the picker uses 0% utilization.
+      out.set(provider, null);
+    }
+  }
+  await Promise.all(tasks);
+  return out;
 }

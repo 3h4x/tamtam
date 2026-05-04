@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { startProjectReview } from '@/lib/pipeline/start-review';
+import { isCliProvider } from '@/lib/usage/cli-providers';
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ projectName: string }> }
 ) {
   const { projectName } = await params;
-  const result = await startProjectReview(projectName);
+  const preferredProviderHeader = request.headers.get('x-tamtam-provider-preferred');
+  const result = await startProjectReview(projectName, {
+    preferredProvider: isCliProvider(preferredProviderHeader) ? preferredProviderHeader : null,
+  });
   if (!result.ok) {
     const errorBody: { detail: string; blocking_job_id?: string } = { detail: result.detail };
     if (result.blockingJobId) errorBody.blocking_job_id = result.blockingJobId;

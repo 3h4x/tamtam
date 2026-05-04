@@ -54,6 +54,7 @@ describe('POST /api/agents/[agentId]/run — Direct Branch issue-branch guard', 
     vi.doMock('@/lib/shared/config', () => ({
       withBasePrompt: (p: string) => p,
       getPermissionModeFlag: () => '--permission-mode default',
+      getSettings: () => ({ cli_enabled_providers: ['claude'], default_model: 'fast' }),
     }));
     vi.doMock('@/lib/skills/skills', () => ({
       SKILLS_DIR: '/tmp/skills',

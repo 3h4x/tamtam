@@ -1,5 +1,5 @@
 // One-shot verdict-extraction retry. When the primary `getVerdict` parser
-// fails on a finished review log, we burn a tiny fast-tier Claude call to
+// fails on a finished review log, we burn a tiny fast-tier CLI call to
 // classify the existing review text rather than wasting the entire run by
 // defaulting to NEEDS ATTENTION (which costs another full review + fix
 // iteration). Gated by the `review_retry_on_parse_failure` setting.
@@ -9,7 +9,9 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { readParsedLog } from './verdict';
 import { getSettings, getPermissionModeFlag } from '@/lib/shared/config';
+import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import type { JobData } from './types';
+import { isCliProvider, type CliProvider } from '@/lib/usage/cli-providers';
 
 const TIMEOUT_MS = 30_000;
 const MAX_TAIL_CHARS = 4000;
@@ -41,8 +43,8 @@ function classify(text: string): string | null {
 }
 
 /**
- * Run a tiny Claude call against the review log tail to recover a verdict.
- * Returns null on any failure (no claude bin, timeout, unparseable output)
+ * Run a tiny provider-matched CLI call against the review log tail to recover
+ * a verdict. Returns null on any failure (no CLI bin, timeout, unparseable output)
  * so callers can fall back to their existing default. Never throws.
  */
 export async function retryVerdictWithClaude(job: JobData): Promise<string | null> {
@@ -68,7 +70,9 @@ export async function retryVerdictWithClaude(job: JobData): Promise<string | nul
     '--- review tail ---\n' +
     tail;
 
-  const claudeBin = settings.claude_bin.replace(/^~/, homedir());
+  const provider: CliProvider = isCliProvider(job.provider) ? job.provider : 'claude';
+  const cliBin = resolveCliBin(provider, settings);
+  const cliEnv = resolveCliEnv(provider, settings);
 
   const result = await new Promise<string | null>((resolve) => {
     let out = '';
@@ -84,8 +88,8 @@ export async function retryVerdictWithClaude(job: JobData): Promise<string | nul
     let child;
     try {
       const [permFlag, permValue] = getPermissionModeFlag().split(' ');
-      child = spawn(claudeBin, ['--print', '--model', 'fast', permFlag, permValue], {
-        env: enrichEnv(),
+      child = spawn(cliBin, ['--print', '--model', 'fast', permFlag, permValue], {
+        env: { ...enrichEnv(), ...cliEnv },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch (e) {

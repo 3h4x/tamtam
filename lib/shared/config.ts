@@ -6,6 +6,7 @@ import {
   type BudgetSubscriptionProvider,
 } from '@/lib/usage/subscription-providers';
 import { normalizeModelInput, resolveModelAlias } from '@/lib/agents/model-aliases';
+import { isCliProvider, parseEnabledProviders, type CliProvider } from '@/lib/usage/cli-providers';
 
 /**
  * Read all settings from the DB and return as a config object.
@@ -28,6 +29,15 @@ export interface TamTamConfig {
   claude_provider: string;
   claude_bin: string;
   lmstudio_model: string;
+  cli_enabled_providers: import('@/lib/usage/cli-providers').CliProvider[];
+  cli_bin_claude: string;
+  cli_bin_codex: string;
+  cli_bin_gemini: string;
+  cli_bin_lmstudio: string;
+  cli_default_model_claude: string;
+  cli_default_model_codex: string;
+  cli_default_model_gemini: string;
+  cli_default_model_lmstudio: string;
   log_dir: string;
   frequency: string;
   daytime: boolean;
@@ -81,6 +91,15 @@ const DEFAULTS: TamTamConfig = {
   claude_provider: 'claude',
   claude_bin: '~/.local/bin/claude',
   lmstudio_model: '',
+  cli_enabled_providers: ['claude'],
+  cli_bin_claude: '',
+  cli_bin_codex: '',
+  cli_bin_gemini: '',
+  cli_bin_lmstudio: '',
+  cli_default_model_claude: 'normal',
+  cli_default_model_codex: 'normal',
+  cli_default_model_gemini: 'normal',
+  cli_default_model_lmstudio: 'normal',
   log_dir: './data/logs',
   frequency: '1h',
   daytime: false,
@@ -150,6 +169,26 @@ function inferClaudeProvider(claudeBin: string | undefined): string {
   return 'custom';
 }
 
+function resolveEnabledProviders(raw: string | undefined, legacyProvider: string): CliProvider[] {
+  const parsed = parseEnabledProviders(raw);
+  if (parsed.length > 0) return parsed;
+  // Fallback: treat the legacy single-select `claude_provider` value as a
+  // one-element enabled set so existing installs keep working until the user
+  // saves the CLI tab for the first time. `custom` is mapped to `claude` since
+  // we don't track it as a routable provider in the new model.
+  if (legacyProvider === 'codex' || legacyProvider === 'gemini' || legacyProvider === 'lmstudio') {
+    return [legacyProvider];
+  }
+  return ['claude'];
+}
+
+export function getActiveCliProvider(config: Pick<TamTamConfig, 'cli_enabled_providers' | 'claude_provider'>): CliProvider {
+  if (Array.isArray(config.cli_enabled_providers) && config.cli_enabled_providers.length > 0) {
+    return config.cli_enabled_providers[0];
+  }
+  return isCliProvider(config.claude_provider) ? config.claude_provider : 'claude';
+}
+
 function resolveClaudeBin(provider: string, storedBin: string | undefined): string {
   if (provider === 'gemini') return shimPath('gemini-shim.js');
   if (provider === 'lmstudio') return shimPath('lmstudio-shim.js');
@@ -193,6 +232,22 @@ export function getSettings(): TamTamConfig {
     claude_provider: provider,
     claude_bin: resolveClaudeBin(provider, map.claude_bin),
     lmstudio_model: map.lmstudio_model ?? DEFAULTS.lmstudio_model,
+    cli_enabled_providers: resolveEnabledProviders(map.cli_enabled_providers, provider),
+    cli_bin_claude:
+      map.cli_bin_claude
+      ?? (
+        map.claude_bin &&
+        !isShimPath(map.claude_bin)
+          ? map.claude_bin
+          : DEFAULTS.cli_bin_claude
+      ),
+    cli_bin_codex: map.cli_bin_codex ?? DEFAULTS.cli_bin_codex,
+    cli_bin_gemini: map.cli_bin_gemini ?? DEFAULTS.cli_bin_gemini,
+    cli_bin_lmstudio: map.cli_bin_lmstudio ?? DEFAULTS.cli_bin_lmstudio,
+    cli_default_model_claude: normalizeModelInput(map.cli_default_model_claude, 'normal'),
+    cli_default_model_codex: normalizeModelInput(map.cli_default_model_codex, 'normal'),
+    cli_default_model_gemini: normalizeModelInput(map.cli_default_model_gemini, 'normal'),
+    cli_default_model_lmstudio: normalizeModelInput(map.cli_default_model_lmstudio, 'normal'),
     log_dir: map.log_dir ?? DEFAULTS.log_dir,
     frequency: map.frequency ?? DEFAULTS.frequency,
     daytime: map.daytime === 'true',
@@ -296,12 +351,20 @@ export function getPermissionModeFlag(): string {
 }
 
 /** Prepend the base prompt (if configured) to a user/task prompt. */
-export function withBasePrompt(prompt: string, options: { projectPath?: string } = {}): string {
-  const { base_prompt, claude_provider } = getSettings();
+export function withBasePrompt(
+  prompt: string,
+  options: { projectPath?: string; provider?: string | null } = {},
+): string {
+  const settings = getSettings();
+  const { base_prompt } = settings;
   const parts: string[] = [];
   if (base_prompt) parts.push(base_prompt);
 
-  if (options.projectPath && PROJECT_MEMORY_PROVIDERS.has(claude_provider)) {
+  const provider = options.provider && isCliProvider(options.provider)
+    ? options.provider
+    : getActiveCliProvider(settings);
+
+  if (options.projectPath && PROJECT_MEMORY_PROVIDERS.has(provider)) {
     const memoryPath = join(options.projectPath, 'CLAUDE.md');
     if (existsSync(memoryPath)) {
       try {

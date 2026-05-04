@@ -62,11 +62,14 @@ describe('settings API', () => {
   });
 
   describe('GET /settings', () => {
-    it('returns empty settings object initially', async () => {
+    it('returns effective CLI routing defaults initially', async () => {
       const response = await GET();
       expect(response.status).toBe(200);
       const data = await response.json();
-      expect(data.settings).toEqual({});
+      expect(data.settings).toEqual({
+        claude_provider: 'claude',
+        cli_enabled_providers: 'claude',
+      });
     });
 
     it('returns all stored settings', async () => {
@@ -101,6 +104,30 @@ describe('settings API', () => {
 
       expect(data.settings.default_model).toBe('fast');
       expect(data.settings.pipeline_model_review).toBe('');
+    });
+
+    it('canonicalizes CLI provider and per-provider model settings in the API response', async () => {
+      testDb.db.insert(schema.settings).values({ key: 'cli_enabled_providers', value: 'codex gemini codex' }).run();
+      testDb.db.insert(schema.settings).values({ key: 'cli_default_model_codex', value: 'sonnet' }).run();
+
+      const response = await GET();
+      const data = await response.json();
+
+      expect(data.settings.cli_enabled_providers).toBe('codex,gemini');
+      expect(data.settings.cli_default_model_codex).toBe('normal');
+    });
+
+    it('hydrates effective CLI routing fields from legacy-only settings', async () => {
+      testDb.db.insert(schema.settings).values({ key: 'claude_provider', value: 'codex' }).run();
+      testDb.db.insert(schema.settings).values({ key: 'claude_bin', value: '/custom/claude' }).run();
+
+      const response = await GET();
+      const data = await response.json();
+
+      expect(data.settings.claude_provider).toBe('codex');
+      expect(data.settings.cli_enabled_providers).toBe('codex');
+      expect(data.settings.cli_bin_claude).toBe('/custom/claude');
+      expect(data.settings.claude_bin).toBe('/custom/claude');
     });
   });
 
@@ -336,6 +363,61 @@ describe('settings API', () => {
 
       const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'budget_subscription_providers');
       expect(row?.value).toBe('codex');
+    });
+
+    it('saves CLI provider and per-provider model settings in canonical form', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          cli_enabled_providers: 'codex gemini codex',
+          cli_default_model_codex: 'sonnet',
+        }),
+      });
+      await PATCH(request);
+
+      const rows = testDb.db.select().from(schema.settings).all();
+      expect(rows.find((r) => r.key === 'cli_enabled_providers')?.value).toBe('codex,gemini');
+      expect(rows.find((r) => r.key === 'cli_default_model_codex')?.value).toBe('normal');
+      expect(rows.find((r) => r.key === 'claude_provider')?.value).toBe('codex');
+    });
+
+    it('syncs claude_provider to cli_enabled_providers even when the request sends a stale legacy value', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          claude_provider: 'claude',
+          cli_enabled_providers: 'codex',
+        }),
+      });
+      await PATCH(request);
+
+      const rows = testDb.db.select().from(schema.settings).all();
+      expect(rows.find((r) => r.key === 'cli_enabled_providers')?.value).toBe('codex');
+      expect(rows.find((r) => r.key === 'claude_provider')?.value).toBe('codex');
+    });
+
+    it('preserves effective CLI routing when round-tripping legacy settings through an unrelated save', async () => {
+      testDb.db.insert(schema.settings).values({ key: 'claude_provider', value: 'codex' }).run();
+      testDb.db.insert(schema.settings).values({ key: 'claude_bin', value: '/custom/claude' }).run();
+
+      const getResponse = await GET();
+      const loaded = await getResponse.json();
+
+      const patchRequest = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          ...loaded.settings,
+          github_owner: 'octocat',
+        }),
+      });
+      await PATCH(patchRequest);
+
+      const rows = Object.fromEntries(testDb.db.select().from(schema.settings).all().map((row) => [row.key, row.value]));
+      expect(rows.github_owner).toBe('octocat');
+      expect(rows.claude_provider).toBe('codex');
+      expect(rows.cli_enabled_providers).toBe('codex');
+      expect(rows.claude_bin).toBe('/custom/claude');
+      expect(rows.cli_bin_claude).toBe('/custom/claude');
     });
 
     it('saves fix_ci_max_retries setting', async () => {

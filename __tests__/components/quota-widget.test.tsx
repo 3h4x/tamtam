@@ -161,7 +161,7 @@ describe('QuotaWidget', () => {
 
     expect(codexCard.textContent).toContain('Scheduled agents')
     expect(codexCard.textContent).toContain('7d · Sonnet')
-    expect(claudeCard.textContent).toContain('Quota unavailable')
+    expect(claudeCard.textContent).toContain('quota unavailable')
     expect(claudeCard.textContent).not.toContain('Scheduled agents')
 
     unmount()

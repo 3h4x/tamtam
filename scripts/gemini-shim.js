@@ -8,6 +8,7 @@
  */
 const { spawn } = require('child_process');
 const readline = require('readline');
+const { installInactivityWatchdog } = require('./shim-utils');
 
 function resolveGeminiModel(model) {
   const aliases = {
@@ -75,11 +76,20 @@ geminiArgs.push('--model', model);
 geminiArgs.push('--approval-mode', approvalMode);
 geminiArgs.push('--output-format', 'stream-json');
 
-// Launch Gemini CLI
-const gemini = spawn('gemini', geminiArgs, {
-  stdio: ['pipe', 'pipe', 'inherit'],
+// Launch Gemini CLI. Pipe stderr (was 'inherit') so the inactivity watchdog
+// can observe it; we forward stderr chunks to the parent's stderr below.
+const geminiBin = process.env.GEMINI_BIN || 'gemini';
+const gemini = spawn(geminiBin, geminiArgs, {
+  stdio: ['pipe', 'pipe', 'pipe'],
   cwd: cwd,
   env: { ...process.env, FORCE_COLOR: '0' }
+});
+
+const watchdog = installInactivityWatchdog(gemini, { shimName: 'gemini-shim' });
+gemini.stdout.on('data', () => watchdog.markActivity());
+gemini.stderr.on('data', (chunk) => {
+  watchdog.markActivity();
+  process.stderr.write(chunk);
 });
 
 // Forward stdin (the prompt) to Gemini
@@ -226,6 +236,7 @@ rl.on('line', (line) => {
 });
 
 gemini.on('exit', (code, signal) => {
+  watchdog.dispose();
   if (inTextBlock) {
     console.log(JSON.stringify({
       type: 'stream_event',
@@ -235,6 +246,14 @@ gemini.on('exit', (code, signal) => {
     }));
     inTextBlock = false;
   }
+  if (watchdog.timedOut()) {
+    console.log(JSON.stringify({
+      type: 'result',
+      is_error: true,
+      result: '[gemini-shim] killed by inactivity watchdog'
+    }));
+    process.exit(124);
+  }
   if (signal) {
     process.exit(1);
   }
@@ -242,6 +261,7 @@ gemini.on('exit', (code, signal) => {
 });
 
 gemini.on('error', (err) => {
+  watchdog.dispose();
   if (inTextBlock) {
     console.log(JSON.stringify({
       type: 'stream_event',

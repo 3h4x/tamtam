@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -61,6 +61,7 @@ describe('scanFileAgents', () => {
 
   it('parses frontmatter fields', () => {
     writeAgent(tmpDir, 'improve', `---
+provider: codex
 model: opus
 schedule: 4h
 runner: launchctl
@@ -71,6 +72,7 @@ Improve the UI of tamtam.`);
     const agents = scanFileAgents(tmpDir, 'testproject');
     expect(agents).toHaveLength(1);
     const a = agents[0];
+    expect(a.provider).toBe('codex');
     expect(a.model).toBe('smart');
     expect(a.schedule).toBe('4h');
     expect(a.runner).toBe('launchctl');
@@ -173,6 +175,7 @@ describe('writeFileAgent', () => {
 
   it('merges into existing file without losing unset fields', () => {
     writeAgent(tmpDir, 'improve', `---
+provider: gemini
 model: opus
 schedule: 4h
 skillIds: ["agent-tests"]
@@ -183,6 +186,7 @@ Original prompt.`);
 
     const a = loadFileAgent(tmpDir, 'proj', 'improve');
     expect(a!.prompt).toBe('Updated prompt.');
+    expect(a!.provider).toBe('gemini');
     expect(a!.model).toBe('smart');
     expect(a!.schedule).toBe('4h');
     expect(a!.skillIds).toEqual(['agent-tests']);
@@ -233,13 +237,63 @@ Original prompt.`);
   it('round-trips through load', () => {
     const skillIds = ['persona:engineering-team/senior-fullstack', 'agent-tests'];
     writeFileAgent(tmpDir, 'proj', 'agent', {
+      provider: 'lmstudio',
       model: 'smart', schedule: '8h', skillIds, runner: 'launchctl', prompt: 'Run stuff.',
     });
     const a = loadFileAgent(tmpDir, 'proj', 'agent')!;
+    expect(a.provider).toBe('lmstudio');
     expect(a.model).toBe('smart');
     expect(a.schedule).toBe('8h');
     expect(a.skillIds).toEqual(skillIds);
     expect(a.runner).toBe('launchctl');
     expect(a.prompt).toBe('Run stuff.');
+  });
+
+  it('preserves an existing provider on prompt-only writes', () => {
+    writeAgent(tmpDir, 'provider-agent', `---
+provider: codex
+model: normal
+---
+Original prompt.`);
+
+    writeFileAgent(tmpDir, 'proj', 'provider-agent', { prompt: 'Updated prompt.' });
+
+    const content = readFileSync(join(tmpDir, '.tamtam', 'agents', 'provider-agent.md'), 'utf-8');
+    expect(content).toContain('provider: codex');
+    expect(loadFileAgent(tmpDir, 'proj', 'provider-agent')!.provider).toBe('codex');
+  });
+});
+
+describe('writeFileAgent on feature branches', () => {
+  let tmpDir: string;
+
+  beforeEach(() => { tmpDir = makeTmpDir(); });
+  afterEach(() => {
+    vi.resetModules();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('preserves the default-branch prompt on provider-only writes when no working-tree file exists', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/git/git-branch', () => ({
+      getBranchContext: vi.fn().mockReturnValue({ isDefaultBranch: false, defaultBranch: 'main' }),
+      gitLsTreeSync: vi.fn(),
+      gitShowSync: vi.fn().mockReturnValue(`---
+provider: claude
+model: normal
+---
+Prompt from default branch.`),
+    }));
+    vi.doMock('@/lib/agents/file-agent-overrides', () => ({
+      getFileAgentOverride: vi.fn().mockReturnValue(null),
+    }));
+
+    const mod = await import('@/lib/agents/tamtam-file-agents');
+    const updated = mod.writeFileAgent(tmpDir, 'proj', 'branch-agent', { provider: 'codex' });
+
+    expect(updated.prompt).toBe('Prompt from default branch.');
+    expect(updated.provider).toBe('codex');
+    expect(readFileSync(join(tmpDir, '.tamtam', 'agents', 'branch-agent.md'), 'utf-8')).toContain('Prompt from default branch.');
+    expect(mod.loadFileAgent(tmpDir, 'proj', 'branch-agent')!.prompt).toBe('Prompt from default branch.');
   });
 });

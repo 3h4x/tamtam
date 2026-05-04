@@ -13,6 +13,7 @@ describe('startProjectReview', () => {
   let getLockMock: ReturnType<typeof vi.fn>;
   let acquireLockMock: ReturnType<typeof vi.fn>;
   let isLockOwnedByActiveReleaseMock: ReturnType<typeof vi.fn>;
+  let checkCliStartGateMock: ReturnType<typeof vi.fn>;
 
   function resp(exitCode: number, stdout = '', stderr = '') {
     return Promise.resolve({ exitCode, stdout, stderr });
@@ -38,6 +39,7 @@ describe('startProjectReview', () => {
     getLockMock = vi.fn().mockReturnValue(null);
     acquireLockMock = vi.fn().mockResolvedValue({ acquired: true });
     isLockOwnedByActiveReleaseMock = vi.fn().mockReturnValue(false);
+    checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
 
     createJobMock = vi.fn().mockImplementation((project: string, kind: string) => ({
       id: `${project}-${kind}-id`, project, kind, pid: 0, logPath: '',
@@ -73,6 +75,9 @@ describe('startProjectReview', () => {
     }));
     vi.doMock('@/lib/skills/skills', () => ({
       CODE_REVIEWER_SKILL: '/nonexistent/code-reviewer.md',
+    }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: checkCliStartGateMock,
     }));
     vi.doMock('fs', () => ({
       existsSync: vi.fn().mockReturnValue(false),
@@ -156,6 +161,29 @@ describe('startProjectReview', () => {
       expect(r.status).toBe(404);
       expect(r.detail).toContain('missing');
     }
+  });
+
+  it('returns 429 when every enabled provider is over budget', async () => {
+    checkCliStartGateMock.mockResolvedValue({
+      ok: false,
+      status: 429,
+      detail: 'All enabled CLI providers are over budget. Adjust block threshold or wait for the window to reset.',
+    });
+    const r = await startProjectReview('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(429);
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
+  it('passes through a preferred provider override when supplied', async () => {
+    execMock.mockResolvedValueOnce(resp(0, ' M file.ts\n'));
+
+    await startProjectReview('proj', { preferredProvider: 'codex' });
+
+    expect(checkCliStartGateMock).toHaveBeenCalledWith('start a review', {
+      parentJobId: null,
+      preferred: 'codex',
+    });
   });
 
   it('returns 409 when pipeline lock is held by another job', async () => {

@@ -4,10 +4,12 @@ import { resolveProjectPath, clearProjectDataCache } from '@/lib/shared/project-
 import { exec } from '@/lib/shared/shell';
 import { getSettings, getPipelineModel } from '@/lib/shared/config';
 import { getImproveConfig, setProjectPushResult } from '@/lib/scheduling/scheduling';
+import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
+import { checkCliStartGate } from '@/lib/usage/resolve-provider';
+import { currentParent } from '@/lib/jobs/parent-context';
 import { buildDiffContext } from '@/lib/git/diff-context';
 import { createJob, markDone, updateJob, listJobs } from '@/lib/jobs/job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { runGates } from '@/lib/shared/job-control';
 
 export type CommitResult =
   | { ok: true; commitSha: string; message: string; jobId?: string }
@@ -18,7 +20,7 @@ const CONV_RE = /^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)
 // Generic fallback phrases the model produces when it lacks real diff context.
 const GENERIC_RE = /^chore:\s*(automated?\s*update|update|changes?)$/i;
 
-export async function generateCommitMessage(projPath: string, projectName: string): Promise<string> {
+export async function generateCommitMessage(projPath: string, projectName: string, providerOverride?: string): Promise<string> {
   const [statR, diffR] = await Promise.all([
     exec('git', ['-C', projPath, 'diff', '--cached', '--stat', '--no-color'], { timeout: 10000 }),
     exec('git', ['-C', projPath, 'diff', '--cached', '--no-color'], { timeout: 10000 }),
@@ -46,7 +48,16 @@ ${context}
 ${styleGuide ? `\nSTYLE GUIDE:\n${styleGuide}\n` : ''}
 Return ONLY the title — nothing else.${extra}`;
 
-  const { claudeBin } = getImproveConfig();
+  const settings = getSettings();
+  // generateCommitMessage is also called inline (not via job spawn), so it
+  // accepts an explicit provider for inheritance; if absent, falls back to
+  // the legacy claude_bin path so older direct callers keep working.
+  const claudeBin = providerOverride && providerOverride.length > 0
+    ? resolveCliBin(providerOverride as 'claude' | 'codex' | 'gemini' | 'lmstudio', settings)
+    : getImproveConfig().claudeBin;
+  const cliEnv = providerOverride && providerOverride.length > 0
+    ? resolveCliEnv(providerOverride as 'claude' | 'codex' | 'gemini' | 'lmstudio', settings)
+    : {};
 
   // --system-prompt replaces the injected CLAUDE.md/git-history system prompt so the
   // model cannot pattern-match on recent "chore: automated update" commits.
@@ -73,7 +84,7 @@ Return ONLY the title — nothing else.${extra}`;
     );
   };
 
-  const r1 = await exec(claudeBin, claudeArgs(buildPrompt()), { cwd: projPath, timeout: 30000 });
+  const r1 = await exec(claudeBin, claudeArgs(buildPrompt()), { cwd: projPath, timeout: 30000, env: cliEnv });
   const msg1 = parse(r1.stdout);
 
   // If the first attempt returns a generic placeholder, retry once with an explicit nudge.
@@ -81,7 +92,7 @@ Return ONLY the title — nothing else.${extra}`;
     const r2 = await exec(
       claudeBin,
       claudeArgs(buildPrompt('\n\nIMPORTANT: Be specific about what actually changed in the diff above. Do not use generic descriptions like "automated update".')),
-      { cwd: projPath, timeout: 30000 },
+      { cwd: projPath, timeout: 30000, env: cliEnv },
     );
     const msg2 = parse(r2.stdout);
     if (msg2 && !GENERIC_RE.test(msg2)) return msg2;
@@ -154,6 +165,7 @@ async function runCommit(
   projPath: string,
   log: (s: string) => void,
   issueCtx?: { number: number; repo: string; title: string } | null,
+  provider?: string,
 ): Promise<CommitResult> {
   // If we have issue context and are currently on the default branch, switch
   // to a feature branch BEFORE committing. Otherwise the commit lands on main,
@@ -244,7 +256,7 @@ async function runCommit(
 
   if (hasStaged) {
     log(`\n# generating commit message via Claude...\n`);
-    const message = await generateCommitMessage(projPath, projectName);
+    const message = await generateCommitMessage(projPath, projectName, provider);
     log(`# commit message: ${message}\n\n$ git commit -m "${message}"\n`);
     let commitR = await exec('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 });
     if (commitR.stdout) log(commitR.stdout);
@@ -295,14 +307,15 @@ export async function startProjectCommit(projectName: string): Promise<CommitRes
     setProjectPushResult(projectName, 'project not found');
     return { ok: false, status: 404, detail: 'project not found' };
   }
-  const paused = runGates('start a commit');
-  if (paused) {
-    setProjectPushResult(projectName, paused.detail);
-    return paused;
+  const gate = await checkCliStartGate('start a commit', { parentJobId: currentParent() });
+  if (!gate.ok) {
+    setProjectPushResult(projectName, gate.detail);
+    return gate;
   }
 
   const { logDir } = getImproveConfig();
   mkdirSync(logDir, { recursive: true });
+  const provider = gate.provider;
   // Stamp issue context on the commit job so downstream hooks can pick it up.
   const earlyIssueCtx = await findIssueContext(projectName, projPath);
   const job = createJob(
@@ -312,6 +325,7 @@ export async function startProjectCommit(projectName: string): Promise<CommitRes
     earlyIssueCtx?.repo ?? null,
     earlyIssueCtx?.title ?? null,
   );
+  job.provider = provider;
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
   updateJob(job);
@@ -330,7 +344,7 @@ export async function startProjectCommit(projectName: string): Promise<CommitRes
   };
   append(`# commit start — ${new Date().toISOString()}\n# repo: ${projPath}\n`);
 
-  const result = await runCommit(projectName, projPath, append, earlyIssueCtx);
+  const result = await runCommit(projectName, projPath, append, earlyIssueCtx, provider);
   try {
     setProjectPushResult(projectName, result.ok ? null : result.detail);
   } catch {}

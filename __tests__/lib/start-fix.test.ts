@@ -29,6 +29,7 @@ describe('startFixFromJob', () => {
   let openSyncMock: ReturnType<typeof vi.fn>;
   let mkdirSyncMock: ReturnType<typeof vi.fn>;
   let writeFileSyncMock: ReturnType<typeof vi.fn>;
+  let checkCliStartGateMock: ReturnType<typeof vi.fn>;
 
   function makeSourceJob(overrides: Record<string, unknown> = {}) {
     return {
@@ -60,6 +61,7 @@ describe('startFixFromJob', () => {
     markDoneMock = vi.fn().mockResolvedValue(undefined);
     acquireLockMock = vi.fn().mockResolvedValue({ acquired: true });
     isLockOwnedByActiveReleaseMock = vi.fn().mockReturnValue(false);
+    checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
 
     vi.doMock('child_process', () => ({ spawn: spawnMock }));
     vi.doMock('fs', () => ({
@@ -95,6 +97,9 @@ describe('startFixFromJob', () => {
       jobsPausedResult: vi.fn().mockReturnValue(null),
       runGates: vi.fn().mockReturnValue(null),
     }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: checkCliStartGateMock,
+    }));
 
     ({ startFixFromJob } = await import('@/lib/pipeline/start-fix'));
   });
@@ -119,6 +124,18 @@ describe('startFixFromJob', () => {
       expect(r.status).toBe(400);
       expect(r.detail).toContain('still running');
     }
+  });
+
+  it('returns 429 when every enabled provider is over budget', async () => {
+    checkCliStartGateMock.mockResolvedValue({
+      ok: false,
+      status: 429,
+      detail: 'All enabled CLI providers are over budget. Adjust block threshold or wait for the window to reset.',
+    });
+    const r = await startFixFromJob('src-job-1');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(429);
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it('returns 404 when project path cannot be resolved', async () => {
@@ -154,7 +171,7 @@ describe('startFixFromJob', () => {
     await startFixFromJob('src-job-1');
     expect(spawnMock).toHaveBeenCalledOnce();
     const [cmd, args] = spawnMock.mock.calls[0];
-    expect(cmd).toBe('claude');
+    expect(String(cmd)).toMatch(/claude-shim\.js$/);
     expect(args).toContain('--print');
     expect(args).toContain('--output-format');
     expect(args).toContain('stream-json');
@@ -291,6 +308,9 @@ describe('startFixFromJob', () => {
     vi.doMock('@/lib/shared/job-control', () => ({
       jobsPausedResult: vi.fn().mockReturnValue({ ok: false, status: 409, detail: 'Jobs are paused globally.' }),
       runGates: vi.fn().mockReturnValue({ ok: false, status: 409, detail: 'Jobs are paused globally.' }),
+    }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: vi.fn().mockResolvedValue({ ok: false, status: 409, detail: 'Jobs are paused globally.' }),
     }));
     const { startFixFromJob: startFixPaused } = await import('@/lib/pipeline/start-fix');
     const r = await startFixPaused('src-job-1');

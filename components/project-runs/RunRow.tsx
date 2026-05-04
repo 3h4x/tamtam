@@ -4,6 +4,21 @@ import { formatAgo } from '@/lib/shared/format'
 import { formatDuration, formatTokens, formatCost, KIND_LABEL, KIND_COLOR, entryIsRunning, entryNeedsAttention } from '@/components/project-runs/utils'
 import type { Entry } from '@/components/project-runs/utils'
 
+const PROVIDER_LABEL: Record<string, string> = {
+  claude: 'claude',
+  codex: 'codex',
+  gemini: 'gemini',
+  lmstudio: 'lmstudio',
+}
+
+// Brand-ish tints so users can scan a long run list and spot which CLI ran each row.
+const PROVIDER_BADGE_CLASS: Record<string, string> = {
+  claude: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
+  codex: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+  gemini: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
+  lmstudio: 'bg-violet-500/15 text-violet-400 border-violet-500/30',
+}
+
 function modifiedFileCount(raw: string | null): number {
   if (!raw) return 0
   try {
@@ -264,6 +279,14 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
               </span>
             )}
             {e.turns > 1 && <span className="font-mono">{e.turns} turns</span>}
+            {e.provider && (
+              <span
+                className={`px-1.5 py-0.5 text-[10px] font-mono rounded border ${PROVIDER_BADGE_CLASS[e.provider] ?? 'bg-bg-tertiary text-text-secondary border-border'}`}
+                title={`CLI: ${e.provider}`}
+              >
+                {PROVIDER_LABEL[e.provider] ?? e.provider}
+              </span>
+            )}
             {e.model && <span className="font-mono">{e.model}</span>}
             {e.navSessionId && <span className="font-mono">#{e.navSessionId.slice(0, 8)}</span>}
             <span className="font-mono tabular-nums">started {formatAgo(e.startedAt)}</span>

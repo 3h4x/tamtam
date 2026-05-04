@@ -14,9 +14,11 @@ import { errMsg } from '@/lib/shared/types';
 import { exec } from '@/lib/shared/shell';
 import { parseFileAgentId, loadFileAgent } from '@/lib/agents/tamtam-file-agents';
 import { getAgentMemoryDir, getAgentMemoryPath, readAgentMemory, ensureAgentMemoryDir, buildMemoryBlock } from '@/lib/agents/agent-memory';
-import { runGates } from '@/lib/shared/job-control';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { enqueueAgentRun } from '@/lib/agents/pending-agent-run';
+import { getSettings } from '@/lib/shared/config';
+import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
+import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 
 export async function POST(
   request: NextRequest,
@@ -25,7 +27,7 @@ export async function POST(
   const { agentId } = await params;
 
   // Resolve agent — either a DB row or a file-based agent
-  let agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean } | null = null;
+  let agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean; provider?: string | null } | null = null;
 
   const parsedFileId = parseFileAgentId(agentId);
   if (parsedFileId) {
@@ -100,8 +102,6 @@ export async function POST(
   if (!projPath) {
     return NextResponse.json({ detail: `project '${agent.project}' not found` }, { status: 404 });
   }
-  const paused = runGates('start an agent run');
-  if (paused) return NextResponse.json({ detail: paused.detail }, { status: paused.status });
 
   // In Direct Branch mode, block agent runs while a fix/issue-* branch is
   // checked out. Scheduled agents committing to an issue branch would mix
@@ -198,7 +198,15 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     },
   });
 
-  const { claudeBin, logDir } = getImproveConfig();
+  const { logDir } = getImproveConfig();
+  const gate = await checkCliStartGate('start an agent run', { preferred: agent.provider ?? null });
+  if (!gate.ok) {
+    return NextResponse.json({ detail: gate.detail }, { status: gate.status });
+  }
+  const provider = gate.provider;
+  const settings = getSettings();
+  const claudeBin = resolveCliBin(provider, settings);
+  const cliEnv = resolveCliEnv(provider, settings);
 
   // Inject agent memory so it can track state across runs.
   const memDir = getAgentMemoryDir();
@@ -216,14 +224,15 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   const corePrompt = systemPrompt && taskPrompt
     ? `${systemPrompt}\n\n---\n\n${taskPrompt}`
     : (systemPrompt || taskPrompt);
-  const fullPrompt = withBasePrompt(`${corePrompt}\n\n---\n\n${memoryBlock}`, { projectPath: projPath });
+  const fullPrompt = withBasePrompt(`${corePrompt}\n\n---\n\n${memoryBlock}`, { projectPath: projPath, provider });
 
   const job = createJob(agent.project, `agent:${agent.name}`, 0, '', taskPrompt, contextMeta, taskPrompt);
+  job.provider = provider;
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
 
   try {
-    const pid = await startJob(job.id, cmd, fullPrompt, projPath);
+    const pid = await startJob(job.id, cmd, fullPrompt, projPath, { env: cliEnv });
     job.pid = pid;
   } catch (e: unknown) {
     job.finishedAt = Date.now() / 1000;

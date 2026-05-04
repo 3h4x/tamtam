@@ -22,6 +22,7 @@ function createTestDb() {
       schedule TEXT,
       runner TEXT NOT NULL DEFAULT 'pm2',
       enabled INTEGER NOT NULL DEFAULT 1,
+      provider TEXT,
       created_at REAL NOT NULL,
       updated_at REAL NOT NULL
     );
@@ -64,7 +65,9 @@ describe('POST /api/agents/{agentId}/run', () => {
   let probeJobStatusMock: ReturnType<typeof vi.fn>;
   let runGatesMock: ReturnType<typeof vi.fn>;
   let enqueueAgentRunMock: ReturnType<typeof vi.fn>;
+  let checkCliStartGateMock: ReturnType<typeof vi.fn>;
   let tempSkillsDir: string;
+  let settingsMock: Record<string, unknown>;
 
   const now = Date.now() / 1000;
 
@@ -100,6 +103,23 @@ describe('POST /api/agents/{agentId}/run', () => {
     probeJobStatusMock = vi.fn().mockResolvedValue('done');
     runGatesMock = vi.fn().mockReturnValue(null);
     enqueueAgentRunMock = vi.fn();
+    checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
+    settingsMock = {
+      workspace_path: '',
+      github_owner: '',
+      claude_bin: 'claude',
+      log_dir: '/tmp/logs',
+      cli_bin_claude: '',
+      cli_bin_codex: '',
+      cli_bin_gemini: '',
+      cli_bin_lmstudio: '',
+      frequency: '1h',
+      daytime: false,
+      weekends: false,
+      launchagent_prefix: 'com.tamtam',
+      base_prompt: '',
+      permission_mode: 'bypassPermissions',
+    };
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     vi.doMock('@/lib/agents/pending-agent-run', () => ({
@@ -139,14 +159,14 @@ describe('POST /api/agents/{agentId}/run', () => {
     vi.doMock('@/lib/shared/config', () => ({
       withBasePrompt: (p: string) => p,
       getPermissionModeFlag: () => '--dangerously-skip-permissions',
-      getSettings: () => ({
-        workspace_path: '', github_owner: '', claude_bin: 'claude', log_dir: '/tmp/logs',
-        frequency: '1h', daytime: false, weekends: false, launchagent_prefix: 'com.tamtam', base_prompt: '',
-        permission_mode: 'bypassPermissions',
-      }),
+      getSettings: () => settingsMock,
     }));
     vi.doMock('@/lib/shared/job-control', () => ({
       runGates: runGatesMock,
+      jobsPausedResult: runGatesMock,
+    }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: checkCliStartGateMock,
     }));
 
     const mod = await import('@/app/api/agents/[agentId]/run/route');
@@ -216,6 +236,43 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(data.status).toBe('started');
     expect(data.job_id).toBeTruthy();
     expect(data.agent).toBe('Test Agent');
+  });
+
+  it('keeps the Codex shim on the command line and forwards CODEX_BIN via env', async () => {
+    insertAgent({ provider: 'codex' });
+    checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'codex' });
+    settingsMock.cli_bin_codex = '/custom/codex';
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    expect(res.status).toBe(200);
+    expect(startJobMock).toHaveBeenCalledWith(
+      'test-job-id',
+      expect.stringContaining('/scripts/codex-shim.js'),
+      expect.any(String),
+      '/path/to/proj',
+      { env: { CODEX_BIN: '/custom/codex' } },
+    );
+  });
+
+  it('returns 429 when every enabled provider is over budget', async () => {
+    insertAgent();
+    checkCliStartGateMock.mockResolvedValue({
+      ok: false,
+      status: 429,
+      detail: 'All enabled CLI providers are over budget. Adjust block threshold or wait for the window to reset.',
+    });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    expect(res.status).toBe(429);
+    expect(startJobMock).not.toHaveBeenCalled();
   });
 
   it('rejects scheduled triggers for disabled agents before starting work', async () => {
@@ -317,7 +374,7 @@ describe('POST /api/agents/{agentId}/run', () => {
 
   it('returns the global pause conflict when scheduled work reaches the route while jobs are paused', async () => {
     insertAgent({ schedule: '1h' });
-    runGatesMock.mockReturnValue({
+    checkCliStartGateMock.mockResolvedValue({
       ok: false,
       status: 409,
       detail: 'Jobs are paused globally. Turn the switch back on in Settings to start an agent run.',
@@ -349,6 +406,21 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(cmd).toContain('--model normal');
     expect(fullPrompt).toContain('run tests');
     expect(projPath).toBe('/path/to/proj');
+  });
+
+  it('passes the agent provider as a soft preference and can fall back to a healthier CLI', async () => {
+    insertAgent({ provider: 'claude' });
+    checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'codex' });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'run tests' }),
+    });
+
+    await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    expect(checkCliStartGateMock).toHaveBeenCalledWith('start an agent run', { preferred: 'claude' });
+    const [, cmd] = startJobMock.mock.calls[0];
+    expect(cmd).toContain('/scripts/codex-shim.js');
   });
 
   it('sanitizes an invalid stored model before building the command', async () => {

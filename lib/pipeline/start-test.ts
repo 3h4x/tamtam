@@ -3,10 +3,11 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { spawn, execSync } from 'child_process';
 import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/scheduling';
+import { currentParent } from '@/lib/jobs/parent-context';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { createJob, listJobs, probeJobStatus, updateJob, markDone } from '@/lib/jobs/job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { runGates } from '@/lib/shared/job-control';
+import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 
 export function detectTestCommand(projPath: string, projectName?: string): string | null {
   // Explicit off-switch — overrides user/auto-detected command. Wrapped in
@@ -65,8 +66,8 @@ export type StartTestResult =
 export async function startProjectTest(projectName: string): Promise<StartTestResult> {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
-  const paused = runGates('start tests');
-  if (paused) return paused;
+  const gate = await checkCliStartGate('start tests', { parentJobId: currentParent() });
+  if (!gate.ok) return gate;
 
   // Check for existing pipeline lock — but allow running under a parent
   // release job's lock (this step was kicked off by the release pipeline).
@@ -98,6 +99,7 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
   mkdirSync(logDir, { recursive: true });
 
   const job = createJob(projectName, 'test', 0, '');
+  job.provider = gate.provider;
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
 

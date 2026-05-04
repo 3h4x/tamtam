@@ -143,6 +143,7 @@ export interface Entry {
   costUsd: number
   turns: number
   model: string | null
+  provider?: string | null
   navJobId: string
   navSessionId: string | null
   verdict?: JobInfo['verdict']
@@ -334,6 +335,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       costUsd: jobCost(j),
       turns: 1,
       model: j.model ?? modelFromContext(j.context_meta),
+      provider: j.provider ?? null,
       navJobId: j.id,
       navSessionId: j.session_id ?? null,
       verdict: j.verdict,
@@ -538,6 +540,7 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
           costUsd: cluster.reduce((s, e) => s + e.costUsd, 0),
           turns: 1,
           model: null,
+          provider: null,
           navJobId: last.navJobId,
           navSessionId: null,
           verdict: undefined,

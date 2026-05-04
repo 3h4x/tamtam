@@ -19,6 +19,7 @@
 const { spawn } = require('child_process');
 const { homedir } = require('os');
 const { join } = require('path');
+const { installInactivityWatchdog } = require('./shim-utils');
 
 const TIER_DEFAULTS = {
   fast: 'haiku',
@@ -58,7 +59,20 @@ for (let i = 0; i < argv.length; i++) {
 // Default mirrors TamTam's `claude_bin` default in lib/shared/config.ts so
 // users who relied on `~/.local/bin/claude` don't need to set CLAUDE_BIN.
 const bin = process.env.CLAUDE_BIN || join(homedir(), '.local', 'bin', 'claude');
-const child = spawn(bin, out, { stdio: 'inherit', env: process.env });
+// Pipe stdout/stderr so the inactivity watchdog can observe data events,
+// then forward each chunk to the parent's stdout/stderr so streaming
+// output and exit codes pass through unchanged.
+const child = spawn(bin, out, { stdio: ['inherit', 'pipe', 'pipe'], env: process.env });
+
+const watchdog = installInactivityWatchdog(child, { shimName: 'claude-shim' });
+child.stdout.on('data', (chunk) => {
+  watchdog.markActivity();
+  process.stdout.write(chunk);
+});
+child.stderr.on('data', (chunk) => {
+  watchdog.markActivity();
+  process.stderr.write(chunk);
+});
 
 function forward(sig) {
   return () => {
@@ -70,10 +84,16 @@ process.on('SIGINT', forward('SIGINT'));
 process.on('SIGHUP', forward('SIGHUP'));
 
 child.on('error', (err) => {
+  watchdog.dispose();
   process.stderr.write(`[claude-shim] failed to launch ${bin}: ${err.message}\n`);
   process.exit(1);
 });
 child.on('close', (code, signal) => {
+  watchdog.dispose();
+  if (watchdog.timedOut()) {
+    process.stderr.write(`[claude-shim] killed by inactivity watchdog\n`);
+    process.exit(124);
+  }
   if (signal) {
     const sigCode = require('os').constants.signals[signal] || 0;
     process.exit(128 + sigCode);

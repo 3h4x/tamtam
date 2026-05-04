@@ -47,6 +47,7 @@ export function loadFromDb(): void {
         promptBytes: row.promptBytes ?? null,
         workSummary: row.workSummary ?? null,
         modifiedFiles: row.modifiedFiles ?? null,
+        provider: row.provider ?? null,
       });
     }
     loaded = true;
@@ -90,6 +91,7 @@ export function saveToDb(job: JobData): void {
         promptBytes: job.promptBytes ?? null,
         workSummary: job.workSummary ?? null,
         modifiedFiles: job.modifiedFiles ?? null,
+        provider: job.provider ?? null,
       })
       .onConflictDoUpdate({
         target: schema.jobs.id,
@@ -117,6 +119,7 @@ export function saveToDb(job: JobData): void {
           promptBytes: job.promptBytes ?? null,
           workSummary: job.workSummary ?? null,
           modifiedFiles: job.modifiedFiles ?? null,
+          provider: job.provider ?? null,
         },
       })
       .run();
@@ -147,6 +150,7 @@ export function createJob(
   ghIssueRepo?: string | null,
   ghIssueTitle?: string | null,
   parentJobId?: string | null,
+  provider?: string | null,
 ): JobData {
   loadFromDb();
   let timestamp = Math.floor(Date.now() * 1000);
@@ -185,6 +189,7 @@ export function createJob(
     releaseId: autoReleaseId,
     workSummary: null,
     modifiedFiles: null,
+    provider: provider ?? null,
   };
   jobsCache.set(jobId, job);
   saveToDb(job);
@@ -241,6 +246,7 @@ export function getJob(jobId: string): JobData | null {
     promptBytes: row.promptBytes ?? null,
     workSummary: row.workSummary ?? null,
     modifiedFiles: row.modifiedFiles ?? null,
+    provider: row.provider ?? null,
   };
   jobsCache.set(jobId, job);
   return job;
@@ -319,6 +325,7 @@ export function jobToDict(job: JobData): Record<string, unknown> {
   d.prompt_bytes = job.promptBytes ?? null;
   d.work_summary = job.workSummary ?? null;
   d.modified_files = job.modifiedFiles ?? null;
+  d.provider = job.provider ?? null;
   const verdict = getVerdict(job);
   if (verdict !== null) d.verdict = verdict;
   return d;

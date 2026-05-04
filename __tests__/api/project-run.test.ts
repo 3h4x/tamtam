@@ -25,6 +25,8 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let createJobMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
+  let checkCliStartGateMock: ReturnType<typeof vi.fn>;
+  let getSettingsMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
   let skillsDir: string;
 
@@ -38,6 +40,11 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/project');
     createJobMock = vi.fn().mockImplementation(() => makeJob());
     updateJobMock = vi.fn();
+    checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
+    getSettingsMock = vi.fn(() => ({
+      cli_enabled_providers: ['claude'],
+      cli_bin_claude: '/legacy/claude',
+    }));
 
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
@@ -63,10 +70,23 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
       DATA_SKILLS_DIR: join(skillsDir, 'data-skills'),
     }));
 
+    vi.doMock('@/lib/shared/config', () => ({
+      withBasePrompt: (p: string) => p,
+      getPermissionModeFlag: () => '--permission-mode bypassPermissions',
+      getSettings: getSettingsMock,
+    }));
+
     vi.doMock('@/lib/shared/job-control', () => ({
       runGates: () => null,
+      jobsPausedResult: () => null,
       runAutoChainGates: () => null,
       isJobsPaused: () => false,
+    }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: checkCliStartGateMock,
+    }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: checkCliStartGateMock,
     }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
@@ -123,6 +143,21 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     expect(data.log_path).toBeTruthy();
   });
 
+  it('returns 429 when every enabled provider is over budget', async () => {
+    checkCliStartGateMock.mockResolvedValue({
+      ok: false,
+      status: 429,
+      detail: 'All enabled CLI providers are over budget. Adjust block threshold or wait for the window to reset.',
+    });
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'run my agent' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(429);
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
   it('calls startJob with correct project path', async () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
       method: 'POST',
@@ -132,6 +167,17 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     expect(startJobMock).toHaveBeenCalledOnce();
     const [, , , projPath] = startJobMock.mock.calls[0];
     expect(projPath).toBe('/path/to/project');
+  });
+
+  it('forwards the Claude binary override through CLAUDE_BIN', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'test prompt' }),
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    const [, , , , options] = startJobMock.mock.calls[0];
+    expect(options).toEqual({ env: { CLAUDE_BIN: '/legacy/claude' } });
   });
 
   it('defaults terminal runs to the fast tier', async () => {
@@ -305,6 +351,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     vi.doMock('@/lib/shared/config', () => ({
       withBasePrompt: (p: string) => `BASE-PROMPT-SENTINEL\n\n---\n\n${p}`,
       getPermissionModeFlag: () => '--permission-mode bypassPermissions',
+      getSettings: () => ({ cli_enabled_providers: ['claude'] }),
     }));
     // Re-apply other mocks that resetModules cleared
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
@@ -316,8 +363,12 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     vi.doMock('@/lib/skills/skills', () => ({ SKILLS_DIR: skillsDir, DATA_SKILLS_DIR: join(skillsDir, 'data-skills') }));
     vi.doMock('@/lib/shared/job-control', () => ({
       runGates: () => null,
+      jobsPausedResult: () => null,
       runAutoChainGates: () => null,
       isJobsPaused: () => false,
+    }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: checkCliStartGateMock,
     }));
     const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
     const POST2 = mod.POST;
@@ -338,6 +389,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     vi.doMock('@/lib/shared/config', () => ({
       withBasePrompt: (p: string) => `BASE-PROMPT-SENTINEL\n\n---\n\n${p}`,
       getPermissionModeFlag: () => '--permission-mode bypassPermissions',
+      getSettings: () => ({ cli_enabled_providers: ['claude'] }),
     }));
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({
@@ -348,6 +400,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     vi.doMock('@/lib/skills/skills', () => ({ SKILLS_DIR: skillsDir, DATA_SKILLS_DIR: join(skillsDir, 'data-skills') }));
     vi.doMock('@/lib/shared/job-control', () => ({
       runGates: () => null,
+      jobsPausedResult: () => null,
       runAutoChainGates: () => null,
       isJobsPaused: () => false,
     }));

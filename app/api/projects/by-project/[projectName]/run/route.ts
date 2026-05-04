@@ -10,8 +10,10 @@ import { createJob, updateJob } from '@/lib/jobs/job-storage';
 import { startJob } from '@/lib/jobs/pm2-jobs';
 import { withBasePrompt, getPermissionModeFlag } from '@/lib/shared/config';
 import { errMsg } from '@/lib/shared/types';
-import { runGates } from '@/lib/shared/job-control';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
+import { getSettings } from '@/lib/shared/config';
+import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
+import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 
 export async function POST(
   request: NextRequest,
@@ -21,9 +23,15 @@ export async function POST(
 
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
-  const paused = runGates('start a terminal run');
-  if (paused) return NextResponse.json({ detail: paused.detail }, { status: paused.status });
-  const { claudeBin, logDir } = getImproveConfig();
+  const { logDir } = getImproveConfig();
+  const gate = await checkCliStartGate('start a terminal run');
+  if (!gate.ok) {
+    return NextResponse.json({ detail: gate.detail }, { status: gate.status });
+  }
+  const provider = gate.provider;
+  const settings = getSettings();
+  const claudeBin = resolveCliBin(provider, settings);
+  const cliEnv = resolveCliEnv(provider, settings);
 
   let prompt = '';
   let personaPaths: string[] = [];
@@ -112,7 +120,7 @@ export async function POST(
     }
   }
   if (!resumeSessionId) {
-    prompt = withBasePrompt(prompt, { projectPath: projPath });
+    prompt = withBasePrompt(prompt, { projectPath: projPath, provider });
   }
 
   if (attachmentPaths.length > 0) {
@@ -121,6 +129,7 @@ export async function POST(
   }
 
   const job = createJob(projectName, 'run', 0, '', prompt, contextMeta || undefined, userPrompt || undefined, ghIssueNumber, ghIssueRepo || null, ghIssueTitle || null);
+  job.provider = provider;
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
 
@@ -134,7 +143,8 @@ export async function POST(
       job.id,
       cmd,
       prompt,
-      projPath
+      projPath,
+      { env: cliEnv }
     );
     job.pid = pid;
   } catch (e: unknown) {

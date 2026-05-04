@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { errMsg } from '@/lib/shared/types'
 import { FIELDS, DEFAULTS, GRID_COLS } from '@/components/settings/constants'
 import type { SettingsFieldKey } from '@/components/settings/constants'
@@ -9,8 +10,9 @@ import { AgentTemplatesTab } from '@/components/settings/AgentTemplatesTab'
 export type { AgentTemplateRecord } from '@/components/settings/AgentTemplatesTab'
 import { NotificationsTab } from '@/components/settings/NotificationsTab'
 import type { NotificationsSettings } from '@/components/settings/NotificationsTab'
-import { BudgetTab } from '@/components/settings/BudgetTab'
-import type { BudgetSettings } from '@/components/settings/BudgetTab'
+import { CliTab } from '@/components/settings/CliTab'
+import type { CliTabSettings } from '@/components/settings/CliTab'
+import { parseEnabledProviders } from '@/lib/usage/cli-providers'
 
 interface SettingsMap {
   workspace_path: string
@@ -23,6 +25,15 @@ interface SettingsMap {
   github_board_view_url: string
   claude_provider: string
   claude_bin: string
+  cli_enabled_providers: string
+  cli_bin_claude: string
+  cli_bin_codex: string
+  cli_bin_gemini: string
+  cli_bin_lmstudio: string
+  cli_default_model_claude: string
+  cli_default_model_codex: string
+  cli_default_model_gemini: string
+  cli_default_model_lmstudio: string
   lmstudio_model: string
   log_dir: string
   frequency: string
@@ -69,6 +80,15 @@ const SETTINGS_DEFAULTS: SettingsMap = {
   github_board_project_number: '',
   github_board_project_url: '',
   github_board_view_url: '',
+  cli_enabled_providers: 'claude',
+  cli_bin_claude: '',
+  cli_bin_codex: '',
+  cli_bin_gemini: '',
+  cli_bin_lmstudio: '',
+  cli_default_model_claude: 'normal',
+  cli_default_model_codex: 'normal',
+  cli_default_model_gemini: 'normal',
+  cli_default_model_lmstudio: 'normal',
   jobs_paused: 'false',
   notification_on_budget_blocked: 'false',
   budget_block_runs_enabled: 'false',
@@ -77,7 +97,7 @@ const SETTINGS_DEFAULTS: SettingsMap = {
   budget_warn_at_pct: '80',
 }
 
-type TabId = 'agent' | 'pipeline' | 'general' | 'projects' | 'database' | 'templates' | 'notifications' | 'budget'
+type TabId = 'general' | 'cli' | 'pipeline' | 'projects' | 'database' | 'templates' | 'notifications'
 
 const GROUPS: {
   id: TabId
@@ -85,17 +105,15 @@ const GROUPS: {
   description: string
   cols: number
 }[] = [
-  { id: 'agent',    title: 'Agent',           description: 'Which CLI backend TamTam invokes and how Claude is prompted',     cols: 2 },
   { id: 'pipeline', title: 'Release Pipeline', description: 'Commit, review, fix-loop, and retention rules for the release pipeline', cols: 2 },
   { id: 'general',  title: 'General',          description: 'Workspace location, GitHub defaults, and scheduling windows',     cols: 3 },
 ]
 
 const TABS: { id: TabId; label: string }[] = [
-  { id: 'agent',         label: 'Agent' },
-  { id: 'pipeline',      label: 'Pipeline' },
   { id: 'general',       label: 'General' },
+  { id: 'cli',           label: 'CLI' },
+  { id: 'pipeline',      label: 'Pipeline' },
   { id: 'notifications', label: 'Notifications' },
-  { id: 'budget',        label: 'Budget' },
   { id: 'projects',      label: 'Projects' },
   { id: 'templates',     label: 'Templates' },
   { id: 'database',      label: 'Database' },
@@ -109,7 +127,8 @@ interface ProjectEntry {
   priority: string | null
 }
 
-export function SettingsPage() {
+export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
+  const router = useRouter()
   const [settings, setSettings]           = useState<SettingsMap>({ ...SETTINGS_DEFAULTS })
   const [savedSettings, setSavedSettings] = useState<SettingsMap>({ ...SETTINGS_DEFAULTS })
   const [loading, setLoading]             = useState(true)
@@ -117,14 +136,9 @@ export function SettingsPage() {
   const [saved, setSaved]                 = useState(false)
   const [error, setError]                 = useState<string | null>(null)
   const [showAdvanced, setShowAdvanced]   = useState(false)
-  const [activeTab, setActiveTab]         = useState<TabId>(() => {
-    if (typeof window === 'undefined') return 'agent'
-    const stored = localStorage.getItem('tamtam-settings-tab-v2') as TabId | null
-    return stored && TABS.some(t => t.id === stored) ? stored : 'agent'
-  })
+  const activeTab: TabId = initialTab && TABS.some(t => t.id === initialTab) ? initialTab : 'general'
   const switchTab = (id: TabId) => {
-    setActiveTab(id)
-    try { localStorage.setItem('tamtam-settings-tab-v2', id) } catch {}
+    router.push(`/settings/${id}`)
   }
 
   const [projects, setProjects]               = useState<ProjectEntry[]>([])
@@ -206,6 +220,9 @@ export function SettingsPage() {
   const handleChange = (key: keyof SettingsMap, value: string) => {
     setSettings((prev) => {
       const next = { ...prev, [key]: value }
+      if (key === 'cli_enabled_providers') {
+        next.claude_provider = parseEnabledProviders(value)[0] ?? 'claude'
+      }
       if (key === 'claude_provider' && (value === 'claude' || value === 'custom')) {
         // Drop stale shim paths left over from a prior shim selection
         // so the Claude CLI Path field shows the real default instead.
@@ -604,10 +621,10 @@ export function SettingsPage() {
             />
           )}
 
-          {/* Budget */}
-          {activeTab === 'budget' && (
-            <BudgetTab
-              settings={settings as unknown as BudgetSettings}
+          {/* CLI (formerly Agent + Budget) */}
+          {activeTab === 'cli' && (
+            <CliTab
+              settings={settings as unknown as CliTabSettings}
               onChange={(key, value) => handleChange(key as keyof SettingsMap, value)}
             />
           )}

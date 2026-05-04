@@ -1,6 +1,9 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/scheduling';
+import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
+import { checkCliStartGate } from '@/lib/usage/resolve-provider';
+import { currentParent } from '@/lib/jobs/parent-context';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { createJob, listJobs, probeJobStatus, readParsedLog, updateJob } from '@/lib/jobs/job-storage';
 import { startJob } from '@/lib/jobs/pm2-jobs';
@@ -8,7 +11,6 @@ import { exec } from '@/lib/shared/shell';
 import { CODE_REVIEWER_SKILL } from '@/lib/skills/skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings, getPipelineModel } from '@/lib/shared/config';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { runGates } from '@/lib/shared/job-control';
 import { extractFindingIds, REVIEW_OUTPUT_CONTRACT, stripFinalVerdict } from './review-contract';
 import type { JobData } from '@/lib/jobs/types';
 
@@ -128,7 +130,10 @@ ${excerpt || '(no log excerpt)'}`;
 }
 
 /** Start a code review for the given project. Returns the new job id or a structured error. */
-export async function startProjectReview(projectName: string): Promise<StartReviewResult> {
+export async function startProjectReview(
+  projectName: string,
+  options: { preferredProvider?: string | null } = {},
+): Promise<StartReviewResult> {
   // Per-project off-switch — used when the agent prompt already performs review.
   try {
     if (getProjectTestConfig(projectName)?.reviewDisabled) {
@@ -136,14 +141,21 @@ export async function startProjectReview(projectName: string): Promise<StartRevi
     }
   } catch { /* ignore — test env without DB */ }
 
-  const { claudeBin, logDir } = getImproveConfig();
+  const { logDir } = getImproveConfig();
   const reviewModel = getPipelineModel('review');
   const projPath = resolveProjectPath(projectName);
   if (!projPath) {
     return { ok: false, status: 404, detail: `project '${projectName}' not found` };
   }
-  const paused = runGates('start a review');
-  if (paused) return paused;
+  const gate = await checkCliStartGate('start a review', {
+    parentJobId: currentParent(),
+    preferred: options.preferredProvider ?? null,
+  });
+  if (!gate.ok) return gate;
+  const provider = gate.provider;
+  const settings = getSettings();
+  const claudeBin = resolveCliBin(provider, settings);
+  const cliEnv = resolveCliEnv(provider, settings);
 
   // Check for existing pipeline lock — but allow running under a parent
   // release job's lock (this step was kicked off by the release pipeline).
@@ -176,10 +188,11 @@ export async function startProjectReview(projectName: string): Promise<StartRevi
       .replace('{path}', projPath)
       .replace('{review_scope}', scope.prompt)
       .replace('{release_context}', releaseContextForReview(projectName)),
-    { projectPath: projPath }
+    { projectPath: projPath, provider }
   );
 
   const job = createJob(projectName, 'review', 0, '');
+  job.provider = provider;
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
 
@@ -188,7 +201,8 @@ export async function startProjectReview(projectName: string): Promise<StartRevi
       job.id,
       `${claudeBin} --print --output-format stream-json --verbose --include-partial-messages --model ${reviewModel} ${getPermissionModeFlag()}`,
       prompt,
-      projPath
+      projPath,
+      { env: cliEnv }
     );
     job.pid = pid;
   } catch (e: unknown) {

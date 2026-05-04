@@ -3,11 +3,13 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { mkdirSync, openSync, closeSync, writeFileSync } from 'fs';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
+import { getSettings } from '@/lib/shared/config';
+import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
+import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getJob, createJob, readParsedLog, probeJobStatus, updateJob, markDone } from '@/lib/jobs/job-storage';
 import { getPermissionModeFlag, getPipelineModel } from '@/lib/shared/config';
 import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { runGates } from '@/lib/shared/job-control';
 import { FIX_OUTPUT_CONTRACT, stripFinalVerdict } from './review-contract';
 
 export type StartFixResult =
@@ -22,11 +24,15 @@ export async function startFixFromJob(sourceJobId: string): Promise<StartFixResu
   }
 
   const projectName = sourceJob.project;
-  const { claudeBin, logDir } = getImproveConfig();
+  const { logDir } = getImproveConfig();
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
-  const paused = runGates('start a fix job');
-  if (paused) return paused;
+  const gate = await checkCliStartGate('start a fix job', { parentJobId: sourceJob.id });
+  if (!gate.ok) return gate;
+  const provider = gate.provider;
+  const settings = getSettings();
+  const claudeBin = resolveCliBin(provider, settings);
+  const cliEnv = resolveCliEnv(provider, settings);
 
   const resumeSessionId = sourceJob.sessionId ?? null;
 
@@ -81,6 +87,7 @@ Do not commit — just make the code changes.
   mkdirSync(logDir, { recursive: true });
 
   const job = createJob(projectName, 'fix', 0, '');
+  job.provider = provider;
   const logPath = join(logDir, `${job.id}.log`);
   const promptPath = join(logDir, `${job.id}.prompt`);
   job.logPath = logPath;
@@ -108,6 +115,7 @@ Do not commit — just make the code changes.
     stdio: ['pipe', logFd, logFd],
     env: {
       ...process.env,
+      ...cliEnv,
       PATH: `${join(homedir(), 'Library', 'pnpm')}:${process.env.PATH ?? ''}`,
       HOME: homedir(),
     },

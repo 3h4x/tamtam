@@ -28,6 +28,7 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
   let startJobMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
   let dbGetMock: ReturnType<typeof vi.fn>;
+  let checkCliStartGateMock: ReturnType<typeof vi.fn>;
 
   const CI_URL = 'https://github.com/owner/repo/actions/runs/12345';
 
@@ -41,6 +42,7 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
     updateJobMock = vi.fn();
     startJobMock = vi.fn().mockResolvedValue(42);
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: 'Build failed\nError: test suite failed', stderr: '' });
+    checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'codex' });
 
     dbGetMock = vi.fn().mockReturnValue({ project: 'proj1', ciFailedUrl: CI_URL });
 
@@ -63,6 +65,9 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/shared/config', () => ({ getPermissionModeFlag: vi.fn().mockReturnValue(''), getSettings: vi.fn().mockReturnValue({ default_model: 'sonnet' }) }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: checkCliStartGateMock,
+    }));
     vi.doMock('@/lib/db', () => ({
       db: {
         select: vi.fn().mockReturnValue({
@@ -136,6 +141,16 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
     expect(data.status).toBe('started');
     expect(data.job_id).toBeTruthy();
     expect(data.ci_url).toBe(CI_URL);
+  });
+
+  it('passes the preferred provider header into the chooser', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/fix-ci', {
+      method: 'POST',
+      headers: { 'x-tamtam-provider-preferred': 'claude' },
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    expect(checkCliStartGateMock).toHaveBeenCalledWith('start a CI fix', { preferred: 'claude' });
   });
 
   it('calls gh with the run ID extracted from the CI URL', async () => {

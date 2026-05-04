@@ -99,7 +99,16 @@ export function useTerminalBootstrap({
   useEffect(() => {
     if (!initialSessionId) return
     const cur = terminalStore.get(projectName)
-    if (cur.streaming) return
+    // Only bail out if the currently-streaming job is for the same session
+    // we're being asked to restore. If a different agent run was streaming
+    // when the URL changed, close that stream and restore the requested
+    // session — otherwise the user clicks a review and keeps seeing the
+    // unrelated running agent.
+    if (cur.streaming && cur.claudeSessionId === initialSessionId) return
+    if (cur.streaming) {
+      terminalStore.closeStream(projectName)
+      terminalStore.reset(projectName)
+    }
 
     let cancelled = false
     const run = async () => {

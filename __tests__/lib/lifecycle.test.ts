@@ -44,7 +44,8 @@ function createTestDb() {
       aborted_at REAL,
       prompt_bytes INTEGER,
       work_summary TEXT,
-      modified_files TEXT
+      modified_files TEXT,
+      provider TEXT
     );
     CREATE TABLE IF NOT EXISTS recommendations (
       id TEXT PRIMARY KEY,
@@ -796,7 +797,7 @@ describe('verdict retry rescue', () => {
   let retryVerdictMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
 
-  function makeReviewJob(id: string, logPath: string | null): JobData {
+  function makeReviewJob(id: string, logPath: string | null, overrides: Partial<JobData> = {}): JobData {
     const now = Date.now() / 1000;
     return {
       id,
@@ -816,6 +817,8 @@ describe('verdict retry rescue', () => {
       cacheCreateTokens: null,
       sessionId: null,
       releaseId: 'release-retry',
+      provider: null,
+      ...overrides,
     };
   }
 
@@ -902,6 +905,21 @@ describe('verdict retry rescue', () => {
     await markDoneFn(makeReviewJob('rev-no-verdict', logPath), 0);
 
     expect(retryVerdictMock).toHaveBeenCalledOnce();
+  });
+
+  it('passes the source review provider into parse-retry for non-Claude reviews', async () => {
+    const logPath = join(tempDir, 'no-verdict-codex.log');
+    writeFileSync(logPath, 'Review text without a formal verdict line.\n');
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+
+    await markDoneFn(makeReviewJob('rev-no-verdict-codex', logPath, { provider: 'codex' }), 0);
+
+    expect(retryVerdictMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'rev-no-verdict-codex',
+      provider: 'codex',
+    }));
   });
 
   it('uses the rescued verdict from retry — LGTM → no fix started', async () => {

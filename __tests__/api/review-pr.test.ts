@@ -76,6 +76,7 @@ describe('POST /api/projects/by-project/{projectName}/review-pr', () => {
 
     vi.doMock('@/lib/shared/job-control', () => ({
       runGates: () => null,
+      jobsPausedResult: () => null,
       runAutoChainGates: () => null,
       isJobsPaused: () => false,
     }));

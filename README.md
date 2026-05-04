@@ -60,14 +60,21 @@ pnpm mcp:http <tool> [json_args]  # call local TamTam HTTP endpoints via .tamtam
 
 Runtime config lives in the SQLite database (`data/db/tamtam.db`). Shared per-project settings can also be committed in `.tamtam/config.yml`, and file-agent prompts can live in `.tamtam/agents/*.md`.
 
+The Settings area is split across `/settings/general`, `/settings/cli`, `/settings/pipeline`, `/settings/notifications`, `/settings/projects`, `/settings/templates`, and `/settings/database`.
+
 | Setting | Where |
 |---|---|
-| Workspace path | Settings page |
-| Global base prompt | Settings page |
-| Agent provider and binary path | Settings page |
-| Agent templates | Settings page |
+| Workspace path | `/settings/general` |
+| GitHub owner and board sync | `/settings/general` |
+| CLI provider routing, binaries, and model tiers | `/settings/cli` |
+| Global base prompt | `/settings/cli` |
+| Pipeline behavior, commit/review rules, and model overrides | `/settings/pipeline` |
+| Project enablement | `/settings/projects` |
+| Agent templates | `/settings/templates` |
 | Per-project test commands | `/project/[name]/config` |
 | Custom actions | `/project/[name]/config` |
+| Notifications | `/settings/notifications` |
+| Database backup | `/settings/database` |
 
 Optional env vars:
 
@@ -105,6 +112,7 @@ Run any agent on demand from the UI, or let the scheduler fire it automatically.
 ```bash
 pnpm test           # vitest unit tests
 pnpm test:e2e       # Playwright (requires dev server running)
+pnpm test:e2e:pipeline  # pipeline e2e tests (isolated dev server + temp DB)
 pnpm type-check     # TypeScript
 pnpm check          # lint + type-check + test (all in one)
 ```
