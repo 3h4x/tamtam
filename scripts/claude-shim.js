@@ -1,0 +1,82 @@
+#!/usr/bin/env node
+/* eslint-env node */
+
+/**
+ * Claude CLI tier-name shim.
+ *
+ * TamTam uses tier names (`fast`/`normal`/`smart`) globally so all provider
+ * shims share one vocabulary. The actual `claude` CLI does not understand
+ * these — it expects its own aliases (`haiku`/`sonnet`/`opus`) or full
+ * model IDs — so this thin wrapper rewrites the `--model` value before
+ * exec'ing the real Claude binary. All other args (and stdio) are forwarded
+ * verbatim, so streaming and exit codes pass through untouched.
+ *
+ * Override the underlying binary with `CLAUDE_BIN` (default `claude`), and
+ * the per-tier mapping with `CLAUDE_FAST_MODEL` / `CLAUDE_NORMAL_MODEL` /
+ * `CLAUDE_SMART_MODEL`.
+ */
+
+const { spawn } = require('child_process');
+const { homedir } = require('os');
+const { join } = require('path');
+
+const TIER_DEFAULTS = {
+  fast: 'haiku',
+  normal: 'sonnet',
+  smart: 'opus',
+};
+
+function resolveClaudeModel(value) {
+  const v = String(value || '').trim();
+  if (!v) return v;
+  if (v === 'fast') return process.env.CLAUDE_FAST_MODEL || TIER_DEFAULTS.fast;
+  if (v === 'normal') return process.env.CLAUDE_NORMAL_MODEL || TIER_DEFAULTS.normal;
+  if (v === 'smart') return process.env.CLAUDE_SMART_MODEL || TIER_DEFAULTS.smart;
+  // Already a Claude alias or full model ID — leave it alone.
+  return v;
+}
+
+const argv = process.argv.slice(2);
+const out = [];
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a === '--model' && i + 1 < argv.length) {
+    out.push(a, resolveClaudeModel(argv[i + 1]));
+    i += 1;
+  } else if (a.startsWith('--model=')) {
+    out.push(`--model=${resolveClaudeModel(a.slice('--model='.length))}`);
+  } else if (a === '--fallback-model' && i + 1 < argv.length) {
+    out.push(a, resolveClaudeModel(argv[i + 1]));
+    i += 1;
+  } else if (a.startsWith('--fallback-model=')) {
+    out.push(`--fallback-model=${resolveClaudeModel(a.slice('--fallback-model='.length))}`);
+  } else {
+    out.push(a);
+  }
+}
+
+// Default mirrors TamTam's `claude_bin` default in lib/shared/config.ts so
+// users who relied on `~/.local/bin/claude` don't need to set CLAUDE_BIN.
+const bin = process.env.CLAUDE_BIN || join(homedir(), '.local', 'bin', 'claude');
+const child = spawn(bin, out, { stdio: 'inherit', env: process.env });
+
+function forward(sig) {
+  return () => {
+    try { child.kill(sig); } catch { /* child may already be gone */ }
+  };
+}
+process.on('SIGTERM', forward('SIGTERM'));
+process.on('SIGINT', forward('SIGINT'));
+process.on('SIGHUP', forward('SIGHUP'));
+
+child.on('error', (err) => {
+  process.stderr.write(`[claude-shim] failed to launch ${bin}: ${err.message}\n`);
+  process.exit(1);
+});
+child.on('close', (code, signal) => {
+  if (signal) {
+    const sigCode = require('os').constants.signals[signal] || 0;
+    process.exit(128 + sigCode);
+  }
+  process.exit(code ?? 0);
+});

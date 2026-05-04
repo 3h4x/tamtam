@@ -19,9 +19,9 @@ export function SettingsField({
 }) {
   const field = FIELDS[fieldKey]
   const colSpanClass = COL_SPAN[field.span ?? 1] ?? 'col-span-1'
-  const shimManaged = fieldKey === 'claude_bin' && (provider === 'gemini' || provider === 'lmstudio' || provider === 'codex')
+  const shimManaged = fieldKey === 'claude_bin' && (provider === 'claude' || provider === 'gemini' || provider === 'lmstudio' || provider === 'codex')
   const shimDisplay = shimManaged
-    ? `<TamTam>/scripts/${provider === 'gemini' ? 'gemini-shim.js' : provider === 'lmstudio' ? 'lmstudio-shim.js' : 'codex-shim.js'}`
+    ? `<TamTam>/scripts/${provider === 'gemini' ? 'gemini-shim.js' : provider === 'lmstudio' ? 'lmstudio-shim.js' : provider === 'codex' ? 'codex-shim.js' : 'claude-shim.js'}`
     : ''
 
   return (

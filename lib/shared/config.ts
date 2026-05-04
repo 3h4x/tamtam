@@ -131,7 +131,7 @@ function shimPath(name: string): string {
 
 function isShimPath(bin: string | undefined): boolean {
   if (!bin) return false;
-  return /scripts\/(gemini|lmstudio|codex)-shim\.js$/.test(bin);
+  return /scripts\/(claude|gemini|lmstudio|codex)-shim\.js$/.test(bin);
 }
 
 function inferClaudeProvider(claudeBin: string | undefined): string {
@@ -139,6 +139,7 @@ function inferClaudeProvider(claudeBin: string | undefined): string {
   if (claudeBin.endsWith('/scripts/gemini-shim.js') || claudeBin.endsWith('scripts/gemini-shim.js')) return 'gemini';
   if (claudeBin.endsWith('/scripts/lmstudio-shim.js') || claudeBin.endsWith('scripts/lmstudio-shim.js')) return 'lmstudio';
   if (claudeBin.endsWith('/scripts/codex-shim.js') || claudeBin.endsWith('scripts/codex-shim.js')) return 'codex';
+  if (claudeBin.endsWith('/scripts/claude-shim.js') || claudeBin.endsWith('scripts/claude-shim.js')) return 'claude';
   if (claudeBin === DEFAULTS.claude_bin || claudeBin.endsWith('/claude') || claudeBin === 'claude') return 'claude';
   return 'custom';
 }
@@ -147,7 +148,12 @@ function resolveClaudeBin(provider: string, storedBin: string | undefined): stri
   if (provider === 'gemini') return shimPath('gemini-shim.js');
   if (provider === 'lmstudio') return shimPath('lmstudio-shim.js');
   if (provider === 'codex') return shimPath('codex-shim.js');
-  // For claude/custom providers, ignore stored shim paths left over from a prior
+  // The Claude CLI doesn't accept TamTam's tier names (`fast`/`normal`/`smart`)
+  // for `--model`. Route through scripts/claude-shim.js, which translates the
+  // tier name to a Claude alias and execs the real binary (default
+  // `~/.local/bin/claude`, override with CLAUDE_BIN env var).
+  if (provider === 'claude') return shimPath('claude-shim.js');
+  // For custom providers, ignore stored shim paths left over from a prior
   // gemini/lmstudio configuration — they would invoke the wrong backend.
   if (isShimPath(storedBin)) return DEFAULTS.claude_bin;
   return storedBin ?? DEFAULTS.claude_bin;
