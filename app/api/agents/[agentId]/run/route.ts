@@ -16,6 +16,7 @@ import { parseFileAgentId, loadFileAgent } from '@/lib/agents/tamtam-file-agents
 import { getAgentMemoryDir, getAgentMemoryPath, readAgentMemory, ensureAgentMemoryDir, buildMemoryBlock } from '@/lib/agents/agent-memory';
 import { runGates } from '@/lib/shared/job-control';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
+import { enqueueAgentRun } from '@/lib/agents/pending-agent-run';
 
 export async function POST(
   request: NextRequest,
@@ -52,25 +53,47 @@ export async function POST(
     return NextResponse.json({ detail: `Agent '${agent.name}' has no schedule — ignoring scheduled trigger` }, { status: 409 });
   }
 
-  // Prevent duplicate runs: check if this agent is already running
-  const kindKey = `agent:${agent.name}`;
-  const candidates = listJobs().filter(
-    (j) => j.project === agent.project && j.kind === kindKey && j.finishedAt === null
-  );
-  for (const j of candidates) {
-    if ((await probeJobStatus(j)) === 'running') {
-      return NextResponse.json(
-        { detail: `Agent '${agent.name}' is already running (job ${j.id})` },
-        { status: 409 }
-      );
-    }
-  }
-
   const body = await request.json();
   const taskPrompt = body.prompt?.trim() ?? '';
   const hasSkills = JSON.parse(agent.skillIds || '[]').length > 0;
   if (!taskPrompt && !hasSkills) {
     return NextResponse.json({ detail: 'agent has no prompt and no skills to run' }, { status: 400 });
+  }
+
+  // Only one agent runs at a time per project — concurrent agents racing on
+  // the same git worktree clobber each other's commits and branch state.
+  //   - Same agent already running → reject (true duplicate, scheduler retries
+  //     on the next tick; queueing would just recurse).
+  //   - Different agent running on this project → enqueue this fire and return
+  //     202 queued. Drained when the running agent finishes.
+  const kindKey = `agent:${agent.name}`;
+  const runningAgents = listJobs().filter(
+    (j) => j.project === agent.project && j.kind.startsWith('agent:') && j.finishedAt === null
+  );
+  for (const j of runningAgents) {
+    if ((await probeJobStatus(j)) !== 'running') continue;
+    if (j.kind === kindKey) {
+      return NextResponse.json(
+        { detail: `Agent '${agent.name}' is already running (job ${j.id})` },
+        { status: 409 }
+      );
+    }
+    enqueueAgentRun(agent.project, {
+      agentId: agent.id,
+      agentName: agent.name,
+      triggeredBy,
+      prompt: taskPrompt,
+      enqueuedAt: Date.now(),
+    });
+    return NextResponse.json(
+      {
+        status: 'queued',
+        detail: `Agent '${agent.name}' queued — '${j.kind}' is running for ${agent.project} (job ${j.id})`,
+        blockingJobId: j.id,
+        agent: agent.name,
+      },
+      { status: 202 }
+    );
   }
 
   const projPath = resolveProjectPath(agent.project);

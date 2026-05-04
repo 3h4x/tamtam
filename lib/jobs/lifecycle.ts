@@ -826,6 +826,18 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     }
   }
 
+  // Drain the pending-agent-run queue: only one agent runs at a time per
+  // project (the run route enqueues here when another agent was already
+  // active). Trigger the next pending fire now that this slot is free.
+  if (job.kind.startsWith('agent:')) {
+    try {
+      const { drainNextAgentRun } = await import('@/lib/agents/pending-agent-run');
+      await drainNextAgentRun(job.project);
+    } catch (e) {
+      console.error(`[pending-agent-run] drain hook error for ${job.project}:`, e);
+    }
+  }
+
   // Agent run failures: notify on agent run failures
   if (job.kind.startsWith('agent:') && job.exitCode !== 0) {
     try {
