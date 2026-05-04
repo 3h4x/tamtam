@@ -34,9 +34,11 @@ describe('settings API', () => {
       owner: 'octocat',
       title: 'TamTam',
       projectNumber: '7',
+      projectUrl: 'https://github.com/users/octocat/projects/7',
       projectId: 'PVT_x',
       statusFieldId: 'F_x',
-      optionIds: { Queued: '1', Running: '2', Review: '3', Fixing: '4', 'Ready to Push': '5', Blocked: '6', Done: '7', Failed: '8' },
+      optionIds: { 'Todo': '1', 'In Progress': '2', 'Review': '3', 'Fixing': '4', 'Blocked': '5', 'Done': '6' },
+      customFieldIds: { project: 'F_P', agent: 'F_A', kind: 'F_K', branch: 'F_B' },
     });
 
     vi.doMock('@/lib/db', () => ({
@@ -429,11 +431,11 @@ describe('settings API', () => {
       expect(rows.github_board_project_number).toBe('7');
       expect(rows.github_board_project_id).toBe('PVT_x');
       expect(rows.github_board_status_field_id).toBe('F_x');
-      expect(rows.github_board_status_option_ids).toContain('"Running":"2"');
+      expect(rows.github_board_status_option_ids).toContain('"In Progress":"2"');
     });
 
     it('persists github_board_status_option_ids as JSON when given an object', async () => {
-      const optionIds = { Queued: 'Q', Running: 'R', Review: 'REV', Fixing: 'F', 'Ready to Push': 'P', Blocked: 'B', Done: 'D', Failed: 'X' };
+      const optionIds = { 'Todo': 'Q', 'In Progress': 'R', 'Review': 'REV', 'Fixing': 'F', 'Blocked': 'B', 'Done': 'D' };
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',
         body: JSON.stringify({ github_board_status_option_ids: optionIds }),
@@ -446,7 +448,7 @@ describe('settings API', () => {
     });
 
     it('round-trips github_board_status_option_ids through GET', async () => {
-      const optionIds = { Queued: 'Q', Running: 'R' };
+      const optionIds = { 'Todo': 'Q', 'In Progress': 'R' };
       testDb.db.insert(schema.settings).values({ key: 'github_board_status_option_ids', value: JSON.stringify(optionIds) }).run();
       const response = await GET();
       const data = await response.json();

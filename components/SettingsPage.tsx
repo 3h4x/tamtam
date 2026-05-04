@@ -19,6 +19,8 @@ interface SettingsMap {
   github_board_project_owner: string
   github_board_project_title: string
   github_board_project_number: string
+  github_board_project_url: string
+  github_board_view_url: string
   claude_provider: string
   claude_bin: string
   lmstudio_model: string
@@ -65,6 +67,8 @@ const SETTINGS_DEFAULTS: SettingsMap = {
   github_board_project_owner: '',
   github_board_project_title: 'TamTam',
   github_board_project_number: '',
+  github_board_project_url: '',
+  github_board_view_url: '',
   jobs_paused: 'false',
   notification_on_budget_blocked: 'false',
   budget_block_runs_enabled: 'false',
@@ -127,6 +131,8 @@ export function SettingsPage() {
   const [projectsLoading, setProjectsLoading] = useState(false)
   const [projectsSaving, setProjectsSaving]   = useState(false)
   const [projectsSaved, setProjectsSaved]     = useState(false)
+  const [boardResyncing, setBoardResyncing]   = useState(false)
+  const [boardResyncMsg, setBoardResyncMsg]   = useState<string | null>(null)
 
   const isDirty = JSON.stringify(settings) !== JSON.stringify(savedSettings)
 
@@ -400,6 +406,69 @@ export function SettingsPage() {
                           />
                         </div>
                       </div>
+                      {settings.github_board_project_url && (
+                        <div className="mt-3 flex items-center gap-3">
+                          <a
+                            href={settings.github_board_view_url || settings.github_board_project_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+                          >
+                            Open board on GitHub ↗
+                          </a>
+                          {settings.github_board_view_url && (
+                            <span className="text-xs text-text-tertiary">(custom view configured)</span>
+                          )}
+                          <button
+                            type="button"
+                            disabled={boardResyncing || settings.github_board_sync_enabled !== 'true'}
+                            onClick={async () => {
+                              setBoardResyncing(true)
+                              setBoardResyncMsg(null)
+                              try {
+                                const res = await fetch('/api/settings/board-resync', { method: 'POST' })
+                                const data = await res.json()
+                                if (!res.ok || !data.ok) {
+                                  setBoardResyncMsg(data.error || `HTTP ${res.status}`)
+                                } else {
+                                  const rl = data.rateLimited ? ', rate-limited — wait 5 min and retry' : ''
+                                  setBoardResyncMsg(`Resynced ${data.resynced}/${data.scanned} (last ${data.days}d, top ${data.limit}, ${data.failed} failed${rl})`)
+                                }
+                              } catch (e: unknown) {
+                                setBoardResyncMsg(`Failed: ${errMsg(e)}`)
+                              } finally {
+                                setBoardResyncing(false)
+                              }
+                            }}
+                            className="text-xs text-text-secondary hover:text-text-primary border border-border rounded px-2 py-1 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                          >
+                            {boardResyncing ? 'Resyncing…' : 'Resync recent runs'}
+                          </button>
+                          {boardResyncMsg && <span className="text-xs text-text-tertiary">{boardResyncMsg}</span>}
+                        </div>
+                      )}
+                      <div className="mt-4">
+                        <label className="mb-1 block text-xs font-medium text-text-secondary">Kanban view URL <span className="text-text-tertiary">(optional)</span></label>
+                        <input
+                          value={settings.github_board_view_url}
+                          onChange={(e) => handleChange('github_board_view_url', e.target.value)}
+                          placeholder="https://github.com/users/.../projects/7/views/2"
+                          className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+                        />
+                      </div>
+                      {settings.github_board_project_url && (
+                        <div className="mt-4 rounded-lg border border-border bg-bg-secondary/50 p-3 text-xs text-text-secondary">
+                          <div className="font-semibold text-text-primary mb-1">Optional: pin a custom kanban view</div>
+                          <p className="text-text-tertiary mb-2">
+                            TamTam writes to the project&apos;s built-in <code className="font-mono">Status</code> field and adds <code className="font-mono">Review</code>, <code className="font-mono">Fixing</code>, and <code className="font-mono">Blocked</code> on top of GitHub&apos;s default <code className="font-mono">Todo / In Progress / Done</code>. The default <code className="font-mono">View 1</code> already groups by Status — no setup needed. To deep-link to a custom view from TamTam, create one and paste its URL above.
+                          </p>
+                          <ol className="list-decimal list-inside space-y-0.5 text-text-tertiary">
+                            <li>Open the board (link above) and click <span className="font-mono text-text-secondary">+ New view</span></li>
+                            <li>Pick <span className="font-mono text-text-secondary">Board</span> and group by <span className="font-mono text-text-secondary">Status</span></li>
+                            <li>Save, then copy the new view URL into the field above so all <span className="font-mono text-text-secondary">Board ↗</span> chips deep-link to it</li>
+                          </ol>
+                        </div>
+                      )}
                     </div>
                   )}
 

@@ -19,9 +19,12 @@ export interface TamTamConfig {
   github_board_project_owner: string;
   github_board_project_title: string;
   github_board_project_number: string;
+  github_board_project_url: string;
+  github_board_view_url: string;
   github_board_project_id: string;
   github_board_status_field_id: string;
   github_board_status_option_ids: Partial<Record<import('@/lib/github/project-board-status').BoardStatus, string>>;
+  github_board_custom_field_ids: Partial<Record<'project' | 'agent' | 'kind' | 'branch', string>>;
   claude_provider: string;
   claude_bin: string;
   lmstudio_model: string;
@@ -69,9 +72,12 @@ const DEFAULTS: TamTamConfig = {
   github_board_project_owner: '',
   github_board_project_title: 'TamTam',
   github_board_project_number: '',
+  github_board_project_url: '',
+  github_board_view_url: '',
   github_board_project_id: '',
   github_board_status_field_id: '',
   github_board_status_option_ids: {},
+  github_board_custom_field_ids: {},
   claude_provider: 'claude',
   claude_bin: '~/.local/bin/claude',
   lmstudio_model: '',
@@ -178,9 +184,12 @@ export function getSettings(): TamTamConfig {
     github_board_project_owner: map.github_board_project_owner ?? DEFAULTS.github_board_project_owner,
     github_board_project_title: map.github_board_project_title ?? DEFAULTS.github_board_project_title,
     github_board_project_number: map.github_board_project_number ?? DEFAULTS.github_board_project_number,
+    github_board_project_url: map.github_board_project_url ?? DEFAULTS.github_board_project_url,
+    github_board_view_url: map.github_board_view_url ?? DEFAULTS.github_board_view_url,
     github_board_project_id: map.github_board_project_id ?? DEFAULTS.github_board_project_id,
     github_board_status_field_id: map.github_board_status_field_id ?? DEFAULTS.github_board_status_field_id,
     github_board_status_option_ids: parseJsonObject(map.github_board_status_option_ids),
+    github_board_custom_field_ids: parseJsonObject(map.github_board_custom_field_ids),
     claude_provider: provider,
     claude_bin: resolveClaudeBin(provider, map.claude_bin),
     lmstudio_model: map.lmstudio_model ?? DEFAULTS.lmstudio_model,

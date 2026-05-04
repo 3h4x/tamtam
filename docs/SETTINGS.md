@@ -24,22 +24,30 @@ All settings stored in the `settings` table (key-value, both TEXT). Accessed via
 | `github_board_project_owner` | string | `''` | GitHub org/user that owns the shared TamTam project board. Falls back to `github_owner` when blank |
 | `github_board_project_title` | string | `'TamTam'` | Project board title TamTam creates or reuses when sync is enabled |
 | `github_board_project_number` | string | `''` | Persisted GitHub Project number discovered during provisioning |
+| `github_board_project_url` | string | `''` | Persisted GitHub Project URL discovered during provisioning |
+| `github_board_view_url` | string | `''` | Optional deep link to a custom GitHub Project view; UI board chips use this when set |
 | `github_board_project_id` | string | `''` | Persisted GitHub Project node id discovered during provisioning |
-| `github_board_status_field_id` | string | `''` | Persisted single-select field id for the `TamTam Status` field |
+| `github_board_status_field_id` | string | `''` | Persisted single-select field id for GitHub's built-in `Status` field |
 | `github_board_status_option_ids` | JSON object | `{}` | Persisted map of board status labels to GitHub option ids |
+| `github_board_custom_field_ids` | JSON object | `{}` | Persisted map of TamTam-managed text custom fields (`Project`, `Agent`, `Run kind`, `Branch`) to GitHub field ids |
 
 ### GitHub Project Board Sync
 
-TamTam can mirror job lifecycle into a shared GitHub Project board. When enabled from Settings, TamTam uses the local `gh` CLI to create or reuse a project named by `github_board_project_title` under `github_board_project_owner`, then ensures a `TamTam Status` single-select field with these options:
+TamTam can mirror job lifecycle into a shared GitHub Project board. When enabled from Settings, TamTam uses the local `gh` CLI to create or reuse a project named by `github_board_project_title` under `github_board_project_owner`, then uses GitHub's built-in `Status` field and ensures these statuses exist:
 
-- `Queued`
-- `Running`
+- `Todo`
+- `In Progress`
 - `Review`
 - `Fixing`
-- `Ready to Push`
 - `Blocked`
 - `Done`
-- `Failed`
+
+TamTam also provisions these TEXT custom fields on the project and keeps their field IDs in settings:
+
+- `Project`
+- `Agent`
+- `Run kind`
+- `Branch`
 
 Prerequisites:
 
@@ -50,20 +58,23 @@ Prerequisites:
 Provisioning behavior:
 
 - `PATCH /api/settings` auto-provisions the board when `github_board_sync_enabled` is set to `true`
-- successful provisioning writes `github_board_project_number`, `github_board_project_id`, `github_board_status_field_id`, and `github_board_status_option_ids` back into the `settings` table
+- successful provisioning writes `github_board_project_number`, `github_board_project_url`, `github_board_project_id`, `github_board_status_field_id`, `github_board_status_option_ids`, and `github_board_custom_field_ids` back into the `settings` table
 - provisioning failures return HTTP 502 and do not partially enable the feature
+- upgrades are backward-compatible: if an existing install still has the legacy status-option map or is missing the new custom-field IDs, the next board sync auto-reprovisions the board metadata and persists the new values without requiring a manual Settings save
 
 Run lifecycle behavior:
 
 - background run/release sync is best-effort and never blocks job creation or completion
-- the sync metadata is stored on each root job in `context_meta.githubBoard` and includes the board item id, resolved branch name, and recent activity lines
+- the sync metadata is stored on each root job in `context_meta.githubBoard` and includes the board item id, resolved branch name, recent activity lines, and the last-written custom-field values
 - pipeline child jobs update the release root item instead of creating separate board items
+- issue-linked runs prefer content-linked project items (the GitHub issue/PR itself) instead of always creating draft cards
 
 Manual sync behavior:
 
 - the History UI exposes `Sync board` only for finished jobs
 - `POST /api/jobs/[jobId]/board-sync` is strict, not best-effort: it rejects running jobs, returns HTTP 409 when board sync is disabled or not fully configured, and returns HTTP 502 when the underlying GitHub sync fails
 - manual sync reuses the existing board item when possible and refreshes the item body/status from the current persisted job state
+- `POST /api/settings/board-resync` re-syncs the most recent root jobs in bulk (default last 7 days / top 100, configurable via `?days=` and `?limit=`), skips pipeline child jobs, pauses 250 ms between GitHub writes, and stops early on GitHub secondary rate limits
 
 ### Claude CLI
 

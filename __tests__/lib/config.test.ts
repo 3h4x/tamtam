@@ -62,9 +62,12 @@ describe('config', () => {
         github_board_project_owner: '',
         github_board_project_title: 'TamTam',
         github_board_project_number: '',
+        github_board_project_url: '',
+        github_board_view_url: '',
         github_board_project_id: '',
         github_board_status_field_id: '',
         github_board_status_option_ids: {},
+        github_board_custom_field_ids: {},
         claude_provider: 'claude',
         claude_bin: `${process.cwd()}/scripts/claude-shim.js`,
         lmstudio_model: '',
@@ -131,14 +134,14 @@ describe('config', () => {
       db.insert(schema.settings).values({ key: 'github_board_sync_enabled', value: 'true' }).run();
       db.insert(schema.settings).values({ key: 'github_board_project_owner', value: 'acme' }).run();
       db.insert(schema.settings).values({ key: 'github_board_project_title', value: 'TamTam Ops' }).run();
-      db.insert(schema.settings).values({ key: 'github_board_status_option_ids', value: JSON.stringify({ Running: 'opt-1' }) }).run();
+      db.insert(schema.settings).values({ key: 'github_board_status_option_ids', value: JSON.stringify({ 'In Progress': 'opt-1' }) }).run();
 
       const config = getSettings();
 
       expect(config.github_board_sync_enabled).toBe(true);
       expect(config.github_board_project_owner).toBe('acme');
       expect(config.github_board_project_title).toBe('TamTam Ops');
-      expect(config.github_board_status_option_ids).toEqual({ Running: 'opt-1' });
+      expect(config.github_board_status_option_ids).toEqual({ 'In Progress': 'opt-1' });
     });
 
     it('returns config with overridden claude_bin', () => {

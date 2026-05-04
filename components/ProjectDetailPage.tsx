@@ -54,6 +54,7 @@ export function ProjectDetailPage({
   const [openPrByBranch, setOpenPrByBranch] = useState<Record<string, number>>({})
   const [creatingPr, setCreatingPr] = useState(false)
   const [pushingToPr, setPushingToPr] = useState(false)
+  const [boardUrl, setBoardUrl] = useState<string>('')
 
   // Custom actions
   const [customActions, setCustomActions] = useState<CustomAction[]>([])
@@ -101,6 +102,20 @@ export function ProjectDetailPage({
     if (!name) return
     fetchCustomActions(name).then((data) => setCustomActions(data.actions)).catch(() => {})
   }, [name])
+
+  // Load board URL for the optional "Board ↗" header chip
+  useEffect(() => {
+    fetch('/api/settings')
+      .then((r) => r.json())
+      .then((data) => {
+        const s = data?.settings ?? data
+        if (s?.github_board_sync_enabled === 'true') {
+          const url = (typeof s?.github_board_view_url === 'string' && s.github_board_view_url) || (typeof s?.github_board_project_url === 'string' ? s.github_board_project_url : '')
+          if (url) setBoardUrl(url)
+        }
+      })
+      .catch(() => undefined)
+  }, [])
 
   // Poll issues/PRs + current/default branch together
   useEffect(() => {
@@ -486,6 +501,17 @@ export function ProjectDetailPage({
               </svg>
               {releaseTag}
             </span>
+          )}
+          {boardUrl && (
+            <a
+              href={`${boardUrl}?filterQuery=${encodeURIComponent(name)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-xs text-text-secondary hover:text-accent hover:border-accent/40 transition-colors"
+              title="Open this project on the TamTam GitHub board"
+            >
+              Board ↗
+            </a>
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
