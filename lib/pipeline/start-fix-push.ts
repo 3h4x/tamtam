@@ -90,3 +90,28 @@ export function isHookRejection(detail: string | null | undefined): boolean {
     /@typescript-eslint/.test(s)
   );
 }
+
+// Detect when the hook rejection was caused by a test-framework failure
+// (vitest/jest/mocha/pytest/etc.) rather than a lint/typecheck nit. fix-push
+// is designed for surgical fixes Claude can apply to a known file+line; for
+// test failures (especially flaky ones), letting it loop just burns attempts
+// without converging. Caller skips fix-push when this returns true and lets
+// the push fail loudly so a human can decide.
+export function isTestFailureRejection(detail: string | null | undefined): boolean {
+  if (!detail) return false;
+  const s = detail.toLowerCase();
+  return (
+    /\btests? failed\b/.test(s) ||
+    /\btest files?\s+\d+\s+failed/.test(s) ||
+    /\btests?\s+\d+\s+failed/.test(s) ||
+    / fail\s+/.test(s) ||
+    /❌\s*test/.test(s) ||
+    /\bvitest\b.*\bfail/.test(s) ||
+    /\bjest\b.*\bfail/.test(s) ||
+    /test:integration\s+failed/.test(s) ||
+    /test:unit\s+failed/.test(s) ||
+    /test:e2e\s+failed/.test(s) ||
+    /\bfailed:\s*test:/.test(s) ||
+    /failing tests?:/.test(s)
+  );
+}

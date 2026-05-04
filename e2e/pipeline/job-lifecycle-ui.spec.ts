@@ -184,10 +184,12 @@ test.describe('Job lifecycle UI badges', () => {
   // History tab — cancelled job (exit -3 = aborted pipeline)
   // -------------------------------------------------------------------------
   test('aborted job shows "exit -3" badge in history tab', async ({ page }) => {
+    // Use kind:'review' — release jobs with no children get a 'release blocked'
+    // failureLabel instead of 'exit N', which would mask the exit code badge.
     const jobs: MockJob[] = [
       makeJob({
         id: 'job-cancelled-1',
-        kind: 'release',
+        kind: 'review',
         status: 'done',
         exit_code: -3,
         started_at: now() - 90,
@@ -298,7 +300,8 @@ test.describe('Job lifecycle UI badges', () => {
     ];
     await mockJobScenario(page, jobs);
     await page.goto(`/project/${PROJECT}`);
-    await expect(page.getByText('running')).not.toBeVisible();
+    // { exact: true } avoids matching the persistent "jobs running" header toggle.
+    await expect(page.getByText('running', { exact: true })).not.toBeVisible();
   });
 
   // -------------------------------------------------------------------------

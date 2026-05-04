@@ -61,7 +61,8 @@ test.describe('Live pipeline UI transitions', () => {
     await page.reload();
 
     // After the reload, the release job is done, so "running" should not appear.
-    await expect(page.getByText('running')).not.toBeVisible({ timeout: 5_000 });
+    // Use { exact: true } to avoid matching the persistent "jobs running" header toggle.
+    await expect(page.getByText('running', { exact: true })).not.toBeVisible({ timeout: 5_000 });
 
     // The release row should show "done" (no verdict on the meta-job itself).
     await expect(page.getByText('done').first()).toBeVisible({ timeout: 5_000 });

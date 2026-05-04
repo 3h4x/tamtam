@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { isHookRejection } from '@/lib/pipeline/start-fix-push';
+import { isHookRejection, isTestFailureRejection } from '@/lib/pipeline/start-fix-push';
 
 describe('isHookRejection', () => {
   it('returns false for null/undefined/empty', () => {
@@ -38,6 +38,45 @@ describe('isHookRejection', () => {
     expect(isHookRejection('remote: permission denied')).toBe(false);
     expect(isHookRejection('error: failed to push some refs')).toBe(false);
     expect(isHookRejection('network timeout')).toBe(false);
+  });
+});
+
+describe('isTestFailureRejection', () => {
+  it('returns false for null/undefined/empty', () => {
+    expect(isTestFailureRejection(null)).toBe(false);
+    expect(isTestFailureRejection(undefined)).toBe(false);
+    expect(isTestFailureRejection('')).toBe(false);
+  });
+
+  it('detects vitest FAIL line', () => {
+    expect(isTestFailureRejection(' FAIL  src/lib/api/sbt/merkle.integration.test.ts')).toBe(true);
+  });
+
+  it('detects "Tests failed" in script output', () => {
+    expect(isTestFailureRejection('❌ Tests failed (exit: 1)')).toBe(true);
+  });
+
+  it('detects vitest summary "Test Files  1 failed"', () => {
+    expect(isTestFailureRejection(' Test Files  1 failed | 130 passed | 2 skipped (133)')).toBe(true);
+  });
+
+  it('detects vitest summary "Tests  1 failed"', () => {
+    expect(isTestFailureRejection('      Tests  1 failed | 1620 passed | 45 skipped (1666)')).toBe(true);
+  });
+
+  it('detects named test:* script failure', () => {
+    expect(isTestFailureRejection('❌ FAILED: test:integration')).toBe(true);
+    expect(isTestFailureRejection('test:unit failed')).toBe(true);
+  });
+
+  it('does not match plain lint/typecheck rejection text', () => {
+    expect(isTestFailureRejection('eslint found 3 errors')).toBe(false);
+    expect(isTestFailureRejection('@typescript-eslint/no-unused-vars')).toBe(false);
+    expect(isTestFailureRejection('husky - pre-push script failed (code 1)')).toBe(false);
+  });
+
+  it('does not match the bare push-failed line', () => {
+    expect(isTestFailureRejection('error: failed to push some refs to origin')).toBe(false);
   });
 });
 

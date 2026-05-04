@@ -1,0 +1,247 @@
+import { test, expect } from '@playwright/test';
+import type { Route } from '@playwright/test';
+
+// Live-update UI tests — verify auto-polling state transitions and concurrent
+// multi-project job visibility without page reload.
+//
+// Uses page.route() to intercept API calls; no real pipeline execution is
+// involved (no Claude shim, no git shim, no PM2 jobs).
+
+const PROJECT = 'lifecycle-ui'; // reuse the mocked-API project from job-lifecycle-ui.spec.ts
+
+const now = () => Math.floor(Date.now() / 1000);
+
+function makeTask(project: string) {
+  return {
+    id: `${project}-1`,
+    project,
+    job: null,
+    priority: null,
+    launchctl: 'running',
+    path: `/tmp/${project}`,
+    fires_at: '',
+    sync: true,
+    changes: 0,
+    unpushed: 0,
+    reviewed: true,
+    last_run: null,
+    last_run_ago: null,
+    last_run_duration_s: null,
+    last_run_exit: null,
+    release_tag: null,
+    ci: null,
+    ci_failed_url: null,
+    github: null,
+  };
+}
+
+function makeJob(
+  id: string,
+  project: string,
+  status: 'running' | 'done',
+  exit_code: number | null,
+  kind = 'review',
+) {
+  return {
+    id,
+    project,
+    kind,
+    status,
+    exit_code,
+    started_at: now() - 60,
+    finished_at: status === 'done' ? now() - 5 : null,
+    pid: 0,
+    log_path: '',
+    seen: true,
+  };
+}
+
+async function stubCommonRoutes(
+  page: import('@playwright/test').Page,
+  project: string,
+): Promise<void> {
+  await page.route('**/api/projects', (route: Route) =>
+    route.fulfill({
+      json: { tasks: [makeTask(project)], priorities: [], issueCounts: {} },
+    }),
+  );
+  await page.route(
+    `**/api/projects/by-project/${project}/config`,
+    (route: Route) =>
+      route.fulfill({
+        json: {
+          project,
+          test_command: '',
+          detected_test_command: '',
+          effective_test_command: '',
+          test_cron_enabled: false,
+          test_cron_schedule: '',
+          auto_push_enabled: false,
+          auto_commit_enabled: false,
+          auto_pr_merge_enabled: false,
+          pr_workflow_enabled: false,
+          release_after_run: false,
+          tests_disabled: true,
+          review_disabled: false,
+          issue_auto_branch: false,
+        },
+      }),
+  );
+  await page.route(
+    `**/api/projects/by-project/${project}/action`,
+    (route: Route) => route.fulfill({ json: { actions: [] } }),
+  );
+  await page.route(
+    `**/api/agents?project=${project}`,
+    (route: Route) => route.fulfill({ json: { agents: [] } }),
+  );
+  await page.route(
+    `**/api/projects/by-project/${project}/branch`,
+    (route: Route) =>
+      route.fulfill({
+        json: { branch: 'master', defaultBranch: 'master', commitsAhead: null },
+      }),
+  );
+  await page.route(
+    `**/api/projects/by-project/${project}/behind`,
+    (route: Route) => route.fulfill({ json: { behind: 0, ahead: 0 } }),
+  );
+  await page.route(
+    `**/api/projects/by-project/${project}/issues`,
+    (route: Route) => route.fulfill({ json: { prs: [], issues: [] } }),
+  );
+  await page.route('**/api/streaming/**', (route: Route) =>
+    route.fulfill({ status: 204, body: '' }),
+  );
+  await page.route('**/api/jobs/notifications', (route: Route) =>
+    route.fulfill({ json: { notifications: [] } }),
+  );
+  await page.route('**/api/settings', (route: Route) =>
+    route.fulfill({ json: { jobs_paused: false, github_owner: '' } }),
+  );
+}
+
+// ─── Test 1: Auto-polling live update ────────────────────────────────────────
+//
+// ProjectRunsTab (history tab) polls /api/jobs every 5 s.
+// This test verifies the UI transitions from "running" to "done" on the
+// next poll cycle — no page.reload() allowed.
+
+test.describe('Auto-polling live update', () => {
+  test('history tab transitions running→done via 5s poll cycle without page reload', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+
+    await stubCommonRoutes(page, PROJECT);
+
+    // Dynamic mock: first calls return "running", subsequent calls return "done".
+    // The closure variable is flipped after the page renders the initial state.
+    await page.route(
+      (url) =>
+        url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        route.fulfill({
+          json: {
+            jobs: [
+              makeJob(
+                'auto-poll-job',
+                PROJECT,
+                serveRunning ? 'running' : 'done',
+                serveRunning ? null : 0,
+              ),
+            ],
+            pendingReleaseProjects: [],
+          },
+        });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    // Phase 1: the initial fetch returns "running" — verify the badge is visible.
+    await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
+
+    // Flip the mock so the next poll (≤5 s away) will return "done".
+    serveRunning = false;
+
+    // Phase 2: wait for the auto-poll to fire and the UI to update.
+    // Allow 12 s: one full 5 s poll cycle + rendering time + safety buffer.
+    // No page.reload() — the polling loop must pick up the change.
+    await expect(page.getByText('done').first()).toBeVisible({ timeout: 12_000 });
+
+    // No orphaned spinner: the status badge with exactly "running" text must be gone.
+    // Using { exact: true } to avoid matching the persistent "jobs running" header toggle.
+    await expect(page.getByText('running', { exact: true })).not.toBeVisible();
+  });
+});
+
+// ─── Test 2: Concurrent jobs across projects ─────────────────────────────────
+//
+// The global /runs page fetches /api/jobs without a project filter and renders
+// all jobs from all projects in a single table. Verify that two simultaneously
+// running jobs from different projects each display correctly and that the
+// "running" filter shows both independently.
+
+test.describe('Concurrent jobs across projects', () => {
+  test('/runs page shows independent running jobs for two projects simultaneously', async ({
+    page,
+  }) => {
+    const ALPHA = 'alpha-project';
+    const BETA = 'beta-project';
+
+    const alphaJob = makeJob('job-alpha', ALPHA, 'running', null, 'review');
+    const betaJob = makeJob('job-beta', BETA, 'running', null, 'test');
+
+    // Mock the global /api/jobs endpoint (no project query param).
+    // JobsPage calls fetchJobs() without a project, which generates /api/jobs?limit=50.
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && !url.searchParams.has('project'),
+      (route: Route) =>
+        route.fulfill({
+          json: { jobs: [alphaJob, betaJob], pendingReleaseProjects: [] },
+        }),
+    );
+
+    // App-shell routes common to every page load.
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({ json: { notifications: [] } }),
+    );
+    await page.route('**/api/settings', (route: Route) =>
+      route.fulfill({ json: { jobs_paused: false, github_owner: '' } }),
+    );
+    await page.route('**/api/projects', (route: Route) =>
+      route.fulfill({
+        json: {
+          tasks: [makeTask(ALPHA), makeTask(BETA)],
+          priorities: [],
+          issueCounts: {},
+        },
+      }),
+    );
+
+    await page.goto('/runs');
+
+    // Both project names must be visible in the table.
+    await expect(page.getByText(ALPHA).first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText(BETA).first()).toBeVisible({ timeout: 8_000 });
+
+    // The table body must have exactly 2 rows (one per mocked job).
+    const rows = page.locator('tbody tr');
+    await expect(rows).toHaveCount(2, { timeout: 8_000 });
+
+    // Each row must carry a "running" status badge (not "done", not "exit N").
+    await expect(rows.nth(0).getByText('running')).toBeVisible();
+    await expect(rows.nth(1).getByText('running')).toBeVisible();
+
+    // Clicking the "running" filter chip must keep both projects visible —
+    // verifying that independent job state is preserved per project.
+    await page.getByRole('button', { name: /^running/ }).click();
+    await expect(page.getByText(ALPHA).first()).toBeVisible();
+    await expect(page.getByText(BETA).first()).toBeVisible();
+
+    // The "done" filter chip must show 0 jobs (neither job is done).
+    await page.getByRole('button', { name: /^done/ }).click();
+    await expect(page.locator('tbody tr')).toHaveCount(0);
+  });
+});

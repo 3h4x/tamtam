@@ -280,7 +280,8 @@ test.describe('JobsPauseToggle ARIA state', () => {
     await mockScenario(page, [], { settings: { jobs_paused: 'false' } });
     await page.goto(`/project/${PROJECT}/terminal`);
 
-    const toggle = page.getByRole('switch', { name: /pause jobs|resume jobs/i });
+    // Aria-label changes: "Pause jobs" (running) or "Jobs paused — click to resume" (paused).
+    const toggle = page.getByRole('switch', { name: /pause jobs|jobs paused/i });
     await expect(toggle).toBeVisible({ timeout: 5_000 });
     await expect(toggle).toHaveAttribute('aria-checked', 'false');
   });
@@ -292,7 +293,8 @@ test.describe('JobsPauseToggle ARIA state', () => {
     await mockScenario(page, [], { settings: { jobs_paused: 'true' } });
     await page.goto(`/project/${PROJECT}/terminal`);
 
-    const toggle = page.getByRole('switch', { name: /pause jobs|resume jobs/i });
+    // Aria-label changes: "Pause jobs" (running) or "Jobs paused — click to resume" (paused).
+    const toggle = page.getByRole('switch', { name: /pause jobs|jobs paused/i });
     await expect(toggle).toBeVisible({ timeout: 5_000 });
     await expect(toggle).toHaveAttribute('aria-checked', 'true');
   });

@@ -694,8 +694,17 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   if (job.kind === 'push' && job.exitCode !== 0) {
     try {
       const rawLog = readLog(job, 100_000);
-      const { isHookRejection, startFixPush } = await import('@/lib/pipeline/start-fix-push');
-      if (isHookRejection(rawLog)) {
+      const { isHookRejection, isTestFailureRejection, startFixPush } = await import('@/lib/pipeline/start-fix-push');
+      if (isTestFailureRejection(rawLog)) {
+        // Pre-push hook ran tests and they failed. fix-push is the wrong loop
+        // here — it's tuned for lint/typecheck nits, not for diagnosing test
+        // failures (especially flakes). Stop the pipeline and surface the
+        // failure so a human can decide whether to skip, fix, or rerun.
+        releaseStopReason = `push blocked: pre-push hook tests failed for ${job.project}`;
+        noteReleaseStop(releaseStopReason);
+        forcedReleaseExitCode = 1;
+        console.log(`[push] pre-push tests failed for ${job.project} — not auto-retrying via fix-push`);
+      } else if (isHookRejection(rawLog)) {
         const attempts = recentFixPushCount(job.project);
         if (attempts < MAX_FIX_PUSH_ATTEMPTS) {
           const r = await startFixPush(job.project, rawLog);

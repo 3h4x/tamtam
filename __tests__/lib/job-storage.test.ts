@@ -2482,6 +2482,7 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
     }));
     vi.doMock('@/lib/pipeline/start-fix-push', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
+      isTestFailureRejection: vi.fn().mockReturnValue(false),
       startFixPush: vi.fn().mockResolvedValue({ ok: false, status: 503, detail: 'test' }),
     }));
 
@@ -2584,6 +2585,7 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
   let startProjectCommitMock: ReturnType<typeof vi.fn>;
   let startProjectReviewMock: ReturnType<typeof vi.fn>;
   let isHookRejectionMock: ReturnType<typeof vi.fn>;
+  let isTestFailureRejectionMock: ReturnType<typeof vi.fn>;
   let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   let tempDir: string;
@@ -2644,6 +2646,7 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
     startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'committed' });
     startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-1', pid: 888, logPath: '/tmp/rev.log' });
     isHookRejectionMock = vi.fn().mockReturnValue(false);
+    isTestFailureRejectionMock = vi.fn().mockReturnValue(false);
     getProjectTestConfigMock = vi.fn().mockReturnValue({ autoPushEnabled: false });
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     resolveProjectPathMock = vi.fn().mockReturnValue('/proj');
@@ -2670,6 +2673,7 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
     vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
     vi.doMock('@/lib/pipeline/start-fix-push', () => ({
       isHookRejection: isHookRejectionMock,
+      isTestFailureRejection: isTestFailureRejectionMock,
       startFixPush: startFixPushMock,
     }));
 
@@ -2702,6 +2706,22 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
 
     await markDoneFn(job, 1);
 
+    expect(startFixPushMock).not.toHaveBeenCalled();
+  });
+
+  it('does not spawn fix-push when push fails because pre-push tests broke', async () => {
+    // Hook rejection is true (husky pre-push failed) but it's a test failure,
+    // not a lint nit — we don't want to enter the fix-push retry loop because
+    // Claude can't reliably "fix" flaky integration tests.
+    isHookRejectionMock.mockReturnValue(true);
+    isTestFailureRejectionMock.mockReturnValue(true);
+    const logFile = join(tempDir, 'push-tests-fail.log');
+    writeFileSync(logFile, 'husky - pre-push script failed (code 1)\n FAIL  src/foo.test.ts\n Tests  1 failed | 100 passed');
+    const job = makeJob('push', logFile);
+
+    await markDoneFn(job, 1);
+
+    expect(isTestFailureRejectionMock).toHaveBeenCalled();
     expect(startFixPushMock).not.toHaveBeenCalled();
   });
 
@@ -2909,6 +2929,7 @@ describe('runCompletionHooks – release-after-run', () => {
     }));
     vi.doMock('@/lib/pipeline/start-fix-push', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
+      isTestFailureRejection: vi.fn().mockReturnValue(false),
       startFixPush: vi.fn().mockResolvedValue({ ok: false, status: 503, detail: 'not needed' }),
     }));
 
@@ -3037,6 +3058,7 @@ describe('markDone – ghIssuesCache invalidation', () => {
     }));
     vi.doMock('@/lib/pipeline/start-fix-push', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
+      isTestFailureRejection: vi.fn().mockReturnValue(false),
       startFixPush: vi.fn().mockResolvedValue({ ok: false }),
     }));
     vi.doMock('@/lib/pipeline/start-release', () => ({
@@ -3148,6 +3170,7 @@ describe('markDone – metadata extraction skipped for release kind', () => {
     }));
     vi.doMock('@/lib/pipeline/start-fix-push', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
+      isTestFailureRejection: vi.fn().mockReturnValue(false),
       startFixPush: vi.fn().mockResolvedValue({ ok: false }),
     }));
 
@@ -3425,6 +3448,7 @@ describe('markDone – DB-level idempotency guard', () => {
     }));
     vi.doMock('@/lib/pipeline/start-fix-push', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
+      isTestFailureRejection: vi.fn().mockReturnValue(false),
       startFixPush: vi.fn().mockResolvedValue({ ok: false, detail: 'guard' }),
     }));
 
