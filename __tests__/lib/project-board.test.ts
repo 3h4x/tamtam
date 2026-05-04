@@ -32,9 +32,11 @@ const DISABLED_SETTINGS = {
   github_board_project_owner: '',
   github_board_project_title: 'TamTam',
   github_board_project_number: '',
+  github_board_project_url: '',
   github_board_project_id: '',
   github_board_status_field_id: '',
   github_board_status_option_ids: {},
+  github_board_custom_field_ids: {},
 };
 
 const ENABLED_SETTINGS = {
@@ -43,17 +45,22 @@ const ENABLED_SETTINGS = {
   github_board_project_owner: 'octocat',
   github_board_project_title: 'TamTam',
   github_board_project_number: '7',
+  github_board_project_url: 'https://github.com/users/octocat/projects/7',
   github_board_project_id: 'PVT_1',
   github_board_status_field_id: 'FIELD_1',
   github_board_status_option_ids: {
-    Queued: 'Q',
-    Running: 'R',
-    Review: 'REV',
-    Fixing: 'F',
-    'Ready to Push': 'P',
-    Blocked: 'B',
-    Done: 'D',
-    Failed: 'X',
+    'Todo': 'Q',
+    'In Progress': 'R',
+    'Review': 'REV',
+    'Fixing': 'F',
+    'Blocked': 'B',
+    'Done': 'D',
+  },
+  github_board_custom_field_ids: {
+    project: 'F_PROJECT',
+    agent: 'F_AGENT',
+    kind: 'F_KIND',
+    branch: 'F_BRANCH',
   },
 };
 
@@ -61,7 +68,13 @@ describe('project board integration', () => {
   const execMock = vi.fn();
   const updateJobMock = vi.fn();
   const getJobMock = vi.fn();
+  const listJobsMock = vi.fn(() => [] as unknown[]);
   const resolveProjectPathMock = vi.fn();
+  const dbRunMock = vi.fn();
+  const dbOnConflictMock = vi.fn(() => ({ run: dbRunMock }));
+  const dbValuesMock = vi.fn(() => ({ onConflictDoUpdate: dbOnConflictMock }));
+  const dbInsertMock = vi.fn(() => ({ values: dbValuesMock }));
+  const reloadConfigMock = vi.fn();
 
   // Mutable settings pointer: all vi.doMock factories for @/lib/shared/config
   // delegate here, so per-test overrides work regardless of which stacked
@@ -73,7 +86,14 @@ describe('project board integration', () => {
     execMock.mockReset();
     updateJobMock.mockReset();
     getJobMock.mockReset();
+    listJobsMock.mockReset();
+    listJobsMock.mockReturnValue([]);
     resolveProjectPathMock.mockReset();
+    dbRunMock.mockReset();
+    dbOnConflictMock.mockClear();
+    dbValuesMock.mockClear();
+    dbInsertMock.mockClear();
+    reloadConfigMock.mockReset();
     mockGetSettings = () => ({ ...DISABLED_SETTINGS });
 
     vi.doMock('@/lib/shared/shell', () => ({
@@ -82,19 +102,25 @@ describe('project board integration', () => {
     vi.doMock('@/lib/jobs/storage', () => ({
       getJob: getJobMock,
       updateJob: updateJobMock,
+      listJobs: listJobsMock,
     }));
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
+    }));
+    vi.doMock('@/lib/db', () => ({
+      db: { insert: dbInsertMock },
+      schema: { settings: { key: 'key' } },
     }));
     // Factory always delegates to mockGetSettings() so that any stacked
     // registration from a previous beforeEach still returns the current
     // per-test settings without needing to override the factory itself.
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => mockGetSettings(),
+      reloadConfig: reloadConfigMock,
     }));
   });
 
-  it('reuses an existing GitHub project and status field when provisioning', async () => {
+  it('reuses an existing GitHub project and built-in Status field when all options are already present', async () => {
     execMock.mockImplementation(async (_cmd: string, args: string[]) => {
       if (args[0] === 'project' && args[1] === 'list') {
         return { exitCode: 0, stdout: JSON.stringify({ projects: [{ id: 'PVT_1', number: 7, title: 'TamTam' }] }), stderr: '' };
@@ -103,20 +129,24 @@ describe('project board integration', () => {
         return {
           exitCode: 0,
           stdout: JSON.stringify({
-            fields: [{
-              id: 'FIELD_1',
-              name: 'TamTam Status',
-              options: [
-                { id: 'Q', name: 'Queued' },
-                { id: 'R', name: 'Running' },
-                { id: 'REV', name: 'Review' },
-                { id: 'F', name: 'Fixing' },
-                { id: 'P', name: 'Ready to Push' },
-                { id: 'B', name: 'Blocked' },
-                { id: 'D', name: 'Done' },
-                { id: 'X', name: 'Failed' },
-              ],
-            }],
+            fields: [
+              {
+                id: 'FIELD_1',
+                name: 'Status',
+                options: [
+                  { id: 'Q', name: 'Todo' },
+                  { id: 'R', name: 'In Progress' },
+                  { id: 'REV', name: 'Review' },
+                  { id: 'F', name: 'Fixing' },
+                  { id: 'B', name: 'Blocked' },
+                  { id: 'D', name: 'Done' },
+                ],
+              },
+              { id: 'F_PROJECT', name: 'Project' },
+              { id: 'F_AGENT', name: 'Agent' },
+              { id: 'F_KIND', name: 'Run kind' },
+              { id: 'F_BRANCH', name: 'Branch' },
+            ],
           }),
           stderr: '',
         };
@@ -131,23 +161,29 @@ describe('project board integration', () => {
       owner: 'octocat',
       title: 'TamTam',
       projectNumber: '7',
+      projectUrl: 'https://github.com/users/octocat/projects/7',
       projectId: 'PVT_1',
       statusFieldId: 'FIELD_1',
       optionIds: {
-        Queued: 'Q',
-        Running: 'R',
-        Review: 'REV',
-        Fixing: 'F',
-        'Ready to Push': 'P',
-        Blocked: 'B',
-        Done: 'D',
-        Failed: 'X',
+        'Todo': 'Q',
+        'In Progress': 'R',
+        'Review': 'REV',
+        'Fixing': 'F',
+        'Blocked': 'B',
+        'Done': 'D',
+      },
+      customFieldIds: {
+        project: 'F_PROJECT',
+        agent: 'F_AGENT',
+        kind: 'F_KIND',
+        branch: 'F_BRANCH',
       },
     });
     expect(execMock).toHaveBeenCalledTimes(2);
   });
 
-  it('creates the project and status field when they do not exist', async () => {
+  it('creates the project and adds missing options to the built-in Status field via graphql', async () => {
+    let fieldListCall = 0;
     execMock.mockImplementation(async (_cmd: string, args: string[]) => {
       if (args[0] === 'project' && args[1] === 'list') {
         return { exitCode: 0, stdout: JSON.stringify({ projects: [] }), stderr: '' };
@@ -156,27 +192,53 @@ describe('project board integration', () => {
         return { exitCode: 0, stdout: JSON.stringify({ id: 'PVT_NEW', number: 9, title: 'TamTam Ops' }), stderr: '' };
       }
       if (args[0] === 'project' && args[1] === 'field-list') {
-        return { exitCode: 0, stdout: JSON.stringify({ fields: [] }), stderr: '' };
-      }
-      if (args[0] === 'project' && args[1] === 'field-create') {
+        fieldListCall++;
+        if (fieldListCall === 1) {
+          // Newly created GitHub project ships with default Todo / In Progress / Done.
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              fields: [{
+                id: 'FIELD_NEW',
+                name: 'Status',
+                options: [
+                  { id: 'OT', name: 'Todo' },
+                  { id: 'OP', name: 'In Progress' },
+                  { id: 'OD', name: 'Done' },
+                ],
+              }],
+            }),
+            stderr: '',
+          };
+        }
+        // After our graphql update, all 6 options are present.
         return {
           exitCode: 0,
           stdout: JSON.stringify({
-            id: 'FIELD_NEW',
-            name: 'TamTam Status',
-            options: [
-              { id: 'Q', name: 'Queued' },
-              { id: 'R', name: 'Running' },
-              { id: 'REV', name: 'Review' },
-              { id: 'F', name: 'Fixing' },
-              { id: 'P', name: 'Ready to Push' },
-              { id: 'B', name: 'Blocked' },
-              { id: 'D', name: 'Done' },
-              { id: 'X', name: 'Failed' },
-            ],
+            fields: [{
+              id: 'FIELD_NEW',
+              name: 'Status',
+              options: [
+                { id: 'OT', name: 'Todo' },
+                { id: 'OP', name: 'In Progress' },
+                { id: 'NREV', name: 'Review' },
+                { id: 'NFIX', name: 'Fixing' },
+                { id: 'NBLK', name: 'Blocked' },
+                { id: 'OD', name: 'Done' },
+              ],
+            }],
           }),
           stderr: '',
         };
+      }
+      if (args[0] === 'api' && args[1] === 'graphql') {
+        return { exitCode: 0, stdout: JSON.stringify({ data: { updateProjectV2Field: { projectV2Field: { id: 'FIELD_NEW' } } } }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'field-create') {
+        const nameIdx = args.indexOf('--name');
+        const name = nameIdx >= 0 ? args[nameIdx + 1] : '';
+        const id = `F_${name.replace(/\s+/g, '_').toUpperCase()}`;
+        return { exitCode: 0, stdout: JSON.stringify({ id, name }), stderr: '' };
       }
       throw new Error(`Unexpected command: ${args.join(' ')}`);
     });
@@ -187,7 +249,30 @@ describe('project board integration', () => {
     expect(result.projectNumber).toBe('9');
     expect(result.projectId).toBe('PVT_NEW');
     expect(result.statusFieldId).toBe('FIELD_NEW');
-    expect(execMock).toHaveBeenCalledTimes(4);
+    expect(result.projectUrl).toBe('https://github.com/users/octocat/projects/9');
+    expect(result.optionIds).toEqual({
+      'Todo': 'OT',
+      'In Progress': 'OP',
+      'Review': 'NREV',
+      'Fixing': 'NFIX',
+      'Blocked': 'NBLK',
+      'Done': 'OD',
+    });
+    expect(result.customFieldIds).toEqual({
+      project: 'F_PROJECT',
+      agent: 'F_AGENT',
+      kind: 'F_RUN_KIND',
+      branch: 'F_BRANCH',
+    });
+    // list, create, field-list, graphql, field-list (re-read), 4× field-create
+    expect(execMock).toHaveBeenCalledTimes(9);
+    const graphqlCall = execMock.mock.calls.find(([, args]) => Array.isArray(args) && args[0] === 'api' && args[1] === 'graphql');
+    expect(graphqlCall).toBeDefined();
+    const queryArg = String(graphqlCall![1][3] ?? '');
+    expect(queryArg).toContain('updateProjectV2Field');
+    expect(queryArg).toContain('"Review"');
+    expect(queryArg).toContain('"Fixing"');
+    expect(queryArg).toContain('"Blocked"');
   });
 
   it('syncs pipeline child jobs onto the release root item and dedupes activities', async () => {
@@ -224,7 +309,7 @@ describe('project board integration', () => {
         return { exitCode: 0, stdout: JSON.stringify({ items: [] }), stderr: '' };
       }
       if (args[0] === 'project' && args[1] === 'item-create') {
-        return { exitCode: 0, stdout: JSON.stringify({ id: 'ITEM_1' }), stderr: '' };
+        return { exitCode: 0, stdout: JSON.stringify({ id: 'DI_ITEM_1' }), stderr: '' };
       }
       if (args[0] === 'project' && args[1] === 'item-edit') {
         return { exitCode: 0, stdout: JSON.stringify({ ok: true }), stderr: '' };
@@ -241,7 +326,7 @@ describe('project board integration', () => {
     expect(updateJobMock).toHaveBeenCalled();
 
     const storedMeta = JSON.parse(releaseJob.contextMeta ?? '{}').githubBoard;
-    expect(storedMeta.itemId).toBe('ITEM_1');
+    expect(storedMeta.itemId).toBe('DI_ITEM_1');
     expect(storedMeta.branch).toBe('feature/release');
     expect(storedMeta.activities).toHaveLength(1);
     expect(storedMeta.activities[0].line).toContain('review passed (LGTM)');
@@ -326,5 +411,447 @@ describe('project board integration', () => {
     expect(calls.some((entry) => entry[1] === 'project' && entry[2] === 'item-create')).toBe(false);
     const storedMeta = JSON.parse(job.contextMeta ?? '{}').githubBoard;
     expect(storedMeta.itemId).toBe('ITEM_EXISTING');
+  });
+
+  it('writes Project / Agent / Run kind / Branch custom fields and skips re-writes on the next sync', async () => {
+    const job = makeJob({
+      id: 'agent-cf-1',
+      kind: 'agent:ui-components',
+      project: 'borged',
+      prompt: 'standardise components',
+      finishedAt: 100,
+      exitCode: 0,
+    });
+
+    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    resolveProjectPathMock.mockReturnValue('/tmp/repo');
+    getJobMock.mockImplementation((id: string) => (id === 'agent-cf-1' ? job : null));
+
+    const calls: string[][] = [];
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'git') return { exitCode: 0, stdout: 'main\n', stderr: '' };
+      if (args[0] === 'project' && args[1] === 'item-list') {
+        return { exitCode: 0, stdout: JSON.stringify({ items: [] }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-create') {
+        return { exitCode: 0, stdout: JSON.stringify({ id: 'DI_NEW' }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-edit') {
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true }), stderr: '' };
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
+    await syncJobToProjectBoard(job, 'manual', { requireConfigured: true });
+
+    const fieldWrites = (predicate: (call: string[]) => boolean) =>
+      calls.filter((entry) => entry[1] === 'project' && entry[2] === 'item-edit' && predicate(entry));
+
+    const projectWrites = fieldWrites((c) => c.includes('--field-id') && c.includes('F_PROJECT') && c.includes('--text') && c.includes('borged'));
+    const agentWrites = fieldWrites((c) => c.includes('F_AGENT') && c.includes('ui-components'));
+    const kindWrites = fieldWrites((c) => c.includes('F_KIND') && c.includes('agent:ui-components'));
+    const branchWrites = fieldWrites((c) => c.includes('F_BRANCH') && c.includes('main'));
+    expect(projectWrites).toHaveLength(1);
+    expect(agentWrites).toHaveLength(1);
+    expect(kindWrites).toHaveLength(1);
+    expect(branchWrites).toHaveLength(1);
+
+    const storedMeta = JSON.parse(job.contextMeta ?? '{}').githubBoard;
+    expect(storedMeta.customFields).toEqual({
+      project: 'borged',
+      agent: 'ui-components',
+      kind: 'agent:ui-components',
+      branch: 'main',
+    });
+    expect(storedMeta.title).toBe('ui-components agent · borged');
+
+    // Second sync — values unchanged, no custom field writes should fire.
+    const callsBefore = calls.length;
+    await syncJobToProjectBoard(job, 'manual', { requireConfigured: true });
+    const newCalls = calls.slice(callsBefore);
+    const newFieldWrites = newCalls.filter((entry) =>
+      entry[1] === 'project' && entry[2] === 'item-edit' &&
+      (entry.includes('F_PROJECT') || entry.includes('F_AGENT') || entry.includes('F_KIND') || entry.includes('F_BRANCH')),
+    );
+    expect(newFieldWrites).toHaveLength(0);
+  });
+
+  it('auto-upgrades legacy board settings during sync and persists the new IDs', async () => {
+    const job = makeJob({
+      id: 'legacy-sync-1',
+      kind: 'run',
+      prompt: 'upgrade legacy board settings',
+    });
+    mockGetSettings = () => ({
+      ...ENABLED_SETTINGS,
+      github_board_project_url: '',
+      github_board_status_option_ids: {
+        Queued: 'OLD_Q',
+        Running: 'OLD_R',
+        Review: 'OLD_REV',
+        Fixing: 'OLD_F',
+        'Ready to Push': 'OLD_PUSH',
+        Blocked: 'OLD_B',
+        Done: 'OLD_D',
+        Failed: 'OLD_X',
+      },
+      github_board_custom_field_ids: {},
+    });
+    resolveProjectPathMock.mockReturnValue('/tmp/repo');
+    getJobMock.mockImplementation((id: string) => (id === 'legacy-sync-1' ? job : null));
+
+    const calls: string[][] = [];
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'git') return { exitCode: 0, stdout: 'main\n', stderr: '' };
+      if (args[0] === 'project' && args[1] === 'list') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ projects: [{ id: 'PVT_1', number: 7, title: 'TamTam' }] }),
+          stderr: '',
+        };
+      }
+      if (args[0] === 'project' && args[1] === 'field-list') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            fields: [{
+              id: 'FIELD_1',
+              name: 'Status',
+              options: [
+                { id: 'OT', name: 'Todo' },
+                { id: 'OP', name: 'In Progress' },
+                { id: 'NREV', name: 'Review' },
+                { id: 'NFIX', name: 'Fixing' },
+                { id: 'NBLK', name: 'Blocked' },
+                { id: 'OD', name: 'Done' },
+              ],
+            }],
+          }),
+          stderr: '',
+        };
+      }
+      if (args[0] === 'project' && args[1] === 'field-create') {
+        const nameIdx = args.indexOf('--name');
+        const name = nameIdx >= 0 ? args[nameIdx + 1] : '';
+        const id = `F_${name.replace(/\s+/g, '_').toUpperCase()}`;
+        return { exitCode: 0, stdout: JSON.stringify({ id, name }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-list') {
+        return { exitCode: 0, stdout: JSON.stringify({ items: [] }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-create') {
+        return { exitCode: 0, stdout: JSON.stringify({ id: 'DI_LEGACY' }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-edit') {
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true }), stderr: '' };
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
+    await syncJobToProjectBoard(job, 'manual', { requireConfigured: true });
+
+    expect(reloadConfigMock).toHaveBeenCalledTimes(1);
+    expect(dbInsertMock).toHaveBeenCalledTimes(8);
+    const persisted = (dbValuesMock.mock.calls as unknown as Array<[unknown]>)
+      .map(([value]) => value as { key: string; value: string });
+    expect(persisted).toEqual(expect.arrayContaining([
+      { key: 'github_board_project_url', value: 'https://github.com/users/octocat/projects/7' },
+      { key: 'github_board_status_option_ids', value: JSON.stringify({
+        'Todo': 'OT',
+        'In Progress': 'OP',
+        'Review': 'NREV',
+        'Fixing': 'NFIX',
+        'Blocked': 'NBLK',
+        'Done': 'OD',
+      }) },
+      { key: 'github_board_custom_field_ids', value: JSON.stringify({
+        project: 'F_PROJECT',
+        agent: 'F_AGENT',
+        kind: 'F_RUN_KIND',
+        branch: 'F_BRANCH',
+      }) },
+    ]));
+    expect(calls.some((entry) => entry[1] === 'project' && entry[2] === 'field-create')).toBe(true);
+    expect(calls.some((entry) => entry[1] === 'project' && entry[2] === 'item-edit' && entry.includes('F_PROJECT'))).toBe(true);
+  });
+
+  it('reuses an issue-linked board item by content URL match instead of creating a draft', async () => {
+    const job = makeJob({
+      id: 'run-issue-1',
+      kind: 'run',
+      prompt: 'Work on issue 42',
+      ghIssueNumber: 42,
+      ghIssueRepo: '3h4x/tamtam',
+      ghIssueTitle: 'Investigate the thing',
+    });
+
+    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    resolveProjectPathMock.mockReturnValue('/tmp/repo');
+    getJobMock.mockImplementation((id: string) => (id === 'run-issue-1' ? job : null));
+
+    const calls: string[][] = [];
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'git') return { exitCode: 0, stdout: 'main\n', stderr: '' };
+      if (args[0] === 'project' && args[1] === 'item-list') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            items: [{
+              id: 'ITEM_ISSUE_42',
+              content: { type: 'Issue', url: 'https://github.com/3h4x/tamtam/issues/42', title: 'Investigate the thing' },
+            }],
+          }),
+          stderr: '',
+        };
+      }
+      if (args[0] === 'project' && args[1] === 'item-edit') {
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true }), stderr: '' };
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
+    await syncJobToProjectBoard(job, 'manual', { requireConfigured: true });
+
+    expect(calls.some((entry) => entry[1] === 'project' && entry[2] === 'item-create')).toBe(false);
+    expect(calls.some((entry) => entry[1] === 'project' && entry[2] === 'item-add')).toBe(false);
+    const storedMeta = JSON.parse(job.contextMeta ?? '{}').githubBoard;
+    expect(storedMeta.itemId).toBe('ITEM_ISSUE_42');
+    // Content-linked items must not get title/body edits.
+    const titleBodyEdits = calls.filter((entry) => entry[1] === 'project' && entry[2] === 'item-edit' && entry.includes('--title'));
+    expect(titleBodyEdits).toHaveLength(0);
+    // Status field update is still applied.
+    const statusEdits = calls.filter((entry) => entry[1] === 'project' && entry[2] === 'item-edit' && entry.includes('--single-select-option-id'));
+    expect(statusEdits).toHaveLength(1);
+  });
+
+  it('matches issue-linked board items by exact content URL, not numeric prefix', async () => {
+    const job = makeJob({
+      id: 'run-issue-4',
+      kind: 'run',
+      prompt: 'Work on issue 4',
+      ghIssueNumber: 4,
+      ghIssueRepo: '3h4x/tamtam',
+    });
+
+    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    resolveProjectPathMock.mockReturnValue('/tmp/repo');
+    getJobMock.mockImplementation((id: string) => (id === 'run-issue-4' ? job : null));
+
+    const calls: string[][] = [];
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'git') return { exitCode: 0, stdout: 'main\n', stderr: '' };
+      if (args[0] === 'project' && args[1] === 'item-list') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            items: [
+              {
+                id: 'ITEM_ISSUE_42',
+                content: { type: 'Issue', url: 'https://github.com/3h4x/tamtam/issues/42' },
+              },
+              {
+                id: 'ITEM_ISSUE_4',
+                content: { type: 'Issue', url: 'https://github.com/3h4x/tamtam/issues/4' },
+              },
+            ],
+          }),
+          stderr: '',
+        };
+      }
+      if (args[0] === 'project' && args[1] === 'item-edit') {
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true }), stderr: '' };
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
+    await syncJobToProjectBoard(job, 'manual', { requireConfigured: true });
+
+    expect(calls.some((entry) => entry[1] === 'project' && entry[2] === 'item-create')).toBe(false);
+    expect(calls.some((entry) => entry[1] === 'project' && entry[2] === 'item-add')).toBe(false);
+    const storedMeta = JSON.parse(job.contextMeta ?? '{}').githubBoard;
+    expect(storedMeta.itemId).toBe('ITEM_ISSUE_4');
+  });
+
+  it('reuses PR-linked board items by exact content URL match', async () => {
+    const job = makeJob({
+      id: 'run-pr-7',
+      kind: 'run',
+      prompt: 'Review PR 7',
+      ghIssueNumber: 7,
+      ghIssueRepo: '3h4x/tamtam',
+    });
+
+    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    resolveProjectPathMock.mockReturnValue('/tmp/repo');
+    getJobMock.mockImplementation((id: string) => (id === 'run-pr-7' ? job : null));
+
+    const calls: string[][] = [];
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'git') return { exitCode: 0, stdout: 'main\n', stderr: '' };
+      if (args[0] === 'project' && args[1] === 'item-list') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            items: [
+              {
+                id: 'ITEM_PR_70',
+                content: { type: 'PullRequest', url: 'https://github.com/3h4x/tamtam/pull/70' },
+              },
+              {
+                id: 'ITEM_PR_7',
+                content: { type: 'PullRequest', url: 'https://github.com/3h4x/tamtam/pull/7' },
+              },
+            ],
+          }),
+          stderr: '',
+        };
+      }
+      if (args[0] === 'project' && args[1] === 'item-edit') {
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true }), stderr: '' };
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
+    await syncJobToProjectBoard(job, 'manual', { requireConfigured: true });
+
+    expect(calls.some((entry) => entry[1] === 'project' && entry[2] === 'item-create')).toBe(false);
+    expect(calls.some((entry) => entry[1] === 'project' && entry[2] === 'item-add')).toBe(false);
+    const storedMeta = JSON.parse(job.contextMeta ?? '{}').githubBoard;
+    expect(storedMeta.itemId).toBe('ITEM_PR_7');
+  });
+
+  it('adds an issue/PR to the board via item-add when no matching item exists', async () => {
+    const job = makeJob({
+      id: 'run-issue-99',
+      kind: 'run',
+      prompt: 'Fix issue 99',
+      ghIssueNumber: 99,
+      ghIssueRepo: '3h4x/tamtam',
+    });
+
+    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    resolveProjectPathMock.mockReturnValue('/tmp/repo');
+    getJobMock.mockImplementation((id: string) => (id === 'run-issue-99' ? job : null));
+
+    const calls: string[][] = [];
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'git') return { exitCode: 0, stdout: 'main\n', stderr: '' };
+      if (args[0] === 'project' && args[1] === 'item-list') {
+        return { exitCode: 0, stdout: JSON.stringify({ items: [] }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-add') {
+        return { exitCode: 0, stdout: JSON.stringify({ id: 'ITEM_ADDED_99' }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-edit') {
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true }), stderr: '' };
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
+    await syncJobToProjectBoard(job, 'manual', { requireConfigured: true });
+
+    const addCalls = calls.filter((entry) => entry[1] === 'project' && entry[2] === 'item-add');
+    expect(addCalls).toHaveLength(1);
+    expect(addCalls[0]).toContain('https://github.com/3h4x/tamtam/issues/99');
+    expect(calls.some((entry) => entry[1] === 'project' && entry[2] === 'item-create')).toBe(false);
+    const storedMeta = JSON.parse(job.contextMeta ?? '{}').githubBoard;
+    expect(storedMeta.itemId).toBe('ITEM_ADDED_99');
+  });
+
+  it('recovers from a deleted board card by clearing the stored itemId and re-creating', async () => {
+    const job = makeJob({
+      id: 'run-deleted-card',
+      kind: 'run',
+      prompt: 'card got deleted',
+      contextMeta: JSON.stringify({ githubBoard: { itemId: 'PVTI_GONE' } }),
+    });
+
+    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    resolveProjectPathMock.mockReturnValue('/tmp/repo');
+    getJobMock.mockImplementation((id: string) => (id === 'run-deleted-card' ? job : null));
+
+    const calls: string[][] = [];
+    let updateAttempt = 0;
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'git') return { exitCode: 0, stdout: 'main\n', stderr: '' };
+      if (args[0] === 'project' && args[1] === 'item-list') {
+        // After we clear the stale id, rediscovery sees an empty board.
+        return { exitCode: 0, stdout: JSON.stringify({ items: [] }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-edit') {
+        // First attempt (against PVTI_GONE) fails with resource-not-found;
+        // retry against the freshly created draft succeeds.
+        const isStaleTarget = args.includes('PVTI_GONE');
+        if (isStaleTarget && updateAttempt === 0) {
+          updateAttempt++;
+          return { exitCode: 1, stdout: '', stderr: 'resource not found, please check the URL' };
+        }
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-create') {
+        return { exitCode: 0, stdout: JSON.stringify({ id: 'DI_REPLACEMENT' }), stderr: '' };
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
+    await syncJobToProjectBoard(job, 'manual', { requireConfigured: true });
+
+    const itemCreateCalls = calls.filter((entry) => entry[1] === 'project' && entry[2] === 'item-create');
+    expect(itemCreateCalls).toHaveLength(1);
+    const storedMeta = JSON.parse(job.contextMeta ?? '{}').githubBoard;
+    expect(storedMeta.itemId).toBe('DI_REPLACEMENT');
+  });
+
+  it('clears invalid item IDs (not starting with DI_) and creates new ones', async () => {
+    const job = makeJob({
+      id: 'run-invalid-id',
+      kind: 'run',
+      prompt: 'Invalid ID test',
+      contextMeta: JSON.stringify({ githubBoard: { itemId: 'INVALID_ITEM_ID' } }),
+    });
+
+    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    resolveProjectPathMock.mockReturnValue('/tmp/repo');
+    getJobMock.mockImplementation((id: string) => (id === 'run-invalid-id' ? job : null));
+
+    const calls: string[][] = [];
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'git') {
+        return { exitCode: 0, stdout: 'main\n', stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-list') {
+        return { exitCode: 0, stdout: JSON.stringify({ items: [] }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-create') {
+        return { exitCode: 0, stdout: JSON.stringify({ id: 'DI_ITEM_VALID' }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-edit') {
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true }), stderr: '' };
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
+    await syncJobToProjectBoard(job, 'manual', { requireConfigured: true });
+
+    const itemCreateCalls = calls.filter((entry) => entry[1] === 'project' && entry[2] === 'item-create');
+    expect(itemCreateCalls).toHaveLength(1);
+    const storedMeta = JSON.parse(job.contextMeta ?? '{}').githubBoard;
+    expect(storedMeta.itemId).toBe('DI_ITEM_VALID');
   });
 });

@@ -121,6 +121,20 @@ export function JobsPage() {
   // the signal that we've reached the end of the dataset.
   const [hasMore, setHasMore] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [boardUrl, setBoardUrl] = useState<string>('')
+
+  useEffect(() => {
+    fetch('/api/settings')
+      .then((r) => r.json())
+      .then((data) => {
+        const s = data?.settings ?? data
+        if (s?.github_board_sync_enabled === 'true') {
+          const url = (typeof s?.github_board_view_url === 'string' && s.github_board_view_url) || (typeof s?.github_board_project_url === 'string' ? s.github_board_project_url : '')
+          if (url) setBoardUrl(url)
+        }
+      })
+      .catch(() => undefined)
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -201,6 +215,17 @@ export function JobsPage() {
           )}
         </h2>
         <div className="flex items-center gap-3">
+          {boardUrl && (
+            <a
+              href={boardUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-md border border-border bg-bg-secondary text-text-secondary hover:text-accent hover:border-accent/40 transition-colors"
+              title="Open the TamTam project board on GitHub"
+            >
+              Board ↗
+            </a>
+          )}
           <input
             type="search"
             placeholder="Filter by project, kind, or prompt…"

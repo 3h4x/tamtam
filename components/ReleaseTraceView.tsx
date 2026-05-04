@@ -97,6 +97,20 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
   const [trace, setTrace] = useState<ReleaseTrace | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [expandedStep, setExpandedStep] = useState<string | null>(null)
+  const [boardUrl, setBoardUrl] = useState<string>('')
+
+  useEffect(() => {
+    fetch('/api/settings')
+      .then((r) => r.json())
+      .then((data) => {
+        const s = data?.settings ?? data
+        if (s?.github_board_sync_enabled === 'true') {
+          const url = (typeof s?.github_board_view_url === 'string' && s.github_board_view_url) || (typeof s?.github_board_project_url === 'string' ? s.github_board_project_url : '')
+          if (url) setBoardUrl(url)
+        }
+      })
+      .catch(() => undefined)
+  }, [])
 
   useEffect(() => {
     const load = async () => {
@@ -236,6 +250,17 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
               <span className="text-xs px-2.5 py-1 rounded-full bg-status-error/15 text-status-error font-mono border border-status-error/30">
                 failed
               </span>
+            )}
+            {boardUrl && (
+              <a
+                href={`${boardUrl}?filterQuery=${encodeURIComponent(releaseId)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs px-2.5 py-1 rounded-full bg-bg-primary text-text-secondary font-mono border border-border hover:text-accent hover:border-accent/40 transition-colors"
+                title="View this run on the GitHub project board"
+              >
+                Board ↗
+              </a>
             )}
           </div>
         </div>

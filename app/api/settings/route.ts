@@ -18,9 +18,12 @@ const SETTING_KEYS = [
   'github_board_project_owner',
   'github_board_project_title',
   'github_board_project_number',
+  'github_board_project_url',
+  'github_board_view_url',
   'github_board_project_id',
   'github_board_status_field_id',
   'github_board_status_option_ids',
+  'github_board_custom_field_ids',
   'claude_provider',
   'claude_bin',
   'lmstudio_model',
@@ -63,7 +66,7 @@ const SETTING_KEYS = [
 ] as const;
 
 function serializeSettingValue(key: string, value: unknown): string {
-  if (key === 'github_board_status_option_ids') {
+  if (key === 'github_board_status_option_ids' || key === 'github_board_custom_field_ids') {
     if (typeof value === 'string') return value;
     if (value && typeof value === 'object') return JSON.stringify(value);
     return '';
@@ -190,9 +193,11 @@ export async function PATCH(request: NextRequest) {
         { key: 'github_board_project_owner', value: ensured.owner },
         { key: 'github_board_project_title', value: ensured.title },
         { key: 'github_board_project_number', value: ensured.projectNumber },
+        { key: 'github_board_project_url', value: ensured.projectUrl },
         { key: 'github_board_project_id', value: ensured.projectId },
         { key: 'github_board_status_field_id', value: ensured.statusFieldId },
         { key: 'github_board_status_option_ids', value: JSON.stringify(ensured.optionIds) },
+        { key: 'github_board_custom_field_ids', value: JSON.stringify(ensured.customFieldIds) },
       ];
       for (const entry of ensuredEntries) {
         const existing = serializedEntries.find((candidate) => candidate.key === entry.key);
