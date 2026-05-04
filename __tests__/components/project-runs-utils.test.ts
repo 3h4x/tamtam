@@ -128,7 +128,6 @@ function makeEntry(partial: {
   verdict?: string;
   startedAt?: number;
 }): Entry {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return {
     key: `job:${partial.kind}`,
     kind: partial.kind,
