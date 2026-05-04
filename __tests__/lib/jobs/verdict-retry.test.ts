@@ -6,6 +6,10 @@ vi.mock('@/lib/shared/config', () => ({
   getSettings: vi.fn(),
   getPermissionModeFlag: vi.fn(() => '--permission-mode auto'),
 }));
+vi.mock('@/lib/shared/cli-bin', () => ({
+  resolveCliBin: vi.fn(),
+  resolveCliEnv: vi.fn(),
+}));
 vi.mock('@/lib/jobs/verdict', () => ({
   readParsedLog: vi.fn(),
 }));
@@ -14,6 +18,7 @@ vi.mock('child_process', () => ({
 }));
 
 import { getSettings } from '@/lib/shared/config';
+import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { readParsedLog } from '@/lib/jobs/verdict';
 import { spawn } from 'child_process';
 import { retryVerdictWithClaude } from '@/lib/jobs/verdict-retry';
@@ -21,6 +26,8 @@ import type { JobData } from '@/lib/jobs/types';
 import { EventEmitter } from 'events';
 
 const mockGetSettings = vi.mocked(getSettings);
+const mockResolveCliBin = vi.mocked(resolveCliBin);
+const mockResolveCliEnv = vi.mocked(resolveCliEnv);
 const mockReadParsedLog = vi.mocked(readParsedLog);
 const mockSpawn = vi.mocked(spawn);
 
@@ -65,6 +72,8 @@ function makeMockChild(stdoutData: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockResolveCliBin.mockImplementation((provider) => `/shim/${provider}`);
+  mockResolveCliEnv.mockReturnValue({});
 });
 
 describe('retryVerdictWithClaude — gating', () => {
@@ -82,6 +91,23 @@ describe('retryVerdictWithClaude — gating', () => {
     const result = await retryVerdictWithClaude(makeJob());
     expect(result).toBeNull();
     expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it('routes retry through the source review provider when present', async () => {
+    mockGetSettings.mockReturnValue(makeSettings() as ReturnType<typeof getSettings>);
+    mockReadParsedLog.mockReturnValue('some review text');
+    mockSpawn.mockReturnValue(makeMockChild('LGTM') as ReturnType<typeof spawn>);
+
+    const result = await retryVerdictWithClaude(makeJob({ provider: 'codex' }));
+
+    expect(result).toBe('LGTM');
+    expect(mockResolveCliBin).toHaveBeenCalledWith('codex', expect.anything());
+    expect(mockResolveCliEnv).toHaveBeenCalledWith('codex', expect.anything());
+    expect(mockSpawn).toHaveBeenCalledWith(
+      '/shim/codex',
+      expect.arrayContaining(['--print', '--model', 'fast']),
+      expect.objectContaining({ env: expect.any(Object) }),
+    );
   });
 });
 

@@ -12,6 +12,33 @@ import {
   parseOptionalKnownModelInput,
   resolveModelAlias,
 } from '@/lib/agents/model-aliases';
+import {
+  encodeEnabledProviders,
+  isCliProvider,
+  parseEnabledProviders,
+} from '@/lib/usage/cli-providers';
+
+function firstEnabledProvider(value: string | null | undefined): string {
+  const enabled = parseEnabledProviders(value);
+  return enabled[0] ?? 'claude';
+}
+
+function buildSettingsResponse(): Record<string, string> {
+  const rows = db.select().from(schema.settings).all();
+  const settings: Record<string, string> = {};
+  for (const row of rows) {
+    settings[row.key] = serializeSettingValue(row.key, row.value);
+  }
+
+  const effective = getSettings();
+  settings.claude_provider = serializeSettingValue('claude_provider', effective.claude_provider);
+  settings.cli_enabled_providers = serializeSettingValue('cli_enabled_providers', effective.cli_enabled_providers);
+  if (effective.cli_bin_claude) {
+    settings.cli_bin_claude = serializeSettingValue('cli_bin_claude', effective.cli_bin_claude);
+  }
+
+  return settings;
+}
 const SETTING_KEYS = [
   'github_owner',
   'github_board_sync_enabled',
@@ -27,6 +54,15 @@ const SETTING_KEYS = [
   'claude_provider',
   'claude_bin',
   'lmstudio_model',
+  'cli_enabled_providers',
+  'cli_bin_claude',
+  'cli_bin_codex',
+  'cli_bin_gemini',
+  'cli_bin_lmstudio',
+  'cli_default_model_claude',
+  'cli_default_model_codex',
+  'cli_default_model_gemini',
+  'cli_default_model_lmstudio',
   'log_dir',
   'frequency',
   'daytime',
@@ -73,6 +109,20 @@ function serializeSettingValue(key: string, value: unknown): string {
   }
   if (key === 'budget_subscription_providers') {
     return encodeBudgetSubscriptionProviders(normalizeBudgetSubscriptionProviders(String(value)));
+  }
+  if (key === 'cli_enabled_providers') {
+    if (Array.isArray(value)) {
+      return encodeEnabledProviders(value.filter(isCliProvider));
+    }
+    return encodeEnabledProviders(parseEnabledProviders(String(value)));
+  }
+  if (
+    key === 'cli_default_model_claude' ||
+    key === 'cli_default_model_codex' ||
+    key === 'cli_default_model_gemini' ||
+    key === 'cli_default_model_lmstudio'
+  ) {
+    return normalizeModelInput(String(value), 'normal');
   }
   if (key === 'default_model') {
     return normalizeModelInput(String(value), 'fast');
@@ -156,12 +206,7 @@ function validateAndSerializeSettingValue(
 }
 
 export async function GET() {
-  const rows = db.select().from(schema.settings).all();
-  const settings: Record<string, string> = {};
-  for (const row of rows) {
-    settings[row.key] = serializeSettingValue(row.key, row.value);
-  }
-  return NextResponse.json({ settings });
+  return NextResponse.json({ settings: buildSettingsResponse() });
 }
 
 export async function PATCH(request: NextRequest) {
@@ -175,6 +220,20 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ detail: validated.error }, { status: 400 });
     }
     serializedEntries.push({ key: key as (typeof SETTING_KEYS)[number], value: validated.value });
+  }
+
+  const cliEnabledEntry = serializedEntries.find((entry) => entry.key === 'cli_enabled_providers');
+  const claudeProviderEntry = serializedEntries.find((entry) => entry.key === 'claude_provider');
+  if (cliEnabledEntry) {
+    const syncedProvider = firstEnabledProvider(cliEnabledEntry.value);
+    if (claudeProviderEntry) {
+      claudeProviderEntry.value = syncedProvider;
+    } else {
+      serializedEntries.push({
+        key: 'claude_provider',
+        value: syncedProvider,
+      });
+    }
   }
 
   const desired = {

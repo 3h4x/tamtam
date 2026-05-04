@@ -25,6 +25,9 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
   let updateJobMock: ReturnType<typeof vi.fn>;
   let startJobMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
+  let getSettingsMock: ReturnType<typeof vi.fn>;
+  let checkCliStartGateMock: ReturnType<typeof vi.fn>;
+  let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -36,6 +39,21 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
     updateJobMock = vi.fn();
     startJobMock = vi.fn().mockResolvedValue(9999);
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
+    checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'codex' });
+    fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: 'started', job_id: 'delegated-job' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    getSettingsMock = vi.fn(() => ({
+      default_model: 'fast',
+      cli_default_model_codex: 'smart',
+      cli_bin_claude: '',
+      cli_bin_codex: '',
+      cli_bin_gemini: '',
+      cli_bin_lmstudio: '',
+    }));
 
     vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
@@ -58,17 +76,30 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
       startJob: startJobMock,
     }));
 
+    vi.doMock('@/lib/shared/config', () => ({
+      getPermissionModeFlag: () => '--permission-mode bypassPermissions',
+      getSettings: getSettingsMock,
+    }));
+
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: checkCliStartGateMock,
+    }));
+
     vi.doMock('@/lib/shared/job-control', () => ({
       runGates: () => null,
+      jobsPausedResult: () => null,
       runAutoChainGates: () => null,
       isJobsPaused: () => false,
     }));
+
+    vi.stubGlobal('fetch', fetchMock);
 
     const mod = await import('@/app/api/jobs/[jobId]/rerun/route');
     POST = mod.POST;
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.resetModules();
   });
 
@@ -114,6 +145,67 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
     });
     await POST(req, { params: Promise.resolve({ jobId: 'job-source' }) });
     expect(startJobMock).toHaveBeenCalledOnce();
+  });
+
+  it('uses the selected provider default model when rerunning', async () => {
+    getJobMock.mockReturnValue(makeJob());
+    const req = new NextRequest('http://localhost/api/jobs/job-source/rerun', {
+      method: 'POST',
+    });
+    await POST(req, { params: Promise.resolve({ jobId: 'job-source' }) });
+
+    const [, command] = startJobMock.mock.calls[0];
+    expect(command).toContain('--model smart');
+  });
+
+  it('passes the source job provider as a soft preference to the chooser', async () => {
+    getJobMock.mockReturnValue(makeJob({ provider: 'claude' }));
+    checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'codex' });
+
+    const req = new NextRequest('http://localhost/api/jobs/job-source/rerun', {
+      method: 'POST',
+    });
+    await POST(req, { params: Promise.resolve({ jobId: 'job-source' }) });
+
+    expect(checkCliStartGateMock).toHaveBeenCalledWith('rerun a job', { preferred: 'claude' });
+    const [, command] = startJobMock.mock.calls[0];
+    expect(command).toContain('/scripts/codex-shim.js');
+  });
+
+  it('forwards the source provider to delegated review reruns without re-gating locally', async () => {
+    getJobMock.mockReturnValue(makeJob({ kind: 'review', provider: 'claude' }));
+
+    const req = new NextRequest('http://localhost/api/jobs/job-source/rerun', {
+      method: 'POST',
+      headers: { 'x-test': '1' },
+    });
+    const res = await POST(req, { params: Promise.resolve({ jobId: 'job-source' }) });
+
+    expect(res.status).toBe(200);
+    expect(checkCliStartGateMock).not.toHaveBeenCalled();
+    expect(startJobMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/api/projects/by-project/proj1/review');
+    const headers = init?.headers as Headers;
+    expect(headers.get('x-tamtam-provider-preferred')).toBe('claude');
+    expect(headers.get('x-test')).toBe('1');
+  });
+
+  it('forwards the source provider to delegated fix-ci reruns without re-gating locally', async () => {
+    getJobMock.mockReturnValue(makeJob({ kind: 'fix-ci', provider: 'codex' }));
+
+    const req = new NextRequest('http://localhost/api/jobs/job-source/rerun', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ jobId: 'job-source' }) });
+
+    expect(res.status).toBe(200);
+    expect(checkCliStartGateMock).not.toHaveBeenCalled();
+    expect(startJobMock).not.toHaveBeenCalled();
+    const [, init] = fetchMock.mock.calls[0];
+    const headers = init?.headers as Headers;
+    expect(headers.get('x-tamtam-provider-preferred')).toBe('codex');
   });
 
   it('calls updateJob after startJob', async () => {

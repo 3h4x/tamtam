@@ -17,6 +17,7 @@ function createTestDb() {
       schedule TEXT,
       runner TEXT NOT NULL DEFAULT 'pm2',
       enabled INTEGER NOT NULL DEFAULT 1,
+      provider TEXT,
       created_at REAL NOT NULL,
       updated_at REAL NOT NULL
     );
@@ -72,7 +73,8 @@ function createTestDb() {
       aborted_at REAL,
       prompt_bytes INTEGER,
       work_summary TEXT,
-      modified_files TEXT
+      modified_files TEXT,
+      provider TEXT
     );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };

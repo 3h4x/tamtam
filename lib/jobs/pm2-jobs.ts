@@ -70,7 +70,8 @@ export async function startJob(
   jobId: string,
   command: string,
   prompt: string,
-  cwd: string
+  cwd: string,
+  options?: { env?: Record<string, string> },
 ): Promise<number> {
   const LOG_DIR = resolveLogDir();
   const { mkdirSync } = await import('fs');
@@ -119,7 +120,7 @@ export async function startJob(
       promptPath,
       ...cmdArgv,
     ],
-    { timeout: 15000 }
+    { timeout: 15000, env: options?.env }
   );
 
   if (result.exitCode !== 0) {

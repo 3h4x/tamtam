@@ -8,6 +8,7 @@ import { loadFileAgent, writeFileAgent } from '@/lib/agents/tamtam-file-agents';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
+import { isCliProvider } from '@/lib/usage/cli-providers';
 
 // PATCH /api/agents/by-name
 // Lets an agent update itself by project+name without knowing its UUID.
@@ -16,6 +17,7 @@ import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule
 export async function PATCH(request: NextRequest) {
   const body = await request.json();
   const { project, name, ...fields } = body;
+  const provider = fields.provider === null ? null : (isCliProvider(fields.provider) ? fields.provider : undefined);
 
   if (!project?.trim() || !name?.trim()) {
     return NextResponse.json({ detail: 'project and name are required' }, { status: 400 });
@@ -42,6 +44,7 @@ export async function PATCH(request: NextRequest) {
     if (fields.schedule !== undefined) updates.schedule = parsedSchedule.schedule;
     if (fields.runner !== undefined) updates.runner = fields.runner;
     if (fields.enabled !== undefined) updates.enabled = fields.enabled;
+    if (provider !== undefined) updates.provider = provider;
 
     db.update(schema.agents).set(updates).where(eq(schema.agents.id, existing.id)).run();
     clearAgentsCache();
@@ -61,6 +64,7 @@ export async function PATCH(request: NextRequest) {
             skillIds,
             runner: agent.runner,
             enabled: agent.enabled,
+            provider: agent.provider,
           });
         } catch { /* non-fatal */ }
       }
@@ -92,6 +96,7 @@ export async function PATCH(request: NextRequest) {
           skillIds: fields.skillIds,
           runner: fields.runner,
           enabled: fields.enabled,
+          provider,
         });
         try {
           if (updated.schedule && updated.enabled && (updated.prompt || updated.skillIds.length > 0)) {

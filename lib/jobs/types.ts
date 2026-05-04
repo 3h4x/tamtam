@@ -30,4 +30,5 @@ export interface JobData {
   promptBytes?: number | null;
   workSummary?: string | null;
   modifiedFiles?: string | null;
+  provider?: string | null;
 }

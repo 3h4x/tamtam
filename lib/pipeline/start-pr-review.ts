@@ -1,6 +1,9 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
+import { resolveCliBin, resolveCliDefaultModel, resolveCliEnv } from '@/lib/shared/cli-bin';
+import { checkCliStartGate } from '@/lib/usage/resolve-provider';
+import { currentParent } from '@/lib/jobs/parent-context';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { createJob, listJobs, probeJobStatus, updateJob } from '@/lib/jobs/job-storage';
 import { startJob } from '@/lib/jobs/pm2-jobs';
@@ -8,7 +11,6 @@ import { exec } from '@/lib/shared/shell';
 import { CODE_REVIEWER_SKILL } from '@/lib/skills/skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings } from '@/lib/shared/config';
 import { wrapUntrusted, withUntrustedPreamble } from '@/lib/shared/untrusted';
-import { runGates } from '@/lib/shared/job-control';
 
 export type StartPrReviewResult =
   | { ok: true; jobId: string; pid: number; logPath: string }
@@ -43,14 +45,18 @@ export async function startPrReview(
   headRef: string,
   baseRef: string,
 ): Promise<StartPrReviewResult> {
-  const { claudeBin, logDir } = getImproveConfig();
-  const { default_model } = getSettings();
+  const { logDir } = getImproveConfig();
+  const settings = getSettings();
   const projPath = resolveProjectPath(projectName);
   if (!projPath) {
     return { ok: false, status: 404, detail: `project '${projectName}' not found` };
   }
-  const paused = runGates('start a PR review');
-  if (paused) return paused;
+  const gate = await checkCliStartGate('start a PR review', { parentJobId: currentParent() });
+  if (!gate.ok) return gate;
+  const provider = gate.provider;
+  const claudeBin = resolveCliBin(provider, settings);
+  const cliEnv = resolveCliEnv(provider, settings);
+  const defaultModel = resolveCliDefaultModel(provider, settings);
 
   const jobs = listJobs();
   const running = jobs.filter(
@@ -81,9 +87,10 @@ export async function startPrReview(
   for (const [key, value] of Object.entries(substitutions)) {
     rendered = rendered.split(key).join(value);
   }
-  const prompt = withUntrustedPreamble(withBasePrompt(rendered, { projectPath: projPath }));
+  const prompt = withUntrustedPreamble(withBasePrompt(rendered, { projectPath: projPath, provider }));
 
   const job = createJob(projectName, 'review', 0, '');
+  job.provider = provider;
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
 
@@ -91,9 +98,10 @@ export async function startPrReview(
     // Review only needs to read code — restrict to safe read-only tools.
     const pid = await startJob(
       job.id,
-      `${claudeBin} --print --output-format stream-json --verbose --include-partial-messages --model ${default_model} ${getPermissionModeFlag()} --allowed-tools Read,Grep,Glob`,
+      `${claudeBin} --print --output-format stream-json --verbose --include-partial-messages --model ${defaultModel} ${getPermissionModeFlag()} --allowed-tools Read,Grep,Glob`,
       prompt,
-      projPath
+      projPath,
+      { env: cliEnv }
     );
     job.pid = pid;
   } catch (e: unknown) {

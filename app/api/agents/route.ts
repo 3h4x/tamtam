@@ -8,6 +8,7 @@ import { scanFileAgents, writeFileAgent, type FileAgent } from '@/lib/agents/tam
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
+import { isCliProvider } from '@/lib/usage/cli-providers';
 
 const ALL_FILE_AGENTS_TTL_MS = 10_000;
 let _allFileAgentsCache: { agents: FileAgent[]; time: number } | null = null;
@@ -67,6 +68,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const { name, project, skillIds, docPaths, model, prompt, schedule, runner, enabled } = body;
+  const provider = isCliProvider(body.provider) ? body.provider : null;
 
   if (!name?.trim()) {
     return NextResponse.json({ detail: 'name is required' }, { status: 400 });
@@ -96,6 +98,7 @@ export async function POST(request: NextRequest) {
     schedule: parsedSchedule,
     runner: runner || 'pm2',
     enabled: enabled !== false,
+    provider,
     createdAt: now,
     updatedAt: now,
   };
@@ -107,14 +110,15 @@ export async function POST(request: NextRequest) {
   const projPath = resolveProjectPath(agent.project);
   if (projPath) {
     try {
-      writeFileAgent(projPath, agent.project, agent.name, {
-        prompt: agent.prompt,
-        model: agent.model,
-        schedule: agent.schedule,
-        skillIds: skillIds || [],
-        runner: agent.runner,
-        enabled: agent.enabled,
-      });
+        writeFileAgent(projPath, agent.project, agent.name, {
+          prompt: agent.prompt,
+          model: agent.model,
+          schedule: agent.schedule,
+          skillIds: skillIds || [],
+          runner: agent.runner,
+          enabled: agent.enabled,
+          provider: agent.provider,
+        });
     } catch { /* non-fatal */ }
   }
 

@@ -57,6 +57,13 @@
       "when": 1777846514162,
       "tag": "0007_slim_nomad",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1777913017072,
+      "tag": "0008_windy_whistler",
+      "breakpoints": true
     }
   ]
 }

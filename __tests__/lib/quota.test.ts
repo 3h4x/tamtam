@@ -8,7 +8,7 @@ import {
 } from '@/lib/usage/quota';
 
 const mocks = vi.hoisted(() => ({
-  settings: { claude_provider: 'claude' },
+  settings: { claude_provider: 'claude', cli_enabled_providers: ['claude'] },
   throwSettings: false,
   claude: {
     getQuota: vi.fn(),
@@ -29,6 +29,7 @@ vi.mock('@/lib/shared/config', () => ({
     if (mocks.throwSettings) throw new Error('settings unavailable');
     return mocks.settings;
   }),
+  getActiveCliProvider: vi.fn((settings) => settings.cli_enabled_providers?.[0] ?? settings.claude_provider ?? 'claude'),
 }));
 
 vi.mock('@/lib/usage/claude-quota', () => ({
@@ -47,7 +48,7 @@ vi.mock('@/lib/usage/codex-quota', () => ({
 
 describe('quota provider selector', () => {
   beforeEach(() => {
-    mocks.settings = { claude_provider: 'claude' };
+    mocks.settings = { claude_provider: 'claude', cli_enabled_providers: ['claude'] };
     mocks.throwSettings = false;
     Object.values(mocks.claude).forEach((mock) => mock.mockReset());
     Object.values(mocks.codex).forEach((mock) => mock.mockReset());
@@ -66,7 +67,7 @@ describe('quota provider selector', () => {
 
   it('uses Codex quota when Codex is the active provider', async () => {
     const snapshot = { provider: 'codex' };
-    mocks.settings = { claude_provider: 'codex' };
+    mocks.settings = { claude_provider: 'claude', cli_enabled_providers: ['codex'] };
     mocks.codex.getQuota.mockResolvedValue(snapshot);
 
     await expect(getQuota()).resolves.toBe(snapshot);
@@ -78,7 +79,7 @@ describe('quota provider selector', () => {
   it('honors explicit provider requests independently of active settings', async () => {
     const claudeSnapshot = { provider: 'claude' };
     const codexSnapshot = { provider: 'codex' };
-    mocks.settings = { claude_provider: 'codex' };
+    mocks.settings = { claude_provider: 'claude', cli_enabled_providers: ['codex'] };
     mocks.claude.getQuota.mockResolvedValue(claudeSnapshot);
     mocks.codex.getQuota.mockResolvedValue(codexSnapshot);
 
@@ -91,7 +92,7 @@ describe('quota provider selector', () => {
 
   it('routes cache helpers to the active provider', () => {
     const cached = { provider: 'codex' };
-    mocks.settings = { claude_provider: 'codex' };
+    mocks.settings = { claude_provider: 'claude', cli_enabled_providers: ['codex'] };
     mocks.codex.peekQuotaCache.mockReturnValue(cached);
 
     clearQuotaCache();
@@ -102,5 +103,15 @@ describe('quota provider selector', () => {
     expect(mocks.codex.prefetchQuota).toHaveBeenCalledOnce();
     expect(mocks.claude.clearQuotaCache).not.toHaveBeenCalled();
     expect(mocks.claude.prefetchQuota).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the legacy provider when enabled providers are missing', async () => {
+    const snapshot = { provider: 'codex' };
+    mocks.settings = { claude_provider: 'codex', cli_enabled_providers: [] };
+    mocks.codex.getQuota.mockResolvedValue(snapshot);
+
+    await expect(getQuota()).resolves.toBe(snapshot);
+
+    expect(mocks.codex.getQuota).toHaveBeenCalledWith({});
   });
 });

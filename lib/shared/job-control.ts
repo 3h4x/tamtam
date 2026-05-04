@@ -135,6 +135,12 @@ export function syncJobsPauseState(paused: boolean): void {
  * JobsPausedResult or BudgetBlockedResult; null when both gates are clear.
  * Synchronous — both component checks are sync. Callers convert to a 409 or
  * 429 NextResponse (pause→409, budget→429) using `result.status` and `result.detail`.
+ *
+ * Multi-CLI note: with several providers enabled, this gate's budget check
+ * (against the legacy "active" snapshot) can over-block — Claude full but
+ * Codex available. Routes that route through `resolveProviderForRun` /
+ * `pickCliProvider` should call `jobsPausedResult` instead and let the
+ * picker handle per-provider budget enforcement.
  */
 export function runGates(action = 'start new jobs'): JobsPausedResult | BudgetBlockedResult | null {
   const paused = jobsPausedResult(action);

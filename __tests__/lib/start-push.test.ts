@@ -7,6 +7,8 @@ describe('startProjectPush — push result tracking', () => {
   let createJobMock: ReturnType<typeof vi.fn>;
   let markDoneMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
+  let generateCommitMessageMock: ReturnType<typeof vi.fn>;
+  let checkCliStartGateMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -21,6 +23,8 @@ describe('startProjectPush — push result tracking', () => {
     }));
     markDoneMock = vi.fn().mockResolvedValue(undefined);
     updateJobMock = vi.fn();
+    generateCommitMessageMock = vi.fn().mockResolvedValue('feat: test');
+    checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
 
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
@@ -46,10 +50,13 @@ describe('startProjectPush — push result tracking', () => {
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
     vi.doMock('@/lib/pipeline/start-commit', () => ({
-      generateCommitMessage: vi.fn().mockResolvedValue('feat: test'),
+      generateCommitMessage: generateCommitMessageMock,
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn().mockReturnValue('fix/issue-1-test'),
+    }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: checkCliStartGateMock,
     }));
 
     ({ startProjectPush } = await import('@/lib/pipeline/start-push'));
@@ -84,6 +91,23 @@ describe('startProjectPush — push result tracking', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.detail).toContain('Push failed');
     expect(setProjectPushResultMock).toHaveBeenCalledWith('proj', expect.stringContaining('Push failed'));
+  });
+
+  it('reuses the selected provider when a pre-push hook leaves new changes', async () => {
+    checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'codex' });
+    execMock
+      .mockImplementationOnce(() => resp(0, '1\n'))
+      .mockImplementationOnce(() => resp(0, '# branch.head master\n# branch.ab +0 -0\n'))
+      .mockImplementationOnce(() => resp(1, '', 'hook failed'))
+      .mockImplementationOnce(() => resp(0, ' M lint.ts\n'))
+      .mockImplementationOnce(() => resp(0))
+      .mockImplementationOnce(() => resp(0, '[master abc123] feat: test\n'))
+      .mockImplementationOnce(() => resp(0))
+      .mockImplementationOnce(() => resp(0, 'abc1234'));
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(true);
+    expect(generateCommitMessageMock).toHaveBeenCalledWith('/path/to/proj', 'proj', 'codex');
   });
 
   it('returns 404 when project path cannot be resolved', async () => {

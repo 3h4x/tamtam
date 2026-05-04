@@ -76,11 +76,21 @@ Manual sync behavior:
 - manual sync reuses the existing board item when possible and refreshes the item body/status from the current persisted job state
 - `POST /api/settings/board-resync` re-syncs the most recent root jobs in bulk (default last 7 days / top 100, configurable via `?days=` and `?limit=`), skips pipeline child jobs, pauses 250 ms between GitHub writes, and stops early on GitHub secondary rate limits
 
-### Claude CLI
+### CLI Routing
 
 | Key | Type | Default | Effect |
 |-----|------|---------|--------|
-| `claude_bin` | string | `~/.local/bin/claude` | Path to Claude CLI binary; used for every review/fix/run/agent job |
+| `claude_provider` | string | `claude` | Legacy compatibility field. When the CLI tab saves `cli_enabled_providers`, TamTam syncs this to the first enabled provider so older “active provider” code paths keep matching the new routing model |
+| `claude_bin` | string | `~/.local/bin/claude` | Legacy Claude executable path; when this is the only Claude-specific setting TamTam still routes through `scripts/claude-shim.js` and forwards the stored path via `CLAUDE_BIN` |
+| `cli_enabled_providers` | string | `'claude'` | Comma-separated enabled provider set for routing top-level runs. Valid values: `claude`, `codex`, `gemini`, `lmstudio` |
+| `cli_bin_claude` | string | `''` | Optional underlying Claude executable path. TamTam still launches the bundled `scripts/claude-shim.js` so shared `fast` / `normal` / `smart` tiers keep working |
+| `cli_bin_codex` | string | `''` | Optional underlying Codex executable path. TamTam still launches the bundled `scripts/codex-shim.js` and forwards this path via `CODEX_BIN` |
+| `cli_bin_gemini` | string | `''` | Optional underlying Gemini executable path. TamTam still launches the bundled `scripts/gemini-shim.js` and forwards this path via `GEMINI_BIN` |
+| `cli_bin_lmstudio` | string | `''` | Optional LM Studio server URL override. TamTam still launches the bundled `scripts/lmstudio-shim.js`; when this value looks like `http://...` or `https://...` it is forwarded via `LMSTUDIO_BASE_URL` |
+| `cli_default_model_claude` | string | `normal` | Per-provider default tier, normalized to `fast` / `normal` / `smart`; used by launch paths that do not receive an explicit model override |
+| `cli_default_model_codex` | string | `normal` | Per-provider default tier, normalized to `fast` / `normal` / `smart`; used by launch paths that do not receive an explicit model override |
+| `cli_default_model_gemini` | string | `normal` | Per-provider default tier, normalized to `fast` / `normal` / `smart`; used by launch paths that do not receive an explicit model override |
+| `cli_default_model_lmstudio` | string | `normal` | Per-provider default tier, normalized to `fast` / `normal` / `smart`; used by launch paths that do not receive an explicit model override |
 | `permission_mode` | string | `bypassPermissions` | Passed as `--permission-mode` flag. Allowed: `acceptEdits`, `auto`, `bypassPermissions`, `default`, `dontAsk`, `plan` — invalid values fall back to `bypassPermissions` |
 | `default_model` | string | `fast` | Pre-selected semantic tier in the terminal UI. Primary options: `fast`, `normal`, `smart`. Legacy `haiku`, `sonnet`, `opus` values are still accepted and normalized. |
 
@@ -167,10 +177,18 @@ Live subscription quota (5-hour rolling + 7-day weekly window) is surfaced on `/
 
 | Key | Type | Default | Effect |
 |-----|------|---------|--------|
-| `budget_block_runs_enabled` | boolean | `false` | When true, pipeline routes (run, review, fix, push, release, rerun, fix-ci, agent run) return HTTP 429 once the 5-hour window crosses `budget_block_at_pct` |
+| `budget_block_runs_enabled` | boolean | `false` | When true, TamTam resolves a provider through the enabled CLI set before starting any run/release path. If every enabled provider is at or above `budget_block_at_pct`, pipeline routes (`run`, `review`, `fix`, `push`, `release`, `rerun`, `fix-ci`, `agent run`) return HTTP 429 |
 | `budget_subscription_providers` | string | `'claude,codex'` | Comma-separated provider list shown in Settings → Budget and `/stats` so TamTam tracks pace for each selected subscription |
 | `budget_block_at_pct` | number | `95` | Block threshold in percent (0–100). Applies to the 5-hour window; scheduled/auto-chain work also considers weekly burn rate |
 | `budget_warn_at_pct` | number | `80` | Cosmetic warn threshold; quota bars turn yellow at this percentage |
+
+Budget gate semantics:
+
+- The provider chooser is the single source of truth for budget blocking.
+- A single enabled provider is still blocked once its own quota crosses `budget_block_at_pct`.
+- With multiple enabled providers, TamTam skips blocked providers and uses the enabled provider with the most remaining headroom.
+- Agent/file-agent `provider` preferences are soft: TamTam uses them when they are enabled and healthy, otherwise it falls back to the normal chooser.
+- Release/test/push entrypoints use the same chooser up front, so a full legacy `claude_provider` snapshot does not block work when another enabled provider is still healthy.
 
 **Payload shape** (generic JSON POST):
 

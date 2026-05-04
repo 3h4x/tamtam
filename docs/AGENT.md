@@ -32,6 +32,7 @@ Agents are reusable automation units that combine skills, a model, a prompt temp
 | `schedule` | string | `null` | Run interval for scheduling: `"30m"`, `"1h"`, `"8h"`, etc. or `null` for manual only |
 | `runner` | string | `pm2` | Scheduler mode: `"pm2"` for the internal scheduler, or legacy `"launchctl"` on macOS |
 | `enabled` | boolean | `true` | Enable/disable without deletion |
+| `provider` | string \| null | `null` | Optional preferred CLI provider (`claude`, `codex`, `gemini`, `lmstudio`). TamTam falls back to the enabled-provider chooser if the preferred provider cannot be used. |
 | `createdAt` | number | — | Unix timestamp (seconds) |
 | `updatedAt` | number | — | Unix timestamp (seconds) |
 
@@ -150,6 +151,8 @@ The final prompt sent to Claude is:
 ```
 [Base prompt from settings] + [Composed skills] + [Task prompt]
 ```
+
+For file-backed agents in `.tamtam/agents/*.md`, `provider:` is committed frontmatter and is preserved on prompt-only writes. TamTam treats it as part of the shared agent contract, not as an ephemeral UI-only override.
 
 This allows agents to be reusable — the same agent can run with different task prompts while keeping the skill composition consistent.
 

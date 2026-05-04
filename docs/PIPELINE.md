@@ -2,6 +2,21 @@
 
 The pipeline is a quality-gated sequence driven by Claude. The exact steps depend on the **workflow mode** configured per project.
 
+## Budget Gate
+
+Before any run/release path starts work, TamTam performs one shared async gate:
+
+1. Check the global jobs pause flag.
+2. Resolve a CLI provider using the same multi-provider chooser the eventual run will use.
+
+Implications:
+
+- If `budget_block_runs_enabled` is off, the chooser still selects a provider but does not block on quota.
+- If exactly one CLI is enabled and it is over `budget_block_at_pct`, the start is rejected with HTTP 429.
+- If multiple CLIs are enabled, TamTam skips blocked providers and proceeds with the enabled provider that has the most remaining headroom.
+- Release/test/push entrypoints no longer rely on the legacy active-provider snapshot, so a full Claude window does not block a release when another enabled CLI is healthy.
+- Once a release starts, the chosen provider is stamped onto the release/test/push jobs so downstream review/fix/commit steps inherit the same provider instead of repicking mid-pipeline.
+
 ## Workflow Modes
 
 Each project has a mode selector in its Config tab:

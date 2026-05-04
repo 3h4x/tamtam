@@ -102,8 +102,12 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
 
     vi.doMock('@/lib/shared/job-control', () => ({
       runGates: () => null,
+      jobsPausedResult: () => null,
       runAutoChainGates: () => null,
       isJobsPaused: () => false,
+    }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
     }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/test/route');

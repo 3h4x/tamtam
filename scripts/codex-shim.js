@@ -10,6 +10,7 @@
  */
 
 const { spawn } = require('child_process');
+const { installInactivityWatchdog } = require('./shim-utils');
 
 const args = process.argv.slice(2);
 
@@ -349,6 +350,7 @@ function launchCodex({ prompt, model, streamJson }) {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
+    const watchdog = installInactivityWatchdog(child, { shimName: 'codex-shim' });
     const emitter = makeTextEmitter(streamJson);
     let stdoutBuffer = '';
     let stderr = '';
@@ -404,6 +406,7 @@ function launchCodex({ prompt, model, streamJson }) {
     };
 
     child.stdout.on('data', (chunk) => {
+      watchdog.markActivity();
       stdoutBuffer += chunk.toString();
       const lines = stdoutBuffer.split(/\r?\n/);
       stdoutBuffer = lines.pop() || '';
@@ -411,15 +414,21 @@ function launchCodex({ prompt, model, streamJson }) {
     });
 
     child.stderr.on('data', (chunk) => {
+      watchdog.markActivity();
       stderr += chunk.toString();
     });
 
     child.on('error', (err) => {
       removeSignalHandlers();
+      watchdog.dispose();
       reject(err);
     });
     child.on('close', (code, signal) => {
       removeSignalHandlers();
+      watchdog.dispose();
+      if (watchdog.timedOut() && !stderr.trim()) {
+        stderr = `[codex-shim] killed by inactivity watchdog after ${process.env.SHIM_INACTIVITY_TIMEOUT_MS || 600000}ms with no output from child`;
+      }
       if (stdoutBuffer) handleLine(stdoutBuffer);
       emitter.close();
       if (!streamJson && fullText && !fullText.endsWith('\n')) process.stdout.write('\n');

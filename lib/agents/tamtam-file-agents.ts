@@ -4,6 +4,7 @@ import { getBranchContext, gitLsTreeSync, gitShowSync } from '@/lib/git/git-bran
 import { getFileAgentOverride } from '@/lib/agents/file-agent-overrides';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
+import { isCliProvider } from '@/lib/usage/cli-providers';
 
 export interface FileAgent {
   id: string;
@@ -16,6 +17,7 @@ export interface FileAgent {
   schedule: string | null;
   runner: string;
   enabled: boolean;
+  provider: string | null;
   createdAt: number;
   updatedAt: number;
   source: 'file';
@@ -29,10 +31,17 @@ export interface FileAgentUpdates {
   skillIds?: string[];
   runner?: string;
   enabled?: boolean;
+  provider?: string | null;
 }
 
 // Canonical frontmatter key order for serialization
-const FM_KEY_ORDER = ['model', 'schedule', 'skillIds', 'runner', 'enabled'] as const;
+const FM_KEY_ORDER = ['provider', 'model', 'schedule', 'skillIds', 'runner', 'enabled'] as const;
+
+function normalizeFileAgentProvider(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const raw = value.trim().toLowerCase();
+  return isCliProvider(raw) ? raw : null;
+}
 
 function parseFrontmatter(content: string): { meta: Record<string, string>; body: string } {
   const meta: Record<string, string> = {};
@@ -100,6 +109,7 @@ function buildFileAgent(
       override?.enabled !== undefined
         ? override.enabled
         : meta.enabled !== 'false',
+    provider: normalizeFileAgentProvider(meta.provider),
     createdAt: now,
     updatedAt: now,
     source: 'file',
@@ -108,6 +118,7 @@ function buildFileAgent(
 }
 
 function serializeAgent(
+  provider: string | null,
   model: string,
   schedule: string | null,
   skillIds: string[],
@@ -118,7 +129,9 @@ function serializeAgent(
   const fmLines: string[] = [];
 
   for (const key of FM_KEY_ORDER) {
-    if (key === 'model') {
+    if (key === 'provider' && provider) {
+      fmLines.push(`provider: ${provider}`);
+    } else if (key === 'model') {
       fmLines.push(`model: ${model}`);
     } else if (key === 'schedule' && schedule) {
       fmLines.push(`schedule: ${schedule}`);
@@ -223,7 +236,7 @@ export function writeFileAgent(
   // Load current values from the working-tree file (if it exists) to preserve unset fields.
   // We intentionally read from disk here even on a feature branch, because the user may have
   // edited the agent locally and we want to preserve their changes.
-  const current = existsSync(filePath)
+  const currentFromDisk = existsSync(filePath)
     ? (() => {
         try {
           const content = readFileSync(filePath, 'utf-8');
@@ -233,6 +246,10 @@ export function writeFileAgent(
         }
       })()
     : null;
+  // On feature branches the effective agent may come from origin/<default>
+  // even when the working-tree file does not exist yet. Fall back to that
+  // view so provider-only metadata edits don't wipe the committed prompt.
+  const current = currentFromDisk ?? loadFileAgent(projectPath, projectName, agentName);
 
   const model = normalizeModelInput(updates.model ?? current?.model, 'normal');
   const rawSchedule = updates.schedule !== undefined ? updates.schedule : (current?.schedule ?? null);
@@ -241,9 +258,12 @@ export function writeFileAgent(
   const skillIds = updates.skillIds ?? current?.skillIds ?? [];
   const runner = updates.runner ?? current?.runner ?? 'pm2';
   const enabled = updates.enabled !== undefined ? updates.enabled : (current?.enabled ?? true);
+  const provider = updates.provider !== undefined
+    ? normalizeFileAgentProvider(updates.provider)
+    : (current?.provider ?? null);
   const prompt = updates.prompt ?? current?.prompt ?? '';
 
-  const content = serializeAgent(model, schedule, skillIds, runner, enabled, prompt);
+  const content = serializeAgent(provider, model, schedule, skillIds, runner, enabled, prompt);
   writeFileSync(filePath, content);
 
   return buildFileAgent(filePath, agentName, projectName, content, Date.now() / 1000);

@@ -11,7 +11,7 @@ import { exec } from '@/lib/shared/shell';
 import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/scheduling';
 import { acquireLock, getLock } from './pipeline-lock';
 import { detectMainBranch } from './start-commit';
-import { runGates } from '@/lib/shared/job-control';
+import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { hasFreshLgtm, hasLocalCommitsAhead } from './release-state';
 
 const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push', 'pr-wait', 'mark-dod', 'release']);
@@ -192,16 +192,16 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
   const sourceJob = options.sourceJobId ? getJob(options.sourceJobId) : null;
   const parentJobId = sourceJob?.project === projectName ? sourceJob.id : null;
-  const paused = runGates('start a release');
-  if (paused) {
+  const gate = await checkCliStartGate('start a release', { parentJobId });
+  if (!gate.ok) {
     // For budget-blocked releases, enqueue so the periodic drain picks it up
     // when the 5h window resets. For pause, the existing resume hook drains.
-    if ('window' in paused) {
+    if (gate.status === 429) {
       const { setPendingRelease } = await import('./pending-release');
       setPendingRelease(projectName);
     }
     if (options.queueIfBlocked) return queueRelease(projectName);
-    return paused;
+    return gate;
   }
 
   // In Direct Branch mode, guard against releasing from an unexpected branch.
@@ -255,6 +255,11 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
     return { ok: false, status: 500, detail: 'Failed to create release job' };
   }
   const releaseJobId = release.id;
+  const releaseJob = getJob(releaseJobId);
+  if (releaseJob) {
+    releaseJob.provider = gate.provider;
+    updateJob(releaseJob);
+  }
 
   // Acquire lock. If a concurrent caller won the race after our pre-check,
   // mark our just-created release job done so it doesn't linger as running.

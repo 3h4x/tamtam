@@ -19,7 +19,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
   let updateJobMock: ReturnType<typeof vi.fn>;
   let markDoneMock: ReturnType<typeof vi.fn>;
   let getJobMock: ReturnType<typeof vi.fn>;
-  let runGatesMock: ReturnType<typeof vi.fn>;
+  let checkCliStartGateMock: ReturnType<typeof vi.fn>;
   let setPendingReleaseMock: ReturnType<typeof vi.fn>;
   let isReviewedMock: ReturnType<typeof vi.fn>;
 
@@ -43,7 +43,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     updateJobMock = vi.fn();
     markDoneMock = vi.fn();
     getJobMock = vi.fn().mockReturnValue(null);
-    runGatesMock = vi.fn().mockReturnValue(null);
+    checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
     setPendingReleaseMock = vi.fn();
     isReviewedMock = vi.fn().mockResolvedValue(false);
 
@@ -85,7 +85,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
       getLock: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/shared/job-control', () => ({ runGates: runGatesMock }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({ checkCliStartGate: checkCliStartGateMock }));
     vi.doMock('@/lib/pipeline/pending-release', () => ({ setPendingRelease: setPendingReleaseMock }));
 
     ({ startRelease } = await import('@/lib/pipeline/start-release'));
@@ -134,13 +134,10 @@ describe('startRelease — release pipeline entry decision tree', () => {
   });
 
   it('queues a pending release when the budget gate blocks startup', async () => {
-    runGatesMock.mockReturnValue({
+    checkCliStartGateMock.mockResolvedValue({
       ok: false,
       status: 429,
       detail: 'Claude quota exceeded',
-      window: '5h',
-      utilization: 99,
-      resetsAt: '2026-05-02T12:00:00.000Z',
     });
 
     const r = await startRelease('proj');
@@ -153,7 +150,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
   });
 
   it('does not queue a pending release for a manual global pause', async () => {
-    runGatesMock.mockReturnValue({
+    checkCliStartGateMock.mockResolvedValue({
       ok: false,
       status: 409,
       detail: 'Jobs are paused globally',
@@ -266,6 +263,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock, probeJobStatus: probeJobStatusMock,
       createJob: createJobMock, updateJob: updateJobMock,
+      getJob: getJobMock,
       getVerdict: vi.fn().mockReturnValue(null), markDone: vi.fn(),
       runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
@@ -287,7 +285,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
       getLock: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/shared/job-control', () => ({ runGates: vi.fn().mockReturnValue(null) }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({ checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }) }));
 
     const { startRelease: fn } = await import('@/lib/pipeline/start-release');
     const r = await fn('proj');
@@ -476,6 +474,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       probeJobStatus: probeJobStatusMock,
       createJob: createJobMock,
       updateJob: updateJobMock,
+      getJob: getJobMock,
       getVerdict: getVerdictLgtm,
       runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
@@ -488,7 +487,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
     vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
     vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
-    vi.doMock('@/lib/shared/job-control', () => ({ runGates: vi.fn().mockReturnValue(null) }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({ checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }) }));
 
     const { startRelease: fn } = await import('@/lib/pipeline/start-release');
     const r = await fn('proj');
@@ -525,6 +524,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       probeJobStatus: probeJobStatusMock,
       createJob: createJobMock,
       updateJob: updateJobMock,
+      getJob: getJobMock,
       getVerdict: vi.fn().mockReturnValue('LGTM'),
       runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
@@ -662,7 +662,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
       getLock: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/shared/job-control', () => ({ runGates: runGatesMock }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({ checkCliStartGate: checkCliStartGateMock }));
     vi.doMock('@/lib/pipeline/pending-release', () => ({ setPendingRelease: setPendingReleaseMock }));
 
     const { startRelease: fn } = await import('@/lib/pipeline/start-release');
@@ -690,6 +690,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock, probeJobStatus: probeJobStatusMock,
       createJob: createJobMock, updateJob: updateJobMock,
+      getJob: getJobMock,
       getVerdict: vi.fn().mockReturnValue(null), markDone: vi.fn(),
       runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
@@ -739,6 +740,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock, probeJobStatus: probeJobStatusMock,
       createJob: createJobMock, updateJob: updateJobMock,
+      getJob: getJobMock,
       getVerdict: vi.fn().mockReturnValue(null), markDone: vi.fn(),
       runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
@@ -784,6 +786,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock, probeJobStatus: probeJobStatusMock,
       createJob: createJobMock, updateJob: updateJobMock,
+      getJob: getJobMock,
       getVerdict: vi.fn().mockReturnValue(null), markDone: vi.fn(),
       runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
     }));
@@ -830,6 +833,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       probeJobStatus: probeJobStatusMock,
       createJob: createJobMock,
       updateJob: updateJobMock,
+      getJob: getJobMock,
       getVerdict: vi.fn().mockReturnValue(null),
       markDone: vi.fn(),
       runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
@@ -961,7 +965,7 @@ describe('startRelease — legacy review stamp compatibility', () => {
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
       getLock: vi.fn().mockReturnValue(null),
     }));
-    vi.doMock('@/lib/shared/job-control', () => ({ runGates: vi.fn().mockReturnValue(null) }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({ checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }) }));
 
     ({ startRelease } = await import('@/lib/pipeline/start-release'));
   });

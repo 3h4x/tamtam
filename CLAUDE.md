@@ -4,44 +4,21 @@ Next.js monolith (App Router) for managing Claude-compatible CLI agents across m
 
 ## Vision: CI/CD for code, driven by Claude
 
-TamTam's north star is a **quality-gated release pipeline** for each tracked repo. Each project has two workflow modes (set in the project Config tab):
+TamTam's north star is a **quality-gated release pipeline** for each tracked repo. Each project picks a workflow mode in its Config tab:
 
-**Direct Branch**: `test → review → (fix loop) → commit → push`
-**PR Workflow**: `test → review → (fix loop) → commit → push → dod → merge`
+- **Direct Branch**: `test → review → (fix loop) → commit → push`
+- **PR Workflow**: `test → review → (fix loop) → commit → push → dod → merge`
 
-Steps are pluggable per project and coordinated by completion hooks in `lib/jobs/job-storage.ts`:
+Steps are pluggable per project. The **🚀 Release** button triggers the pipeline at the right starting step; with `auto_push_enabled` on, the chain continues automatically. Verdicts (`LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP`) are emitted by Claude during review and drive fix loops (capped at 3 iterations per 30-minute window). The pipeline strip in the Terminal tab shows live step state (`○` pending, spinner running, `✓` done, `!` needs attention, `✗` failed) and is only visible while a pipeline is actively running.
 
-- **test** — runs the project's test command (auto-detected from `package.json`, `pyproject.toml`/`requirements.txt`, `foundry.toml`, `Package.swift`, `Cargo.toml`, `go.mod`, `pom.xml`, `build.gradle`/`build.gradle.kts`, `Makefile:test`, or user-configured). Skipped if none. If tests pass with no uncommitted changes but local commits are ahead of upstream, the pipeline still runs review against `@{u}..HEAD` before push.
-- **review** — Claude reads the uncommitted diff or, for a clean branch with unpushed commits, the committed diff against upstream, then emits a verdict: `LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP` (verdict rules are configurable in Settings). Fresh-LGTM skips are commit-aware: they only apply when the reviewed `git status` fingerprint, `HEAD`, and upstream base still match.
-- **fix** — on `NEEDS ATTENTION` / `DO NOT SHIP`, Claude resumes the review session and applies fixes. Capped at 3 iterations per 30-minute window to prevent loops. On success it chains back to review.
-- **commit + push** — on `LGTM`, staged changes are committed with a Claude-generated message (respecting the `commit_style` setting) and pushed. All changes (including untracked files) are staged via `git add -A`; `.gitignore` is trusted to exclude secrets.
-- **mark-dod** *(PR Workflow only)* — after push, Claude inspects the codebase with tool access (Read/Grep/Glob) to verify which acceptance-criteria checkboxes in the linked GitHub issue are actually implemented, then ticks only the verified ones. Best-effort and non-fatal.
-- **merge** *(PR Workflow + auto-merge enabled)* — polls CI checks on the PR and merges once they pass. After merge, the working copy is returned to the default branch.
-
-The **🚀 Release** button triggers the pipeline at the right starting step. When `auto_push_enabled` is on (per-project config, off by default), the chain continues automatically from one step to the next. The pipeline strip in the Terminal tab shows the live state of each step (`○` pending, spinner running, `✓` done, `!` needs attention, `✗` failed); clicking a step opens its log. The strip is **only visible while the pipeline is actively running** — it disappears when all steps finish. Each release starts with a clean strip: only jobs from the current run are shown. Steps that come after the currently-running step always render as `○` (they haven't executed yet in this run), and prior steps are only shown as `✓` if they started within 30 minutes of the running step (older jobs are from a previous release and are ignored).
-
-**Helpers** (composable building blocks used by both the API routes and the auto-chain):
-- `lib/pipeline/start-test.ts` → `startProjectTest`
-- `lib/pipeline/start-review.ts` → `startProjectReview`
-- `lib/pipeline/start-fix.ts` → `startFixFromJob`
-- `lib/pipeline/start-fix-push.ts` → `startFixPush` (pre-commit/pre-push hook failure recovery)
-- `lib/pipeline/start-commit.ts` → `startProjectCommit` (stage all changes + generate commit message via Claude; also exports `generateCommitMessage`, `issueBranchName`, `findIssueContext`, `detectMainBranch`)
-- `lib/pipeline/start-push.ts` → `startProjectPush`
-- `lib/pipeline/start-release.ts` → `startRelease` (pipeline entry point)
-- `lib/pipeline/start-pr-review.ts` → `startPrReview` (AI review of a GitHub PR)
-- `lib/pipeline/start-mark-dod.ts` → `startMarkDod` (DoD verification + GitHub issue checkbox update)
-- `lib/pipeline/start-pr-wait.ts` → `launchPrWait` (background PR poller: polls CI checks, auto-merges once they pass, switches working copy back to default branch, then runs mark-dod)
-- `lib/pipeline/release-state.ts` → `hasFreshLgtm` / `hasLocalCommitsAhead` (release skip detection and upstream-ahead checks)
-- `lib/shared/notifications.ts` → `notify` / `sendTestNotification` (outbound webhook delivery)
-
-Verdict detection (`getVerdict` in `lib/jobs/verdict.ts`, re-exported via the `job-storage` barrel) reads the **last 2000 chars** of the parsed Claude log and looks for an explicit "Verdict: X" marker or a bare token on the final line — deliberately lenient across markdown formatting (`## Verdict\n**NEEDS ATTENTION**`) but robust against false positives from code snippets higher up in the log.
+**See `docs/PIPELINE.md`** for the full state machine, completion-hook chain, helper modules (`lib/pipeline/start-*.ts`), verdict-detection rules, fresh-LGTM skip logic, and `mark-dod` / `pr-wait` behavior.
 
 ## Concepts
 - **Skills** — reusable prompt/instruction blocks (DB-backed + file-based personas from `skills/docs/skills/` and `data/skills/`)
-- **Agents** — composed from skills + model + prompt (optional when skills are set) + interval schedule + runner. `pm2` is the default and recommended runner; `launchctl` remains for backward compatibility and emits a `[agent-scheduler] launchctl runner is deprecated` warning.
-- **Runs** — individual executions of an agent (what was previously called "jobs")
+- **Agents** — composed from skills + model + prompt + interval schedule + runner. `pm2` is the default runner; `launchctl` is deprecated.
+- **Runs** — individual executions of an agent (previously called "jobs")
 - **Custom Actions** — per-project bash commands (e.g. deploy) with configurable button color
-- **Release Pipeline** — two modes: *Direct Branch* (`test → review → fix → commit → push`) or *PR Workflow* (adds `dod → merge`), driven by Claude and configurable per project
+- **Release Pipeline** — see Vision above
 
 ## Tech Stack
 - **Framework**: Next.js 16 (App Router) — both frontend and backend
@@ -49,211 +26,117 @@ Verdict detection (`getVerdict` in `lib/jobs/verdict.ts`, re-exported via the `j
 - **Streaming**: SSE via route handlers for real-time run output
 - **Styling**: Tailwind CSS v4
 - **Agent providers**: Claude CLI plus Gemini, LM Studio, Codex, and custom backends through compatibility shims
-- **Skills**: `skills/` submodule (claude-skills) — file-based personas scanned from `skills/docs/skills/`; user-defined personas in `data/skills/`
+- **Skills**: `skills/` submodule (claude-skills) — file-based personas; user-defined personas in `data/skills/`
 - **Testing**: vitest + Playwright (e2e)
 - **Package Manager**: pnpm
 - **Release**: semantic-release on push to master (GitHub releases only, no npm)
 
 ## Commands
-- `pnpm dev` — run `next dev` directly in the foreground on port 1337 (HMR enabled, no PM2). Use only for active local development; never for the long-lived TamTam server.
-- `pnpm start` — start (or idempotently restart) the production server via PM2 on port 1337. Delegates to `scripts/pm2-start.sh`, which spawns `next` directly under PM2 (`--interpreter node`, no shell wrapper) so PM2 tracks the actual server PID — no orphans on stop/restart. Self-heals if a previous orphan is still squatting on port 1337. This is the canonical way to run TamTam.
-- `pnpm run rebuild` — `pnpm build && pnpm start` — production mode has no HMR, so rebuild always rebuilds first to pick up code changes. This is the canonical post-edit command.
-- `pnpm restart` — same end result as `pnpm run rebuild`. Note: bare `pnpm rebuild` invokes pnpm's built-in native-deps rebuild instead — use `pnpm run rebuild` or `pnpm restart`.
+- `pnpm dev` — `next dev` foreground on port 1337 (HMR enabled, no PM2). Local debugging only.
+- `pnpm start` — start (or idempotently restart) production server via PM2 on port 1337. Self-heals if a previous orphan is squatting on the port. Canonical way to run TamTam.
+- `pnpm run rebuild` / `pnpm restart` — `pnpm build && pnpm start`. Canonical post-edit command. (Note: bare `pnpm rebuild` triggers pnpm's native-deps rebuild instead — use `pnpm run rebuild`.)
 - `pnpm stop` — stop the PM2 server.
 - `pnpm logs` — view PM2 logs.
-- `pnpm mcp:http <tool> [json_args]` — call local TamTam HTTP endpoints through the sibling `mcp-http-tools` checkout using `.tamtam/mcp-http-tools.yaml`; prefer `tamtam_api_get` for path-only GET routes (for example `pnpm mcp:http tamtam_api_get '{"path":"jobs/notifications"}'`). Set `MCP_HTTP_TOOLS_DIR` if the checkout is not at `../mcp-http-tools`.
+- `pnpm mcp:http <tool> [json_args]` — call local TamTam HTTP endpoints via the sibling `mcp-http-tools` checkout (`.tamtam/mcp-http-tools.yaml`). Prefer `tamtam_api_get` for path-only GET routes, e.g. `pnpm mcp:http tamtam_api_get '{"path":"jobs/notifications"}'`.
 - `pnpm build` — production build.
-- `pnpm test` — run unit tests
-- `pnpm test:watch` — run vitest in watch mode
-- `pnpm test:e2e` — run Playwright e2e tests (requires dev server running on port 1337)
-- `pnpm test:e2e:pipeline` — run pipeline e2e tests (`e2e/pipeline/`); spins up an isolated Next.js dev server on port 1338 with a temp DB at `/tmp/tamtam-e2e-pipeline/` — does NOT require the production server to be running
-- `pnpm lint` — ESLint on app, components, lib, hooks
-- `pnpm type-check` — TypeScript check
-- `pnpm check` — lint + type-check + test (all in one)
-- `pnpm db:generate` — generate Drizzle migration files from schema changes
-- `pnpm db:migrate` — apply pending Drizzle migrations
-- `pnpm dev:profile` — start dev server with Turbopack tracing enabled; stop server to flush trace to `.next/dev/trace-turbopack`, then open via `npx next internal trace` or https://trace.nextjs.org/
-- `pnpm dev:flamegraph` — start dev server with V8 CPU profiling; stop server to flush `.profiles/CPU.*.cpuprofile`, then open in Chrome DevTools or https://www.speedscope.app/
+- `pnpm test` / `pnpm test:watch` — vitest unit tests
+- `pnpm test:e2e` — Playwright e2e (requires dev server on port 1337)
+- `pnpm test:e2e:pipeline` — pipeline e2e (`e2e/pipeline/`); spins up an isolated Next.js dev server on port 1338 with a temp DB at `/tmp/tamtam-e2e-pipeline/`. See `docs/E2E.md`.
+- `pnpm lint` / `pnpm type-check` / `pnpm check` — ESLint / `tsc --noEmit` / lint+type-check+test
+- `pnpm db:generate` / `pnpm db:migrate` — Drizzle migrations
+- `pnpm dev:profile` / `pnpm dev:flamegraph` — Turbopack tracing / V8 CPU profiling. See `docs/PROFILING.md`.
 
-**Always run TamTam under PM2 via `pnpm start` / `pnpm run rebuild` (or `pnpm restart`).** `pnpm dev` is foreground-only and intended for ad-hoc local debugging — it does not register with PM2, so the rest of the harness (logs, restart, stop scripts) won't see it.
+**Always run TamTam under PM2 via `pnpm start` / `pnpm run rebuild`.** `pnpm dev` is foreground-only — never use as the long-lived server (HMR file watchers can restart mid-operation, orphaning in-flight jobs).
 
 ### Applying code changes
 
-TamTam runs in **production mode** (`next start`) under PM2 — no HMR, no auto-reload. After any code change:
-
-1. `pnpm run rebuild` — builds and restarts the PM2 server in one step (preferred)
-2. Or: `pnpm build` then `pnpm start`
-
-`pnpm start` is idempotent: if a `tamtam` PM2 entry already exists it is restarted in place (no port kill, no dropped in-flight requests); otherwise a new entry is created.
-
-If you genuinely need HMR for an interactive session, run `pnpm dev` in a separate terminal — but stop the PM2 server first (`pnpm stop`) so the two don't fight over port 1337. **Never leave `pnpm dev` running as the long-lived server**: HMR file watchers can restart the process mid-operation (e.g. while a git push hook runs), orphaning in-flight jobs and marking them `exit -1`.
+TamTam runs in **production mode** (`next start`) under PM2 — no HMR. After any code change, run `pnpm run rebuild`. `pnpm start` is idempotent: existing entry is restarted in place; otherwise a new entry is created. If you genuinely need HMR, run `pnpm dev` after `pnpm stop` so the two don't fight over port 1337.
 
 ## Architecture
 - `app/` — Next.js pages and API route handlers
 - `components/` — React client components; large pages have a co-located subfolder (e.g. `components/monitoring/`, `components/settings/`, `components/project-detail/`, `components/project-runs/`, `components/terminal/`)
 - `hooks/` — Custom React hooks
-- `lib/` — Server-side business logic, organised into domain folders:
-  - `lib/pipeline/` — release pipeline orchestration (`start-*`, `pipeline-lock`, `pipeline-status`, `pipeline-steps`, `mark-dod-branch`, `pr-create`, `pending-release`, `review-contract`, `release-state`)
-  - `lib/scheduling/` — agent/test scheduling (`agent-scheduler`, `internal-scheduler`, `test-scheduler`, `scheduling`, `fire-times`, `launchagent`)
-  - `lib/git/` — git operations (`git-branch`, `git-utils`, `diff-context`)
-  - `lib/jobs/` — job lifecycle (`job-storage` barrel + `storage`, `lifecycle`, `verdict`, `verdict-retry`, `probe`, `types`, `parent-context`, `prompt-size`; also `pm2-jobs`, `run-history`, `log-persistence`, `retention`, `claude-stream-parser`)
-  - `lib/terminal/` — terminal streaming (`terminal-session-store`, `ansi-render`)
-  - `lib/agents/` — agent management (`agent-memory`, `agents-cache`, `default-agent-skills`, `file-agent-overrides`, `tamtam-file-agents`)
-  - `lib/skills/` — skills (`skills`, `tamtam-file-config`)
-  - `lib/shared/` — cross-cutting utilities (`shell`, `types`, `format`, `config`, `untrusted`, `usage-pricing`, `notifications`, `job-control`, `budget-throttle`, `statusConstants`, `gh-status`, `project-data`, `project-branch-lock`)
-  - `lib/usage/` — Claude/Codex quota snapshots and provider-specific quota fetchers
-  - `lib/db/` — Drizzle schema and connection (tables: settings, projects, jobs, recommendations, gh_status, gh_issues_cache, skills, agents, pipeline_locks)
-  - `lib/client-api.ts` — barrel re-exporting from `lib/client/` (split by resource: `projects`, `jobs`, `agents`, `skills`, `types`)
-- `scripts/` — server startup, job runners, and CLI shims (`pm2-start.sh`, `job-runner.js`, `gemini-shim.js`, `lmstudio-shim.js`, `codex-shim.js`)
+- `lib/` — Server-side business logic, organised into domain folders: `pipeline/`, `scheduling/`, `git/`, `jobs/` (`job-storage` barrel), `terminal/`, `agents/`, `skills/`, `shared/`, `usage/`, `db/`, `github/`. `lib/client-api.ts` is the only barrel.
+- `scripts/` — server startup, job runners, CLI shims (`pm2-start.sh`, `job-runner.js`, `gemini-shim.js`, `lmstudio-shim.js`, `codex-shim.js`)
 - `skills/` — claude-skills submodule
 - `data/` — SQLite database (gitignored)
 - `__tests__/` — vitest unit tests
 - `e2e/` — Playwright integration tests
-- `docs/` — architecture docs (see **Docs Reference** section below)
+- `docs/` — architecture docs (see **Docs Reference** below)
 
 **File size conventions (enforced by convention, not tooling):**
-- No new top-level files directly in `lib/` — all new lib modules must go in a domain subfolder
+- No new top-level files directly in `lib/` — all new lib modules go in a domain subfolder
 - New lib files: target under 300 lines, hard cap 500 lines
-- New component files: target under 400 lines, hard cap 600 lines; if a page component grows past 600 lines, extract subcomponents into a co-located `components/<page-name>/` folder
+- New component files: target under 400 lines, hard cap 600 lines; if a page component grows past 600, extract subcomponents into `components/<page-name>/`
 
-**React Server vs Client Components (Next.js App Router):**
-- UI component files in `components/` that render React must start with `'use client'` (single quotes, first line). Co-located type, constant, utility, and hook modules may omit the directive when they are imported only from client components.
-- Pages in `app/` are Server Components by default; do not add `'use client'` to a page file unless the page itself needs React hooks directly (rare — usually the page just imports a client component).
+**React Server vs Client Components:**
+- UI files in `components/` that render React must start with `'use client'` (single quotes, first line). Co-located type/constant/utility/hook modules may omit it when imported only from client components.
+- Pages in `app/` are Server Components by default; do not add `'use client'` unless the page itself needs hooks directly.
 - Never use browser-only APIs (`window`, `document`, `localStorage`) in `app/` page/layout files.
 
 **Adding a new API route:**
 1. Create `app/api/<path>/route.ts` — export named functions (`GET`, `POST`, etc.).
 2. Add a matching test at `__tests__/api/<route-name>.test.ts`.
-3. Document the route in the API Routes section of this file.
-4. If the route needs a new DB table, follow the schema change procedure in Commit & Branch Rules.
+3. Document the route in `docs/API.md`.
+4. If the route needs a new DB table, follow the schema change procedure in **Commit & Branch Rules**.
 
 ## Pages
 - `/` — Projects list with status, changes, CI
-- `/project/[name]` — Project overview
-- `/project/[name]/[tab]` — Project detail tabs (`overview`, `config`, `history`, `terminal`, `changes`, `issues`, `docs`, `recommendations`)
-- `/project/[name]/terminal/[sessionId]` — Interactive Claude runner with model tier selector (fast/normal/smart; legacy haiku/sonnet/opus aliases still accepted), skill picker, and real-time token streaming via SSE (see `docs/STREAMING.md`)
-- `/project/[name]/task/[task]` — Task detail view
-- `/project/[name]/release/[releaseId]` — Release trace view: pipeline steps, per-step verdicts and log excerpts for a specific release run
-- `/agents` — Agents management page
-- `/monitoring` — Prometheus + Loki health dashboard (alerts, service up/down, log errors)
-- `/pipeline` — Pipeline health metrics dashboard (verdict distribution, fix-loop stats, step durations, MTTR, per-project breakdown; filterable by 24h/7d/30d/all)
-- `/stats` — Token usage dashboard (runs, input/output/cache tokens, cost per project and per agent kind, filterable by 24h/7d/30d/all)
-- `/runs` — All runs across projects
-- `/jobs` — Redirects to `/runs`
+- `/project/[name]` — Project overview; `/project/[name]/[tab]` — tabs (`overview`, `config`, `history`, `terminal`, `changes`, `issues`, `docs`, `recommendations`)
+- `/project/[name]/terminal/[sessionId]` — Interactive Claude runner with model tier selector (fast/normal/smart; legacy haiku/sonnet/opus aliases still accepted), skill picker, real-time SSE streaming. See `docs/STREAMING.md`.
+- `/project/[name]/task/[task]` — Task detail
+- `/project/[name]/release/[releaseId]` — Release trace: pipeline steps, per-step verdicts, log excerpts
+- `/agents` — Agents management
+- `/monitoring` — Prometheus + Loki health dashboard
+- `/pipeline` — Pipeline health metrics (filterable by 24h/7d/30d/all)
+- `/stats` — Token usage dashboard
+- `/runs` — All runs across projects (`/jobs` redirects here)
 - `/logs` — Log viewer
 - `/skills` — Skill editor (CRUD for DB-backed skills)
-- `/settings` — Workspace path, project enablement, agent provider/binary, default model, permission mode, agent templates, pipeline behavior/model settings, budget gates, notifications, retention, DB backup
+- `/settings` → `/settings/general`; `/settings/[tab]` — `general`, `cli`, `pipeline`, `notifications`, `projects`, `templates`, `database`
 
 ## API Routes
-- `/api/agents` — CRUD for agents (GET: accepts `?project=` and `?name=` filters, POST)
-- `/api/agents/[agentId]` — Agent detail (GET, PATCH, DELETE)
-- `/api/agents/[agentId]/run` — Run agent (POST) — composes skills into prompt
-- `/api/agents/by-name` — Update agent by project+name without knowing its UUID (PATCH: `{ project, name, ...fields }`) — enables agents to self-improve
-- `/api/agents/scheduler-health` — Verify the internal scheduler matches the DB (GET returns `{ ok, expected, actual, missing, orphans, errors, internal: { started, entries: [{ agentId, project, name, schedule, nextFireMs, lastFireMs, fireCount, errorCount, lastError }] } }`); POST reinstalls anything missing and sweeps legacy PM2 cron orphans, then returns `{ before, after, installed, installFailures }`. Surfaced on the `/monitoring` page.
-- `/api/skills` — CRUD for skills (GET, POST)
-- `/api/skills/[skillId]` — Skill detail (GET, PATCH, DELETE)
-- `/api/projects` — All projects list (GET)
-- `/api/projects/personas` — File-based skills from `skills/docs/skills/` (GET)
-- `/api/projects/[schedId]/priority` — Set project scheduling priority (PATCH)
-- `/api/projects/[schedId]/pause` — Pause project scheduling (POST)
-- `/api/projects/[schedId]/resume` — Resume project scheduling (POST)
-- `/api/projects/[schedId]/detail` — Project scheduling detail (GET)
-- `/api/projects/by-project/[name]/action` — Custom actions (GET, PUT, POST)
-- `/api/projects/by-project/[name]/config` — Project test command config (GET, PATCH)
-- `/api/projects/by-project/[name]/run` — Run Claude on project (POST, accepts `model` param)
-- `/api/projects/by-project/[name]/review` — Start AI code review (POST)
-- `/api/projects/by-project/[name]/review-pr` — Start AI review of a GitHub PR (POST)
-- `/api/projects/by-project/[name]/fix-ci` — Start AI CI fix run (POST)
-- `/api/projects/by-project/[name]/test` — Run project test command (POST)
-- `/api/projects/by-project/[name]/changes` — Uncommitted changes summary (GET, returns `defaultBranch` in addition to `branch`/`ahead`/`behind`/`files`); git pull with configurable strategy (POST: ff-only/merge/rebase)
-- `/api/projects/by-project/[name]/changes/diff` — Full git diff content (GET)
-- `/api/projects/by-project/[name]/checkout-default` — Switch working copy to the project's default branch; refuses if there are uncommitted changes (POST, returns `{ status: 'switched'|'already-on-branch', branch }`)
-- `/api/projects/by-project/[name]/push` — Push changes to git (POST)
-- `/api/projects/by-project/[name]/create-pr` — Push current branch + create GitHub PR with a generated title (derived from the linked GitHub issue title or commit log; falls back to `gh pr create --fill`) (POST); returns `{ url }` — refuses if on default branch
-- `/api/projects/by-project/[name]/release` — Trigger release pipeline (POST)
-- `/api/projects/by-project/[name]/release/[releaseId]` — Release detail: meta-job + ordered pipeline step jobs with verdicts and log excerpts (GET)
-- `/api/projects/by-project/[name]/release/abort` — Abort the active release pipeline: marks the release job aborted, kills the running step job, and releases the pipeline lock (POST)
-- `/api/projects/by-project/[name]/issues` — GitHub PRs and issues for the project (GET, with `?refresh=1` to bypass cache); POST merges or approves a PR and switches the working copy to the default branch after merge
-- `/api/projects/by-project/[name]/issue-branch` — Create or checkout `fix/issue-<n>-<slug>` before Claude edits (POST); called automatically from TerminalTab when opening from an issue
-- `/api/projects/by-project/[name]/continue-issue` — Build a "Continue work" payload for an issue (GET: `?issue_number=N`); returns `{ sessionId, prompt, unverifiedCount, hasContext }` — finds the most recent Claude run tagged with the issue and the most recent mark-dod log, then composes a focused prompt listing only the unverified acceptance criteria
-- `/api/projects/by-project/[name]/mark-dod` — Run DoD verification for latest issue-linked run (POST); also triggered automatically after review→LGTM
-- `/api/projects/by-project/[name]/pr-branch` — Fetch and checkout a PR's head branch so Terminal opens on the right branch (POST: `{ branch }`)
-- `/api/projects/by-project/[name]/pr-gates` — TamTam-side gate state for a PR: tests/review/DoD badges (GET); used by IssuesTab
-- `/api/projects/by-project/[name]/branch` — Current branch name + default branch (GET); returns `{ branch, defaultBranch, commitsAhead }` (`commitsAhead` is the count of local commits not yet in `origin/<default>`, or `null` when on the default branch; no `git fetch` is issued)
-- `/api/projects/by-project/[name]/behind` — Ahead/behind commit counts vs remote (GET)
-- `/api/projects/by-project/[name]/logs` — Project run log files (GET)
-- `/api/projects/by-project/[name]/docs` — Project documentation files (GET)
-- `/api/projects/by-project/[name]/recommendations` — Project recommendations (GET); update recommendation status (PATCH: `{ id, status }`)
-- `/api/config/projects` — Scan workspace for git repos and configure projects (GET, PATCH)
-- `/api/jobs` — All runs across projects (GET)
-- `/api/jobs/[jobId]` — Job detail (GET, DELETE)
-- `/api/jobs/[jobId]/logs` — Job log content (GET)
-- `/api/jobs/[jobId]/board-sync` — Manually sync a finished root job to the shared GitHub project board (POST); rejects running jobs, requires board sync to be configured, and surfaces GitHub sync failures instead of swallowing them
-- `/api/jobs/[jobId]/rerun` — Re-run a job (POST)
-- `/api/jobs/[jobId]/fix` — Start AI fix run for a failed job (POST)
-- `/api/jobs/[jobId]/seen` — Mark job as seen (POST)
-- `/api/jobs/notifications` — Unseen job notifications (GET)
-- `/api/jobs/notifications/mark-seen` — Mark all notifications seen (POST)
-- `/api/streaming/[jobId]` — SSE stream of parsed text deltas from NDJSON log (`?raw=1` for raw lines)
-- `/api/settings` — Settings CRUD (GET, PATCH) — includes agent provider/bin/model settings, `base_prompt`, permission mode, pipeline model overrides, budget gates, retention, and all `notification_*` keys
-- `/api/settings/test-notification` — Send a test webhook payload to verify connectivity (POST)
-- `/api/settings/board-resync` — Re-run `syncJobToProjectBoard(job, 'manual')` for the most recent release/agent/run jobs (default last 7d, top 100; set via `?days=`/`?limit=`); skips pipeline child jobs (their root release covers them) and stops early on a GitHub secondary rate-limit. A 250 ms delay between syncs spreads out gh API calls. Returns `{ ok, days, limit, scanned, resynced, failed, rateLimited }`. (POST)
 
-GitHub board cards also carry four TEXT custom fields provisioned by `ensureProjectBoard`: **Project**, **Agent** (empty for non-agent runs), **Run kind**, **Branch**. Field IDs are persisted under `github_board_custom_field_ids`. Values are written on first sync of a card and skipped on subsequent syncs unless they change (cached on `boardMeta.customFields` in the job's `contextMeta`).
-
-GitHub board settings also persist `github_board_view_url` (optional user-facing URL override shown in the UI) and `github_board_custom_field_ids` (JSON map of the provisioned TEXT field ids). Treat both like other settings-backed JSON/string config: round-trip them through `lib/shared/config.ts` and `app/api/settings/route.ts`, and cover them with route/config tests when touched.
-- `/api/settings/backup` — SQLite hot backup (POST)
-- `/api/health` — Health check (GET)
-- `/api/monitoring` — Prometheus + Loki status aggregation (GET); env: `PROMETHEUS_URL`, `LOKI_URL`
-- `/api/monitoring/pm2-logs` — Tail tamtam PM2 log files (error + out from `~/.pm2/logs/`), last 64 KB; accepts `?limit=` (max 500) and `?out=0` to suppress stdout log (GET)
-- `/api/stats/usage` — Token usage statistics per project and per agent kind (GET, accepts `?window=24h|7d|30d|all`)
-- `/api/stats/pipeline` — Pipeline health metrics: verdict distribution, fix-loop stats, step durations, MTTR, per-project breakdown (GET, accepts `?window=24h|7d|30d|all` and `?project=`; 60s cache)
-- `/api/usage/quota` — active provider quota snapshot (Claude or Codex; `?provider=claude|codex` overrides). GET returns `QuotaSnapshot` with fiveHour/sevenDay utilization and gate state; POST force-clears cache and re-fetches; returns 502 when provider quota data is unavailable.
+See `docs/API.md` for the full route reference. New routes must be documented there.
 
 ## Testing Requirements
 - **All new API routes must have vitest tests** in `__tests__/api/`; lib logic tests go in `__tests__/lib/` or alongside the file.
-- Follow existing test patterns (in-memory SQLite, mocked shell/PM2 calls).
-- **Do not mock the database** — use an in-memory `better-sqlite3` instance with the real Drizzle schema instead. Mock only external side-effects: `lib/shared/shell.ts` `exec`, PM2, Claude CLI spawning.
-- Run `pnpm test` after every non-trivial code change, not only after writing new tests. All tests must pass before committing.
+- **Do not mock the database** — use an in-memory `better-sqlite3` instance with the real Drizzle schema. Mock only external side-effects: `lib/shared/shell.ts` `exec`, PM2, Claude CLI spawning.
+- Run `pnpm test` after every non-trivial code change. All tests must pass before committing.
 - Test naming: `__tests__/api/<route-name>.test.ts` mirroring `app/api/<route-name>/route.ts`.
-- **`createTestDb()` pattern**: each test file defines its own local `createTestDb()` that opens `new Database(':memory:')` with `pragma journal_mode = WAL` and creates only the tables that test actually needs via raw SQL. There is no shared helper — copy the pattern from the nearest similar test file. Never import the real DB connection in tests.
-- **E2e vs unit**: three kinds of Playwright tests exist — (1) browser tests in `e2e/` for UI-only rendering and component state; (2) pipeline e2e tests in `e2e/pipeline/` for full pipeline chains (review → fix → commit → push) where completion hooks and PM2 job lifecycle must be exercised end-to-end; (3) API integration tests via `request` fixture. Write a pipeline e2e test when you need to verify that completion hooks chain correctly across multiple steps, or that the probe sweep picks up a PM2 job's exit code and triggers the right follow-on step — unit tests cannot catch these because they mock the async job lifecycle. See `docs/E2E.md` for the full pipeline harness guide (mocks, scenarios, helpers, how to add a new spec). All API routes and lib logic must have vitest unit tests. Component tests with `@testing-library/react` are available but optional — prefer testing behaviour through the API layer instead.
-- **What must be tested**: new API route handlers (happy path + error cases), new lib functions that contain branching logic or state mutations. Skip trivial passthrough functions and pure type definitions.
-- **Pipeline e2e isolation**: `pnpm test:e2e:pipeline` launches a dedicated Next.js dev server on port 1338, uses a temp SQLite DB (`/tmp/tamtam-e2e-pipeline/data/db/tamtam.db`), and intercepts all `git`/`gh` CLI calls via shims in `e2e/pipeline/mocks/bin/`. Tests run sequentially (`workers: 1`) to prevent shim-state collisions. Never run pipeline e2e against the production server or DB.
-- **Pre-push hook** (`.husky/pre-push`): runs `pnpm lint && pnpm type-check && pnpm test` before every push. If the hook fails, fix the root cause — do not bypass with `--no-verify`.
+- **`createTestDb()` pattern**: each test file defines its own local `createTestDb()` opening `new Database(':memory:')` with `pragma journal_mode = WAL` and creates only the tables that test needs via raw SQL. No shared helper — copy from the nearest similar test. Never import the real DB connection in tests.
+- **E2e vs unit**: three kinds of Playwright tests — (1) browser tests in `e2e/` for UI rendering; (2) pipeline e2e in `e2e/pipeline/` for full pipeline chains where completion hooks and PM2 lifecycle must be exercised; (3) API integration tests via `request` fixture. Write a pipeline e2e when you need to verify cross-step hook chaining or probe-sweep-driven follow-ons. See `docs/E2E.md`.
+- **What must be tested**: new API route handlers (happy + error), new lib functions with branching logic or state mutations. Skip trivial passthroughs.
+- **Pipeline e2e isolation**: `pnpm test:e2e:pipeline` uses port 1338, temp DB at `/tmp/tamtam-e2e-pipeline/`, intercepts `git`/`gh` via shims in `e2e/pipeline/mocks/bin/`. Sequential workers. Never run pipeline e2e against production server or DB.
+- **Pre-push hook** (`.husky/pre-push`): runs `pnpm lint && pnpm type-check && pnpm test`. If it fails, fix the root cause — do not bypass with `--no-verify`.
 
 ## Definition of Done for UI/Frontend Changes
-- Server must be running (`pnpm start` — or `pnpm rebuild` if a build is needed) before testing frontend changes
-- Use Chrome DevTools MCP (`mcp__plugin_chrome-devtools-mcp_chrome-devtools__*`) to navigate to the relevant page and take a screenshot verifying the UI renders correctly
-- Test the golden path and key edge cases visually in the browser
-- Check for regressions in adjacent features
-- Do NOT claim frontend work is complete without the Chrome MCP screenshot step
+- Server must be running (`pnpm start`, or `pnpm rebuild` if a build is needed) before testing
+- Use Chrome DevTools MCP (`mcp__plugin_chrome-devtools-mcp_chrome-devtools__*`) to navigate to the relevant page and screenshot it
+- Test the golden path and key edge cases visually; check for regressions in adjacent features
+- Do NOT claim frontend work complete without the Chrome MCP screenshot step
 
 ## Key Patterns
-- Runtime config is stored in DB (`settings`, `projects`, `skills`, `agents` tables); shared per-project config and file-agent prompts can also live in committed `.tamtam/` files.
-- Workspace path configured in Settings UI, projects discovered by scanning for git repos
-- Most CLI calls (git, gh, launchctl, pm2) go through `lib/shared/shell.ts`; a few specialized helpers use direct `child_process` spawning when they need tighter process control.
-- `lib/shared/project-data.ts` assembles project data with 10s TTL cache
-- Terminal runs use `claude --output-format stream-json` for token-by-token streaming via PM2 + log file + fs.watch + NDJSON parser (see `docs/STREAMING.md`)
-- SSE at `/api/streaming/[jobId]` parses NDJSON and sends text deltas + `done` event (`?raw=1` for raw mode)
-- Agent runs compose skill content into the prompt before sending it to the configured Claude-compatible provider
-- `commit_style` setting injects a style guide into the commit-message generation prompt; `review_verdict_rules` setting drives LGTM/NEEDS ATTENTION/DO NOT SHIP decisions in code reviews — both configurable in Settings UI (Behavior tab)
-- File-based skills scanned from `skills/docs/skills/` and `data/skills/` (category subdirs, any `.md` file with optional YAML frontmatter: `title`, `description`)
-- DB-backed skills created via `/skills` page or API; a set of built-in agent skills (cto, security-review, dependency-check, blog, ci-monitor, release-ready, tests, gha-audit, docs-claude, readme-sync, self-improve, manage-agents, senior-fullstack) is seeded from `lib/agents/default-agent-skills.ts` on first `GET /api/skills`
-- GitHub owner fallback configurable via `GITHUB_OWNER` env var or Settings UI
-- Issue-driven runs auto-checkout `fix/issue-<n>-<slug>` branch before Claude edits (via `issue-branch` route called from TerminalTab); in PR Workflow mode, after the PR is merged the working copy is returned to the default branch
-- Pipeline workflow mode per project: *Direct Branch* (commit+push to current branch) or *PR Workflow* (push to feature branch → DoD → optional auto-merge); configured via project Config tab; `pr_workflow_enabled` + `auto_pr_merge_enabled` flags on the `projects` table
-- Outbound webhook notifications (`lib/shared/notifications.ts`): Slack block kit, Discord embeds, ntfy, or generic JSON POST; HMAC-SHA256 signed when `notification_webhook_secret` is set; events: `release_success`, `release_fail`, `release_aborted`, `fix_loop_exhausted`, `review_do_not_ship`, `agent_run_fail`, `budget_blocked`; configured via Settings → Notifications tab; `TAMTAM_BASE_URL` env var sets the log link base
-- Log and row retention (`lib/jobs/retention.ts`): `pruneProjectLogs` deletes on-disk log files after each run (controlled by `log_retention_count` and `log_retention_days` settings; defaults 200 / 30 days); `runNightlyCleanup` deletes finished `jobs` DB rows older than `job_row_retention_days` (default 180 days) — called once at startup then every 24h from `instrumentation.ts`
-- **Global job pause and budget gates**: `lib/shared/job-control.ts` exposes `isJobsPaused()` / `syncJobsPauseState(paused)` plus quota gate helpers. When the `jobs_paused` setting is `true` (toggled via the Settings UI or the pause toggle in the Jobs header), all pipeline routes (`run`, `review`, `fix`, `push`, `release`, `rerun`, `fix-ci`, `agent run`) return HTTP 409 and the internal scheduler is paused. When `budget_block_runs_enabled` is on and the active Claude/Codex quota snapshot exceeds `budget_block_at_pct`, job starts return HTTP 429. Scheduled work also checks the 7-day burn-rate throttle. Pause state is held in a module-level boolean — `syncJobsPauseState` is called on settings write and on boot from `instrumentation-node.ts`.
-- Background probe sweep: `instrumentation.ts` runs `runProbeSweep` every 30 seconds — detects Claude-compatible provider processes that hang after emitting their final result event (holding a job "running" indefinitely) and resolves them via `probeJobStatus` in `lib/jobs/job-storage.ts`
-- **Per-project agent serialization** (`lib/agents/pending-agent-run.ts`): only one agent runs at a time per project — concurrent agents racing on the same git worktree clobber each other's commits/branch state. When `/api/agents/[id]/run` is called while another `agent:*` job is active for the project, the request is enqueued (in-memory FIFO, idempotent per agentId) and the route returns HTTP 202 with `{ status: 'queued', blockingJobId }`. The lifecycle hook calls `drainNextAgentRun(project)` when any `agent:*` job finishes, which re-POSTs to the run endpoint with the original `triggeredBy` header and prompt. Same-agent duplicate runs still return 409 (queueing them would just recurse). Queue state is in-memory only — on server restart the internal scheduler re-fires on the next tick.
-- **Issue-branch lock** (`lib/shared/project-branch-lock.ts`): when a project's working tree is checked out on a `fix/issue-N-…` branch, the internal scheduler skips any scheduled agent fire for that project. Prevents unrelated agent commits landing on an in-progress feature branch. The lock state is cached for 5 s (TTL) and cleared by `checkout-default` and `issue-branch` routes after branch switches. Exposed as `getIssueBranchLock(projectName)` / `clearIssueBranchLockCache(projectName)` from `lib/shared/project-branch-lock.ts`.
-- **Scheduled agent intervals**: handled in-process by `lib/scheduling/internal-scheduler.ts`, NOT by PM2 cron. PM2's `cron_restart` combined with `--no-autostart` silently no-ops (PM2 updates `pm_uptime` at the cron tick but never starts the stopped process), so registering agents that way leaves them as zombies that never fire — that bug went unnoticed for a long time. The internal scheduler reads enabled DB agents and file agents from enabled projects on boot (`reinstallAgents` in `instrumentation-node.ts`), arms a `setTimeout` per agent based on its `Nh`/`Nm` interval + a stableHash phase offset, and on fire POSTs to `/api/agents/{id}/run`. State is pinned on `globalThis.__tamtamScheduler` so instrumentation and route handlers share the singleton across Next.js's separate module realms. Agent CRUD routes still call `installAgentSchedule` / `uninstallAgentSchedule` from `lib/scheduling/agent-scheduler.ts`, which now delegate to `upsertAgentSchedule` / `removeAgentSchedule`. The `launchctl` runner is **deprecated** (warning logged on use); only `pm2` is supported going forward.
-- **One-shot job processes**: Claude-backed jobs (review, fix, fix-push, agent run, rerun, and the inner DoD verification job) are spawned by `lib/jobs/pm2-jobs.ts startJob` via PM2 → `scripts/job-runner.js` (a single node entrypoint) → the actual command. PM2 invokes the runner with `--interpreter node`, so PM2 tracks the runner's PID directly — no bash-wrapper layer. The runner forwards SIGTERM/SIGINT/SIGHUP to its child so `pm2 stop`/`pm2 delete` actually kills the work. The runner pipes the `${jobId}.prompt` file into the child's stdin and writes `[tamtam] launching: ...` / `[tamtam] exited with code N` breadcrumbs to the same log file `app/api/streaming/[jobId]/route.ts` filters out of the user-facing stream. The `${jobId}.prompt` file is still written so `/api/jobs/[jobId]/rerun` can restore the original prompt; the per-job `.sh` wrapper is gone. Inline orchestrator jobs such as `mark-dod` and `pr-wait` run in the Next.js process, write their own logs, and are reaped on boot if a server restart abandons them.
-- **GitHub project board sync**: lifecycle-triggered sync lives in `lib/github/project-board.ts` plus `lib/github/project-board-status.ts`. Automatic sync is queued from `lib/jobs/storage.ts` on job start and `lib/jobs/lifecycle.ts` on finish, and it is deliberately best-effort so run/release completion is never blocked by GitHub failures. Manual sync routes (`/api/jobs/[jobId]/board-sync`, `/api/settings/board-resync`) are the strict path: they should return real configuration/rate-limit/API errors to the caller. Pipeline child jobs must update the root release card rather than creating duplicate items.
-- **Local HTTP MCP tools**: `.tamtam/mcp-http-tools.yaml` defines read-only TamTam API tools for the sibling `/Users/3h4x/workspace/mcp-http-tools` project. Use `pnpm mcp:http tamtam_api_get '{"path":"jobs/notifications"}'` for arbitrary path-only `GET /api/...` checks, or named wrappers such as `pnpm mcp:http tamtam_usage_quota '{"provider":"codex"}'` when query params are needed.
-- Dependabot with grouped PRs (production deps, dev deps, actions)
+- Runtime config is stored in DB (`settings`, `projects`, `skills`, `agents`); shared per-project config and file-agent prompts can also live in committed `.tamtam/` files.
+- Workspace path configured in Settings UI; projects discovered by scanning for git repos.
+- Most CLI calls (git, gh, launchctl, pm2) go through `lib/shared/shell.ts`. `lib/shared/project-data.ts` assembles project data with 10s TTL cache.
+- Terminal runs use `claude --output-format stream-json` for token-by-token streaming via PM2 + log file + fs.watch + NDJSON parser. SSE at `/api/streaming/[jobId]`. See `docs/STREAMING.md`.
+- Agent runs compose skill content into the prompt before sending to the configured provider. See `docs/AGENT.md` for skill composition, scheduling, runner lifecycle.
+- `commit_style` setting injects a style guide into commit-message generation; `review_verdict_rules` drives LGTM/NEEDS ATTENTION/DO NOT SHIP — both configurable in Settings → Pipeline. All settings keys/types/defaults: `docs/SETTINGS.md`.
+- File-based skills scanned from `skills/docs/skills/` and `data/skills/` (category subdirs, any `.md` with optional YAML frontmatter: `title`, `description`). DB-backed skills via `/skills` page or API; built-in agent skills (cto, security-review, dependency-check, blog, ci-monitor, release-ready, tests, gha-audit, docs-claude, readme-sync, self-improve, manage-agents, senior-fullstack) seeded from `lib/agents/default-agent-skills.ts`.
+- GitHub owner fallback configurable via `GITHUB_OWNER` env or Settings UI.
+- Issue-driven runs auto-checkout `fix/issue-<n>-<slug>` (via `issue-branch` route from TerminalTab); in PR Workflow, after merge the working copy is returned to the default branch.
+- Outbound webhook notifications (`lib/shared/notifications.ts`): Slack, Discord, ntfy, or generic JSON POST; HMAC-SHA256 signed when `notification_webhook_secret` is set; events: `release_success`, `release_fail`, `release_aborted`, `fix_loop_exhausted`, `review_do_not_ship`, `agent_run_fail`, `budget_blocked`. `TAMTAM_BASE_URL` sets log link base.
+- Log/row retention (`lib/jobs/retention.ts`): `pruneProjectLogs` after each run (`log_retention_count` / `log_retention_days`, defaults 200 / 30); `runNightlyCleanup` deletes finished `jobs` rows older than `job_row_retention_days` (default 180); called once at startup then every 24h from `instrumentation.ts`.
+- **Global job pause + budget gates** (`lib/shared/job-control.ts`): when `jobs_paused` is `true`, all pipeline routes return HTTP 409 and the internal scheduler pauses. When `budget_block_runs_enabled` is on and active quota exceeds `budget_block_at_pct`, job starts return HTTP 429. Pause state is module-level; `syncJobsPauseState` is called on settings write and on boot.
+- Background probe sweep: `instrumentation.ts` runs `runProbeSweep` every 30s — detects providers that hang after the final result event and resolves them via `probeJobStatus`.
+- **Per-project agent serialization** (`lib/agents/pending-agent-run.ts`): only one agent runs at a time per project. Concurrent calls to `/api/agents/[id]/run` while another `agent:*` job is active are enqueued (in-memory FIFO, idempotent per agentId) and the route returns HTTP 202 with `{ status: 'queued', blockingJobId }`. Lifecycle hook drains the queue when an agent job finishes. Same-agent duplicates still return 409.
+- **Issue-branch lock** (`lib/shared/project-branch-lock.ts`): when checked out on `fix/issue-N-…`, the internal scheduler skips scheduled agent fires for that project. 5s TTL cache; cleared by `checkout-default` and `issue-branch` routes.
+- **Scheduled agent intervals**: handled in-process by `lib/scheduling/internal-scheduler.ts`, NOT by PM2 cron (PM2 `cron_restart` + `--no-autostart` silently no-ops). State pinned on `globalThis.__tamtamScheduler` so route handlers and instrumentation share the singleton across Next.js's separate module realms. `launchctl` runner is deprecated. See `docs/AGENT.md`.
+- **One-shot job processes**: Claude-backed jobs are spawned by `lib/jobs/pm2-jobs.ts startJob` via PM2 → `scripts/job-runner.js` → the actual command. PM2 invokes the runner with `--interpreter node`, so PM2 tracks the runner's PID directly (no bash wrapper). Runner forwards SIGTERM/SIGINT/SIGHUP to its child. The `${jobId}.prompt` file is written so `/api/jobs/[jobId]/rerun` can restore the original prompt. Inline orchestrator jobs (`mark-dod`, `pr-wait`) run in the Next.js process and are reaped on boot if a restart abandons them.
+- **GitHub project board sync**: lifecycle-triggered sync in `lib/github/project-board.ts` + `lib/github/project-board-status.ts`. Auto-sync from `lib/jobs/storage.ts` (start) and `lib/jobs/lifecycle.ts` (finish) is best-effort; manual sync routes (`/api/jobs/[jobId]/board-sync`, `/api/settings/board-resync`) are strict and surface errors. Pipeline child jobs update the root release card rather than creating duplicates.
+- **Local HTTP MCP tools**: `.tamtam/mcp-http-tools.yaml` defines read-only TamTam API tools for the sibling `mcp-http-tools` project. Use `pnpm mcp:http tamtam_api_get '{"path":"..."}'` for arbitrary GET, or named wrappers like `pnpm mcp:http tamtam_usage_quota '{"provider":"codex"}'`.
+- Dependabot with grouped PRs (production deps, dev deps, actions).
 
 ## `.tamtam/` Directory (per-project, committed to version control)
 
@@ -290,6 +173,7 @@ Each `.md` file defines one agent scoped to the project. Filename (minus `.md`) 
 
 ```markdown
 ---
+provider: codex        # optional: claude | codex | gemini | lmstudio
 model: normal          # fast | normal | smart (legacy haiku | sonnet | opus still read)
 schedule: 4h           # optional: 15m 30m 1h 2h 4h 8h 12h 24h
 skillIds: ["agent-tests"]   # JSON array or space-separated skill IDs
@@ -300,7 +184,7 @@ enabled: true
 Prompt content here. This is sent verbatim as the agent's task instructions.
 ```
 
-File agents appear in the Agents tab with a `file` badge. Prompt edits are written back to `.tamtam/agents/<name>.md`; operational settings (`enabled`, `schedule`, `model`, `runner`, `skillIds`) are stored as DB overrides under `agent_override:<project>:<name>` so UI toggles do not dirty tracked files. A DB agent with the same project+name takes precedence over the file agent.
+File agents appear in the Agents tab with a `file` badge. Prompt edits are written back to `.tamtam/agents/<name>.md`; committed frontmatter such as `provider` is preserved on write. Operational settings (`enabled`, `schedule`, `model`, `runner`, `skillIds`) are stored as DB overrides under `agent_override:<project>:<name>` so UI toggles do not dirty tracked files. A DB agent with the same project+name takes precedence over the file agent.
 
 Reader: `lib/agents/tamtam-file-agents.ts` → `scanFileAgents(projectPath, projectName)` / `loadFileAgent(...)`.
 File agent IDs use the format `file:<project>:<name>` and are handled transparently in all agent API routes.
@@ -311,6 +195,7 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 
 | File | Topic | Load when… |
 |------|-------|------------|
+| `docs/API.md` | Full API route reference | Adding/changing API routes |
 | `docs/STREAMING.md` | Job lifecycle + SSE streaming infrastructure | Touching terminal runs, log tailing, SSE endpoints, or NDJSON parsing |
 | `docs/PIPELINE.md` | Release pipeline state machine (test→review→fix→commit→push→dod→merge) | Modifying any pipeline step, completion hooks, or pipeline orchestration |
 | `docs/DATABASE.md` | Drizzle schema reference — all tables, columns, indices | Adding/changing DB tables, writing migrations, or working with `lib/db/` |
@@ -325,37 +210,36 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 | `docs/E2E.md` | Playwright pipeline e2e harness: mocks, scenarios, helpers | Writing or debugging pipeline e2e tests in `e2e/pipeline/` |
 
 ## Coding Conventions
-- **Runtime versions**: Next.js 16 (App Router), React 19, TypeScript 6 (strict), Tailwind CSS v4, pnpm 10. Do not use APIs or syntax that requires a higher version than what is pinned in `package.json`.
-- **Path imports**: always use the `@/` alias (e.g. `import { exec } from '@/lib/shared/shell'`), never relative `../../` paths.
-- **File naming**: kebab-case for all files (`start-fix.ts`, `project-data.ts`); PascalCase only for React component files (`AgentsTab.tsx`).
-- **Components**: PascalCase, one component per file, `.tsx` extension. No class components.
-- **Barrel files**: `lib/client-api.ts` is the only barrel; do not create new barrel `index.ts` files — import directly from the module file.
-- **TypeScript**: strict mode is on. Avoid `any`; ESLint allows it but prefer explicit types. Never use `// @ts-ignore` — fix the type instead.
-- **Error handling**: throw exceptions for unexpected failures; return typed result objects (`{ ok, error }`) only where callers need to branch on failure without crashing. Log errors to `console.error` before re-throwing in API routes.
-- **Async**: use `async/await` throughout. No raw `.then()` chains. Parallelise independent async work with `Promise.all`.
-- **UI styling**: use the design tokens and component patterns documented in `docs/UI.md`; do not introduce one-off color scales, spacing systems, or global CSS outside the existing Tailwind v4 token setup.
-- **Linting**: `pnpm lint` runs ESLint on `app/`, `components/`, `lib/`, `hooks/`. Auto-fix with `--fix` is acceptable. Run after significant edits.
-- **Type checking**: `pnpm type-check` runs `tsc --noEmit`. Run before committing any TypeScript change.
-- **Turbopack NFT comments**: Next.js 16 (Turbopack) traces server-route deps at build time. When a route's dep tree calls `path.join(dynamicVar, …)` or any `fs` call (`existsSync`, `readFileSync`, `readFile`, `openSync`, `statSync`, `watch`, `readdirSync`) with a *runtime-dynamic* path — settings paths, project paths, log paths, `homedir()`, `process.cwd() + userVar` — the static analyzer can't bound it and traces the **whole project**, dragging `next.config.ts` into every route bundle (warning: `Encountered unexpected file in NFT list`). Annotate the dynamic argument with `/*turbopackIgnore: true*/` (the comment must be inline at the call site, on each `fs` / `join` call that uses the dynamic value, not just the original `join`). Examples: `existsSync(/*turbopackIgnore: true*/ p)`, `readFile(/*turbopackIgnore: true*/ path, 'utf8')`, `join(/*turbopackIgnore: true*/ projPath, 'README.md')`. Statically-scoped joins like `join(process.cwd(), 'data', name)` are fine and don't need the comment.
+- **Runtime versions**: Next.js 16, React 19, TypeScript 6 (strict), Tailwind CSS v4, pnpm 10. Do not use APIs requiring a higher version than what's pinned in `package.json`.
+- **Path imports**: always use the `@/` alias, never relative `../../`.
+- **File naming**: kebab-case (`start-fix.ts`); PascalCase only for React component files (`AgentsTab.tsx`).
+- **Components**: PascalCase, one per file, `.tsx`. No class components.
+- **Barrel files**: `lib/client-api.ts` is the only barrel; do not create new `index.ts` barrels — import directly from the module.
+- **TypeScript**: strict mode is on. Avoid `any`. Never use `// @ts-ignore` — fix the type.
+- **Error handling**: throw exceptions for unexpected failures; return typed result objects (`{ ok, error }`) only where callers must branch without crashing. Log errors to `console.error` before re-throwing in API routes.
+- **Async**: `async/await` throughout, no raw `.then()` chains. Parallelise independent work with `Promise.all`.
+- **UI styling**: use design tokens and component patterns from `docs/UI.md`; do not introduce one-off color scales, spacing systems, or global CSS outside the existing Tailwind v4 token setup.
+- **Linting/typing**: `pnpm lint` after significant edits; `pnpm type-check` before committing.
+- **Turbopack NFT comments**: Next.js 16 (Turbopack) traces server-route deps at build time. When a route's dep tree calls `path.join(dynamicVar, …)` or any `fs` call (`existsSync`, `readFileSync`, `readFile`, `openSync`, `statSync`, `watch`, `readdirSync`) with a *runtime-dynamic* path — settings paths, project paths, log paths, `homedir()`, `process.cwd() + userVar` — the static analyzer can't bound it and traces the **whole project**, dragging `next.config.ts` into every route bundle (warning: `Encountered unexpected file in NFT list`). Annotate the dynamic argument with `/*turbopackIgnore: true*/` inline at each call site (not just the original `join`). Examples: `existsSync(/*turbopackIgnore: true*/ p)`, `readFile(/*turbopackIgnore: true*/ path, 'utf8')`. Statically-scoped joins like `join(process.cwd(), 'data', name)` are fine.
 
 ## Dependency & Supply-Chain Security
-- **Lock file**: always commit `pnpm-lock.yaml`. Never install packages with `--no-lockfile` or `--frozen-lockfile` bypassed.
-- **Install scripts**: inspect `postinstall`, `prepare`, `preinstall`, and `install` scripts before adding or updating any dependency. Treat them as arbitrary code execution during `pnpm install`.
-- **Allowed build scripts**: `package.json` pins `pnpm.onlyBuiltDependencies` to `[better-sqlite3, esbuild, sharp, unrs-resolver]`. Do not add a new package to this list without explicit user approval.
-- **No silent additions**: never add a new dependency not already in `package.json` without explicit user approval. Justify every new dep in the commit message (why it's needed, why no existing dep covers it).
-- **Verify before adding**: check new packages on npmjs.com for download count, publish date, and maintainer history before adding. Prefer packages with >1 M weekly downloads and >1 year of history.
-- **Audit after changes**: run `pnpm audit` after any `pnpm add`/`pnpm remove` and fix or document any high-severity findings before committing.
+- **Lock file**: always commit `pnpm-lock.yaml`. Never bypass `--frozen-lockfile` or use `--no-lockfile`.
+- **Install scripts**: inspect `postinstall`, `prepare`, `preinstall`, `install` scripts before adding/updating any dependency. Treat them as arbitrary code execution.
+- **Allowed build scripts**: `package.json` pins `pnpm.onlyBuiltDependencies` to `[better-sqlite3, esbuild, sharp, unrs-resolver]`. Do not add to this list without explicit user approval.
+- **No silent additions**: never add a new dependency without explicit user approval. Justify every new dep in the commit message.
+- **Verify before adding**: prefer packages with >1 M weekly downloads and >1 year of history.
+- **Audit after changes**: run `pnpm audit` after any `pnpm add`/`pnpm remove`; fix or document high-severity findings before committing.
 
 ## Commit & Branch Rules
-- **Conventional commits**: use the format `type(scope): message` — types observed in this repo: `feat`, `fix`, `test`, `docs`, `refactor`, `perf`, `chore`. Keep the subject line under 72 characters.
-- **Direct to master**: this is a solo project; direct commits to `master` are fine. No PR required for local changes.
-- **DB schema changes**: always pair a schema edit in `lib/db/schema.ts` with `pnpm db:generate` (creates migration file) and `pnpm db:migrate` (applies it). Never edit migration files by hand; never delete them.
-- **Never bypass hooks**: do not pass `--no-verify` to `git commit`. If a hook fails, fix the underlying issue.
-- **No secrets in code**: use environment variables for all credentials. Never commit `.env` files or hardcode tokens/keys.
+- **Conventional commits**: `type(scope): message` — observed types: `feat`, `fix`, `test`, `docs`, `refactor`, `perf`, `chore`. Subject under 72 chars.
+- **Direct to master**: solo project; direct commits to `master` are fine. No PR required for local changes.
+- **DB schema changes**: always pair `lib/db/schema.ts` edits with `pnpm db:generate` and `pnpm db:migrate`. Never edit migration files by hand or delete them.
+- **Never bypass hooks**: do not pass `--no-verify` to `git commit`. If a hook fails, fix the root cause.
+- **No secrets in code**: env vars for credentials. Never commit `.env` files or hardcoded tokens.
 
 ## Scope & Safety Rules
-- **Destructive git operations**: do not run `git reset --hard`, `git clean`, force pushes, branch deletion, or history rewrites unless the user explicitly asks for that exact operation.
-- **Production data**: do not delete or rewrite `data/db/tamtam.db`, run destructive SQL, or remove project log directories without an explicit backup plan and user approval.
-- **Schema safety**: migrations must be additive or carefully backfilled when existing data matters; document any irreversible data loss before applying the migration.
-- **External side effects**: treat `git push`, GitHub issue edits, PR merge actions, webhook sends, and PM2 process changes as real side effects. Run them only when they are required by the task and the expected target is clear from the code or user request.
-- **Never SIGKILL system PIDs**: `lib/jobs/lifecycle.ts` runs a `pgrep -P <job.pid>` + `process.kill(child, 'SIGKILL')` fallback after job completion to clean up hung Claude CLI trees. PIDs ≤ `SAFE_PID_FLOOR` (100) are *refused* — PID 1 on macOS is `launchd`, whose children include Finder, Dock, the running terminal, and every user GUI app. A bad `job.pid` value (corrupt DB row, zombie PM2 entry, a unit test that passes `pid: 1` or `pid: 2`) without this guard would SIGKILL every user-owned process, restarting the macOS UI in under a second. Any future code that takes a pid from job/DB state and calls `process.kill` MUST gate on `pid > SAFE_PID_FLOOR` and bail with a `console.warn` otherwise. In tests, always use a high synthetic PID like `99999` for `createJob` — never a real PID, never a low number.
+- **Destructive git**: do not run `git reset --hard`, `git clean`, force pushes, branch deletion, or history rewrites unless explicitly requested.
+- **Production data**: do not delete or rewrite `data/db/tamtam.db`, run destructive SQL, or remove project log directories without explicit approval.
+- **Schema safety**: migrations must be additive or carefully backfilled; document any irreversible data loss before applying.
+- **External side effects**: treat `git push`, GitHub issue/PR actions, webhook sends, and PM2 process changes as real side effects. Run only when required by the task and the target is clear.
+- **Never SIGKILL system PIDs**: `lib/jobs/lifecycle.ts` runs `pgrep -P <job.pid>` + `process.kill(child, 'SIGKILL')` after job completion to clean up hung Claude CLI trees. PIDs ≤ `SAFE_PID_FLOOR` (100) are *refused* — PID 1 on macOS is `launchd`, whose children include Finder, Dock, the running terminal, and every user GUI app. A bad `job.pid` (corrupt DB row, zombie PM2 entry, a unit test passing `pid: 1`) without this guard would SIGKILL every user-owned process and restart the macOS UI in under a second. Any future code that takes a pid from job/DB state and calls `process.kill` MUST gate on `pid > SAFE_PID_FLOOR` and bail with `console.warn` otherwise. In tests, always use a high synthetic PID like `99999` for `createJob` — never a real or low PID.

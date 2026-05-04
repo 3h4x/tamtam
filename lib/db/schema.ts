@@ -59,6 +59,7 @@ export const jobs = sqliteTable('jobs', {
   promptBytes: integer('prompt_bytes'),
   workSummary: text('work_summary'),
   modifiedFiles: text('modified_files'),
+  provider: text('provider'),
 });
 
 export const recommendations = sqliteTable('recommendations', {
@@ -97,6 +98,7 @@ export const agents = sqliteTable('agents', {
   runner: text('runner').notNull().default('pm2'),  // "launchctl" or "pm2"
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
   docPaths: text('doc_paths').notNull().default('[]'),  // JSON array of project-relative doc paths
+  provider: text('provider'),
   createdAt: real('created_at').notNull(),
   updatedAt: real('updated_at').notNull(),
 });

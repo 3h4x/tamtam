@@ -21,6 +21,7 @@ function createTestDb() {
       schedule TEXT,
       runner TEXT NOT NULL DEFAULT 'pm2',
       enabled INTEGER NOT NULL DEFAULT 1,
+      provider TEXT,
       created_at REAL NOT NULL,
       updated_at REAL NOT NULL
     );
@@ -773,7 +774,7 @@ describe('agents API', () => {
       const fakeAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
         skillIds: [] as string[], model: 'sonnet', prompt: 'new prompt', schedule: null,
-        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+        runner: 'pm2', enabled: true, provider: 'codex', createdAt: 0, updatedAt: 0,
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
       parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
@@ -791,7 +792,60 @@ describe('agents API', () => {
       expect(response.status).toBe(200);
       const data = await response.json();
       expect(data.agent.id).toBe('file:myproj:my-agent');
-      expect(writeFileAgentMock).toHaveBeenCalledOnce();
+      expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'my-agent', {
+        prompt: 'new prompt',
+        provider: undefined,
+      });
+    });
+
+    it('persists provider-only updates for file agents', async () => {
+      const fakeAgent = {
+        id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
+        skillIds: [] as string[], model: 'sonnet', prompt: 'existing prompt', schedule: null,
+        runner: 'pm2', enabled: true, provider: 'codex', createdAt: 0, updatedAt: 0,
+        source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
+      };
+      parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      loadFileAgentMock.mockReturnValue(fakeAgent);
+      writeFileAgentMock.mockReturnValueOnce(fakeAgent);
+
+      const request = new NextRequest('http://localhost/api/agents/file:myproj:my-agent', {
+        method: 'PATCH',
+        body: JSON.stringify({ provider: 'codex' }),
+      });
+      const response = await PATCH(request, { params: Promise.resolve({ agentId: 'file:myproj:my-agent' }) });
+
+      expect(response.status).toBe(200);
+      expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'my-agent', {
+        prompt: undefined,
+        provider: 'codex',
+      });
+    });
+
+    it('clears file-agent provider frontmatter when provider is set to null', async () => {
+      const fakeAgent = {
+        id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
+        skillIds: [] as string[], model: 'sonnet', prompt: 'existing prompt', schedule: null,
+        runner: 'pm2', enabled: true, provider: null, createdAt: 0, updatedAt: 0,
+        source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
+      };
+      parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      loadFileAgentMock.mockReturnValue(fakeAgent);
+      writeFileAgentMock.mockReturnValueOnce(fakeAgent);
+
+      const request = new NextRequest('http://localhost/api/agents/file:myproj:my-agent', {
+        method: 'PATCH',
+        body: JSON.stringify({ provider: null }),
+      });
+      const response = await PATCH(request, { params: Promise.resolve({ agentId: 'file:myproj:my-agent' }) });
+
+      expect(response.status).toBe(200);
+      expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'my-agent', {
+        prompt: undefined,
+        provider: null,
+      });
     });
 
     it('rejects invalid model values for file agents', async () => {
@@ -1397,11 +1451,54 @@ describe('agents API', () => {
         skillIds: undefined,
         runner: undefined,
         enabled: undefined,
+        provider: undefined,
       });
       expect(installAgentScheduleMock).toHaveBeenCalledWith(
         'file:myproj:my-agent', '2h', 'updated', 'pm2', 'myproj', 'my-agent'
       );
       expect(uninstallAgentScheduleMock).not.toHaveBeenCalled();
+    });
+
+    it('preserves provider when syncing a DB agent back to the file', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Agent',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: 'updated prompt',
+          schedule: null,
+          runner: 'pm2',
+          enabled: true,
+          provider: 'codex',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/proj1');
+
+      const request = new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ prompt: 'updated prompt' }),
+      });
+
+      const response = await PATCH(request, {
+        params: Promise.resolve({ agentId: 'agent-123' }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/proj1', 'proj1', 'Agent', {
+        prompt: 'updated prompt',
+        model: 'sonnet',
+        schedule: null,
+        skillIds: [],
+        runner: 'pm2',
+        enabled: true,
+        provider: 'codex',
+      });
     });
 
     it('rejects invalid model values for by-name file agent fallback', async () => {

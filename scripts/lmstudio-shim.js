@@ -9,6 +9,8 @@
  * native stateful chat API and translates the response into those shapes.
  */
 
+const { installFetchInactivityWatchdog } = require('./shim-utils');
+
 const DEFAULT_BASE_URL = 'http://127.0.0.1:1234';
 
 const args = process.argv.slice(2);
@@ -277,6 +279,8 @@ async function callLmStudio({ prompt, model, streamJson }) {
   process.once('SIGTERM', abort);
   process.once('SIGINT', abort);
 
+  const watchdog = installFetchInactivityWatchdog(abort, { shimName: 'lmstudio-shim' });
+
   const startedAt = Date.now();
   const emitter = makeTextEmitter(streamJson);
   let fullText = '';
@@ -292,8 +296,10 @@ async function callLmStudio({ prompt, model, streamJson }) {
       signal: controller.signal,
     });
   } catch (err) {
+    watchdog.dispose();
     throw new Error(`LM Studio request failed at ${endpoint(baseUrl)}: ${err.message}`);
   }
+  watchdog.markActivity();
 
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
@@ -303,6 +309,7 @@ async function callLmStudio({ prompt, model, streamJson }) {
   const contentType = response.headers.get('content-type') || '';
   if (!response.body || !contentType.includes('text/event-stream')) {
     const json = await response.json();
+    watchdog.dispose();
     const text = outputTextFromNativeResult(json);
     stats = json?.stats || null;
     responseId = json?.response_id || '';
@@ -354,10 +361,14 @@ async function callLmStudio({ prompt, model, streamJson }) {
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
-
+    watchdog.markActivity();
     parseSseEvents(decoder.decode(value, { stream: true }), sseState, onEvent);
   }
   parseSseEvents(`${decoder.decode()}\n\n`, sseState, onEvent);
+  watchdog.dispose();
+  if (watchdog.timedOut()) {
+    throw new Error('LM Studio request killed by inactivity watchdog');
+  }
 
   if (resumeSessionId && !resumeSessionId.startsWith('resp_') && !responseId) {
     throw new Error(`cannot resume LM Studio session ${resumeSessionId}; expected an LM Studio response_id starting with "resp_"`);

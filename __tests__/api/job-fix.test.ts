@@ -78,6 +78,7 @@ describe('POST /api/jobs/[jobId]/fix', () => {
 
     vi.doMock('@/lib/shared/job-control', () => ({
       runGates: () => null,
+      jobsPausedResult: () => null,
       runAutoChainGates: () => null,
       isJobsPaused: () => false,
     }));

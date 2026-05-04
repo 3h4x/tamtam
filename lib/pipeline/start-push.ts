@@ -4,10 +4,11 @@ import { resolveProjectPath, clearProjectDataCache } from '@/lib/shared/project-
 import { invalidateProject } from '@/lib/shared/gh-status';
 import { exec } from '@/lib/shared/shell';
 import { getImproveConfig, setProjectPushResult } from '@/lib/scheduling/scheduling';
+import { currentParent } from '@/lib/jobs/parent-context';
 import { createJob, markDone, updateJob } from '@/lib/jobs/job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { generateCommitMessage, findIssueContext, detectMainBranch } from './start-commit';
-import { runGates } from '@/lib/shared/job-control';
+import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { createGenericPR, createIssuePR } from './pr-create';
 
 export type PushResult =
@@ -31,10 +32,10 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
     setProjectPushResult(projectName, 'project not found');
     return { ok: false, status: 404, detail: 'project not found' };
   }
-  const paused = runGates('start a push');
-  if (paused) {
-    setProjectPushResult(projectName, paused.detail);
-    return paused;
+  const gate = await checkCliStartGate('start a push', { parentJobId: currentParent() });
+  if (!gate.ok) {
+    setProjectPushResult(projectName, gate.detail);
+    return gate;
   }
 
   // Track every push attempt as a job so it appears in /runs with a log file
@@ -51,6 +52,7 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
     earlyIssueCtx?.repo ?? null,
     earlyIssueCtx?.title ?? null,
   );
+  job.provider = gate.provider;
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
   updateJob(job);
@@ -69,7 +71,7 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
   };
   append(`# push start — ${new Date().toISOString()}\n# repo: ${projPath}\n`);
 
-  const result = await runPush(projectName, projPath, append, earlyIssueCtx);
+  const result = await runPush(projectName, projPath, append, earlyIssueCtx, false, gate.provider);
   try {
     setProjectPushResult(projectName, result.ok ? null : result.detail);
   } catch {}
@@ -97,8 +99,6 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
 export function launchProjectPush(projectName: string): { jobId: string } | { error: string; status?: number } {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { error: 'project not found' };
-  const paused = runGates('start a push');
-  if (paused) return { error: paused.detail, status: paused.status };
 
   // If a release pipeline is in flight, the auto-chain will push at the right
   // step. Letting the manual "Push" button race the release lets push run in
@@ -122,6 +122,15 @@ export function launchProjectPush(projectName: string): { jobId: string } | { er
 
   // Run async in background — do not await
   ;(async () => {
+    const gate = await checkCliStartGate('start a push');
+    if (!gate.ok) {
+      append(`\n# push blocked (${gate.status})\n${gate.detail}\n`);
+      try { setProjectPushResult(projectName, gate.detail); } catch {}
+      await markDone(job, 1);
+      return;
+    }
+    job.provider = gate.provider;
+    updateJob(job);
     // Pre-check above guarantees no active pipeline; acquire the lock for this
     // standalone push so a concurrent release/agent can't sneak in mid-push.
     // The pre-check + async acquire has a TOCTOU window — if a release started
@@ -143,7 +152,7 @@ export function launchProjectPush(projectName: string): { jobId: string } | { er
       return;
     }
 
-    const result = await runPush(projectName, projPath, append, null, true);
+    const result = await runPush(projectName, projPath, append, null, true, gate.provider);
     try { setProjectPushResult(projectName, result.ok ? null : result.detail); } catch {}
     if (result.ok) {
       invalidateProject(projectName);
@@ -198,6 +207,7 @@ async function runPush(
   log: (s: string) => void,
   issueCtx?: { number: number; repo: string; title: string } | null,
   pushOnly?: boolean,
+  provider?: string,
 ): Promise<PushResult> {
   // pushOnly: skip all staging/committing/PR logic — just push existing commits.
   if (pushOnly) {
@@ -300,7 +310,7 @@ async function runPush(
     if (hookHasChanges) {
       log(`\n# pre-push hook left new changes — committing delta\n`);
       await exec('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
-      const fixMsg = await generateCommitMessage(projPath, projectName);
+      const fixMsg = await generateCommitMessage(projPath, projectName, provider);
       log(`# fix commit message: ${fixMsg}\n\n$ git commit -m "${fixMsg}"\n`);
       const fixCommitR = await exec('git', ['-C', projPath, 'commit', '-m', fixMsg], { timeout: 30000 });
       if (fixCommitR.stdout) log(fixCommitR.stdout);

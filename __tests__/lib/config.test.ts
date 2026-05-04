@@ -71,6 +71,15 @@ describe('config', () => {
         claude_provider: 'claude',
         claude_bin: `${process.cwd()}/scripts/claude-shim.js`,
         lmstudio_model: '',
+        cli_enabled_providers: ['claude'],
+        cli_bin_claude: '',
+        cli_bin_codex: '',
+        cli_bin_gemini: '',
+        cli_bin_lmstudio: '',
+        cli_default_model_claude: 'normal',
+        cli_default_model_codex: 'normal',
+        cli_default_model_gemini: 'normal',
+        cli_default_model_lmstudio: 'normal',
         log_dir: './data/logs',
         frequency: '1h',
         daytime: false,
@@ -154,6 +163,18 @@ describe('config', () => {
       // the user's stored value is forwarded to the underlying binary via the
       // CLAUDE_BIN env var at spawn time, not by overriding claude_bin itself.
       expect(config.claude_bin).toBe(`${process.cwd()}/scripts/claude-shim.js`);
+      expect(config.cli_bin_claude).toBe('/usr/bin/claude');
+    });
+
+    it('preserves a legacy Claude binary override even when another provider is active', () => {
+      const db = testDb.db;
+      db.insert(schema.settings).values({ key: 'claude_provider', value: 'codex' }).run();
+      db.insert(schema.settings).values({ key: 'claude_bin', value: '/usr/bin/claude' }).run();
+
+      const config = getSettings();
+
+      expect(config.claude_provider).toBe('codex');
+      expect(config.cli_bin_claude).toBe('/usr/bin/claude');
     });
 
     it('canonicalizes legacy model aliases from settings', () => {
@@ -447,6 +468,41 @@ describe('config', () => {
         expect(result).toContain('Project instructions from CLAUDE.md');
         expect(result).toContain('Use pnpm.');
         expect(result).toContain('task here');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('uses the enabled CLI set as the active provider when deciding CLAUDE.md injection', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'tamtam-config-'));
+      try {
+        writeFileSync(join(dir, 'CLAUDE.md'), '# Project Rules\n\nUse pnpm.');
+        testDb.db.insert(schema.settings).values({ key: 'claude_provider', value: 'claude' }).run();
+        testDb.db.insert(schema.settings).values({ key: 'cli_enabled_providers', value: 'codex,claude' }).run();
+        testDb.db.insert(schema.settings).values({ key: 'base_prompt', value: 'Base rules.' }).run();
+        reloadConfig();
+
+        const result = withBasePrompt('task here', { projectPath: dir });
+
+        expect(result).toContain('Project instructions from CLAUDE.md');
+        expect(result).toContain('Use pnpm.');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('uses an explicit run provider when deciding CLAUDE.md injection', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'tamtam-config-'));
+      try {
+        writeFileSync(join(dir, 'CLAUDE.md'), '# Project Rules\n\nUse pnpm.');
+        testDb.db.insert(schema.settings).values({ key: 'claude_provider', value: 'claude' }).run();
+        testDb.db.insert(schema.settings).values({ key: 'base_prompt', value: 'Base rules.' }).run();
+        reloadConfig();
+
+        const result = withBasePrompt('task here', { projectPath: dir, provider: 'codex' });
+
+        expect(result).toContain('Project instructions from CLAUDE.md');
+        expect(result).toContain('Use pnpm.');
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

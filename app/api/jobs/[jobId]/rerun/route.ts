@@ -7,7 +7,9 @@ import { getJob, createJob, updateJob } from '@/lib/jobs/job-storage';
 import { startJob } from '@/lib/jobs/pm2-jobs';
 import { getPermissionModeFlag, getSettings } from '@/lib/shared/config';
 import { errMsg } from '@/lib/shared/types';
-import { runGates } from '@/lib/shared/job-control';
+import { resolveCliBin, resolveCliDefaultModel, resolveCliEnv } from '@/lib/shared/cli-bin';
+import { checkCliStartGate } from '@/lib/usage/resolve-provider';
+import { isCliProvider } from '@/lib/usage/cli-providers';
 
 export async function POST(
   request: NextRequest,
@@ -22,25 +24,38 @@ export async function POST(
 
   const projectName = sourceJob.project;
   const jobKind = sourceJob.kind;
-  const { claudeBin, logDir } = getImproveConfig();
-  const { default_model } = getSettings();
+  const { logDir } = getImproveConfig();
+  const settings = getSettings();
 
   const projPath = resolveProjectPath(projectName);
   if (!projPath) {
     return NextResponse.json({ detail: `project '${projectName}' not found` }, { status: 404 });
   }
-  const paused = runGates('rerun a job');
-  if (paused) return NextResponse.json({ detail: paused.detail }, { status: paused.status });
 
   // For review and fix-ci, delegate to those endpoints
   if (jobKind === 'review') {
     const url = new URL(`/api/projects/by-project/${projectName}/review`, request.url);
-    return fetch(url, { method: 'POST', headers: request.headers });
+    const headers = new Headers(request.headers);
+    if (typeof sourceJob.provider === 'string' && isCliProvider(sourceJob.provider)) {
+      headers.set('x-tamtam-provider-preferred', sourceJob.provider);
+    }
+    return fetch(url, { method: 'POST', headers });
   }
   if (jobKind === 'fix-ci') {
     const url = new URL(`/api/projects/by-project/${projectName}/fix-ci`, request.url);
-    return fetch(url, { method: 'POST', headers: request.headers });
+    const headers = new Headers(request.headers);
+    if (typeof sourceJob.provider === 'string' && isCliProvider(sourceJob.provider)) {
+      headers.set('x-tamtam-provider-preferred', sourceJob.provider);
+    }
+    return fetch(url, { method: 'POST', headers });
   }
+
+  const gate = await checkCliStartGate('rerun a job', { preferred: sourceJob.provider ?? null });
+  if (!gate.ok) return NextResponse.json({ detail: gate.detail }, { status: gate.status });
+  const provider = gate.provider;
+  const claudeBin = resolveCliBin(provider, settings);
+  const cliEnv = resolveCliEnv(provider, settings);
+  const defaultModel = resolveCliDefaultModel(provider, settings);
 
   const { mkdirSync } = await import('fs');
   mkdirSync(logDir, { recursive: true });
@@ -52,15 +67,17 @@ export async function POST(
     : `Rerun of ${sourceJob.kind} for ${projectName}`;
 
   const job = createJob(projectName, jobKind, 0, '');
+  job.provider = provider;
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
 
   try {
     const pid = await startJob(
       job.id,
-      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${default_model} ${getPermissionModeFlag()}`,
+      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${defaultModel} ${getPermissionModeFlag()}`,
       prompt,
-      projPath
+      projPath,
+      { env: cliEnv }
     );
     job.pid = pid;
   } catch (e: unknown) {

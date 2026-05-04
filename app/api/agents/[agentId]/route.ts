@@ -9,6 +9,7 @@ import { setFileAgentOverride, deleteFileAgentOverride } from '@/lib/agents/file
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
+import { isCliProvider } from '@/lib/usage/cli-providers';
 
 export async function GET(
   _request: NextRequest,
@@ -38,6 +39,7 @@ export async function PATCH(
 
   const parsedFile = parseFileAgentId(agentId);
   const body = await request.json();
+  const provider = body.provider === null ? null : (isCliProvider(body.provider) ? body.provider : undefined);
   const { model: parsedModel, error: modelError } = parseOptionalKnownModelInput(body.model, 'normal');
   if (modelError) return NextResponse.json({ detail: modelError }, { status: 400 });
   const parsedSchedule = body.schedule !== undefined
@@ -70,10 +72,10 @@ export async function PATCH(
           skillIds: body.skillIds,
         });
       }
-      // Prompt edits still flow to the .md file — that's the part of an
-      // agent worth committing.
-      if (body.prompt !== undefined) {
-        writeFileAgent(projPath, parsedFile.project, parsedFile.name, { prompt: body.prompt });
+      // Prompt edits always flow to the file. Provider frontmatter is also
+      // committed state, so provider-only updates must write the file too.
+      if (body.prompt !== undefined || provider !== undefined) {
+        writeFileAgent(projPath, parsedFile.project, parsedFile.name, { prompt: body.prompt, provider });
       }
       const updated = loadFileAgent(projPath, parsedFile.project, parsedFile.name);
       if (!updated) return NextResponse.json({ detail: 'not found after write' }, { status: 500 });
@@ -111,6 +113,7 @@ export async function PATCH(
   if (body.schedule !== undefined) updates.schedule = parsedSchedule.schedule;
   if (body.runner !== undefined) updates.runner = body.runner;
   if (body.enabled !== undefined) updates.enabled = body.enabled;
+  if (provider !== undefined) updates.provider = provider;
 
   db.update(schema.agents).set(updates).where(eq(schema.agents.id, agentId)).run();
   clearAgentsCache();
@@ -129,6 +132,7 @@ export async function PATCH(
           skillIds,
           runner: agent.runner,
           enabled: agent.enabled,
+          provider: agent.provider,
         });
       } catch { /* non-fatal */ }
     }

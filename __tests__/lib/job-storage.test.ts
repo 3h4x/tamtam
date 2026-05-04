@@ -45,7 +45,8 @@ function createTestDb() {
       aborted_at REAL,
       prompt_bytes INTEGER,
       work_summary TEXT,
-      modified_files TEXT
+      modified_files TEXT,
+      provider TEXT
     );
     CREATE TABLE IF NOT EXISTS recommendations (
       id TEXT PRIMARY KEY,

@@ -3,13 +3,15 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
+import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
+import { checkCliStartGate } from '@/lib/usage/resolve-provider';
+import { currentParent } from '@/lib/jobs/parent-context';
 import { exec } from '@/lib/shared/shell';
-import { getPermissionModeFlag, getPipelineModel } from '@/lib/shared/config';
+import { getPermissionModeFlag, getPipelineModel, getSettings } from '@/lib/shared/config';
 import { createJob, listJobs, markDone, updateJob } from '@/lib/jobs/job-storage';
 import { wrapIfUntrusted, withUntrustedPreamble } from '@/lib/shared/untrusted';
 import { startJob, getJobStatus, deleteJob } from '@/lib/jobs/pm2-jobs';
 import { ensureBranchForCtx } from './mark-dod-branch';
-import { runGates } from '@/lib/shared/job-control';
 
 export type MarkDodResult =
   | { ok: true; jobId: string; issueNumber: number; verified: number; total: number; changed: boolean }
@@ -103,17 +105,22 @@ export async function startMarkDod(
     isPr = !issueCtx && !!prCtx;
   }
   if (!ctx) return { ok: false, status: 400, detail: 'no issue or PR context on latest run' };
-  const paused = runGates('start DoD verification');
-  if (paused) return paused;
 
-  const { logDir, claudeBin } = getImproveConfig();
+  const { logDir } = getImproveConfig();
   mkdirSync(logDir, { recursive: true });
+  const gate = await checkCliStartGate('start DoD verification', { parentJobId: currentParent() });
+  if (!gate.ok) return gate;
+  const provider = gate.provider;
+  const settings = getSettings();
+  const claudeBin = resolveCliBin(provider, settings);
+  const cliEnv = resolveCliEnv(provider, settings);
 
   // pid=0 — inline job with no spawned process; avoids markDone's SIGKILL
   // fallback (gated on pid>0). probeJobStatus treats `mark-dod` as inline
   // explicitly so the 30s sweep doesn't declare a healthy in-flight job
   // dead — see job-storage.ts probeJobStatus.
   const job = createJob(projectName, 'mark-dod', 0, '');
+  job.provider = provider;
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
   // Persist log_path right away so the UI can show the log mid-run. Without
@@ -207,7 +214,7 @@ JSON schema:
     let claudeExitCode = 1;
     let timedOut = false;
     try {
-      await startJob(claudeJobId, claudeCommand, fullPrompt, projPath);
+      await startJob(claudeJobId, claudeCommand, fullPrompt, projPath, { env: cliEnv });
       const deadline = Date.now() + 300000;
       while (Date.now() < deadline) {
         if (_pollIntervalMs > 0) await new Promise(r => setTimeout(r, _pollIntervalMs));

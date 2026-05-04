@@ -179,6 +179,7 @@ export interface JobInfo {
   parent_job_id?: string | null
   work_summary?: string | null
   modified_files?: string | null
+  provider?: string | null
 }
 
 export interface ModifiedFileSummary {
