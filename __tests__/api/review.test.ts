@@ -76,6 +76,12 @@ describe('POST /api/projects/by-project/{projectName}/review', () => {
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
     }));
 
+    vi.doMock('@/lib/shared/job-control', () => ({
+      runGates: () => null,
+      runAutoChainGates: () => null,
+      isJobsPaused: () => false,
+    }));
+
     const mod = await import('@/app/api/projects/by-project/[projectName]/review/route');
     POST = mod.POST;
   });

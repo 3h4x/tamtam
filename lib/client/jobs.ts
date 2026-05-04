@@ -45,3 +45,14 @@ export async function markNotificationsSeen(): Promise<{ status: string }> {
   }
   return response.json()
 }
+
+export async function syncJobBoard(jobId: string): Promise<{ status: string }> {
+  const response = await fetch(`${JOBS_BASE}/${jobId}/board-sync`, {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || `Failed to sync board item: ${response.statusText}`)
+  }
+  return response.json()
+}

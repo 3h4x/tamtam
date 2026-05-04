@@ -15,6 +15,10 @@ import type { BudgetSettings } from '@/components/settings/BudgetTab'
 interface SettingsMap {
   workspace_path: string
   github_owner: string
+  github_board_sync_enabled: string
+  github_board_project_owner: string
+  github_board_project_title: string
+  github_board_project_number: string
   claude_provider: string
   claude_bin: string
   lmstudio_model: string
@@ -57,6 +61,10 @@ interface SettingsMap {
 
 const SETTINGS_DEFAULTS: SettingsMap = {
   ...DEFAULTS,
+  github_board_sync_enabled: 'false',
+  github_board_project_owner: '',
+  github_board_project_title: 'TamTam',
+  github_board_project_number: '',
   jobs_paused: 'false',
   notification_on_budget_blocked: 'false',
   budget_block_runs_enabled: 'false',
@@ -345,6 +353,55 @@ export function SettingsPage() {
                       <SettingsField key={key} fieldKey={key} value={settings[key]} provider={settings.claude_provider} onChange={handleChange} />
                     ))}
                   </div>
+
+                  {group.id === 'general' && (
+                    <div className="mt-6 rounded-xl border border-border bg-bg-primary/50 p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <h4 className="text-sm font-semibold text-text-primary">GitHub Board Sync</h4>
+                          <p className="mt-1 text-xs text-text-tertiary">
+                            Creates or reuses a global GitHub Project named <code className="font-mono">TamTam</code> and mirrors run lifecycle there.
+                          </p>
+                        </div>
+                        <label className="inline-flex items-center gap-2 text-sm text-text-primary">
+                          <input
+                            type="checkbox"
+                            checked={settings.github_board_sync_enabled === 'true'}
+                            onChange={(e) => handleChange('github_board_sync_enabled', e.target.checked ? 'true' : 'false')}
+                            className="h-4 w-4 rounded border-border bg-bg-primary text-accent focus:ring-accent/30"
+                          />
+                          Enabled
+                        </label>
+                      </div>
+                      <div className="mt-4 grid gap-4 md:grid-cols-3">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-text-secondary">Project Owner</label>
+                          <input
+                            value={settings.github_board_project_owner}
+                            onChange={(e) => handleChange('github_board_project_owner', e.target.value)}
+                            placeholder={settings.github_owner || 'octocat'}
+                            className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-text-secondary">Project Title</label>
+                          <input
+                            value={settings.github_board_project_title}
+                            onChange={(e) => handleChange('github_board_project_title', e.target.value)}
+                            className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-text-secondary">Project Number</label>
+                          <input
+                            value={settings.github_board_project_number}
+                            readOnly
+                            className="w-full h-10 px-3 py-2 bg-bg-tertiary text-text-secondary border border-border rounded-lg text-sm font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {advancedFields.length > 0 && (
                     <div className="mt-4">

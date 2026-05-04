@@ -63,6 +63,12 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
       DATA_SKILLS_DIR: join(skillsDir, 'data-skills'),
     }));
 
+    vi.doMock('@/lib/shared/job-control', () => ({
+      runGates: () => null,
+      runAutoChainGates: () => null,
+      isJobsPaused: () => false,
+    }));
+
     const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
     POST = mod.POST;
   });
@@ -308,6 +314,11 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     vi.doMock('@/lib/jobs/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
     vi.doMock('@/lib/skills/skills', () => ({ SKILLS_DIR: skillsDir, DATA_SKILLS_DIR: join(skillsDir, 'data-skills') }));
+    vi.doMock('@/lib/shared/job-control', () => ({
+      runGates: () => null,
+      runAutoChainGates: () => null,
+      isJobsPaused: () => false,
+    }));
     const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
     const POST2 = mod.POST;
 
@@ -335,6 +346,11 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     vi.doMock('@/lib/jobs/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
     vi.doMock('@/lib/skills/skills', () => ({ SKILLS_DIR: skillsDir, DATA_SKILLS_DIR: join(skillsDir, 'data-skills') }));
+    vi.doMock('@/lib/shared/job-control', () => ({
+      runGates: () => null,
+      runAutoChainGates: () => null,
+      isJobsPaused: () => false,
+    }));
     const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
     const POST2 = mod.POST;
 

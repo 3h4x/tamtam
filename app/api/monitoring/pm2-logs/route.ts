@@ -17,9 +17,9 @@ const DEFAULT_TAIL_BYTES = 64 * 1024;
 // Returns { raw, truncated } — truncated=true when we read less than the full file
 // and the first line may be partial.
 function tailBytes(path: string, bytes: number): { raw: string; truncated: boolean } {
-  const fd = openSync(path, 'r');
+  const fd = openSync(/*turbopackIgnore: true*/ path, 'r');
   try {
-    const size = statSync(path).size;
+    const size = statSync(/*turbopackIgnore: true*/ path).size;
     const readLen = Math.min(bytes, size);
     const offset = size - readLen;
     const buf = Buffer.alloc(readLen);
@@ -68,8 +68,8 @@ export async function GET(request: Request): Promise<NextResponse> {
   const logDir = process.env.PM2_LOG_DIR ?? join(homedir(), '.pm2', 'logs');
   // Filenames follow PM2's default convention `<app>-error.log` / `<app>-out.log`,
   // where `<app>` is the fixed PM2 app name ("tamtam") set in package.json's dev/start scripts.
-  const errPath = join(logDir, 'tamtam-error.log');
-  const outPath = join(logDir, 'tamtam-out.log');
+  const errPath = join(/*turbopackIgnore: true*/ logDir, 'tamtam-error.log');
+  const outPath = join(/*turbopackIgnore: true*/ logDir, 'tamtam-out.log');
 
   const entries: LogEntry[] = [];
   const fileStats: { path: string; size: number | null; mtime: string | null; error?: string }[] = [];
@@ -80,7 +80,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (searchParams.get('out') !== '0') targets.push([outPath, 'out']);
   for (const [path, source] of targets) {
     try {
-      const st = statSync(path);
+      const st = statSync(/*turbopackIgnore: true*/ path);
       fileStats.push({ path, size: st.size, mtime: st.mtime.toISOString() });
       const { raw, truncated } = tailBytes(path, DEFAULT_TAIL_BYTES);
       entries.push(...parseLines(raw, source, limit, truncated));

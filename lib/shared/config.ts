@@ -15,6 +15,13 @@ import { normalizeModelInput, resolveModelAlias } from '@/lib/agents/model-alias
 export interface TamTamConfig {
   workspace_path: string;
   github_owner: string;
+  github_board_sync_enabled: boolean;
+  github_board_project_owner: string;
+  github_board_project_title: string;
+  github_board_project_number: string;
+  github_board_project_id: string;
+  github_board_status_field_id: string;
+  github_board_status_option_ids: Partial<Record<import('@/lib/github/project-board-status').BoardStatus, string>>;
   claude_provider: string;
   claude_bin: string;
   lmstudio_model: string;
@@ -58,6 +65,13 @@ export interface TamTamConfig {
 const DEFAULTS: TamTamConfig = {
   workspace_path: '',
   github_owner: '',
+  github_board_sync_enabled: false,
+  github_board_project_owner: '',
+  github_board_project_title: 'TamTam',
+  github_board_project_number: '',
+  github_board_project_id: '',
+  github_board_status_field_id: '',
+  github_board_status_option_ids: {},
   claude_provider: 'claude',
   claude_bin: '~/.local/bin/claude',
   lmstudio_model: '',
@@ -117,7 +131,7 @@ function shimPath(name: string): string {
 
 function isShimPath(bin: string | undefined): boolean {
   if (!bin) return false;
-  return /scripts\/(gemini|lmstudio|codex)-shim\.js$/.test(bin);
+  return /scripts\/(claude|gemini|lmstudio|codex)-shim\.js$/.test(bin);
 }
 
 function inferClaudeProvider(claudeBin: string | undefined): string {
@@ -125,6 +139,7 @@ function inferClaudeProvider(claudeBin: string | undefined): string {
   if (claudeBin.endsWith('/scripts/gemini-shim.js') || claudeBin.endsWith('scripts/gemini-shim.js')) return 'gemini';
   if (claudeBin.endsWith('/scripts/lmstudio-shim.js') || claudeBin.endsWith('scripts/lmstudio-shim.js')) return 'lmstudio';
   if (claudeBin.endsWith('/scripts/codex-shim.js') || claudeBin.endsWith('scripts/codex-shim.js')) return 'codex';
+  if (claudeBin.endsWith('/scripts/claude-shim.js') || claudeBin.endsWith('scripts/claude-shim.js')) return 'claude';
   if (claudeBin === DEFAULTS.claude_bin || claudeBin.endsWith('/claude') || claudeBin === 'claude') return 'claude';
   return 'custom';
 }
@@ -133,7 +148,12 @@ function resolveClaudeBin(provider: string, storedBin: string | undefined): stri
   if (provider === 'gemini') return shimPath('gemini-shim.js');
   if (provider === 'lmstudio') return shimPath('lmstudio-shim.js');
   if (provider === 'codex') return shimPath('codex-shim.js');
-  // For claude/custom providers, ignore stored shim paths left over from a prior
+  // The Claude CLI doesn't accept TamTam's tier names (`fast`/`normal`/`smart`)
+  // for `--model`. Route through scripts/claude-shim.js, which translates the
+  // tier name to a Claude alias and execs the real binary (default
+  // `~/.local/bin/claude`, override with CLAUDE_BIN env var).
+  if (provider === 'claude') return shimPath('claude-shim.js');
+  // For custom providers, ignore stored shim paths left over from a prior
   // gemini/lmstudio configuration — they would invoke the wrong backend.
   if (isShimPath(storedBin)) return DEFAULTS.claude_bin;
   return storedBin ?? DEFAULTS.claude_bin;
@@ -154,6 +174,13 @@ export function getSettings(): TamTamConfig {
   const config: TamTamConfig = {
     workspace_path: map.workspace_path ?? DEFAULTS.workspace_path,
     github_owner: map.github_owner ?? DEFAULTS.github_owner,
+    github_board_sync_enabled: map.github_board_sync_enabled === 'true',
+    github_board_project_owner: map.github_board_project_owner ?? DEFAULTS.github_board_project_owner,
+    github_board_project_title: map.github_board_project_title ?? DEFAULTS.github_board_project_title,
+    github_board_project_number: map.github_board_project_number ?? DEFAULTS.github_board_project_number,
+    github_board_project_id: map.github_board_project_id ?? DEFAULTS.github_board_project_id,
+    github_board_status_field_id: map.github_board_status_field_id ?? DEFAULTS.github_board_status_field_id,
+    github_board_status_option_ids: parseJsonObject(map.github_board_status_option_ids),
     claude_provider: provider,
     claude_bin: resolveClaudeBin(provider, map.claude_bin),
     lmstudio_model: map.lmstudio_model ?? DEFAULTS.lmstudio_model,
@@ -215,6 +242,16 @@ function parseIntOr(v: string | undefined, fallback: number): number {
   if (v === undefined || v === '') return fallback;
   const n = parseInt(v, 10);
   return isNaN(n) ? fallback : n;
+}
+
+function parseJsonObject(v: string | undefined): Record<string, string> {
+  if (!v) return {};
+  try {
+    const parsed = JSON.parse(v);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, string> : {};
+  } catch {
+    return {};
+  }
 }
 
 const VALID_PERMISSION_MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'default', 'dontAsk', 'plan'] as const;

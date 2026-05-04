@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { getVerdict } from './verdict';
 import { currentParent } from './parent-context';
+import { getSettings } from '@/lib/shared/config';
 import type { JobData } from './types';
 
 export { runWithParent } from './parent-context';
@@ -187,6 +188,15 @@ export function createJob(
   };
   jobsCache.set(jobId, job);
   saveToDb(job);
+  let boardSyncEnabled = false;
+  try { boardSyncEnabled = getSettings().github_board_sync_enabled; } catch { /* settings unavailable — skip */ }
+  if (boardSyncEnabled) {
+    void import('@/lib/github/project-board')
+      .then(({ queueJobBoardSync }) => queueJobBoardSync(job, 'started'))
+      .catch((error) => {
+        console.error(`[github-board] failed to queue start sync for ${job.id}`, error);
+      });
+  }
   return job;
 }
 

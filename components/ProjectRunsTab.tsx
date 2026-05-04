@@ -2,7 +2,7 @@
 
 import { Fragment, useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { fetchJobs, releaseProject } from '@/lib/client-api'
+import { fetchJobs, releaseProject, syncJobBoard } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import {
   formatTokens,
@@ -67,6 +67,7 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [releaseActionState, setReleaseActionState] = useState<{ jobId: string; label: string } | null>(null)
+  const [boardActionState, setBoardActionState] = useState<{ jobId: string; label: string } | null>(null)
   const toggleExpanded = (key: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -204,20 +205,50 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
       ?? (e.kind === 'release' && e.status === 'done' && e.exitCode !== null && e.exitCode !== 0
         ? (e.children?.length ?? 0) === 0 ? 'blocked' : 'failed'
         : null)
-    if (outcomeStatus !== 'blocked' && outcomeStatus !== 'failed') return null
-    const active = releaseActionState?.jobId === e.navJobId
-    const label = active ? releaseActionState.label : outcomeStatus === 'blocked' ? 'Retry release' : 'Continue release'
-    return (
+    const releaseButton = outcomeStatus === 'blocked' || outcomeStatus === 'failed' ? (
+      (() => {
+        const active = releaseActionState?.jobId === e.navJobId
+        const label = active ? releaseActionState.label : outcomeStatus === 'blocked' ? 'Retry release' : 'Continue release'
+        return (
+          <button
+            type="button"
+            className="px-2 py-0.5 text-[10px] rounded border border-accent/40 text-accent bg-accent/10 hover:bg-accent/15 disabled:opacity-60 cursor-pointer"
+            disabled={active}
+            onClick={() => retryRelease(e)}
+            title="Start a new release attempt from the current project state"
+          >
+            {label}
+          </button>
+        )
+      })()
+    ) : null
+    const boardActive = boardActionState?.jobId === e.navJobId
+    const canManualSyncBoard = e.status === 'done'
+    const boardButton = canManualSyncBoard ? (
       <button
         type="button"
-        className="px-2 py-0.5 text-[10px] rounded border border-accent/40 text-accent bg-accent/10 hover:bg-accent/15 disabled:opacity-60 cursor-pointer"
-        disabled={active}
-        onClick={() => retryRelease(e)}
-        title="Start a new release attempt from the current project state"
+        className="px-2 py-0.5 text-[10px] rounded border border-border text-text-secondary bg-bg-primary hover:bg-bg-tertiary disabled:opacity-60 cursor-pointer"
+        disabled={boardActive}
+        onClick={async () => {
+          setBoardActionState({ jobId: e.navJobId, label: 'syncing' })
+          try {
+            await syncJobBoard(e.navJobId)
+            setBoardActionState({ jobId: e.navJobId, label: 'synced' })
+            setTimeout(() => setBoardActionState(null), 1500)
+          } catch (error) {
+            console.error('[history] board sync failed', error)
+            setBoardActionState({ jobId: e.navJobId, label: 'failed' })
+            setTimeout(() => setBoardActionState(null), 2500)
+          }
+        }}
+        title="Recreate or refresh this run on the GitHub board"
       >
-        {label}
+        {boardActive ? boardActionState?.label : 'Sync board'}
       </button>
-    )
+    ) : null
+    if (!releaseButton) return boardButton
+    if (!boardButton) return releaseButton
+    return <div className="flex items-center gap-2">{releaseButton}{boardButton}</div>
   }
 
   return (

@@ -8,7 +8,7 @@ import { spawn } from 'child_process';
 import { homedir } from 'os';
 import { join } from 'path';
 import { readParsedLog } from './verdict';
-import { getSettings } from '@/lib/shared/config';
+import { getSettings, getPermissionModeFlag } from '@/lib/shared/config';
 import type { JobData } from './types';
 
 const TIMEOUT_MS = 30_000;
@@ -83,7 +83,8 @@ export async function retryVerdictWithClaude(job: JobData): Promise<string | nul
 
     let child;
     try {
-      child = spawn(claudeBin, ['--print', '--model', 'fast', '--permission-mode', 'bypassPermissions'], {
+      const [permFlag, permValue] = getPermissionModeFlag().split(' ');
+      child = spawn(claudeBin, ['--print', '--model', 'fast', permFlag, permValue], {
         env: enrichEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
       });

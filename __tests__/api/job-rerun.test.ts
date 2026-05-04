@@ -58,6 +58,12 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
       startJob: startJobMock,
     }));
 
+    vi.doMock('@/lib/shared/job-control', () => ({
+      runGates: () => null,
+      runAutoChainGates: () => null,
+      isJobsPaused: () => false,
+    }));
+
     const mod = await import('@/app/api/jobs/[jobId]/rerun/route');
     POST = mod.POST;
   });
