@@ -393,4 +393,104 @@ describe('internal-scheduler — budget skip', () => {
     expect(dump.entries[0].lastSkippedReason).toContain('Codex quota exceeded');
     expect(dump.entries[0].errorCount).toBe(0);
   });
+
+  it('treats route-level HTTP 409 as a skip, not a scheduler error', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: vi.fn().mockResolvedValue({ detail: "Agent 'tests' is already running (job job-1)" }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    setSchedulerBaseUrlDynamic('http://test');
+
+    upsertAgentScheduleDynamic({ id: 'a1', project: 'myproj', name: 'tests', schedule: '1m', prompt: 'run tests', enabled: true });
+
+    await vi.advanceTimersByTimeAsync(60_000 + 100);
+    for (let _i = 0; _i < 20; _i++) await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const dump = dumpInternalSchedulerDynamic();
+    expect(dump.entries[0].skippedCount).toBe(1);
+    expect(dump.entries[0].lastSkippedReason).toContain('already running');
+    expect(dump.entries[0].errorCount).toBe(0);
+  });
+
+  it('removes stale schedules when the route says the scheduled agent is disabled', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: vi.fn().mockResolvedValue({ detail: "Agent 'tests' is disabled — ignoring scheduled trigger" }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    setSchedulerBaseUrlDynamic('http://test');
+
+    upsertAgentScheduleDynamic({ id: 'a1', project: 'myproj', name: 'tests', schedule: '1m', prompt: 'run tests', enabled: true });
+
+    await vi.advanceTimersByTimeAsync(60_000 + 100);
+    for (let _i = 0; _i < 20; _i++) await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(dumpInternalSchedulerDynamic().entries).toHaveLength(0);
+  });
+
+  it('removes stale schedules when the route says the scheduled agent has no schedule', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: vi.fn().mockResolvedValue({ detail: "Agent 'tests' has no schedule — ignoring scheduled trigger" }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    setSchedulerBaseUrlDynamic('http://test');
+
+    upsertAgentScheduleDynamic({ id: 'a1', project: 'myproj', name: 'tests', schedule: '1m', prompt: 'run tests', enabled: true });
+
+    await vi.advanceTimersByTimeAsync(60_000 + 100);
+    for (let _i = 0; _i < 20; _i++) await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(dumpInternalSchedulerDynamic().entries).toHaveLength(0);
+  });
+
+  it('pauses the scheduler when the route reports jobs are paused globally', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: vi.fn().mockResolvedValue({ detail: 'Jobs are paused globally. Turn the switch back on in Settings to start an agent run.' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    setSchedulerBaseUrlDynamic('http://test');
+
+    upsertAgentScheduleDynamic({ id: 'a1', project: 'myproj', name: 'tests', schedule: '1m', prompt: 'run tests', enabled: true });
+
+    await vi.advanceTimersByTimeAsync(60_000 + 100);
+    for (let _i = 0; _i < 20; _i++) await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const dump = dumpInternalSchedulerDynamic();
+    expect(dump.paused).toBe(true);
+    expect(dump.entries[0].errorCount).toBe(1);
+    expect(dump.entries[0].lastError).toContain('Jobs are paused globally');
+    expect(dump.entries[0].skippedCount).toBe(0);
+  });
+
+  it('treats unknown route-level HTTP 409 conflicts as scheduler errors', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: vi.fn().mockResolvedValue({ detail: 'Unexpected conflict while starting agent run' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    setSchedulerBaseUrlDynamic('http://test');
+
+    upsertAgentScheduleDynamic({ id: 'a1', project: 'myproj', name: 'tests', schedule: '1m', prompt: 'run tests', enabled: true });
+
+    await vi.advanceTimersByTimeAsync(60_000 + 100);
+    for (let _i = 0; _i < 20; _i++) await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const dump = dumpInternalSchedulerDynamic();
+    expect(dump.entries[0].errorCount).toBe(1);
+    expect(dump.entries[0].lastError).toContain('Unexpected conflict');
+    expect(dump.entries[0].skippedCount).toBe(0);
+  });
 });

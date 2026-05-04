@@ -60,6 +60,9 @@ describe('POST /api/agents/{agentId}/run', () => {
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let createJobMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
+  let listJobsMock: ReturnType<typeof vi.fn>;
+  let probeJobStatusMock: ReturnType<typeof vi.fn>;
+  let runGatesMock: ReturnType<typeof vi.fn>;
   let tempSkillsDir: string;
 
   const now = Date.now() / 1000;
@@ -92,6 +95,9 @@ describe('POST /api/agents/{agentId}/run', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     createJobMock = vi.fn().mockImplementation(() => makeJob());
     updateJobMock = vi.fn();
+    listJobsMock = vi.fn().mockReturnValue([]);
+    probeJobStatusMock = vi.fn().mockResolvedValue('done');
+    runGatesMock = vi.fn().mockReturnValue(null);
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
 
@@ -107,8 +113,8 @@ describe('POST /api/agents/{agentId}/run', () => {
     vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       updateJob: updateJobMock,
-      listJobs: vi.fn().mockReturnValue([]),
-      probeJobStatus: vi.fn().mockResolvedValue('done'),
+      listJobs: listJobsMock,
+      probeJobStatus: probeJobStatusMock,
     }));
 
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
@@ -133,6 +139,9 @@ describe('POST /api/agents/{agentId}/run', () => {
         frequency: '1h', daytime: false, weekends: false, launchagent_prefix: 'com.tamtam', base_prompt: '',
         permission_mode: 'bypassPermissions',
       }),
+    }));
+    vi.doMock('@/lib/shared/job-control', () => ({
+      runGates: runGatesMock,
     }));
 
     const mod = await import('@/app/api/agents/[agentId]/run/route');
@@ -202,6 +211,77 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(data.status).toBe('started');
     expect(data.job_id).toBeTruthy();
     expect(data.agent).toBe('Test Agent');
+  });
+
+  it('rejects scheduled triggers for disabled agents before starting work', async () => {
+    insertAgent({ enabled: false, schedule: '1h' });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.detail).toContain('is disabled');
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects scheduled triggers for agents without schedules before starting work', async () => {
+    insertAgent({ schedule: null });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.detail).toContain('has no schedule');
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects scheduled triggers when the agent is already running', async () => {
+    insertAgent({ schedule: '1h' });
+    listJobsMock.mockReturnValue([makeJob({ id: 'job-1', finishedAt: null })]);
+    probeJobStatusMock.mockResolvedValue('running');
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.detail).toContain('already running');
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
+  it('returns the global pause conflict when scheduled work reaches the route while jobs are paused', async () => {
+    insertAgent({ schedule: '1h' });
+    runGatesMock.mockReturnValue({
+      ok: false,
+      status: 409,
+      detail: 'Jobs are paused globally. Turn the switch back on in Settings to start an agent run.',
+    });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.detail).toContain('Jobs are paused globally');
+    expect(startJobMock).not.toHaveBeenCalled();
   });
 
   it('calls startJob with correct args', async () => {
