@@ -176,6 +176,15 @@ describe('project board integration', () => {
       verdict: 'LGTM',
     });
 
+    // The beforeEach mock for @/lib/shared/config returns enabled:false; this
+    // test needs enabled:true. Reset the module cache so the override below
+    // is the one that gets resolved on the next dynamic import (without the
+    // reset, vitest sometimes serves the beforeEach factory under CI-level
+    // worker pressure even when doMock is called second).
+    vi.resetModules();
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/jobs/storage', () => ({ getJob: getJobMock, updateJob: updateJobMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({
         github_owner: 'octocat',
