@@ -116,6 +116,35 @@ describe('internal-scheduler', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
+    it('remove-while-in-flight does not re-arm a zombie timer', async () => {
+      // fetch hangs until we resolve it manually
+      let resolveFetch!: (value: Response) => void;
+      const hangingFetch = new Promise<Response>((resolve) => { resolveFetch = resolve; });
+      vi.stubGlobal('fetch', vi.fn().mockReturnValue(hangingFetch));
+      setSchedulerBaseUrl('http://test');
+
+      upsertAgentSchedule({ id: 'a1', project: 'p', name: 'n', schedule: '1m', prompt: 'do', enabled: true });
+
+      // Advance past the schedule window so fire() starts and awaits fetch
+      await vi.advanceTimersByTimeAsync(60_000 + 100);
+
+      // Remove the entry while fire() is still awaiting the response
+      removeAgentSchedule('a1');
+      expect(dumpInternalScheduler().entries).toHaveLength(0);
+
+      // Now let the fetch resolve — fire()'s finally block calls armNext()
+      resolveFetch({ ok: true } as Response);
+      // Drain microtasks so the finally block runs
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+
+      // armNext must have bailed on the entries.has() guard — no zombie entry
+      expect(dumpInternalScheduler().entries).toHaveLength(0);
+
+      // Advance another full interval to confirm no zombie timer fires
+      await vi.advanceTimersByTimeAsync(60_000 + 100);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
     it('upsert with enabled=false is a no-op (no entry, no timer)', () => {
       upsertAgentSchedule({ id: 'a1', project: 'p', name: 'n', schedule: '1m', prompt: 'x', enabled: false });
       expect(dumpInternalScheduler().entries).toHaveLength(0);

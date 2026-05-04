@@ -283,6 +283,7 @@ async function fire(entry: ScheduleEntry): Promise<void> {
 function armNext(entry: ScheduleEntry): void {
   if (!entry.enabled) return;
   if (getPaused()) return;
+  if (!entries.has(entry.agentId)) return;
   if (entry.timer) clearTimeout(entry.timer);
   entry.nextFireMs = computeNextFire(entry.schedule, entry.agentId);
   const delay = Math.max(1000, entry.nextFireMs - Date.now());
