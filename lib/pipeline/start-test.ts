@@ -23,35 +23,35 @@ export function detectTestCommand(projPath: string, projectName?: string): strin
       if (cfg.project === projectName && cfg.test_command) return cfg.test_command;
     }
   }
-  if (existsSync(join(projPath, 'pyproject.toml')) || existsSync(join(projPath, 'requirements.txt'))) {
-    const venvPython = join(projPath, '.venv', 'bin', 'python');
+  if (existsSync(join(/*turbopackIgnore: true*/ projPath, 'pyproject.toml')) || existsSync(join(/*turbopackIgnore: true*/ projPath, 'requirements.txt'))) {
+    const venvPython = join(/*turbopackIgnore: true*/ projPath, '.venv', 'bin', 'python');
     return existsSync(venvPython) ? `${venvPython} -m pytest` : 'python3 -m pytest';
   }
-  const pkgJson = join(projPath, 'package.json');
+  const pkgJson = join(/*turbopackIgnore: true*/ projPath, 'package.json');
   if (existsSync(pkgJson)) {
     try {
       const pkg = JSON.parse(readFileSync(pkgJson, 'utf-8'));
       if (pkg.scripts?.test) {
-        return existsSync(join(projPath, 'pnpm-lock.yaml')) ? 'pnpm test' : 'npm test';
+        return existsSync(join(/*turbopackIgnore: true*/ projPath, 'pnpm-lock.yaml')) ? 'pnpm test' : 'npm test';
       }
     } catch {}
   }
-  if (existsSync(join(projPath, 'foundry.toml'))) return 'forge test';
-  if (existsSync(join(projPath, 'Package.swift'))) {
+  if (existsSync(join(/*turbopackIgnore: true*/ projPath, 'foundry.toml'))) return 'forge test';
+  if (existsSync(join(/*turbopackIgnore: true*/ projPath, 'Package.swift'))) {
     // Guard against triggering macOS Xcode GUI dialogs when running headless.
     // xcode-select -p exits 0 only when developer tools are properly configured.
     try { execSync('xcode-select -p', { stdio: 'ignore', timeout: 3000 }); } catch { return null; }
     return 'swift test';
   }
-  if (existsSync(join(projPath, 'Cargo.toml'))) return 'cargo test';
-  if (existsSync(join(projPath, 'go.mod'))) return 'go test ./...';
-  if (existsSync(join(projPath, 'pom.xml'))) return 'mvn test';
-  if (existsSync(join(projPath, 'build.gradle')) || existsSync(join(projPath, 'build.gradle.kts'))) return 'gradle test';
+  if (existsSync(join(/*turbopackIgnore: true*/ projPath, 'Cargo.toml'))) return 'cargo test';
+  if (existsSync(join(/*turbopackIgnore: true*/ projPath, 'go.mod'))) return 'go test ./...';
+  if (existsSync(join(/*turbopackIgnore: true*/ projPath, 'pom.xml'))) return 'mvn test';
+  if (existsSync(join(/*turbopackIgnore: true*/ projPath, 'build.gradle')) || existsSync(join(/*turbopackIgnore: true*/ projPath, 'build.gradle.kts'))) return 'gradle test';
   for (const mk of ['Makefile', 'makefile', 'GNUmakefile']) {
-    const p = join(projPath, mk);
-    if (existsSync(p)) {
+    const p = join(/*turbopackIgnore: true*/ projPath, mk);
+    if (existsSync(/*turbopackIgnore: true*/ p)) {
       try {
-        if (/^test\s*:/m.test(readFileSync(p, 'utf-8'))) return 'make test';
+        if (/^test\s*:/m.test(readFileSync(/*turbopackIgnore: true*/ p, 'utf-8'))) return 'make test';
       } catch {}
     }
   }
