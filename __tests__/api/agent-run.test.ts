@@ -63,6 +63,7 @@ describe('POST /api/agents/{agentId}/run', () => {
   let listJobsMock: ReturnType<typeof vi.fn>;
   let probeJobStatusMock: ReturnType<typeof vi.fn>;
   let runGatesMock: ReturnType<typeof vi.fn>;
+  let enqueueAgentRunMock: ReturnType<typeof vi.fn>;
   let tempSkillsDir: string;
 
   const now = Date.now() / 1000;
@@ -98,8 +99,12 @@ describe('POST /api/agents/{agentId}/run', () => {
     listJobsMock = vi.fn().mockReturnValue([]);
     probeJobStatusMock = vi.fn().mockResolvedValue('done');
     runGatesMock = vi.fn().mockReturnValue(null);
+    enqueueAgentRunMock = vi.fn();
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/agents/pending-agent-run', () => ({
+      enqueueAgentRun: enqueueAgentRunMock,
+    }));
 
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
@@ -261,6 +266,53 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(res.status).toBe(409);
     expect(data.detail).toContain('already running');
     expect(startJobMock).not.toHaveBeenCalled();
+    expect(enqueueAgentRunMock).not.toHaveBeenCalled();
+  });
+
+  it('queues the run when a different agent is already running on the project', async () => {
+    insertAgent({ schedule: '1h' });
+    listJobsMock.mockReturnValue([
+      makeJob({ id: 'job-other', kind: 'agent:Other Agent', finishedAt: null }),
+    ]);
+    probeJobStatusMock.mockResolvedValue('running');
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(202);
+    expect(data.status).toBe('queued');
+    expect(data.blockingJobId).toBe('job-other');
+    expect(startJobMock).not.toHaveBeenCalled();
+    expect(enqueueAgentRunMock).toHaveBeenCalledTimes(1);
+    const [project, entry] = enqueueAgentRunMock.mock.calls[0];
+    expect(project).toBe('proj1');
+    expect(entry.agentId).toBe('agent-123');
+    expect(entry.agentName).toBe('Test Agent');
+    expect(entry.triggeredBy).toBe('schedule');
+    expect(entry.prompt).toBe('do something');
+  });
+
+  it('does not queue when a different agent for the project is no longer actually running', async () => {
+    insertAgent({ schedule: '1h' });
+    listJobsMock.mockReturnValue([
+      makeJob({ id: 'job-stale', kind: 'agent:Stale Agent', finishedAt: null }),
+    ]);
+    probeJobStatusMock.mockResolvedValue('done');
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    expect(res.status).toBe(200);
+    expect(enqueueAgentRunMock).not.toHaveBeenCalled();
+    expect(startJobMock).toHaveBeenCalledTimes(1);
   });
 
   it('returns the global pause conflict when scheduled work reaches the route while jobs are paused', async () => {
