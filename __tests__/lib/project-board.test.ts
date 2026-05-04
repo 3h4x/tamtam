@@ -26,11 +26,47 @@ function makeJob(overrides: Partial<JobData> = {}): JobData {
   };
 }
 
+const DISABLED_SETTINGS = {
+  github_owner: '',
+  github_board_sync_enabled: false,
+  github_board_project_owner: '',
+  github_board_project_title: 'TamTam',
+  github_board_project_number: '',
+  github_board_project_id: '',
+  github_board_status_field_id: '',
+  github_board_status_option_ids: {},
+};
+
+const ENABLED_SETTINGS = {
+  github_owner: 'octocat',
+  github_board_sync_enabled: true,
+  github_board_project_owner: 'octocat',
+  github_board_project_title: 'TamTam',
+  github_board_project_number: '7',
+  github_board_project_id: 'PVT_1',
+  github_board_status_field_id: 'FIELD_1',
+  github_board_status_option_ids: {
+    Queued: 'Q',
+    Running: 'R',
+    Review: 'REV',
+    Fixing: 'F',
+    'Ready to Push': 'P',
+    Blocked: 'B',
+    Done: 'D',
+    Failed: 'X',
+  },
+};
+
 describe('project board integration', () => {
   const execMock = vi.fn();
   const updateJobMock = vi.fn();
   const getJobMock = vi.fn();
   const resolveProjectPathMock = vi.fn();
+
+  // Mutable settings pointer: all vi.doMock factories for @/lib/shared/config
+  // delegate here, so per-test overrides work regardless of which stacked
+  // factory Vitest resolves — avoiding the "beforeEach factory wins" flake.
+  let mockGetSettings: () => object;
 
   beforeEach(() => {
     vi.resetModules();
@@ -38,6 +74,7 @@ describe('project board integration', () => {
     updateJobMock.mockReset();
     getJobMock.mockReset();
     resolveProjectPathMock.mockReset();
+    mockGetSettings = () => ({ ...DISABLED_SETTINGS });
 
     vi.doMock('@/lib/shared/shell', () => ({
       exec: execMock,
@@ -49,17 +86,11 @@ describe('project board integration', () => {
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
+    // Factory always delegates to mockGetSettings() so that any stacked
+    // registration from a previous beforeEach still returns the current
+    // per-test settings without needing to override the factory itself.
     vi.doMock('@/lib/shared/config', () => ({
-      getSettings: () => ({
-        github_owner: '',
-        github_board_sync_enabled: false,
-        github_board_project_owner: '',
-        github_board_project_title: 'TamTam',
-        github_board_project_number: '',
-        github_board_project_id: '',
-        github_board_status_field_id: '',
-        github_board_status_option_ids: {},
-      }),
+      getSettings: () => mockGetSettings(),
     }));
   });
 
@@ -176,36 +207,10 @@ describe('project board integration', () => {
       verdict: 'LGTM',
     });
 
-    // The beforeEach mock for @/lib/shared/config returns enabled:false; this
-    // test needs enabled:true. Reset the module cache so the override below
-    // is the one that gets resolved on the next dynamic import (without the
-    // reset, vitest sometimes serves the beforeEach factory under CI-level
-    // worker pressure even when doMock is called second).
-    vi.resetModules();
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/jobs/storage', () => ({ getJob: getJobMock, updateJob: updateJobMock }));
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: () => ({
-        github_owner: 'octocat',
-        github_board_sync_enabled: true,
-        github_board_project_owner: 'octocat',
-        github_board_project_title: 'TamTam',
-        github_board_project_number: '7',
-        github_board_project_id: 'PVT_1',
-        github_board_status_field_id: 'FIELD_1',
-        github_board_status_option_ids: {
-          Queued: 'Q',
-          Running: 'R',
-          Review: 'REV',
-          Fixing: 'F',
-          'Ready to Push': 'P',
-          Blocked: 'B',
-          Done: 'D',
-          Failed: 'X',
-        },
-      }),
-    }));
+    // Update the shared settings pointer — the beforeEach factory delegates
+    // to mockGetSettings(), so this applies regardless of which stacked
+    // factory Vitest picks for @/lib/shared/config.
+    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockImplementation((jobId: string) => (jobId === 'release-1' ? releaseJob : null));
 
@@ -243,27 +248,9 @@ describe('project board integration', () => {
   });
 
   it('engages a rate-limit cooldown after a 403 secondary-rate-limit response', async () => {
-    vi.resetModules();
     const job = makeJob({ id: 'run-rl', kind: 'run', prompt: 'rate limit me' });
 
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/jobs/storage', () => ({ getJob: getJobMock, updateJob: updateJobMock }));
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: () => ({
-        github_owner: 'octocat',
-        github_board_sync_enabled: true,
-        github_board_project_owner: 'octocat',
-        github_board_project_title: 'TamTam',
-        github_board_project_number: '7',
-        github_board_project_id: 'PVT_1',
-        github_board_status_field_id: 'FIELD_1',
-        github_board_status_option_ids: {
-          Queued: 'Q', Running: 'R', Review: 'REV', Fixing: 'F',
-          'Ready to Push': 'P', Blocked: 'B', Done: 'D', Failed: 'X',
-        },
-      }),
-    }));
+    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockReturnValue(null);
 
@@ -282,7 +269,6 @@ describe('project board integration', () => {
   });
 
   it('refuses to pass --prefixed strings as gh title/body args', async () => {
-    vi.resetModules();
     const job = makeJob({
       id: 'run-inj',
       kind: 'run',
@@ -290,24 +276,7 @@ describe('project board integration', () => {
       contextMeta: JSON.stringify({ githubBoard: { title: '--format=json' } }),
     });
 
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/jobs/storage', () => ({ getJob: getJobMock, updateJob: updateJobMock }));
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: () => ({
-        github_owner: 'octocat',
-        github_board_sync_enabled: true,
-        github_board_project_owner: 'octocat',
-        github_board_project_title: 'TamTam',
-        github_board_project_number: '7',
-        github_board_project_id: 'PVT_1',
-        github_board_status_field_id: 'FIELD_1',
-        github_board_status_option_ids: {
-          Queued: 'Q', Running: 'R', Review: 'REV', Fixing: 'F',
-          'Ready to Push': 'P', Blocked: 'B', Done: 'D', Failed: 'X',
-        },
-      }),
-    }));
+    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockImplementation((id: string) => (id === 'run-inj' ? job : null));
 
@@ -326,33 +295,9 @@ describe('project board integration', () => {
   });
 
   it('reuses an existing board item discovered by marker lookup', async () => {
-    vi.resetModules();
     const job = makeJob({ id: 'run-1', kind: 'run', prompt: 'Audit logs' });
 
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/jobs/storage', () => ({ getJob: getJobMock, updateJob: updateJobMock }));
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: () => ({
-        github_owner: 'octocat',
-        github_board_sync_enabled: true,
-        github_board_project_owner: 'octocat',
-        github_board_project_title: 'TamTam',
-        github_board_project_number: '7',
-        github_board_project_id: 'PVT_1',
-        github_board_status_field_id: 'FIELD_1',
-        github_board_status_option_ids: {
-          Queued: 'Q',
-          Running: 'R',
-          Review: 'REV',
-          Fixing: 'F',
-          'Ready to Push': 'P',
-          Blocked: 'B',
-          Done: 'D',
-          Failed: 'X',
-        },
-      }),
-    }));
+    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockReturnValue(null);
 
