@@ -874,8 +874,11 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   }
 
   try {
-    const { queueJobBoardSync } = await import('@/lib/github/project-board');
-    await queueJobBoardSync(job, 'finished');
+    const { getSettings } = await import('@/lib/shared/config');
+    if (getSettings().github_board_sync_enabled) {
+      const { queueJobBoardSync } = await import('@/lib/github/project-board');
+      await queueJobBoardSync(job, 'finished');
+    }
   } catch (e) {
     console.error(`[github-board] failed to sync finished job ${job.id}:`, e);
   }
@@ -996,7 +999,14 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
   // every other in-flight job. mark-dod and pr-wait already avoid this by
   // using pid=0; push/commit use process.pid for restart detection instead.
   const isInlineServerKind = job.kind === 'push' || job.kind === 'commit';
-  if (job.pid > 0 && !isInlineServerKind) {
+  // Refuse to operate on system PIDs. macOS reserves 1–99 for daemons; PID 1 is
+  // launchd, whose children include every user GUI app. A bad job.pid value
+  // from a corrupt DB row or a misbehaving spawner would otherwise SIGKILL
+  // Finder / Dock / the running terminal — observed during a unit test that
+  // accidentally passed pid=1. A legitimate tamtam-spawned process always has
+  // pid > 100 in practice.
+  const SAFE_PID_FLOOR = 100;
+  if (job.pid > SAFE_PID_FLOOR && !isInlineServerKind) {
     try {
       const { exec } = await import('@/lib/shared/shell');
       const { stdout } = await exec('pgrep', ['-P', String(job.pid)], { timeout: 2000 });
@@ -1004,6 +1014,7 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
       const pids = [job.pid, ...children];
       const alive: number[] = [];
       for (const pid of pids) {
+        if (pid <= SAFE_PID_FLOOR) continue;
         try {
           process.kill(pid, 'SIGKILL');
           alive.push(pid);
@@ -1013,5 +1024,7 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
         console.log(`[job ${job.id}] force-killed hung process(es) after completion: ${alive.join(', ')}`);
       }
     } catch {}
+  } else if (job.pid > 0 && job.pid <= SAFE_PID_FLOOR) {
+    console.warn(`[job ${job.id}] refusing to clean up suspicious pid=${job.pid} (system PID range); kind=${job.kind}`);
   }
 }

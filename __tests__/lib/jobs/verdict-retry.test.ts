@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // module after mocking its dependencies so the spawn path is never exercised.
 vi.mock('@/lib/shared/config', () => ({
   getSettings: vi.fn(),
+  getPermissionModeFlag: vi.fn(() => '--permission-mode auto'),
 }));
 vi.mock('@/lib/jobs/verdict', () => ({
   readParsedLog: vi.fn(),

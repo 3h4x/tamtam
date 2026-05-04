@@ -71,7 +71,7 @@ describe('GitHub board sync failures are non-fatal', () => {
     }));
 
     const { createJob, getJob } = await import('@/lib/jobs/job-storage');
-    const job = createJob('proj', 'run', 1, '/tmp/log');
+    const job = createJob('proj', 'run', 99999, '/tmp/log');
     await Promise.resolve();
 
     expect(getJob(job.id)?.id).toBe(job.id);
@@ -88,9 +88,26 @@ describe('GitHub board sync failures are non-fatal', () => {
     vi.doMock('@/lib/jobs/retention', () => ({
       pruneProjectLogs: vi.fn(),
     }));
+    // markDone on a kind:'run' job with exitCode 0 normally triggers
+    // the release-after-run pipeline, which spawns real PM2 subprocesses
+    // and leaks kernel resources. Mock the chain so this test exercises
+    // only the board-sync hook.
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getProjectTestConfig: () => ({ releaseAfterRun: false }),
+      getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs' }),
+    }));
+    vi.doMock('@/lib/pipeline/start-release', () => ({
+      startRelease: vi.fn().mockResolvedValue({ ok: false, status: 503, detail: 'mocked' }),
+    }));
+    vi.doMock('@/lib/pipeline/pending-release', () => ({
+      setPendingRelease: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/job-control', () => ({
+      runAutoChainGates: () => null,
+    }));
 
     const { createJob, markDone, getJob } = await import('@/lib/jobs/job-storage');
-    const job = createJob('proj', 'run', 1, '/tmp/log');
+    const job = createJob('proj', 'run', 99999, '/tmp/log');
     await markDone(job, 0);
 
     expect(getJob(job.id)?.finishedAt).not.toBeNull();
