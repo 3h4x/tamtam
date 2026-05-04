@@ -4,6 +4,7 @@ import { homedir } from 'os';
 import { exec } from '@/lib/shared/shell';
 import { getSettings } from '@/lib/shared/config';
 import { getImproveConfig } from './scheduling';
+import { normalizeAgentScheduleOrThrow } from './agent-schedule';
 
 const LAUNCH_AGENTS_DIR = join(homedir(), 'Library', 'LaunchAgents');
 
@@ -15,7 +16,7 @@ function getScriptsDir(): string {
 }
 
 function parseScheduleToSeconds(schedule: string): number {
-  const s = schedule.trim();
+  const s = normalizeAgentScheduleOrThrow(schedule);
   if (s.endsWith('h')) return parseInt(s.slice(0, -1), 10) * 3600;
   if (s.endsWith('m')) return parseInt(s.slice(0, -1), 10) * 60;
   return parseInt(s, 10);
@@ -218,9 +219,10 @@ export async function installAgentSchedule(
   project?: string,
   agentName?: string
 ): Promise<void> {
+  const normalizedSchedule = normalizeAgentScheduleOrThrow(schedule);
   if (runner === 'launchctl') {
     warnLaunchctlDeprecated('install');
-    await installLaunchctlSchedule(agentId, schedule, prompt);
+    await installLaunchctlSchedule(agentId, normalizedSchedule, prompt);
     return;
   }
   // PM2 cron with --no-autostart silently no-op'd; agents registered that way
@@ -231,7 +233,7 @@ export async function installAgentSchedule(
     id: agentId,
     project: project ?? '',
     name: agentName ?? agentId,
-    schedule,
+    schedule: normalizedSchedule,
     prompt,
     enabled: true,
   });

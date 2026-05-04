@@ -3,6 +3,7 @@ import { join } from 'path';
 import { getBranchContext, gitLsTreeSync, gitShowSync } from '@/lib/git/git-branch';
 import { getFileAgentOverride } from '@/lib/agents/file-agent-overrides';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
+import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 
 export interface FileAgent {
   id: string;
@@ -234,7 +235,9 @@ export function writeFileAgent(
     : null;
 
   const model = normalizeModelInput(updates.model ?? current?.model, 'normal');
-  const schedule = updates.schedule !== undefined ? (updates.schedule || null) : (current?.schedule ?? null);
+  const rawSchedule = updates.schedule !== undefined ? updates.schedule : (current?.schedule ?? null);
+  const { schedule, error: scheduleError } = parseOptionalAgentScheduleInput(rawSchedule);
+  if (scheduleError) throw new Error(scheduleError);
   const skillIds = updates.skillIds ?? current?.skillIds ?? [];
   const runner = updates.runner ?? current?.runner ?? 'pm2';
   const enabled = updates.enabled !== undefined ? updates.enabled : (current?.enabled ?? true);

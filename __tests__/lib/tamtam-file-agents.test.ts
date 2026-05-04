@@ -200,6 +200,11 @@ Original prompt.`);
     expect(loadFileAgent(tmpDir, 'proj', 'agent')!.schedule).toBeNull();
   });
 
+  it('rejects invalid schedules when writing frontmatter', () => {
+    expect(() => writeFileAgent(tmpDir, 'proj', 'agent', { schedule: '1w' })).toThrow('Invalid schedule');
+    expect(existsSync(join(tmpDir, '.tamtam', 'agents', 'agent.md'))).toBe(false);
+  });
+
   it('writes runner only when not pm2', () => {
     writeFileAgent(tmpDir, 'proj', 'agent', { runner: 'launchctl' });
     const content = readFileSync(join(tmpDir, '.tamtam', 'agents', 'agent.md'), 'utf-8');

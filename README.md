@@ -26,7 +26,7 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 ## Stack
 
 - **Next.js 16** (App Router) — frontend + backend in one
-- **Drizzle ORM + SQLite** — WAL mode, zero infra
+- **Drizzle ORM + better-sqlite3 + SQLite** — WAL mode, zero infra
 - **Tailwind CSS v4**
 - **PM2** — process management for the production server and one-shot agent jobs
 - **SSE** — real-time log streaming without WebSocket overhead

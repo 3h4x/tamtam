@@ -7,6 +7,7 @@ import { getAllAgentsCached, clearAgentsCache, normalizeAgent } from '@/lib/agen
 import { scanFileAgents, writeFileAgent, type FileAgent } from '@/lib/agents/tamtam-file-agents';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
+import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 
 const ALL_FILE_AGENTS_TTL_MS = 10_000;
 let _allFileAgentsCache: { agents: FileAgent[]; time: number } | null = null;
@@ -77,6 +78,10 @@ export async function POST(request: NextRequest) {
   if (modelError) {
     return NextResponse.json({ detail: modelError }, { status: 400 });
   }
+  const { schedule: parsedSchedule, error: scheduleError } = parseOptionalAgentScheduleInput(schedule);
+  if (scheduleError) {
+    return NextResponse.json({ detail: scheduleError }, { status: 400 });
+  }
 
   const now = Date.now() / 1000;
   const id = `agent-${Date.now()}`;
@@ -88,7 +93,7 @@ export async function POST(request: NextRequest) {
     docPaths: JSON.stringify(docPaths || []),
     model: parsedModel ?? 'normal',
     prompt: prompt || '',
-    schedule: schedule || null,
+    schedule: parsedSchedule,
     runner: runner || 'pm2',
     enabled: enabled !== false,
     createdAt: now,

@@ -62,6 +62,7 @@ describe('agents API', () => {
   let parseFileAgentIdMock: ReturnType<typeof vi.fn>;
   let loadFileAgentMock: ReturnType<typeof vi.fn>;
   let writeFileAgentMock: ReturnType<typeof vi.fn>;
+  let setFileAgentOverrideMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
@@ -105,6 +106,8 @@ describe('agents API', () => {
     parseFileAgentIdMock = fileAgentsMod.parseFileAgentId as ReturnType<typeof vi.fn>;
     loadFileAgentMock = fileAgentsMod.loadFileAgent as ReturnType<typeof vi.fn>;
     writeFileAgentMock = fileAgentsMod.writeFileAgent as ReturnType<typeof vi.fn>;
+    const fileAgentOverridesMod = await import('@/lib/agents/file-agent-overrides');
+    setFileAgentOverrideMock = fileAgentOverridesMod.setFileAgentOverride as ReturnType<typeof vi.fn>;
     const projectDataMod = await import('@/lib/shared/project-data');
     resolveProjectPathMock = projectDataMod.resolveProjectPath as ReturnType<typeof vi.fn>;
 
@@ -401,6 +404,41 @@ describe('agents API', () => {
       });
     });
 
+    it('rejects invalid schedule values on create', async () => {
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Agent', project: 'proj1', schedule: '1w' }),
+      });
+
+      const response = await POST(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('Invalid schedule'),
+      });
+      expect(installAgentScheduleMock).not.toHaveBeenCalled();
+    });
+
+    it('normalizes schedule values on create before persisting and scheduling', async () => {
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Agent', project: 'proj1', prompt: 'Do something', schedule: ' 15M ' }),
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(data.agent.schedule).toBe('15m');
+      expect(installAgentScheduleMock).toHaveBeenCalledWith(
+        data.agent.id,
+        '15m',
+        'Do something',
+        'pm2',
+        'proj1',
+        'Agent'
+      );
+    });
+
     it('stores agent in database', async () => {
       const request = new NextRequest('http://localhost/api/agents', {
         method: 'POST',
@@ -578,6 +616,41 @@ describe('agents API', () => {
       });
     });
 
+    it('rejects invalid schedule values on update', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Agent',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: 'old prompt',
+          schedule: '1h',
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const request = new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ schedule: '1w' }),
+      });
+
+      const response = await PATCH(request, {
+        params: Promise.resolve({ agentId: 'agent-123' }),
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('Invalid schedule'),
+      });
+      expect(installAgentScheduleMock).not.toHaveBeenCalled();
+      expect(uninstallAgentScheduleMock).not.toHaveBeenCalled();
+    });
+
     it('updates skillIds as JSON array', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
@@ -743,6 +816,61 @@ describe('agents API', () => {
         detail: expect.stringContaining('Invalid model'),
       });
       expect(writeFileAgentMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid schedule values for file agents', async () => {
+      const fakeAgent = {
+        id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
+        skillIds: [] as string[], model: 'sonnet', prompt: 'new prompt', schedule: '1h',
+        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+        source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
+      };
+      parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      loadFileAgentMock.mockReturnValue(fakeAgent);
+
+      const request = new NextRequest('http://localhost/api/agents/file:myproj:my-agent', {
+        method: 'PATCH',
+        body: JSON.stringify({ schedule: '1w' }),
+      });
+      const response = await PATCH(request, { params: Promise.resolve({ agentId: 'file:myproj:my-agent' }) });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('Invalid schedule'),
+      });
+      expect(writeFileAgentMock).not.toHaveBeenCalled();
+      expect(installAgentScheduleMock).not.toHaveBeenCalled();
+      expect(uninstallAgentScheduleMock).not.toHaveBeenCalled();
+    });
+
+    it('preserves an existing file-agent schedule when patching model without schedule', async () => {
+      const existingAgent = {
+        id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
+        skillIds: [] as string[], model: 'sonnet', prompt: 'do work', schedule: '4h',
+        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+        source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
+      };
+      const updatedAgent = { ...existingAgent, model: 'smart' };
+      parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      loadFileAgentMock.mockReturnValueOnce(existingAgent).mockReturnValueOnce(updatedAgent);
+
+      const request = new NextRequest('http://localhost/api/agents/file:myproj:my-agent', {
+        method: 'PATCH',
+        body: JSON.stringify({ model: 'smart' }),
+      });
+      const response = await PATCH(request, { params: Promise.resolve({ agentId: 'file:myproj:my-agent' }) });
+
+      expect(response.status).toBe(200);
+      expect(setFileAgentOverrideMock).toHaveBeenCalledWith('myproj', 'my-agent', expect.objectContaining({
+        model: 'smart',
+        schedule: undefined,
+      }));
+      expect(installAgentScheduleMock).toHaveBeenCalledWith(
+        'file:myproj:my-agent', '4h', 'do work', 'pm2', 'myproj', 'my-agent'
+      );
+      expect(uninstallAgentScheduleMock).not.toHaveBeenCalled();
     });
 
     it('calls installAgentSchedule for file agent with schedule, enabled, and prompt', async () => {
@@ -1128,6 +1256,40 @@ describe('agents API', () => {
       });
     });
 
+    it('rejects invalid schedule values by project+name', async () => {
+      seedAgent(testDb.db);
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'Self', schedule: '1w' }),
+      }));
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('Invalid schedule'),
+      });
+      expect(installAgentScheduleMock).not.toHaveBeenCalled();
+      expect(uninstallAgentScheduleMock).not.toHaveBeenCalled();
+    });
+
+    it('normalizes schedule values by project+name before saving and scheduling', async () => {
+      seedAgent(testDb.db, { prompt: 'do work', schedule: null, enabled: true });
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'Self', schedule: ' 2H ' }),
+      }));
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.agent.schedule).toBe('2h');
+      expect(installAgentScheduleMock).toHaveBeenCalledWith(
+        'agent-bn',
+        '2h',
+        'do work',
+        'pm2',
+        'myproj',
+        'Self'
+      );
+    });
+
     it('does not affect an agent with the same name in a different project', async () => {
       const now = Date.now() / 1000;
       seedAgent(testDb.db);
@@ -1208,6 +1370,38 @@ describe('agents API', () => {
       const data = await res.json();
       expect(data.agent.id).toBe('file:myproj:my-agent');
       expect(writeFileAgentMock).toHaveBeenCalledOnce();
+    });
+
+    it('preserves an existing file-agent schedule in by-name fallback when schedule is omitted', async () => {
+      const existingAgent = {
+        id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
+        skillIds: [] as string[], model: 'sonnet', prompt: 'do work', schedule: '2h',
+        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+        source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
+      };
+      const updatedAgent = { ...existingAgent, prompt: 'updated' };
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      loadFileAgentMock.mockReturnValueOnce(existingAgent);
+      writeFileAgentMock.mockReturnValueOnce(updatedAgent);
+
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'my-agent', prompt: 'updated' }),
+      }));
+
+      expect(res.status).toBe(200);
+      expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'my-agent', {
+        prompt: 'updated',
+        model: undefined,
+        schedule: undefined,
+        skillIds: undefined,
+        runner: undefined,
+        enabled: undefined,
+      });
+      expect(installAgentScheduleMock).toHaveBeenCalledWith(
+        'file:myproj:my-agent', '2h', 'updated', 'pm2', 'myproj', 'my-agent'
+      );
+      expect(uninstallAgentScheduleMock).not.toHaveBeenCalled();
     });
 
     it('rejects invalid model values for by-name file agent fallback', async () => {

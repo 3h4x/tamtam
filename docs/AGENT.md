@@ -8,14 +8,14 @@ Agents are reusable automation units that combine skills, a model, a prompt temp
 - Debugging why a scheduled agent isn't firing
 - Understanding how skills are composed into the system prompt
 - Preventing duplicate/concurrent agent runs
-- Switching between PM2 and launchctl schedulers
+- Understanding the internal scheduler and legacy launchctl compatibility
 
 ---
 
 ## Concepts
 
 - **Agent** — A configuration combining skills, model, and prompt template
-- **Scheduled run** — Automatic executions via PM2 or launchctl on an interval (e.g., "1h", "30m")
+- **Scheduled run** — Automatic execution on an interval (e.g., "1h", "30m"), driven by the in-process scheduler for `runner: "pm2"` or by legacy `launchctl` rows
 - **On-demand run** — Manual execution triggered via API or UI
 - **Skill composition** — Skills are prepended as a system prompt before the task prompt
 
@@ -30,7 +30,7 @@ Agents are reusable automation units that combine skills, a model, a prompt temp
 | `model` | string | `normal` | Semantic model tier: `fast`, `normal`, or `smart`. Legacy `haiku`, `sonnet`, and `opus` aliases are still accepted. |
 | `prompt` | string | `''` | Default task prompt for scheduled runs |
 | `schedule` | string | `null` | Run interval for scheduling: `"30m"`, `"1h"`, `"8h"`, etc. or `null` for manual only |
-| `runner` | string | `pm2` | Scheduler: `"pm2"` or `"launchctl"` (macOS only) |
+| `runner` | string | `pm2` | Scheduler mode: `"pm2"` for the internal scheduler, or legacy `"launchctl"` on macOS |
 | `enabled` | boolean | `true` | Enable/disable without deletion |
 | `createdAt` | number | — | Unix timestamp (seconds) |
 | `updatedAt` | number | — | Unix timestamp (seconds) |
@@ -52,12 +52,12 @@ Agents are reusable automation units that combine skills, a model, a prompt temp
 curl -X POST http://localhost:1337/api/agents \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "Weekly Code Review",
+    "name": "Daily Code Review",
     "project": "myapp",
     "skillIds": ["skill-123", "skill-456"],
     "model": "normal",
     "prompt": "Review uncommitted changes in the project and suggest improvements",
-    "schedule": "1w",
+    "schedule": "24h",
     "runner": "pm2",
     "enabled": true
   }'
@@ -68,12 +68,12 @@ curl -X POST http://localhost:1337/api/agents \
 {
   "agent": {
     "id": "agent-1705276800000",
-    "name": "Weekly Code Review",
+    "name": "Daily Code Review",
     "project": "myapp",
     "skillIds": "[\"skill-123\", \"skill-456\"]",
     "model": "normal",
     "prompt": "Review uncommitted changes...",
-    "schedule": "1w",
+    "schedule": "24h",
     "runner": "pm2",
     "enabled": true,
     "createdAt": 1705276800.5,
@@ -88,6 +88,8 @@ curl -X POST http://localhost:1337/api/agents \
 If you provide both `schedule` and `prompt`, the agent's schedule is automatically installed.
 
 ## Running an Agent
+
+Schedule values are validated on write. Supported formats are positive minute/hour intervals such as `15m`, `30m`, `1h`, `4h`, or `24h`.
 
 ### On-Demand Run
 
@@ -121,8 +123,8 @@ When an agent finishes, TamTam asks it to include a short `TamTam Run Report` in
 
 If an agent has both `schedule` and `prompt`, the schedule is installed automatically on creation/update:
 
-- **runner: "pm2"** — PM2 cron job (works on any OS)
-- **runner: "launchctl"** — macOS LaunchAgent (requires macOS)
+- **runner: "pm2"** — Registers the agent with TamTam's in-process scheduler. The long-lived TamTam server must be running for scheduled fires to happen.
+- **runner: "launchctl"** — Legacy macOS LaunchAgent support retained for backward compatibility. New agents should use `runner: "pm2"`; launchctl emits a deprecation warning.
 
 On each scheduled trigger, the agent runs with its stored `prompt`.
 
@@ -170,6 +172,17 @@ User/scheduler triggers
   → Client polls /api/streaming/{job_id} to watch output
 ```
 
+For scheduled runs with `runner: "pm2"`, the trigger path is:
+
+```
+TamTam server boots
+  → instrumentation-node.ts calls reinstallAgents()
+      → lib/scheduling/internal-scheduler.ts arms setTimeout entries
+          → timer fires
+              → POST /api/agents/{agentId}/run (in-process fetch)
+                  → normal agent-run flow above
+```
+
 ## Querying Agents
 
 **GET /api/agents** — List all agents
@@ -214,38 +227,41 @@ Only provided fields are updated. If you change `schedule`, `prompt`, or `enable
 curl -X DELETE http://localhost:1337/api/agents/agent-1705276800000
 ```
 
-This also uninstalls any active schedule (PM2 cron or LaunchAgent).
+This also removes any active internal-scheduler entry or legacy LaunchAgent.
 
 ## Scheduled Execution Details
 
-### PM2 Cron
+### Internal Scheduler (`runner: "pm2"`)
 
-When `runner: "pm2"`, a PM2 cron job is created:
+When `runner: "pm2"`, TamTam does not create a PM2 cron job. Instead it stores the schedule in memory inside the long-lived Next.js server process and computes the next fire time with `computeNextFire()` in `lib/scheduling/internal-scheduler.ts`.
 
-```bash
-pm2 cron "0 */1 * * *" --name tamtam-{project}-agent-{agentName} \
-  "curl -s -X POST http://localhost:1337/api/agents/{agentId}/run -H 'Content-Type: application/json' -d @{promptFile}"
-```
+Current behavior:
 
-The prompt is stored in `./data/logs/agent-scripts/{agentId}.prompt.json` and passed to the run endpoint.
+- `instrumentation-node.ts` calls `reinstallAgents()` on boot to load enabled scheduled agents from the DB and file-agent layer.
+- `lib/scheduling/internal-scheduler.ts` arms one `setTimeout` per agent using the supported `Nh` / `Nm` interval grammar plus a stable per-agent phase offset.
+- When the timer fires, the scheduler POSTs to `/api/agents/{id}/run` with the stored prompt and `X-Tamtam-Trigger: schedule`.
+- Agent CRUD routes call `installAgentSchedule()` / `uninstallAgentSchedule()`, which delegate to `upsertAgentSchedule()` / `removeAgentSchedule()` so schedule changes apply immediately without restarting the server.
+- Actual agent work still runs as one-shot PM2-managed job processes after `/api/agents/{id}/run` accepts the request. PM2 is used for job execution, not for recurring schedule timers.
 
-Log output goes to `./data/logs/agent-scheduler-{agentId}.log`.
+Skip conditions tracked by the internal scheduler:
 
-#### PM2 boot-storm gotcha
+- global job pause
+- budget gate or 7-day burn-rate throttle
+- release pipeline lock for the same project
+- issue-branch lock for the same project
+- duplicate in-flight agent run
 
-`pm2 start <script> --cron <expr>` registers the cron **and synchronously executes the script once** — PM2 has no "register without running" behavior by default. A naïve `pm2 start` followed by `pm2 stop` does not prevent the initial invocation; the curl in the script reaches `/api/agents/{id}/run` before `pm2 stop` lands, spawning a real agent run. With N scheduled agents, every `reinstallAgents()` pass produces N unintended runs (visible as `<project>-agent:<name>-<epoch>` PM2 processes alongside the `tamtam-<project>-agent-<name>` schedule entries).
+The scheduler tracks `nextFireMs`, `lastFireMs`, `fireCount`, `errorCount`, `skippedCount`, and the most recent error/skip reason. `/api/agents/scheduler-health` exposes both the expected agent set and the live internal scheduler state.
 
-The fix is `--no-autostart` on `pm2 start`. This flag is accepted by `pm2 start` on v6.x (even though `pm2 start --help` doesn't list it) and registers the process in `stopped` state so the script only runs when the cron fires. It should be paired with `--no-autorestart` so a completed run doesn't immediately respawn.
+#### Why PM2 cron is not used
 
-```
-pm2 start <scriptPath> --name <name> --no-autostart --no-autorestart --cron <cronExpr>
-```
-
-If the flag is ever removed upstream, the fallback is ecosystem config with `autostart: false`; the previous `pm2 start` → `pm2 stop` sequence is not a working substitute.
+Older TamTam versions tried to register scheduled agents with PM2 cron. PM2's `cron_restart` combined with `--no-autostart` silently no-op'd: the cron tick updated PM2 metadata but never started the stopped process. That left legacy PM2 schedule rows behind that looked installed but never fired. The current implementation removes those rows and uses the in-process scheduler instead.
 
 ### LaunchAgent (macOS)
 
-When `runner: "launchctl"`, a `.plist` file is created in `~/Library/LaunchAgents/`:
+`runner: "launchctl"` is legacy-only. The code path remains for backward compatibility with pre-existing DB rows and file-agent overrides, but new agents should not use it.
+
+When `runner: "launchctl"` is still present on an existing agent, a `.plist` file is created in `~/Library/LaunchAgents/`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -275,7 +291,7 @@ Schedule string format:
 - `"1h"` → every hour
 - `"8h"` → every 8 hours
 
-The agent loads on startup and runs at the configured interval.
+The agent loads on startup and runs at the configured interval. TamTam logs a `[agent-scheduler] launchctl runner is deprecated` warning on install, uninstall, and health checks for these rows.
 
 ## Preventing Duplicate Runs
 
@@ -321,7 +337,7 @@ Job rows are inserted with `pid=0` and the real pid is persisted asynchronously 
        "skillIds": ["skill-abc123"],
        "model": "normal",
        "prompt": "Review all uncommitted changes and provide feedback",
-       "schedule": "1w",
+       "schedule": "24h",
        "runner": "pm2",
        "enabled": true
      }'
@@ -329,7 +345,7 @@ Job rows are inserted with `pid=0` and the real pid is persisted asynchronously 
 
 3. **Verify the schedule**:
    ```bash
-   pm2 cron list
+   curl http://localhost:1337/api/agents/scheduler-health
    ```
 
 4. **Manually trigger** (to test):
@@ -352,10 +368,12 @@ Job rows are inserted with `pid=0` and the real pid is persisted asynchronously 
 | `app/api/agents/route.ts` | Create, list agents |
 | `app/api/agents/[agentId]/route.ts` | Get, update, delete agents |
 | `app/api/agents/[agentId]/run/route.ts` | Run agent on-demand (skill composition happens here) |
-| `lib/agent-scheduler.ts` | Install/uninstall PM2 cron and LaunchAgent |
-| `lib/pm2-jobs.ts` | PM2 process lifecycle |
+| `app/api/agents/scheduler-health/route.ts` | Scheduler reconciliation + health view |
+| `lib/scheduling/agent-scheduler.ts` | Schedule install/uninstall + legacy PM2/launchctl cleanup |
+| `lib/scheduling/internal-scheduler.ts` | In-process schedule timers, skip reasons, live state |
+| `lib/jobs/pm2-jobs.ts` | PM2 process lifecycle for actual agent runs |
 | `components/AgentsTab.tsx` | UI for agent management |
-| `instrumentation.ts` | Next.js register hook; calls `reinstallAgents()` on server boot |
+| `instrumentation-node.ts` | Boot-time scheduler install + other Node-only startup work |
 
 ### Instrumentation edge-runtime constraint
 
@@ -405,8 +423,8 @@ The dynamic import target is only referenced under the Node branch, so Turbopack
 
 | Runner | Requires | Persists across reboots | Use when |
 |--------|----------|------------------------|----------|
-| `pm2` | PM2 installed | Only if PM2 on startup | Server/Linux environments |
-| `launchctl` | macOS | Yes (LaunchAgent) | macOS dev machines |
+| `pm2` | TamTam server running under PM2 or another long-lived supervisor | Yes, if the TamTam server itself is restarted on boot | Default for all new agents |
+| `launchctl` | macOS | Yes (LaunchAgent) | Legacy compatibility only; migrate existing rows to `pm2` |
 
 ### Prompt composition order
 
@@ -419,10 +437,10 @@ The dynamic import target is only referenced under the Node branch, so Turbopack
 ### Verify a scheduled agent
 
 ```bash
-# Check PM2 cron jobs
-pm2 cron list
+# Inspect the live internal scheduler
+curl http://localhost:1337/api/agents/scheduler-health
 
-# Check launchctl agents (macOS)
+# Check legacy launchctl agents (macOS only)
 launchctl list | grep tamtam
 
 # Manually trigger
@@ -441,8 +459,9 @@ curl -N http://localhost:1337/api/streaming/{job_id}
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
 | Agent returns 409 on run | Another instance already running | Wait for the current run to finish; duplicate prevention is intentional |
-| Schedule not firing | `prompt` or `schedule` is empty | Both fields required for schedule installation |
+| Schedule not firing | `prompt` or `schedule` is empty, the internal scheduler is paused, or the fire was intentionally skipped | Check `/api/agents/scheduler-health` for `missing`, `errorCount`, `skippedCount`, `lastError`, and `lastSkippedReason` |
 | Skills not in Claude's context | `skillIds` references deleted skills | Re-check skill IDs; missing skills are silently skipped |
-| LaunchAgent not surviving reboot | plist not loaded | Run `launchctl load ~/Library/LaunchAgents/com.tamtam.agent.{id}.plist` |
+| Scheduler says the agent is missing | Boot-time reinstall did not register the entry or the row was changed while the server was down | POST `/api/agents/scheduler-health` to reinstall missing schedules, then re-check the GET response |
+| LaunchAgent not surviving reboot | plist not loaded | Legacy only: run `launchctl load ~/Library/LaunchAgents/com.tamtam.agent.{id}.plist`, then migrate the agent to `runner: "pm2"` |
 | Agent runs but no output in UI | Job started but SSE not connected | Navigate to `/project/[name]/history`, open the run log |
-| `schedule` change didn't take effect | Old schedule still installed | PATCH the agent — schedule is reinstalled on any update |
+| `schedule` change didn't take effect | Internal scheduler entry was not refreshed yet | PATCH the agent again or POST `/api/agents/scheduler-health` to reinstall missing schedules, then confirm the new `nextFireMs` |

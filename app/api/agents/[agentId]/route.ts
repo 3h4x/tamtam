@@ -8,6 +8,7 @@ import { parseFileAgentId, loadFileAgent, writeFileAgent, deleteFileAgent } from
 import { setFileAgentOverride, deleteFileAgentOverride } from '@/lib/agents/file-agent-overrides';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
+import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 
 export async function GET(
   _request: NextRequest,
@@ -39,6 +40,10 @@ export async function PATCH(
   const body = await request.json();
   const { model: parsedModel, error: modelError } = parseOptionalKnownModelInput(body.model, 'normal');
   if (modelError) return NextResponse.json({ detail: modelError }, { status: 400 });
+  const parsedSchedule = body.schedule !== undefined
+    ? parseOptionalAgentScheduleInput(body.schedule)
+    : { schedule: undefined, error: null };
+  if (parsedSchedule.error) return NextResponse.json({ detail: parsedSchedule.error }, { status: 400 });
 
   if (parsedFile) {
     const projPath = resolveProjectPath(parsedFile.project);
@@ -59,7 +64,7 @@ export async function PATCH(
       ) {
         setFileAgentOverride(parsedFile.project, parsedFile.name, {
           enabled: body.enabled,
-          schedule: body.schedule,
+          schedule: body.schedule !== undefined ? parsedSchedule.schedule : undefined,
           model: parsedModel ?? undefined,
           runner: body.runner,
           skillIds: body.skillIds,
@@ -103,7 +108,7 @@ export async function PATCH(
   if (body.docPaths !== undefined) updates.docPaths = JSON.stringify(body.docPaths);
   if (body.model !== undefined) updates.model = parsedModel ?? 'normal';
   if (body.prompt !== undefined) updates.prompt = body.prompt;
-  if (body.schedule !== undefined) updates.schedule = body.schedule || null;
+  if (body.schedule !== undefined) updates.schedule = parsedSchedule.schedule;
   if (body.runner !== undefined) updates.runner = body.runner;
   if (body.enabled !== undefined) updates.enabled = body.enabled;
 
