@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   extractFindingIds,
+  extractFixClaims,
   findingsIdentity,
   stripFinalVerdict,
 } from '@/lib/pipeline/review-contract'
@@ -46,6 +47,45 @@ describe('review-contract helpers', () => {
     ].join('\n')
 
     expect(extractFindingIds(text)).toEqual(['api/regression', 'missing-docs', 'z-last'])
+  })
+
+  it('extracts fix claims with status from the Fix checklist', () => {
+    const text = [
+      'Fix checklist:',
+      '- Finding ID: leaky-cache',
+      '  Status: fixed',
+      '  Files changed: cache.ts',
+      '- Finding ID: missing-handler',
+      '  Status: not fixed',
+      '  Remaining risk: requires schema migration',
+    ].join('\n')
+
+    expect(extractFixClaims(text)).toEqual([
+      { id: 'leaky-cache', status: 'fixed' },
+      { id: 'missing-handler', status: 'not fixed' },
+    ])
+  })
+
+  it('omits fix claims that have no following Status line', () => {
+    const text = [
+      '- Finding ID: orphaned',
+      '  Files changed: foo.ts',
+      '- Finding ID: ok',
+      '  Status: fixed',
+    ].join('\n')
+
+    expect(extractFixClaims(text)).toEqual([{ id: 'ok', status: 'fixed' }])
+  })
+
+  it('does not match incidental id: prose lines as fix claims', () => {
+    const text = [
+      'Findings:',
+      '- Root cause: missing auth',
+      '  id: shared-placeholder',
+      '  Status: fixed',
+    ].join('\n')
+
+    expect(extractFixClaims(text)).toEqual([])
   })
 
   it('builds a stable findings identity only when at least one id is present', () => {

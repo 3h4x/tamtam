@@ -63,3 +63,37 @@ export function findingsIdentity(text: string): string | null {
   if (ids.length === 0) return null;
   return ids.join('|');
 }
+
+export type FixClaim = { id: string; status: 'fixed' | 'not fixed' };
+
+// Parse the Fix checklist emitted by fix jobs (per FIX_OUTPUT_CONTRACT). For
+// each `Finding ID: X` line, look ahead up to 6 lines for `Status: fixed |
+// not fixed`. A new `Finding ID:` line ends the lookahead window for the
+// previous claim. Lines without a Status are dropped.
+export function extractFixClaims(text: string): FixClaim[] {
+  const lines = text.split(/\r?\n/);
+  const idRe = /^\s*[-*]?\s*Finding ID:\s*([a-z0-9][a-z0-9._/-]*)\s*$/i;
+  const statusRe = /^\s*[-*]?\s*Status:\s*(fixed|not fixed)\b/i;
+  const claims: FixClaim[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(idRe);
+    if (!m) continue;
+    const id = m[1].toLowerCase();
+    const end = Math.min(lines.length, i + 7);
+    for (let j = i + 1; j < end; j++) {
+      if (idRe.test(lines[j])) break;
+      const sm = lines[j].match(statusRe);
+      if (sm) {
+        const status = sm[1].toLowerCase() as 'fixed' | 'not fixed';
+        const key = `${id}:${status}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          claims.push({ id, status });
+        }
+        break;
+      }
+    }
+  }
+  return claims;
+}

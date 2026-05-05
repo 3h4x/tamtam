@@ -110,6 +110,26 @@ describe('resolveProviderForRun', () => {
     expect(result.reason).toBe('all_blocked');
   });
 
+  it('keeps a preferred provider when only its 7d burn is hot but 5h is healthy', async () => {
+    const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+    const fourDaysMs = 4 * 24 * 60 * 60 * 1000;
+    getSettingsMock.mockReturnValue({
+      cli_enabled_providers: ['claude', 'codex'],
+      claude_provider: 'claude',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: true,
+    });
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      // claude: 5h low but weekly burn is hot. Manual/root gating should
+      // still accept it because weekly burn is scheduled-only.
+      ['claude', { fiveHour: { utilization: 24 }, sevenDay: { utilization: 71, msUntilReset: threeDaysMs } }],
+      ['codex', { fiveHour: { utilization: 35 }, sevenDay: { utilization: 34, msUntilReset: fourDaysMs } }],
+    ]));
+    const { resolveProviderForRun } = await import('@/lib/usage/resolve-provider');
+    const result = await resolveProviderForRun({ preferred: 'claude' });
+    expect(result.provider).toBe('claude');
+  });
+
   it('uses the same chooser for the start gate, allowing a healthy alternate provider', async () => {
     getSettingsMock.mockReturnValue({
       cli_enabled_providers: ['claude', 'codex'],
@@ -124,5 +144,21 @@ describe('resolveProviderForRun', () => {
     const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
     const result = await checkCliStartGate('start a release');
     expect(result).toEqual({ ok: true, provider: 'codex' });
+  });
+
+  it('does not block a root start gate on weekly burn alone', async () => {
+    const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+    getSettingsMock.mockReturnValue({
+      cli_enabled_providers: ['claude'],
+      claude_provider: 'claude',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: true,
+    });
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['claude', { fiveHour: { utilization: 24 }, sevenDay: { utilization: 71, msUntilReset: threeDaysMs } }],
+    ]));
+    const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
+    const result = await checkCliStartGate('start a release');
+    expect(result).toEqual({ ok: true, provider: 'claude' });
   });
 });

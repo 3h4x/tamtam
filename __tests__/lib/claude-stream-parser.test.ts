@@ -395,7 +395,7 @@ describe('claude-stream-parser', () => {
   describe('createParseState', () => {
     it('returns zeroed state', () => {
       const state = createParseState();
-      expect(state).toEqual({ currentToolName: '', currentToolInput: '', inToolUse: false, hasEmitted: false, isCompacting: false });
+      expect(state).toEqual({ currentToolName: '', currentToolInput: '', inToolUse: false, hasEmitted: false, isCompacting: false, lastTextTail: '' });
     });
 
     it('shared state accumulates tool input across multiple parseStreamLines calls', () => {
@@ -418,6 +418,52 @@ describe('claude-stream-parser', () => {
         opts,
       );
       expect(events).toEqual([{ type: 'tool_use', name: 'Read', input: '{"path":"x.ts"}' }]);
+    });
+  });
+
+  describe('paragraph boundary between consecutive text deltas', () => {
+    function delta(text: string): string {
+      return JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
+      });
+    }
+
+    it('inserts \\n\\n between two paragraph-sized deltas with no separator', () => {
+      const state = createParseState();
+      const opts = { state };
+      const out: string[] = [];
+      for (const e of parseStreamLines(delta('First sentence ends here.'), opts)) if (e.type === 'text') out.push(e.text);
+      for (const e of parseStreamLines(delta('Second paragraph begins now.'), opts)) if (e.type === 'text') out.push(e.text);
+      expect(out.join('')).toBe('First sentence ends here.\n\nSecond paragraph begins now.');
+    });
+
+    it('does NOT insert a break for token-streaming fragments mid-word', () => {
+      const state = createParseState();
+      const opts = { state };
+      const out: string[] = [];
+      for (const e of parseStreamLines(delta('I'), opts)) if (e.type === 'text') out.push(e.text);
+      for (const e of parseStreamLines(delta("'ve"), opts)) if (e.type === 'text') out.push(e.text);
+      for (const e of parseStreamLines(delta(' got it.'), opts)) if (e.type === 'text') out.push(e.text);
+      expect(out.join('')).toBe("I've got it.");
+    });
+
+    it('does NOT insert a break when previous delta already ends in whitespace', () => {
+      const state = createParseState();
+      const opts = { state };
+      const out: string[] = [];
+      for (const e of parseStreamLines(delta('Done. '), opts)) if (e.type === 'text') out.push(e.text);
+      for (const e of parseStreamLines(delta('Next bit.'), opts)) if (e.type === 'text') out.push(e.text);
+      expect(out.join('')).toBe('Done. Next bit.');
+    });
+
+    it('does NOT insert a break when next delta starts mid-sentence (lowercase)', () => {
+      const state = createParseState();
+      const opts = { state };
+      const out: string[] = [];
+      for (const e of parseStreamLines(delta('Status:'), opts)) if (e.type === 'text') out.push(e.text);
+      for (const e of parseStreamLines(delta('fixed'), opts)) if (e.type === 'text') out.push(e.text);
+      expect(out.join('')).toBe('Status:fixed');
     });
   });
 });

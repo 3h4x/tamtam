@@ -16,6 +16,19 @@ function collapseCarriageReturns(text: string): string {
   }).join('\n')
 }
 
+// CommonMark collapses single newlines into spaces, so prose written with
+// hard wraps (Claude often emits short sentences on their own lines) renders
+// as one blob. Convert each single `\n` to a Markdown hard-break (`  \n`) so
+// the visual line structure survives. Skip content inside fenced code blocks
+// — those are pre-formatted and the wrap matters there. Blank-line paragraph
+// breaks (`\n\n`) are preserved.
+function preserveSingleNewlines(text: string): string {
+  const parts = text.split(/(```[\s\S]*?```)/g)
+  return parts
+    .map((part, i) => (i % 2 === 1 ? part : part.replace(/([^\n])\n(?!\n)/g, '$1  \n')))
+    .join('')
+}
+
 interface TerminalMessagesProps {
   history: TermEntry[]
   streaming: boolean
@@ -256,7 +269,7 @@ export function TerminalMessages({
             {entry.role === 'assistant'
               ? (hasAnsi(entry.text)
                   ? <pre className="whitespace-pre-wrap font-mono text-xs m-0">{renderAnsi(entry.text)}</pre>
-                  : <Markdown remarkPlugins={[remarkGfm]}>{entry.text}</Markdown>)
+                  : <Markdown remarkPlugins={[remarkGfm]}>{preserveSingleNewlines(entry.text)}</Markdown>)
               : entry.role === 'raw'
                 ? <LogBlock text={entry.text} allowAnsi fallbackTone="default" structured={false} />
               : entry.role === 'status'
@@ -314,7 +327,7 @@ export function TerminalMessages({
               ? <LogBlock text={streamBuffer} allowAnsi fallbackTone="default" structured={false} />
               : hasAnsi(streamBuffer)
                 ? <pre className="whitespace-pre-wrap font-mono text-xs m-0">{renderAnsi(streamBuffer)}</pre>
-                : <Markdown remarkPlugins={[remarkGfm]}>{streamBuffer}</Markdown>}
+                : <Markdown remarkPlugins={[remarkGfm]}>{preserveSingleNewlines(streamBuffer)}</Markdown>}
           </div>
         )}
 

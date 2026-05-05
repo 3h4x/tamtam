@@ -15,18 +15,25 @@ export interface PickCliResult {
   utilization?: number;
 }
 
+function finiteOrZero(n: number | null | undefined): number {
+  return typeof n === 'number' && Number.isFinite(n) ? n : 0;
+}
+
 /**
  * Compute the worst-case utilization (%) for a single provider snapshot.
+ * Considers the hard-gate signals shared by all manual/root entrypoints:
+ *   - 5h rolling window utilization (hard short-term gate)
+ *   - credits/extra utilization (when the provider exposes a credits pool)
+ *
  * Providers without a snapshot (gemini, lmstudio, fetcher errors) report 0
  * so they always look fully available — the picker treats them as fallback
  * options that are never blocked by the gate.
  */
-function utilizationFor(snapshot: QuotaSnapshot | null): number {
+export function effectiveUtilizationFor(snapshot: QuotaSnapshot | null): number {
   if (!snapshot) return 0;
-  const fiveHour = Number.isFinite(snapshot.fiveHour?.utilization) ? snapshot.fiveHour.utilization : 0;
-  const credits = snapshot.extra?.utilization;
-  const creditsPct = typeof credits === 'number' && Number.isFinite(credits) ? credits : 0;
-  return Math.max(fiveHour, creditsPct);
+  const fiveHour = finiteOrZero(snapshot.fiveHour?.utilization);
+  const credits = finiteOrZero(snapshot.extra?.utilization);
+  return Math.max(fiveHour, credits);
 }
 
 /**
@@ -45,7 +52,7 @@ export function pickCliProvider(opts: PickCliOptions): PickCliResult {
   let bestUtilization = 0;
   for (const provider of enabled) {
     const snapshot = snapshots.get(provider) ?? null;
-    const utilization = utilizationFor(snapshot);
+    const utilization = effectiveUtilizationFor(snapshot);
     if (blockEnabled && utilization >= budgetBlockAtPct) continue;
     const headroom = 100 - utilization;
     if (headroom > bestHeadroom) {

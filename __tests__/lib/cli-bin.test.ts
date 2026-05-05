@@ -125,6 +125,27 @@ describe('resolveCliBin', () => {
     expect(resolveCliBin('lmstudio', settings)).toBe('/tmp/tamtam-root/scripts/lmstudio-shim.js');
     expect(resolveCliEnv('lmstudio', settings)).toEqual({});
   });
+
+  it('expands ~/ in the Claude binary override before exporting CLAUDE_BIN', async () => {
+    const { homedir } = await import('os');
+    const settings = makeSettings({ cli_bin_claude: '~/.local/bin/claude' });
+    expect(resolveCliEnv('claude', settings)).toEqual({
+      CLAUDE_BIN: `${homedir()}/.local/bin/claude`,
+    });
+  });
+
+  it('expands a bare ~ as the home directory', async () => {
+    const { homedir } = await import('os');
+    const settings = makeSettings({ cli_bin_codex: '~' });
+    expect(resolveCliEnv('codex', settings)).toEqual({ CODEX_BIN: homedir() });
+  });
+
+  it('does not touch absolute paths or http(s) overrides', () => {
+    expect(resolveCliEnv('claude', makeSettings({ cli_bin_claude: '/abs/claude' })))
+      .toEqual({ CLAUDE_BIN: '/abs/claude' });
+    expect(resolveCliEnv('lmstudio', makeSettings({ cli_bin_lmstudio: 'http://lmstudio.internal:1234' })))
+      .toEqual({ LMSTUDIO_BASE_URL: 'http://lmstudio.internal:1234' });
+  });
 });
 
 describe('resolveCliDefaultModel', () => {

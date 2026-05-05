@@ -232,6 +232,39 @@ describe('job-storage', () => {
       expect(jobA).toBeTruthy();
       expect(jobB).toBeTruthy();
     });
+
+    it('auto-links releaseId to an active release job for the same project', () => {
+      const releaseJob = createJob('my-proj', 'release', 100, '/log-release');
+      const reviewJob = createJob('my-proj', 'review', 101, '/log-review');
+      expect(reviewJob.releaseId).toBe(releaseJob.id);
+    });
+
+    it('does not auto-link releaseId when kind is release (no self-link)', () => {
+      const release1 = createJob('my-proj', 'release', 100, '/log-1');
+      const release2 = createJob('my-proj', 'release', 101, '/log-2');
+      expect(release1.releaseId).toBeNull();
+      expect(release2.releaseId).toBeNull();
+    });
+
+    it('does not auto-link releaseId when no active release exists', () => {
+      const reviewJob = createJob('my-proj', 'review', 101, '/log-review');
+      expect(reviewJob.releaseId).toBeNull();
+    });
+
+    it('does not auto-link to a release job from a different project', () => {
+      createJob('other-proj', 'release', 100, '/log-release');
+      const reviewJob = createJob('my-proj', 'review', 101, '/log-review');
+      expect(reviewJob.releaseId).toBeNull();
+    });
+
+    it('does not auto-link to a finished release job', () => {
+      const releaseJob = createJob('my-proj', 'release', 100, '/log-release');
+      // Mutate the same reference held in the cache (matching how markDone works)
+      releaseJob.finishedAt = Date.now() / 1000;
+      releaseJob.exitCode = 0;
+      const reviewJob = createJob('my-proj', 'review', 101, '/log-review');
+      expect(reviewJob.releaseId).toBeNull();
+    });
   });
 
   describe('getJob', () => {

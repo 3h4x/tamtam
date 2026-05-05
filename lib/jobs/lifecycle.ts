@@ -14,7 +14,7 @@ import {
 } from './storage';
 import { parentContext } from './parent-context';
 import type { JobData } from './types';
-import { findingsIdentity } from '@/lib/pipeline/review-contract';
+import { findingsIdentity, extractFindingIds, extractFixClaims } from '@/lib/pipeline/review-contract';
 import { hasFreshLgtm, hasLocalCommitsAhead } from '@/lib/pipeline/release-state';
 
 async function getProjectPipelineConfig(projectName: string): Promise<{ autoCommitEnabled: boolean; autoPushEnabled: boolean; releaseAfterRun: boolean; autoPrMergeEnabled: boolean; prWorkflowEnabled: boolean }> {
@@ -130,6 +130,36 @@ function noteReleaseStop(reason: string): void {
   console.log(`[release] ${reason}`);
 }
 
+// Decide whether a finished job should be auto-marked "seen" so the
+// notification bell only highlights things that need a human. Failures and
+// review verdicts that block the pipeline always stay unseen; successful
+// pipeline children, LGTM reviews, and no-op agent runs are silenced.
+function shouldAutoMarkSeen(job: JobData): boolean {
+  if (job.exitCode !== 0) return false;
+  // Release meta-job is the entry point users click into — keep it visible.
+  if (job.kind === 'release') return false;
+  // Interactive terminal sessions: user explicitly started them.
+  if (job.kind === 'run') return false;
+  if (job.kind === 'review') {
+    const verdict = getVerdict(job);
+    return verdict === 'LGTM';
+  }
+  if (job.kind.startsWith('agent:')) {
+    // No-op agent runs (explicit empty modifiedFiles) are not actionable for
+    // the user. Missing metadata means report extraction failed, so keep the
+    // run visible for inspection.
+    if (job.modifiedFiles == null) return false;
+    try {
+      const files = JSON.parse(job.modifiedFiles) as unknown[];
+      return Array.isArray(files) && files.length === 0;
+    } catch {
+      return false;
+    }
+  }
+  // Successful pipeline children — silenced; the release meta-job remains.
+  return PIPELINE_STEP_KINDS.has(job.kind);
+}
+
 // True if the previous review in the same release window produced the same
 // findings as the one that just finished — fix isn't making progress, so
 // running another iteration won't help.
@@ -152,6 +182,39 @@ function reviewIsStuck(currentReview: JobData): boolean {
     return cur === old && cur.length > 1;
   } catch {
     return false;
+  }
+}
+
+// True if the most recent fix in the same release claimed `Status: fixed`
+// for one or more Finding IDs that the current review is still flagging.
+// Catches the case where reviewer and fixer disagree on whether a finding
+// is closed — running another fix iteration won't help.
+function fixContradictsReview(currentReview: JobData): { stuck: boolean; ids: string[] } {
+  if (!currentReview.releaseId) return { stuck: false, ids: [] };
+  const fixes = listJobs()
+    .filter(j =>
+      j.project === currentReview.project &&
+      j.kind === 'fix' &&
+      j.releaseId === currentReview.releaseId &&
+      j.exitCode === 0 &&
+      j.startedAt < currentReview.startedAt
+    )
+    .sort((a, b) => b.startedAt - a.startedAt);
+  if (fixes.length === 0) return { stuck: false, ids: [] };
+  const fixJob = fixes[0];
+  try {
+    const claimedFixed = new Set(
+      extractFixClaims(readParsedLog(fixJob))
+        .filter(c => c.status === 'fixed')
+        .map(c => c.id)
+    );
+    if (claimedFixed.size === 0) return { stuck: false, ids: [] };
+    const stillFlagged = extractFindingIds(readParsedLog(currentReview));
+    const overlap = stillFlagged.filter(id => claimedFixed.has(id));
+    if (overlap.length === 0) return { stuck: false, ids: [] };
+    return { stuck: true, ids: overlap };
+  } catch {
+    return { stuck: false, ids: [] };
   }
 }
 
@@ -407,8 +470,14 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           // Convergence guard: if this review listed the same findings as the
           // previous one in this release, fix isn't making progress — abort
           // instead of wasting another iteration on the same nits.
+          const contradiction = fixContradictsReview(job);
           const stuck = reviewIsStuck(job);
-          if (stuck) {
+          if (contradiction.stuck) {
+            releaseStopReason = `fix claimed ${contradiction.ids.join(', ')} fixed but review still flags them — stopping`;
+            noteReleaseStop(releaseStopReason);
+            notificationEvent = 'fix_loop_exhausted';
+            forcedReleaseExitCode = 1;
+          } else if (stuck) {
             releaseStopReason = `review findings unchanged from previous iteration for ${job.project} — fix not converging, stopping`;
             noteReleaseStop(releaseStopReason);
             notificationEvent = 'fix_loop_exhausted';
@@ -1003,6 +1072,7 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
       console.log(`[job ${job.id}] failed to finalize agent run report:`, e);
     }
   }
+  if (shouldAutoMarkSeen(job)) job.seen = true;
   saveToDb(job);
   try {
     db.delete(schema.ghIssuesCache).where(eq(schema.ghIssuesCache.project, job.project)).run();

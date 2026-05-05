@@ -125,8 +125,10 @@ export function syncJobsPauseState(paused: boolean): void {
   } else {
     internalScheduler.resumeInternalScheduler?.();
     // Resume edge: drain any release queued while we were paused. Fire and
-    // forget — drainPendingRelease is bounded and self-cleaning.
+    // forget — drainPendingRelease / drainNextAgentRun are bounded and
+    // self-cleaning.
     if (wasPaused) void drainAllPendingReleasesAsync();
+    if (wasPaused) void drainAllQueuedAgentsAsync();
   }
 }
 
@@ -187,5 +189,21 @@ async function drainAllPendingReleasesAsync(): Promise<void> {
     }
   } catch (e) {
     console.error('[resume] failed to enumerate pending releases:', e);
+  }
+}
+
+async function drainAllQueuedAgentsAsync(): Promise<void> {
+  try {
+    const { listQueuedProjects, drainNextAgentRun } = await import('@/lib/agents/pending-agent-run');
+    const projects = listQueuedProjects();
+    for (const project of projects) {
+      try {
+        await drainNextAgentRun(project);
+      } catch (e) {
+        console.error('[resume] agent drain failed for', project, e);
+      }
+    }
+  } catch (e) {
+    console.error('[resume] failed to enumerate queued agents:', e);
   }
 }
