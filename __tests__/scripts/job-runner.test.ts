@@ -7,11 +7,21 @@ import { join, resolve } from 'path';
 
 const RUNNER = resolve(__dirname, '..', '..', 'scripts', 'job-runner.js');
 
+function runnerEnv(env: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
+  const inherited = { ...process.env };
+  delete inherited.TAMTAM_DB_PATH;
+  return { ...inherited, ...env };
+}
+
 function runRunner(args: string[], env: Record<string, string | undefined> = {}): Promise<{ exitCode: number | null; signal: NodeJS.Signals | null; child: ReturnType<typeof spawn> }> {
   return new Promise((res) => {
+    // Strip the vitest-setup TAMTAM_DB_PATH so each test's TAMTAM_ROOT (or
+    // explicit TAMTAM_DB_PATH override) resolves to the throwaway DB it
+    // just populated — otherwise the runner reads the empty vitest temp DB
+    // and misses the `jobs_paused` row the test wrote.
     const child = spawn('node', [RUNNER, ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ...env },
+      env: runnerEnv(env),
     });
     child.on('exit', (code, signal) => res({ exitCode: code, signal, child }));
   });
@@ -149,7 +159,7 @@ describe('scripts/job-runner.js', () => {
       'node', '-e', childCode,
     ], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, TAMTAM_ROOT: join(dir, 'no-db-root') },
+      env: runnerEnv({ TAMTAM_ROOT: join(dir, 'no-db-root') }),
     });
 
     // Wait until the inner child has installed its handler.
