@@ -22,9 +22,10 @@ describe('__tests__/global-setup.ts', () => {
     const dbPath = process.env.TAMTAM_DB_PATH;
     expect(dbPath).toBeTruthy();
     expect(dbPath).toContain(`${tmpdir()}/tamtam-vitest-db-`);
-    expect(existsSync(dbPath as string)).toBe(true);
+    if (!dbPath) throw new Error('Expected TAMTAM_DB_PATH to be set by globalSetup');
+    expect(existsSync(dbPath)).toBe(true);
 
-    const sqlite = new Database(dbPath as string, { readonly: true, fileMustExist: true });
+    const sqlite = new Database(dbPath, { readonly: true, fileMustExist: true });
     try {
       const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'").all();
       expect(tables).toEqual([{ name: 'settings' }]);
