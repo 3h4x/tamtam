@@ -2,15 +2,23 @@ import { describe, it, expect } from 'vitest'
 import { buildEntries, entryNeedsAttention, groupReleaseChildren } from '../../components/project-runs/utils'
 import type { JobInfo } from '../../lib/client-api'
 
-function job(partial: Partial<JobInfo> & { id: string; kind: string; started_at: number }): JobInfo {
+function job({
+  id,
+  kind,
+  started_at,
+  ...partial
+}: Partial<JobInfo> & { id: string; kind: string; started_at: number }): JobInfo {
   return {
+    id,
+    kind,
+    started_at,
     project: 'p',
     prompt: null,
     pid: 0,
     log_path: '',
     status: 'done',
     exit_code: 0,
-    finished_at: partial.started_at + 1,
+    finished_at: started_at + 1,
     seen: true,
     ...partial,
   } as JobInfo
