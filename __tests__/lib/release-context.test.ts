@@ -25,6 +25,8 @@ describe('release context helpers', () => {
   let findReleaseScopedIssueContext: typeof import('@/lib/pipeline/release-context').findReleaseScopedIssueContext;
   let findReleaseScopedPrContext: typeof import('@/lib/pipeline/release-context').findReleaseScopedPrContext;
   let findLatestIssueRunContext: typeof import('@/lib/pipeline/release-context').findLatestIssueRunContext;
+  let findReleaseScopedIssueJob: typeof import('@/lib/pipeline/release-context').findReleaseScopedIssueJob;
+  let findLatestPrContext: typeof import('@/lib/pipeline/release-context').findLatestPrContext;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -43,6 +45,8 @@ describe('release context helpers', () => {
       findReleaseScopedIssueContext,
       findReleaseScopedPrContext,
       findLatestIssueRunContext,
+      findReleaseScopedIssueJob,
+      findLatestPrContext,
     } = await import('@/lib/pipeline/release-context'));
   });
 
@@ -210,5 +214,96 @@ describe('release context helpers', () => {
 
     expect(findReleaseScopedIssueContext('proj', activeRelease, [activeRelease])).toBeNull();
     expect(findReleaseScopedPrContext('proj', activeRelease, [activeRelease])).toBeNull();
+  });
+
+  describe('findReleaseScopedIssueJob', () => {
+    it('returns null when there is no active release', () => {
+      expect(findReleaseScopedIssueJob('proj', null, [])).toBeNull();
+    });
+
+    it('returns null when no release-scoped jobs have issue numbers', () => {
+      const activeRelease = makeJob({ id: 'release-1', kind: 'release', startedAt: 1_000 });
+      const noIssue = makeJob({ id: 'fix-1', kind: 'fix', startedAt: 2_000, releaseId: 'release-1', ghIssueNumber: null });
+      expect(findReleaseScopedIssueJob('proj', activeRelease, [activeRelease, noIssue])).toBeNull();
+    });
+
+    it('returns the latest release-scoped job with an issue number', () => {
+      const activeRelease = makeJob({ id: 'release-1', kind: 'release', startedAt: 1_000 });
+      const olderFix = makeJob({ id: 'fix-1', kind: 'fix', startedAt: 2_000, releaseId: 'release-1', ghIssueNumber: 10, ghIssueTitle: 'older' });
+      const newerFix = makeJob({ id: 'fix-2', kind: 'fix', startedAt: 3_000, releaseId: 'release-1', ghIssueNumber: 10, ghIssueTitle: 'newer' });
+      expect(findReleaseScopedIssueJob('proj', activeRelease, [activeRelease, olderFix, newerFix])?.id).toBe('fix-2');
+    });
+
+    it('falls back to parent chain when no release-scoped jobs carry issue numbers', () => {
+      const triggerRun = makeJob({ id: 'run-1', startedAt: 1_000, ghIssueNumber: 77, ghIssueTitle: 'from parent' });
+      const activeRelease = makeJob({ id: 'release-1', kind: 'release', startedAt: 2_000, parentJobId: 'run-1' });
+      expect(findReleaseScopedIssueJob('proj', activeRelease, [triggerRun, activeRelease])?.id).toBe('run-1');
+    });
+
+    it('deduplicates jobs that appear in both release-scoped and parent chain', () => {
+      const shared = makeJob({ id: 'run-shared', startedAt: 1_000, ghIssueNumber: 5, releaseId: 'release-1' });
+      const activeRelease = makeJob({ id: 'release-1', kind: 'release', startedAt: 2_000, parentJobId: 'run-shared' });
+      const result = findReleaseScopedIssueJob('proj', activeRelease, [shared, activeRelease]);
+      expect(result?.id).toBe('run-shared');
+    });
+
+    it('ignores jobs from other projects', () => {
+      const activeRelease = makeJob({ id: 'release-1', kind: 'release', startedAt: 1_000 });
+      const otherProj = makeJob({ id: 'fix-other', kind: 'fix', startedAt: 2_000, project: 'other', releaseId: 'release-1', ghIssueNumber: 99 });
+      expect(findReleaseScopedIssueJob('proj', activeRelease, [activeRelease, otherProj])).toBeNull();
+    });
+  });
+
+  describe('findLatestPrContext', () => {
+    it('returns null when no jobs exist', () => {
+      expect(findLatestPrContext('proj', [])).toBeNull();
+    });
+
+    it('returns null when no jobs have valid PR metadata', () => {
+      const job = makeJob({ id: 'run-1', startedAt: 1_000, contextMeta: null });
+      expect(findLatestPrContext('proj', [job])).toBeNull();
+    });
+
+    it('returns the PR context from the latest job with valid metadata', () => {
+      const older = makeJob({
+        id: 'run-1',
+        startedAt: 1_000,
+        contextMeta: JSON.stringify({ prNumber: 5, prRepo: 'owner/repo', prUrl: 'https://example.test/5' }),
+      });
+      const newer = makeJob({
+        id: 'run-2',
+        startedAt: 2_000,
+        contextMeta: JSON.stringify({ prNumber: 12, prRepo: 'owner/repo', prUrl: 'https://example.test/12' }),
+      });
+      expect(findLatestPrContext('proj', [older, newer])).toEqual({
+        number: 12,
+        repo: 'owner/repo',
+        url: 'https://example.test/12',
+      });
+    });
+
+    it('skips jobs from other projects', () => {
+      const job = makeJob({
+        id: 'run-other',
+        project: 'other',
+        startedAt: 3_000,
+        contextMeta: JSON.stringify({ prNumber: 99, prRepo: 'wrong/repo' }),
+      });
+      expect(findLatestPrContext('proj', [job])).toBeNull();
+    });
+
+    it('skips jobs with malformed contextMeta and falls back to older valid ones', () => {
+      const valid = makeJob({
+        id: 'run-1',
+        startedAt: 1_000,
+        contextMeta: JSON.stringify({ prNumber: 7, prRepo: 'owner/repo' }),
+      });
+      const malformed = makeJob({ id: 'run-2', startedAt: 2_000, contextMeta: '{bad json' });
+      expect(findLatestPrContext('proj', [valid, malformed])).toEqual({
+        number: 7,
+        repo: 'owner/repo',
+        url: undefined,
+      });
+    });
   });
 });
