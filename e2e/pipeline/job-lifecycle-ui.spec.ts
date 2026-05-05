@@ -164,10 +164,12 @@ test.describe('Job lifecycle UI badges', () => {
   // History tab — failed job
   // -------------------------------------------------------------------------
   test('failed job shows "exit 1" badge in history tab', async ({ page }) => {
+    // Use kind:'test' — review jobs with no verdict show "review verdict missing"
+    // instead of the raw exit code, masking the "exit N" badge we want to test.
     const jobs: MockJob[] = [
       makeJob({
         id: 'job-failed-1',
-        kind: 'review',
+        kind: 'test',
         status: 'done',
         exit_code: 1,
         started_at: now() - 60,
@@ -176,7 +178,6 @@ test.describe('Job lifecycle UI badges', () => {
     ];
     await mockJobScenario(page, jobs);
     await page.goto(`/project/${PROJECT}/history`);
-    // VerdictBadge renders "exit ${exitCode}" when isFailed
     await expect(page.getByText('exit 1').first()).toBeVisible();
   });
 
@@ -184,12 +185,12 @@ test.describe('Job lifecycle UI badges', () => {
   // History tab — cancelled job (exit -3 = aborted pipeline)
   // -------------------------------------------------------------------------
   test('aborted job shows "exit -3" badge in history tab', async ({ page }) => {
-    // Use kind:'review' — release jobs with no children get a 'release blocked'
-    // failureLabel instead of 'exit N', which would mask the exit code badge.
+    // Use kind:'test' — release jobs with no children show 'release blocked', and
+    // review jobs with no verdict show 'review verdict missing', both masking "exit N".
     const jobs: MockJob[] = [
       makeJob({
         id: 'job-cancelled-1',
-        kind: 'review',
+        kind: 'test',
         status: 'done',
         exit_code: -3,
         started_at: now() - 90,
@@ -343,15 +344,16 @@ test.describe('Job lifecycle UI badges', () => {
   // would replace the exact exit code with a normalized "exit 1").
   // -------------------------------------------------------------------------
   test('failed filter in history tab shows only failed jobs', async ({ page }) => {
+    // Use kind:'test' so the failure shows the raw exit code badge ("exit 2").
+    // Review jobs with no verdict render "review verdict missing" instead.
     const jobs: MockJob[] = [
       makeJob({
         id: 'job-failed-f',
-        kind: 'review',
+        kind: 'test',
         status: 'done',
         exit_code: 2,
         started_at: now() - 60,
         finished_at: now() - 30,
-        // Give it a session_id so it doesn't get merged with anything else
         session_id: 'sess-failed-f',
       }),
     ];

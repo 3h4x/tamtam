@@ -327,7 +327,7 @@ export function ProjectDetailPage({
       if (error.isPipelineLocked) {
         const msg = error.blockingJobId
           ? `Pipeline is running (job ${error.blockingJobId}). Click the job to watch its progress.`
-          : 'Pipeline is already running. Wait for it to complete before starting another release.'
+          : (error.message || 'Pipeline is already running. Wait for it to complete before starting another release.')
         toast(msg, 'info')
       } else {
         toast(error instanceof Error ? error.message : 'Failed to start release', 'error')

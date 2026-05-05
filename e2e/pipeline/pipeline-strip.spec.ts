@@ -272,6 +272,117 @@ test.describe('PipelineStrip visibility', () => {
   });
 });
 
+test.describe('PipelineStrip completion transition', () => {
+  // ---------------------------------------------------------------------------
+  // Strip disappears when the running pipeline job completes
+  // ---------------------------------------------------------------------------
+  test('pipeline strip disappears from terminal tab when running job transitions to done', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+
+    // Dynamic mock: flips from a running review job to no jobs on the next poll.
+    await page.route('**/api/projects', (route: Route) => {
+      route.fulfill({
+        json: { tasks: [BASE_TASK], priorities: [], issueCounts: {} },
+      });
+    });
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        const jobs = serveRunning
+          ? [
+              makeJob({
+                id: 'strip-transition-job',
+                kind: 'review',
+                status: 'running',
+                exit_code: null,
+                started_at: now() - 5,
+                finished_at: null,
+                session_id: 'sess-strip-trans',
+              }),
+            ]
+          : [];
+        route.fulfill({ json: { jobs, pendingReleaseProjects: [] } });
+      },
+    );
+    await page.route(
+      `**/api/projects/by-project/${PROJECT}/config`,
+      (route: Route) => {
+        route.fulfill({
+          json: {
+            project: PROJECT,
+            test_command: '',
+            detected_test_command: '',
+            effective_test_command: '',
+            test_cron_enabled: false,
+            test_cron_schedule: '',
+            auto_push_enabled: false,
+            auto_commit_enabled: false,
+            auto_pr_merge_enabled: false,
+            pr_workflow_enabled: false,
+            release_after_run: false,
+            tests_disabled: true,
+            review_disabled: false,
+            issue_auto_branch: false,
+          },
+        });
+      },
+    );
+    await page.route(
+      `**/api/projects/by-project/${PROJECT}/action`,
+      (route: Route) => route.fulfill({ json: { actions: [] } }),
+    );
+    await page.route(
+      `**/api/agents?project=${PROJECT}`,
+      (route: Route) => route.fulfill({ json: { agents: [] } }),
+    );
+    await page.route(
+      `**/api/projects/by-project/${PROJECT}/branch`,
+      (route: Route) =>
+        route.fulfill({
+          json: { branch: 'master', defaultBranch: 'master', commitsAhead: null },
+        }),
+    );
+    await page.route(
+      `**/api/projects/by-project/${PROJECT}/behind`,
+      (route: Route) => route.fulfill({ json: { behind: 0, ahead: 0 } }),
+    );
+    await page.route(
+      `**/api/projects/by-project/${PROJECT}/issues`,
+      (route: Route) => route.fulfill({ json: { prs: [], issues: [] } }),
+    );
+    await page.route('**/api/streaming/**', (route: Route) =>
+      route.fulfill({ status: 204, body: '' }),
+    );
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({ json: { notifications: [] } }),
+    );
+    await page.route('**/api/settings', (route: Route) =>
+      route.fulfill({ json: { settings: { jobs_paused: 'false' } } }),
+    );
+    await page.route('**/api/skills', (route: Route) =>
+      route.fulfill({ json: { skills: [] } }),
+    );
+    await page.route('**/api/projects/personas', (route: Route) =>
+      route.fulfill({ json: { personas: [] } }),
+    );
+
+    await page.goto(`/project/${PROJECT}/terminal`);
+
+    // Phase 1: strip is visible because a review job is running.
+    const abortBtn = page.getByRole('button', { name: 'abort' });
+    await expect(abortBtn).toBeVisible({ timeout: 8_000 });
+
+    // Flip the mock: next poll will return no running jobs.
+    serveRunning = false;
+
+    // Phase 2: wait for the next poll (up to 12 s) and assert the strip vanishes.
+    // ProjectDetailPage polls /api/jobs every 10 s; allow 14 s for safety.
+    await expect(abortBtn).not.toBeVisible({ timeout: 14_000 });
+  });
+});
+
 test.describe('JobsPauseToggle ARIA state', () => {
   // ---------------------------------------------------------------------------
   // Toggle shows unpaused state (aria-checked=false) by default
