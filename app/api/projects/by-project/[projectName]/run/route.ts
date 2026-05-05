@@ -14,6 +14,7 @@ import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { getSettings } from '@/lib/shared/config';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
+import { isCliProvider } from '@/lib/usage/cli-providers';
 
 export async function POST(
   request: NextRequest,
@@ -24,14 +25,6 @@ export async function POST(
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
   const { logDir } = getImproveConfig();
-  const gate = await checkCliStartGate('start a terminal run');
-  if (!gate.ok) {
-    return NextResponse.json({ detail: gate.detail }, { status: gate.status });
-  }
-  const provider = gate.provider;
-  const settings = getSettings();
-  const claudeBin = resolveCliBin(provider, settings);
-  const cliEnv = resolveCliEnv(provider, settings);
 
   let prompt = '';
   let personaPaths: string[] = [];
@@ -43,6 +36,7 @@ export async function POST(
   let ghIssueNumber: number | null = null;
   let ghIssueRepo = '';
   let ghIssueTitle = '';
+  let pinnedProvider = '';
 
   const contentType = request.headers.get('content-type') ?? '';
   if (contentType.includes('multipart/form-data')) {
@@ -67,6 +61,8 @@ export async function POST(
     if (formIssueRepo) ghIssueRepo = formIssueRepo;
     const formIssueTitle = form.get('ghIssueTitle') as string;
     if (formIssueTitle) ghIssueTitle = formIssueTitle;
+    const formProvider = form.get('provider') as string;
+    if (formProvider) pinnedProvider = formProvider;
 
     const attachDir = join(process.cwd(), 'data', 'attachments');
     mkdirSync(attachDir, { recursive: true });
@@ -95,6 +91,7 @@ export async function POST(
     if (body.ghIssueNumber != null) ghIssueNumber = Number(body.ghIssueNumber) || null;
     if (body.ghIssueRepo) ghIssueRepo = body.ghIssueRepo;
     if (body.ghIssueTitle) ghIssueTitle = body.ghIssueTitle;
+    if (body.provider) pinnedProvider = String(body.provider);
   }
 
   if (!prompt.trim() && attachmentPaths.length === 0) {
@@ -103,6 +100,27 @@ export async function POST(
   if (!prompt.trim() && attachmentPaths.length > 0) {
     prompt = 'See the attached files.';
   }
+
+  // When resuming, pin to the originating provider — session IDs are stored
+  // per-CLI (codex rollouts ≠ claude sessions ≠ gemini threads), so a
+  // cross-provider resume yields a cryptic "no rollout / session not found"
+  // error from whichever CLI was picked by the budget gate.
+  const preferredProvider = resumeSessionId && pinnedProvider && isCliProvider(pinnedProvider)
+    ? pinnedProvider
+    : undefined;
+  const gate = await checkCliStartGate('start a terminal run', { preferred: preferredProvider });
+  if (!gate.ok) {
+    return NextResponse.json({ detail: gate.detail }, { status: gate.status });
+  }
+  if (preferredProvider && gate.provider !== preferredProvider) {
+    return NextResponse.json({
+      detail: `Cannot resume session on ${gate.provider}: original session ran on ${preferredProvider}, which is currently disabled or over budget. Start a new session or re-enable ${preferredProvider}.`,
+    }, { status: 409 });
+  }
+  const provider = gate.provider;
+  const settings = getSettings();
+  const claudeBin = resolveCliBin(provider, settings);
+  const cliEnv = resolveCliEnv(provider, settings);
 
   // Personas (file-based skills) are always prepended when selected in the
   // toolbar — initial turn or follow-up — so the user's mental model "if it's

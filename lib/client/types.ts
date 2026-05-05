@@ -92,6 +92,7 @@ export interface RunProjectOptions {
   ghIssueNumber?: number
   ghIssueRepo?: string
   ghIssueTitle?: string
+  provider?: string
 }
 
 export interface LogEntry {

@@ -219,26 +219,18 @@ async function runCommit(
             return { ok: false, status: 500, detail: `Failed to recreate feature branch ${featureBranch}: ${retryR.stderr || retryR.stdout}` };
           }
         } else {
-          // Branch exists and is NOT merged — reuse it. `git checkout` would
-          // refuse if uncommitted changes conflict with its tip; carry the
-          // working tree across via `-m` (merge) so the commit still lands on
-          // the feature branch with the user's staged + unstaged work intact.
-          const coExistingR = await exec('git', ['-C', projPath, 'checkout', '-m', featureBranch], { timeout: 10000 });
-          if (coExistingR.stdout) log(coExistingR.stdout);
-          if (coExistingR.stderr) log(coExistingR.stderr);
-          if (coExistingR.exitCode !== 0) {
-            return { ok: false, status: 500, detail: `Failed to create feature branch ${featureBranch}: ${coExistingR.stderr || coExistingR.stdout}` };
-          }
-          // The -m merge may have produced conflict markers if both the feature
-          // branch tip and the working tree edited the same lines. Staging those
-          // markers via `git add -A` would produce a broken commit, so detect
-          // and reject here rather than silently committing garbage.
-          const conflictR = await exec('git', ['-C', projPath, 'diff', '--name-only', '--diff-filter=U'], { timeout: 5000 });
-          const conflicted = conflictR.stdout.trim().split('\n').filter(Boolean);
-          if (conflicted.length > 0) {
-            log(`# Merge conflicts detected in: ${conflicted.join(', ')}\n`);
-            return { ok: false, status: 409, detail: `Merge conflicts when switching to ${featureBranch}: ${conflicted.join(', ')}` };
-          }
+          // Branch exists and is NOT merged. We do NOT auto-switch the default
+          // branch's working tree onto an existing unmerged branch. `checkout
+          // -m` would silently 3-way-merge the working tree with the branch
+          // tip and can leave conflict markers in source files, which `git
+          // add -A` would then stage into a broken commit. Refuse and let the
+          // user resolve manually — switch + rebase, or delete/rename the
+          // conflicting branch.
+          const detail = `Refusing to auto-switch from ${currentBranch || '(detached)'} onto existing unmerged branch ${featureBranch}. ` +
+            `Auto-switching from the default branch onto an existing branch is unsafe (silent merges can stage conflict markers). ` +
+            `Either check out ${featureBranch} manually and resolve, or delete/rename it and retry.`;
+          log(`# ${detail}\n`);
+          return { ok: false, status: 409, detail };
         }
       }
     }

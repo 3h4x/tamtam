@@ -113,8 +113,12 @@ export async function GET(
           } else if (event.type === 'compacting') {
             controller.enqueue(encoder.encode(sseEncode('', 'compacting')));
           } else if (event.type === 'done') {
+            const jobForProvider = getJob(jobId);
+            const result = jobForProvider?.provider
+              ? { ...event.result, provider: jobForProvider.provider }
+              : event.result;
             controller.enqueue(
-              encoder.encode(sseEncode(JSON.stringify(event.result), 'done'))
+              encoder.encode(sseEncode(JSON.stringify(result), 'done'))
             );
           }
         }
@@ -193,6 +197,11 @@ export async function GET(
             const detail = extractLogDetail();
             if (detail) payload.detail = detail;
           }
+          // Carry the originating provider so the client can pin follow-up
+          // turns to the same CLI — session IDs are not portable across
+          // providers (codex's "rollout" store ≠ claude's session store).
+          const jobForProvider = getJob(jobId);
+          if (jobForProvider?.provider) payload.provider = jobForProvider.provider;
           controller.enqueue(encoder.encode(sseEncode(JSON.stringify(payload), 'done')));
         } catch {}
         closeStream(watcher);
@@ -320,6 +329,8 @@ export async function GET(
             const detail = extractLogDetail();
             if (detail) payload.detail = detail;
           }
+          const jobForProvider = getJob(jobId);
+          if (jobForProvider?.provider) payload.provider = jobForProvider.provider;
           controller.enqueue(encoder.encode(sseEncode(JSON.stringify(payload), 'done')));
         } catch {}
         cleanup();
