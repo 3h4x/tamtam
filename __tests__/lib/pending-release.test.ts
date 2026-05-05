@@ -84,4 +84,34 @@ describe('pending-release queue', () => {
     await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
     expect(getPendingRelease('proj')).toBe(false);
   });
+
+  it('keeps the queue when drain hits a temporary global-pause block', async () => {
+    startReleaseMock.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      detail: 'Jobs are paused globally. Turn the switch back on in Settings to start a release.',
+    });
+    setPendingRelease('proj');
+    await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
+    expect(getPendingRelease('proj')).toBe(true);
+  });
+
+  it('keeps the queue when drain returns a retryable startup failure', async () => {
+    startReleaseMock.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      detail: 'Failed to create release job',
+      retryable: true,
+    });
+    setPendingRelease('proj');
+    await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
+    expect(getPendingRelease('proj')).toBe(true);
+  });
+
+  it('keeps the queue when drain throws before release start is confirmed', async () => {
+    startReleaseMock.mockRejectedValueOnce(new Error('pm2 start failed'));
+    setPendingRelease('proj');
+    await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
+    expect(getPendingRelease('proj')).toBe(true);
+  });
 });

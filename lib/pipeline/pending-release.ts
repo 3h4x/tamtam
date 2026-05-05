@@ -9,6 +9,8 @@ import { eq, like } from 'drizzle-orm';
 //   1. The holding pipeline finishes (releaseLock fires drainPendingRelease).
 //   2. The user resumes jobs from the header switch (syncJobsPauseState
 //      walks every pending project and drains each).
+//   3. Server boot or stale-lock self-heal notices a queued release whose
+//      original holder vanished and retries it once the project is unlocked.
 //
 // Stored in the `settings` table under `pending_release:<project>=1` so we
 // avoid a schema migration. Idempotent — multiple agents finishing while
@@ -66,11 +68,24 @@ export function listPendingReleaseProjects(): string[] {
   }
 }
 
+function shouldKeepPendingRelease(result: { ok: boolean; status?: number; detail?: string; retryable?: boolean }): boolean {
+  if (result.ok) return false;
+  if (result.retryable) return true;
+  if (result.status === 429) return true;
+  if (result.status !== 409) return false;
+  const detail = result.detail ?? '';
+  return detail.includes('Jobs are paused globally')
+    || detail.includes('Pipeline already running')
+    || detail.includes('Release pipeline already running');
+}
+
 // Clear the flag and try to start the queued release. Async fire-and-forget
 // is fine — `startRelease` is itself bounded and will gracefully no-op if
 // nothing has changed since the agent finished. Errors are logged but
 // shouldn't surface to the caller (drainPendingRelease is invoked from
-// completion hooks where re-entry into the pipeline is incidental).
+// completion hooks where re-entry into the pipeline is incidental). Any
+// indeterminate start failure (explicit retryable result or thrown error)
+// re-queues the release so the next recovery path can retry it.
 export async function drainPendingRelease(project: string): Promise<void> {
   if (!getPendingRelease(project)) return;
   clearPendingRelease(project);
@@ -79,12 +94,16 @@ export async function drainPendingRelease(project: string): Promise<void> {
     const r = await startRelease(project);
     if (r.ok) {
       console.log(`[pending-release] drained queue for ${project} → release ${r.jobId}`);
+    } else if (shouldKeepPendingRelease(r)) {
+      setPendingRelease(project);
+      console.log(`[pending-release] drain for ${project} deferred: ${r.detail}`);
     } else {
       // 'Nothing to release' is the common no-op case — earlier in-flight
       // release already swept up the agent's changes. That's fine.
       console.log(`[pending-release] drain for ${project} produced no release: ${r.detail}`);
     }
   } catch (e) {
+    setPendingRelease(project);
     console.error(`[pending-release] drain failed for ${project}:`, e);
   }
 }

@@ -258,10 +258,27 @@ async function backfillVerdicts(): Promise<void> {
   }
 }
 
+export async function drainStalePendingReleases(): Promise<void> {
+  try {
+    const { listPendingReleaseProjects, drainPendingRelease } = await import('@/lib/pipeline/pending-release');
+    const { getLock } = await import('@/lib/pipeline/pipeline-lock');
+    const projects = listPendingReleaseProjects();
+    for (const p of projects) {
+      // Skip if an active pipeline lock still exists — the drain will fire
+      // naturally when that lock is released.
+      if (getLock(p)) continue;
+      try { await drainPendingRelease(p); } catch (e) { console.error('[boot] pending-release drain failed for', p, e); }
+    }
+  } catch (err) {
+    console.error('[boot] drainStalePendingReleases failed:', err);
+  }
+}
+
 export async function registerNode(): Promise<void> {
   await migrateLegacyFileWorkflowFlags();
   void backfillVerdicts();
   void reapAbandonedInlineJobs();
+  void drainStalePendingReleases();
   void reinstallAgents();
 
   if (process.env.VITEST || process.env.NODE_ENV === 'test') return;

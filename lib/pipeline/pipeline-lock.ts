@@ -55,6 +55,7 @@ function selfHealStaleLock(projectName: string): PipelineLock | null {
     if (holder && holder.finishedAt !== null) {
       // Holder finished without releasing — clear immediately.
       releaseLockSync(projectName);
+      void drainPendingReleaseAsync(projectName);
       return null;
     }
     if (!holder) {
@@ -64,6 +65,7 @@ function selfHealStaleLock(projectName: string): PipelineLock | null {
       const ageSec = Date.now() / 1000 - existing.acquiredAt;
       if (ageSec > MISSING_HOLDER_GRACE_SECONDS) {
         releaseLockSync(projectName);
+        void drainPendingReleaseAsync(projectName);
         return null;
       }
     }

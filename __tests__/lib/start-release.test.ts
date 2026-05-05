@@ -117,6 +117,28 @@ describe('startRelease — release pipeline entry decision tree', () => {
     if (!r.ok) expect(r.status).toBe(404);
   });
 
+  it('marks release-job startup failures as retryable before any step starts', async () => {
+    detectTestCommandMock.mockReturnValue(null);
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'pm2' && args[0] === 'start') {
+          return Promise.resolve({ exitCode: 1, stdout: '', stderr: 'pm2 start failed' });
+        }
+        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+      });
+
+    const r = await startRelease('proj');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(500);
+      expect(r.detail).toBe('Failed to create release job');
+      expect(r.retryable).toBe(true);
+    }
+  });
+
   it('uses sourceJobId as the parent for a new release when it belongs to the project', async () => {
     getJobMock.mockReturnValue({ id: 'agent-123', project: 'proj' });
     detectTestCommandMock.mockReturnValue(null);

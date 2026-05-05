@@ -165,6 +165,28 @@ Called by `markDone()` after every job finishes. Hooks run in order:
 10. **Release finalization**: If a pipeline job ran but no chaining happened, write `# release finished — exit {code}` to meta-log and mark the release job done.
 11. **Fix-CI auto-retry**: If `fix-ci` exits ≠0 and duration < `fix_ci_fast_crash_ms`: schedule retry after 500–3000ms backoff.
 
+### Pending-release recovery
+
+When a release trigger arrives while the project pipeline lock is held or jobs
+are paused globally, TamTam stores `pending_release:<project>=1` in the
+`settings` table instead of dropping the request.
+
+That queued release is retried from three places:
+
+1. `releaseLock()` after the active pipeline finishes
+2. `syncJobsPauseState(false)` when the user resumes jobs
+3. server boot or stale-lock self-heal, if a queued project is found with no
+   active pipeline lock
+
+Retry semantics matter: a drain attempt only consumes the queue when the
+release actually starts or reaches a terminal no-op such as "nothing to
+release". Temporary blocks such as the global pause, a fresh budget/credits
+429, another active pipeline, or an indeterminate pre-start failure (for
+example PM2/boot-time startup errors before the release job is created) keep
+the pending flag in place so a later drain can retry safely. Once a release
+job exists and the pipeline has actually started, later step failures consume
+the queue normally because that release attempt is no longer pending.
+
 ---
 
 ## Verdict detection (`getVerdict`)
