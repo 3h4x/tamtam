@@ -1,6 +1,18 @@
 import { join } from 'path';
+import { homedir } from 'os';
 import type { TamTamConfig } from '@/lib/shared/config';
 import type { CliProvider } from '@/lib/usage/cli-providers';
+
+// Expand a leading `~` or `~/` into the user's home directory. Settings UI
+// stores paths verbatim ("~/.local/bin/claude"), but child_process.spawn
+// does not perform shell expansion — passing the literal `~` results in
+// ENOENT. Apply this at the env boundary so every consumer (shim or direct
+// reader) sees an absolute path.
+function expandHome(p: string): string {
+  if (p === '~') return homedir();
+  if (p.startsWith('~/')) return join(homedir(), p.slice(2));
+  return p;
+}
 
 const DEFAULT_SHIM: Record<CliProvider, string> = {
   claude: 'claude-shim.js',
@@ -34,7 +46,8 @@ export function resolveCliEnv(provider: CliProvider, settings: TamTamConfig): Re
   const overrideKey = `cli_bin_${provider}` as keyof TamTamConfig;
   const override = settings[overrideKey];
   if (typeof override === 'string' && override.trim().length > 0 && !isShimPath(override)) {
-    const value = override.trim();
+    const trimmed = override.trim();
+    const value = /^https?:\/\//i.test(trimmed) ? trimmed : expandHome(trimmed);
     if (provider === 'claude') return { CLAUDE_BIN: value };
     if (provider === 'codex') return { CODEX_BIN: value };
     if (provider === 'gemini') return { GEMINI_BIN: value };

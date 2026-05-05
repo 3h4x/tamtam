@@ -106,13 +106,36 @@ curl -X POST http://localhost:1337/api/agents/agent-1705276800000/run \
 
 The `prompt` field is required for each run — it overrides the agent's default prompt.
 
-**Response:**
+Possible responses:
+
+**Started (`200`)**
 ```json
 {
   "status": "started",
   "job_id": "job-1705276900123",
   "pid": 45678,
   "agent": "Weekly Code Review"
+}
+```
+
+**Queued (`202`)**
+```json
+{
+  "status": "queued",
+  "detail": "Agent 'Docs Agent' queued — 'agent:Review Agent' is running for myapp (job myapp-agent:Review Agent-1705276900123)",
+  "blockingJobId": "myapp-agent:Review Agent-1705276900123",
+  "agent": "Docs Agent"
+}
+```
+
+When the route is between duplicate-check and `pm2 start`, the response may
+still be `202 queued`, but without a `blockingJobId`. In that case the
+blocking agent is only "starting" and has not landed its job row yet.
+
+**Duplicate start (`409`)**
+```json
+{
+  "detail": "Agent 'Weekly Code Review' is already running (job myapp-agent:Weekly Code Review-1705276900123)"
 }
 ```
 
@@ -162,6 +185,9 @@ This allows agents to be reusable — the same agent can run with different task
 User/scheduler triggers
   → POST /api/agents/{agentId}/run
       → Fetch agent from DB
+      → Check for running/starting agent on the same project
+          → same agent already active/starting → 409
+          → different agent active/starting → 202 queued
       → Fetch skills from DB (by skillIds)
       → Compose system prompt: `## SkillName\nContent` + `---` separators
       → Build command:
@@ -169,6 +195,7 @@ User/scheduler triggers
       → Create job record
       → Start via PM2 with composed prompt as stdin
       → Return job ID and PID
+      → If startup fails before PM2 takes over, release the per-project start slot and drain the next queued fire immediately
   → Process runs → writes NDJSON log
   → Lifecycle stores agent run summary and changed-file metadata
   → No-op scheduled runs may create project recommendations
@@ -252,7 +279,7 @@ Skip conditions tracked by the internal scheduler:
 - budget gate or 7-day burn-rate throttle
 - release pipeline lock for the same project
 - issue-branch lock for the same project
-- duplicate in-flight agent run
+- duplicate in-flight or in-progress-start agent run
 
 The scheduler tracks `nextFireMs`, `lastFireMs`, `fireCount`, `errorCount`, `skippedCount`, and the most recent error/skip reason. `/api/agents/scheduler-health` exposes both the expected agent set and the live internal scheduler state.
 
@@ -298,7 +325,19 @@ The agent loads on startup and runs at the configured interval. TamTam logs a `[
 
 ## Preventing Duplicate Runs
 
-To prevent an agent from running multiple times simultaneously, the run endpoint checks if an agent with the same name is already running on the same project:
+To prevent multiple agents from racing in the same git worktree, the run
+endpoint applies two guards:
+
+1. An existing-job check for already-running agent jobs on the same project.
+2. A synchronous per-project "starting" slot covering the gap between that
+   check and `pm2 start`, so concurrent requests cannot both observe an empty
+   running set and start together.
+
+Same-agent duplicates are rejected with `409`. Different agents on the same
+project are returned as `202 queued` and are drained FIFO when the active or
+starting run exits or fails before startup completes.
+
+The running-job guard looks like:
 
 ```typescript
 const kindKey = `agent:${agent.name}`;
@@ -311,7 +350,9 @@ if (running.length > 0) {
 }
 ```
 
-This prevents concurrent runs if a schedule fires faster than the agent completes.
+This prevents concurrent runs if a schedule fires faster than the agent completes. The
+additional start-slot closes the smaller race where a second request arrives
+after the running-job check but before the first request has created its job row.
 
 ### Spawn-grace in `probeJobStatus`
 

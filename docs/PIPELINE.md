@@ -14,6 +14,7 @@ Implications:
 - If `budget_block_runs_enabled` is off, the chooser still selects a provider but does not block on quota.
 - If exactly one CLI is enabled and it is over `budget_block_at_pct`, the start is rejected with HTTP 429.
 - If multiple CLIs are enabled, TamTam skips blocked providers and proceeds with the enabled provider that has the most remaining headroom.
+- The shared start gate only considers the hard 5-hour window (and provider credits where available). The 7-day burn-rate throttle is enforced separately for scheduled agent fires inside the internal scheduler, not for manual buttons or root pipeline starts.
 - Release/test/push entrypoints no longer rely on the legacy active-provider snapshot, so a full Claude window does not block a release when another enabled CLI is healthy.
 - Once a release starts, the chosen provider is stamped onto the release/test/push jobs so downstream review/fix/commit steps inherit the same provider instead of repicking mid-pipeline.
 
@@ -103,6 +104,10 @@ When a release enters a follow-up review after a fix, TamTam feeds the review jo
 parsed output from earlier review/fix steps in the same release. Repeated structured
 `Finding ID:` entries are treated as the same underlying issue even if the wording
 changes, so the fix loop can stop when the review findings are not converging.
+If the most recent successful fix explicitly claims `Status: fixed` for a
+`Finding ID` that the follow-up review still flags, the release also stops:
+TamTam treats reviewer/fixer disagreement on the same structured finding as a
+non-converging loop instead of burning another fix iteration.
 
 FIX
   ├─ exit 0  → completion hook → start REVIEW (loop)
@@ -150,7 +155,7 @@ Called by `markDone()` after every job finishes. Hooks run in order:
 
 1. **Release meta-log**: For pipeline jobs, if an active release exists for the project, append a log section.
 2. **Review mark**: If `review` exits 0, call `markReviewed(project, path)` to store a commit-aware review fingerprint (`git status` + `HEAD` + upstream) used by the fresh-LGTM skip.
-3. **Review chaining**: If `review` exits 0 AND (in-release OR `auto_push_enabled`): LGTM → start PUSH; NEEDS ATTENTION / DO NOT SHIP → start FIX (within iteration cap).
+3. **Review chaining**: If `review` exits 0 AND (in-release OR `auto_push_enabled`): LGTM → start PUSH; NEEDS ATTENTION / DO NOT SHIP → start FIX (within iteration cap), unless the new review repeats the previous findings or contradicts the most recent fix's `Status: fixed` claims for the same `Finding ID`s, in which case the release stops as non-converging.
 4. **Fix chaining**: If `fix` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW.
 5. **Test chaining**: If `test` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW.
 6. **Push hook fix**: If `push` exits ≠0 and log matches hook rejection patterns: start FIX-PUSH (within attempt cap).

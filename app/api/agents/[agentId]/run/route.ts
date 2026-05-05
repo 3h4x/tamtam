@@ -15,7 +15,7 @@ import { exec } from '@/lib/shared/shell';
 import { parseFileAgentId, loadFileAgent } from '@/lib/agents/tamtam-file-agents';
 import { getAgentMemoryDir, getAgentMemoryPath, readAgentMemory, ensureAgentMemoryDir, buildMemoryBlock } from '@/lib/agents/agent-memory';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
-import { enqueueAgentRun } from '@/lib/agents/pending-agent-run';
+import { enqueueAgentRun, tryClaimAgentStartSlot, releaseAgentStartSlot, drainNextAgentRun } from '@/lib/agents/pending-agent-run';
 import { getSettings } from '@/lib/shared/config';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
@@ -49,10 +49,10 @@ export async function POST(
   const triggeredBy = request.headers.get('x-tamtam-trigger') || 'manual';
   const isScheduled = triggeredBy === 'schedule';
   if (!agent.enabled && isScheduled) {
-    return NextResponse.json({ detail: `Agent '${agent.name}' is disabled — ignoring scheduled trigger` }, { status: 409 });
+    return NextResponse.json({ code: 'agent_disabled', detail: `Agent '${agent.name}' is disabled — ignoring scheduled trigger` }, { status: 409 });
   }
   if (!agent.schedule && isScheduled) {
-    return NextResponse.json({ detail: `Agent '${agent.name}' has no schedule — ignoring scheduled trigger` }, { status: 409 });
+    return NextResponse.json({ code: 'no_schedule', detail: `Agent '${agent.name}' has no schedule — ignoring scheduled trigger` }, { status: 409 });
   }
 
   const body = await request.json();
@@ -76,7 +76,7 @@ export async function POST(
     if ((await probeJobStatus(j)) !== 'running') continue;
     if (j.kind === kindKey) {
       return NextResponse.json(
-        { detail: `Agent '${agent.name}' is already running (job ${j.id})` },
+        { code: 'already_running', detail: `Agent '${agent.name}' is already running (job ${j.id})` },
         { status: 409 }
       );
     }
@@ -98,9 +98,62 @@ export async function POST(
     );
   }
 
+  // Closes the TOCTOU between the listJobs check above and createJob below.
+  // Concurrent fires would otherwise both observe an empty running-agent
+  // list, then both pass through the awaits (issue-branch check, git exec,
+  // CLI gate) to createJob, producing two simultaneous agent runs for the
+  // same project.
+  const slot = tryClaimAgentStartSlot(agent.project, agent.name);
+  if (!slot.ok) {
+    if (slot.runningAgent === agent.name) {
+      return NextResponse.json(
+        { code: 'already_starting', detail: `Agent '${agent.name}' is already starting for ${agent.project}` },
+        { status: 409 }
+      );
+    }
+    enqueueAgentRun(agent.project, {
+      agentId: agent.id,
+      agentName: agent.name,
+      triggeredBy,
+      prompt: taskPrompt,
+      enqueuedAt: Date.now(),
+    });
+    return NextResponse.json(
+      {
+        status: 'queued',
+        detail: `Agent '${agent.name}' queued — '${slot.runningAgent}' is starting for ${agent.project}`,
+        agent: agent.name,
+      },
+      { status: 202 }
+    );
+  }
+
+  try {
+    const result = await runAgentStart(agent, taskPrompt, triggeredBy);
+    return result.response;
+  } finally {
+    releaseAgentStartSlot(agent.project);
+    // Always re-check the queue after releasing the synchronous start slot.
+    // Fast-finishing agents can complete and trigger a lifecycle drain before
+    // this route unwinds; that drain now no-ops while the slot is held, so the
+    // post-release route drain is the handoff that guarantees queued work
+    // keeps moving whether startup succeeded or failed.
+    await drainNextAgentRun(agent.project);
+  }
+}
+
+async function runAgentStart(
+  agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean; provider?: string | null },
+  taskPrompt: string,
+  triggeredBy: string,
+): Promise<{ response: NextResponse; startedJob: boolean }> {
+
   const projPath = resolveProjectPath(agent.project);
   if (!projPath) {
-    return NextResponse.json({ detail: `project '${agent.project}' not found` }, { status: 404 });
+    return {
+      response: NextResponse.json({ detail: `project '${agent.project}' not found` }, { status: 404 }),
+      startedJob: false,
+    };
   }
 
   // In Direct Branch mode, block agent runs while a fix/issue-* branch is
@@ -108,10 +161,13 @@ export async function POST(
   // unrelated work into the issue and push to the wrong branch.
   const blockedBranch = await checkIssueBranchBlock(agent.project, projPath);
   if (blockedBranch) {
-    return NextResponse.json(
-      { detail: `Cannot run agent in Direct Branch mode while on issue branch '${blockedBranch}' — finish or abandon issue work first`, branch: blockedBranch },
-      { status: 409 }
-    );
+    return {
+      response: NextResponse.json(
+        { code: 'issue_branch', detail: `Cannot run agent in Direct Branch mode while on issue branch '${blockedBranch}' — finish or abandon issue work first`, branch: blockedBranch },
+        { status: 409 }
+      ),
+      startedJob: false,
+    };
   }
 
   // Compose skills into system prompt. Agent skillIds can be:
@@ -201,7 +257,17 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   const { logDir } = getImproveConfig();
   const gate = await checkCliStartGate('start an agent run', { preferred: agent.provider ?? null });
   if (!gate.ok) {
-    return NextResponse.json({ detail: gate.detail }, { status: gate.status });
+    const gateCode =
+      gate.status === 409 ? 'jobs_paused' :
+      gate.status === 429 ? 'providers_over_budget' :
+      undefined;
+    return {
+      response: NextResponse.json(
+        gateCode ? { code: gateCode, detail: gate.detail } : { detail: gate.detail },
+        { status: gate.status },
+      ),
+      startedJob: false,
+    };
   }
   const provider = gate.provider;
   const settings = getSettings();
@@ -238,15 +304,21 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     job.finishedAt = Date.now() / 1000;
     job.exitCode = -1;
     updateJob(job);
-    return NextResponse.json({ detail: `Failed to start: ${errMsg(e)}` }, { status: 500 });
+    return {
+      response: NextResponse.json({ detail: `Failed to start: ${errMsg(e)}` }, { status: 500 }),
+      startedJob: false,
+    };
   }
 
   updateJob(job);
 
-  return NextResponse.json({
-    status: 'started',
-    job_id: job.id,
-    pid: job.pid,
-    agent: agent.name,
-  });
+  return {
+    response: NextResponse.json({
+      status: 'started',
+      job_id: job.id,
+      pid: job.pid,
+      agent: agent.name,
+    }),
+    startedJob: true,
+  };
 }

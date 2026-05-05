@@ -119,6 +119,65 @@ describe('pickCliProvider', () => {
     expect(result.reason).toBe('no_enabled_providers');
   });
 
+  it('ignores 7d burn when the hard 5h/credits gate is still healthy', () => {
+    const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+    const fourDaysMs = 4 * 24 * 60 * 60 * 1000;
+    const claudeSnap: QuotaSnapshot = {
+      provider: 'claude',
+      fiveHour: { utilization: 24, resetsAt: null, msUntilReset: null },
+      sevenDay: { utilization: 71, resetsAt: null, msUntilReset: threeDaysMs },
+      fetchedAt: 0,
+      stale: false,
+    };
+    const codexSnap: QuotaSnapshot = {
+      provider: 'codex',
+      fiveHour: { utilization: 35, resetsAt: null, msUntilReset: null },
+      sevenDay: { utilization: 34, resetsAt: null, msUntilReset: fourDaysMs },
+      fetchedAt: 0,
+      stale: false,
+    };
+    const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+      ['claude', claudeSnap],
+      ['codex', codexSnap],
+    ]);
+    const result = pickCliProvider({
+      enabled: ['claude', 'codex'],
+      snapshots,
+      budgetBlockAtPct: 95,
+      blockEnabled: true,
+    });
+    expect(result.provider).toBe('claude');
+  });
+
+  it('scores providers by 5h/credits only even when weekly burn differs', () => {
+    const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+    const claudeSnap: QuotaSnapshot = {
+      provider: 'claude',
+      fiveHour: { utilization: 10, resetsAt: null, msUntilReset: null },
+      sevenDay: { utilization: 71, resetsAt: null, msUntilReset: threeDaysMs },
+      fetchedAt: 0,
+      stale: false,
+    };
+    const codexSnap: QuotaSnapshot = {
+      provider: 'codex',
+      fiveHour: { utilization: 20, resetsAt: null, msUntilReset: null },
+      sevenDay: { utilization: 34, resetsAt: null, msUntilReset: threeDaysMs },
+      fetchedAt: 0,
+      stale: false,
+    };
+    const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+      ['claude', claudeSnap],
+      ['codex', codexSnap],
+    ]);
+    const result = pickCliProvider({
+      enabled: ['claude', 'codex'],
+      snapshots,
+      budgetBlockAtPct: 95,
+      blockEnabled: false,
+    });
+    expect(result.provider).toBe('claude');
+  });
+
   it('does not block any provider when blockEnabled is false', () => {
     const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
       ['claude', snapshot('claude', 99)],

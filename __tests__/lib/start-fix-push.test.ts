@@ -69,6 +69,24 @@ describe('isTestFailureRejection', () => {
     expect(isTestFailureRejection('test:unit failed')).toBe(true);
   });
 
+  it('detects vitest runner output containing "vitest" and "fail"', () => {
+    expect(isTestFailureRejection('vitest failed to run')).toBe(true);
+    expect(isTestFailureRejection('running vitest… 3 tests fail')).toBe(true);
+  });
+
+  it('detects jest runner output containing "jest" and "fail"', () => {
+    expect(isTestFailureRejection('jest: test suite failed to run')).toBe(true);
+  });
+
+  it('detects test:e2e script failure', () => {
+    expect(isTestFailureRejection('test:e2e failed')).toBe(true);
+  });
+
+  it('detects "failing tests:" output', () => {
+    expect(isTestFailureRejection('failing tests: 3')).toBe(true);
+    expect(isTestFailureRejection('failing test: auth.spec.ts')).toBe(true);
+  });
+
   it('does not match plain lint/typecheck rejection text', () => {
     expect(isTestFailureRejection('eslint found 3 errors')).toBe(false);
     expect(isTestFailureRejection('@typescript-eslint/no-unused-vars')).toBe(false);

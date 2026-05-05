@@ -605,6 +605,158 @@ describe('reviewIsStuck convergence guard', () => {
     expect(startFixFromJobMock).toHaveBeenCalledWith('cur-review2');
   });
 
+  it('stops the release when the prior fix claimed an ID fixed but review still flags it', async () => {
+    const now = Date.now() / 1000;
+    const releaseLog = join(tempDir, 'release-contradict.log');
+    writeFileSync(releaseLog, '# release\n');
+
+    const fixLog = join(tempDir, 'fix-contradict.log');
+    writeFileSync(fixLog, ndjsonText([
+      'Fix checklist:',
+      '- Finding ID: multiline-escaped-quotes-truncate-imported-values',
+      '  Status: fixed',
+      '  Files changed: Store.swift',
+    ].join('\n')));
+
+    const prevReviewLog = join(tempDir, 'prev-review-contradict.log');
+    writeFileSync(prevReviewLog, ndjsonText([
+      'Findings:',
+      '- Finding ID: multiline-escaped-quotes-truncate-imported-values',
+      'Verdict: DO NOT SHIP',
+    ].join('\n')));
+
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: 'release-contradict', project: 'proj', kind: 'release', logPath: releaseLog, startedAt: now - 200 }) as any,
+      makeJobRow({
+        id: 'prev-review-contradict',
+        project: 'proj',
+        kind: 'review',
+        releaseId: 'release-contradict',
+        logPath: prevReviewLog,
+        startedAt: now - 180,
+        finishedAt: now - 170,
+        exitCode: 0,
+      }) as any,
+      makeJobRow({
+        id: 'fix-contradict',
+        project: 'proj',
+        kind: 'fix',
+        releaseId: 'release-contradict',
+        logPath: fixLog,
+        startedAt: now - 150,
+        finishedAt: now - 100,
+        exitCode: 0,
+      }) as any,
+    ]).run();
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+
+    const curLog = join(tempDir, 'cur-review-contradict.log');
+    writeFileSync(curLog, ndjsonText([
+      'Findings:',
+      '- Finding ID: multiline-escaped-quotes-truncate-imported-values',
+      '  Root cause: still bypasses canonical parser',
+      'Verdict: DO NOT SHIP',
+    ].join('\n')));
+    const curReview = makeReviewJob('cur-review-contradict', curLog, {
+      releaseId: 'release-contradict',
+      startedAt: now - 60,
+    });
+
+    await markDoneFn(curReview, 0);
+
+    expect(startFixFromJobMock).not.toHaveBeenCalled();
+    const row = testDb.db.select().from(schema.jobs).all().find((r) => r.id === 'release-contradict');
+    expect(row?.exitCode).toBe(1);
+    expect(row?.finishedAt).not.toBeNull();
+  });
+
+  it('does NOT treat fix claiming Status: not fixed as a contradiction', async () => {
+    const now = Date.now() / 1000;
+    const fixLog = join(tempDir, 'fix-honest.log');
+    writeFileSync(fixLog, ndjsonText([
+      'Fix checklist:',
+      '- Finding ID: tricky-finding',
+      '  Status: not fixed',
+      '  Remaining risk: needs deeper refactor',
+    ].join('\n')));
+
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: 'release-honest', project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
+      makeJobRow({
+        id: 'fix-honest',
+        project: 'proj',
+        kind: 'fix',
+        releaseId: 'release-honest',
+        logPath: fixLog,
+        startedAt: now - 150,
+        finishedAt: now - 100,
+        exitCode: 0,
+      }) as any,
+    ]).run();
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+
+    const curLog = join(tempDir, 'cur-review-honest.log');
+    writeFileSync(curLog, ndjsonText([
+      'Findings:',
+      '- Finding ID: tricky-finding',
+      'Verdict: NEEDS ATTENTION',
+    ].join('\n')));
+    const curReview = makeReviewJob('cur-review-honest', curLog, {
+      releaseId: 'release-honest',
+      startedAt: now - 60,
+    });
+
+    await markDoneFn(curReview, 0);
+
+    expect(startFixFromJobMock).toHaveBeenCalledWith('cur-review-honest');
+  });
+
+  it('DOES start a fix when fix claimed a different ID than the review now flags', async () => {
+    const now = Date.now() / 1000;
+    const fixLog = join(tempDir, 'fix-different.log');
+    writeFileSync(fixLog, ndjsonText([
+      'Fix checklist:',
+      '- Finding ID: original-finding',
+      '  Status: fixed',
+    ].join('\n')));
+
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: 'release-different', project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
+      makeJobRow({
+        id: 'fix-different',
+        project: 'proj',
+        kind: 'fix',
+        releaseId: 'release-different',
+        logPath: fixLog,
+        startedAt: now - 150,
+        finishedAt: now - 100,
+        exitCode: 0,
+      }) as any,
+    ]).run();
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+
+    const curLog = join(tempDir, 'cur-review-different.log');
+    writeFileSync(curLog, ndjsonText([
+      'Findings:',
+      '- Finding ID: brand-new-finding',
+      'Verdict: NEEDS ATTENTION',
+    ].join('\n')));
+    const curReview = makeReviewJob('cur-review-different', curLog, {
+      releaseId: 'release-different',
+      startedAt: now - 60,
+    });
+
+    await markDoneFn(curReview, 0);
+
+    expect(startFixFromJobMock).toHaveBeenCalledWith('cur-review-different');
+  });
+
   it('starts a fix on the first review in a release (no previous to compare against)', async () => {
     const now = Date.now() / 1000;
     testDb.db.insert(schema.jobs).values(
@@ -948,5 +1100,139 @@ describe('verdict retry rescue', () => {
 
     expect(retryVerdictMock).toHaveBeenCalledOnce();
     expect(startFixFromJobMock).toHaveBeenCalledWith('rev-retry-null');
+  });
+});
+
+// ─── auto-mark seen on completion ────────────────────────────────────────────
+
+describe('auto-mark seen on completion', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
+  let finalizeAgentRunReportMock: ReturnType<typeof vi.fn>;
+
+  function makeInMemoryJob(id: string, kind: string, overrides: Partial<JobData> = {}): JobData {
+    const now = Date.now() / 1000;
+    return {
+      id, project: 'proj', kind, prompt: null, pid: 0, logPath: null,
+      startedAt: now, finishedAt: null, exitCode: null, seen: false,
+      durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+    testDb = createTestDb();
+    finalizeAgentRunReportMock = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+      getJobStatus: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/git/git-utils', () => ({ markReviewed: vi.fn().mockResolvedValue(undefined) }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({
+        autoPushEnabled: false, autoCommitEnabled: false,
+        releaseAfterRun: false, prWorkflowEnabled: false,
+      }),
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      releaseLock: vi.fn(), getLock: vi.fn().mockReturnValue(null),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/jobs/retention', () => ({ pruneProjectLogs: vi.fn() }));
+    vi.doMock('@/lib/shared/notifications', () => ({ notify: vi.fn().mockResolvedValue(undefined) }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: vi.fn().mockReturnValue({
+        fix_ci_max_retries: 0, fix_ci_retry_window_seconds: 120, fix_ci_fast_crash_ms: 5000,
+      }),
+    }));
+    // finalizeAgentRunReport would otherwise overwrite job.modifiedFiles based
+    // on git/log inspection. The auto-mark logic depends on the value present
+    // at lifecycle time, so leave whatever the test set.
+    vi.doMock('@/lib/agents/agent-run-report', () => ({
+      finalizeAgentRunReport: finalizeAgentRunReportMock,
+    }));
+  });
+
+  afterEach(() => vi.resetModules());
+
+  async function runMarkDone(job: JobData, exitCode: number): Promise<boolean> {
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+    await markDoneFn(job, exitCode);
+    const row = testDb.db
+      .select({ seen: schema.jobs.seen })
+      .from(schema.jobs)
+      .where(eq(schema.jobs.id, job.id))
+      .get();
+    return !!row?.seen;
+  }
+
+  it('auto-marks a successful pipeline child seen (commit / push / test)', async () => {
+    for (const kind of ['commit', 'push', 'test', 'fix-push', 'mark-dod']) {
+      const seen = await runMarkDone(makeInMemoryJob(`${kind}-ok`, kind), 0);
+      expect(seen, `${kind} exit-0 should be auto-seen`).toBe(true);
+      vi.resetModules();
+    }
+  });
+
+  it('does NOT auto-mark a failed pipeline child seen', async () => {
+    const seen = await runMarkDone(makeInMemoryJob('test-fail', 'test'), 1);
+    expect(seen).toBe(false);
+  });
+
+  it('does NOT auto-mark a release meta-job seen even on success', async () => {
+    const seen = await runMarkDone(makeInMemoryJob('rel-ok', 'release'), 0);
+    expect(seen).toBe(false);
+  });
+
+  it('does NOT auto-mark interactive `run` jobs seen', async () => {
+    const seen = await runMarkDone(makeInMemoryJob('term-ok', 'run'), 0);
+    expect(seen).toBe(false);
+  });
+
+  it('auto-marks an LGTM review seen but leaves NEEDS ATTENTION unseen', async () => {
+    const lgtmLog = join(mkdtempSync(join(tmpdir(), 'amark-')), 'lgtm.log');
+    writeFileSync(lgtmLog, 'Findings: none\nVerdict: LGTM\n');
+    const seenLgtm = await runMarkDone(makeInMemoryJob('rev-lgtm', 'review', { logPath: lgtmLog }), 0);
+    expect(seenLgtm).toBe(true);
+
+    vi.resetModules();
+    const naLog = join(mkdtempSync(join(tmpdir(), 'amark-')), 'na.log');
+    writeFileSync(naLog, 'Findings:\n- Finding ID: x\nVerdict: NEEDS ATTENTION\n');
+    const seenNa = await runMarkDone(makeInMemoryJob('rev-na', 'review', { logPath: naLog }), 0);
+    expect(seenNa).toBe(false);
+  });
+
+  it('auto-marks a no-op agent run (empty modifiedFiles) seen but keeps actionable runs unseen', async () => {
+    const seenNoop = await runMarkDone(
+      makeInMemoryJob('agent-noop', 'agent:improve', { modifiedFiles: '[]' }),
+      0,
+    );
+    expect(seenNoop).toBe(true);
+
+    vi.resetModules();
+    const seenActionable = await runMarkDone(
+      makeInMemoryJob('agent-act', 'agent:improve', { modifiedFiles: '[{"path":"a.ts"}]' }),
+      0,
+    );
+    expect(seenActionable).toBe(false);
+  });
+
+  it('keeps an agent run unseen when report extraction fails and modifiedFiles is missing', async () => {
+    finalizeAgentRunReportMock.mockRejectedValueOnce(new Error('git status failed'));
+    const seen = await runMarkDone(
+      makeInMemoryJob('agent-report-fail', 'agent:improve', { modifiedFiles: null }),
+      0,
+    );
+    expect(seen).toBe(false);
   });
 });

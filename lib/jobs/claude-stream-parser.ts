@@ -67,10 +67,30 @@ export interface ParseState {
   inToolUse: boolean;
   hasEmitted: boolean;
   isCompacting: boolean;
+  // Trailing characters of the last emitted text delta. Used to inject a
+  // paragraph break between consecutive text_delta events that look like
+  // separate paragraphs (previous ended a sentence, next starts capitalized
+  // and there's no whitespace bridging them). Claude with
+  // --include-partial-messages emits each paragraph as its own delta with no
+  // separator, which would otherwise concatenate into a wall of text.
+  lastTextTail: string;
 }
 
 export function createParseState(): ParseState {
-  return { currentToolName: '', currentToolInput: '', inToolUse: false, hasEmitted: false, isCompacting: false };
+  return { currentToolName: '', currentToolInput: '', inToolUse: false, hasEmitted: false, isCompacting: false, lastTextTail: '' };
+}
+
+// Returns true when the gap between two consecutive text deltas should
+// render as a paragraph break: prev ended a sentence (`.`, `!`, `?`, `:`)
+// with no trailing whitespace, and next begins with a capital letter (so
+// it's the start of a new sentence/paragraph rather than a token-streaming
+// fragment of the same word).
+function isParagraphBoundary(prevTail: string, nextHead: string): boolean {
+  if (!prevTail || !nextHead) return false;
+  if (/\s$/.test(prevTail)) return false;
+  if (!/[.!?:]"?$/.test(prevTail)) return false;
+  if (/^\s/.test(nextHead)) return false;
+  return /^["“'']?[A-Z]/.test(nextHead);
 }
 
 export interface ParseOptions {
@@ -141,7 +161,12 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
         evt?.delta?.type === 'text_delta' &&
         !state.isCompacting
       ) {
-        push({ type: 'text', text: evt.delta.text ?? '' });
+        const text = evt.delta.text ?? '';
+        if (text && isParagraphBoundary(state.lastTextTail, text.slice(0, 4))) {
+          push({ type: 'text', text: '\n\n' });
+        }
+        push({ type: 'text', text });
+        if (text) state.lastTextTail = text.slice(-4);
       }
 
       // Tool use start — capture tool name
@@ -152,6 +177,7 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
         state.inToolUse = true;
         state.currentToolName = evt.content_block.name ?? '';
         state.currentToolInput = '';
+        state.lastTextTail = '';
       }
 
       // Tool input JSON delta
@@ -179,6 +205,7 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
         state.hasEmitted
       ) {
         push({ type: 'text', text: '\n' });
+        state.lastTextTail = '\n';
       }
     }
 

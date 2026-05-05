@@ -11,6 +11,8 @@ describe('job-control', () => {
   let resumeInternalSchedulerMock: ReturnType<typeof vi.fn>;
   let listPendingMock: ReturnType<typeof vi.fn>;
   let drainMock: ReturnType<typeof vi.fn>;
+  let listQueuedProjectsMock: ReturnType<typeof vi.fn>;
+  let drainQueuedAgentMock: ReturnType<typeof vi.fn>;
   let getSettingsMock: ReturnType<typeof vi.fn>;
   let peekQuotaCacheMock: ReturnType<typeof vi.fn>;
   let prefetchQuotaMock: ReturnType<typeof vi.fn>;
@@ -41,6 +43,8 @@ describe('job-control', () => {
     resumeInternalSchedulerMock = vi.fn();
     listPendingMock = vi.fn().mockReturnValue([]);
     drainMock = vi.fn().mockResolvedValue(undefined);
+    listQueuedProjectsMock = vi.fn().mockReturnValue([]);
+    drainQueuedAgentMock = vi.fn().mockResolvedValue(undefined);
     getSettingsMock = vi.fn().mockReturnValue(makeSettings());
     peekQuotaCacheMock = vi.fn().mockReturnValue(null);
     prefetchQuotaMock = vi.fn();
@@ -52,6 +56,10 @@ describe('job-control', () => {
     vi.doMock('@/lib/pipeline/pending-release', () => ({
       listPendingReleaseProjects: listPendingMock,
       drainPendingRelease: drainMock,
+    }));
+    vi.doMock('@/lib/agents/pending-agent-run', () => ({
+      listQueuedProjects: listQueuedProjectsMock,
+      drainNextAgentRun: drainQueuedAgentMock,
     }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: getSettingsMock,
@@ -143,6 +151,7 @@ describe('job-control', () => {
 
     it('drains pending releases for each queued project when resuming after a pause', async () => {
       listPendingMock.mockReturnValue(['proj-a', 'proj-b']);
+      listQueuedProjectsMock.mockReturnValue(['proj-c']);
       syncJobsPauseState(true);
       syncJobsPauseState(false);
       // drain is async fire-and-forget — wait a microtask cycle
@@ -150,6 +159,8 @@ describe('job-control', () => {
       expect(listPendingMock).toHaveBeenCalled();
       expect(drainMock).toHaveBeenCalledWith('proj-a');
       expect(drainMock).toHaveBeenCalledWith('proj-b');
+      expect(listQueuedProjectsMock).toHaveBeenCalled();
+      expect(drainQueuedAgentMock).toHaveBeenCalledWith('proj-c');
     });
 
     it('does not drain pending releases when resuming without a prior pause', async () => {
@@ -158,6 +169,7 @@ describe('job-control', () => {
       syncJobsPauseState(false);
       await new Promise<void>((r) => setTimeout(r, 10));
       expect(drainMock).not.toHaveBeenCalled();
+      expect(drainQueuedAgentMock).not.toHaveBeenCalled();
     });
 
     it('does not drain pending releases when pausing', async () => {

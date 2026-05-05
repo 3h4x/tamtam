@@ -2,7 +2,7 @@ import { getJob } from '@/lib/jobs/storage';
 import { jobsPausedResult } from '@/lib/shared/job-control';
 import { getSettings } from '@/lib/shared/config';
 import { getQuotaSnapshots } from '@/lib/usage/quota';
-import { pickCliProvider, type PickCliResult } from '@/lib/usage/cli-picker';
+import { pickCliProvider, effectiveUtilizationFor, type PickCliResult } from '@/lib/usage/cli-picker';
 import { isCliProvider, type CliProvider } from '@/lib/usage/cli-providers';
 
 export interface ResolveProviderOptions {
@@ -75,13 +75,7 @@ export async function resolveProviderForRun(
 
   const snapshots = await getQuotaSnapshots(enabled);
   if (preferred) {
-    const preferredSnapshot = snapshots.get(preferred) ?? null;
-    const preferredUtilization = Math.max(
-      Number.isFinite(preferredSnapshot?.fiveHour?.utilization) ? (preferredSnapshot?.fiveHour?.utilization ?? 0) : 0,
-      typeof preferredSnapshot?.extra?.utilization === 'number' && Number.isFinite(preferredSnapshot?.extra?.utilization)
-        ? preferredSnapshot.extra.utilization
-        : 0,
-    );
+    const preferredUtilization = effectiveUtilizationFor(snapshots.get(preferred) ?? null);
     if (preferredUtilization < (settings.budget_block_at_pct ?? 95)) {
       return { provider: preferred, utilization: preferredUtilization };
     }

@@ -65,6 +65,8 @@ describe('POST /api/agents/{agentId}/run', () => {
   let probeJobStatusMock: ReturnType<typeof vi.fn>;
   let runGatesMock: ReturnType<typeof vi.fn>;
   let enqueueAgentRunMock: ReturnType<typeof vi.fn>;
+  let drainNextAgentRunMock: ReturnType<typeof vi.fn>;
+  let tryClaimAgentStartSlotMock: ReturnType<typeof vi.fn>;
   let checkCliStartGateMock: ReturnType<typeof vi.fn>;
   let tempSkillsDir: string;
   let settingsMock: Record<string, unknown>;
@@ -90,6 +92,16 @@ describe('POST /api/agents/{agentId}/run', () => {
       .run();
   }
 
+  function deferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
   beforeEach(async () => {
     vi.resetModules();
     testDb = createTestDb();
@@ -103,6 +115,8 @@ describe('POST /api/agents/{agentId}/run', () => {
     probeJobStatusMock = vi.fn().mockResolvedValue('done');
     runGatesMock = vi.fn().mockReturnValue(null);
     enqueueAgentRunMock = vi.fn();
+    drainNextAgentRunMock = vi.fn().mockResolvedValue(undefined);
+    tryClaimAgentStartSlotMock = vi.fn().mockReturnValue({ ok: true });
     checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
     settingsMock = {
       workspace_path: '',
@@ -124,6 +138,9 @@ describe('POST /api/agents/{agentId}/run', () => {
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     vi.doMock('@/lib/agents/pending-agent-run', () => ({
       enqueueAgentRun: enqueueAgentRunMock,
+      tryClaimAgentStartSlot: tryClaimAgentStartSlotMock,
+      releaseAgentStartSlot: vi.fn(),
+      drainNextAgentRun: drainNextAgentRunMock,
     }));
 
     vi.doMock('@/lib/shared/project-data', () => ({
@@ -236,6 +253,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(data.status).toBe('started');
     expect(data.job_id).toBeTruthy();
     expect(data.agent).toBe('Test Agent');
+    expect(drainNextAgentRunMock).toHaveBeenCalledWith('proj1');
   });
 
   it('keeps the Codex shim on the command line and forwards CODEX_BIN via env', async () => {
@@ -272,6 +290,26 @@ describe('POST /api/agents/{agentId}/run', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
     expect(res.status).toBe(429);
+    const data = await res.json();
+    expect(data.code).toBe('providers_over_budget');
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
+  it('returns a coded 409 when jobs are paused so queue drains can preserve the head', async () => {
+    insertAgent();
+    checkCliStartGateMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      detail: 'Jobs are paused globally. Turn the switch back on in Settings to start an agent run.',
+    });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.code).toBe('jobs_paused');
     expect(startJobMock).not.toHaveBeenCalled();
   });
 
@@ -352,6 +390,77 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(entry.agentName).toBe('Test Agent');
     expect(entry.triggeredBy).toBe('schedule');
     expect(entry.prompt).toBe('do something');
+  });
+
+  it('releases the starting slot after a pre-start failure so same-agent retries are not stranded', async () => {
+    insertAgent({ schedule: '1h' });
+    const pendingStart = deferred<void>();
+    tryClaimAgentStartSlotMock
+      .mockReturnValueOnce({ ok: true })
+      .mockReturnValueOnce({ ok: false, runningAgent: 'Test Agent' });
+    startJobMock.mockImplementationOnce(async () => {
+      await pendingStart.promise;
+      throw new Error('pm2 boot failed');
+    });
+
+    const reqA = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'first prompt' }),
+    });
+    const reqB = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'second prompt' }),
+    });
+
+    const first = POST(reqA, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    void first.catch(() => undefined);
+    await Promise.resolve();
+    const second = POST(reqB, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const resB = await second;
+    pendingStart.resolve();
+    const resA = await first;
+
+    expect(resA.status).toBe(500);
+    expect(resB.status).toBe(409);
+    expect(enqueueAgentRunMock).not.toHaveBeenCalled();
+    expect(drainNextAgentRunMock).toHaveBeenCalledWith('proj1');
+  });
+
+  it('drains the queued different agent after a pre-start failure by the slot holder', async () => {
+    insertAgent({ schedule: '1h' });
+    const pendingStart = deferred<void>();
+    tryClaimAgentStartSlotMock.mockReturnValueOnce({ ok: true });
+    startJobMock.mockImplementationOnce(async () => {
+      await pendingStart.promise;
+      throw new Error('pm2 boot failed');
+    });
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+
+    const pendingFirst = POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    void pendingFirst.catch(() => undefined);
+    await Promise.resolve();
+
+    tryClaimAgentStartSlotMock.mockReturnValueOnce({ ok: false, runningAgent: 'Other Agent' });
+    const otherReq = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'queued prompt' }),
+    });
+    const queuedRes = await POST(otherReq, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    pendingStart.resolve();
+    const failedRes = await pendingFirst;
+
+    expect(queuedRes.status).toBe(202);
+    expect(failedRes.status).toBe(500);
+    expect(enqueueAgentRunMock).toHaveBeenCalledTimes(1);
+    expect(drainNextAgentRunMock).toHaveBeenCalledWith('proj1');
   });
 
   it('does not queue when a different agent for the project is no longer actually running', async () => {
