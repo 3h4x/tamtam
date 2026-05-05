@@ -30,7 +30,7 @@ async function isReleasePipelineRunning(projectName: string): Promise<boolean> {
 export type ReleaseResult =
   | { ok: true; step: 'test' | 'review' | 'commit' | 'push'; jobId?: string; releaseJobId?: string; message: string }
   | { ok: true; status: 'queued'; step?: undefined; jobId?: undefined; releaseJobId?: undefined; message: string; blockingJobId?: string }
-  | { ok: false; status: number; detail: string; blockingJobId?: string };
+  | { ok: false; status: number; detail: string; blockingJobId?: string; retryable?: boolean };
 
 export interface StartReleaseOptions {
   queueIfBlocked?: boolean;
@@ -272,7 +272,7 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
 
   const release = await createReleaseJob(projectName, parentJobId, issueContext);
   if (!release) {
-    return { ok: false, status: 500, detail: 'Failed to create release job' };
+    return { ok: false, status: 500, detail: 'Failed to create release job', retryable: true };
   }
   const releaseJobId = release.id;
   const releaseJob = getJob(releaseJobId);

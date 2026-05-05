@@ -45,6 +45,10 @@ function createTestDb() {
       modified_files TEXT,
       provider TEXT
     );
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };
 }
@@ -102,6 +106,81 @@ describe('pipeline-lock', () => {
       );
       testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at, finished_at) VALUES ('old-release', 'proj', 'release', ${Date.now() / 1000 - 200}, ${Date.now() / 1000 - 10})`);
       expect(getLock('proj')).toBeNull();
+    });
+
+    it('self-heal keeps a pending release queued when the drain is pause-blocked', async () => {
+      vi.resetModules();
+      testDb = createTestDb();
+      vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+      const startReleaseMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        detail: 'Jobs are paused globally. Turn the switch back on in Settings to start a release.',
+      });
+      vi.doMock('@/lib/pipeline/start-release', () => ({ startRelease: startReleaseMock }));
+
+      const pendingMod = await import('@/lib/pipeline/pending-release');
+      const mod2 = await import('@/lib/pipeline/pipeline-lock');
+
+      testDb.sqlite.exec(
+        `INSERT INTO pipeline_locks (project, locked_by_job_id, acquired_at) VALUES ('proj', 'old-release', ${Date.now() / 1000 - 5})`
+      );
+      testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at, finished_at) VALUES ('old-release', 'proj', 'release', ${Date.now() / 1000 - 200}, ${Date.now() / 1000 - 10})`);
+      pendingMod.setPendingRelease('proj');
+
+      expect(mod2.getLock('proj')).toBeNull();
+      await new Promise<void>((r) => setTimeout(r, 10));
+      expect(startReleaseMock).toHaveBeenCalledWith('proj');
+      expect(pendingMod.getPendingRelease('proj')).toBe(true);
+    });
+
+    it('self-heal keeps a pending release queued when the drain throws', async () => {
+      vi.resetModules();
+      testDb = createTestDb();
+      vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+      const startReleaseMock = vi.fn().mockRejectedValue(new Error('pm2 start failed'));
+      vi.doMock('@/lib/pipeline/start-release', () => ({ startRelease: startReleaseMock }));
+
+      const pendingMod = await import('@/lib/pipeline/pending-release');
+      const mod2 = await import('@/lib/pipeline/pipeline-lock');
+
+      testDb.sqlite.exec(
+        `INSERT INTO pipeline_locks (project, locked_by_job_id, acquired_at) VALUES ('proj', 'old-release', ${Date.now() / 1000 - 5})`
+      );
+      testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at, finished_at) VALUES ('old-release', 'proj', 'release', ${Date.now() / 1000 - 200}, ${Date.now() / 1000 - 10})`);
+      pendingMod.setPendingRelease('proj');
+
+      expect(mod2.getLock('proj')).toBeNull();
+      await new Promise<void>((r) => setTimeout(r, 10));
+      expect(startReleaseMock).toHaveBeenCalledWith('proj');
+      expect(pendingMod.getPendingRelease('proj')).toBe(true);
+    });
+
+    it('self-heal keeps a pending release queued on retryable startup failure', async () => {
+      vi.resetModules();
+      testDb = createTestDb();
+      vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+      const startReleaseMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        detail: 'Failed to create release job',
+        retryable: true,
+      });
+      vi.doMock('@/lib/pipeline/start-release', () => ({ startRelease: startReleaseMock }));
+
+      const pendingMod = await import('@/lib/pipeline/pending-release');
+      const mod2 = await import('@/lib/pipeline/pipeline-lock');
+
+      testDb.sqlite.exec(
+        `INSERT INTO pipeline_locks (project, locked_by_job_id, acquired_at) VALUES ('proj', 'old-release', ${Date.now() / 1000 - 5})`
+      );
+      testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at, finished_at) VALUES ('old-release', 'proj', 'release', ${Date.now() / 1000 - 200}, ${Date.now() / 1000 - 10})`);
+      pendingMod.setPendingRelease('proj');
+
+      expect(mod2.getLock('proj')).toBeNull();
+      await new Promise<void>((r) => setTimeout(r, 10));
+      expect(startReleaseMock).toHaveBeenCalledWith('proj');
+      expect(pendingMod.getPendingRelease('proj')).toBe(true);
     });
 
     it('self-heals: still returns the lock while the holder is running', async () => {

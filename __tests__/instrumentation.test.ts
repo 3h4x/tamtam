@@ -386,4 +386,21 @@ describe('instrumentation', () => {
       expect(reconcileStaleRelease).not.toHaveBeenCalled();
     });
   });
+
+  describe('drainStalePendingReleases()', () => {
+    it('drains each unlocked pending project during boot recovery', async () => {
+      const drainPendingReleaseMock = vi.fn().mockResolvedValue(undefined);
+      vi.doMock('@/lib/pipeline/pending-release', () => ({
+        listPendingReleaseProjects: vi.fn().mockReturnValue(['proj']),
+        drainPendingRelease: drainPendingReleaseMock,
+      }));
+      vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+        getLock: vi.fn().mockReturnValue(null),
+      }));
+      const { drainStalePendingReleases } = await import('@/instrumentation-node');
+
+      await drainStalePendingReleases();
+      expect(drainPendingReleaseMock).toHaveBeenCalledWith('proj');
+    });
+  });
 });
