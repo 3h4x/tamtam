@@ -10,9 +10,10 @@ import { listJobs, probeJobStatus, createJob, updateJob, getJob, markDone, runWi
 import { exec } from '@/lib/shared/shell';
 import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/scheduling';
 import { acquireLock, getLock } from './pipeline-lock';
-import { detectMainBranch } from './start-commit';
+import { detectMainBranch, findIssueContext } from './start-commit';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { hasFreshLgtm, hasLocalCommitsAhead } from './release-state';
+import type { IssueContext } from './release-context';
 
 const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push', 'pr-wait', 'mark-dod', 'release']);
 
@@ -43,6 +44,7 @@ export interface StartReleaseOptions {
 async function createReleaseJob(
   projectName: string,
   parentJobId?: string | null,
+  issueContext?: IssueContext | null,
 ): Promise<{ id: string; releaseId: string; logPath: string } | null> {
   try {
     const { logDir } = getImproveConfig();
@@ -53,6 +55,11 @@ async function createReleaseJob(
     const scriptPath = join(logDir, `${job.id}.sh`);
     const monitorLogPath = join(logDir, `${job.id}.monitor.log`);
     job.logPath = logPath;
+    if (issueContext) {
+      job.ghIssueNumber = issueContext.number;
+      job.ghIssueRepo = issueContext.repo;
+      job.ghIssueTitle = issueContext.title;
+    }
     // Release job identifies itself: every child step created while this
     // release is active will auto-inherit this id as its releaseId.
     job.releaseId = job.id;
@@ -230,6 +237,19 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
     return { ok: false, status: 409, detail: `Release pipeline already running for ${projectName}` };
   }
 
+  const hasIssueTaggedRun = listJobs().some(
+    (job) => job.project === projectName && job.kind === 'run' && job.ghIssueNumber != null,
+  );
+  const issueContext = sourceJob?.project === projectName && sourceJob.ghIssueNumber != null
+    ? {
+        number: sourceJob.ghIssueNumber,
+        repo: sourceJob.ghIssueRepo ?? '',
+        title: sourceJob.ghIssueTitle ?? '',
+      }
+    : hasIssueTaggedRun
+      ? await findIssueContext(projectName, projPath)
+      : null;
+
   const changes = await hasChanges(projPath);
   const unpushed = await hasLocalCommitsAhead(projPath);
   if (!changes && !unpushed) {
@@ -250,7 +270,7 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
     }
   }
 
-  const release = await createReleaseJob(projectName, parentJobId);
+  const release = await createReleaseJob(projectName, parentJobId, issueContext);
   if (!release) {
     return { ok: false, status: 500, detail: 'Failed to create release job' };
   }

@@ -109,6 +109,9 @@ describe('startMarkDod', () => {
   let listJobsMock: ReturnType<typeof vi.fn>;
   let createJobMock: ReturnType<typeof vi.fn>;
   let markDoneMock: ReturnType<typeof vi.fn>;
+  let updateJobMock: ReturnType<typeof vi.fn>;
+  let findActiveReleaseJobMock: ReturnType<typeof vi.fn>;
+  let getJobMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let appendFileSyncMock: ReturnType<typeof vi.fn>;
   let existsSyncMock: ReturnType<typeof vi.fn>;
@@ -153,6 +156,9 @@ describe('startMarkDod', () => {
       seen: false,
     }));
     markDoneMock = vi.fn().mockResolvedValue(undefined);
+    updateJobMock = vi.fn();
+    findActiveReleaseJobMock = vi.fn().mockReturnValue(null);
+    getJobMock = vi.fn().mockReturnValue(null);
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     appendFileSyncMock = vi.fn();
     existsSyncMock = vi.fn().mockReturnValue(true);
@@ -183,7 +189,14 @@ describe('startMarkDod', () => {
       createJob: createJobMock,
       listJobs: listJobsMock,
       markDone: markDoneMock,
-      updateJob: vi.fn(),
+      updateJob: updateJobMock,
+      findActiveReleaseJob: findActiveReleaseJobMock,
+      getJob: getJobMock,
+    }));
+    vi.doMock('@/lib/jobs/storage', () => ({
+      listJobs: listJobsMock,
+      findActiveReleaseJob: findActiveReleaseJobMock,
+      getJob: getJobMock,
     }));
     // Default branch-switch to a no-op so the tests' explicit exec mock
     // chain isn't consumed by the gh pr lookup. Tests that exercise the
@@ -255,6 +268,45 @@ describe('startMarkDod', () => {
     const r = await startMarkDod('myproj', undefined, 0);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(400);
+  });
+
+  it('recovers a missing latest-run ghIssueRepo from an older row for the same issue', async () => {
+    listJobsMock.mockReturnValue([
+      makeRunJob({ id: 'older-run', startedAt: 1000, ghIssueRepo: 'owner/repo' }),
+      makeRunJob({ id: 'latest-run', startedAt: 2000, ghIssueRepo: null, ghIssueTitle: 'Recovered repo' }),
+    ]);
+    execMock.mockResolvedValue(resp(1, '', 'gh failed'));
+
+    const r = await startMarkDod('myproj', undefined, 0);
+
+    expect(r.ok).toBe(true);
+    const ghArgs: string[] = execMock.mock.calls[0][1];
+    expect(ghArgs).toContain('issue');
+    expect(ghArgs).toContain('42');
+    expect(ghArgs).toContain('owner/repo');
+  });
+
+  it('stamps issue context onto the mark-dod job row', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0, ISSUE_JSON))
+      .mockImplementationOnce(() => resp(0, ''));
+    readFileSyncMock.mockReturnValue(CLAUDE_JSON);
+
+    const r = await startMarkDod('myproj', undefined, 0);
+
+    expect(r.ok).toBe(true);
+    const job = createJobMock.mock.results[0]?.value;
+    expect(job.ghIssueNumber).toBe(42);
+    expect(job.ghIssueRepo).toBe('owner/repo');
+    expect(job.ghIssueTitle).toBe('Add login feature');
+    expect(job.contextMeta).toContain('"sourceType":"issue"');
+    expect(job.contextMeta).toContain('"sourceNumber":42');
+    expect(updateJobMock).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'mark-dod',
+      ghIssueNumber: 42,
+      ghIssueRepo: 'owner/repo',
+      ghIssueTitle: 'Add login feature',
+    }));
   });
 
   it('returns ok:true changed:false when gh issue view fails', async () => {
@@ -563,6 +615,22 @@ describe('startMarkDod', () => {
     };
   }
 
+  function makeReleaseJob(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'release-job-1',
+      project: 'myproj',
+      kind: 'release',
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      releaseId: 'release-job-1',
+      ghIssueNumber: 42,
+      ghIssueRepo: 'owner/repo',
+      ghIssueTitle: 'Fix login bug',
+      ...overrides,
+    };
+  }
+
   it('uses PR context when no issue-linked run job exists but a push job has prNumber+prRepo in contextMeta', async () => {
     listJobsMock.mockReturnValue([
       makePushJob(JSON.stringify({ prNumber: 99, prRepo: 'owner/repo' })),
@@ -606,6 +674,72 @@ describe('startMarkDod', () => {
     const ghArgs: string[] = execMock.mock.calls[0][1];
     expect(ghArgs).toContain('issue');
     expect(ghArgs).toContain('42');
+  });
+
+  it('uses the active release issue lineage instead of a newer unrelated run', async () => {
+    const activeRelease = makeReleaseJob({ id: 'release-42', ghIssueNumber: 42, ghIssueRepo: 'owner/repo' });
+    findActiveReleaseJobMock.mockReturnValue(activeRelease);
+    listJobsMock.mockReturnValue([
+      activeRelease,
+      makeRunJob({ id: 'issue-42-run', ghIssueNumber: 42, ghIssueRepo: 'owner/repo', releaseId: 'release-42', startedAt: 1000 }),
+      makeRunJob({ id: 'newer-issue-99-run', ghIssueNumber: 99, ghIssueRepo: 'owner/repo', startedAt: 9999 }),
+    ]);
+    execMock.mockResolvedValue(resp(1, '', 'gh failed'));
+
+    const r = await startMarkDod('myproj', undefined, 0);
+
+    expect(r.ok).toBe(true);
+    const ghArgs: string[] = execMock.mock.calls[0][1];
+    expect(ghArgs).toContain('issue');
+    expect(ghArgs).toContain('42');
+    expect(ghArgs).not.toContain('99');
+  });
+
+  it('recovers a missing release-scoped ghIssueRepo from a sibling row in the same release', async () => {
+    const activeRelease = makeReleaseJob({ id: 'release-42', ghIssueNumber: 42, ghIssueRepo: null });
+    findActiveReleaseJobMock.mockReturnValue(activeRelease);
+    listJobsMock.mockReturnValue([
+      activeRelease,
+      makeRunJob({ id: 'issue-42-source', ghIssueRepo: null, releaseId: 'release-42', startedAt: 1000 }),
+      makeRunJob({ id: 'issue-42-sibling', ghIssueRepo: 'owner/repo', releaseId: 'release-42', startedAt: 900 }),
+    ]);
+    execMock.mockResolvedValue(resp(1, '', 'gh failed'));
+
+    const r = await startMarkDod('myproj', undefined, 0);
+
+    expect(r.ok).toBe(true);
+    const ghArgs: string[] = execMock.mock.calls[0][1];
+    expect(ghArgs).toContain('issue');
+    expect(ghArgs).toContain('42');
+    expect(ghArgs).toContain('owner/repo');
+  });
+
+  it('uses the active release push lineage instead of a newer unrelated run when verifying a PR', async () => {
+    const activeRelease = makeReleaseJob({
+      id: 'release-pr',
+      ghIssueNumber: null,
+      ghIssueRepo: null,
+      ghIssueTitle: null,
+    });
+    findActiveReleaseJobMock.mockReturnValue(activeRelease);
+    listJobsMock.mockReturnValue([
+      activeRelease,
+      makePushJob(JSON.stringify({ prNumber: 55, prRepo: 'owner/repo' }), {
+        id: 'push-pr-55',
+        releaseId: 'release-pr',
+        startedAt: 1000,
+      }),
+      makeRunJob({ id: 'newer-issue-99-run', ghIssueNumber: 99, ghIssueRepo: 'owner/repo', startedAt: 9999 }),
+    ]);
+    execMock.mockResolvedValue(resp(1, '', 'gh failed'));
+
+    const r = await startMarkDod('myproj', undefined, 0);
+
+    expect(r.ok).toBe(true);
+    const ghArgs: string[] = execMock.mock.calls[0][1];
+    expect(ghArgs).toContain('pr');
+    expect(ghArgs).toContain('55');
+    expect(ghArgs).not.toContain('99');
   });
 
   it('PR context happy path: uses gh pr view and gh pr edit to update the PR body', async () => {

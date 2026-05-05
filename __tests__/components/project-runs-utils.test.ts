@@ -8,6 +8,7 @@ import {
   bucketOf,
   buildReleaseSummary,
   dayLabel,
+  entryNeedsAttention,
   groupReleaseChildren,
   flattenPipelineSteps,
 } from '@/components/project-runs/utils';
@@ -116,6 +117,27 @@ describe('bucketOf', () => {
       expect(bucketOf(kind)).toBe(expected);
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// entryNeedsAttention
+// ---------------------------------------------------------------------------
+describe('entryNeedsAttention', () => {
+  it('treats NEEDS ATTENTION reviews as attention even with exitCode 0', () => {
+    expect(entryNeedsAttention(makeEntry({ kind: 'review', exitCode: 0, verdict: 'NEEDS ATTENTION' }))).toBe(true);
+  });
+
+  it('treats DO NOT SHIP reviews as attention even with exitCode 0', () => {
+    expect(entryNeedsAttention(makeEntry({ kind: 'review', exitCode: 0, verdict: 'DO NOT SHIP' }))).toBe(true);
+  });
+
+  it('treats review rows with no parsed verdict as attention', () => {
+    expect(entryNeedsAttention(makeEntry({ kind: 'review', exitCode: 0, verdict: undefined }))).toBe(true);
+  });
+
+  it('does not flag LGTM reviews as attention', () => {
+    expect(entryNeedsAttention(makeEntry({ kind: 'review', exitCode: 0, verdict: 'LGTM' }))).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

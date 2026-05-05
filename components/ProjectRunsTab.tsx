@@ -16,6 +16,7 @@ import {
   KIND_LABEL,
   entryIsRunning,
   entryNeedsAttention,
+  latestReleaseKey,
 } from '@/components/project-runs/utils'
 import type { Entry, KindBucket } from '@/components/project-runs/utils'
 import { RunRow } from '@/components/project-runs/RunRow'
@@ -38,7 +39,12 @@ function filterKey(f: Filter): string {
 // Render a chained-child node (e.g. a release nested under an agent run).
 // For release nodes the pipeline steps are flattened so test/review/commit/push
 // all appear at the same depth; fix/fix-push are one level deeper.
-function renderChain(node: Entry, depth: number, navigate: (e: Entry) => void): React.ReactNode {
+function renderChain(
+  node: Entry,
+  depth: number,
+  navigate: (e: Entry) => void,
+  actionsFor: (e: Entry) => React.ReactNode,
+): React.ReactNode {
   const summary = node.kind === 'release'
     ? buildReleaseSummary(node.children ?? [], node)
     : null
@@ -47,12 +53,18 @@ function renderChain(node: Entry, depth: number, navigate: (e: Entry) => void): 
     : []
   return (
     <Fragment key={node.key}>
-      <RunRow entry={node} onClick={() => navigate(node)} depth={depth} summary={summary} />
+      <RunRow
+        entry={node}
+        onClick={() => navigate(node)}
+        depth={depth}
+        summary={summary}
+        actions={actionsFor(node)}
+      />
       {node.kind === 'release'
         ? pipelineFlat.map(({ entry, depth: d }) => (
             <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
           ))
-        : node.chainedChildren?.map((c) => renderChain(c, depth + 1, navigate))
+        : node.chainedChildren?.map((c) => renderChain(c, depth + 1, navigate, actionsFor))
       }
     </Fragment>
   )
@@ -95,6 +107,12 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
   }, [projectName])
 
   const entries = useMemo(() => buildEntries(jobs), [jobs])
+  const groupedEntries = useMemo(() => groupReleaseChildren(entries), [entries])
+  // Latest release per project — used to gate the "Continue release" /
+  // "Retry release" actions so they only appear on the most recent release
+  // entry. Once a newer release ran, retrying an older failed one is
+  // misleading: the project state has moved on.
+  const latestTopLevelReleaseKey = useMemo(() => latestReleaseKey(groupedEntries), [groupedEntries])
   const loadJobs = async () => {
     const data = await fetchJobs(projectName, { limit: 0 })
     setJobs(data.jobs)
@@ -137,14 +155,14 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    const source = shouldGroup(filter) ? groupReleaseChildren(entries) : entries
+    const source = shouldGroup(filter) ? groupedEntries : entries
     return source.filter((e) => {
       if (!matches(e, filter)) return false
       if (!q) return true
       const hay = `${e.title} ${e.subtitle ?? ''} ${e.releaseOutcome?.label ?? ''} ${e.model ?? ''} ${e.navSessionId ?? ''} ${e.kind}`.toLowerCase()
       return hay.includes(q)
     })
-  }, [entries, filter, search])
+  }, [entries, filter, groupedEntries, search])
 
   // Group filtered entries by day for scannability.
   const groups = useMemo(() => {
@@ -205,7 +223,11 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
       ?? (e.kind === 'release' && e.status === 'done' && e.exitCode !== null && e.exitCode !== 0
         ? (e.children?.length ?? 0) === 0 ? 'blocked' : 'failed'
         : null)
-    const releaseButton = outcomeStatus === 'blocked' || outcomeStatus === 'failed' ? (
+    // Only the latest release for the project should offer continue/retry —
+    // older failed releases reflect a past project state, and retrying them
+    // would silently rerun on whatever's currently checked out.
+    const isLatestRelease = e.kind === 'release' && e.key === latestTopLevelReleaseKey
+    const releaseButton = isLatestRelease && (outcomeStatus === 'blocked' || outcomeStatus === 'failed') ? (
       (() => {
         const active = releaseActionState?.jobId === e.navJobId
         const label = active ? releaseActionState.label : outcomeStatus === 'blocked' ? 'Retry release' : 'Continue release'
@@ -465,7 +487,7 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
                               ).map(({ entry, depth: d }) => (
                                 <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
                               ))
-                            : (e.chainedChildren ?? []).map((root) => renderChain(root, 1, navigate))
+                            : (e.chainedChildren ?? []).map((root) => renderChain(root, 1, navigate, releaseActionsFor))
                           }
                         </div>
                       )}

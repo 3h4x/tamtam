@@ -372,6 +372,58 @@ describe('job-storage', () => {
       expect(retrieved?.exitCode).toBe(42);
       expect(retrieved?.finishedAt).toBe(1234567890);
     });
+
+    it('persists release issue stamps added after createJob across a reload', async () => {
+      const release = createJob('proj', 'release', 0, '/log');
+      release.ghIssueNumber = 42;
+      release.ghIssueRepo = 'owner/repo';
+      release.ghIssueTitle = 'Fix login bug';
+      release.releaseId = release.id;
+      updateJob(release);
+
+      vi.resetModules();
+      vi.doMock('@/lib/db', () => ({
+        db: testDb.db,
+        schema,
+      }));
+      const reloaded = await import('@/lib/jobs/job-storage');
+      const persisted = reloaded.getJob(release.id);
+
+      expect(persisted?.ghIssueNumber).toBe(42);
+      expect(persisted?.ghIssueRepo).toBe('owner/repo');
+      expect(persisted?.ghIssueTitle).toBe('Fix login bug');
+      expect(persisted?.releaseId).toBe(release.id);
+    });
+
+    it('persists mark-dod issue stamps and context meta added after createJob across a reload', async () => {
+      const dod = createJob('proj', 'mark-dod', 0, '/log');
+      dod.ghIssueNumber = 7;
+      dod.ghIssueRepo = 'owner/repo';
+      dod.ghIssueTitle = 'Add login feature';
+      dod.contextMeta = JSON.stringify({
+        sourceType: 'issue',
+        sourceNumber: 7,
+        sourceRepo: 'owner/repo',
+        sourceTitle: 'Add login feature',
+        verified: 1,
+        total: 2,
+      });
+      updateJob(dod);
+
+      vi.resetModules();
+      vi.doMock('@/lib/db', () => ({
+        db: testDb.db,
+        schema,
+      }));
+      const reloaded = await import('@/lib/jobs/job-storage');
+      const persisted = reloaded.getJob(dod.id);
+
+      expect(persisted?.ghIssueNumber).toBe(7);
+      expect(persisted?.ghIssueRepo).toBe('owner/repo');
+      expect(persisted?.ghIssueTitle).toBe('Add login feature');
+      expect(persisted?.contextMeta).toContain('"sourceType":"issue"');
+      expect(persisted?.contextMeta).toContain('"sourceNumber":7');
+    });
   });
 
   describe('readLog', () => {
@@ -2973,13 +3025,19 @@ describe('runCompletionHooks – release-after-run', () => {
   it('triggers startRelease after run job finishes with exit 0 when releaseAfterRun=true', async () => {
     const job = makeJob('run');
     await markDoneFn(job, 0);
-    expect(startReleaseMock).toHaveBeenCalledWith('my-proj', { queueIfBlocked: true });
+    expect(startReleaseMock).toHaveBeenCalledWith('my-proj', {
+      queueIfBlocked: true,
+      sourceJobId: 'run-rar-test',
+    });
   });
 
   it('triggers startRelease after agent:x job finishes with exit 0 when releaseAfterRun=true', async () => {
     const job = makeJob('agent:my-agent');
     await markDoneFn(job, 0);
-    expect(startReleaseMock).toHaveBeenCalledWith('my-proj', { queueIfBlocked: true });
+    expect(startReleaseMock).toHaveBeenCalledWith('my-proj', {
+      queueIfBlocked: true,
+      sourceJobId: 'agent-my-agent-rar-test',
+    });
   });
 
   it('does not trigger startRelease when run job exits non-zero', async () => {
@@ -3367,7 +3425,10 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
   it('calls startMarkDod when push succeeds with prWorkflowEnabled=true and contextMeta has prNumber', async () => {
     const job = makeJob('push', { contextMeta: JSON.stringify({ prNumber: 55, prRepo: 'owner/repo', prUrl: 'https://github.com/owner/repo/pull/55' }) });
     await markDoneFn(job, 0);
-    expect(startMarkDodMock).toHaveBeenCalledWith('my-proj');
+    expect(startMarkDodMock).toHaveBeenCalledWith('my-proj', {
+      prNumber: 55,
+      repo: 'owner/repo',
+    });
   });
 
   it('does not call startMarkDod when push fails', async () => {
@@ -3381,7 +3442,10 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
     getProjectTestConfigMock.mockReturnValue({ prWorkflowEnabled: false, autoPrMergeEnabled: false });
     const job = makeJob('push', { contextMeta: JSON.stringify({ prNumber: 55, prRepo: 'owner/repo' }) });
     await markDoneFn(job, 0);
-    expect(startMarkDodMock).toHaveBeenCalledWith('my-proj');
+    expect(startMarkDodMock).toHaveBeenCalledWith('my-proj', {
+      prNumber: 55,
+      repo: 'owner/repo',
+    });
   });
 
   it('does not call startMarkDod when autoPrMergeEnabled=true (launchPrWait handles DoD post-merge)', async () => {

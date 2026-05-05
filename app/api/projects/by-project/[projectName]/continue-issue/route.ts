@@ -1,19 +1,94 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listJobs, readLog } from '@/lib/jobs/job-storage';
+import type { JobData } from '@/lib/jobs/job-storage';
 
 interface ContinuePayload {
   sessionId: string | null;
+  provider: string | null;
   prompt: string;
   unverifiedCount: number;
   hasContext: boolean;
+}
+
+function issueStamped(job: Pick<JobData, 'ghIssueNumber'> | null | undefined): job is JobData & { ghIssueNumber: number } {
+  return !!job && typeof job.ghIssueNumber === 'number' && Number.isFinite(job.ghIssueNumber);
+}
+
+function issueScopedMarkDodSourceNumber(
+  job: { ghIssueNumber?: number | null; contextMeta?: string | null },
+): number | null {
+  if (!job.contextMeta) return null;
+  try {
+    const meta = JSON.parse(job.contextMeta) as { sourceType?: string; sourceNumber?: number };
+    if (meta.sourceType !== 'issue') return null;
+    if (typeof meta.sourceNumber === 'number' && Number.isFinite(meta.sourceNumber)) {
+      return meta.sourceNumber;
+    }
+    return job.ghIssueNumber ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function isIssueScopedMarkDod(job: { ghIssueNumber?: number | null; contextMeta?: string | null }, issueNumber: number): boolean {
+  return issueScopedMarkDodSourceNumber(job) === issueNumber;
+}
+
+function inferLegacyMarkDodIssueFromLineage(job: JobData, jobs: JobData[]): number | null {
+  const byId = new Map(jobs.map((candidate) => [candidate.id, candidate]));
+  const seen = new Set<string>();
+  let cursor = job.parentJobId ? byId.get(job.parentJobId) ?? null : null;
+
+  while (cursor && !seen.has(cursor.id)) {
+    seen.add(cursor.id);
+    if (issueStamped(cursor)) return cursor.ghIssueNumber;
+    cursor = cursor.parentJobId ? byId.get(cursor.parentJobId) ?? null : null;
+  }
+
+  if (job.releaseId) {
+    const releaseScopedIssue = jobs
+      .filter(
+        (candidate) =>
+          candidate.project === job.project &&
+          candidate.releaseId === job.releaseId &&
+          issueStamped(candidate),
+      )
+      .sort((a, b) => b.startedAt - a.startedAt)[0];
+    if (releaseScopedIssue) return releaseScopedIssue.ghIssueNumber ?? null;
+  }
+
+  return null;
+}
+
+function inferLegacyMarkDodIssueByTime(job: JobData, jobs: JobData[]): number | null {
+  const contextKinds = new Set(['run', 'fix']);
+  return jobs
+    .filter(
+      (candidate) =>
+        candidate.project === job.project &&
+        contextKinds.has(candidate.kind) &&
+        candidate.ghIssueNumber != null &&
+        candidate.startedAt <= job.startedAt,
+    )
+    .sort((a, b) => b.startedAt - a.startedAt)[0]?.ghIssueNumber ?? null;
+}
+
+function matchesIssueMarkDod(job: JobData, issueNumber: number, jobs: JobData[]): boolean {
+  if (isIssueScopedMarkDod(job, issueNumber)) return true;
+  if (job.ghIssueNumber === issueNumber && !job.contextMeta) return true;
+  if (job.ghIssueNumber != null) return false;
+  return (
+    inferLegacyMarkDodIssueFromLineage(job, jobs) === issueNumber ||
+    inferLegacyMarkDodIssueByTime(job, jobs) === issueNumber
+  );
 }
 
 /**
  * Build the "Continue work" payload for an issue:
  *
  * 1. Find the most recent Claude run/fix job tagged with this issue
- *    (`gh_issue_number`) and grab its `session_id` so the next run can
- *    `--resume` into the same Claude conversation.
+ *    (`gh_issue_number`) and grab its `session_id` + originating provider so
+ *    the next run can `--resume` into the same CLI conversation.
  *
  * 2. Find the most recent `mark-dod` job for the same issue and parse its
  *    log for the `[unverified]` lines that mark-dod itself wrote — those are
@@ -51,10 +126,13 @@ export async function GET(
     )
     .sort((a, b) => b.startedAt - a.startedAt)[0] ?? null;
 
-  // Most recent mark-dod for this issue (regardless of project — issue numbers
-  // are repo-scoped but `mark-dod` rows are stamped with the project).
+  // Most recent mark-dod for this issue. mark-dod rows now persist their own
+  // source issue/PR metadata, so a newer verification pass for some other
+  // issue in the same project cannot leak its checklist into this prompt.
+  // Older rows predate that stamp, so fall back to the latest issue-linked
+  // run/fix context that existed before the legacy mark-dod fired.
   const lastMarkDod = allJobs
-    .filter(j => j.project === projectName && j.kind === 'mark-dod')
+    .filter(j => j.project === projectName && j.kind === 'mark-dod' && matchesIssueMarkDod(j, issueNumber, allJobs))
     .sort((a, b) => b.startedAt - a.startedAt)[0] ?? null;
 
   // Parse the unverified items from the mark-dod log. Lines look like:
@@ -92,6 +170,7 @@ Work through them one by one. Edit files directly. Don't redo anything that alre
 
   const payload: ContinuePayload = {
     sessionId: lastClaudeForIssue?.sessionId ?? null,
+    provider: lastClaudeForIssue?.provider ?? null,
     prompt,
     unverifiedCount: unverified.length,
     hasContext: !!lastClaudeForIssue,

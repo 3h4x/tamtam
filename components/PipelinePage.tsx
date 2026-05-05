@@ -279,7 +279,7 @@ export function PipelinePage() {
         <StatCard
           label="Fix convergence"
           value={fixLoop.total > 0 ? fmtPct(convRate) : '—'}
-          sub={fixLoop.total > 0 ? `${fixLoop.converged}/${fixLoop.total} converged · ${fixLoop.hitCap} hit cap` : 'No fix loops'}
+          sub={fixLoop.total > 0 ? `${fixLoop.converged}/${fixLoop.total} converged · ${fixLoop.hitCap} exhausted recovery budget` : 'No recovery loops'}
           color={convColor as 'green' | 'yellow' | 'red' | undefined}
         />
         <StatCard
@@ -341,13 +341,14 @@ export function PipelinePage() {
           <div className="px-4 py-3 border-b border-border bg-bg-tertiary">
             <h2 className="text-sm font-medium text-text-primary">Fix loop detail</h2>
             <p className="text-xs text-text-tertiary mt-0.5">
-              Cap: {configSnapshot.maxFixIterations} iterations per{' '}
-              {Math.round(configSnapshot.fixWindowSeconds / 60)} min window
+              Review/test cap: {configSnapshot.maxStepIterations} iterations per step
+              {' · '}
+              fix-push cap: {configSnapshot.maxFixPushAttempts} attempts
             </p>
           </div>
           <div className="px-4 py-4 grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
             <div>
-              <div className="text-xs text-text-tertiary uppercase tracking-wide">Releases with fixes</div>
+              <div className="text-xs text-text-tertiary uppercase tracking-wide">Releases with recovery loops</div>
               <div className="text-xl font-semibold text-text-primary mt-1 tabular-nums">{fixLoop.total}</div>
             </div>
             <div>
@@ -355,13 +356,13 @@ export function PipelinePage() {
               <div className="text-xl font-semibold text-status-success mt-1 tabular-nums">{fixLoop.converged}</div>
             </div>
             <div>
-              <div className="text-xs text-text-tertiary uppercase tracking-wide">Hit cap</div>
+              <div className="text-xs text-text-tertiary uppercase tracking-wide">Exhausted recovery budget</div>
               <div className={`text-xl font-semibold mt-1 tabular-nums ${fixLoop.hitCap > 0 ? 'text-status-error' : 'text-text-primary'}`}>
                 {fixLoop.hitCap}
               </div>
             </div>
             <div>
-              <div className="text-xs text-text-tertiary uppercase tracking-wide">Avg iterations</div>
+              <div className="text-xs text-text-tertiary uppercase tracking-wide">Avg recovery iters</div>
               <div className="text-xl font-semibold text-text-primary mt-1 tabular-nums">{fixLoop.avgIterations}</div>
             </div>
           </div>
@@ -382,7 +383,7 @@ export function PipelinePage() {
                   <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Releases</th>
                   <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Success</th>
                   <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">LGTM rate</th>
-                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Avg fix iters</th>
+                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Avg recovery iters</th>
                   <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Median release</th>
                 </tr>
               </thead>
@@ -467,7 +468,10 @@ export function PipelinePage() {
           <div className="px-4 py-4 space-y-4">
             <div>
               <div className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-1">
-                Verdict rules · cap: {configSnapshot.maxFixIterations} iterations / {Math.round(configSnapshot.fixWindowSeconds / 60)} min
+                Verdict rules · review/test cap: {configSnapshot.maxStepIterations} iterations per step
+              </div>
+              <div className="text-xs text-text-secondary mb-2">
+                fix-push cap: {configSnapshot.maxFixPushAttempts} attempts · standalone fallback window: {Math.round(configSnapshot.stepWindowSeconds / 60)} min
               </div>
               <pre className="text-xs text-text-secondary bg-bg-tertiary rounded p-3 whitespace-pre-wrap break-words">
                 {configSnapshot.verdictRules || '(using defaults)'}

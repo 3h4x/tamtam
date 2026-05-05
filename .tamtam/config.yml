@@ -3,3 +3,11 @@
 
 pipeline:
   test_command: pnpm lint && pnpm type-check && pnpm test
+actions:
+  custom_actions:
+    - name: Restart
+      command: pnpm restart
+      color: "#6366f1"
+    - name: Rebuild
+      command: pnpm run rebuild
+      color: "#2563eb"

@@ -129,6 +129,40 @@ describe('RunRow', () => {
     unmount()
   })
 
+  it('renders NEEDS ATTENTION reviews as attention instead of green done', () => {
+    const entry = makeEntry({
+      verdict: 'NEEDS ATTENTION',
+      exitCode: 0,
+    })
+
+    const { container, unmount } = renderRow({
+      entry,
+      onClick: vi.fn(),
+    })
+
+    expect(container.textContent).toContain('review needs attention')
+    expect(container.textContent).toContain('⚠ ATTN')
+    expect(container.textContent).not.toContain('done')
+    unmount()
+  })
+
+  it('renders DO NOT SHIP reviews as attention instead of green done', () => {
+    const entry = makeEntry({
+      verdict: 'DO NOT SHIP',
+      exitCode: 0,
+    })
+
+    const { container, unmount } = renderRow({
+      entry,
+      onClick: vi.fn(),
+    })
+
+    expect(container.textContent).toContain('do not ship')
+    expect(container.textContent).toContain('✗ DNS')
+    expect(container.textContent).not.toContain('done')
+    unmount()
+  })
+
   it('hides parent badges for nested rows and renders release-attention state', () => {
     const nested = makeEntry({
       verdict: 'NEEDS ATTENTION',

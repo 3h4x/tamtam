@@ -46,7 +46,7 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
   // Issue bodies can be many KB. Stuffing them into the URL trips Node's
   // 8KB header limit (HTTP 431) before the terminal page even renders, so
   // we stash the payload in sessionStorage and pass only the short key.
-  const stashAndOpen = (data: { prompt: string; issue_number?: string; issue_repo?: string; issue_title?: string; resume_session_id?: string }) => {
+  const stashAndOpen = (data: { prompt: string; issue_number?: string; issue_repo?: string; issue_title?: string; resume_session_id?: string; resume_provider?: string }) => {
     const key = `tamtam-pending-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     try { sessionStorage.setItem(key, JSON.stringify(data)) } catch {}
     router.push(`/project/${projectName}/terminal?pending=${key}`)
@@ -75,7 +75,7 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
     try {
       const res = await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/continue-issue?issue_number=${issue.number}`)
       if (!res.ok) throw new Error('continue-issue lookup failed')
-      const data = await res.json() as { sessionId: string | null; prompt: string; unverifiedCount: number }
+      const data = await res.json() as { sessionId: string | null; provider: string | null; prompt: string; unverifiedCount: number }
       const repoMatch = issue.url.match(/github\.com\/([^/]+\/[^/]+)\/issues\//)
       const repo = repoMatch?.[1] ?? ''
       stashAndOpen({
@@ -84,6 +84,7 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
         issue_repo: repo,
         issue_title: issue.title,
         resume_session_id: data.sessionId ?? undefined,
+        resume_provider: data.provider ?? undefined,
       })
     } catch {
       // Fall back to a plain Work-on if the lookup failed.

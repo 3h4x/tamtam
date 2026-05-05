@@ -11,11 +11,22 @@ import {
   listJobs,
   getJob,
   persistVerdict,
+  updateJob,
 } from './storage';
 import { parentContext } from './parent-context';
 import type { JobData } from './types';
 import { findingsIdentity, extractFindingIds, extractFixClaims } from '@/lib/pipeline/review-contract';
 import { hasFreshLgtm, hasLocalCommitsAhead } from '@/lib/pipeline/release-state';
+import {
+  getFixPushAttemptCap,
+  getMaxStepIterations,
+  getStepWindowSeconds,
+} from '@/lib/pipeline/recovery-budget';
+import {
+  findLatestIssueRunContext,
+  findReleaseScopedIssueContext,
+  parsePrContextMeta,
+} from '@/lib/pipeline/release-context';
 
 async function getProjectPipelineConfig(projectName: string): Promise<{ autoCommitEnabled: boolean; autoPushEnabled: boolean; releaseAfterRun: boolean; autoPrMergeEnabled: boolean; prWorkflowEnabled: boolean }> {
   try {
@@ -37,11 +48,10 @@ async function getProjectPipelineConfig(projectName: string): Promise<{ autoComm
   }
 }
 
-// Cap runaway review→fix→review loops when auto-push is on. Override via
-// TAMTAM_MAX_FIX_ITERATIONS / TAMTAM_FIX_WINDOW_SECONDS for debugging or tuning
-// per-environment without a code change.
-const MAX_FIX_ITERATIONS = parseInt(process.env.TAMTAM_MAX_FIX_ITERATIONS ?? '', 10) || 3;
-const FIX_WINDOW_SECONDS = parseInt(process.env.TAMTAM_FIX_WINDOW_SECONDS ?? '', 10) || 30 * 60;
+// Cap runaway review→fix→review loops when auto-push is on. The shared helper
+// keeps lifecycle enforcement, stats snapshots, and docs on the same contract.
+const MAX_FIX_ITERATIONS = getMaxStepIterations();
+const FIX_WINDOW_SECONDS = getStepWindowSeconds();
 // fix-ci retries — live-read from settings so the user can tune this in the UI
 // without restarting the server. Only crash-fast failures are retried so real
 // errors still surface.
@@ -68,7 +78,26 @@ function recentFixCiCount(projectName: string, windowSeconds: number): number {
 
 // Cap auto-fix-push retries so a stubbornly-broken lint rule can't spin
 // Claude in a loop. Same 30min window as review-fix for consistency.
-const MAX_FIX_PUSH_ATTEMPTS = 2;
+const MAX_FIX_PUSH_ATTEMPTS = getFixPushAttemptCap();
+
+function parseJsonObject(value: string | null | undefined): Record<string, unknown> {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistReleaseStopReason(release: JobData, stopReason: string): void {
+  const meta = parseJsonObject(release.contextMeta);
+  meta.releaseStopReason = stopReason;
+  release.contextMeta = JSON.stringify(meta);
+  updateJob(release);
+}
 
 function recentFixPushCount(projectName: string): number {
   const cutoff = Date.now() / 1000 - FIX_WINDOW_SECONDS;
@@ -429,9 +458,10 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           // to launchPrWait (post-merge) so verification reflects the merged
           // state. Otherwise (PR Workflow + issue but no auto-merge) run it
           // now so the review can tick boxes before manual merge.
-          const hasIssueContext = listJobs().some(
-            j => j.project === job.project && j.kind === 'run' && j.ghIssueNumber != null,
-          );
+          const hasIssueContext = (
+            findReleaseScopedIssueContext(job.project) ??
+            findLatestIssueRunContext(job.project)
+          ) !== null;
           const prWorkflow = !!pipelineCfg.prWorkflowEnabled;
           const shouldRunDod = prWorkflow && hasIssueContext;
           const shouldDeferDod = shouldRunDod && pipelineCfg.autoPrMergeEnabled;
@@ -726,13 +756,13 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         // PR exists but no auto-merge (covers both PR Workflow and Direct Branch
         // issue-linked pushes that create a PR): run DoD now. The auto-merge path
         // defers this to post-merge in launchPrWait.
-        const meta = JSON.parse(job.contextMeta) as { prNumber?: number };
-        if (meta.prNumber) {
+        const meta = parsePrContextMeta(job.contextMeta);
+        if (meta) {
           try {
             const { startMarkDod } = await import('@/lib/pipeline/start-mark-dod');
-            const md = await startMarkDod(job.project);
+            const md = await startMarkDod(job.project, { prNumber: meta.number, repo: meta.repo });
             if (md.ok) {
-              console.log(`[push→dod] PR #${meta.prNumber} DoD: ${md.verified}/${md.total} verified${md.changed ? ' (PR updated)' : ''}`);
+              console.log(`[push→dod] PR #${meta.number} DoD: ${md.verified}/${md.total} verified${md.changed ? ' (PR updated)' : ''}`);
             }
           } catch (e) {
             console.log(`[push→dod] mark-dod error for ${job.project}:`, e);
@@ -773,6 +803,10 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
             console.log(`[push] hook rejection — could not start fix-push: ${r.detail}`);
           }
         } else {
+          releaseStopReason = `fix-push cap reached for ${job.project} (${attempts}/${MAX_FIX_PUSH_ATTEMPTS}) — push hook failures still need recovery`;
+          noteReleaseStop(releaseStopReason);
+          notificationEvent = 'fix_loop_exhausted';
+          forcedReleaseExitCode = 1;
           console.log(`[push] hook rejection — fix-push cap reached (${attempts}/${MAX_FIX_PUSH_ATTEMPTS}) — surfacing error`);
         }
       }
@@ -823,6 +857,9 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     const release = findActiveReleaseJob(job.project);
     if (release) {
       const exitCode = forcedReleaseExitCode ?? pipelineExitCodeForStep(job);
+      if (releaseStopReason) {
+        persistReleaseStopReason(release, releaseStopReason);
+      }
       if (releaseStopReason && release.logPath) {
         try {
           appendFileSync(release.logPath, `\n# release stopped — ${releaseStopReason}\n`);
@@ -922,7 +959,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
       const { releaseAfterRun } = await getProjectPipelineConfig(job.project);
       if (releaseAfterRun) {
         const { startRelease } = await import('@/lib/pipeline/start-release');
-        const r = await startRelease(job.project, { queueIfBlocked: true });
+        const r = await startRelease(job.project, { queueIfBlocked: true, sourceJobId: job.id });
         if (r.ok) {
           if ('status' in r && r.status === 'queued') {
             console.log(`[release-after-run] queued release for ${job.project} after run ${job.id}`);

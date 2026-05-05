@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildEntries } from '../../components/project-runs/utils'
+import { buildEntries, entryNeedsAttention, groupReleaseChildren } from '../../components/project-runs/utils'
 import type { JobInfo } from '../../lib/client-api'
 
 function job(partial: Partial<JobInfo> & { id: string; kind: string; started_at: number }): JobInfo {
@@ -132,5 +132,56 @@ describe('buildEntries session grouping', () => {
     expect(entries).toHaveLength(1)
     expect(entries[0].turns).toBe(2)
     expect(entries[0].bucket).toBe('review')
+  })
+
+  it('refreshes a merged review entry verdict from undefined to LGTM on the latest turn', () => {
+    const jobs = [
+      job({ id: 'rev-1', kind: 'review', started_at: 100, session_id: 'S2', verdict: undefined }),
+      job({ id: 'rev-2', kind: 'review', started_at: 200, session_id: 'S2', verdict: 'LGTM' }),
+    ]
+
+    const [entry] = buildEntries(jobs)
+
+    expect(entry.verdict).toBe('LGTM')
+    expect(entryNeedsAttention(entry)).toBe(false)
+  })
+
+  it('refreshes a merged review entry verdict from NEEDS ATTENTION to LGTM on the latest turn', () => {
+    const jobs = [
+      job({ id: 'rev-1', kind: 'review', started_at: 100, session_id: 'S2', verdict: 'NEEDS ATTENTION' }),
+      job({ id: 'rev-2', kind: 'review', started_at: 200, session_id: 'S2', verdict: 'LGTM' }),
+    ]
+
+    const [entry] = buildEntries(jobs)
+
+    expect(entry.verdict).toBe('LGTM')
+    expect(entryNeedsAttention(entry)).toBe(false)
+  })
+
+  it('refreshes a merged review entry verdict from LGTM to NEEDS ATTENTION on the latest turn', () => {
+    const jobs = [
+      job({ id: 'rev-1', kind: 'review', started_at: 100, session_id: 'S2', verdict: 'LGTM' }),
+      job({ id: 'rev-2', kind: 'review', started_at: 200, session_id: 'S2', verdict: 'NEEDS ATTENTION' }),
+    ]
+
+    const [entry] = buildEntries(jobs)
+
+    expect(entry.verdict).toBe('NEEDS ATTENTION')
+    expect(entryNeedsAttention(entry)).toBe(true)
+  })
+
+  it('uses the latest merged review verdict when computing grouped pipeline state', () => {
+    const entries = buildEntries([
+      job({ id: 'test-1', kind: 'test', started_at: 100, finished_at: 110 }),
+      job({ id: 'review-1', kind: 'review', started_at: 120, finished_at: 130, session_id: 'S3', verdict: 'NEEDS ATTENTION' }),
+      job({ id: 'review-2', kind: 'review', started_at: 140, finished_at: 150, session_id: 'S3', verdict: 'LGTM' }),
+    ])
+
+    const grouped = groupReleaseChildren(entries)
+
+    expect(grouped).toHaveLength(1)
+    expect(grouped[0].kind).toBe('release')
+    expect(grouped[0].failureLabel).toBeNull()
+    expect(grouped[0].exitCode).toBe(0)
   })
 })

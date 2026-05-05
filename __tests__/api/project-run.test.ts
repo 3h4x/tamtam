@@ -440,6 +440,22 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     );
   });
 
+  it('returns 400 when ghIssueNumber is provided without ghIssueRepo', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({
+        prompt: 'fix the bug',
+        ghIssueNumber: 42,
+      }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toContain('ghIssueRepo');
+    expect(createJobMock).not.toHaveBeenCalled();
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
   it('stores null ghIssue fields when not provided in request body', async () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
       method: 'POST',

@@ -247,7 +247,7 @@ export function launchPrWait(
       // Run mark-dod post-merge so verification reflects the merged state
       try {
         const { startMarkDod } = await import('./start-mark-dod');
-        const md = await startMarkDod(projectName);
+        const md = await startMarkDod(projectName, { prNumber, repo: prRepo });
         if (md.ok) {
           log(`\n# mark-dod: ${md.verified}/${md.total} verified${md.changed ? ' (issue updated)' : ''}\n`);
         }

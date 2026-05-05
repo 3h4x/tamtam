@@ -44,7 +44,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 - `release/abort` — Abort active release: marks release job aborted, kills running step, releases lock (POST)
 - `issues` — GitHub PRs and issues (GET, with `?refresh=1` to bypass cache); POST merges or approves a PR and switches working copy to default after merge
 - `issue-branch` — Create or checkout `fix/issue-<n>-<slug>` before Claude edits (POST)
-- `continue-issue` — Build a "Continue work" payload for an issue (GET: `?issue_number=N`); returns `{ sessionId, prompt, unverifiedCount, hasContext }`
+- `continue-issue` — Build a "Continue work" payload for an issue (GET: `?issue_number=N`); returns `{ sessionId, provider, prompt, unverifiedCount, hasContext }`
 - `mark-dod` — Run DoD verification for latest issue-linked run (POST); also triggered automatically after review→LGTM
 - `pr-branch` — Fetch and checkout a PR's head branch (POST: `{ branch }`)
 - `pr-gates` — TamTam-side gate state for a PR: tests/review/DoD badges (GET)
@@ -82,5 +82,5 @@ GitHub board cards carry four TEXT custom fields provisioned by `ensureProjectBo
 - `/api/monitoring` — Prometheus + Loki status aggregation (GET); env: `PROMETHEUS_URL`, `LOKI_URL`
 - `/api/monitoring/pm2-logs` — Tail tamtam PM2 log files (error + out from `~/.pm2/logs/`), last 64 KB; `?limit=` (max 500), `?out=0` to suppress stdout (GET)
 - `/api/stats/usage` — Token usage per project and per agent kind (GET, `?window=24h|7d|30d|all`)
-- `/api/stats/pipeline` — Pipeline health metrics: verdict distribution, fix-loop stats, step durations, MTTR, per-project breakdown (GET, `?window=...`, `?project=`; 60s cache)
+- `/api/stats/pipeline` — Pipeline health metrics: verdict distribution, recovery-loop stats (`fix` and `fix-push`, attributed by `releaseId` when present and otherwise by the enclosing release window), step durations, MTTR, per-project breakdown, and active recovery-budget config snapshot (`maxStepIterations`, `maxFixPushAttempts`, `stepWindowSeconds`; sourced from the same helper as runtime enforcement) (GET, `?window=...`, `?project=`; 60s cache)
 - `/api/usage/quota` — Active provider quota snapshot (`?provider=claude|codex` overrides). GET → `QuotaSnapshot` with fiveHour/sevenDay utilization and gate state; POST force-clears cache and re-fetches; 502 when provider data unavailable.
