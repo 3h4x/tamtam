@@ -120,7 +120,7 @@ describe('IssueRow', () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ sessionId: 'sess-123', prompt: 'resume prompt', unverifiedCount: 2 }),
+        json: async () => ({ sessionId: 'sess-123', provider: 'codex', prompt: 'resume prompt', unverifiedCount: 2 }),
       })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -144,6 +144,7 @@ describe('IssueRow', () => {
     const payload = JSON.parse(sessionStorage.getItem(pendingKey) ?? '{}')
     expect(payload.prompt).toBe('resume prompt')
     expect(payload.resume_session_id).toBe('sess-123')
+    expect(payload.resume_provider).toBe('codex')
     expect(payload.issue_repo).toBe('acme/widgets')
     unmount()
   })
@@ -176,6 +177,7 @@ describe('IssueRow', () => {
     const pendingKey = (push.mock.calls[0][0] as string).split('pending=')[1]
     const payload = JSON.parse(sessionStorage.getItem(pendingKey) ?? '{}')
     expect(payload.resume_session_id).toBeUndefined()
+    expect(payload.resume_provider).toBeUndefined()
     expect(payload.prompt).toContain('Work on GitHub issue #42')
     unmount()
   })

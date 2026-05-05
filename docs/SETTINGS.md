@@ -1,6 +1,6 @@
 # Settings Reference
 
-All settings stored in the `settings` table (key-value, both TEXT). Accessed via `lib/config.ts` (`getSettings()`, `TamTamConfig`). Config is cached with a 5s TTL; `PATCH /api/settings` calls `reloadConfig()` to invalidate.
+All settings stored in the `settings` table (key-value, both TEXT). Accessed via `lib/shared/config.ts` (`getSettings()`, `TamTamConfig`). Config is cached with a 5s TTL; `PATCH /api/settings` calls `reloadConfig()` to invalidate.
 
 ## When to read this
 
@@ -120,7 +120,7 @@ Outbound webhooks for release pipeline events. Never blocks pipeline progress â€
 | `notification_webhook_secret` | string | `''` | Optional secret for HMAC-SHA256 signature verification. If set, payloads include `X-TamTam-Signature` header. |
 | `notification_on_release_success` | boolean | `false` | Stored as `'true'`/`'false'`. Notify when a release pipeline completes successfully. |
 | `notification_on_release_fail` | boolean | `false` | Notify when a release pipeline fails. |
-| `notification_on_fix_loop_exhausted` | boolean | `false` | Notify when the fix loop reaches its maximum iteration count (prevents infinite reviewâ†’fix cycles). |
+| `notification_on_fix_loop_exhausted` | boolean | `false` | Notify when a release exhausts automated recovery budget (`test`/`review` retries or `fix-push` attempts) or stops for non-converging fix/review loops. |
 | `notification_on_review_do_not_ship` | boolean | `false` | Notify when a code review verdict is "DO NOT SHIP". |
 | `notification_on_agent_run_fail` | boolean | `false` | Notify when an agent run fails. |
 
@@ -166,7 +166,7 @@ Outbound webhook fired when the release pipeline reaches a terminal state. Suppo
 | `notification_webhook_secret` | string | `''` | If set, every POST includes an `X-TamTam-Signature` HMAC-SHA256 hex header over the JSON body |
 | `notification_on_release_success` | boolean | `false` | Fire when the full release pipeline completes with exit 0 |
 | `notification_on_release_fail` | boolean | `false` | Fire when any pipeline step fails and the pipeline halts |
-| `notification_on_fix_loop_exhausted` | boolean | `false` | Fire when the fix-iteration cap (3/30 min) is reached without achieving LGTM |
+| `notification_on_fix_loop_exhausted` | boolean | `false` | Fire when a release exhausts automated recovery budget (`test`/`review` retries or `fix-push` attempts) or stops because fix/review iterations are not converging |
 | `notification_on_review_do_not_ship` | boolean | `false` | Fire when a review returns a DO NOT SHIP verdict |
 | `notification_on_agent_run_fail` | boolean | `false` | Fire when any scheduled agent job exits non-zero |
 | `notification_on_budget_blocked` | boolean | `false` | Fire when a run is refused because the selected agent subscription budget threshold is exceeded (debounced once per window+resetsAt) |
@@ -256,9 +256,13 @@ const isValid = timingSafeEqual(Buffer.from(expected), Buffer.from(req.headers['
 
 ```
 github_owner, github_board_sync_enabled, github_board_project_owner,
-github_board_project_title, github_board_project_number, github_board_project_id,
-github_board_status_field_id, github_board_status_option_ids,
-claude_provider, claude_bin, lmstudio_model, log_dir,
+github_board_project_title, github_board_project_number, github_board_project_url,
+github_board_view_url, github_board_project_id, github_board_status_field_id,
+github_board_status_option_ids, github_board_custom_field_ids,
+claude_provider, claude_bin, lmstudio_model, cli_enabled_providers,
+cli_bin_claude, cli_bin_codex, cli_bin_gemini, cli_bin_lmstudio,
+cli_default_model_claude, cli_default_model_codex,
+cli_default_model_gemini, cli_default_model_lmstudio, log_dir,
 frequency, daytime, weekends, launchagent_prefix, workspace_path,
 base_prompt, default_model, permission_mode, commit_style,
 review_verdict_rules, jobs_paused,

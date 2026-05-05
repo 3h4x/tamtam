@@ -50,14 +50,45 @@ function VerdictBadge({ verdict }: { verdict: string }) {
   return null
 }
 
+function finishedJobState(job: JobInfo): { success: boolean; detailLabel: string | null } {
+  if (job.kind === 'review' && job.status === 'done') {
+    if (job.verdict === 'LGTM') return { success: true, detailLabel: null }
+    if (job.verdict === 'NEEDS ATTENTION' || job.verdict === 'DO NOT SHIP') {
+      return { success: false, detailLabel: null }
+    }
+    return { success: false, detailLabel: 'review verdict missing' }
+  }
+
+  const success = job.exit_code === 0 || job.exit_code === null
+  return { success, detailLabel: success ? null : `exit ${job.exit_code}` }
+}
+
+function collapseFinishedJobs(jobs: JobInfo[]): JobInfo[] {
+  const byProject = new Map<string, JobInfo[]>()
+  for (const job of jobs) {
+    const list = byProject.get(job.project) ?? []
+    list.push(job)
+    byProject.set(job.project, list)
+  }
+
+  const picked: JobInfo[] = []
+  for (const projectJobs of byProject.values()) {
+    const sorted = [...projectJobs].sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))
+    const attentionJob = sorted.find((job) => !finishedJobState(job).success)
+    picked.push(attentionJob ?? sorted[0])
+  }
+
+  return picked.sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))
+}
+
 function StatusIcon({ success }: { success: boolean }) {
   return success ? (
-    <svg className="w-4 h-4 text-status-success shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-label="success" className="w-4 h-4 text-status-success shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="8" cy="8" r="6.5" />
       <path d="M5 8l2 2 4-4" />
     </svg>
   ) : (
-    <svg className="w-4 h-4 text-status-error shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-label="attention" className="w-4 h-4 text-status-error shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="8" cy="8" r="6.5" />
       <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" />
     </svg>
@@ -102,14 +133,10 @@ export function NotificationBell() {
         }
         setRunningJobs([...runningByProject.values()])
 
-        // Sky view: one finished entry per project (most recent wins)
-        const sorted = [...notifs.jobs].sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))
-        const seen = new Set<string>()
-        setFinishedJobs(sorted.filter(j => {
-          if (seen.has(j.project)) return false
-          seen.add(j.project)
-          return true
-        }))
+        // Sky view: one finished entry per project. Prefer the newest
+        // actionable attention item over a newer green remediation step so an
+        // unsuperseded failure stays visible until a terminal success clears it.
+        setFinishedJobs(collapseFinishedJobs(notifs.jobs))
       } catch {
         // ignore
       }
@@ -169,15 +196,22 @@ export function NotificationBell() {
           <path d="M6.5 12a1.5 1.5 0 0 0 3 0" />
         </svg>
 
-        {/* Unread badge */}
-        {unseenCount > 0 && (
-          <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-status-error text-white text-[10px] font-semibold rounded-full flex items-center justify-center leading-none">
-            {unseenCount > 99 ? '99+' : unseenCount}
+        {/* Unread badge — count what the dropdown actually surfaces (one per
+            project, after the sky-view collapse) so the number on the bell
+            matches what the user sees when they open it. The raw `unseenCount`
+            counts every individual unseen job and was confusing when one
+            chatty project produced dozens of pipeline children. */}
+        {finishedJobs.length > 0 && (
+          <span
+            className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-status-error text-white text-[10px] font-semibold rounded-full flex items-center justify-center leading-none"
+            title={unseenCount > finishedJobs.length ? `${finishedJobs.length} project${finishedJobs.length === 1 ? '' : 's'} need attention (${unseenCount} unseen items in total)` : undefined}
+          >
+            {finishedJobs.length > 99 ? '99+' : finishedJobs.length}
           </span>
         )}
 
         {/* Running indicator dot (only when no unread badge) */}
-        {isRunning && unseenCount === 0 && (
+        {isRunning && finishedJobs.length === 0 && (
           <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-accent rounded-full animate-pulse" />
         )}
       </button>
@@ -247,7 +281,7 @@ export function NotificationBell() {
                     </div>
                   )}
                   {finishedJobs.map(job => {
-                    const success = job.exit_code === 0 || job.exit_code === null
+                    const state = finishedJobState(job)
                     const dur = elapsed(job.started_at, job.finished_at)
                     const ago = job.finished_at ? timeAgo(new Date(job.finished_at * 1000)) : null
 
@@ -257,7 +291,7 @@ export function NotificationBell() {
                         onClick={() => handleJobClick(job)}
                         className="w-full flex items-center gap-3 px-4 py-3 border-b border-border/50 last:border-0 hover:bg-bg-secondary transition-colors bg-transparent cursor-pointer text-left"
                       >
-                        <StatusIcon success={success} />
+                        <StatusIcon success={state.success} />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-sm font-medium text-text-primary truncate">{job.project}</span>
@@ -267,8 +301,8 @@ export function NotificationBell() {
                           <div className="flex items-center gap-2 mt-0.5">
                             <span className="text-xs text-text-tertiary">{dur}</span>
                             {ago && <span className="text-xs text-text-tertiary">· {ago}</span>}
-                            {!success && !job.verdict && (
-                              <span className="text-xs text-status-error">exit {job.exit_code}</span>
+                            {!state.success && state.detailLabel && (
+                              <span className="text-xs text-status-error">{state.detailLabel}</span>
                             )}
                           </div>
                         </div>

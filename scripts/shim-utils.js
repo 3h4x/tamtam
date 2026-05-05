@@ -11,8 +11,9 @@
  * and the shim *is* alive (just idle).
  *
  * `installInactivityWatchdog(child, opts)` arms a periodic check that kills
- * the child if no stdout/stderr data has arrived in `timeoutMs`. Callers
- * should:
+ * the child if no stdout/stderr data has arrived in `timeoutMs`. Child CLIs
+ * can legitimately be silent during process startup, so the watchdog grants
+ * a startup grace window before "no output" counts as a hang. Callers should:
  *   1. call this after `spawn(...)` returns the child handle
  *   2. invoke `markActivity()` on every chunk received from the child
  *      (stdout / stderr) so the timer is rearmed by real progress
@@ -38,13 +39,22 @@ function readTimeoutMs() {
 /**
  * Arm an inactivity watchdog around `child`.
  * @param {import('child_process').ChildProcess} child
- * @param {{ shimName: string, onTimeout?: (info: { timeoutMs: number, sinceLastActivityMs: number }) => void, timeoutMs?: number }} opts
+ * @param {{ shimName: string, onTimeout?: (info: { timeoutMs: number, sinceLastActivityMs: number }) => void, timeoutMs?: number, startupGraceMs?: number }} opts
  * @returns {{ markActivity: () => void, dispose: () => void, timedOut: () => boolean }}
  */
 function installInactivityWatchdog(child, opts) {
   const shimName = opts && opts.shimName ? opts.shimName : 'shim';
   const timeoutMs = typeof opts?.timeoutMs === 'number' ? opts.timeoutMs : readTimeoutMs();
-  const state = { lastActivityAt: Date.now(), timedOut: false, killedAt: 0 };
+  const startupGraceMs = typeof opts?.startupGraceMs === 'number'
+    ? Math.max(0, opts.startupGraceMs)
+    : Math.max(timeoutMs, 5_000);
+  const state = {
+    lastActivityAt: Date.now(),
+    timedOut: false,
+    killedAt: 0,
+    startedAt: Date.now(),
+    sawActivity: false,
+  };
 
   if (timeoutMs <= 0) {
     return {
@@ -57,6 +67,7 @@ function installInactivityWatchdog(child, opts) {
   // Check 6× per timeout window so we're never more than ~timeout/6 late.
   const tickMs = Math.max(1_000, Math.floor(timeoutMs / 6));
   const timer = setInterval(() => {
+    if (!state.sawActivity && Date.now() - state.startedAt < startupGraceMs) return;
     const idleMs = Date.now() - state.lastActivityAt;
     if (idleMs < timeoutMs) return;
     if (state.timedOut) {
@@ -81,7 +92,10 @@ function installInactivityWatchdog(child, opts) {
   if (typeof timer.unref === 'function') timer.unref();
 
   return {
-    markActivity() { state.lastActivityAt = Date.now(); },
+    markActivity() {
+      state.lastActivityAt = Date.now();
+      state.sawActivity = true;
+    },
     dispose() { clearInterval(timer); },
     timedOut: () => state.timedOut,
   };
@@ -91,16 +105,27 @@ function installInactivityWatchdog(child, opts) {
  * Variant for shims that don't spawn a child process — e.g. lmstudio-shim
  * talks to a local HTTP server via fetch. Caller passes an abort function
  * (typically `controller.abort`) instead of a child handle. Same lifecycle:
- * markActivity() on each meaningful chunk, dispose() on completion.
+ * markActivity() on each meaningful chunk, dispose() on completion. Just like
+ * the child-process watchdog above, this grants a startup grace window before
+ * "no activity" counts as a hang so cold model boot / delayed first token
+ * isn't treated as a stall.
  *
  * @param {() => void} abort
- * @param {{ shimName: string, onTimeout?: (info: { timeoutMs: number, sinceLastActivityMs: number }) => void, timeoutMs?: number }} opts
+ * @param {{ shimName: string, onTimeout?: (info: { timeoutMs: number, sinceLastActivityMs: number }) => void, timeoutMs?: number, startupGraceMs?: number }} opts
  * @returns {{ markActivity: () => void, dispose: () => void, timedOut: () => boolean }}
  */
 function installFetchInactivityWatchdog(abort, opts) {
   const shimName = opts && opts.shimName ? opts.shimName : 'shim';
   const timeoutMs = typeof opts?.timeoutMs === 'number' ? opts.timeoutMs : readTimeoutMs();
-  const state = { lastActivityAt: Date.now(), timedOut: false };
+  const startupGraceMs = typeof opts?.startupGraceMs === 'number'
+    ? Math.max(0, opts.startupGraceMs)
+    : Math.max(timeoutMs, 5_000);
+  const state = {
+    lastActivityAt: Date.now(),
+    timedOut: false,
+    startedAt: Date.now(),
+    sawActivity: false,
+  };
 
   if (timeoutMs <= 0) {
     return { markActivity() {}, dispose() {}, timedOut: () => false };
@@ -108,6 +133,7 @@ function installFetchInactivityWatchdog(abort, opts) {
 
   const tickMs = Math.max(1_000, Math.floor(timeoutMs / 6));
   const timer = setInterval(() => {
+    if (!state.sawActivity && Date.now() - state.startedAt < startupGraceMs) return;
     const idleMs = Date.now() - state.lastActivityAt;
     if (idleMs < timeoutMs) return;
     if (state.timedOut) return;
@@ -124,7 +150,10 @@ function installFetchInactivityWatchdog(abort, opts) {
   if (typeof timer.unref === 'function') timer.unref();
 
   return {
-    markActivity() { state.lastActivityAt = Date.now(); },
+    markActivity() {
+      state.lastActivityAt = Date.now();
+      state.sawActivity = true;
+    },
     dispose() { clearInterval(timer); },
     timedOut: () => state.timedOut,
   };

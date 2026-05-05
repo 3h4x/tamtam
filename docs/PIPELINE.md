@@ -189,7 +189,7 @@ Accepts markdown wrapping (`**LGTM**`, `` `LGTM` ``) and optional colon/dash del
 
 | Cap | Limit | Window | Setting |
 |-----|-------|--------|---------|
-| Review→Fix loop | unbounded fixes; 3 verification iterations cap | per release; 30 min fallback for standalone chaining | `TAMTAM_MAX_FIX_ITERATIONS` (default 3), `FIX_WINDOW_SECONDS=1800`. Every NEEDS ATTENTION/DO NOT SHIP review or red test triggers a fix; the cap fires on the *next* verification step (fix→test, fix→review). After the budget is exhausted the trailing fix still runs unverified and the release stops without re-running test/review. |
+| Review→Fix loop | unbounded fixes; 3 verification iterations cap | per release; 30 min fallback for standalone chaining | `TAMTAM_MAX_STEP_ITERATIONS` (default 3, legacy alias: `TAMTAM_MAX_FIX_ITERATIONS`), `TAMTAM_FIX_WINDOW_SECONDS=1800`. Every NEEDS ATTENTION/DO NOT SHIP review or red test triggers a fix; the cap fires on the *next* verification step (fix→test, fix→review). After the budget is exhausted the trailing fix still runs unverified and the release stops without re-running test/review. |
 | Fix-Push attempts | 2 attempts | 30 min | hardcoded `MAX_FIX_PUSH_ATTEMPTS=2` |
 | Fix-CI auto-retry | configurable | configurable | `fix_ci_max_retries` (default 2), `fix_ci_retry_window_seconds` (default 120) |
 | Fix-CI fast-crash | — | — | `fix_ci_fast_crash_ms` (default 5000ms) — only retries if job died in under this |
@@ -330,7 +330,7 @@ The global `/pipeline` view shows all projects in a summary table. Clicking a pr
 | Metric | What it tells you | Action |
 |---|---|---|
 | LGTM rate < 50% | Reviews consistently block — rules may be too strict | Loosen `review_verdict_rules` in Settings → Behavior |
-| Fix convergence low, hit-cap count high | Fix loop can't resolve issues within 3 iterations | Increase `TAMTAM_MAX_FIX_ITERATIONS` env var or adjust the review prompt |
+| Fix convergence low, hit-cap count high | Recovery loops cannot converge inside the configured review/test cap | Increase `TAMTAM_MAX_STEP_ITERATIONS` (legacy alias: `TAMTAM_MAX_FIX_ITERATIONS`) or adjust the review prompt |
 | `review` p95 > 5 min | Review jobs are slow | Check model choice; consider switching to Haiku for review |
 | Pipeline success < 80% | Releases failing frequently | Check step durations + History tab for the most recent failures |
 | MTTR high | Long time from start to push | High `fix` median duration or many fix iterations — check fix loop stats |
@@ -341,6 +341,13 @@ The global `/pipeline` view shows all projects in a summary table. Clicking a pr
 
 Returns `PipelineResponse` (see `app/api/stats/pipeline/route.ts` for full type). Cached 60 seconds per (window, project) pair.
 
+Recovery-loop attribution prefers explicit `releaseId` links on `fix` / `fix-push` jobs. For historical rows or partially stamped data where `releaseId` is absent, the stats API falls back to the release's `[startedAt, finishedAt]` window so older dashboards do not silently lose recovery iterations.
+
+The `configSnapshot` section reflects the same shared recovery-budget helper used by runtime enforcement:
+- review/test cap: `TAMTAM_MAX_STEP_ITERATIONS` with legacy fallback to `TAMTAM_MAX_FIX_ITERATIONS`
+- fallback window: `TAMTAM_FIX_WINDOW_SECONDS`
+- fix-push cap: hardcoded `2`
+
 ---
 
 ## Common Issues
@@ -349,7 +356,7 @@ Returns `PipelineResponse` (see `app/api/stats/pipeline/route.ts` for full type)
 |---------|-------------|-----|
 | Pipeline stops after test with no next step | `auto_push_enabled` is off and no active Release | Use 🚀 Release button or enable `auto_push_enabled` |
 | Review exits 0 but no verdict found | Verdict buried early in a long log | Check last 2000 chars of log; rephrase review prompt to emit verdict at the end |
-| Fix loop runs 3 times then stops | `MAX_FIX_ITERATIONS=3` cap reached within 30 min | Fix manually or wait 30 min for window to reset |
+| Fix loop runs 3 times then stops | Review/test verification cap reached within the configured fallback window | Fix manually, increase `TAMTAM_MAX_STEP_ITERATIONS` (legacy alias: `TAMTAM_MAX_FIX_ITERATIONS`), or wait for `TAMTAM_FIX_WINDOW_SECONDS` to reset |
 | Push fails, no `fix-push` triggered | Hook strings not matched by `isHookRejection` | Check the push log for hook output; add new hook string patterns to `lib/start-fix-push.ts` |
 | Release button grayed out / 400 | No changes and no unpushed commits | Make a change or verify `git status` |
 | `DO NOT SHIP` verdict loops forever | Fix cap reached | Inspect fix logs; may need manual code changes |

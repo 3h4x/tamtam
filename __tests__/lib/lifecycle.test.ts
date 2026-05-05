@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/lib/db/schema';
-import { writeFileSync, mkdtempSync, rmSync } from 'fs';
+import { writeFileSync, readFileSync, mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { eq } from 'drizzle-orm';
@@ -1234,5 +1234,159 @@ describe('auto-mark seen on completion', () => {
       0,
     );
     expect(seen).toBe(false);
+  });
+});
+
+describe('fix-push cap notifications', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
+  let notifyMock: ReturnType<typeof vi.fn>;
+  let startFixPushMock: ReturnType<typeof vi.fn>;
+  let tempDir: string;
+
+  function makePushJob(id: string, overrides: Partial<JobData> = {}): JobData {
+    const now = Date.now() / 1000;
+    return {
+      id,
+      project: 'proj',
+      kind: 'push',
+      prompt: null,
+      pid: 0,
+      logPath: null,
+      startedAt: now,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-fix-push-cap-'));
+    notifyMock = vi.fn().mockResolvedValue(undefined);
+    startFixPushMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-push-next' });
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+      getJobStatus: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/git/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({
+        autoPushEnabled: true,
+        autoCommitEnabled: false,
+        releaseAfterRun: false,
+        prWorkflowEnabled: false,
+        autoPrMergeEnabled: false,
+      }),
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      releaseLock: vi.fn(),
+      getLock: vi.fn().mockReturnValue(null),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/jobs/retention', () => ({
+      pruneProjectLogs: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/notifications', () => ({
+      notify: notifyMock,
+    }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: vi.fn().mockReturnValue({
+        fix_ci_max_retries: 0,
+        fix_ci_retry_window_seconds: 120,
+        fix_ci_fast_crash_ms: 5000,
+      }),
+    }));
+    vi.doMock('@/lib/pipeline/start-fix-push', () => ({
+      isHookRejection: vi.fn().mockReturnValue(true),
+      isTestFailureRejection: vi.fn().mockReturnValue(false),
+      startFixPush: startFixPushMock,
+    }));
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('emits fix_loop_exhausted when push hook retries hit the fix-push cap', async () => {
+    const now = Date.now() / 1000;
+    const releaseLog = join(tempDir, 'release.log');
+    const pushLog = join(tempDir, 'push.log');
+    writeFileSync(releaseLog, '# release start\n');
+    writeFileSync(pushLog, 'husky - pre-push hook exited with code 1\n');
+
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({
+        id: 'release-fix-push-cap',
+        project: 'proj',
+        kind: 'release',
+        logPath: releaseLog,
+        startedAt: now - 300,
+      }) as any,
+      makeJobRow({
+        id: 'fix-push-old-1',
+        project: 'proj',
+        kind: 'fix-push',
+        startedAt: now - 120,
+        finishedAt: now - 110,
+        exitCode: 0,
+      }) as any,
+      makeJobRow({
+        id: 'fix-push-old-2',
+        project: 'proj',
+        kind: 'fix-push',
+        startedAt: now - 90,
+        finishedAt: now - 80,
+        exitCode: 0,
+      }) as any,
+    ]).run();
+
+    const { markDone } = await import('@/lib/jobs/job-storage');
+    markDoneFn = markDone;
+
+    const pushJob = makePushJob('push-cap-hit', {
+      logPath: pushLog,
+      releaseId: 'release-fix-push-cap',
+      startedAt: now - 10,
+    });
+
+    await markDoneFn(pushJob, 1);
+
+    expect(startFixPushMock).not.toHaveBeenCalled();
+    expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'fix_loop_exhausted',
+      project: 'proj',
+      job_id: 'push-cap-hit',
+      status: 'failed',
+    }));
+
+    const releaseRow = testDb.db
+      .select()
+      .from(schema.jobs)
+      .where(eq(schema.jobs.id, 'release-fix-push-cap'))
+      .get();
+    expect(releaseRow?.exitCode).toBe(1);
+    expect(releaseRow?.finishedAt).not.toBeNull();
+    expect(releaseRow?.contextMeta).toContain('"releaseStopReason":"fix-push cap reached for proj');
+    expect(readFileSync(releaseLog, 'utf8')).toContain('fix-push cap reached for proj');
   });
 });

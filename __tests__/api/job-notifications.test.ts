@@ -135,6 +135,173 @@ describe('GET /api/jobs/notifications', () => {
     expect(data.runningCount).toBe(1);
   });
 
+  it('hides unseen failed pipeline jobs once a newer success supersedes them for the same project', async () => {
+    const oldFail = makeJob({ id: 'old-fail', kind: 'release', exitCode: 1, finishedAt: 1000, seen: false });
+    const newSuccess = makeJob({ id: 'new-pass', kind: 'release', exitCode: 0, finishedAt: 2000, seen: true });
+    unseenFinishedMock.mockReturnValue([oldFail]);
+    listJobsMock.mockReturnValue([oldFail, newSuccess]);
+    const res = await GET();
+    const data = await res.json();
+    expect(data.count).toBe(0);
+    expect(data.jobs).toEqual([]);
+  });
+
+  it('keeps unseen failures when the newer finished job for the project also failed', async () => {
+    const oldFail = makeJob({ id: 'old-fail', kind: 'release', exitCode: 1, finishedAt: 1000, seen: false });
+    const newFail = makeJob({ id: 'new-fail', kind: 'release', exitCode: 1, finishedAt: 2000, seen: false });
+    unseenFinishedMock.mockReturnValue([oldFail, newFail]);
+    listJobsMock.mockReturnValue([oldFail, newFail]);
+    const res = await GET();
+    const data = await res.json();
+    expect(data.count).toBe(2);
+  });
+
+  it('does not let a successful agent run silence an older pipeline failure', async () => {
+    // Different "domains" — agent runs and pipeline runs are unrelated; a
+    // green agent shouldn't claim the pipeline is healthy.
+    const oldPipelineFail = makeJob({ id: 'pipe-fail', kind: 'push', exitCode: 1, finishedAt: 1000, seen: false });
+    const newAgentSuccess = makeJob({ id: 'agent-ok', kind: 'agent:test', exitCode: 0, finishedAt: 2000, seen: true });
+    unseenFinishedMock.mockReturnValue([oldPipelineFail]);
+    listJobsMock.mockReturnValue([oldPipelineFail, newAgentSuccess]);
+    const res = await GET();
+    const data = await res.json();
+    expect(data.count).toBe(1);
+  });
+
+  it('does not let a successful fix silence an older unseen pipeline failure', async () => {
+    const oldFail = makeJob({ id: 'test-fail', kind: 'test', exitCode: 1, finishedAt: 1000, seen: false });
+    const fixSuccess = makeJob({ id: 'fix-ok', kind: 'fix', exitCode: 0, finishedAt: 2000, seen: true });
+    unseenFinishedMock.mockReturnValue([oldFail]);
+    listJobsMock.mockReturnValue([oldFail, fixSuccess]);
+    const res = await GET();
+    const data = await res.json();
+    expect(data.count).toBe(1);
+    expect(data.jobs[0].id).toBe('test-fail');
+  });
+
+  it('does not let a successful fix-push silence an older unseen pipeline failure', async () => {
+    const oldFail = makeJob({ id: 'push-fail', kind: 'push', exitCode: 1, finishedAt: 1000, seen: false });
+    const fixPushSuccess = makeJob({ id: 'fix-push-ok', kind: 'fix-push', exitCode: 0, finishedAt: 2000, seen: true });
+    unseenFinishedMock.mockReturnValue([oldFail]);
+    listJobsMock.mockReturnValue([oldFail, fixPushSuccess]);
+    const res = await GET();
+    const data = await res.json();
+    expect(data.count).toBe(1);
+    expect(data.jobs[0].id).toBe('push-fail');
+  });
+
+  it('does not let a successful fix-ci silence an older unseen pipeline failure', async () => {
+    const oldFail = makeJob({ id: 'test-fail', kind: 'test', exitCode: 1, finishedAt: 1000, seen: false });
+    const fixCiSuccess = makeJob({ id: 'fix-ci-ok', kind: 'fix-ci', exitCode: 0, finishedAt: 2000, seen: true });
+    unseenFinishedMock.mockReturnValue([oldFail]);
+    listJobsMock.mockReturnValue([oldFail, fixCiSuccess]);
+    const res = await GET();
+    const data = await res.json();
+    expect(data.count).toBe(1);
+    expect(data.jobs[0].id).toBe('test-fail');
+  });
+
+  it('suppresses an older unseen fix-ci failure after a later terminal green release succeeds', async () => {
+    const oldFixCiFail = makeJob({ id: 'fix-ci-fail', kind: 'fix-ci', exitCode: 1, finishedAt: 1000, seen: false });
+    const releaseSuccess = makeJob({ id: 'release-ok', kind: 'release', exitCode: 0, finishedAt: 2000, seen: true });
+    unseenFinishedMock.mockReturnValue([oldFixCiFail]);
+    listJobsMock.mockReturnValue([oldFixCiFail, releaseSuccess]);
+    const res = await GET();
+    const data = await res.json();
+    expect(data.count).toBe(0);
+    expect(data.jobs).toEqual([]);
+  });
+
+  it('suppresses an older unseen failure after a later terminal green release succeeds', async () => {
+    const oldFail = makeJob({ id: 'review-fail', kind: 'review', exitCode: 1, finishedAt: 1000, seen: false });
+    const fixSuccess = makeJob({ id: 'fix-ok', kind: 'fix', exitCode: 0, finishedAt: 1500, seen: true });
+    const releaseSuccess = makeJob({ id: 'release-ok', kind: 'release', exitCode: 0, finishedAt: 2000, seen: true });
+    unseenFinishedMock.mockReturnValue([oldFail]);
+    listJobsMock.mockReturnValue([oldFail, fixSuccess, releaseSuccess]);
+    const res = await GET();
+    const data = await res.json();
+    expect(data.count).toBe(0);
+    expect(data.jobs).toEqual([]);
+  });
+
+  it('does not let a successful mark-dod silence an older unseen pipeline failure', async () => {
+    const oldFail = makeJob({ id: 'review-fail', kind: 'review', exitCode: 1, finishedAt: 1000, seen: false });
+    const markDodSuccess = makeJob({ id: 'dod-ok', kind: 'mark-dod', exitCode: 0, finishedAt: 2000, seen: true });
+    unseenFinishedMock.mockReturnValue([oldFail]);
+    listJobsMock.mockReturnValue([oldFail, markDodSuccess]);
+    const res = await GET();
+    const data = await res.json();
+    expect(data.count).toBe(1);
+    expect(data.jobs[0].id).toBe('review-fail');
+  });
+
+  it('does not let a successful mark-dod silence an older unseen fix-ci failure', async () => {
+    // fix-ci is in PIPELINE_LIKE (so a terminal release success can supersede it)
+    // but mark-dod is not a GLOBAL_TERMINAL_SUCCESS_KIND and not the same kind,
+    // so it must not clear a fix-ci failure.
+    const oldFixCiFail = makeJob({ id: 'fix-ci-fail', kind: 'fix-ci', exitCode: 1, finishedAt: 1000, seen: false });
+    const markDodSuccess = makeJob({ id: 'dod-ok', kind: 'mark-dod', exitCode: 0, finishedAt: 2000, seen: true });
+    unseenFinishedMock.mockReturnValue([oldFixCiFail]);
+    listJobsMock.mockReturnValue([oldFixCiFail, markDodSuccess]);
+    const res = await GET();
+    const data = await res.json();
+    expect(data.count).toBe(1);
+    expect(data.jobs[0].id).toBe('fix-ci-fail');
+  });
+
+  it('does not let a newer LGTM review silence an older unseen review failure', async () => {
+    const oldReviewFail = makeJob({
+      id: 'review-fail',
+      kind: 'review',
+      exitCode: 1,
+      finishedAt: 1000,
+      seen: false,
+      verdict: 'NEEDS ATTENTION',
+    });
+    const newReviewPass = makeJob({
+      id: 'review-lgtm',
+      kind: 'review',
+      exitCode: 0,
+      finishedAt: 2000,
+      seen: true,
+      verdict: 'LGTM',
+    });
+    unseenFinishedMock.mockReturnValue([oldReviewFail]);
+    listJobsMock.mockReturnValue([oldReviewFail, newReviewPass]);
+
+    const res = await GET();
+    const data = await res.json();
+
+    expect(data.count).toBe(1);
+    expect(data.jobs[0].id).toBe('review-fail');
+  });
+
+  it('does not let a newer passing test silence an older unseen test failure', async () => {
+    const oldTestFail = makeJob({ id: 'test-fail', kind: 'test', exitCode: 1, finishedAt: 1000, seen: false });
+    const newTestPass = makeJob({ id: 'test-pass', kind: 'test', exitCode: 0, finishedAt: 2000, seen: true });
+    unseenFinishedMock.mockReturnValue([oldTestFail]);
+    listJobsMock.mockReturnValue([oldTestFail, newTestPass]);
+
+    const res = await GET();
+    const data = await res.json();
+
+    expect(data.count).toBe(1);
+    expect(data.jobs[0].id).toBe('test-fail');
+  });
+
+  it('does not let a newer successful commit silence an older unseen commit failure', async () => {
+    const oldCommitFail = makeJob({ id: 'commit-fail', kind: 'commit', exitCode: 1, finishedAt: 1000, seen: false });
+    const newCommitPass = makeJob({ id: 'commit-pass', kind: 'commit', exitCode: 0, finishedAt: 2000, seen: true });
+    unseenFinishedMock.mockReturnValue([oldCommitFail]);
+    listJobsMock.mockReturnValue([oldCommitFail, newCommitPass]);
+
+    const res = await GET();
+    const data = await res.json();
+
+    expect(data.count).toBe(1);
+    expect(data.jobs[0].id).toBe('commit-fail');
+  });
+
   it('omits bulky prompt fields from notification jobs', async () => {
     const unseen = makeJob({ id: 'u1', prompt: 'large prompt', userPrompt: 'large user prompt', contextMeta: '{"large":true}' });
     unseenFinishedMock.mockReturnValue([unseen]);

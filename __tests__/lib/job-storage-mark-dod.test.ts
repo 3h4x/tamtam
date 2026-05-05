@@ -280,6 +280,58 @@ describe('runCompletionHooks – mark-dod integration', () => {
     expect(startProjectCommitMock).toHaveBeenCalled();
   });
 
+  it('still calls startMarkDod when the release-scoped source row is missing ghIssueRepo but a sibling row has it', async () => {
+    testDb.sqlite.exec('DELETE FROM jobs');
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.jobs).values([
+      {
+        id: 'release-active',
+        project: 'my-proj',
+        kind: 'release',
+        pid: 0,
+        startedAt: now - 120,
+        finishedAt: null,
+        exitCode: null,
+        ghIssueNumber: 7,
+        ghIssueRepo: null,
+        ghIssueTitle: 'sample',
+      } as any,
+      {
+        id: 'issue-source-missing-repo',
+        project: 'my-proj',
+        kind: 'run',
+        pid: 0,
+        startedAt: now - 110,
+        finishedAt: now - 100,
+        exitCode: 0,
+        releaseId: 'release-active',
+        ghIssueNumber: 7,
+        ghIssueRepo: null,
+        ghIssueTitle: 'sample',
+      } as any,
+      {
+        id: 'issue-sibling-with-repo',
+        project: 'my-proj',
+        kind: 'fix',
+        pid: 0,
+        startedAt: now - 90,
+        finishedAt: now - 80,
+        exitCode: 0,
+        releaseId: 'release-active',
+        ghIssueNumber: 7,
+        ghIssueRepo: 'owner/repo',
+        ghIssueTitle: 'sample',
+      } as any,
+    ]).run();
+
+    const logFile = join(tempDir, 'lgtm-recover-repo.log');
+    writeFileSync(logFile, 'Verdict: LGTM\n');
+    await markDoneFn(makeReviewJob(logFile), 0);
+
+    expect(startMarkDodMock).toHaveBeenCalledWith('my-proj');
+    expect(startProjectCommitMock).toHaveBeenCalled();
+  });
+
   it('defers mark-dod (does NOT call it inline) when auto_pr_merge_enabled is true', async () => {
     // PR Workflow + issue context + auto-merge → shouldDeferDod=true → mark-dod
     // is left to launchPrWait post-merge. The release chain must still proceed

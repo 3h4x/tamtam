@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { closeSync, openSync, readSync, statSync } from 'fs';
 import { listJobs, getVerdict } from '@/lib/jobs/job-storage';
 import type { JobData } from '@/lib/jobs/job-storage';
 import { getSettings } from '@/lib/shared/config';
+import {
+  getFixPushAttemptCap,
+  getMaxStepIterations,
+  getStepWindowSeconds,
+} from '@/lib/pipeline/recovery-budget';
 
 const WINDOWS = {
   '24h': 24 * 60 * 60 * 1000,
@@ -60,13 +66,28 @@ export interface PipelineResponse {
   configSnapshot: {
     verdictRules: string;
     commitStyle: string;
-    maxFixIterations: number;
-    fixWindowSeconds: number;
+    maxStepIterations: number;
+    maxFixPushAttempts: number;
+    stepWindowSeconds: number;
   };
 }
 
-const MAX_FIX_ITERATIONS = parseInt(process.env.TAMTAM_MAX_FIX_ITERATIONS ?? '', 10) || 3;
-const FIX_WINDOW_SECONDS = parseInt(process.env.TAMTAM_FIX_WINDOW_SECONDS ?? '', 10) || 30 * 60;
+const MAX_STEP_ITERATIONS = getMaxStepIterations();
+const MAX_FIX_PUSH_ATTEMPTS = getFixPushAttemptCap();
+const FIX_WINDOW_SECONDS = getStepWindowSeconds();
+const RECOVERY_STEP_KINDS = new Set<JobData['kind']>(['fix', 'fix-push']);
+
+function parseJsonObject(value: string | null | undefined): Record<string, unknown> {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
 
 function jobDurationMs(job: JobData): number | null {
   if (job.durationMs != null && job.durationMs > 0) return job.durationMs;
@@ -84,13 +105,59 @@ function percentile(values: number[], p: number): number {
   return sorted[idx];
 }
 
-function fixChildrenOf(release: JobData, fixJobs: JobData[]): JobData[] {
-  return fixJobs.filter(
-    (fix) =>
-      fix.project === release.project &&
-      fix.startedAt >= release.startedAt &&
-      fix.startedAt <= (release.finishedAt ?? Infinity),
+function recoveryChildrenOf(release: JobData, recoveryJobs: JobData[]): JobData[] {
+  return recoveryJobs.filter(
+    (job) =>
+      job.project === release.project &&
+      (job.releaseId === release.id || job.releaseId == null) &&
+      job.startedAt >= release.startedAt &&
+      job.startedAt <= (release.finishedAt ?? Infinity),
   );
+}
+
+function readReleaseLogTail(release: JobData, tailBytes = 50_000): string {
+  if (!release.logPath) return '';
+  try {
+    const size = statSync(/*turbopackIgnore: true*/ release.logPath).size;
+    if (size <= 0) return '';
+    const start = Math.max(0, size - tailBytes);
+    const length = size - start;
+    const fd = openSync(/*turbopackIgnore: true*/ release.logPath, 'r');
+    try {
+      const buffer = Buffer.alloc(length);
+      const bytesRead = readSync(fd, buffer, 0, length, start);
+      const tail = buffer.toString('utf8', 0, bytesRead);
+      if (start === 0) return tail;
+      const newlineIdx = tail.indexOf('\n');
+      return newlineIdx >= 0 ? tail.slice(newlineIdx + 1) : tail;
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return '';
+  }
+}
+
+function createReleaseStopReasonReader(): (release: JobData) => string | null {
+  const cache = new Map<string, string | null>();
+  return (release: JobData): string | null => {
+    const key = release.id;
+    if (cache.has(key)) return cache.get(key) ?? null;
+    const persisted = parseJsonObject(release.contextMeta).releaseStopReason;
+    if (typeof persisted === 'string' && persisted.trim()) {
+      cache.set(key, persisted);
+      return persisted;
+    }
+    const log = readReleaseLogTail(release);
+    if (!log) {
+      cache.set(key, null);
+      return null;
+    }
+    const matches = [...log.matchAll(/# release stopped — ([^\n]+)/g)];
+    const reason = matches.length > 0 ? matches[matches.length - 1][1].trim() : null;
+    cache.set(key, reason);
+    return reason;
+  };
 }
 
 function computeVerdicts(reviewJobs: JobData[]): VerdictDistribution {
@@ -108,15 +175,19 @@ function computeVerdicts(reviewJobs: JobData[]): VerdictDistribution {
   return dist;
 }
 
-function computeFixLoop(releaseJobs: JobData[], fixJobs: JobData[]): FixLoopStats {
+function computeFixLoop(
+  releaseJobs: JobData[],
+  recoveryJobs: JobData[],
+  getReleaseStopReason: (release: JobData) => string | null,
+): FixLoopStats {
   let total = 0, converged = 0, hitCap = 0, totalIterations = 0;
   for (const release of releaseJobs) {
-    const children = fixChildrenOf(release, fixJobs);
+    const children = recoveryChildrenOf(release, recoveryJobs);
     if (children.length === 0) continue;
     total++;
     totalIterations += children.length;
     if (release.exitCode === 0) converged++;
-    else if (children.length >= MAX_FIX_ITERATIONS) hitCap++;
+    else if ((getReleaseStopReason(release) ?? '').match(/\b[a-z-]+ cap reached\b/i)) hitCap++;
   }
   return {
     total,
@@ -146,13 +217,14 @@ function computeMetrics(
   projectFilter: string | null,
 ): Omit<PipelineResponse, 'window' | 'generatedAt' | 'project' | 'configSnapshot'> {
   const scoped = projectFilter ? jobs.filter((j) => j.project === projectFilter) : jobs;
+  const getReleaseStopReason = createReleaseStopReasonReader();
 
   const reviewJobs = scoped.filter((j) => j.kind === 'review' && j.finishedAt != null && j.exitCode === 0);
   const verdicts = computeVerdicts(reviewJobs);
 
   const releaseJobs = scoped.filter((j) => j.kind === 'release' && j.finishedAt != null);
-  const fixJobs = scoped.filter((j) => j.kind === 'fix');
-  const fixLoop = computeFixLoop(releaseJobs, fixJobs);
+  const recoveryJobs = scoped.filter((j) => RECOVERY_STEP_KINDS.has(j.kind));
+  const fixLoop = computeFixLoop(releaseJobs, recoveryJobs, getReleaseStopReason);
 
   const succeeded = releaseJobs.filter((j) => j.exitCode === 0).length;
   const failed = releaseJobs.length - succeeded;
@@ -186,9 +258,9 @@ function computeMetrics(
       const pReleases = pjobs.filter((j) => j.kind === 'release' && j.finishedAt != null);
       if (pReleases.length === 0) continue;
       const pReviews = pjobs.filter((j) => j.kind === 'review' && j.finishedAt != null && j.exitCode === 0);
-      const pFix = pjobs.filter((j) => j.kind === 'fix');
+      const pRecoveryJobs = pjobs.filter((j) => RECOVERY_STEP_KINDS.has(j.kind));
       const lgtmCount = pReviews.filter((j) => getVerdict(j) === 'LGTM').length;
-      const pFixLoop = computeFixLoop(pReleases, pFix);
+      const pFixLoop = computeFixLoop(pReleases, pRecoveryJobs, getReleaseStopReason);
       const pDurations = pReleases
         .filter((j) => j.exitCode === 0)
         .map((j) => jobDurationMs(j))
@@ -236,8 +308,9 @@ export async function GET(request: NextRequest) {
     configSnapshot: {
       verdictRules: settings.review_verdict_rules,
       commitStyle: settings.commit_style,
-      maxFixIterations: MAX_FIX_ITERATIONS,
-      fixWindowSeconds: FIX_WINDOW_SECONDS,
+      maxStepIterations: MAX_STEP_ITERATIONS,
+      maxFixPushAttempts: MAX_FIX_PUSH_ATTEMPTS,
+      stepWindowSeconds: FIX_WINDOW_SECONDS,
     },
   };
 

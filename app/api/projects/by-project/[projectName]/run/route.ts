@@ -100,6 +100,11 @@ export async function POST(
   if (!prompt.trim() && attachmentPaths.length > 0) {
     prompt = 'See the attached files.';
   }
+  if (ghIssueNumber != null && !ghIssueRepo.trim()) {
+    return NextResponse.json({
+      detail: 'ghIssueRepo is required when ghIssueNumber is set',
+    }, { status: 400 });
+  }
 
   // When resuming, pin to the originating provider — session IDs are stored
   // per-CLI (codex rollouts ≠ claude sessions ≠ gemini threads), so a

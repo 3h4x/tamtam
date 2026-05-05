@@ -64,7 +64,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   // short `pending` key. Read once on first render and clear, so reloads
   // don't re-fire the same auto-submit.
   const pendingKey = searchParams.get('pending')
-  const [stashed] = useState<{ prompt?: string; issue_number?: string; issue_repo?: string; issue_title?: string; resume_session_id?: string }>(() => {
+  const [stashed] = useState<{ prompt?: string; issue_number?: string; issue_repo?: string; issue_title?: string; resume_session_id?: string; resume_provider?: string }>(() => {
     if (!pendingKey || typeof window === 'undefined') return {}
     try {
       const raw = sessionStorage.getItem(pendingKey)
@@ -78,6 +78,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const issueRepoParam = stashed.issue_repo ?? searchParams.get('issue_repo')
   const issueTitleParam = stashed.issue_title ?? searchParams.get('issue_title')
   const resumeSessionIdParam = stashed.resume_session_id ?? null
+  const resumeProviderParam = stashed.resume_provider ?? null
 
   // Subscribe to the module-level session store. Survives component unmounts.
   const state = useSyncExternalStore(
@@ -179,6 +180,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     issueNumberParam,
     issueTitleParam,
     resumeSessionIdParam,
+    resumeProviderParam,
     onLoadSessions: loadSessions,
   })
 

@@ -151,6 +151,104 @@ describe('groupReleaseChildren', () => {
     expect(out[0].children!.map((c) => c.kind)).toEqual(['test', 'review', 'push']);
   });
 
+  it('clustered chain that recovers from a failed step reports green (terminal step exit 0)', () => {
+    // test fails → fix succeeds → test passes → push succeeds. The pipeline
+    // recovered: virtual group should report exit 0, not red.
+    const entries = [
+      makeEntry({ id: 't1', kind: 'test', startedAt: 1000, finishedAt: 1010, exitCode: 1 }),
+      makeEntry({ id: 'fix1', kind: 'fix', startedAt: 1020, finishedAt: 1080, exitCode: 0 }),
+      makeEntry({ id: 't2', kind: 'test', startedAt: 1090, finishedAt: 1100, exitCode: 0 }),
+      makeEntry({ id: 'p1', kind: 'push', startedAt: 1110, finishedAt: 1115, exitCode: 1 }),
+      makeEntry({ id: 'fp', kind: 'fix-push', startedAt: 1120, finishedAt: 1180, exitCode: 0 }),
+      makeEntry({ id: 'p2', kind: 'push', startedAt: 1190, finishedAt: 1200, exitCode: 0 }),
+    ];
+    const out = groupReleaseChildren(entries);
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe('release');
+    expect(out[0].exitCode).toBe(0);
+    expect(out[0].failureLabel).toBeNull();
+  });
+
+  it('clustered chain that ends on a failed terminal step reports red', () => {
+    // push fails and no recovery — the virtual group is genuinely failed.
+    const entries = [
+      makeEntry({ id: 't', kind: 'test', startedAt: 1000, finishedAt: 1010, exitCode: 0 }),
+      makeEntry({ id: 'p', kind: 'push', startedAt: 1020, finishedAt: 1030, exitCode: 1 }),
+    ];
+    const out = groupReleaseChildren(entries);
+    expect(out).toHaveLength(1);
+    expect(out[0].exitCode).toBe(1);
+    expect(out[0].failureLabel).toBe('pipeline failed');
+  });
+
+  it('cluster ending on a successful fix still reports attention until follow-up runs', () => {
+    const entries = [
+      makeEntry({ id: 't', kind: 'test', startedAt: 1000, finishedAt: 1010, exitCode: 1 }),
+      makeEntry({ id: 'fix', kind: 'fix', startedAt: 1020, finishedAt: 1080, exitCode: 0 }),
+    ];
+    const out = groupReleaseChildren(entries);
+    expect(out).toHaveLength(1);
+    expect(out[0].exitCode).toBe(1);
+    expect(out[0].failureLabel).toBe('follow-up pending');
+  });
+
+  it('cluster ending on a successful fix-push still reports attention until push reruns', () => {
+    const entries = [
+      makeEntry({ id: 'push', kind: 'push', startedAt: 1000, finishedAt: 1010, exitCode: 1 }),
+      makeEntry({ id: 'fix-push', kind: 'fix-push', startedAt: 1020, finishedAt: 1080, exitCode: 0 }),
+    ];
+    const out = groupReleaseChildren(entries);
+    expect(out).toHaveLength(1);
+    expect(out[0].exitCode).toBe(1);
+    expect(out[0].failureLabel).toBe('follow-up pending');
+  });
+
+  it('cluster ending on a review with NEEDS ATTENTION stays red until a later LGTM review', () => {
+    const attentionReview = {
+      ...makeEntry({ id: 'review-1', kind: 'review', startedAt: 1000, finishedAt: 1010, exitCode: 0 }),
+      verdict: 'NEEDS ATTENTION',
+    };
+    const out = groupReleaseChildren([
+      makeEntry({ id: 'test-1', kind: 'test', startedAt: 900, finishedAt: 950, exitCode: 0 }),
+      attentionReview,
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].exitCode).toBe(1);
+    expect(out[0].failureLabel).toBe('review needs attention');
+
+    const recovered = groupReleaseChildren([
+      makeEntry({ id: 'test-1', kind: 'test', startedAt: 900, finishedAt: 950, exitCode: 0 }),
+      attentionReview,
+      { ...makeEntry({ id: 'fix-1', kind: 'fix', startedAt: 1020, finishedAt: 1030, exitCode: 0 }) },
+      { ...makeEntry({ id: 'review-2', kind: 'review', startedAt: 1040, finishedAt: 1050, exitCode: 0 }), verdict: 'LGTM' },
+    ]);
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0].exitCode).toBe(0);
+    expect(recovered[0].failureLabel).toBeNull();
+  });
+
+  it('cluster ending on a successful mark-dod keeps the pipeline actionable instead of green', () => {
+    const out = groupReleaseChildren([
+      makeEntry({ id: 'push-1', kind: 'push', startedAt: 1000, finishedAt: 1010, exitCode: 1 }),
+      makeEntry({ id: 'dod-1', kind: 'mark-dod', startedAt: 1020, finishedAt: 1030, exitCode: 0 }),
+    ]);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].exitCode).toBe(1);
+    expect(out[0].failureLabel).toBe('follow-up pending');
+  });
+
+  it('cluster ending on a successful mark-dod after LGTM still reports follow-up pending', () => {
+    const out = groupReleaseChildren([
+      { ...makeEntry({ id: 'review-lgtm', kind: 'review', startedAt: 1000, finishedAt: 1010, exitCode: 0 }), verdict: 'LGTM' },
+      makeEntry({ id: 'dod-1', kind: 'mark-dod', startedAt: 1020, finishedAt: 1030, exitCode: 0 }),
+    ]);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].exitCode).toBe(1);
+    expect(out[0].failureLabel).toBe('follow-up pending');
+  });
+
   it('does not cluster orphaned pipeline steps separated by more than 30 min', () => {
     const GAP = 31 * 60; // 31 minutes
     const entries = [

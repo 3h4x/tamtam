@@ -8,8 +8,13 @@ import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { currentParent } from '@/lib/jobs/parent-context';
 import { buildDiffContext } from '@/lib/git/diff-context';
-import { createJob, markDone, updateJob, listJobs } from '@/lib/jobs/job-storage';
+import { createJob, markDone, updateJob, listJobs, findActiveReleaseJob } from '@/lib/jobs/job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
+import {
+  findReleaseScopedIssueContext,
+  issueStamped,
+  type IssueContext,
+} from './release-context';
 
 export type CommitResult =
   | { ok: true; commitSha: string; message: string; jobId?: string }
@@ -125,28 +130,80 @@ export function issueBranchName(issue: { number: number; title: string }): strin
 export async function findIssueContext(
   projectName: string,
   projPath: string,
-): Promise<{ number: number; repo: string; title: string } | null> {
-  const jobs = listJobs()
-    .filter(j => j.project === projectName && j.kind === 'run' && j.ghIssueNumber != null)
-    .sort((a, b) => b.startedAt - a.startedAt);
-  const job = jobs[0];
-  if (!job || job.ghIssueNumber == null) return null;
-  const repo = job.ghIssueRepo ?? '';
-  // Skip already-closed issues — otherwise the next release after an
-  // issue-driven merge creates a redundant PR targeting the closed issue
-  // (the run job keeps the gh_issue_number stamp forever).
-  if (repo) {
-    try {
-      const r = await exec('gh', ['issue', 'view', String(job.ghIssueNumber), '--repo', repo, '--json', 'state'], { cwd: projPath, timeout: 10000 });
-      if (r.exitCode === 0) {
-        const state = (JSON.parse(r.stdout).state ?? '').toString().toUpperCase();
-        if (state && state !== 'OPEN') return null;
-      }
-    } catch {
-      // gh unreachable — fall through and use the context optimistically.
+): Promise<IssueContext | null> {
+  // Scope to the active release if there is one — a stale issue stamp from a
+  // long-ago run must NOT decide what branch the current commit lands on.
+  // Without this scope the most recent issue-tagged run job ever recorded
+  // (no time bound) was treated as authoritative, which is how a `commit` on
+  // master would decide to silently switch onto an unmerged `fix/issue-N-…`
+  // branch from weeks ago.
+  const active = findActiveReleaseJob(projectName);
+  const candidates: IssueContext[] = [];
+  const releaseIssue = active ? findReleaseScopedIssueContext(projectName, active) : null;
+  if (releaseIssue) {
+    candidates.push(releaseIssue);
+  } else {
+    const recentIssues = listJobs()
+      .filter(
+        j =>
+          j.project === projectName &&
+          j.kind === 'run' &&
+          issueStamped(j) &&
+          // No active release: only honor an issue stamp from a run started
+          // in the last 30 minutes. Anything older was almost certainly a
+          // different task.
+          Date.now() / 1000 - j.startedAt < 30 * 60,
+      )
+      .sort((a, b) => b.startedAt - a.startedAt);
+    for (const job of recentIssues) {
+      if (!issueStamped(job)) continue;
+      candidates.push({
+        number: job.ghIssueNumber,
+        repo: job.ghIssueRepo ?? '',
+        title: job.ghIssueTitle ?? '',
+      });
     }
   }
-  return { number: job.ghIssueNumber, repo, title: job.ghIssueTitle ?? '' };
+  if (candidates.length === 0) return null;
+
+  let currentBranch = '';
+  let mainBranch = '';
+  // If the working tree is currently checked out on a different feature
+  // branch (not the default branch and not the inferred fix/issue-N branch),
+  // trust the human's branch over the inferred issue context.
+  try {
+    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+    currentBranch = branchR.stdout.trim();
+    mainBranch = await detectMainBranch(projPath);
+  } catch {
+    // git unreachable — fall through with optimistic context.
+  }
+
+  for (const issue of candidates) {
+    if (currentBranch && mainBranch) {
+      const inferredBranch = issueBranchName({ number: issue.number, title: issue.title });
+      if (currentBranch !== mainBranch && currentBranch !== inferredBranch) {
+        continue;
+      }
+    }
+    const repo = issue.repo;
+    // Skip already-closed issues — otherwise the next release after an
+    // issue-driven merge creates a redundant PR targeting the closed issue
+    // (the run job keeps the gh_issue_number stamp forever).
+    if (repo) {
+      try {
+        const r = await exec('gh', ['issue', 'view', String(issue.number), '--repo', repo, '--json', 'state'], { cwd: projPath, timeout: 10000 });
+        if (r.exitCode === 0) {
+          const state = (JSON.parse(r.stdout).state ?? '').toString().toUpperCase();
+          if (state && state !== 'OPEN') continue;
+        }
+      } catch {
+        // gh unreachable — fall through and use the context optimistically.
+      }
+    }
+    return issue;
+  }
+  return null;
 }
 
 export async function detectMainBranch(projPath: string): Promise<string> {

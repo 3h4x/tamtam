@@ -65,9 +65,15 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock, probeJobStatus: probeJobStatusMock,
       createJob: createJobMock, updateJob: updateJobMock, getJob: getJobMock,
+      findActiveReleaseJob: vi.fn().mockReturnValue(null),
       getVerdict: getVerdictMock,
       markDone: markDoneMock,
       runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
+    }));
+    vi.doMock('@/lib/jobs/storage', () => ({
+      listJobs: listJobsMock,
+      getJob: getJobMock,
+      findActiveReleaseJob: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/git/git-utils', () => ({
       isReviewed: isReviewedMock,
@@ -79,7 +85,11 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/pipeline/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
     vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
     vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
-    vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' }) }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
+      startProjectCommit: vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' }),
+      detectMainBranch: vi.fn().mockResolvedValue('main'),
+      findIssueContext: vi.fn().mockResolvedValue(null),
+    }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
@@ -131,6 +141,137 @@ describe('startRelease — release pipeline entry decision tree', () => {
       undefined,
       'agent-123',
     );
+  });
+
+  it('stamps issue context onto the release root when started from an issue-linked source job', async () => {
+    getJobMock.mockReturnValue({
+      id: 'run-issue-42',
+      project: 'proj',
+      kind: 'run',
+      ghIssueNumber: 42,
+      ghIssueRepo: 'owner/repo',
+      ghIssueTitle: 'Fix login bug',
+    });
+    detectTestCommandMock.mockReturnValue(null);
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'));
+    startProjectReviewMock.mockResolvedValue({ ok: true, jobId: 'r1' });
+
+    const r = await startRelease('proj', { sourceJobId: 'run-issue-42' });
+
+    expect(r.ok).toBe(true);
+    expect(updateJobMock.mock.calls.some(([job]) =>
+      job.kind === 'release' &&
+      job.ghIssueNumber === 42 &&
+      job.ghIssueRepo === 'owner/repo' &&
+      job.ghIssueTitle === 'Fix login bug'
+    )).toBe(true);
+  });
+
+  it('stamps issue context onto the release root for a plain release without sourceJobId', async () => {
+    vi.resetModules();
+    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
+    listJobsMock = vi.fn().mockReturnValue([
+      {
+        id: 'issue-42-run',
+        project: 'proj',
+        kind: 'run',
+        startedAt: Date.now() / 1000 - 120,
+        ghIssueNumber: 42,
+        ghIssueRepo: 'owner/repo',
+        ghIssueTitle: 'Fix login bug',
+      },
+      {
+        id: 'issue-99-run',
+        project: 'proj',
+        kind: 'run',
+        startedAt: Date.now() / 1000 - 60,
+        ghIssueNumber: 99,
+        ghIssueRepo: 'owner/repo',
+        ghIssueTitle: 'Wrong issue',
+      },
+    ]);
+    probeJobStatusMock = vi.fn();
+    getVerdictMock = vi.fn().mockReturnValue(null);
+    createJobMock = vi.fn().mockImplementation((project: string, kind: string) => ({
+      id: `${project}-${kind}-rel-id`, project, kind, pid: 0, logPath: '',
+      prompt: null, startedAt: 0, finishedAt: null, exitCode: null, seen: false,
+      durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+      contextMeta: null, userPrompt: null,
+    }));
+    updateJobMock = vi.fn();
+    markDoneMock = vi.fn();
+    getJobMock = vi.fn().mockReturnValue(null);
+    detectTestCommandMock = vi.fn().mockReturnValue(null);
+    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'r1' });
+    execMock = vi.fn()
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementationOnce(() => Promise.resolve({ exitCode: 0, stdout: 'fix/issue-42-fix-login-bug\n', stderr: '' }))
+      .mockImplementationOnce(() => Promise.resolve({ exitCode: 0, stdout: 'refs/remotes/origin/main\n', stderr: '' }))
+      .mockImplementationOnce(() => Promise.resolve({ exitCode: 0, stdout: '{"state":"OPEN"}', stderr: '' }))
+      .mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'pm2' && args[0] === 'start') return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+        if (cmd === 'pm2' && args[0] === 'jlist') return Promise.resolve({ exitCode: 0, stdout: JSON.stringify([{ name: 'proj-release-rel-id', pid: 1234 }]), stderr: '' });
+        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+      });
+
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      listJobs: listJobsMock,
+      probeJobStatus: probeJobStatusMock,
+      createJob: createJobMock,
+      updateJob: updateJobMock,
+      getJob: getJobMock,
+      findActiveReleaseJob: vi.fn().mockReturnValue(null),
+      getVerdict: getVerdictMock,
+      markDone: markDoneMock,
+      runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
+    }));
+    vi.doMock('@/lib/jobs/storage', () => ({
+      listJobs: listJobsMock,
+      getJob: getJobMock,
+      findActiveReleaseJob: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/git/git-utils', () => ({
+      isReviewed: vi.fn().mockResolvedValue(false),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs', claudeBin: 'claude', projects: {} }),
+      getProjectTestConfig: () => null,
+    }));
+    vi.doMock('@/lib/pipeline/start-test', () => ({ startProjectTest: startProjectTestMock, detectTestCommand: detectTestCommandMock }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
+      startProjectCommit: vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' }),
+      detectMainBranch: vi.fn().mockResolvedValue('main'),
+      findIssueContext: vi.fn().mockResolvedValue({
+        number: 42,
+        repo: 'owner/repo',
+        title: 'Fix login bug',
+      }),
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+      getLock: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({ checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }) }));
+
+    const { startRelease: fn } = await import('@/lib/pipeline/start-release');
+    const r = await fn('proj');
+
+    expect(r.ok).toBe(true);
+    expect(updateJobMock.mock.calls.some(([job]) =>
+      job.kind === 'release' &&
+      job.ghIssueNumber === 42 &&
+      job.ghIssueRepo === 'owner/repo' &&
+      job.ghIssueTitle === 'Fix login bug'
+    )).toBe(true);
   });
 
   it('queues a pending release when the budget gate blocks startup', async () => {

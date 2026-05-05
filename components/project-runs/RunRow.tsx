@@ -4,21 +4,6 @@ import { formatAgo } from '@/lib/shared/format'
 import { formatDuration, formatTokens, formatCost, KIND_LABEL, KIND_COLOR, entryIsRunning, entryNeedsAttention } from '@/components/project-runs/utils'
 import type { Entry } from '@/components/project-runs/utils'
 
-const PROVIDER_LABEL: Record<string, string> = {
-  claude: 'claude',
-  codex: 'codex',
-  gemini: 'gemini',
-  lmstudio: 'lmstudio',
-}
-
-// Brand-ish tints so users can scan a long run list and spot which CLI ran each row.
-const PROVIDER_BADGE_CLASS: Record<string, string> = {
-  claude: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
-  codex: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-  gemini: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
-  lmstudio: 'bg-violet-500/15 text-violet-400 border-violet-500/30',
-}
-
 function modifiedFileCount(raw: string | null): number {
   if (!raw) return 0
   try {
@@ -63,43 +48,22 @@ function VerdictBadge({
   verdict,
   isRunning,
   isFailed,
-  exitCode,
-  failureLabel,
 }: {
   verdict: string | null | undefined
   isRunning: boolean
   isFailed: boolean
-  exitCode: number | null | undefined
-  failureLabel?: string | null
 }) {
-  if (verdict && !isRunning && !isFailed) {
-    return (
-      <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium font-mono ${
-        verdict === 'LGTM' ? 'bg-status-success/15 text-status-success border border-status-success/30' :
-        verdict === 'DO NOT SHIP' ? 'bg-status-error/15 text-status-error border border-status-error/30' :
-        'bg-status-warning/15 text-status-warning border border-status-warning/30'
-      }`} title={`Review verdict: ${verdict}`}>
-        {verdict === 'LGTM' ? '✓ LGTM' : verdict === 'DO NOT SHIP' ? '✗ DNS' : '⚠ ATTN'}
-      </span>
-    )
-  }
-  if (isRunning) {
-    return (
-      <span className="inline-flex items-center gap-1.5 px-1.5 py-0.5 text-[10px] rounded-full font-medium bg-status-info/15 text-status-info border border-status-info/30">
-        <span className="relative flex h-1.5 w-1.5">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-status-info opacity-60" />
-          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-status-info" />
-        </span>
-        running
-      </span>
-    )
-  }
+  // Only render when there's a verdict to convey. The running/done/failed
+  // states are already shown by RowStateBadge — emitting a second "done" or
+  // "exit X" badge here just duplicates that without adding information.
+  if (!verdict || isRunning || isFailed) return null
   return (
-    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium border ${
-      isFailed ? 'bg-status-error/15 text-status-error border-status-error/30' :
-      'bg-status-success/15 text-status-success border-status-success/30'
-    }`}>
-      {isFailed ? (failureLabel ?? `exit ${exitCode}`) : '✓ done'}
+    <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-medium font-mono ${
+      verdict === 'LGTM' ? 'bg-status-success/15 text-status-success border border-status-success/30' :
+      verdict === 'DO NOT SHIP' ? 'bg-status-error/15 text-status-error border border-status-error/30' :
+      'bg-status-warning/15 text-status-warning border border-status-warning/30'
+    }`} title={`Review verdict: ${verdict}`}>
+      {verdict === 'LGTM' ? '✓ LGTM' : verdict === 'DO NOT SHIP' ? '✗ DNS' : '⚠ ATTN'}
     </span>
   )
 }
@@ -156,29 +120,39 @@ function RowStateBadge({
 
 export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summary, actions, depth = 0, children }: RunRowProps) {
   const isRunning = e.status === 'running'
-  const isFailed = !isRunning && e.exitCode !== null && e.exitCode !== 0
   const effectiveRunning = entryIsRunning(e)
   const effectiveNeedsAttention = entryNeedsAttention(e)
+  const statusFailureLabel = e.failureLabel
+    ?? (e.kind === 'review' && e.verdict === 'DO NOT SHIP'
+      ? 'do not ship'
+      : e.kind === 'review' && e.verdict == null && e.status === 'done'
+      ? 'review verdict missing'
+      : e.kind === 'review' && effectiveNeedsAttention
+      ? 'review needs attention'
+      : null)
   const totalTokens = e.inputTokens + e.outputTokens
   const fileCount = modifiedFileCount(e.modifiedFiles)
   const statusBadge = (
     <RowStateBadge
-      isRunning={isRunning}
-      isFailed={isFailed}
+      isRunning={effectiveRunning}
+      isFailed={effectiveNeedsAttention}
       exitCode={e.exitCode}
-      failureLabel={e.failureLabel}
+      failureLabel={statusFailureLabel}
     />
   )
   const verdictBadge = (
     <VerdictBadge
       verdict={e.verdict}
       isRunning={isRunning}
-      isFailed={isFailed}
-      exitCode={e.exitCode}
-      failureLabel={e.failureLabel}
+      isFailed={!isRunning && e.exitCode !== null && e.exitCode !== 0}
     />
   )
-  const releaseBadge = <ReleaseOutcomeBadge entry={e} />
+  // ReleaseOutcomeBadge is only useful when the entry itself isn't a
+  // release — i.e. an agent/run that owns a separate release outcome chip.
+  // For release/vgroup entries the row's RowStateBadge already conveys the
+  // outcome, and showing a second "release done"/"release failed" pill
+  // duplicates that. Hide it on those rows.
+  const releaseBadge = e.bucket === 'release' ? null : <ReleaseOutcomeBadge entry={e} />
   // Top-level rows (depth=0) get a wider, always-colored status border so
   // the outcome of every item is scannable at a glance. Child rows keep a
   // thinner border and only color it for running/failed (success stays quiet).
@@ -279,14 +253,6 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
               </span>
             )}
             {e.turns > 1 && <span className="font-mono">{e.turns} turns</span>}
-            {e.provider && (
-              <span
-                className={`px-1.5 py-0.5 text-[10px] font-mono rounded border ${PROVIDER_BADGE_CLASS[e.provider] ?? 'bg-bg-tertiary text-text-secondary border-border'}`}
-                title={`CLI: ${e.provider}`}
-              >
-                {PROVIDER_LABEL[e.provider] ?? e.provider}
-              </span>
-            )}
             {e.model && <span className="font-mono">{e.model}</span>}
             {e.navSessionId && <span className="font-mono">#{e.navSessionId.slice(0, 8)}</span>}
             <span className="font-mono tabular-nums">started {formatAgo(e.startedAt)}</span>

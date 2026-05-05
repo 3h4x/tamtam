@@ -8,33 +8,55 @@ import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { currentParent } from '@/lib/jobs/parent-context';
 import { exec } from '@/lib/shared/shell';
 import { getPermissionModeFlag, getPipelineModel, getSettings } from '@/lib/shared/config';
-import { createJob, listJobs, markDone, updateJob } from '@/lib/jobs/job-storage';
+import { createJob, findActiveReleaseJob, markDone, updateJob } from '@/lib/jobs/job-storage';
 import { wrapIfUntrusted, withUntrustedPreamble } from '@/lib/shared/untrusted';
 import { startJob, getJobStatus, deleteJob } from '@/lib/jobs/pm2-jobs';
 import { ensureBranchForCtx } from './mark-dod-branch';
+import {
+  findLatestIssueRunContext,
+  findLatestPrContext,
+  findReleaseScopedIssueContext,
+  findReleaseScopedPrContext,
+} from './release-context';
 
 export type MarkDodResult =
   | { ok: true; jobId: string; issueNumber: number; verified: number; total: number; changed: boolean }
   | { ok: false; status: number; detail: string };
 
+function buildMarkDodContextMeta(
+  ctx: { number: number; repo: string; title?: string },
+  isPr: boolean,
+  verified: number | null = null,
+  total: number | null = null,
+): string {
+  return JSON.stringify({
+    sourceType: isPr ? 'pr' : 'issue',
+    sourceNumber: ctx.number,
+    sourceRepo: ctx.repo,
+    sourceTitle: ctx.title ?? null,
+    verified,
+    total,
+  });
+}
+
 function findIssueContext(projectName: string): { number: number; repo: string } | null {
-  const job = listJobs()
-    .filter(j => j.project === projectName && j.kind === 'run' && j.ghIssueNumber != null)
-    .sort((a, b) => b.startedAt - a.startedAt)[0];
-  if (!job || job.ghIssueNumber == null || !job.ghIssueRepo) return null;
-  return { number: job.ghIssueNumber, repo: job.ghIssueRepo };
+  const activeReleaseIssue = findReleaseScopedIssueContext(projectName);
+  if (activeReleaseIssue) {
+    return { number: activeReleaseIssue.number, repo: activeReleaseIssue.repo };
+  }
+  if (findActiveReleaseJob(projectName)) return null;
+  const issue = findLatestIssueRunContext(projectName);
+  if (!issue) return null;
+  return { number: issue.number, repo: issue.repo };
 }
 
 function findPrContext(projectName: string): { number: number; repo: string } | null {
-  const job = listJobs()
-    .filter(j => j.project === projectName && j.kind === 'push' && j.contextMeta != null)
-    .sort((a, b) => b.startedAt - a.startedAt)[0];
-  if (!job?.contextMeta) return null;
-  try {
-    const meta = JSON.parse(job.contextMeta) as { prNumber?: number; prRepo?: string };
-    if (meta.prNumber && meta.prRepo) return { number: meta.prNumber, repo: meta.prRepo };
-  } catch {}
-  return null;
+  const activeReleasePr = findReleaseScopedPrContext(projectName);
+  if (activeReleasePr) return { number: activeReleasePr.number, repo: activeReleasePr.repo };
+  if (findActiveReleaseJob(projectName)) return null;
+  const pr = findLatestPrContext(projectName);
+  if (!pr) return null;
+  return { number: pr.number, repo: pr.repo };
 }
 
 // Extract acceptance criteria (unchecked checkbox lines) from issue body.
@@ -121,6 +143,9 @@ export async function startMarkDod(
   // dead — see job-storage.ts probeJobStatus.
   const job = createJob(projectName, 'mark-dod', 0, '');
   job.provider = provider;
+  job.ghIssueNumber = ctx.number;
+  job.ghIssueRepo = ctx.repo;
+  job.contextMeta = buildMarkDodContextMeta(ctx, isPr);
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
   // Persist log_path right away so the UI can show the log mid-run. Without
@@ -152,6 +177,9 @@ export async function startMarkDod(
     try { parsed = JSON.parse(viewR.stdout); } catch {}
     const body = parsed.body ?? '';
     const title = parsed.title ?? '';
+    job.ghIssueTitle = title || null;
+    job.contextMeta = buildMarkDodContextMeta({ ...ctx, title }, isPr);
+    updateJob(job);
     const authorLogin = parsed.author?.login;
     const criteria = extractCriteria(body);
     if (criteria.length === 0) {
@@ -244,7 +272,7 @@ JSON schema:
     if (claudeExitCode !== 0 || !claudeOutputStripped) {
       if (!claudeOutputStripped) log(`# claude output: ${claudeOutput.slice(0, 300).trim()}\n`);
       log(`# claude verification failed\n`);
-      job.contextMeta = JSON.stringify({ verified: 0, total: criteria.length });
+      job.contextMeta = buildMarkDodContextMeta({ ...ctx, title }, isPr, 0, criteria.length);
       updateJob(job);
       await markDone(job, 1);
       return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: 0, total: criteria.length, changed: false };
@@ -268,7 +296,7 @@ JSON schema:
       if (Array.isArray(parsedResult.results)) results = parsedResult.results;
     } catch (e) {
       log(`# could not parse claude JSON: ${e}\n--- raw output ---\n${raw.slice(0, 2000)}\n`);
-      job.contextMeta = JSON.stringify({ verified: 0, total: criteria.length });
+      job.contextMeta = buildMarkDodContextMeta({ ...ctx, title }, isPr, 0, criteria.length);
       updateJob(job);
       await markDone(job, 1);
       return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: 0, total: criteria.length, changed: false };
@@ -301,7 +329,7 @@ JSON schema:
       log(`# [${r.verified ? 'VERIFIED' : 'unverified'}] ${(r.text ?? '').slice(0, 120)}\n#   evidence: ${(r.evidence ?? '').slice(0, 300)}\n`);
     }
     log(`# summary: ${verifiedTexts.size} / ${criteria.length} verified\n`);
-    job.contextMeta = JSON.stringify({ verified: verifiedTexts.size, total: criteria.length });
+    job.contextMeta = buildMarkDodContextMeta({ ...ctx, title }, isPr, verifiedTexts.size, criteria.length);
     updateJob(job);
 
     if (verifiedTexts.size === 0) {

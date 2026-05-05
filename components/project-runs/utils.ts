@@ -117,6 +117,10 @@ export const KIND_COLOR: Record<KindBucket, string> = {
 // Kinds that belong to a release pipeline. When a `release` meta-job is
 // active, any of these jobs started inside its [started_at, finished_at]
 // window is considered a child of that release in the History UI.
+// Note: `fix-ci` is intentionally absent — it is not a scheduled release-chain
+// step, so the UI shows it as a top-level row rather than nesting it under a
+// release card. It IS included in PIPELINE_LIKE in the notifications route so
+// that a terminal release success can supersede an older fix-ci failure.
 export const PIPELINE_CHILD_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'fix-push', 'pr-wait'])
 
 // An entry represents a single row in the history. For `run` jobs with a
@@ -143,7 +147,6 @@ export interface Entry {
   costUsd: number
   turns: number
   model: string | null
-  provider?: string | null
   navJobId: string
   navSessionId: string | null
   verdict?: JobInfo['verdict']
@@ -194,13 +197,66 @@ function releaseOutcomeFor(rel: Entry): ReleaseOutcome {
   return { status: 'failed', label: 'release failed', releaseJobId: rel.navJobId }
 }
 
+function reviewNeedsAttention(e: Entry): boolean {
+  return e.kind === 'review' && e.verdict !== undefined && e.verdict !== null && e.verdict !== 'LGTM'
+}
+
+function nonTerminalRecoveryStep(e: Entry): boolean {
+  return e.kind === 'fix' || e.kind === 'fix-push'
+}
+
+function advisoryNonTerminalStep(e: Entry): boolean {
+  return e.kind === 'mark-dod'
+}
+
+function virtualGroupAttentionState(cluster: Entry[]): { exitCode: number; failureLabel: string } | null {
+  if (cluster.length === 0) return null
+  const last = cluster[cluster.length - 1]
+  if (last.exitCode !== null && last.exitCode !== 0) {
+    return { exitCode: last.exitCode, failureLabel: 'pipeline failed' }
+  }
+  if (reviewNeedsAttention(last)) {
+    return { exitCode: 1, failureLabel: 'review needs attention' }
+  }
+  if (nonTerminalRecoveryStep(last)) {
+    return { exitCode: 1, failureLabel: 'follow-up pending' }
+  }
+  if (advisoryNonTerminalStep(last)) {
+    return { exitCode: 1, failureLabel: 'follow-up pending' }
+  }
+  if (last.kind === 'review' && last.verdict !== 'LGTM') {
+    return { exitCode: 1, failureLabel: 'review verdict missing' }
+  }
+  return null
+}
+
 export function entryIsRunning(e: Entry): boolean {
   return e.status === 'running' || e.releaseOutcome?.status === 'running'
 }
 
 export function entryNeedsAttention(e: Entry): boolean {
   if (e.status === 'done' && e.exitCode !== null && e.exitCode !== 0) return true
+  if (reviewNeedsAttention(e)) return true
+  if (e.kind === 'review' && e.status === 'done' && e.verdict == null) return true
   return e.releaseOutcome?.status === 'blocked' || e.releaseOutcome?.status === 'failed'
+}
+
+export function latestReleaseKey(entries: Entry[]): string | null {
+  let bestKey: string | null = null
+  let bestStartedAt = Number.NEGATIVE_INFINITY
+  const walk = (nodes: Entry[]) => {
+    for (const e of nodes) {
+      if (e.kind === 'release' && e.startedAt > bestStartedAt) {
+        bestKey = e.key
+        bestStartedAt = e.startedAt
+      }
+      if (e.chainedChildren && e.chainedChildren.length > 0) {
+        walk(e.chainedChildren)
+      }
+    }
+  }
+  walk(entries)
+  return bestKey
 }
 
 function truncate(s: string, n: number): string {
@@ -298,6 +354,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
         existing.finishedAt = j.finished_at
         existing.status = j.status
         existing.exitCode = j.exit_code
+        existing.verdict = j.verdict
         existing.durationMs = (existing.durationMs ?? 0) + (j.duration_ms ?? 0)
         existing.inputTokens += j.input_tokens ?? 0
         existing.outputTokens += j.output_tokens ?? 0
@@ -335,7 +392,6 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       costUsd: jobCost(j),
       turns: 1,
       model: j.model ?? modelFromContext(j.context_meta),
-      provider: j.provider ?? null,
       navJobId: j.id,
       navSessionId: j.session_id ?? null,
       verdict: j.verdict,
@@ -521,7 +577,10 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
       } else {
         const last = cluster[cluster.length - 1]
         const allDone = cluster.every(e => e.status === 'done')
-        const anyFailed = cluster.some(e => e.exitCode !== null && e.exitCode !== 0)
+        // Outcome is the chain's terminal state, but recovery steps are not
+        // terminal. A cluster ending on fix/fix-push or a non-LGTM review
+        // still needs follow-up work before it can read green.
+        const attention = allDone ? virtualGroupAttentionState(cluster) : null
         const vgroup: Entry = {
           key: `vgroup:${cluster[0].startedAt}`,
           kind: 'release',
@@ -532,7 +591,7 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
           lastActivityAt: last.lastActivityAt,
           finishedAt: last.finishedAt,
           status: allDone ? 'done' : 'running',
-          exitCode: anyFailed ? 1 : allDone ? 0 : null,
+          exitCode: allDone ? attention?.exitCode ?? 0 : null,
           durationMs: null,
           inputTokens: cluster.reduce((s, e) => s + e.inputTokens, 0),
           outputTokens: cluster.reduce((s, e) => s + e.outputTokens, 0),
@@ -540,11 +599,10 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
           costUsd: cluster.reduce((s, e) => s + e.costUsd, 0),
           turns: 1,
           model: null,
-          provider: null,
           navJobId: last.navJobId,
           navSessionId: null,
           verdict: undefined,
-          failureLabel: anyFailed ? 'pipeline failed' : null,
+          failureLabel: attention?.failureLabel ?? null,
           releaseOutcome: null,
           logPruned: false,
           workSummary: null,

@@ -32,7 +32,7 @@ describe('installInactivityWatchdog', () => {
   it('SIGTERMs the child after the configured idle window', async () => {
     const { installInactivityWatchdog } = await import('@/scripts/shim-utils');
     const child = makeFakeChild();
-    const wd = installInactivityWatchdog(asChild(child), { shimName: 'test', timeoutMs: 1000 });
+    const wd = installInactivityWatchdog(asChild(child), { shimName: 'test', timeoutMs: 1000, startupGraceMs: 0 });
     vi.advanceTimersByTime(1500);
     expect(child.kill).toHaveBeenCalledWith('SIGTERM');
     expect(wd.timedOut()).toBe(true);
@@ -42,7 +42,7 @@ describe('installInactivityWatchdog', () => {
   it('escalates to SIGKILL after the grace window if the child is still alive', async () => {
     const { installInactivityWatchdog } = await import('@/scripts/shim-utils');
     const child = makeFakeChild();
-    const wd = installInactivityWatchdog(asChild(child), { shimName: 'test', timeoutMs: 1000 });
+    const wd = installInactivityWatchdog(asChild(child), { shimName: 'test', timeoutMs: 1000, startupGraceMs: 0 });
     vi.advanceTimersByTime(1500); // SIGTERM fires
     expect(child.kill).toHaveBeenCalledWith('SIGTERM');
     vi.advanceTimersByTime(6000); // > 5s grace
@@ -53,7 +53,7 @@ describe('installInactivityWatchdog', () => {
   it('rearms the timer on markActivity()', async () => {
     const { installInactivityWatchdog } = await import('@/scripts/shim-utils');
     const child = makeFakeChild();
-    const wd = installInactivityWatchdog(asChild(child), { shimName: 'test', timeoutMs: 1000 });
+    const wd = installInactivityWatchdog(asChild(child), { shimName: 'test', timeoutMs: 1000, startupGraceMs: 0 });
     vi.advanceTimersByTime(900);
     wd.markActivity();
     vi.advanceTimersByTime(900); // total 1800 since start, but only 900 since last activity
@@ -80,10 +80,21 @@ describe('installInactivityWatchdog', () => {
     const { installInactivityWatchdog } = await import('@/scripts/shim-utils');
     const child = makeFakeChild();
     const onTimeout = vi.fn();
-    const wd = installInactivityWatchdog(asChild(child), { shimName: 'test', timeoutMs: 1000, onTimeout });
+    const wd = installInactivityWatchdog(asChild(child), { shimName: 'test', timeoutMs: 1000, startupGraceMs: 0, onTimeout });
     vi.advanceTimersByTime(2500);
     expect(onTimeout).toHaveBeenCalledTimes(1);
     expect(onTimeout.mock.calls[0][0]).toMatchObject({ timeoutMs: 1000 });
+    wd.dispose();
+  });
+
+  it('waits through the default startup grace before killing a silent child', async () => {
+    const { installInactivityWatchdog } = await import('@/scripts/shim-utils');
+    const child = makeFakeChild();
+    const wd = installInactivityWatchdog(asChild(child), { shimName: 'test', timeoutMs: 1000 });
+    vi.advanceTimersByTime(4500);
+    expect(child.kill).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1000);
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
     wd.dispose();
   });
 });
@@ -92,10 +103,22 @@ describe('installFetchInactivityWatchdog', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it('aborts the fetch when idle past the timeout', async () => {
+  it('waits through the default startup grace before aborting a silent fetch', async () => {
     const { installFetchInactivityWatchdog } = await import('@/scripts/shim-utils');
     const abort = vi.fn();
     const wd = installFetchInactivityWatchdog(abort, { shimName: 'test', timeoutMs: 1000 });
+    vi.advanceTimersByTime(4500);
+    expect(abort).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1000);
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(wd.timedOut()).toBe(true);
+    wd.dispose();
+  });
+
+  it('aborts the fetch when idle past the timeout', async () => {
+    const { installFetchInactivityWatchdog } = await import('@/scripts/shim-utils');
+    const abort = vi.fn();
+    const wd = installFetchInactivityWatchdog(abort, { shimName: 'test', timeoutMs: 1000, startupGraceMs: 0 });
     vi.advanceTimersByTime(1500);
     expect(abort).toHaveBeenCalled();
     expect(wd.timedOut()).toBe(true);
@@ -105,7 +128,7 @@ describe('installFetchInactivityWatchdog', () => {
   it('rearms on markActivity()', async () => {
     const { installFetchInactivityWatchdog } = await import('@/scripts/shim-utils');
     const abort = vi.fn();
-    const wd = installFetchInactivityWatchdog(abort, { shimName: 'test', timeoutMs: 1000 });
+    const wd = installFetchInactivityWatchdog(abort, { shimName: 'test', timeoutMs: 1000, startupGraceMs: 0 });
     vi.advanceTimersByTime(900);
     wd.markActivity();
     vi.advanceTimersByTime(900);

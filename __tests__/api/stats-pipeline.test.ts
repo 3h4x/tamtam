@@ -1,6 +1,22 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 import type { JobData } from '@/lib/jobs/job-storage';
+
+const originalMaxStepIterations = process.env.TAMTAM_MAX_STEP_ITERATIONS;
+const originalLegacyMaxFixIterations = process.env.TAMTAM_MAX_FIX_ITERATIONS;
+const originalFixWindowSeconds = process.env.TAMTAM_FIX_WINDOW_SECONDS;
+
+function restoreRecoveryBudgetEnv() {
+  if (originalMaxStepIterations === undefined) delete process.env.TAMTAM_MAX_STEP_ITERATIONS;
+  else process.env.TAMTAM_MAX_STEP_ITERATIONS = originalMaxStepIterations;
+  if (originalLegacyMaxFixIterations === undefined) delete process.env.TAMTAM_MAX_FIX_ITERATIONS;
+  else process.env.TAMTAM_MAX_FIX_ITERATIONS = originalLegacyMaxFixIterations;
+  if (originalFixWindowSeconds === undefined) delete process.env.TAMTAM_FIX_WINDOW_SECONDS;
+  else process.env.TAMTAM_FIX_WINDOW_SECONDS = originalFixWindowSeconds;
+}
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
   return {
@@ -30,14 +46,34 @@ function makeFix(id: string, project: string, startedAt: number): JobData {
   return makeJob({ id, project, kind: 'fix', exitCode: 0, startedAt, finishedAt: startedAt + 60 });
 }
 
+function makeFixPush(id: string, project: string, startedAt: number): JobData {
+  return makeJob({ id, project, kind: 'fix-push', exitCode: 0, startedAt, finishedAt: startedAt + 60 });
+}
+
+function writeReleaseLog(dir: string, name: string, stopReason?: string): string {
+  const path = join(dir, `${name}.log`);
+  const lines = ['# release started'];
+  if (stopReason) lines.push(`# release stopped — ${stopReason}`);
+  lines.push('# release finished — exit 1');
+  writeFileSync(path, `${lines.join('\n')}\n`);
+  return path;
+}
+
 describe('GET /api/stats/pipeline', () => {
   let GET: (req: NextRequest) => Promise<Response>;
   let listJobsMock: ReturnType<typeof vi.fn>;
   let getVerdictMock: ReturnType<typeof vi.fn>;
   let getSettingsMock: ReturnType<typeof vi.fn>;
+  let openSyncMock: ReturnType<typeof vi.fn>;
+  let readSyncMock: ReturnType<typeof vi.fn>;
+  let closeSyncMock: ReturnType<typeof vi.fn>;
+  let statSyncMock: ReturnType<typeof vi.fn>;
+  let readFileSyncMock: ReturnType<typeof vi.fn>;
+  let tempDir: string;
 
   beforeEach(async () => {
     vi.resetModules();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-stats-pipeline-'));
     listJobsMock = vi.fn().mockReturnValue([]);
     getVerdictMock = vi.fn().mockReturnValue(null);
     getSettingsMock = vi.fn().mockReturnValue({
@@ -50,12 +86,32 @@ describe('GET /api/stats/pipeline', () => {
       getVerdict: getVerdictMock,
     }));
     vi.doMock('@/lib/shared/config', () => ({ getSettings: getSettingsMock }));
+    vi.doMock('fs', async () => {
+      const actual = await vi.importActual<typeof import('fs')>('fs');
+      openSyncMock = vi.fn(actual.openSync);
+      readSyncMock = vi.fn(actual.readSync);
+      closeSyncMock = vi.fn(actual.closeSync);
+      statSyncMock = vi.fn(actual.statSync);
+      readFileSyncMock = vi.fn(actual.readFileSync);
+      return {
+        ...actual,
+        openSync: openSyncMock,
+        readSync: readSyncMock,
+        closeSync: closeSyncMock,
+        statSync: statSyncMock,
+        readFileSync: readFileSyncMock,
+      };
+    });
 
     const mod = await import('@/app/api/stats/pipeline/route');
     GET = mod.GET as typeof GET;
   });
 
-  afterEach(() => vi.resetModules());
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+    restoreRecoveryBudgetEnv();
+    vi.resetModules();
+  });
 
   it('returns empty metrics when no jobs', async () => {
     const res = await GET(new NextRequest('http://localhost/api/stats/pipeline'));
@@ -101,6 +157,22 @@ describe('GET /api/stats/pipeline', () => {
     expect(getVerdictMock).not.toHaveBeenCalled();
   });
 
+  it('classifies logPruned review with no verdict as prunedMissingVerdict, not parseFailed', async () => {
+    const now = Date.now() / 1000;
+    // logPruned: true means the log was deleted by retention; getVerdict returns null
+    // because there is no log to parse. This should count as prunedMissingVerdict,
+    // not parseFailed (which implies the log exists but verdict text wasn't found).
+    const pruned = { ...makeReview('r-pruned', 'p1', 0, now - 10), logPruned: true };
+    listJobsMock.mockReturnValue([pruned]);
+    getVerdictMock.mockReturnValue(null);
+
+    const res = await GET(new NextRequest('http://localhost/api/stats/pipeline?window=all'));
+    const data = await res.json();
+    expect(data.verdicts.total).toBe(1);
+    expect(data.verdicts.prunedMissingVerdict).toBe(1);
+    expect(data.verdicts.parseFailed).toBe(0);
+  });
+
   it('computes pipeline success rate from release jobs', async () => {
     const now = Date.now() / 1000;
     listJobsMock.mockReturnValue([
@@ -119,12 +191,18 @@ describe('GET /api/stats/pipeline', () => {
 
   it('computes fix loop convergence', async () => {
     const now = Date.now() / 1000;
-    const rel1 = makeRelease('rel1', 'p1', 0, now - 600, now - 300);
-    const rel2 = makeRelease('rel2', 'p1', 1, now - 1200, now - 700);
-    const fix1 = makeFix('fix1', 'p1', now - 500);
-    const fix2a = makeFix('fix2a', 'p1', now - 1100);
-    const fix2b = makeFix('fix2b', 'p1', now - 1000);
-    const fix2c = makeFix('fix2c', 'p1', now - 900);
+    const rel1 = {
+      ...makeRelease('rel1', 'p1', 0, now - 600, now - 300),
+      logPath: writeReleaseLog(tempDir, 'rel1'),
+    };
+    const rel2 = {
+      ...makeRelease('rel2', 'p1', 1, now - 1200, now - 700),
+      logPath: writeReleaseLog(tempDir, 'rel2', 'review cap reached for p1 (3/3) — unresolved NEEDS ATTENTION review, no re-review budget left'),
+    };
+    const fix1 = { ...makeFix('fix1', 'p1', now - 500), releaseId: 'rel1' };
+    const fix2a = { ...makeFix('fix2a', 'p1', now - 1100), releaseId: 'rel2' };
+    const fix2b = { ...makeFix('fix2b', 'p1', now - 1000), releaseId: 'rel2' };
+    const fix2c = { ...makeFix('fix2c', 'p1', now - 900), releaseId: 'rel2' };
     listJobsMock.mockReturnValue([rel1, rel2, fix1, fix2a, fix2b, fix2c]);
 
     const res = await GET(new NextRequest('http://localhost/api/stats/pipeline?window=all'));
@@ -133,6 +211,190 @@ describe('GET /api/stats/pipeline', () => {
     expect(data.fixLoop.converged).toBe(1);
     expect(data.fixLoop.hitCap).toBe(1);
     expect(data.fixLoop.avgIterations).toBe(2);
+  });
+
+  it('memoizes each release stop-reason lookup within one response and avoids full-file reads', async () => {
+    const now = Date.now() / 1000;
+    const release = {
+      ...makeRelease('rel-cache', 'p1', 1, now - 600, now - 300),
+      logPath: writeReleaseLog(tempDir, 'rel-cache', 'review cap reached for p1 (3/3) — unresolved NEEDS ATTENTION review'),
+    };
+    const fix = { ...makeFix('fix-cache', 'p1', now - 500), releaseId: 'rel-cache' };
+    listJobsMock.mockReturnValue([release, fix]);
+
+    const res = await GET(new NextRequest('http://localhost/api/stats/pipeline?window=all'));
+    const data = await res.json();
+
+    expect(data.fixLoop.hitCap).toBe(1);
+    expect(readFileSyncMock).not.toHaveBeenCalled();
+    expect(statSyncMock).toHaveBeenCalledTimes(1);
+    expect(openSyncMock).toHaveBeenCalledTimes(1);
+    expect(readSyncMock).toHaveBeenCalledTimes(1);
+    expect(closeSyncMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to the release time window for legacy recovery rows without releaseId', async () => {
+    const now = Date.now() / 1000;
+    const release = {
+      ...makeRelease('rel-legacy', 'legacy-proj', 1, now - 1200, now - 700),
+      logPath: writeReleaseLog(tempDir, 'rel-legacy', 'fix-push cap reached for legacy-proj (2/2) — push still blocked by hook rejection'),
+    };
+    const legacyFix = { ...makeFix('legacy-fix', 'legacy-proj', now - 1100), releaseId: null };
+    const legacyFixPush = { ...makeFixPush('legacy-fix-push', 'legacy-proj', now - 1000), releaseId: null };
+    listJobsMock.mockReturnValue([release, legacyFix, legacyFixPush]);
+
+    const res = await GET(new NextRequest('http://localhost/api/stats/pipeline?window=all'));
+    const data = await res.json();
+    expect(data.fixLoop.total).toBe(1);
+    expect(data.fixLoop.converged).toBe(0);
+    expect(data.fixLoop.hitCap).toBe(1);
+    expect(data.fixLoop.avgIterations).toBe(2);
+    const project = data.projects.find((p: { project: string }) => p.project === 'legacy-proj');
+    expect(project).toMatchObject({
+      releases: 1,
+      successRate: 0,
+      fixIterationsAvg: 2,
+    });
+  });
+
+  it('counts a failed release as hitCap when review/test budget is exhausted below the old fix-count threshold', async () => {
+    const now = Date.now() / 1000;
+    const release = {
+      ...makeRelease('rel-cap', 'p1', 1, now - 600, now - 300),
+      logPath: writeReleaseLog(tempDir, 'rel-cap', 'test cap reached for p1 (3/3) — tests still failing, no re-test budget left'),
+    };
+    const fix = { ...makeFix('fix-cap', 'p1', now - 500), releaseId: 'rel-cap' };
+    listJobsMock.mockReturnValue([release, fix]);
+
+    const res = await GET(new NextRequest('http://localhost/api/stats/pipeline?window=all'));
+    const data = await res.json();
+    expect(data.fixLoop.total).toBe(1);
+    expect(data.fixLoop.converged).toBe(0);
+    expect(data.fixLoop.hitCap).toBe(1);
+    expect(data.fixLoop.avgIterations).toBe(1);
+  });
+
+  it('does not count raw fix volume as hitCap when the release stopped for another reason', async () => {
+    const now = Date.now() / 1000;
+    const release = {
+      ...makeRelease('rel-no-cap', 'p1', 1, now - 1200, now - 700),
+      logPath: writeReleaseLog(tempDir, 'rel-no-cap', 'push blocked: pre-push hook tests failed for p1'),
+    };
+    const fixes = [
+      { ...makeFix('fix-a', 'p1', now - 1100), releaseId: 'rel-no-cap' },
+      { ...makeFix('fix-b', 'p1', now - 1000), releaseId: 'rel-no-cap' },
+      { ...makeFix('fix-c', 'p1', now - 900), releaseId: 'rel-no-cap' },
+    ];
+    listJobsMock.mockReturnValue([release, ...fixes]);
+
+    const res = await GET(new NextRequest('http://localhost/api/stats/pipeline?window=all'));
+    const data = await res.json();
+    expect(data.fixLoop.total).toBe(1);
+    expect(data.fixLoop.converged).toBe(0);
+    expect(data.fixLoop.hitCap).toBe(0);
+    expect(data.fixLoop.avgIterations).toBe(3);
+  });
+
+  it('counts a failed release as hitCap when fix-push retries are exhausted', async () => {
+    const now = Date.now() / 1000;
+    const release = {
+      ...makeRelease('rel-fix-push-cap', 'p1', 1, now - 1200, now - 700),
+      logPath: writeReleaseLog(tempDir, 'rel-fix-push-cap', 'fix-push cap reached for p1 (2/2) — push still blocked by hook rejection'),
+    };
+    const fixPushes = [
+      { ...makeFixPush('fix-push-a', 'p1', now - 1100), releaseId: 'rel-fix-push-cap' },
+      { ...makeFixPush('fix-push-b', 'p1', now - 1000), releaseId: 'rel-fix-push-cap' },
+    ];
+    listJobsMock.mockReturnValue([release, ...fixPushes]);
+
+    const res = await GET(new NextRequest('http://localhost/api/stats/pipeline?window=all'));
+    const data = await res.json();
+    expect(data.fixLoop.total).toBe(1);
+    expect(data.fixLoop.converged).toBe(0);
+    expect(data.fixLoop.hitCap).toBe(1);
+    expect(data.fixLoop.avgIterations).toBe(2);
+  });
+
+  it('counts fix-push-only recovery loops in the per-project table', async () => {
+    const now = Date.now() / 1000;
+    const release = {
+      ...makeRelease('rel-fix-push-project', 'proj-fix-push', 1, now - 1200, now - 700),
+      logPath: writeReleaseLog(tempDir, 'rel-fix-push-project', 'fix-push cap reached for proj-fix-push (2/2) — push still blocked by hook rejection'),
+    };
+    const fixPushes = [
+      { ...makeFixPush('proj-fix-push-a', 'proj-fix-push', now - 1100), releaseId: 'rel-fix-push-project' },
+      { ...makeFixPush('proj-fix-push-b', 'proj-fix-push', now - 1000), releaseId: 'rel-fix-push-project' },
+    ];
+    listJobsMock.mockReturnValue([release, ...fixPushes]);
+
+    const res = await GET(new NextRequest('http://localhost/api/stats/pipeline?window=all'));
+    const data = await res.json();
+    const project = data.projects.find((p: { project: string }) => p.project === 'proj-fix-push');
+    expect(project).toMatchObject({
+      releases: 1,
+      successRate: 0,
+      fixIterationsAvg: 2,
+    });
+  });
+
+  it('counts review/test cap exhaustion from persisted release context when the log was pruned', async () => {
+    const now = Date.now() / 1000;
+    const release = {
+      ...makeRelease('rel-pruned-cap', 'proj-pruned-cap', 1, now - 1200, now - 700),
+      logPath: null,
+      logPruned: true,
+      contextMeta: JSON.stringify({
+        releaseStopReason: 'fix→test cap reached for proj-pruned-cap (3/3) — tests still need verification',
+      }),
+    };
+    const fix = { ...makeFix('fix-pruned-cap', 'proj-pruned-cap', now - 1100), releaseId: 'rel-pruned-cap' };
+    listJobsMock.mockReturnValue([release, fix]);
+
+    const res = await GET(new NextRequest('http://localhost/api/stats/pipeline?window=all'));
+    const data = await res.json();
+
+    expect(data.fixLoop.total).toBe(1);
+    expect(data.fixLoop.hitCap).toBe(1);
+    expect(statSyncMock).not.toHaveBeenCalled();
+    expect(openSyncMock).not.toHaveBeenCalled();
+    expect(readSyncMock).not.toHaveBeenCalled();
+    expect(closeSyncMock).not.toHaveBeenCalled();
+    const project = data.projects.find((p: { project: string }) => p.project === 'proj-pruned-cap');
+    expect(project).toMatchObject({
+      releases: 1,
+      successRate: 0,
+      fixIterationsAvg: 1,
+    });
+  });
+
+  it('counts fix-push cap exhaustion from persisted release context when the log was pruned', async () => {
+    const now = Date.now() / 1000;
+    const release = {
+      ...makeRelease('rel-pruned-fix-push-cap', 'proj-pruned-fix-push', 1, now - 1200, now - 700),
+      logPath: null,
+      logPruned: true,
+      contextMeta: JSON.stringify({
+        releaseStopReason: 'fix-push cap reached for proj-pruned-fix-push (2/2) — push hook failures still need recovery',
+      }),
+    };
+    const fixPushes = [
+      { ...makeFixPush('fix-push-pruned-a', 'proj-pruned-fix-push', now - 1100), releaseId: 'rel-pruned-fix-push-cap' },
+      { ...makeFixPush('fix-push-pruned-b', 'proj-pruned-fix-push', now - 1000), releaseId: 'rel-pruned-fix-push-cap' },
+    ];
+    listJobsMock.mockReturnValue([release, ...fixPushes]);
+
+    const res = await GET(new NextRequest('http://localhost/api/stats/pipeline?window=all'));
+    const data = await res.json();
+
+    expect(data.fixLoop.total).toBe(1);
+    expect(data.fixLoop.hitCap).toBe(1);
+    expect(data.fixLoop.avgIterations).toBe(2);
+    const project = data.projects.find((p: { project: string }) => p.project === 'proj-pruned-fix-push');
+    expect(project).toMatchObject({
+      releases: 1,
+      successRate: 0,
+      fixIterationsAvg: 2,
+    });
   });
 
   it('computes step durations (median and p95)', async () => {
@@ -231,7 +493,34 @@ describe('GET /api/stats/pipeline', () => {
     const data = await res.json();
     expect(data.configSnapshot.verdictRules).toBe('default rules');
     expect(data.configSnapshot.commitStyle).toBe('conventional commits');
-    expect(data.configSnapshot.maxFixIterations).toBe(3);
+    expect(data.configSnapshot.maxStepIterations).toBe(3);
+    expect(data.configSnapshot.maxFixPushAttempts).toBe(2);
+    expect(data.configSnapshot.stepWindowSeconds).toBe(1800);
+  });
+
+  it('reads maxStepIterations from the shared recovery-budget env alias', async () => {
+    process.env.TAMTAM_MAX_STEP_ITERATIONS = '5';
+    delete process.env.TAMTAM_MAX_FIX_ITERATIONS;
+    vi.resetModules();
+
+    listJobsMock = vi.fn().mockReturnValue([]);
+    getVerdictMock = vi.fn().mockReturnValue(null);
+    getSettingsMock = vi.fn().mockReturnValue({
+      review_verdict_rules: 'default rules',
+      commit_style: 'conventional commits',
+    });
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      listJobs: listJobsMock,
+      getVerdict: getVerdictMock,
+    }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: getSettingsMock }));
+
+    const mod = await import('@/app/api/stats/pipeline/route');
+    GET = mod.GET as typeof GET;
+
+    const res = await GET(new NextRequest('http://localhost/api/stats/pipeline'));
+    const data = await res.json();
+    expect(data.configSnapshot.maxStepIterations).toBe(5);
   });
 
   it('falls back to 30d for invalid window', async () => {
@@ -257,6 +546,7 @@ describe('GET /api/stats/pipeline — caching', () => {
   });
 
   afterEach(() => {
+    restoreRecoveryBudgetEnv();
     vi.useRealTimers();
     vi.resetModules();
   });
