@@ -272,6 +272,16 @@ describe('internal-scheduler — issue-branch skip', () => {
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
     }));
+    // Without this, the scheduler's budget gate calls into the real
+    // `getSettings()` (which reads the project's production DB) and, if
+    // `budget_block_runs_enabled` is on, fires a real fetch to the Anthropic
+    // usage API with the user's actual OAuth token from ~/.claude. That
+    // both leaks the token into test output and makes assertions about
+    // `fetchMock` flaky.
+    vi.doMock('@/lib/shared/job-control', () => ({
+      budgetBlockedResult: vi.fn().mockReturnValue(null),
+      scheduledBurnRateBlocked: vi.fn().mockReturnValue(null),
+    }));
 
     const mod = await import('@/lib/scheduling/internal-scheduler');
     upsertAgentScheduleDynamic = mod.upsertAgentSchedule;
