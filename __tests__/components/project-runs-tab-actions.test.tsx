@@ -24,15 +24,23 @@ vi.mock('@/lib/client-api', () => ({
   syncJobBoard: syncJobBoardMock,
 }))
 
-function makeJob(overrides: Partial<JobInfo> & { id: string; kind: string; started_at: number }): JobInfo {
+function makeJob({
+  id,
+  kind,
+  started_at,
+  ...overrides
+}: Partial<JobInfo> & { id: string; kind: string; started_at: number }): JobInfo {
   return {
+    id,
+    kind,
+    started_at,
     project: 'alpha',
     prompt: null,
     pid: 0,
     log_path: '',
     status: 'done',
     exit_code: 0,
-    finished_at: overrides.started_at + 5,
+    finished_at: started_at + 5,
     seen: true,
     ...overrides,
   } as JobInfo
