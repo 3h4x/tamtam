@@ -144,11 +144,14 @@ test.describe('Auto-polling live update', () => {
         route.fulfill({
           json: {
             jobs: [
+              // Use kind:'test' — review jobs with no verdict render "review verdict missing"
+              // instead of "done", which would break the Phase 2 assertion.
               makeJob(
                 'auto-poll-job',
                 PROJECT,
                 serveRunning ? 'running' : 'done',
                 serveRunning ? null : 0,
+                'test',
               ),
             ],
             pendingReleaseProjects: [],
