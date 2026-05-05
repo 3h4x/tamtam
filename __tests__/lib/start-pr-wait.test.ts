@@ -219,7 +219,7 @@ describe('launchPrWait', () => {
     launchPrWait('myproj', 13, 'owner/repo', 'https://github.com/owner/repo/pull/13');
 
     await vi.waitFor(() => {
-      expect(startMarkDodMock).toHaveBeenCalledWith('myproj');
+      expect(startMarkDodMock).toHaveBeenCalledWith('myproj', { prNumber: 13, repo: 'owner/repo' });
       expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 0);
     }, { timeout: 3000 });
   });
