@@ -56,7 +56,7 @@ TamTam runs in **production mode** (`next start`) under PM2 — no HMR. After an
 - `app/` — Next.js pages and API route handlers
 - `components/` — React client components; large pages have a co-located subfolder (e.g. `components/monitoring/`, `components/settings/`, `components/project-detail/`, `components/project-runs/`, `components/terminal/`)
 - `hooks/` — Custom React hooks
-- `lib/` — Server-side business logic, organised into domain folders: `pipeline/`, `scheduling/`, `git/`, `jobs/` (`job-storage` barrel), `terminal/`, `agents/`, `skills/`, `shared/`, `usage/`, `db/`, `github/`. `lib/client-api.ts` is the only barrel.
+- `lib/` — Server-side business logic, organised into domain folders: `pipeline/`, `scheduling/`, `git/`, `jobs/` (`job-storage` compatibility barrel), `terminal/`, `agents/`, `skills/`, `shared/`, `usage/`, `db/` (`index.ts` domain barrel), `github/`. `lib/client-api.ts` is the only top-level barrel.
 - `scripts/` — server startup, job runners, CLI shims (`pm2-start.sh`, `job-runner.js`, `gemini-shim.js`, `lmstudio-shim.js`, `codex-shim.js`)
 - `skills/` — claude-skills submodule
 - `data/` — SQLite database (gitignored)
@@ -214,7 +214,7 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 - **Path imports**: always use the `@/` alias, never relative `../../`.
 - **File naming**: kebab-case (`start-fix.ts`); PascalCase only for React component files (`AgentsTab.tsx`).
 - **Components**: PascalCase, one per file, `.tsx`. No class components.
-- **Barrel files**: `lib/client-api.ts` is the only barrel; do not create new `index.ts` barrels — import directly from the module.
+- **Barrel files**: do not create new barrels or new `index.ts` re-export files. Existing exceptions are `lib/client-api.ts` (top-level client barrel), `lib/jobs/job-storage.ts` (compatibility barrel), and `lib/db/index.ts` (domain-local barrel); otherwise import directly from the module.
 - **TypeScript**: strict mode is on. Avoid `any`. Never use `// @ts-ignore` — fix the type.
 - **Error handling**: throw exceptions for unexpected failures; return typed result objects (`{ ok, error }`) only where callers must branch without crashing. Log errors to `console.error` before re-throwing in API routes.
 - **Async**: `async/await` throughout, no raw `.then()` chains. Parallelise independent work with `Promise.all`.
