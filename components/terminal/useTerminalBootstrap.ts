@@ -14,6 +14,7 @@ interface JobDict {
   user_prompt: string | null
   prompt: string | null
   context_meta: string | null
+  provider: string | null
 }
 
 interface BootstrapParams {
@@ -24,6 +25,7 @@ interface BootstrapParams {
   issueNumberParam: string | null
   issueTitleParam: string | null
   resumeSessionIdParam: string | null
+  resumeProviderParam?: string | null
   onLoadSessions: () => void
 }
 
@@ -35,6 +37,7 @@ export function useTerminalBootstrap({
   issueNumberParam,
   issueTitleParam,
   resumeSessionIdParam,
+  resumeProviderParam,
   onLoadSessions,
 }: BootstrapParams) {
   const router = useRouter()
@@ -87,7 +90,10 @@ export function useTerminalBootstrap({
         terminalStore.reset(projectName)
       }
       if (resumeSessionIdParam) {
-        terminalStore.update(projectName, () => ({ claudeSessionId: resumeSessionIdParam }))
+        terminalStore.update(projectName, () => ({
+          claudeSessionId: resumeSessionIdParam,
+          sessionProvider: resumeProviderParam ?? null,
+        }))
       }
       terminalStore.update(projectName, () => ({ pendingAutoSubmit: submit }))
       router.replace(`/project/${projectName}/terminal`)
@@ -179,6 +185,7 @@ export function useTerminalBootstrap({
           }
         })
 
+        const sessionProvider = matches.find(m => m.provider)?.provider ?? null
         if (lastIsRunning) {
           const prompt = lastMatch.user_prompt || lastMatch.prompt
           if (prompt) entries.push({ role: 'user', text: prompt })
@@ -186,6 +193,7 @@ export function useTerminalBootstrap({
             history: entries,
             claudeSessionId: initialSessionId,
             sessionKey: initialSessionId,
+            sessionProvider,
             selectedItems: loadedSkills,
             selectedDocs: loadedDocs,
             restoredFor: initialSessionId,
@@ -196,6 +204,7 @@ export function useTerminalBootstrap({
             history: entries,
             claudeSessionId: initialSessionId,
             sessionKey: initialSessionId,
+            sessionProvider,
             selectedItems: loadedSkills,
             selectedDocs: loadedDocs,
             restoredFor: initialSessionId,

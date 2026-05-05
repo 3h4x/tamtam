@@ -189,7 +189,7 @@ Accepts markdown wrapping (`**LGTM**`, `` `LGTM` ``) and optional colon/dash del
 
 | Cap | Limit | Window | Setting |
 |-----|-------|--------|---------|
-| Review→Fix loop | 3 iterations | 30 min | hardcoded `MAX_FIX_ITERATIONS=3`, `FIX_WINDOW_SECONDS=1800` |
+| Review→Fix loop | unbounded fixes; 3 verification iterations cap | per release; 30 min fallback for standalone chaining | `TAMTAM_MAX_FIX_ITERATIONS` (default 3), `FIX_WINDOW_SECONDS=1800`. Every NEEDS ATTENTION/DO NOT SHIP review or red test triggers a fix; the cap fires on the *next* verification step (fix→test, fix→review). After the budget is exhausted the trailing fix still runs unverified and the release stops without re-running test/review. |
 | Fix-Push attempts | 2 attempts | 30 min | hardcoded `MAX_FIX_PUSH_ATTEMPTS=2` |
 | Fix-CI auto-retry | configurable | configurable | `fix_ci_max_retries` (default 2), `fix_ci_retry_window_seconds` (default 120) |
 | Fix-CI fast-crash | — | — | `fix_ci_fast_crash_ms` (default 5000ms) — only retries if job died in under this |

@@ -41,6 +41,10 @@ export interface SessionState {
   sessionKey: string // claudeSessionId or 'new'
   claudeSessionId: string | null
   currentJobId: string | null
+  // Provider that originated this session. Session IDs are stored per-CLI
+  // (codex rollouts ≠ claude sessions ≠ gemini threads), so follow-up turns
+  // on the same claudeSessionId MUST run on the originating provider.
+  sessionProvider: string | null
   // conversation
   history: TermEntry[]
   // live stream buffers
@@ -65,6 +69,7 @@ const emptyState = (): SessionState => ({
   sessionKey: 'new',
   claudeSessionId: null,
   currentJobId: null,
+  sessionProvider: null,
   history: [],
   streamBuffer: '',
   thinkingBuffer: '',
@@ -341,6 +346,7 @@ class TerminalStore {
         outputTokens?: number;
         cacheReadTokens?: number;
         cacheCreateTokens?: number;
+        provider?: string | null;
       } = {}
       try {
         metadata = JSON.parse((event as MessageEvent).data)
@@ -409,6 +415,7 @@ class TerminalStore {
           currentJobId: null,
           claudeSessionId: sid,
           sessionKey: sid ?? 'new',
+          sessionProvider: metadata.provider ?? s.sessionProvider,
           lastStats: stats,
           pendingAutoSubmit,
           messageQueue,

@@ -1919,7 +1919,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     expect(startFixFromJobMock).not.toHaveBeenCalled();
   });
 
-  it('does not start fix when test fails but fix cap is reached', async () => {
+  it('starts fix on test failure even when prior fix count would otherwise hit the cap (fixes are unbounded)', async () => {
     const now = Date.now() / 1000;
     for (let i = 0; i < 3; i++) {
       testDb.db
@@ -1948,7 +1948,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
     await markDoneFn(job, 1);
 
-    expect(startFixFromJobMock).not.toHaveBeenCalled();
+    expect(startFixFromJobMock).toHaveBeenCalledWith(job.id);
   });
 
   it('starts fix when test fails during an active release (inRelease=true)', async () => {
@@ -2124,8 +2124,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     await expect(markDoneFn(job, 0)).resolves.toBeUndefined();
   });
 
-  it('stops chaining fixes once MAX_FIX_ITERATIONS recent fix jobs exist', async () => {
-    // Insert 3 recent fix jobs so recentFixCount hits the cap.
+  it('always starts fix on NEEDS ATTENTION even when prior fix count would otherwise hit the cap (fixes are unbounded)', async () => {
     const now = Date.now() / 1000;
     for (let i = 0; i < 3; i++) {
       testDb.db
@@ -2157,10 +2156,10 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
     await markDoneFn(job, 0);
 
-    expect(startFixFromJobMock).not.toHaveBeenCalled();
+    expect(startFixFromJobMock).toHaveBeenCalledWith(job.id);
   });
 
-  it('finalizes active release with exit 1 when review still needs attention after fix cap', async () => {
+  it('starts a final fix on DO NOT SHIP even after prior fix cap (fixes are unbounded)', async () => {
     const now = Date.now() / 1000;
     const releaseLog = join(tempDir, 'release-cap.log');
     writeFileSync(releaseLog, '# release start\n');
@@ -2210,19 +2209,15 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
     await markDoneFn(job, 0);
 
-    expect(startFixFromJobMock).not.toHaveBeenCalled();
+    expect(startFixFromJobMock).toHaveBeenCalledWith(job.id);
+    // Release stays open — the trailing fix continues; the cap fires on the
+    // next review (fix→review hook), not here.
     const releaseRow = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-cap');
-    expect(releaseRow?.finishedAt).not.toBeNull();
-    expect(releaseRow?.exitCode).toBe(1);
-    const releaseText = readFileSync(releaseLog, 'utf-8');
-    expect(releaseText).toContain('# release stopped');
-    expect(releaseText).toContain('fix cap reached');
-    expect(releaseText).toContain('# release finished — exit 1');
+    expect(releaseRow?.finishedAt).toBeNull();
   });
 
-  it('counts fix cap per release when job has releaseId — fixes in same release block', async () => {
+  it('starts fix on NEEDS ATTENTION even with prior fixes in the same release (fixes are unbounded)', async () => {
     const now = Date.now() / 1000;
-    // Insert 3 fix jobs belonging to the SAME release
     for (let i = 0; i < 3; i++) {
       testDb.db
         .insert(schema.jobs)
@@ -2254,7 +2249,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
     await markDoneFn(job, 0);
 
-    expect(startFixFromJobMock).not.toHaveBeenCalled();
+    expect(startFixFromJobMock).toHaveBeenCalledWith(job.id);
   });
 
   it('does not count fixes from a different release against the current release cap', async () => {

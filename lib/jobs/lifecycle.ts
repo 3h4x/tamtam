@@ -466,10 +466,12 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           if (verdict === 'DO NOT SHIP') {
             notificationEvent = 'review_do_not_ship';
           }
-          const count = recentFixCount(job.project, job);
-          // Convergence guard: if this review listed the same findings as the
-          // previous one in this release, fix isn't making progress — abort
-          // instead of wasting another iteration on the same nits.
+          // Fixes are unbounded — every NEEDS ATTENTION / DO NOT SHIP triggers
+          // a fix. The cap lives on the verification side (fix→review hook),
+          // so the loop terminates by skipping the *next* review once we've
+          // used the review budget. The trailing fix may go unverified, which
+          // is the explicit tradeoff: applying the fix is more useful than
+          // burning a final review we couldn't act on.
           const contradiction = fixContradictsReview(job);
           const stuck = reviewIsStuck(job);
           if (contradiction.stuck) {
@@ -482,22 +484,17 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
             noteReleaseStop(releaseStopReason);
             notificationEvent = 'fix_loop_exhausted';
             forcedReleaseExitCode = 1;
-          } else if (count < MAX_FIX_ITERATIONS) {
+          } else {
             const { startFixFromJob } = await import('@/lib/pipeline/start-fix');
             const r = await startFixFromJob(job.id);
             if (r.ok) {
-              console.log(`[release] review ${verdict} → started fix ${r.jobId} (iter ${count + 1})`);
+              console.log(`[release] review ${verdict} → started fix ${r.jobId}`);
               chainedNext = true;
             } else {
               releaseStopReason = `skipped fix for ${job.project}: ${r.detail}`;
               noteReleaseStop(releaseStopReason);
               forcedReleaseExitCode = 1;
             }
-          } else {
-            releaseStopReason = `fix cap reached for ${job.project} (${count}/${MAX_FIX_ITERATIONS}) — unresolved ${verdict} review`;
-            noteReleaseStop(releaseStopReason);
-            notificationEvent = 'fix_loop_exhausted';
-            forcedReleaseExitCode = 1;
           }
         }
         // With the default-to-NEEDS-ATTENTION above, verdict is always one of
@@ -685,29 +682,21 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   }
 
   // Test failed: kick off a fix job using the test log. The fix→review hook
-  // will then chain to review → commit → push. Bounded by the same fix cap
-  // as review→fix so a persistently-broken test can't spin Claude forever.
+  // chains back through review → commit → push. Fixes are unbounded — the
+  // loop is bounded on the verification side (next test/review).
   if (job.kind === 'test' && job.exitCode !== null && job.exitCode !== 0) {
     try {
       const { autoCommitEnabled, autoPushEnabled } = await getProjectPipelineConfig(job.project);
       const inRelease = !!findActiveReleaseJob(job.project);
       if (inRelease || autoPushEnabled || autoCommitEnabled) {
-        const count = recentFixCount(job.project, job);
-        if (count < MAX_FIX_ITERATIONS) {
-          const { startFixFromJob } = await import('@/lib/pipeline/start-fix');
-          const r = await startFixFromJob(job.id);
-          if (r.ok) {
-            console.log(`[release] test failed → started fix ${r.jobId} (iter ${count + 1})`);
-            chainedNext = true;
-          } else {
-            releaseStopReason = `test→fix skipped for ${job.project}: ${r.detail}`;
-            noteReleaseStop(releaseStopReason);
-            forcedReleaseExitCode = 1;
-          }
+        const { startFixFromJob } = await import('@/lib/pipeline/start-fix');
+        const r = await startFixFromJob(job.id);
+        if (r.ok) {
+          console.log(`[release] test failed → started fix ${r.jobId}`);
+          chainedNext = true;
         } else {
-          releaseStopReason = `test→fix cap reached for ${job.project} (${count}/${MAX_FIX_ITERATIONS}) — tests still failing`;
+          releaseStopReason = `test→fix skipped for ${job.project}: ${r.detail}`;
           noteReleaseStop(releaseStopReason);
-          notificationEvent = 'fix_loop_exhausted';
           forcedReleaseExitCode = 1;
         }
       }

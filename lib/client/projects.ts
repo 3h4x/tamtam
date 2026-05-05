@@ -201,7 +201,7 @@ export async function fetchPersonas(): Promise<{ personas: Persona[] }> {
 }
 
 export async function runProject(projectName: string, prompt: string, opts: RunProjectOptions = {}): Promise<{ status: string; job_id: string; pid: number }> {
-  const { files, persona, personas, model, resumeSessionId, contextMeta, userPrompt, ghIssueNumber, ghIssueRepo, ghIssueTitle } = opts
+  const { files, persona, personas, model, resumeSessionId, contextMeta, userPrompt, ghIssueNumber, ghIssueRepo, ghIssueTitle, provider } = opts
   let response: Response
   if ((files && files.length > 0) || persona) {
     const formData = new FormData()
@@ -215,6 +215,7 @@ export async function runProject(projectName: string, prompt: string, opts: RunP
     if (ghIssueNumber != null) formData.append('ghIssueNumber', String(ghIssueNumber))
     if (ghIssueRepo) formData.append('ghIssueRepo', ghIssueRepo)
     if (ghIssueTitle) formData.append('ghIssueTitle', ghIssueTitle)
+    if (provider) formData.append('provider', provider)
     if (files) {
       for (const file of files) {
         formData.append('files', file, file.name)
@@ -234,6 +235,7 @@ export async function runProject(projectName: string, prompt: string, opts: RunP
     if (ghIssueNumber != null) body.ghIssueNumber = ghIssueNumber
     if (ghIssueRepo) body.ghIssueRepo = ghIssueRepo
     if (ghIssueTitle) body.ghIssueTitle = ghIssueTitle
+    if (provider) body.provider = provider
     response = await fetch(`${API_BASE}/by-project/${projectName}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

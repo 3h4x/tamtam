@@ -115,6 +115,9 @@ export function useHandleSubmit(deps: SubmitDeps) {
         personas: personaPaths.length > 0 ? personaPaths : undefined,
         model,
         resumeSessionId: sessionId || undefined,
+        // When resuming, pin to the originating provider — session IDs are
+        // not portable across CLIs (codex rollouts ≠ claude sessions).
+        provider: sessionId && cur.sessionProvider ? cur.sessionProvider : undefined,
         contextMeta: contextMetaStr,
         userPrompt: text,
         ghIssueNumber: issueCtx?.number ?? undefined,
