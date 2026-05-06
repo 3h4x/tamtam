@@ -77,7 +77,7 @@ function createTestDb() {
   return { sqlite, db: drizzle(sqlite, { schema }) };
 }
 
-function makeJobRow(overrides: Record<string, unknown>) {
+function makeJobRow<T extends Record<string, unknown>>(overrides: T) {
   const now = Date.now() / 1000;
   return {
     prompt: null,
@@ -86,7 +86,7 @@ function makeJobRow(overrides: Record<string, unknown>) {
     startedAt: now,
     finishedAt: null,
     exitCode: null,
-    seen: 0,
+    seen: false,
     durationMs: null,
     inputTokens: null,
     outputTokens: null,
@@ -99,7 +99,7 @@ function makeJobRow(overrides: Record<string, unknown>) {
     ghIssueNumber: null,
     ghIssueRepo: null,
     ghIssueTitle: null,
-    logPruned: 0,
+    logPruned: false,
     costUsd: null,
     model: null,
     releaseId: null,
@@ -1388,5 +1388,207 @@ describe('fix-push cap notifications', () => {
     expect(releaseRow?.finishedAt).not.toBeNull();
     expect(releaseRow?.contextMeta).toContain('"releaseStopReason":"fix-push cap reached for proj');
     expect(readFileSync(releaseLog, 'utf8')).toContain('fix-push cap reached for proj');
+  });
+});
+
+// ─── agent drain hook ─────────────────────────────────────────────────────────
+
+describe('agent drain hook', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let drainNextAgentRunMock: ReturnType<typeof vi.fn>;
+
+  function makeAgentJob(id: string, kind: string, overrides: Partial<JobData> = {}): JobData {
+    const now = Date.now() / 1000;
+    return {
+      id, project: 'proj', kind, prompt: null, pid: 0, logPath: null,
+      startedAt: now, finishedAt: null, exitCode: null, seen: false,
+      durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+    testDb = createTestDb();
+    drainNextAgentRunMock = vi.fn().mockResolvedValue(undefined);
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+      getJobStatus: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/git/git-utils', () => ({ markReviewed: vi.fn().mockResolvedValue(undefined) }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({
+        autoPushEnabled: false, autoCommitEnabled: false,
+        releaseAfterRun: false, prWorkflowEnabled: false,
+      }),
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      releaseLock: vi.fn(), getLock: vi.fn().mockReturnValue(null),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/jobs/retention', () => ({ pruneProjectLogs: vi.fn() }));
+    vi.doMock('@/lib/shared/notifications', () => ({ notify: vi.fn().mockResolvedValue(undefined) }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: vi.fn().mockReturnValue({
+        fix_ci_max_retries: 0, fix_ci_retry_window_seconds: 120, fix_ci_fast_crash_ms: 5000,
+      }),
+    }));
+    vi.doMock('@/lib/agents/agent-run-report', () => ({
+      finalizeAgentRunReport: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/agents/pending-agent-run', () => ({
+      drainNextAgentRun: drainNextAgentRunMock,
+    }));
+  });
+
+  afterEach(() => vi.resetModules());
+
+  it('calls drainNextAgentRun with the project when an agent job finishes', async () => {
+    const job = makeAgentJob('agent-done', 'agent:improve');
+    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+
+    const { markDone } = await import('@/lib/jobs/job-storage');
+    await markDone(job, 0);
+
+    expect(drainNextAgentRunMock).toHaveBeenCalledOnce();
+    expect(drainNextAgentRunMock).toHaveBeenCalledWith('proj');
+  });
+
+  it('calls drainNextAgentRun even when the agent job fails', async () => {
+    const job = makeAgentJob('agent-fail-drain', 'agent:tests');
+    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+
+    const { markDone } = await import('@/lib/jobs/job-storage');
+    await markDone(job, 1);
+
+    expect(drainNextAgentRunMock).toHaveBeenCalledOnce();
+    expect(drainNextAgentRunMock).toHaveBeenCalledWith('proj');
+  });
+
+  it('does NOT call drainNextAgentRun for non-agent jobs', async () => {
+    const job = makeAgentJob('push-done', 'push');
+    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+
+    const { markDone } = await import('@/lib/jobs/job-storage');
+    await markDone(job, 0);
+
+    expect(drainNextAgentRunMock).not.toHaveBeenCalled();
+  });
+});
+
+// ─── agent run failure notification ──────────────────────────────────────────
+
+describe('agent run failure notification', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let notifyMock: ReturnType<typeof vi.fn>;
+
+  function makeAgentJob(id: string, kind: string, overrides: Partial<JobData> = {}): JobData {
+    const now = Date.now() / 1000;
+    return {
+      id, project: 'proj', kind, prompt: null, pid: 0, logPath: null,
+      startedAt: now, finishedAt: null, exitCode: null, seen: false,
+      durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+    testDb = createTestDb();
+    notifyMock = vi.fn().mockResolvedValue(undefined);
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+      getJobStatus: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/git/git-utils', () => ({ markReviewed: vi.fn().mockResolvedValue(undefined) }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({
+        autoPushEnabled: false, autoCommitEnabled: false,
+        releaseAfterRun: false, prWorkflowEnabled: false,
+      }),
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      releaseLock: vi.fn(), getLock: vi.fn().mockReturnValue(null),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/jobs/retention', () => ({ pruneProjectLogs: vi.fn() }));
+    vi.doMock('@/lib/shared/notifications', () => ({ notify: notifyMock }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: vi.fn().mockReturnValue({
+        fix_ci_max_retries: 0, fix_ci_retry_window_seconds: 120, fix_ci_fast_crash_ms: 5000,
+      }),
+    }));
+    vi.doMock('@/lib/agents/agent-run-report', () => ({
+      finalizeAgentRunReport: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/agents/pending-agent-run', () => ({
+      drainNextAgentRun: vi.fn().mockResolvedValue(undefined),
+    }));
+  });
+
+  afterEach(() => vi.resetModules());
+
+  it('emits agent_run_fail notification when an agent job exits non-zero', async () => {
+    const job = makeAgentJob('agent-fail', 'agent:my-agent');
+    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+
+    const { markDone } = await import('@/lib/jobs/job-storage');
+    await markDone(job, 1);
+
+    const call = notifyMock.mock.calls.find(
+      (c: unknown[]) => (c[0] as { event?: string })?.event === 'agent_run_fail',
+    );
+    expect(call).toBeDefined();
+    expect(call![0]).toMatchObject({
+      event: 'agent_run_fail',
+      project: 'proj',
+      agent: 'my-agent',
+      job_id: 'agent-fail',
+      status: 'failed',
+    });
+  });
+
+  it('does NOT emit agent_run_fail when the agent job succeeds', async () => {
+    const job = makeAgentJob('agent-ok', 'agent:improve');
+    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+
+    const { markDone } = await import('@/lib/jobs/job-storage');
+    await markDone(job, 0);
+
+    const failCall = notifyMock.mock.calls.find(
+      (c: unknown[]) => (c[0] as { event?: string })?.event === 'agent_run_fail',
+    );
+    expect(failCall).toBeUndefined();
+  });
+
+  it('does NOT emit agent_run_fail for non-agent job failures', async () => {
+    const job = makeAgentJob('test-fail', 'test');
+    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+
+    const { markDone } = await import('@/lib/jobs/job-storage');
+    await markDone(job, 1);
+
+    const failCall = notifyMock.mock.calls.find(
+      (c: unknown[]) => (c[0] as { event?: string })?.event === 'agent_run_fail',
+    );
+    expect(failCall).toBeUndefined();
   });
 });
