@@ -109,6 +109,55 @@ export async function isReviewed(project: string, path: string): Promise<boolean
   }
 }
 
+// Incremental review marker — pinned as a real git ref under refs/tamtam/reviewed/<branch>
+// rather than a filesystem fingerprint so it lives in the repo, survives clones,
+// and is introspectable with `git log refs/tamtam/reviewed/<branch>..HEAD`.
+
+const REVIEWED_REF_PREFIX = 'refs/tamtam/reviewed/';
+
+function reviewedRefName(branch: string): string {
+  return `${REVIEWED_REF_PREFIX}${branch}`;
+}
+
+export async function getCurrentBranch(path: string): Promise<string | null> {
+  const r = await exec('git', ['-C', path, 'branch', '--show-current'], { timeout: 5000 });
+  if (r.exitCode !== 0) return null;
+  const b = r.stdout.trim();
+  return b || null;
+}
+
+/** Point refs/tamtam/reviewed/<branch> at HEAD. Best-effort. */
+export async function setReviewedRef(path: string, branch: string): Promise<void> {
+  try {
+    await exec('git', ['-C', path, 'update-ref', reviewedRefName(branch), 'HEAD'], { timeout: 5000 });
+  } catch {
+    // Best effort — a failed ref write should not block the pipeline.
+  }
+}
+
+/** Read refs/tamtam/reviewed/<branch> sha, or null if absent. */
+export async function getReviewedRefSha(path: string, branch: string): Promise<string | null> {
+  const r = await exec('git', ['-C', path, 'rev-parse', '--verify', '--quiet', reviewedRefName(branch)], { timeout: 5000 });
+  if (r.exitCode !== 0) return null;
+  const sha = r.stdout.trim();
+  return sha || null;
+}
+
+/** True iff `ancestor` is an ancestor of `head` (or they are equal). */
+export async function isAncestor(path: string, ancestor: string, head: string = 'HEAD'): Promise<boolean> {
+  const r = await exec('git', ['-C', path, 'merge-base', '--is-ancestor', ancestor, head], { timeout: 5000 });
+  return r.exitCode === 0;
+}
+
+/** Delete refs/tamtam/reviewed/<branch> — used when the marker is stale (rebased past). */
+export async function clearReviewedRef(path: string, branch: string): Promise<void> {
+  try {
+    await exec('git', ['-C', path, 'update-ref', '-d', reviewedRefName(branch)], { timeout: 5000 });
+  } catch {
+    // Ignore — best-effort cleanup.
+  }
+}
+
 export async function gitChanges(path: string): Promise<number | null> {
   try {
     const result = await exec('git', ['-C', path, 'status', '--porcelain', '--ignore-submodules'], {

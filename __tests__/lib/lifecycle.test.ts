@@ -1221,6 +1221,109 @@ describe('verdict retry rescue', () => {
   });
 });
 
+// ─── incremental review ref guard ────────────────────────────────────────────
+
+describe('setReviewedRef incremental_review_enabled guard', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
+  let setReviewedRefMock: ReturnType<typeof vi.fn>;
+  let getCurrentBranchMock: ReturnType<typeof vi.fn>;
+  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
+  let tempDir: string;
+
+  function makeReviewJob(id: string, logPath: string): JobData {
+    const now = Date.now() / 1000;
+    return {
+      id, project: 'proj', kind: 'review', prompt: null, pid: 0, logPath,
+      startedAt: now, finishedAt: null, exitCode: null, seen: false,
+      durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+      releaseId: 'rel-inc', provider: null,
+    };
+  }
+
+  function setupMocks(incrementalEnabled: boolean) {
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ deleteJob: vi.fn().mockResolvedValue(undefined), getJobStatus: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
+    vi.doMock('@/lib/git/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+      setReviewedRef: setReviewedRefMock,
+      getCurrentBranch: getCurrentBranchMock,
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({ autoPushEnabled: false, autoCommitEnabled: false, releaseAfterRun: false, prWorkflowEnabled: false }),
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      releaseLock: vi.fn(), getLock: vi.fn().mockReturnValue(null), isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/jobs/retention', () => ({ pruneProjectLogs: vi.fn() }));
+    vi.doMock('@/lib/shared/notifications', () => ({ notify: vi.fn().mockResolvedValue(undefined) }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: vi.fn().mockReturnValue({
+        fix_ci_max_retries: 0, fix_ci_retry_window_seconds: 120, fix_ci_fast_crash_ms: 5000,
+        incremental_review_enabled: incrementalEnabled,
+      }),
+    }));
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-inc-ref-'));
+    setReviewedRefMock = vi.fn().mockResolvedValue(undefined);
+    getCurrentBranchMock = vi.fn().mockResolvedValue('main');
+    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
+
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.jobs).values(
+      makeJobRow({ id: 'rel-inc', project: 'proj', kind: 'release', startedAt: now - 60 }) as any
+    ).run();
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('does NOT write reviewed ref when incremental_review_enabled is false', async () => {
+    setupMocks(false);
+    const logPath = join(tempDir, 'lgtm-off.log');
+    writeFileSync(logPath, 'Findings: none\nVerdict: LGTM\n');
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+    await markDoneFn(makeReviewJob('rev-off', logPath), 0);
+
+    expect(setReviewedRefMock).not.toHaveBeenCalled();
+  });
+
+  it('writes reviewed ref when incremental_review_enabled is true and project path resolves', async () => {
+    setupMocks(true);
+    const logPath = join(tempDir, 'lgtm-on.log');
+    writeFileSync(logPath, 'Findings: none\nVerdict: LGTM\n');
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+    await markDoneFn(makeReviewJob('rev-on', logPath), 0);
+
+    expect(setReviewedRefMock).toHaveBeenCalledWith('/path/to/proj', 'main');
+  });
+
+  it('does NOT write reviewed ref for non-LGTM verdicts', async () => {
+    setupMocks(true);
+    const logPath = join(tempDir, 'needs-attn.log');
+    writeFileSync(logPath, 'Findings:\n- Finding ID: x\n  Severity: low\nVerdict: NEEDS ATTENTION\n');
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+    await markDoneFn(makeReviewJob('rev-na', logPath), 0);
+
+    expect(setReviewedRefMock).not.toHaveBeenCalled();
+  });
+});
+
 // ─── auto-mark seen on completion ────────────────────────────────────────────
 
 describe('auto-mark seen on completion', () => {

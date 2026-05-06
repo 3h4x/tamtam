@@ -524,6 +524,7 @@ curl -N http://localhost:1337/api/streaming/{job_id}
 |---------|-------------|-----|
 | Agent returns 409 on run | Another instance already running | Wait for the current run to finish; duplicate prevention is intentional |
 | Schedule not firing | `prompt` or `schedule` is empty, the internal scheduler is paused, or the fire was intentionally skipped | Check `/api/agents/scheduler-health` for `missing`, `errorCount`, `skippedCount`, `lastError`, and `lastSkippedReason` |
+| Scheduled fires being skipped with `dirty worktree: N files` | The project has more uncommitted/untracked files than `dirty_worktree_block_threshold` (default 20). Agents won't run on top of large WIP. | Commit, stash, or discard pending changes — or raise the threshold (or set to 0 to disable) in Settings → Pipeline. |
 | Skills not in Claude's context | `skillIds` references deleted skills | Re-check skill IDs; missing skills are silently skipped |
 | Scheduler says the agent is missing | Boot-time reinstall did not register the entry or the row was changed while the server was down | POST `/api/agents/scheduler-health` to reinstall missing schedules, then re-check the GET response |
 | LaunchAgent not surviving reboot | plist not loaded | Legacy only: run `launchctl load ~/Library/LaunchAgents/com.tamtam.agent.{id}.plist`, then migrate the agent to `runner: "pm2"` |

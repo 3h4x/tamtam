@@ -8,6 +8,7 @@ import { resolveProjectPath } from '@/lib/shared/project-data';
 import { createJob, listJobs, probeJobStatus, readParsedLog, updateJob } from '@/lib/jobs/job-storage';
 import { startJob } from '@/lib/jobs/pm2-jobs';
 import { exec } from '@/lib/shared/shell';
+import { getCurrentBranch, getReviewedRefSha, isAncestor, clearReviewedRef } from '@/lib/git/git-utils';
 import { CODE_REVIEWER_SKILL } from '@/lib/skills/skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings, getPipelineModel } from '@/lib/shared/config';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
@@ -72,6 +73,42 @@ async function determineReviewScope(projPath: string): Promise<ReviewScope> {
   const aheadR = await exec('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
   const ahead = parseInt(aheadR?.stdout?.trim() ?? '', 10);
   if (aheadR?.exitCode === 0 && Number.isFinite(ahead) && ahead > 0) {
+    // Incremental review: narrow scope to commits since last LGTM if the
+    // refs/tamtam/reviewed/<branch> ref still points at an ancestor of HEAD.
+    // Falls back to @{u}..HEAD if the ref is missing, stale, or disabled.
+    const incrementalEnabled = getSettings().incremental_review_enabled;
+    if (incrementalEnabled) {
+      const branch = await getCurrentBranch(projPath);
+      if (branch) {
+        const reviewedSha = await getReviewedRefSha(projPath, branch);
+        if (reviewedSha) {
+          const stillAncestor = await isAncestor(projPath, reviewedSha, 'HEAD');
+          if (stillAncestor) {
+            const narrowR = await exec('git', ['-C', projPath, 'rev-list', '--count', `${reviewedSha}..HEAD`], { timeout: 5000 });
+            const narrowCount = parseInt(narrowR?.stdout?.trim() ?? '', 10);
+            if (narrowR?.exitCode === 0 && Number.isFinite(narrowCount)) {
+              if (narrowCount === 0) {
+                // HEAD is exactly the reviewed commit — all unpushed commits are
+                // already approved. Nothing new to review.
+                return { ok: false, detail: 'All unpushed commits already approved (LGTM) — nothing new to review' };
+              }
+              const shortSha = reviewedSha.slice(0, 7);
+              return {
+                ok: true,
+                prompt:
+                  `The working tree is clean. ${ahead} local commit${ahead === 1 ? '' : 's'} are not yet pushed, but commits up to ${shortSha} were already approved (LGTM) in a previous review. ` +
+                  `Review ONLY the ${narrowCount} new commit${narrowCount === 1 ? '' : 's'} since then. ` +
+                  `Use \`git log --oneline ${shortSha}..HEAD\`, \`git diff --stat ${shortSha}..HEAD\`, and \`git diff ${shortSha}..HEAD\` — do not re-review code before ${shortSha}.`,
+              };
+            }
+          } else {
+            // Stale (rebase/reset past the marker) — clean it up so future
+            // reviews don't keep paying the merge-base check.
+            await clearReviewedRef(projPath, branch);
+          }
+        }
+      }
+    }
     return {
       ok: true,
       prompt:

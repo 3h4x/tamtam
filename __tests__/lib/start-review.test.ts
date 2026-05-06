@@ -270,6 +270,110 @@ describe('startProjectReview', () => {
     expect(prompt).toContain('git diff @{u}..HEAD');
   });
 
+  it('returns 400 when HEAD is exactly the reviewed ref (narrowCount=0) — no new commits to review', async () => {
+    vi.resetModules();
+    const sha = 'abc1234abc1234abc1234abc1234abc1234abc1234';
+    execMock = vi.fn()
+      .mockResolvedValueOnce(resp(0, ''))          // git status → clean
+      .mockResolvedValueOnce(resp(0, '2\n'))        // git rev-list @{u}..HEAD → ahead=2
+      .mockResolvedValueOnce(resp(0, 'main\n'))     // git branch --show-current
+      .mockResolvedValueOnce(resp(0, sha + '\n'))   // git rev-parse refs/tamtam/reviewed/main
+      .mockResolvedValueOnce(resp(0, ''))            // git merge-base --is-ancestor → exit 0
+      .mockResolvedValueOnce(resp(0, '0\n'));        // git rev-list --count <sha>..HEAD → 0
+
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      getProjectTestConfig: () => ({}),
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: createJobMock, updateJob: updateJobMock,
+      listJobs: vi.fn().mockReturnValue([]), readLog: vi.fn().mockReturnValue(''),
+      readParsedLog: vi.fn().mockReturnValue(''), probeJobStatus: vi.fn().mockResolvedValue('done'),
+    }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: () => ({ review_verdict_rules: '', incremental_review_enabled: true }),
+      withBasePrompt: (s: string) => s,
+      getPermissionModeFlag: () => '--dangerously-skip-permissions',
+      getPipelineModel: () => 'sonnet',
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/code-reviewer.md' }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
+    }));
+    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
+
+    const { startProjectReview: fn } = await import('@/lib/pipeline/start-review');
+    const r = await fn('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(400);
+      expect(r.detail).toContain('already approved');
+    }
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
+  it('narrows review scope to commits since last LGTM when incremental review is enabled', async () => {
+    vi.resetModules();
+    const sha = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+    execMock = vi.fn()
+      .mockResolvedValueOnce(resp(0, ''))          // git status → clean
+      .mockResolvedValueOnce(resp(0, '3\n'))        // git rev-list @{u}..HEAD → ahead=3
+      .mockResolvedValueOnce(resp(0, 'main\n'))     // git branch --show-current
+      .mockResolvedValueOnce(resp(0, sha + '\n'))   // git rev-parse refs/tamtam/reviewed/main
+      .mockResolvedValueOnce(resp(0, ''))            // git merge-base --is-ancestor → exit 0
+      .mockResolvedValueOnce(resp(0, '1\n'));        // git rev-list --count <sha>..HEAD → 1 new
+
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      getProjectTestConfig: () => ({}),
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: createJobMock, updateJob: updateJobMock,
+      listJobs: vi.fn().mockReturnValue([]), readLog: vi.fn().mockReturnValue(''),
+      readParsedLog: vi.fn().mockReturnValue(''), probeJobStatus: vi.fn().mockResolvedValue('done'),
+    }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: () => ({ review_verdict_rules: '', incremental_review_enabled: true }),
+      withBasePrompt: (s: string) => s,
+      getPermissionModeFlag: () => '--dangerously-skip-permissions',
+      getPipelineModel: () => 'sonnet',
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/code-reviewer.md' }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
+    }));
+    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
+
+    const { startProjectReview: fn } = await import('@/lib/pipeline/start-review');
+    const r = await fn('proj');
+    expect(r.ok).toBe(true);
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('already approved');
+    expect(prompt).toContain('1 new commit');
+    expect(prompt).toContain(sha.slice(0, 7));
+    expect(prompt).not.toContain('@{u}..HEAD');
+  });
+
   it('returns ok with jobId and pid when review starts successfully', async () => {
     execMock.mockResolvedValueOnce(resp(0, 'M lib/foo.ts')); // git status → has changes
     const r = await startProjectReview('proj');

@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { existsSync, readFileSync, appendFileSync } from 'fs';
 import { db, schema } from '@/lib/db';
-import { markReviewed } from '@/lib/git/git-utils';
+import { markReviewed, setReviewedRef, getCurrentBranch } from '@/lib/git/git-utils';
 import { parseStreamLines } from './claude-stream-parser';
 import { costUsd } from '@/lib/shared/usage-pricing';
 import { getVerdict, readLog, readParsedLog } from './verdict';
@@ -478,6 +478,24 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         // in pipeline stats (avoids false "parseFailed" counts on pruned logs).
         if (rawVerdict) persistVerdict(job.id, rawVerdict);
         if (verdict === 'LGTM') {
+          // Pin the "last LGTM'd commit" as a git ref so the next review can
+          // narrow its scope from `@{u}..HEAD` to `<ref>..HEAD`. Skipped when
+          // incremental_review_enabled is off, on detached HEAD (no branch), or
+          // when the ref write fails. Best-effort: failures don't affect the release.
+          try {
+            const { getSettings: getSettingsForRef } = await import('@/lib/shared/config');
+            if (getSettingsForRef().incremental_review_enabled) {
+              const { resolveProjectPath } = await import('@/lib/shared/project-data');
+              const projPath = resolveProjectPath(job.project);
+              if (projPath) {
+                const branch = await getCurrentBranch(projPath);
+                if (branch) await setReviewedRef(projPath, branch);
+              }
+            }
+          } catch (e) {
+            console.log(`[release] failed to set reviewed ref for ${job.project}:`, e);
+          }
+
           // DoD verification only makes sense in PR Workflow mode AND when we
           // have a linked GitHub issue. On a direct-branch release (no PR, no
           // issue) there are no acceptance-criteria checkboxes to tick, so
@@ -998,18 +1016,6 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     }
   }
 
-  // Drain the pending-agent-run queue: only one agent runs at a time per
-  // project (the run route enqueues here when another agent was already
-  // active). Trigger the next pending fire now that this slot is free.
-  if (isAgentJobKind(job.kind)) {
-    try {
-      const { drainNextAgentRun } = await import('@/lib/agents/pending-agent-run');
-      await drainNextAgentRun(job.project);
-    } catch (e) {
-      console.error(`[pending-agent-run] drain hook error for ${job.project}:`, e);
-    }
-  }
-
   // Agent run failures: notify on agent run failures
   if (isAgentJobKind(job.kind) && job.exitCode !== 0) {
     try {
@@ -1055,6 +1061,23 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
       }
     } catch (e) {
       console.log(`[release-after-run] error for ${job.project}:`, e);
+    }
+  }
+
+  // Drain the pending-agent-run queue AFTER release-after-run so a release
+  // pipeline that's about to be triggered has a chance to acquire the project
+  // lock first. Without this ordering the drain fires the next queued agent
+  // before the release lock is held — both then run concurrently on the same
+  // worktree. Once the lock is acquired (synchronously inside startRelease),
+  // the agent run route routes the drained entry into the DB-backed
+  // queued-agent-runs queue, which is replayed when the pipeline lock
+  // releases.
+  if (isAgentJobKind(job.kind)) {
+    try {
+      const { drainNextAgentRun } = await import('@/lib/agents/pending-agent-run');
+      await drainNextAgentRun(job.project);
+    } catch (e) {
+      console.error(`[pending-agent-run] drain hook error for ${job.project}:`, e);
     }
   }
 
