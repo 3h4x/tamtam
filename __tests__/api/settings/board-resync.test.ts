@@ -42,7 +42,13 @@ describe('POST /api/settings/board-resync', () => {
     getSettingsMock = vi.fn(() => ({ github_board_sync_enabled: true }));
 
     vi.doMock('@/lib/jobs/storage', () => ({ listJobs: listJobsMock }));
-    vi.doMock('@/lib/github/project-board', () => ({ syncJobToProjectBoard: syncMock }));
+    vi.doMock('@/lib/github/project-board', () => ({
+      syncJobToProjectBoard: syncMock,
+      isBoardSyncRateLimitError: (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        return /rate-limit cooldown active|rate limit exceeded|secondary rate limit|abuse detection/i.test(message);
+      },
+    }));
     vi.doMock('@/lib/shared/config', () => ({ getSettings: getSettingsMock }));
 
     const mod = await import('@/app/api/settings/board-resync/route');
@@ -104,6 +110,25 @@ describe('POST /api/settings/board-resync', () => {
     expect(data.failed).toBe(0);
     expect(data.rateLimited).toBe(true);
     // Loop must not invoke sync for the job after the rate-limited one.
+    expect(syncMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops early when GitHub abuse detection asks for backoff', async () => {
+    listJobsMock.mockReturnValue([
+      makeJob({ id: 'a' }),
+      makeJob({ id: 'b' }),
+      makeJob({ id: 'c' }),
+      makeJob({ id: 'd' }),
+    ]);
+    syncMock.mockImplementation(async (job: JobData) => {
+      if (job.id === 'c') throw new Error('GraphQL error: abuse detection mechanism triggered');
+    });
+
+    const req = new NextRequest('http://localhost/api/settings/board-resync', { method: 'POST' });
+    const data = await (await POST(req)).json();
+    expect(data.resynced).toBe(2);
+    expect(data.failed).toBe(0);
+    expect(data.rateLimited).toBe(true);
     expect(syncMock).toHaveBeenCalledTimes(3);
   });
 
