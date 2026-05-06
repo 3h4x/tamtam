@@ -379,6 +379,42 @@ describe('project board integration', () => {
     expect(itemCreateAttempted).toBe(false);
   });
 
+  it('logs a concise warning instead of a stack trace for rate-limit errors', async () => {
+    const job = makeJob({ id: 'rate-limit-job', kind: 'run' });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const { logBoardSyncError } = await import('@/lib/github/project-board');
+    logBoardSyncError(job.id, 'manual', new Error('GitHub board sync skipped: rate-limit cooldown active'));
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      `[github-board] sync skipped for ${job.id} (manual): GitHub board sync skipped: rate-limit cooldown active`,
+    );
+    expect(errorSpy).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it('keeps generic HTTP 403 board sync failures on console.error', async () => {
+    const job = makeJob({ id: 'forbidden-job', kind: 'run' });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const error = new Error('HTTP 403: Resource not accessible by integration');
+
+    const { logBoardSyncError } = await import('@/lib/github/project-board');
+    logBoardSyncError(job.id, 'manual', error);
+
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      `[github-board] sync failed for ${job.id} (manual)`,
+      error,
+    );
+
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
   it('reuses an existing board item discovered by marker lookup', async () => {
     const job = makeJob({ id: 'run-1', kind: 'run', prompt: 'Audit logs' });
 

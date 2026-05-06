@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listJobs } from '@/lib/jobs/storage';
-import { syncJobToProjectBoard } from '@/lib/github/project-board';
+import { isBoardSyncRateLimitError, syncJobToProjectBoard } from '@/lib/github/project-board';
 import { getSettings } from '@/lib/shared/config';
 
 const DEFAULT_DAYS = 7;
@@ -50,8 +50,7 @@ export async function POST(request: NextRequest) {
       await syncJobToProjectBoard(job, 'manual', { requireConfigured: true });
       resynced++;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (/rate limit|cooldown/i.test(message)) {
+      if (isBoardSyncRateLimitError(error)) {
         rateLimited = true;
         console.error(`[board-resync] stopping early — GitHub rate limit hit after ${resynced} resyncs`);
         break;

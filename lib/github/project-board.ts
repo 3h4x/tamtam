@@ -267,6 +267,16 @@ class RateLimitError extends Error {
   }
 }
 
+function isExplicitRateLimitMessage(message: string): boolean {
+  return /rate-limit cooldown active|rate limit exceeded|secondary rate limit|abuse detection/i.test(message);
+}
+
+export function isBoardSyncRateLimitError(error: unknown): boolean {
+  if (error instanceof Error && error.name === 'RateLimitError') return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return isExplicitRateLimitMessage(message);
+}
+
 function assertSafeArg(value: string, flag: string): void {
   if (value.startsWith('--')) {
     throw new Error(`Refusing ${flag} value that starts with "--" (would be parsed as a gh flag): ${value.slice(0, 40)}`);
@@ -280,7 +290,7 @@ async function runGhProject(args: string[]): Promise<unknown> {
   const result = await exec('gh', args, { timeout: 30000 });
   if (result.exitCode !== 0) {
     const message = result.stderr.trim() || result.stdout.trim() || 'gh project command failed';
-    if (/rate limit|secondary rate|abuse detection|HTTP 403/i.test(message)) {
+    if (isExplicitRateLimitMessage(message)) {
       rateLimitedUntilMs = Date.now() + RATE_LIMIT_COOLDOWN_MS;
       throw new RateLimitError(message);
     }
@@ -821,6 +831,15 @@ async function updateItemStatus(itemId: string, settings: EnsureBoardResult, sta
 
 const jobSyncQueues = new Map<string, Promise<void>>();
 
+export function logBoardSyncError(jobId: string, phase: BoardSyncPhase, error: unknown): void {
+  if (isBoardSyncRateLimitError(error)) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[github-board] sync skipped for ${jobId} (${phase}): ${message}`);
+    return;
+  }
+  console.error(`[github-board] sync failed for ${jobId} (${phase})`, error);
+}
+
 export async function syncJobToProjectBoard(
   job: JobData,
   phase: BoardSyncPhase,
@@ -901,6 +920,6 @@ export async function queueJobBoardSync(job: JobData, phase: BoardSyncPhase): Pr
   try {
     await syncJobToProjectBoard(job, phase);
   } catch (error) {
-    console.error(`[github-board] sync failed for ${job.id} (${phase})`, error);
+    logBoardSyncError(job.id, phase, error);
   }
 }
