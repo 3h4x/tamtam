@@ -6,9 +6,13 @@ import { db, schema } from '@/lib/db';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { checkIssueBranchBlock } from '@/lib/pipeline/start-release';
+import { isLockOwnedByActiveRelease, getLock } from '@/lib/pipeline/pipeline-lock';
+import { getPendingRelease, drainPendingRelease } from '@/lib/pipeline/pending-release';
+import { enqueueQueuedAgentRun } from '@/lib/agents/queued-agent-runs';
 import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills/skills';
 import { createJob, updateJob, listJobs, probeJobStatus } from '@/lib/jobs/job-storage';
 import { startJob } from '@/lib/jobs/pm2-jobs';
+import { getJobKind, isAgentJobKind } from '@/lib/jobs/kinds';
 import { withBasePrompt, getPermissionModeFlag } from '@/lib/shared/config';
 import { errMsg } from '@/lib/shared/types';
 import { exec } from '@/lib/shared/shell';
@@ -62,6 +66,39 @@ export async function POST(
     return NextResponse.json({ detail: 'agent has no prompt and no skills to run' }, { status: 400 });
   }
 
+  // Block agent runs while a release pipeline holds the project lock.
+  // Queue in DB (not in-memory) so the pending run survives a server restart.
+  // The lock is released when the pipeline finishes, which drains this queue.
+  if (isLockOwnedByActiveRelease(agent.project)) {
+    const lock = getLock(agent.project);
+    try {
+      enqueueQueuedAgentRun(agent.project, {
+        project: agent.project,
+        agentId: agent.id,
+        agentName: agent.name,
+        triggeredBy,
+        prompt: taskPrompt,
+        enqueuedAt: Date.now(),
+      });
+    } catch (err) {
+      console.error('[agent-run-route] failed to persist release-lock queue entry:', err);
+      return NextResponse.json(
+        { detail: `Failed to queue agent '${agent.name}' while the release pipeline is running` },
+        { status: 500 },
+      );
+    }
+    return NextResponse.json(
+      {
+        status: 'queued',
+        code: 'pipeline_lock',
+        detail: `Agent '${agent.name}' queued — release pipeline is running for ${agent.project} (job ${lock?.lockedByJobId ?? 'unknown'})`,
+        blockingJobId: lock?.lockedByJobId,
+        agent: agent.name,
+      },
+      { status: 202 },
+    );
+  }
+
   // Only one agent runs at a time per project — concurrent agents racing on
   // the same git worktree clobber each other's commits and branch state.
   //   - Same agent already running → reject (true duplicate, scheduler retries
@@ -70,11 +107,11 @@ export async function POST(
   //     202 queued. Drained when the running agent finishes.
   const kindKey = `agent:${agent.name}`;
   const runningAgents = listJobs().filter(
-    (j) => j.project === agent.project && j.kind.startsWith('agent:') && j.finishedAt === null
+    (j) => j.project === agent.project && isAgentJobKind(j.kind) && j.finishedAt === null
   );
   for (const j of runningAgents) {
     if ((await probeJobStatus(j)) !== 'running') continue;
-    if (j.kind === kindKey) {
+    if (getJobKind(j.kind) === kindKey) {
       return NextResponse.json(
         { code: 'already_running', detail: `Agent '${agent.name}' is already running (job ${j.id})` },
         { status: 409 }
@@ -129,6 +166,44 @@ export async function POST(
   }
 
   try {
+    // A previously-queued release must get first chance to reacquire the lock
+    // before any newer agent work starts on the same project. Check only once
+    // we know no other agent on the project is running or starting.
+    if (getPendingRelease(agent.project)) {
+      await drainPendingRelease(agent.project);
+      const lock = getLock(agent.project);
+      if (isLockOwnedByActiveRelease(agent.project) || getPendingRelease(agent.project)) {
+        try {
+          enqueueQueuedAgentRun(agent.project, {
+            project: agent.project,
+            agentId: agent.id,
+            agentName: agent.name,
+            triggeredBy,
+            prompt: taskPrompt,
+            enqueuedAt: Date.now(),
+          });
+        } catch (err) {
+          console.error('[agent-run-route] failed to persist pending-release queue entry:', err);
+          return NextResponse.json(
+            { detail: `Failed to queue agent '${agent.name}' while the pending release is recovering` },
+            { status: 500 },
+          );
+        }
+        return NextResponse.json(
+          {
+            status: 'queued',
+            code: lock ? 'pipeline_lock' : 'pending_release',
+            detail: lock
+              ? `Agent '${agent.name}' queued — release pipeline is running for ${agent.project} (job ${lock.lockedByJobId})`
+              : `Agent '${agent.name}' queued — pending release for ${agent.project} will run before new agent work`,
+            blockingJobId: lock?.lockedByJobId,
+            agent: agent.name,
+          },
+          { status: 202 },
+        );
+      }
+    }
+
     const result = await runAgentStart(agent, taskPrompt, triggeredBy);
     return result.response;
   } finally {

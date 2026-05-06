@@ -83,6 +83,8 @@ export {
   runAgent,
 } from './client/agents'
 
+export type { RunAgentResult } from './client/agents'
+
 export {
   fetchSkills,
   createSkill,

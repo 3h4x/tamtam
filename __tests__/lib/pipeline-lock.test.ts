@@ -49,6 +49,11 @@ function createTestDb() {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS projects (
+      name TEXT PRIMARY KEY,
+      path TEXT NOT NULL,
+      enabled INTEGER DEFAULT 1
+    );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };
 }
@@ -62,6 +67,8 @@ describe('pipeline-lock', () => {
 
   beforeEach(async () => {
     vi.resetModules();
+    vi.doUnmock('@/lib/pipeline/pending-release');
+    vi.doUnmock('@/lib/pipeline/recovery-drain');
     testDb = createTestDb();
     vi.doMock('@/lib/db', () => ({
       db: testDb.db,
@@ -112,12 +119,13 @@ describe('pipeline-lock', () => {
       vi.resetModules();
       testDb = createTestDb();
       vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-      const startReleaseMock = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 409,
-        detail: 'Jobs are paused globally. Turn the switch back on in Settings to start a release.',
-      });
-      vi.doMock('@/lib/pipeline/start-release', () => ({ startRelease: startReleaseMock }));
+      const drainProjectRecoveryWorkMock = vi.fn().mockResolvedValue(undefined);
+      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
+        drainProjectRecoveryWork: drainProjectRecoveryWorkMock,
+      }));
+      vi.doMock('@/lib/agents/pending-agent-run', () => ({
+        drainNextAgentRun: vi.fn().mockResolvedValue(undefined),
+      }));
 
       const pendingMod = await import('@/lib/pipeline/pending-release');
       const mod2 = await import('@/lib/pipeline/pipeline-lock');
@@ -129,17 +137,20 @@ describe('pipeline-lock', () => {
       pendingMod.setPendingRelease('proj');
 
       expect(mod2.getLock('proj')).toBeNull();
-      await new Promise<void>((r) => setTimeout(r, 10));
-      expect(startReleaseMock).toHaveBeenCalledWith('proj');
-      expect(pendingMod.getPendingRelease('proj')).toBe(true);
+      await vi.waitFor(() => expect(pendingMod.getPendingRelease('proj')).toBe(true));
     });
 
     it('self-heal keeps a pending release queued when the drain throws', async () => {
       vi.resetModules();
       testDb = createTestDb();
       vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-      const startReleaseMock = vi.fn().mockRejectedValue(new Error('pm2 start failed'));
-      vi.doMock('@/lib/pipeline/start-release', () => ({ startRelease: startReleaseMock }));
+      const drainProjectRecoveryWorkMock = vi.fn().mockRejectedValue(new Error('pm2 start failed'));
+      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
+        drainProjectRecoveryWork: drainProjectRecoveryWorkMock,
+      }));
+      vi.doMock('@/lib/agents/pending-agent-run', () => ({
+        drainNextAgentRun: vi.fn().mockResolvedValue(undefined),
+      }));
 
       const pendingMod = await import('@/lib/pipeline/pending-release');
       const mod2 = await import('@/lib/pipeline/pipeline-lock');
@@ -151,22 +162,20 @@ describe('pipeline-lock', () => {
       pendingMod.setPendingRelease('proj');
 
       expect(mod2.getLock('proj')).toBeNull();
-      await new Promise<void>((r) => setTimeout(r, 10));
-      expect(startReleaseMock).toHaveBeenCalledWith('proj');
-      expect(pendingMod.getPendingRelease('proj')).toBe(true);
+      await vi.waitFor(() => expect(pendingMod.getPendingRelease('proj')).toBe(true));
     });
 
     it('self-heal keeps a pending release queued on retryable startup failure', async () => {
       vi.resetModules();
       testDb = createTestDb();
       vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-      const startReleaseMock = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 500,
-        detail: 'Failed to create release job',
-        retryable: true,
-      });
-      vi.doMock('@/lib/pipeline/start-release', () => ({ startRelease: startReleaseMock }));
+      const drainProjectRecoveryWorkMock = vi.fn().mockResolvedValue(undefined);
+      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
+        drainProjectRecoveryWork: drainProjectRecoveryWorkMock,
+      }));
+      vi.doMock('@/lib/agents/pending-agent-run', () => ({
+        drainNextAgentRun: vi.fn().mockResolvedValue(undefined),
+      }));
 
       const pendingMod = await import('@/lib/pipeline/pending-release');
       const mod2 = await import('@/lib/pipeline/pipeline-lock');
@@ -178,9 +187,7 @@ describe('pipeline-lock', () => {
       pendingMod.setPendingRelease('proj');
 
       expect(mod2.getLock('proj')).toBeNull();
-      await new Promise<void>((r) => setTimeout(r, 10));
-      expect(startReleaseMock).toHaveBeenCalledWith('proj');
-      expect(pendingMod.getPendingRelease('proj')).toBe(true);
+      await vi.waitFor(() => expect(pendingMod.getPendingRelease('proj')).toBe(true));
     });
 
     it('self-heals: still returns the lock while the holder is running', async () => {
@@ -320,33 +327,30 @@ describe('pipeline-lock', () => {
       expect(getLock('proj-b')).not.toBeNull();
     });
 
-    it('calls drainPendingRelease for the project when the lock is released', async () => {
+    it('calls the ordered recovery drain for the project when the lock is released', async () => {
       const drainMock = vi.fn().mockResolvedValue(undefined);
-      vi.doMock('@/lib/pipeline/pending-release', () => ({
-        drainPendingRelease: drainMock,
-      }));
       // Re-import after adding the mock so the module picks up the new mock.
       vi.resetModules();
       testDb = createTestDb();
       vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-      vi.doMock('@/lib/pipeline/pending-release', () => ({
-        drainPendingRelease: drainMock,
+      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
+        drainProjectRecoveryWork: drainMock,
       }));
       const mod2 = await import('@/lib/pipeline/pipeline-lock');
       await mod2.acquireLock('proj', 'job-drain');
       mod2.releaseLock('proj', 'job-drain');
       // drain is async fire-and-forget — wait a microtask cycle
       await new Promise<void>((r) => setTimeout(r, 10));
-      expect(drainMock).toHaveBeenCalledWith('proj');
+      expect(drainMock).toHaveBeenCalledWith('proj', '[pipeline-lock]');
     });
 
-    it('does not call drainPendingRelease when the wrong job tries to release', async () => {
+    it('does not call the recovery drain when the wrong job tries to release', async () => {
       const drainMock = vi.fn().mockResolvedValue(undefined);
       vi.resetModules();
       testDb = createTestDb();
       vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-      vi.doMock('@/lib/pipeline/pending-release', () => ({
-        drainPendingRelease: drainMock,
+      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
+        drainProjectRecoveryWork: drainMock,
       }));
       const mod2 = await import('@/lib/pipeline/pipeline-lock');
       await mod2.acquireLock('proj', 'job-owner');

@@ -145,10 +145,20 @@ export async function drainNextAgentRun(project: string): Promise<void> {
       body: JSON.stringify({ prompt: next.prompt }),
     });
     if (r.status === 202) {
-      // The route only returns 202 when it re-queues this fire because another
-      // agent on the project is still running or starting. Leave the local
-      // head entry intact so it can be retried after the blocker clears.
       const body = await r.text().catch(() => '');
+      let parsed: { code?: string } | null = null;
+      try { parsed = body ? JSON.parse(body) as { code?: string } : null; } catch {}
+      if (parsed?.code === 'pipeline_lock' || parsed?.code === 'pending_release') {
+        // The DB queue now owns this run (survives restart). Drop the in-memory
+        // head so we don't double-fire when release recovery replays it.
+        dropHead();
+        console.log(
+          `[pending-agent-run] handed ${next.agentName} to DB queue (${parsed.code}) for ${project}`,
+        );
+        return;
+      }
+      // Another agent is running or starting — keep the in-memory head so it
+      // retries once the blocker clears (lifecycle drain).
       console.log(
         `[pending-agent-run] keeping ${next.agentName} queued for ${project}: ${r.status} ${body.slice(0, 200)}`,
       );

@@ -132,6 +132,15 @@ When the route is between duplicate-check and `pm2 start`, the response may
 still be `202 queued`, but without a `blockingJobId`. In that case the
 blocking agent is only "starting" and has not landed its job row yet.
 
+When a release pipeline currently holds the project's pipeline lock, the same
+route returns `202 queued` with `code: "pipeline_lock"`. If no release is
+currently running but the project still has an older `pending_release` flag,
+the route first gives that release a chance to start; if it remains queued, the
+agent returns `202 queued` with `code: "pending_release"`. Both cases store the
+agent in `queued_agent_runs`, not just memory, so it survives restart and is
+retried after the release unlocks, when jobs resume from a global pause, when
+the budget gate clears, on boot recovery, and from the periodic recovery sweep.
+
 **Duplicate start (`409`)**
 ```json
 {
@@ -188,6 +197,12 @@ User/scheduler triggers
       → Check for running/starting agent on the same project
           → same agent already active/starting → 409
           → different agent active/starting → 202 queued
+      → Check for active release lock on the same project
+          → release in flight → 202 queued with `code: "pipeline_lock"` and a DB-backed queue row
+      → Claim per-project start slot
+      → Check for queued pending release on the same project
+          → try draining pending release first
+          → still pending / release reacquired lock → 202 queued with `code: "pending_release"` or `code: "pipeline_lock"` and a DB-backed queue row
       → Fetch skills from DB (by skillIds)
       → Compose system prompt: `## SkillName\nContent` + `---` separators
       → Build command:
@@ -212,6 +227,11 @@ TamTam server boots
               → POST /api/agents/{agentId}/run (in-process fetch)
                   → normal agent-run flow above
 ```
+
+If a release lock blocked the fire, the queued row is replayed by
+`queued-agent-runs.ts` instead of the in-memory pending queue. Replays are
+triggered after release unlock, on resume from a global pause, on budget
+recovery, at boot, and by the periodic queued-agent recovery ticker.
 
 ## Querying Agents
 

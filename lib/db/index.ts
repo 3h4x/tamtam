@@ -148,6 +148,24 @@ sqlite.exec(`
   );
 `);
 
+// Agents queued while a release pipeline holds the project lock. This must
+// exist in the runtime bootstrap path as well as Drizzle migrations because
+// live queueing/recovery code can run before an operator manually applies
+// migrations on an upgraded instance.
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS queued_agent_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    agent_name TEXT NOT NULL,
+    triggered_by TEXT NOT NULL DEFAULT 'manual',
+    prompt TEXT NOT NULL DEFAULT '',
+    enqueued_at REAL NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS queued_agent_runs_project_agent
+    ON queued_agent_runs (project, agent_id);
+`);
+
 // Migrate: add token/duration/session columns to jobs if missing
 try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN duration_ms INTEGER');
@@ -254,10 +272,16 @@ try {
 try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN modified_files TEXT');
 } catch {}
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN provider TEXT');
+} catch {}
 
 // Migrate: add doc_paths to agents — JSON array of project-relative doc paths
 try {
   sqlite.exec("ALTER TABLE agents ADD COLUMN doc_paths TEXT NOT NULL DEFAULT '[]'");
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE agents ADD COLUMN provider TEXT');
 } catch {}
 
 // Project/agent recommendations generated from completed runs.

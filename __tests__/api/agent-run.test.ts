@@ -65,9 +65,14 @@ describe('POST /api/agents/{agentId}/run', () => {
   let probeJobStatusMock: ReturnType<typeof vi.fn>;
   let runGatesMock: ReturnType<typeof vi.fn>;
   let enqueueAgentRunMock: ReturnType<typeof vi.fn>;
+  let enqueueQueuedAgentRunMock: ReturnType<typeof vi.fn>;
   let drainNextAgentRunMock: ReturnType<typeof vi.fn>;
   let tryClaimAgentStartSlotMock: ReturnType<typeof vi.fn>;
   let checkCliStartGateMock: ReturnType<typeof vi.fn>;
+  let getLockMock: ReturnType<typeof vi.fn>;
+  let isLockOwnedByActiveReleaseMock: ReturnType<typeof vi.fn>;
+  let getPendingReleaseMock: ReturnType<typeof vi.fn>;
+  let drainPendingReleaseMock: ReturnType<typeof vi.fn>;
   let tempSkillsDir: string;
   let settingsMock: Record<string, unknown>;
 
@@ -115,9 +120,14 @@ describe('POST /api/agents/{agentId}/run', () => {
     probeJobStatusMock = vi.fn().mockResolvedValue('done');
     runGatesMock = vi.fn().mockReturnValue(null);
     enqueueAgentRunMock = vi.fn();
+    enqueueQueuedAgentRunMock = vi.fn();
     drainNextAgentRunMock = vi.fn().mockResolvedValue(undefined);
     tryClaimAgentStartSlotMock = vi.fn().mockReturnValue({ ok: true });
     checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
+    getLockMock = vi.fn().mockReturnValue(null);
+    isLockOwnedByActiveReleaseMock = vi.fn().mockReturnValue(false);
+    getPendingReleaseMock = vi.fn().mockReturnValue(false);
+    drainPendingReleaseMock = vi.fn().mockResolvedValue(undefined);
     settingsMock = {
       workspace_path: '',
       github_owner: '',
@@ -141,6 +151,17 @@ describe('POST /api/agents/{agentId}/run', () => {
       tryClaimAgentStartSlot: tryClaimAgentStartSlotMock,
       releaseAgentStartSlot: vi.fn(),
       drainNextAgentRun: drainNextAgentRunMock,
+    }));
+    vi.doMock('@/lib/agents/queued-agent-runs', () => ({
+      enqueueQueuedAgentRun: enqueueQueuedAgentRunMock,
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      getLock: getLockMock,
+      isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
+    }));
+    vi.doMock('@/lib/pipeline/pending-release', () => ({
+      getPendingRelease: getPendingReleaseMock,
+      drainPendingRelease: drainPendingReleaseMock,
     }));
 
     vi.doMock('@/lib/shared/project-data', () => ({
@@ -384,6 +405,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(data.blockingJobId).toBe('job-other');
     expect(startJobMock).not.toHaveBeenCalled();
     expect(enqueueAgentRunMock).toHaveBeenCalledTimes(1);
+    expect(enqueueQueuedAgentRunMock).not.toHaveBeenCalled();
     const [project, entry] = enqueueAgentRunMock.mock.calls[0];
     expect(project).toBe('proj1');
     expect(entry.agentId).toBe('agent-123');
@@ -479,6 +501,109 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(res.status).toBe(200);
     expect(enqueueAgentRunMock).not.toHaveBeenCalled();
     expect(startJobMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores malformed running-job rows whose kind is not a string', async () => {
+    insertAgent({ schedule: '1h' });
+    listJobsMock.mockReturnValue([
+      makeJob({ id: 'job-bad', kind: null, finishedAt: null }),
+    ]);
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    expect(res.status).toBe(200);
+    expect(startJobMock).toHaveBeenCalledTimes(1);
+    expect(enqueueAgentRunMock).not.toHaveBeenCalled();
+  });
+
+  it('queues in the DB-backed release-lock queue before checking running agents', async () => {
+    insertAgent({ schedule: '1h' });
+    isLockOwnedByActiveReleaseMock.mockReturnValue(true);
+    getLockMock.mockReturnValue({ project: 'proj1', lockedByJobId: 'release-1' });
+    listJobsMock.mockReturnValue([
+      makeJob({ id: 'job-other', kind: 'agent:Other Agent', finishedAt: null }),
+    ]);
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(202);
+    expect(data.status).toBe('queued');
+    expect(data.code).toBe('pipeline_lock');
+    expect(data.blockingJobId).toBe('release-1');
+    expect(enqueueQueuedAgentRunMock).toHaveBeenCalledTimes(1);
+    expect(enqueueAgentRunMock).not.toHaveBeenCalled();
+    expect(probeJobStatusMock).not.toHaveBeenCalled();
+  });
+
+  it('drains an older pending release before allowing a fresh agent start', async () => {
+    insertAgent({ schedule: '1h' });
+    getPendingReleaseMock
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false);
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    expect(res.status).toBe(200);
+    expect(drainPendingReleaseMock).toHaveBeenCalledWith('proj1');
+    expect(startJobMock).toHaveBeenCalledTimes(1);
+    expect(enqueueQueuedAgentRunMock).not.toHaveBeenCalled();
+  });
+
+  it('queues behind a still-pending release after retrying the drain', async () => {
+    insertAgent({ schedule: '1h' });
+    getPendingReleaseMock.mockReturnValue(true);
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(202);
+    expect(data.status).toBe('queued');
+    expect(data.code).toBe('pending_release');
+    expect(drainPendingReleaseMock).toHaveBeenCalledWith('proj1');
+    expect(enqueueQueuedAgentRunMock).toHaveBeenCalledTimes(1);
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
+  it('does not claim a run was queued when persisting the release-lock row fails', async () => {
+    insertAgent({ schedule: '1h' });
+    isLockOwnedByActiveReleaseMock.mockReturnValue(true);
+    getLockMock.mockReturnValue({ project: 'proj1', lockedByJobId: 'release-1' });
+    enqueueQueuedAgentRunMock.mockImplementation(() => {
+      throw new Error('SQLITE_ERROR: no such table: queued_agent_runs');
+    });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(data.detail).toContain('Failed to queue agent');
+    expect(startJobMock).not.toHaveBeenCalled();
+    expect(enqueueAgentRunMock).not.toHaveBeenCalled();
   });
 
   it('returns the global pause conflict when scheduled work reaches the route while jobs are paused', async () => {

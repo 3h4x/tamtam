@@ -190,6 +190,10 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled, proje
     setRunSubmitting(agent.id)
     try {
       const result = await runAgent(agent.id, prompt)
+      if (result.status === 'queued') {
+        toast(result.detail || `Agent ${agent.name} queued`, 'success')
+        return
+      }
       toast(`Agent ${agent.name} started`, 'success')
       router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(result.job_id)}`)
     } catch (err) {

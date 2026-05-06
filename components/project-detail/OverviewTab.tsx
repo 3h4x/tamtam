@@ -33,6 +33,7 @@ export interface OverviewTabProps {
   currentBranch: string | null
   runningJobs: JobInfo[]
   projectJobs: JobInfo[]
+  jobsLoaded: boolean
   onOpenChanges: () => void
 }
 
@@ -53,6 +54,7 @@ export function OverviewTab({
   currentBranch,
   runningJobs,
   projectJobs,
+  jobsLoaded,
   onOpenChanges,
 }: OverviewTabProps) {
   const router = useRouter()
@@ -97,6 +99,7 @@ export function OverviewTab({
         ciStatus={ciStatus}
         ciFailedUrl={ciFailedUrl}
         releaseTag={releaseTag}
+        isLoading={!jobsLoaded}
         onOpenChanges={onOpenChanges}
         onOpenJob={(jobId) => router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(jobId)}`)}
       />

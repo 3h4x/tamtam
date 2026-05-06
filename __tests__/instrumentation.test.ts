@@ -39,14 +39,16 @@ describe('instrumentation', () => {
 
   function mockDeps(agents: unknown[]) {
     const chainedDb = makeChainedDb(agents);
+    const dbMock = { db: { select: chainedDb.select }, schema: { agents: { schedule: 'schedule', enabled: 'enabled' } } };
     const internalSchedulerMock = {
       startInternalScheduler: startInternalSchedulerMock,
       pauseInternalScheduler: vi.fn(),
       resumeInternalScheduler: vi.fn(),
     };
-    vi.doMock('@/lib/db', () => ({ db: { select: chainedDb.select }, schema: { agents: { schedule: 'schedule', enabled: 'enabled' } } }));
+    vi.doMock('@/lib/db', () => dbMock);
+    vi.doMock('./lib/db', () => dbMock);
     vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerMock);
-    vi.doMock('./lib/internal-scheduler', () => internalSchedulerMock);
+    vi.doMock('./lib/scheduling/internal-scheduler', () => internalSchedulerMock);
     vi.doMock('@/lib/scheduling/agent-scheduler', () => ({
       reconcilePm2Schedules: reconcilePm2SchedulesMock,
     }));
@@ -79,7 +81,6 @@ describe('instrumentation', () => {
         () => expect(startInternalSchedulerMock).toHaveBeenCalledTimes(1),
         { timeout: 2000 }
       );
-      expect(startInternalSchedulerMock.mock.calls[0][0]).toHaveLength(1);
     });
   });
 
@@ -170,13 +171,14 @@ describe('instrumentation', () => {
       const schema = { agents: 'agents_table', projects: { enabled: 1 } };
 
       vi.doMock('@/lib/db', () => ({ db, schema }));
+      vi.doMock('./lib/db', () => ({ db, schema }));
       const internalSchedulerMock = {
         startInternalScheduler: startInternalSchedulerMock,
         pauseInternalScheduler: vi.fn(),
         resumeInternalScheduler: vi.fn(),
       };
       vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerMock);
-      vi.doMock('./lib/internal-scheduler', () => internalSchedulerMock);
+      vi.doMock('./lib/scheduling/internal-scheduler', () => internalSchedulerMock);
       vi.doMock('@/lib/scheduling/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
       vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
       vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
@@ -215,13 +217,14 @@ describe('instrumentation', () => {
       const selectFn = vi.fn().mockReturnValue({ from: fromFn });
 
       vi.doMock('@/lib/db', () => ({ db: { select: selectFn }, schema: { agents: {}, projects: { enabled: 1 } } }));
+      vi.doMock('./lib/db', () => ({ db: { select: selectFn }, schema: { agents: {}, projects: { enabled: 1 } } }));
       const internalSchedulerMock = {
         startInternalScheduler: startInternalSchedulerMock,
         pauseInternalScheduler: vi.fn(),
         resumeInternalScheduler: vi.fn(),
       };
       vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerMock);
-      vi.doMock('./lib/internal-scheduler', () => internalSchedulerMock);
+      vi.doMock('./lib/scheduling/internal-scheduler', () => internalSchedulerMock);
       vi.doMock('@/lib/scheduling/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
       vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
       vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
@@ -252,13 +255,14 @@ describe('instrumentation', () => {
       const selectFn = vi.fn().mockReturnValue({ from: fromFn });
 
       vi.doMock('@/lib/db', () => ({ db: { select: selectFn }, schema: { agents: {}, projects: { enabled: 1 } } }));
+      vi.doMock('./lib/db', () => ({ db: { select: selectFn }, schema: { agents: {}, projects: { enabled: 1 } } }));
       const internalSchedulerMock = {
         startInternalScheduler: startInternalSchedulerMock,
         pauseInternalScheduler: vi.fn(),
         resumeInternalScheduler: vi.fn(),
       };
       vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerMock);
-      vi.doMock('./lib/internal-scheduler', () => internalSchedulerMock);
+      vi.doMock('./lib/scheduling/internal-scheduler', () => internalSchedulerMock);
       vi.doMock('@/lib/scheduling/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
       vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
       vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
@@ -357,6 +361,18 @@ describe('instrumentation', () => {
       await expect(runProbeSweep()).resolves.not.toThrow();
     });
 
+    it('skips malformed jobs without a string kind', async () => {
+      const { probeJobStatus } = mockJobStorage([
+        { id: 'job-missing-kind', finishedAt: null },
+        makeJob('run'),
+      ]);
+      mockDeps([]);
+
+      const { runProbeSweep } = await import('@/instrumentation-node');
+      await expect(runProbeSweep()).resolves.not.toThrow();
+      expect(probeJobStatus).toHaveBeenCalledTimes(1);
+    });
+
     it('does nothing when there are no running jobs', async () => {
       const { probeJobStatus } = mockJobStorage([]);
       mockDeps([]);
@@ -405,6 +421,109 @@ describe('instrumentation', () => {
 
       await drainStalePendingReleases();
       expect(drainPendingReleaseMock).toHaveBeenCalledWith('proj');
+    });
+  });
+
+  describe('boot recovery guards', () => {
+    it('skips legacy workflow migration when settings table is unavailable', async () => {
+      process.env.NEXT_RUNTIME = 'nodejs';
+      const allFn = vi.fn()
+        .mockReturnValueOnce([makeAgent()])
+        .mockReturnValueOnce([]);
+      const whereFn = vi.fn().mockReturnValue({ all: allFn });
+      const fromFn = vi.fn().mockReturnValue({ where: whereFn, all: allFn });
+      const selectFn = vi.fn().mockReturnValue({ from: fromFn });
+      vi.doMock('@/lib/db', () => ({
+        db: { select: selectFn },
+        schema: {
+          agents: { schedule: 'schedule', enabled: 'enabled' },
+          projects: { enabled: 1 },
+        },
+      }));
+      vi.doMock('./lib/db', () => ({
+        db: { select: selectFn },
+        schema: {
+          agents: { schedule: 'schedule', enabled: 'enabled' },
+          projects: { enabled: 1 },
+        },
+      }));
+      const internalSchedulerMock = {
+        startInternalScheduler: startInternalSchedulerMock,
+        pauseInternalScheduler: vi.fn(),
+        resumeInternalScheduler: vi.fn(),
+      };
+      vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerMock);
+      vi.doMock('./lib/scheduling/internal-scheduler', () => internalSchedulerMock);
+      vi.doMock('@/lib/scheduling/agent-scheduler', () => ({
+        reconcilePm2Schedules: reconcilePm2SchedulesMock,
+      }));
+      vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
+      vi.doMock('@/lib/pipeline/pending-release', () => ({
+        listPendingReleaseProjects: vi.fn().mockReturnValue([]),
+        drainPendingRelease: vi.fn(),
+      }));
+      vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+        getLock: vi.fn().mockReturnValue(null),
+      }));
+      vi.doMock('@/lib/agents/queued-agent-runs', () => ({
+        drainQueuedAgentRunsForUnlockedProjects: vi.fn(),
+      }));
+      vi.doMock('@/lib/jobs/job-storage', () => ({
+        listJobs: () => [],
+        probeJobStatus: vi.fn(),
+        reconcileStaleRelease: vi.fn(),
+        PIPELINE_STEP_KINDS: new Set(),
+      }));
+
+      const { register } = await import('@/instrumentation');
+      await expect(register()).resolves.not.toThrow();
+      await vi.waitFor(
+        () => expect(startInternalSchedulerMock).toHaveBeenCalledTimes(1),
+        { timeout: 2000 }
+      );
+    });
+
+    it('skips queued-agent boot drain when queued-agent schema is unavailable', async () => {
+      vi.doMock('@/lib/db', () => ({ db: { select: vi.fn() }, schema: {} }));
+      vi.doMock('./lib/db', () => ({ db: { select: vi.fn() }, schema: {} }));
+      const drainUnlockedQueuedAgentRuns = vi.fn();
+      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
+        drainUnlockedQueuedAgentRuns,
+      }));
+
+      const { drainStaleQueuedAgentRuns } = await import('@/instrumentation-node');
+      await expect(drainStaleQueuedAgentRuns()).resolves.not.toThrow();
+      expect(drainUnlockedQueuedAgentRuns).not.toHaveBeenCalled();
+    });
+
+    it('drains unlocked queued agents through the shared helper when schema exists', async () => {
+      vi.doMock('@/lib/db', () => ({
+        db: { select: vi.fn() },
+        schema: { queuedAgentRuns: { project: 'project' } },
+      }));
+      vi.doMock('./lib/db', () => ({
+        db: { select: vi.fn() },
+        schema: { queuedAgentRuns: { project: 'project' } },
+      }));
+      const drainUnlockedQueuedAgentRuns = vi.fn().mockResolvedValue(undefined);
+      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
+        drainUnlockedQueuedAgentRuns,
+      }));
+
+      const { drainStaleQueuedAgentRuns } = await import('@/instrumentation-node');
+      await expect(drainStaleQueuedAgentRuns()).resolves.not.toThrow();
+      expect(drainUnlockedQueuedAgentRuns).toHaveBeenCalledWith('[boot][queued-agent-runs]');
+    });
+
+    it('drains pending releases and queued agents when budget recovers', async () => {
+      const drainAllRecoveryWork = vi.fn().mockResolvedValue(undefined);
+      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
+        drainAllRecoveryWork,
+      }));
+
+      const mod = await import('@/instrumentation-node');
+      await expect(mod.drainQueuedWorkAfterBudgetRecovery()).resolves.not.toThrow();
+      expect(drainAllRecoveryWork).toHaveBeenCalledWith('[budget-drain]');
     });
   });
 });

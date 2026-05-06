@@ -19,6 +19,7 @@ export interface StatusStripProps {
   ciStatus: 'success' | 'failure' | 'in_progress' | null
   ciFailedUrl: string | null
   releaseTag: string | null
+  isLoading?: boolean
   onOpenChanges: () => void
   onOpenJob: (jobId: string) => void
 }
@@ -94,9 +95,23 @@ export function StatusStrip({
   ciStatus,
   ciFailedUrl,
   releaseTag,
+  isLoading,
   onOpenChanges,
   onOpenJob,
 }: StatusStripProps) {
+  if (isLoading) {
+    return (
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {['Changes', 'Review', 'Tests', 'CI'].map((label) => (
+          <div key={label} className="border border-border rounded-md px-2.5 py-1.5 flex items-center gap-2 bg-bg-secondary min-w-[120px]">
+            <div className="skeleton w-1.5 h-1.5 rounded-full shrink-0" />
+            <span className="text-[10px] uppercase tracking-wider text-text-tertiary shrink-0">{label}</span>
+            <div className="skeleton h-3.5 w-16 rounded" />
+          </div>
+        ))}
+      </div>
+    )
+  }
   // CHANGES card
   const changesCard = totalChanges > 0 ? (
     <StatusCard

@@ -1,0 +1,132 @@
+/* @vitest-environment jsdom */
+
+import React from 'react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createRoot } from 'react-dom/client'
+import { flushSync } from 'react-dom'
+import { AgentsTab } from '@/components/AgentsTab'
+
+const {
+  pushMock,
+  toastMock,
+  fetchAgentsMock,
+  fetchSkillsMock,
+  fetchPersonasMock,
+  runAgentMock,
+} = vi.hoisted(() => ({
+  pushMock: vi.fn(),
+  toastMock: vi.fn(),
+  fetchAgentsMock: vi.fn(),
+  fetchSkillsMock: vi.fn(),
+  fetchPersonasMock: vi.fn(),
+  runAgentMock: vi.fn(),
+}))
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: pushMock }),
+}))
+
+vi.mock('@/components/Toast', () => ({
+  useToast: () => ({ toast: toastMock }),
+}))
+
+vi.mock('@/lib/client-api', () => ({
+  fetchAgents: fetchAgentsMock,
+  fetchSkills: fetchSkillsMock,
+  fetchPersonas: fetchPersonasMock,
+  createAgent: vi.fn(),
+  updateAgent: vi.fn(),
+  deleteAgent: vi.fn(),
+  runAgent: runAgentMock,
+}))
+
+vi.mock('@/components/agents-tab/RecommendedAgents', () => ({
+  RecommendedAgents: () => null,
+}))
+
+vi.mock('@/components/agents-tab/AgentModal', () => ({
+  AgentModal: () => null,
+}))
+
+function renderTab() {
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+
+  flushSync(() => {
+    root.render(React.createElement(AgentsTab, { projectName: 'alpha' }))
+  })
+
+  return {
+    container,
+    unmount: () => {
+      root.unmount()
+      container.remove()
+    },
+  }
+}
+
+function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
+  const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent?.trim() === text)
+  if (!(button instanceof HTMLButtonElement)) throw new Error(`button not found: ${text}`)
+  return button
+}
+
+describe('AgentsTab queued runs', () => {
+  beforeEach(() => {
+    fetchAgentsMock.mockResolvedValue({
+      agents: [{
+        id: 'agent-1',
+        name: 'Docs',
+        project: 'alpha',
+        skillIds: [],
+        docPaths: [],
+        model: 'normal',
+        prompt: 'Run docs',
+        schedule: null,
+        runner: 'pm2',
+        enabled: true,
+      }],
+    })
+    fetchSkillsMock.mockResolvedValue({ skills: [] })
+    fetchPersonasMock.mockResolvedValue({ personas: [] })
+    runAgentMock.mockResolvedValue({
+      status: 'queued',
+      code: 'pipeline_lock',
+      detail: 'Agent queued behind active release',
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      json: async () => ({ settings: {} }),
+    }))
+  })
+
+  afterEach(() => {
+    pushMock.mockReset()
+    toastMock.mockReset()
+    fetchAgentsMock.mockReset()
+    fetchSkillsMock.mockReset()
+    fetchPersonasMock.mockReset()
+    runAgentMock.mockReset()
+    vi.unstubAllGlobals()
+    document.body.innerHTML = ''
+  })
+
+  it('shows a queued toast and does not navigate when the run API defers work', async () => {
+    const { container, unmount } = renderTab()
+
+    await vi.waitFor(() => {
+      expect(fetchAgentsMock).toHaveBeenCalledWith('alpha')
+      expect(buttonByText(container, 'Run')).toBeInstanceOf(HTMLButtonElement)
+    })
+
+    buttonByText(container, 'Run').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(runAgentMock).toHaveBeenCalledWith('agent-1', 'Run docs')
+      expect(toastMock).toHaveBeenCalledWith('Agent queued behind active release', 'success')
+    })
+    expect(pushMock).not.toHaveBeenCalled()
+
+    unmount()
+  })
+})

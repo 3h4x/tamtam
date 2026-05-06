@@ -71,4 +71,23 @@ describe('client agents helpers', () => {
 
     await expect(runAgent('agent-1', 'Run it')).rejects.toThrow('Failed to run agent');
   });
+
+  it('runAgent returns queued responses without pretending a job started', async () => {
+    stubFetch(true, {
+      status: 'queued',
+      code: 'pipeline_lock',
+      detail: 'Agent queued behind active release',
+      agent: 'Docs',
+      blockingJobId: 'release-1',
+    });
+    const { runAgent } = await getClientAgents();
+
+    await expect(runAgent('agent-1', 'Run it')).resolves.toEqual({
+      status: 'queued',
+      code: 'pipeline_lock',
+      detail: 'Agent queued behind active release',
+      agent: 'Docs',
+      blockingJobId: 'release-1',
+    });
+  });
 });

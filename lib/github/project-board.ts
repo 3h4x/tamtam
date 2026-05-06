@@ -5,6 +5,7 @@ import { getSettings, reloadConfig } from '@/lib/shared/config';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { exec } from '@/lib/shared/shell';
 import { costUsd, totalTokens } from '@/lib/shared/usage-pricing';
+import { getJobKind, isAgentJobKind } from '@/lib/jobs/kinds';
 import { BOARD_STATUSES, deriveBoardTransition, type BoardStatus, type BoardSyncPhase } from './project-board-status';
 
 const BOARD_FIELD_NAME = 'Status';
@@ -517,7 +518,8 @@ function rootPrompt(job: JobData): string {
 }
 
 function extractAgentName(job: JobData): string {
-  return job.kind.startsWith('agent:') ? job.kind.slice('agent:'.length) : '';
+  const kind = getJobKind(job.kind);
+  return isAgentJobKind(kind) ? kind.slice('agent:'.length) : '';
 }
 
 function buildRootTitle(job: JobData, branch: string): string {

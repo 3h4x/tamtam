@@ -240,6 +240,29 @@ describe('drainNextAgentRun', () => {
     expect(listQueuedAgents('p1')).toEqual([]);
   });
 
+  it('hands the head to the DB queue on 202 pending_release', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(
+        {
+          code: 'pending_release',
+          detail: 'Pending release will run before new agent work',
+        },
+        202,
+      )
+    );
+    enqueueAgentRun('p1', {
+      agentId: 'a',
+      agentName: 'A',
+      triggeredBy: 'schedule',
+      prompt: '',
+      enqueuedAt: 1,
+    });
+
+    await drainNextAgentRun('p1');
+
+    expect(listQueuedAgents('p1')).toEqual([]);
+  });
+
   it('keeps the head entry queued on transient 409 (already_starting / already_running)', async () => {
     fetchSpy.mockResolvedValueOnce(
       jsonResponse({ code: 'already_starting', detail: 'Agent is already starting' }, 409)

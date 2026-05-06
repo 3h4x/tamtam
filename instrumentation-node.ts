@@ -77,10 +77,11 @@ export async function reinstallAgents(): Promise<void> {
 export async function runProbeSweep(): Promise<void> {
   try {
     const { listJobs, probeJobStatus, PIPELINE_STEP_KINDS } = await import('./lib/jobs/job-storage');
+    const { isAgentJobKind, getJobKind } = await import('./lib/jobs/kinds');
     const claudeKinds = new Set(['run', 'review', 'fix', 'fix-ci', 'fix-push']);
     const running = listJobs().filter(j =>
       j.finishedAt === null
-      && (claudeKinds.has(j.kind) || j.kind.startsWith('agent:') || PIPELINE_STEP_KINDS.has(j.kind))
+      && (claudeKinds.has(getJobKind(j.kind)) || isAgentJobKind(j.kind) || PIPELINE_STEP_KINDS.has(getJobKind(j.kind)))
     );
     for (const job of running) {
       try { await probeJobStatus(job); } catch {}
@@ -129,6 +130,8 @@ async function migrateLegacyFileWorkflowFlags(): Promise<void> {
     const { db, schema } = await import('./lib/db');
     const { eq } = await import('drizzle-orm');
     const { readLegacyWorkflowFlags } = await import('./lib/skills/tamtam-file-config');
+
+    if (!schema.projects || !schema.settings?.key) return;
 
     const markerFor = (name: string) => `legacy_file_flags_migrated:${name}`;
     const isMigrated = (name: string): boolean => {
@@ -274,11 +277,44 @@ export async function drainStalePendingReleases(): Promise<void> {
   }
 }
 
+// At boot, drain any agents that were queued (due to a release lock) before a
+// restart. If the lock is still active, the drain will fire naturally when it
+// releases. If the lock is gone (clean finish before restart, or self-healed
+// stale lock), fire immediately.
+export async function drainStaleQueuedAgentRuns(): Promise<void> {
+  try {
+    const { schema } = await import('@/lib/db');
+    if (!schema.queuedAgentRuns?.project) return;
+    const { drainUnlockedQueuedAgentRuns } = await import('@/lib/pipeline/recovery-drain');
+    await drainUnlockedQueuedAgentRuns('[boot][queued-agent-runs]');
+  } catch (err) {
+    console.error('[boot] drainStaleQueuedAgentRuns failed:', err);
+  }
+}
+
+export async function drainQueuedWorkAfterBudgetRecovery(): Promise<void> {
+  try {
+    const { drainAllRecoveryWork } = await import('@/lib/pipeline/recovery-drain');
+    await drainAllRecoveryWork('[budget-drain]');
+  } catch (e) {
+    console.error('[budget-drain] recovery retry failed:', e);
+  }
+}
+
+async function drainBootRecoveryWork(): Promise<void> {
+  try {
+    const { drainAllRecoveryWork } = await import('@/lib/pipeline/recovery-drain');
+    await drainAllRecoveryWork('[boot]');
+  } catch (err) {
+    console.error('[boot] drainBootRecoveryWork failed:', err);
+  }
+}
+
 export async function registerNode(): Promise<void> {
   await migrateLegacyFileWorkflowFlags();
   void backfillVerdicts();
   void reapAbandonedInlineJobs();
-  void drainStalePendingReleases();
+  void drainBootRecoveryWork();
   void reinstallAgents();
 
   // Replay lifecycle hooks for any PM2 child that finished while the server
@@ -306,12 +342,12 @@ export async function registerNode(): Promise<void> {
 
   const probeIntervalMs = parseInt(process.env.TAMTAM_PROBE_INTERVAL_MS ?? '', 10) || 30_000;
   setInterval(runProbeSweep, probeIntervalMs);
+  setInterval(drainStaleQueuedAgentRuns, probeIntervalMs);
 
   // Quota drain ticker: every 60s, refresh the cached subscription quota and,
-  // if we're below the block threshold, drain any releases that were deferred
-  // while the 5h window was full.
+  // if we're below the block threshold, drain any releases or DB-queued agent
+  // fires that were deferred while the 5h window was full.
   const { prefetchQuota, peekQuotaCache } = await import('@/lib/usage/quota');
-  const { listPendingReleaseProjects, drainPendingRelease } = await import('@/lib/pipeline/pending-release');
   const { getSettings } = await import('@/lib/shared/config');
   let lastDrainPct: number | null = null;
   setInterval(async () => {
@@ -324,10 +360,7 @@ export async function registerNode(): Promise<void> {
     const pct = snap.fiveHour.utilization;
     // Edge: dropped from over-limit back under. Drain pending releases.
     if (lastDrainPct != null && lastDrainPct >= limit && pct < limit) {
-      const projects = listPendingReleaseProjects();
-      for (const p of projects) {
-        try { await drainPendingRelease(p); } catch (e) { console.error('[budget-drain] failed for', p, e); }
-      }
+      await drainQueuedWorkAfterBudgetRecovery();
     }
     lastDrainPct = pct;
   }, 60_000);

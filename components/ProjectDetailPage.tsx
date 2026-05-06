@@ -46,6 +46,7 @@ export function ProjectDetailPage({
   const [fixingCi, setFixingCi] = useState(false)
   const [fixCiResult, setFixCiResult] = useState<string | null>(null)
   const [projectJobs, setProjectJobs] = useState<JobInfo[]>([])
+  const [jobsLoaded, setJobsLoaded] = useState(false)
   const [issueCount, setIssueCount] = useState<{ prs: number; issues: number } | null>(null)
   const [currentBranch, setCurrentBranch] = useState<string | null>(null)
   const [defaultBranch, setDefaultBranch] = useState<string | null>(null)
@@ -89,8 +90,11 @@ export function ProjectDetailPage({
     const poll = async () => {
       try {
         const data = await fetchJobs(name)
-        if (active) setProjectJobs(data.jobs)
-      } catch { /* ignore */ }
+        if (active) {
+          setProjectJobs(data.jobs)
+          setJobsLoaded(true)
+        }
+      } catch { if (active) setJobsLoaded(true) }
     }
     poll()
     const interval = setInterval(poll, 10000)
@@ -588,6 +592,7 @@ export function ProjectDetailPage({
           currentBranch={currentBranch}
           runningJobs={runningJobs}
           projectJobs={projectJobs}
+          jobsLoaded={jobsLoaded}
           onOpenChanges={() => setActiveTab('changes')}
         />
       )}
