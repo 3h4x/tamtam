@@ -7,7 +7,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 
 const _require = createRequire(import.meta.url);
 const shim = _require(join(process.cwd(), 'scripts/codex-shim.js')) as {
-  resolveModel: (model: string, env?: NodeJS.ProcessEnv) => string;
+  resolveModel: (model: string, env?: Partial<NodeJS.ProcessEnv>) => string;
   permissionArgsFor: (mode: string) => string[];
   sandboxFor: (mode: string) => string;
   approvalFor: (mode: string) => string;

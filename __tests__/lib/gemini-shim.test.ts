@@ -4,9 +4,9 @@ import { describe, it, expect } from 'vitest';
 
 const _require = createRequire(import.meta.url);
 const shim = _require(join(process.cwd(), 'scripts/gemini-shim.js')) as {
-  resolveGeminiModel: (model: string, env?: NodeJS.ProcessEnv) => string;
+  resolveGeminiModel: (model: string, env?: Partial<NodeJS.ProcessEnv>) => string;
   APPROVAL_MAP: Record<string, string>;
-  parseShimArgs: (argv: string[], env?: NodeJS.ProcessEnv) => { model: string; approvalMode: string; cwd: string; geminiArgs: string[] };
+  parseShimArgs: (argv: string[], env?: Partial<NodeJS.ProcessEnv>) => { model: string; approvalMode: string; cwd: string; geminiArgs: string[] };
   createGeminiTranslator: (modelName: string) => { translateLine: (line: string) => string[]; flush: () => string[] };
 };
 

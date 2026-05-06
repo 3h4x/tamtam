@@ -7,8 +7,8 @@ import { describe, it, expect, afterEach } from 'vitest';
 
 const _require = createRequire(import.meta.url);
 const shim = _require(join(process.cwd(), 'scripts/claude-shim.js')) as {
-  resolveClaudeModel: (value: string, env?: NodeJS.ProcessEnv) => string;
-  transformArgs: (argv: string[], env?: NodeJS.ProcessEnv) => string[];
+  resolveClaudeModel: (value: string, env?: Partial<NodeJS.ProcessEnv>) => string;
+  transformArgs: (argv: string[], env?: Partial<NodeJS.ProcessEnv>) => string[];
 };
 
 const tempDirs: string[] = [];
