@@ -278,3 +278,97 @@ describe('project client helper fallbacks', () => {
     await expect(updateRecommendation('proj', 'rec-1', 'dismissed')).rejects.toThrow('invalid recommendation status');
   });
 });
+
+describe('pullProject', () => {
+  async function getPullProject() {
+    const { pullProject, PullDivergedError } = await import('@/lib/client-api');
+    return { pullProject, PullDivergedError };
+  }
+
+  it('resolves with status and output on success', async () => {
+    const fetchMock = stubFetch(true, { status: 'ok', output: 'Already up to date.' });
+    const { pullProject } = await getPullProject();
+
+    const result = await pullProject('myproj');
+
+    expect(result).toEqual({ status: 'ok', output: 'Already up to date.' });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/by-project/myproj/changes');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ strategy: 'ff-only' });
+  });
+
+  it('throws PullDivergedError on 409 with diverged flag', async () => {
+    stubFetch(false, { diverged: true, detail: 'branch has diverged' }, 409, 'Conflict');
+    const { pullProject, PullDivergedError } = await getPullProject();
+
+    await expect(pullProject('myproj')).rejects.toBeInstanceOf(PullDivergedError);
+  });
+
+  it('throws a detail error on 409 without diverged flag', async () => {
+    stubFetch(false, { detail: 'merge conflict detected' }, 409, 'Conflict');
+    const { pullProject, PullDivergedError } = await getPullProject();
+
+    const err = await pullProject('myproj').catch(e => e);
+    expect(err).not.toBeInstanceOf(PullDivergedError);
+    expect(err.message).toBe('merge conflict detected');
+  });
+
+  it('falls back to status text when detail is absent', async () => {
+    stubFetch(false, {}, 500, 'Internal Server Error');
+    const { pullProject } = await getPullProject();
+
+    await expect(pullProject('myproj')).rejects.toThrow('Pull failed: Internal Server Error');
+  });
+
+  it('passes the strategy param in the request body', async () => {
+    const fetchMock = stubFetch(true, { status: 'ok', output: '' });
+    const { pullProject } = await getPullProject();
+
+    await pullProject('myproj', 'rebase');
+
+    expect(JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string)).toEqual({ strategy: 'rebase' });
+  });
+});
+
+describe('runProject', () => {
+  async function getRunProject() {
+    const { runProject } = await import('@/lib/client-api');
+    return runProject;
+  }
+
+  it('sends a JSON body when no files or persona are provided', async () => {
+    const fetchMock = stubFetch(true, { status: 'started', job_id: 'j1', pid: 42 });
+    const runProject = await getRunProject();
+
+    const result = await runProject('myproj', 'do the thing');
+
+    expect(result).toEqual({ status: 'started', job_id: 'j1', pid: 42 });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/by-project/myproj/run');
+    expect(init.method).toBe('POST');
+    expect((init.headers as Record<string, string>)?.['Content-Type']).toBe('application/json');
+    expect(JSON.parse(init.body as string)).toMatchObject({ prompt: 'do the thing' });
+  });
+
+  it('sends a FormData body when a persona is provided', async () => {
+    const fetchMock = stubFetch(true, { status: 'started', job_id: 'j2', pid: 43 });
+    const runProject = await getRunProject();
+
+    await runProject('myproj', 'audit this', { persona: 'security-expert' });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.body).toBeInstanceOf(FormData);
+    const fd = init.body as FormData;
+    expect(fd.get('prompt')).toBe('audit this');
+    expect(fd.get('persona')).toBe('security-expert');
+    expect(init.headers).toBeUndefined();
+  });
+
+  it('throws a detail error on failure', async () => {
+    stubFetch(false, { detail: 'budget exceeded' }, 429, 'Too Many Requests');
+    const runProject = await getRunProject();
+
+    await expect(runProject('myproj', 'do something')).rejects.toThrow('budget exceeded');
+  });
+});
