@@ -29,6 +29,27 @@ export interface RunRowProps {
   children?: React.ReactNode
 }
 
+function MetaChip({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string
+  value: React.ReactNode
+  tone?: 'neutral' | 'accent'
+}) {
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-mono ${
+      tone === 'accent'
+        ? 'border-accent/25 bg-accent/10 text-accent'
+        : 'border-border bg-bg-primary/70 text-text-secondary'
+    }`}>
+      <span className="text-text-tertiary">{label}</span>
+      <span className={tone === 'accent' ? 'text-accent' : 'text-text-primary'}>{value}</span>
+    </span>
+  )
+}
+
 // Tailwind doesn't see dynamic class names, so map fixed depths → static
 // padding-left classes. Anything past depth 6 saturates at the same padding
 // — we don't expect chains longer than test → review → fix → review → commit
@@ -132,6 +153,8 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
       : null)
   const totalTokens = e.inputTokens + e.outputTokens
   const fileCount = modifiedFileCount(e.modifiedFiles)
+  const durationLabel = formatDuration(e.startedAt, e.finishedAt)
+  const startedLabel = formatAgo(e.startedAt)
   const statusBadge = (
     <RowStateBadge
       isRunning={effectiveRunning}
@@ -224,14 +247,8 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
                 )}
                 {verdictBadge}
                 {releaseBadge}
-              </div>
-            </div>
-            <div className="shrink-0 text-right">
-              <div className="font-mono text-xs text-text-primary tabular-nums">
-                {formatDuration(e.startedAt, e.finishedAt)}
-              </div>
-              <div className="mt-0.5 font-mono text-[11px] text-text-tertiary tabular-nums">
-                {formatAgo(e.lastActivityAt)}
+                <MetaChip label="dur" value={durationLabel} />
+                <MetaChip label="started" value={startedLabel} />
               </div>
             </div>
           </div>
@@ -253,8 +270,8 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
               </span>
             )}
             {e.turns > 1 && <span className="font-mono">{e.turns} turns</span>}
-            {e.model && <span className="font-mono">{e.model}</span>}
-            {e.navSessionId && <span className="font-mono">#{e.navSessionId.slice(0, 8)}</span>}
+            {e.model && <MetaChip label="model" value={e.model} tone="accent" />}
+            {e.navSessionId && <MetaChip label="session" value={`#${e.navSessionId.slice(0, 8)}`} />}
             <span className="font-mono tabular-nums">started {formatAgo(e.startedAt)}</span>
             {summary && <span className="font-mono text-text-secondary">{summary}</span>}
             {e.releaseOutcome && !summary && <span className="font-mono text-text-secondary">{e.releaseOutcome.label}</span>}
@@ -272,7 +289,7 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
 
         <div className="shrink-0 flex flex-col items-end gap-1 text-xs">
           {(totalTokens > 0 || e.costUsd > 0) && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 rounded-md border border-border bg-bg-primary/50 px-2 py-1">
               {totalTokens > 0 && (
                 <span className="font-mono text-text-tertiary" title="Input / output tokens">
                   <span className="text-status-success">↑{formatTokens(e.inputTokens)}</span>{' '}

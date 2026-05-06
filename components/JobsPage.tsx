@@ -46,6 +46,27 @@ function formatTokenPair(job: JobInfo): string | null {
   return `↑${compact(input)} ↓${compact(output)}`
 }
 
+function MetaChip({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string
+  value: React.ReactNode
+  tone?: 'neutral' | 'accent'
+}) {
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-mono ${
+      tone === 'accent'
+        ? 'border-accent/25 bg-accent/10 text-accent'
+        : 'border-border bg-bg-primary/70 text-text-secondary'
+    }`}>
+      <span className="text-text-tertiary">{label}</span>
+      <span className={tone === 'accent' ? 'text-accent' : 'text-text-primary'}>{value}</span>
+    </span>
+  )
+}
+
 function getJobStatus(job: JobInfo): {
   isRunning: boolean
   isFailed: boolean
@@ -351,6 +372,8 @@ export function JobsPage() {
             const totalTokens = formatTokens(job)
             const tokenPair = formatTokenPair(job)
             const cost = formatCost(job)
+            const durationLabel = formatDuration(job.started_at, job.finished_at)
+            const startedLabel = formatAgo(job.started_at)
             return (
               <div
                 key={job.id}
@@ -374,6 +397,8 @@ export function JobsPage() {
                       </Link>
                       <KindBadge kind={job.kind} />
                       {job.verdict && !status.isRunning && <VerdictBadge verdict={job.verdict} />}
+                      <MetaChip label="dur" value={durationLabel} />
+                      <MetaChip label="started" value={startedLabel} />
                     </div>
 
                     <div
@@ -385,9 +410,9 @@ export function JobsPage() {
 
                     <div className="mt-1.5 flex items-center gap-x-2 gap-y-1 flex-wrap text-[11px] text-text-tertiary font-mono">
                       <span title={formatTime(job.started_at)} className="tabular-nums">started {formatAgo(job.started_at)}</span>
-                      {job.model && <span>{job.model}</span>}
-                      {job.provider && <span>{job.provider}</span>}
-                      {job.session_id && <span>#{job.session_id.slice(0, 8)}</span>}
+                      {job.model && <MetaChip label="model" value={job.model} tone="accent" />}
+                      {job.provider && <MetaChip label="provider" value={job.provider} />}
+                      {job.session_id && <MetaChip label="session" value={`#${job.session_id.slice(0, 8)}`} />}
                       {job.work_summary && !job.user_prompt && !job.prompt && (
                         <span className="max-w-[28rem] truncate text-text-secondary normal-case font-sans" title={job.work_summary}>
                           {job.work_summary}
@@ -396,15 +421,9 @@ export function JobsPage() {
                     </div>
                   </div>
 
-                  <div className="shrink-0 text-right">
-                    <div className="font-mono text-xs text-text-primary tabular-nums">
-                      {formatDuration(job.started_at, job.finished_at)}
-                    </div>
-                    <div className="mt-0.5 font-mono text-[11px] text-text-tertiary tabular-nums">
-                      {formatAgo(job.started_at)}
-                    </div>
+                  <div className="shrink-0">
                     {(totalTokens || cost || tokenPair) && (
-                      <div className="mt-1.5 flex flex-col items-end gap-0.5 font-mono text-[11px] tabular-nums">
+                      <div className="flex flex-col items-end gap-1 rounded-md border border-border bg-bg-primary/50 px-2 py-1 font-mono text-[11px] tabular-nums">
                         {tokenPair && (
                           <span className="text-text-tertiary" title="Input / output tokens">
                             <span className="text-status-success">{tokenPair.split(' ')[0]}</span>{' '}

@@ -95,6 +95,26 @@ describe('RunRow', () => {
     unmount()
   })
 
+  it('labels the metadata chip as started instead of live or last', () => {
+    const entry = makeEntry({
+      status: 'running',
+      finishedAt: null,
+      exitCode: null,
+      startedAt: 123,
+      lastActivityAt: 999,
+    })
+
+    const { container, unmount } = renderRow({
+      entry,
+      onClick: vi.fn(),
+    })
+
+    expect(container.textContent).toContain('startedago:123')
+    expect(container.textContent).not.toContain('live')
+    expect(container.textContent).not.toContain('last')
+    unmount()
+  })
+
   it('shows failure labels and keeps expand toggles from triggering row clicks', () => {
     const onClick = vi.fn()
     const onToggleExpand = vi.fn()
