@@ -283,7 +283,8 @@ notification_on_fix_loop_exhausted, notification_on_review_do_not_ship,
 notification_on_agent_run_fail, notification_on_budget_blocked,
 budget_block_runs_enabled, budget_subscription_providers,
 budget_block_at_pct, budget_warn_at_pct, pipeline_model_review,
-pipeline_model_fix, pipeline_model_dod, pipeline_model_commit
+pipeline_model_fix, pipeline_model_dod, pipeline_model_commit,
+dirty_worktree_block_threshold, incremental_review_enabled
 ```
 
 **POST `/api/settings/test-notification`** — sends a test notification to verify webhook connectivity. Request body: `{ webhook_url: string, webhook_secret?: string }`. Response: `{ ok: boolean, error?: string }`.

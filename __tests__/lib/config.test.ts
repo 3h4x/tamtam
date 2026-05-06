@@ -115,6 +115,8 @@ describe('config', () => {
         pipeline_model_dod: '',
         pipeline_model_commit: '',
         review_retry_on_parse_failure: true,
+        dirty_worktree_block_threshold: 20,
+        incremental_review_enabled: true,
       });
     });
 
