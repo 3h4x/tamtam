@@ -10,15 +10,20 @@ export async function POST(
   const { projectName } = await params;
 
   const lock = getLock(projectName);
-  if (!lock) {
-    return NextResponse.json({ status: 'no_pipeline', detail: 'no active pipeline lock' }, { status: 200 });
-  }
-
-  const releaseJob = getJob(lock.lockedByJobId);
+  // Resolve the release we should abort. Normal case: lock-held release.
+  // Orphan case: an unfinished `release` row with no lock (orchestrator died
+  // between createReleaseJob and the first-step kickoff). Reap it too.
+  let releaseJob = lock ? getJob(lock.lockedByJobId) : null;
   if (!releaseJob || releaseJob.kind !== 'release' || releaseJob.finishedAt !== null) {
-    // Lock exists but release is already done — just clean up the lock
-    releaseLock(projectName, lock.lockedByJobId);
-    return NextResponse.json({ status: 'no_pipeline', detail: 'release already finished' }, { status: 200 });
+    const orphan = listJobs().find(j =>
+      j.project === projectName && j.kind === 'release' && j.finishedAt === null
+    );
+    if (orphan) {
+      releaseJob = orphan;
+    } else {
+      if (lock) releaseLock(projectName, lock.lockedByJobId);
+      return NextResponse.json({ status: 'no_pipeline', detail: lock ? 'release already finished' : 'no active pipeline lock' }, { status: 200 });
+    }
   }
 
   const now = Date.now() / 1000;
@@ -67,8 +72,14 @@ export async function POST(
     updateJob(runningStep);
   }
 
-  // Always release the pipeline lock
-  releaseLock(projectName, lock.lockedByJobId);
+  // Stop the release's bash monitor if it's still running.
+  try {
+    await exec('pm2', ['stop', releaseJob.id, '--silent'], { timeout: 5000 });
+    await exec('pm2', ['delete', releaseJob.id, '--silent'], { timeout: 5000 });
+  } catch { /* may not be in PM2 */ }
+
+  // Release the pipeline lock if one was held.
+  if (lock) releaseLock(projectName, lock.lockedByJobId);
 
   // Fire-and-forget notification
   try {

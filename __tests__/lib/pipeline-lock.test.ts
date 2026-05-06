@@ -64,6 +64,7 @@ describe('pipeline-lock', () => {
   let releaseLock: typeof import('@/lib/pipeline/pipeline-lock').releaseLock;
   let getLock: typeof import('@/lib/pipeline/pipeline-lock').getLock;
   let isLockOwnedByActiveRelease: typeof import('@/lib/pipeline/pipeline-lock').isLockOwnedByActiveRelease;
+  let reassignLock: typeof import('@/lib/pipeline/pipeline-lock').reassignLock;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -80,6 +81,7 @@ describe('pipeline-lock', () => {
     releaseLock = mod.releaseLock;
     getLock = mod.getLock;
     isLockOwnedByActiveRelease = mod.isLockOwnedByActiveRelease;
+    reassignLock = mod.reassignLock;
   });
 
   afterEach(() => { vi.resetModules(); });
@@ -400,6 +402,51 @@ describe('pipeline-lock', () => {
     it('returns false when lock references a job not in the db', async () => {
       await acquireLock('proj', 'unknown-job-id');
       expect(isLockOwnedByActiveRelease('proj')).toBe(false);
+    });
+  });
+
+  describe('reassignLock', () => {
+    it('writes a new lock when none exists', () => {
+      reassignLock('proj', 'new-job');
+      const lock = getLock('proj');
+      expect(lock).not.toBeNull();
+      expect(lock!.lockedByJobId).toBe('new-job');
+      expect(lock!.project).toBe('proj');
+    });
+
+    it('overwrites an existing lock regardless of current holder', async () => {
+      await acquireLock('proj', 'placeholder-id');
+      testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at, finished_at) VALUES ('placeholder-id', 'proj', 'release', ${Date.now() / 1000}, NULL)`);
+      reassignLock('proj', 'real-job-id');
+      const lock = getLock('proj');
+      expect(lock!.lockedByJobId).toBe('real-job-id');
+    });
+
+    it('updates acquiredAt to current time', () => {
+      const before = Date.now() / 1000;
+      reassignLock('proj', 'job-1');
+      const after = Date.now() / 1000;
+      const lock = getLock('proj');
+      expect(lock!.acquiredAt).toBeGreaterThanOrEqual(before);
+      expect(lock!.acquiredAt).toBeLessThanOrEqual(after);
+    });
+
+    it('does not affect locks on other projects', async () => {
+      await acquireLock('proj-a', 'job-a');
+      testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at) VALUES ('job-a', 'proj-a', 'release', ${Date.now() / 1000})`);
+      reassignLock('proj-b', 'job-b');
+      expect(getLock('proj-a')!.lockedByJobId).toBe('job-a');
+      expect(getLock('proj-b')!.lockedByJobId).toBe('job-b');
+    });
+
+    it('can overwrite a placeholder id (the start-release early-lock pattern)', async () => {
+      const placeholder = 'proj-release-pending';
+      await acquireLock('proj', placeholder);
+      // Simulate job row created after placeholder lock
+      testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at) VALUES ('real-release-id', 'proj', 'release', ${Date.now() / 1000})`);
+      reassignLock('proj', 'real-release-id');
+      const lock = getLock('proj');
+      expect(lock!.lockedByJobId).toBe('real-release-id');
     });
   });
 });

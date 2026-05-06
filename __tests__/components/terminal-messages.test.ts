@@ -68,7 +68,7 @@ describe('TerminalMessages', () => {
     expect(markup).toContain('failed to push')
     expect(markup).toContain('>status<')
     expect(markup).toContain('>info<')
-    expect(markup).toContain('>success<')
+    expect(markup).toContain('>ok<')
     expect(markup).toContain('>✗ error<')
   })
 

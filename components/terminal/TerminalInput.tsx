@@ -2,6 +2,12 @@
 
 import React from 'react'
 
+function fmtTokens(n: number): string {
+  if (n < 1000) return `${n}`
+  if (n < 1000000) return `${(n / 1000).toFixed(1)}k`
+  return `${(n / 1000000).toFixed(1)}M`
+}
+
 interface LastStats {
   duration: number
   inputTokens: number
@@ -146,7 +152,7 @@ export function TerminalInput({
           {claudeSessionId ? (
             <>
               <span className="text-text-tertiary">session</span>
-              <span className="text-text-secondary">{claudeSessionId.slice(0, 16)}…</span>
+              <span className="text-text-secondary">{claudeSessionId.slice(0, 8)}…</span>
               {currentJobId && streaming && (
                 <>
                   <span className="text-text-tertiary/30">•</span>
@@ -162,14 +168,14 @@ export function TerminalInput({
               <span className="text-text-tertiary/30">•</span>
               <span className="text-text-secondary" title="Duration">{(lastStats.duration / 1000).toFixed(1)}s</span>
               <span className="text-text-secondary" title="Input / output tokens">
-                <span className="text-status-success">↑{lastStats.inputTokens}</span>
-                {' / '}
-                <span className="text-accent">↓{lastStats.outputTokens}</span>
+                <span className="text-status-success">↑{fmtTokens(lastStats.inputTokens)}</span>
+                {' '}
+                <span className="text-accent">↓{fmtTokens(lastStats.outputTokens)}</span>
               </span>
               {(lastStats.cacheReadTokens > 0 || lastStats.cacheCreateTokens > 0) && (
                 <span className="text-text-tertiary" title="Cache read / create tokens">
-                  cache {lastStats.cacheReadTokens}r
-                  {lastStats.cacheCreateTokens > 0 ? ` / ${lastStats.cacheCreateTokens}w` : ''}
+                  cache {fmtTokens(lastStats.cacheReadTokens)}r
+                  {lastStats.cacheCreateTokens > 0 ? ` / ${fmtTokens(lastStats.cacheCreateTokens)}w` : ''}
                 </span>
               )}
             </>

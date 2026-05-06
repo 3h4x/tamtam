@@ -172,7 +172,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
       .catch(() => {})
   }, [])
 
-  const { currentReleaseId } = useTerminalBootstrap({
+  const { currentReleaseId: bootstrapReleaseId } = useTerminalBootstrap({
     projectName,
     initialSessionId,
     jobParam,
@@ -183,6 +183,48 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     resumeProviderParam,
     onLoadSessions: loadSessions,
   })
+
+  // Track the job ID while streaming so we can look it up after completion.
+  const lastJobIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (streaming && currentJobId) lastJobIdRef.current = currentJobId
+  }, [streaming, currentJobId])
+
+  // After streaming ends, poll briefly for a release job triggered by release_after_run.
+  const prevStreamingRef = useRef(false)
+  const [postRunReleaseId, setPostRunReleaseId] = useState<string | null>(null)
+  useEffect(() => {
+    const wasStreaming = prevStreamingRef.current
+    prevStreamingRef.current = streaming
+    if (streaming) {
+      setPostRunReleaseId(null)
+      return
+    }
+    if (!wasStreaming) return
+    const lastJobId = lastJobIdRef.current
+    if (!lastJobId) return
+    let cancelled = false
+    const poll = async () => {
+      for (let attempt = 0; attempt < 6; attempt++) {
+        if (cancelled) return
+        if (attempt > 0) await new Promise(r => setTimeout(r, 1000))
+        try {
+          const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
+          if (!res.ok) continue
+          const data = await res.json()
+          const found = (data.jobs ?? []).find(
+            (j: { kind: string; parent_job_id?: string | null; id: string }) =>
+              j.kind === 'release' && j.parent_job_id === lastJobId
+          )
+          if (found) { setPostRunReleaseId(found.id); return }
+        } catch {}
+      }
+    }
+    poll()
+    return () => { cancelled = true }
+  }, [streaming, projectName])
+
+  const currentReleaseId = bootstrapReleaseId ?? postRunReleaseId
 
   useEffect(() => {
     Promise.all([fetchSkills(), fetchPersonas()]).then(([skillsData, personasData]) => {
