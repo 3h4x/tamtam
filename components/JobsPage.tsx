@@ -38,6 +38,43 @@ function formatCost(job: JobInfo): string | null {
   return `$${c.toFixed(2)}`
 }
 
+function formatTokenPair(job: JobInfo): string | null {
+  const input = job.input_tokens ?? 0
+  const output = job.output_tokens ?? 0
+  if (!input && !output) return null
+  const compact = (value: number) => (value >= 1000 ? `${(value / 1000).toFixed(1)}k` : `${value}`)
+  return `↑${compact(input)} ↓${compact(output)}`
+}
+
+function getJobStatus(job: JobInfo): {
+  isRunning: boolean
+  isFailed: boolean
+  border: string
+  badge: string
+  badgeClass: string
+} {
+  const isRunning = job.status === 'running'
+  const isFailed = !isRunning && job.exit_code !== null && job.exit_code !== 0
+  return {
+    isRunning,
+    isFailed,
+    border: isRunning ? 'border-l-status-warning' : isFailed ? 'border-l-status-error' : 'border-l-status-success',
+    badge: isRunning ? 'running' : isFailed ? `exit ${job.exit_code}` : 'done',
+    badgeClass: isRunning
+      ? 'border-status-warning/30 bg-status-warning/15 text-status-warning'
+      : isFailed
+        ? 'border-status-error/30 bg-status-error/15 text-status-error'
+        : 'border-status-success/30 bg-status-success/15 text-status-success',
+  }
+}
+
+function promptPreview(job: JobInfo): string | null {
+  const promptText = job.user_prompt ?? job.prompt ?? null
+  if (promptText) return promptText.split('\n')[0].trim()
+  if (job.work_summary) return job.work_summary
+  return KIND_HINTS[job.kind] ?? null
+}
+
 // Short descriptive hint shown in the Prompt column when a pipeline job has no
 // user-visible prompt (review, commit, push, etc.).
 const KIND_HINTS: Record<string, string> = {
@@ -187,8 +224,17 @@ export function JobsPage() {
     if (filter === 'done' && !(j.status === 'done' && (j.exit_code === 0 || j.exit_code === null))) return false
     if (search) {
       const q = search.toLowerCase()
-      const prompt = (j.user_prompt ?? j.prompt ?? '').toLowerCase()
-      if (!j.project.toLowerCase().includes(q) && !j.kind.toLowerCase().includes(q) && !prompt.includes(q)) return false
+      const haystack = [
+        j.project,
+        j.kind,
+        j.user_prompt ?? '',
+        j.prompt ?? '',
+        j.model ?? '',
+        j.provider ?? '',
+        j.verdict ?? '',
+        j.work_summary ?? '',
+      ].join(' ').toLowerCase()
+      if (!haystack.includes(q)) return false
     }
     return true
   })
@@ -258,17 +304,33 @@ export function JobsPage() {
       </div>
 
       {loading ? (
-        <div className="space-y-px">
+        <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-4 px-4 py-2 border-t border-border" style={{ opacity: 1 - i * 0.1 }}>
-              <div className="skeleton h-5 w-20 rounded-full shrink-0" />
-              <div className="skeleton h-4 w-28 shrink-0" />
-              <div className="skeleton h-5 w-14 rounded shrink-0" />
-              <div className="skeleton h-4 flex-1 max-w-xs" />
-              <div className="skeleton h-4 w-16 shrink-0" />
-              <div className="skeleton h-4 w-12 shrink-0" />
-              <div className="skeleton h-4 w-14 shrink-0" />
-              <div className="skeleton h-4 w-12 shrink-0" />
+            <div
+              key={i}
+              className="border-t border-border/60 first:border-t-0 border-l-[3px] border-l-border px-4 py-3"
+              style={{ opacity: 1 - i * 0.08 }}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="skeleton h-5 w-16 rounded-full" />
+                    <div className="skeleton h-4 w-24" />
+                    <div className="skeleton h-4 w-14 rounded" />
+                    <div className="skeleton h-4 w-18 rounded-full" />
+                  </div>
+                  <div className="mt-2 skeleton h-4 w-full max-w-xl" />
+                  <div className="mt-2 flex items-center gap-2 flex-wrap">
+                    <div className="skeleton h-3.5 w-20" />
+                    <div className="skeleton h-3.5 w-16" />
+                    <div className="skeleton h-3.5 w-14" />
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="skeleton h-4 w-14 ml-auto" />
+                  <div className="mt-1 skeleton h-3.5 w-12 ml-auto" />
+                </div>
+              </div>
             </div>
           ))}
         </div>
@@ -283,81 +345,83 @@ export function JobsPage() {
         </div>
       ) : (
         <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
-        <table className="w-full border-collapse">
-          <thead className="bg-bg-tertiary border-b border-border">
-            <tr className="text-left text-[11px] text-text-secondary uppercase tracking-wider">
-              <th className="px-4 py-2 font-medium">Status</th>
-              <th className="px-4 py-2 font-medium">Project</th>
-              <th className="px-4 py-2 font-medium">Kind</th>
-              <th className="px-4 py-2 font-medium">Prompt</th>
-              <th className="px-4 py-2 font-medium">Started</th>
-              <th className="px-4 py-2 font-medium text-right">Duration</th>
-              <th className="px-4 py-2 font-medium text-right">Tokens</th>
-              <th className="px-4 py-2 font-medium text-right">Cost</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((job) => {
-              const isRunning = job.status === 'running'
-              const isFailed = !isRunning && job.exit_code !== null && job.exit_code !== 0
-              const promptText = job.user_prompt ?? job.prompt ?? null
-              const tokens = formatTokens(job)
-              const cost = formatCost(job)
-              return (
-                <tr
-                  key={job.id}
-                  className={`border-t border-border/60 hover:bg-bg-tertiary/40 cursor-pointer transition-colors border-l-[3px] ${isRunning ? 'border-l-status-warning' : isFailed ? 'border-l-status-error' : 'border-l-status-success'}`}
-                  onClick={() => router.push(job.kind === 'run' && job.session_id ? `/project/${job.project}/terminal/${job.session_id}` : `/project/${job.project}/terminal?job=${encodeURIComponent(job.id)}`)}
-                >
-                  <td className="px-4 py-2 whitespace-nowrap">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full font-medium ${isRunning ? 'bg-status-warning/15 text-status-warning' : isFailed ? 'bg-status-error/15 text-status-error' : 'bg-status-success/15 text-status-success'}`}>
-                        <span className={isRunning ? 'animate-pulse' : ''}>●</span>
-                        {isRunning ? 'running' : isFailed ? `exit ${job.exit_code}` : 'done'}
+          {filtered.map((job) => {
+            const status = getJobStatus(job)
+            const prompt = promptPreview(job)
+            const totalTokens = formatTokens(job)
+            const tokenPair = formatTokenPair(job)
+            const cost = formatCost(job)
+            return (
+              <div
+                key={job.id}
+                className={`border-t border-border/60 first:border-t-0 border-l-[3px] ${status.border} px-4 py-3 hover:bg-bg-tertiary/40 cursor-pointer transition-colors`}
+                onClick={() => router.push(job.kind === 'run' && job.session_id ? `/project/${job.project}/terminal/${job.session_id}` : `/project/${job.project}/terminal?job=${encodeURIComponent(job.id)}`)}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${status.badgeClass}`}>
+                        <span className={status.isRunning ? 'animate-pulse' : ''}>●</span>
+                        {status.badge}
                       </span>
-                      {job.verdict && !isRunning && <VerdictBadge verdict={job.verdict} />}
+                      <Link
+                        href={`/project/${job.project}`}
+                        data-private
+                        className="text-sm font-medium text-text-primary hover:text-accent transition-colors"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        {job.project}
+                      </Link>
+                      <KindBadge kind={job.kind} />
+                      {job.verdict && !status.isRunning && <VerdictBadge verdict={job.verdict} />}
                     </div>
-                  </td>
-                  <td className="px-4 py-2 whitespace-nowrap">
-                    <Link
-                      href={`/project/${job.project}`}
-                      className="font-medium text-text-primary hover:text-accent transition-colors"
-                      onClick={e => e.stopPropagation()}
+
+                    <div
+                      className={`mt-1 text-sm ${prompt ? 'text-text-secondary' : 'text-text-tertiary'} truncate`}
+                      title={prompt ?? undefined}
                     >
-                      {job.project}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2 whitespace-nowrap">
-                    <KindBadge kind={job.kind} />
-                  </td>
-                  <td className="px-4 py-2 max-w-xs">
-                    {promptText ? (
-                      <span className="text-sm text-text-secondary truncate block" title={promptText}>
-                        {promptText.split('\n')[0].slice(0, 80)}{promptText.length > 80 ? '…' : ''}
-                      </span>
-                    ) : KIND_HINTS[job.kind] ? (
-                      <span className="text-xs text-text-tertiary">{KIND_HINTS[job.kind]}</span>
-                    ) : (
-                      <span className="text-text-tertiary">—</span>
+                      {prompt ? `${prompt.slice(0, 140)}${prompt.length > 140 ? '…' : ''}` : '—'}
+                    </div>
+
+                    <div className="mt-1.5 flex items-center gap-x-2 gap-y-1 flex-wrap text-[11px] text-text-tertiary font-mono">
+                      <span title={formatTime(job.started_at)} className="tabular-nums">started {formatAgo(job.started_at)}</span>
+                      {job.model && <span>{job.model}</span>}
+                      {job.provider && <span>{job.provider}</span>}
+                      {job.session_id && <span>#{job.session_id.slice(0, 8)}</span>}
+                      {job.work_summary && !job.user_prompt && !job.prompt && (
+                        <span className="max-w-[28rem] truncate text-text-secondary normal-case font-sans" title={job.work_summary}>
+                          {job.work_summary}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 text-right">
+                    <div className="font-mono text-xs text-text-primary tabular-nums">
+                      {formatDuration(job.started_at, job.finished_at)}
+                    </div>
+                    <div className="mt-0.5 font-mono text-[11px] text-text-tertiary tabular-nums">
+                      {formatAgo(job.started_at)}
+                    </div>
+                    {(totalTokens || cost || tokenPair) && (
+                      <div className="mt-1.5 flex flex-col items-end gap-0.5 font-mono text-[11px] tabular-nums">
+                        {tokenPair && (
+                          <span className="text-text-tertiary" title="Input / output tokens">
+                            <span className="text-status-success">{tokenPair.split(' ')[0]}</span>{' '}
+                            <span className="text-accent">{tokenPair.split(' ')[1]}</span>
+                          </span>
+                        )}
+                        <div className="flex items-center gap-2">
+                          {totalTokens && <span className="text-text-tertiary">{totalTokens}</span>}
+                          {cost && <span className="text-accent/70">{cost}</span>}
+                        </div>
+                      </div>
                     )}
-                  </td>
-                  <td className="px-4 py-2 text-text-secondary text-sm whitespace-nowrap" title={formatTime(job.started_at)}>
-                    {formatAgo(job.started_at)}
-                  </td>
-                  <td className="px-4 py-2 text-right text-text-secondary text-sm whitespace-nowrap tabular-nums">
-                    {formatDuration(job.started_at, job.finished_at)}
-                  </td>
-                  <td className="px-4 py-2 text-right text-text-tertiary text-xs whitespace-nowrap tabular-nums">
-                    {tokens ?? '—'}
-                  </td>
-                  <td className="px-4 py-2 text-right text-text-tertiary text-xs whitespace-nowrap tabular-nums">
-                    {cost ?? '—'}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
       {/* Infinite-scroll sentinel + status. Hidden until the initial page

@@ -187,6 +187,39 @@ the pending flag in place so a later drain can retry safely. Once a release
 job exists and the pipeline has actually started, later step failures consume
 the queue normally because that release attempt is no longer pending.
 
+### Queued agent recovery
+
+When an agent run arrives while an active release holds the project lock,
+TamTam returns `202 { status: 'queued', code: 'pipeline_lock' }` and stores the
+fire in `queued_agent_runs`. If no release is currently running but the
+project still has an older `pending_release:<project>` flag, TamTam first tries
+to drain that release; if it remains queued, the agent returns
+`202 { status: 'queued', code: 'pending_release' }` and is also stored in
+`queued_agent_runs`. Unlike the in-memory `pending-agent-run` queue, this
+DB-backed queue survives restart.
+
+That queued agent is retried from these paths:
+
+1. `releaseLock()` after the active pipeline finishes
+2. `syncJobsPauseState(false)` when jobs resume from a global pause
+3. budget recovery, when the hard 5-hour gate drops back under
+   `budget_block_at_pct`
+4. server boot
+5. the periodic queued-agent recovery ticker
+
+Retry semantics are conservative: successful starts and handoff to the
+in-memory same-project agent queue consume the DB row; transient blocks such as
+another active release lock, global pause, quota/provider 429s, 5xxs, or
+timeouts leave the row in place for a later retry.
+
+Recovery ordering is per-project: if the same project also has a
+`pending_release:<project>` flag, TamTam drains that release first and only
+starts or replays agent work after the pending release was cleared and no
+pipeline lock was reacquired. This applies to DB-backed queued agents, the
+in-memory same-project agent queue, and fresh `POST /api/agents/[agentId]/run`
+requests, preserving the same "release before queued agents" order used by the
+normal `releaseLock()` completion path.
+
 ---
 
 ## Verdict detection (`getVerdict`)

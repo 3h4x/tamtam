@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const settings = sqliteTable('settings', {
   key: text('key').primaryKey(),
@@ -126,3 +126,18 @@ export const pipelineLocks = sqliteTable('pipeline_locks', {
   lockedByJobId: text('locked_by_job_id').notNull(),
   acquiredAt: real('acquired_at').notNull(),
 });
+
+// Agents queued for a project while a release pipeline holds the lock.
+// DB-backed so the queue survives a server restart — unlike the in-memory
+// pending-agent-run queue which is only for agent-vs-agent serialization.
+export const queuedAgentRuns = sqliteTable('queued_agent_runs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  project: text('project').notNull(),
+  agentId: text('agent_id').notNull(),
+  agentName: text('agent_name').notNull(),
+  triggeredBy: text('triggered_by').notNull().default('manual'),
+  prompt: text('prompt').notNull().default(''),
+  enqueuedAt: real('enqueued_at').notNull(),
+}, (t) => ({
+  projectAgentUniq: uniqueIndex('queued_agent_runs_project_agent').on(t.project, t.agentId),
+}));

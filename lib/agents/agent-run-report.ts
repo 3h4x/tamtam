@@ -2,6 +2,7 @@ import { parseStreamLines } from '@/lib/jobs/claude-stream-parser';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { exec } from '@/lib/shared/shell';
 import { upsertRecommendation } from '@/lib/recommendations/recommendations';
+import { isAgentJobKind } from '@/lib/jobs/kinds';
 import type { JobData } from '@/lib/jobs/types';
 
 interface AgentContextMeta {
@@ -144,7 +145,7 @@ function maybeRecommendSchedule(job: JobData, ctx: AgentContextMeta, files: Modi
 }
 
 export async function finalizeAgentRunReport(job: JobData, rawLog: string): Promise<void> {
-  if (!job.kind.startsWith('agent:')) return;
+  if (!isAgentJobKind(job.kind)) return;
   const ctx = parseContextMeta(job.contextMeta);
   const text = assistantText(rawLog);
   const { summary, actionable } = extractSummary(text);

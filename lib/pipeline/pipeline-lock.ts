@@ -136,10 +136,18 @@ export function releaseLock(projectName: string, jobId: string): void {
 
 async function drainPendingReleaseAsync(projectName: string): Promise<void> {
   try {
-    const { drainPendingRelease } = await import('./pending-release');
-    await drainPendingRelease(projectName);
+    const { drainProjectRecoveryWork } = await import('./recovery-drain');
+    await drainProjectRecoveryWork(projectName, '[pipeline-lock]');
   } catch (e) {
-    console.error('[pipeline-lock] pending-release drain failed for', projectName, e);
+    console.error('[pipeline-lock] recovery drain failed for', projectName, e);
+  }
+  // Re-attempt in-memory queue — an agent queued before the release started
+  // may have been deferred mid-release and is still waiting.
+  try {
+    const { drainNextAgentRun } = await import('@/lib/agents/pending-agent-run');
+    await drainNextAgentRun(projectName);
+  } catch (e) {
+    console.error('[pipeline-lock] in-memory agent drain failed for', projectName, e);
   }
 }
 

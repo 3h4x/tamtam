@@ -26,6 +26,7 @@ import {
   findReleaseScopedIssueContext,
   parsePrContextMeta,
 } from '@/lib/pipeline/release-context';
+import { getJobKind, isAgentJobKind, isClaudeBackedJobKind } from '@/lib/jobs/kinds';
 
 async function getProjectPipelineConfig(projectName: string): Promise<{ autoCommitEnabled: boolean; autoPushEnabled: boolean; releaseAfterRun: boolean; autoPrMergeEnabled: boolean; prWorkflowEnabled: boolean }> {
   try {
@@ -167,15 +168,16 @@ function noteReleaseStop(reason: string): void {
 // pipeline children, LGTM reviews, and no-op agent runs are silenced.
 function shouldAutoMarkSeen(job: JobData): boolean {
   if (job.exitCode !== 0) return false;
+  const kind = getJobKind(job.kind);
   // Release meta-job is the entry point users click into — keep it visible.
-  if (job.kind === 'release') return false;
+  if (kind === 'release') return false;
   // Interactive terminal sessions: user explicitly started them.
-  if (job.kind === 'run') return false;
-  if (job.kind === 'review') {
+  if (kind === 'run') return false;
+  if (kind === 'review') {
     const verdict = getVerdict(job);
     return verdict === 'LGTM';
   }
-  if (job.kind.startsWith('agent:')) {
+  if (isAgentJobKind(kind)) {
     // No-op agent runs (explicit empty modifiedFiles) are not actionable for
     // the user. Missing metadata means report extraction failed, so keep the
     // run visible for inspection.
@@ -188,7 +190,7 @@ function shouldAutoMarkSeen(job: JobData): boolean {
     }
   }
   // Successful pipeline children — silenced; the release meta-job remains.
-  return PIPELINE_STEP_KINDS.has(job.kind);
+  return PIPELINE_STEP_KINDS.has(kind);
 }
 
 // True if the previous review in the same release window produced the same
@@ -999,7 +1001,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   // Drain the pending-agent-run queue: only one agent runs at a time per
   // project (the run route enqueues here when another agent was already
   // active). Trigger the next pending fire now that this slot is free.
-  if (job.kind.startsWith('agent:')) {
+  if (isAgentJobKind(job.kind)) {
     try {
       const { drainNextAgentRun } = await import('@/lib/agents/pending-agent-run');
       await drainNextAgentRun(job.project);
@@ -1009,7 +1011,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   }
 
   // Agent run failures: notify on agent run failures
-  if (job.kind.startsWith('agent:') && job.exitCode !== 0) {
+  if (isAgentJobKind(job.kind) && job.exitCode !== 0) {
     try {
       const { notify } = await import('@/lib/shared/notifications');
       const agentName = job.kind.replace('agent:', '');
@@ -1029,7 +1031,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   }
 
   // Release-after-run: when a terminal/agent run finishes successfully, auto-trigger the release pipeline.
-  if ((job.kind === 'run' || job.kind.startsWith('agent:')) && job.exitCode === 0) {
+  if ((getJobKind(job.kind) === 'run' || isAgentJobKind(job.kind)) && job.exitCode === 0) {
     try {
       const { releaseAfterRun } = await getProjectPipelineConfig(job.project);
       if (releaseAfterRun) {
@@ -1144,14 +1146,7 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
     // by pm2's hard-timeout or our SIGKILL fallback, which makes pm2 report
     // exit -1 / 137. If the stream-json result line says is_error=false,
     // the logical outcome was a clean finish — trust that over pm2's code.
-    const isClaudeKind = (
-      job.kind === 'run' ||
-      job.kind === 'review' ||
-      job.kind === 'fix' ||
-      job.kind === 'fix-ci' ||
-      job.kind === 'fix-push' ||
-      job.kind.startsWith('agent:')
-    );
+    const isClaudeKind = isClaudeBackedJobKind(job.kind);
     if (isClaudeKind && !doneEvent.result.error && exitCode !== 0) {
       console.log(`[job ${job.id}] claude result present (is_error=false) but pm2 reported exit ${exitCode}; overriding to 0`);
       job.exitCode = 0;
@@ -1165,7 +1160,7 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
       job.exitCode = 1;
     }
   }
-  if (job.kind.startsWith('agent:')) {
+  if (isAgentJobKind(job.kind)) {
     try {
       const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
       await finalizeAgentRunReport(job, rawLog);

@@ -41,9 +41,9 @@ function stepChipClass(s: StepState, isRunning: boolean): string {
   if (s === 'done') return 'bg-status-success/12 text-status-success border-status-success/25'
   if (s === 'failed') return 'bg-status-error/15 text-status-error border-status-error/40'
   if (s === 'warning') return 'bg-status-warning/15 text-status-warning border-status-warning/40'
-  if (s === 'running') return `bg-accent/15 text-accent border-accent/50 ${isRunning ? 'ring-2 ring-accent/25' : ''}`
+  if (s === 'running') return `bg-accent/15 text-accent border-accent/50 ${isRunning ? 'ring-2 ring-accent/40' : ''}`
   if (s === 'skipped') return 'bg-bg-tertiary text-text-tertiary border-border/40'
-  return 'bg-transparent text-text-tertiary border-border/50'
+  return 'bg-bg-secondary/40 text-text-tertiary border-border/70'
 }
 
 function stateLabel(s: StepState): string {
@@ -513,7 +513,7 @@ export function PipelineStrip({
               </button>
             )}
             {i < steps.length - 1 && (
-              <span className={`h-px w-3 ${connectorClass(s.state)} transition-colors`} aria-hidden />
+              <span className={`h-0.5 w-3 rounded-full ${connectorClass(s.state)} transition-colors`} aria-hidden />
             )}
           </div>
         )

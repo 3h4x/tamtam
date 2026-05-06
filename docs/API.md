@@ -6,7 +6,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 
 - `/api/agents` — CRUD for agents (GET: accepts `?project=` and `?name=` filters, POST)
 - `/api/agents/[agentId]` — Agent detail (GET, PATCH, DELETE)
-- `/api/agents/[agentId]/run` — Run agent (POST) — composes skills into prompt; returns `200 { status: 'started', job_id, pid, agent }`, `202 { status: 'queued', detail, agent, blockingJobId? }` when another agent on the same project is running or still starting, and `409` for same-agent duplicates
+- `/api/agents/[agentId]/run` — Run agent (POST) — composes skills into prompt; returns `200 { status: 'started', job_id, pid, agent }`, `202 { status: 'queued', detail, agent, blockingJobId?, code? }` when another agent on the same project is running/still starting, when an active release lock defers the run with `code: 'pipeline_lock'`, or when an older queued release must run first with `code: 'pending_release'`, and `409` for same-agent duplicates
 - `/api/agents/by-name` — Update agent by project+name without knowing its UUID (PATCH: `{ project, name, ...fields }`) — enables agents to self-improve
 - `/api/agents/scheduler-health` — Verify the internal scheduler matches the DB (GET returns `{ ok, expected, actual, missing, orphans, errors, internal: { started, entries: [...] } }`); POST reinstalls anything missing and sweeps legacy PM2 cron orphans, returns `{ before, after, installed, installFailures }`. Surfaced on `/monitoring`.
 

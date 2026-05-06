@@ -1,5 +1,9 @@
 import type { Agent } from './types'
 
+export type RunAgentResult =
+  | { status: 'started'; job_id: string; pid: number; agent?: string }
+  | { status: 'queued'; detail?: string; agent?: string; blockingJobId?: string; code?: string }
+
 export async function fetchAgents(project?: string): Promise<{ agents: Agent[] }> {
   const url = project ? `/api/agents?project=${encodeURIComponent(project)}` : '/api/agents'
   const response = await fetch(url)
@@ -39,7 +43,7 @@ export async function deleteAgent(agentId: string): Promise<void> {
   if (!response.ok) throw new Error('Failed to delete agent')
 }
 
-export async function runAgent(agentId: string, prompt: string): Promise<{ status: string; job_id: string; pid: number }> {
+export async function runAgent(agentId: string, prompt: string): Promise<RunAgentResult> {
   const response = await fetch(`/api/agents/${agentId}/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

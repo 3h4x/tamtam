@@ -124,10 +124,9 @@ export function syncJobsPauseState(paused: boolean): void {
     internalScheduler.pauseInternalScheduler?.();
   } else {
     internalScheduler.resumeInternalScheduler?.();
-    // Resume edge: drain any release queued while we were paused. Fire and
-    // forget — drainPendingRelease / drainNextAgentRun are bounded and
-    // self-cleaning.
-    if (wasPaused) void drainAllPendingReleasesAsync();
+    // Resume edge: drain any release/agent work queued while we were paused,
+    // preserving per-project "pending release before queued agent" ordering.
+    if (wasPaused) void drainAllRecoveryWorkAsync();
     if (wasPaused) void drainAllQueuedAgentsAsync();
   }
 }
@@ -180,15 +179,12 @@ export function scheduledBurnRateBlocked(): { reason: string; projectedPct: numb
   return { reason: burn.reason, projectedPct: burn.projectedPct };
 }
 
-async function drainAllPendingReleasesAsync(): Promise<void> {
+async function drainAllRecoveryWorkAsync(): Promise<void> {
   try {
-    const { listPendingReleaseProjects, drainPendingRelease } = await import('@/lib/pipeline/pending-release');
-    const projects = listPendingReleaseProjects();
-    for (const p of projects) {
-      try { await drainPendingRelease(p); } catch (e) { console.error('[resume] drain failed for', p, e); }
-    }
+    const { drainAllRecoveryWork } = await import('@/lib/pipeline/recovery-drain');
+    await drainAllRecoveryWork('[resume]');
   } catch (e) {
-    console.error('[resume] failed to enumerate pending releases:', e);
+    console.error('[resume] failed to drain queued recovery work:', e);
   }
 }
 

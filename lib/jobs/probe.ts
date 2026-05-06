@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'fs';
 import { getJobStatus } from './pm2-jobs';
 import { saveToDb } from './storage';
 import type { JobData } from './types';
+import { isClaudeBackedJobKind } from './kinds';
 
 // Returns the exit code implied by the Claude result line in the job's log:
 //   0  if is_error: false (or the line can't be parsed)
@@ -105,12 +106,7 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
   // = end_turn, is_error = false, but the process never exits — most often seen on
   // long agent runs). If the log already contains a terminal result line, treat
   // the job as done regardless of PM2 status. Applies to every claude-backed kind.
-  const claudeKind = job.kind === 'run'
-    || job.kind === 'review'
-    || job.kind === 'fix'
-    || job.kind === 'fix-ci'
-    || job.kind === 'fix-push'
-    || job.kind.startsWith('agent:');
+  const claudeKind = isClaudeBackedJobKind(job.kind);
   const resultExitCode = getClaudeResultExitCode(job);
   if (claudeKind && resultExitCode !== null) {
     await markDone(job, resultExitCode);
