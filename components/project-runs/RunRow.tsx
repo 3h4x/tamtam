@@ -3,6 +3,7 @@
 import { formatAgo } from '@/lib/shared/format'
 import { formatDuration, formatTokens, formatCost, KIND_LABEL, KIND_COLOR, entryIsRunning, entryNeedsAttention } from '@/components/project-runs/utils'
 import type { Entry } from '@/components/project-runs/utils'
+import { MetaChip } from '@/components/MetaChip'
 
 function modifiedFileCount(raw: string | null): number {
   if (!raw) return 0
@@ -29,26 +30,6 @@ export interface RunRowProps {
   children?: React.ReactNode
 }
 
-function MetaChip({
-  label,
-  value,
-  tone = 'neutral',
-}: {
-  label: string
-  value: React.ReactNode
-  tone?: 'neutral' | 'accent'
-}) {
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-mono ${
-      tone === 'accent'
-        ? 'border-accent/25 bg-accent/10 text-accent'
-        : 'border-border bg-bg-primary/70 text-text-secondary'
-    }`}>
-      <span className="text-text-tertiary">{label}</span>
-      <span className={tone === 'accent' ? 'text-accent' : 'text-text-primary'}>{value}</span>
-    </span>
-  )
-}
 
 // Tailwind doesn't see dynamic class names, so map fixed depths → static
 // padding-left classes. Anything past depth 6 saturates at the same padding
@@ -272,7 +253,6 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
             {e.turns > 1 && <span className="font-mono">{e.turns} turns</span>}
             {e.model && <MetaChip label="model" value={e.model} tone="accent" />}
             {e.navSessionId && <MetaChip label="session" value={`#${e.navSessionId.slice(0, 8)}`} />}
-            <span className="font-mono tabular-nums">started {formatAgo(e.startedAt)}</span>
             {summary && <span className="font-mono text-text-secondary">{summary}</span>}
             {e.releaseOutcome && !summary && <span className="font-mono text-text-secondary">{e.releaseOutcome.label}</span>}
             {e.subtitle && !summary && <span className="italic truncate">{e.subtitle}</span>}

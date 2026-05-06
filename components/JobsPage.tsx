@@ -6,15 +6,12 @@ import Link from 'next/link'
 import { fetchJobs } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
+import { MetaChip } from '@/components/MetaChip'
 
 // Initial page size and how many additional rows each scroll batch loads.
 // Kept generous enough that a single batch covers a typical viewport so
 // the user doesn't see a "loading more" flicker after every screen.
 const PAGE_SIZE = 50
-
-function formatTime(ts: number): string {
-  return new Date(ts * 1000).toLocaleString()
-}
 
 function formatDuration(startedAt: number, finishedAt: number | null): string {
   const end = finishedAt || Date.now() / 1000
@@ -44,27 +41,6 @@ function formatTokenPair(job: JobInfo): string | null {
   if (!input && !output) return null
   const compact = (value: number) => (value >= 1000 ? `${(value / 1000).toFixed(1)}k` : `${value}`)
   return `↑${compact(input)} ↓${compact(output)}`
-}
-
-function MetaChip({
-  label,
-  value,
-  tone = 'neutral',
-}: {
-  label: string
-  value: React.ReactNode
-  tone?: 'neutral' | 'accent'
-}) {
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-mono ${
-      tone === 'accent'
-        ? 'border-accent/25 bg-accent/10 text-accent'
-        : 'border-border bg-bg-primary/70 text-text-secondary'
-    }`}>
-      <span className="text-text-tertiary">{label}</span>
-      <span className={tone === 'accent' ? 'text-accent' : 'text-text-primary'}>{value}</span>
-    </span>
-  )
 }
 
 function getJobStatus(job: JobInfo): {
@@ -409,7 +385,6 @@ export function JobsPage() {
                     </div>
 
                     <div className="mt-1.5 flex items-center gap-x-2 gap-y-1 flex-wrap text-[11px] text-text-tertiary font-mono">
-                      <span title={formatTime(job.started_at)} className="tabular-nums">started {formatAgo(job.started_at)}</span>
                       {job.model && <MetaChip label="model" value={job.model} tone="accent" />}
                       {job.provider && <MetaChip label="provider" value={job.provider} />}
                       {job.session_id && <MetaChip label="session" value={`#${job.session_id.slice(0, 8)}`} />}
