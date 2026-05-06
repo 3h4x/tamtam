@@ -112,10 +112,12 @@ html.privacy-mode [data-private] {
 .scrollbar-none { scrollbar-width: none; }
 .scrollbar-none::-webkit-scrollbar { display: none; }
 
-/* GPU-accelerate Tailwind's animate-spin */
+/* GPU-accelerate Tailwind's animate-spin. Do NOT also set `transform`
+ * here — Tailwind's @keyframes spin animates the same property, and a
+ * static base value collapses the rotation into a near-identity matrix
+ * tween (visible as a stationary spinner). */
 .animate-spin {
   will-change: transform;
-  transform: translateZ(0);
 }
 
 /* Spinner animation */

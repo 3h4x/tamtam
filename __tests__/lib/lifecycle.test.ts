@@ -273,13 +273,13 @@ describe('reconcileStaleRelease', () => {
     const now = Date.now() / 1000;
     testDb.db.insert(schema.jobs).values([
       makeJobRow({ id: 'release-stale', project: 'proj', kind: 'release', startedAt: now - 60 }) as any,
-      makeJobRow({ id: 'test-stale', project: 'proj', kind: 'test', startedAt: now - 50, finishedAt: now - 30, exitCode: 0 }) as any,
-      makeJobRow({ id: 'push-stale', project: 'proj', kind: 'push', startedAt: now - 25, finishedAt: now - 15, exitCode: 0 }) as any,
+      makeJobRow({ id: 'test-stale', project: 'proj', kind: 'test', releaseId: 'release-stale', startedAt: now - 50, finishedAt: now - 30, exitCode: 0 }) as any,
+      makeJobRow({ id: 'push-stale', project: 'proj', kind: 'push', releaseId: 'release-stale', startedAt: now - 25, finishedAt: now - 15, exitCode: 0 }) as any,
     ]).run();
 
     const { reconcileStaleRelease: fn } = await import('@/lib/jobs/job-storage');
 
-    const pushJob = makeJob('push', { project: 'proj', finishedAt: now - 15, exitCode: 0 });
+    const pushJob = makeJob('push', { project: 'proj', releaseId: 'release-stale', finishedAt: now - 15, exitCode: 0 });
     await fn(pushJob);
 
     const row = testDb.db.select().from(schema.jobs).where(eq(schema.jobs.id, 'release-stale')).get();
@@ -291,13 +291,13 @@ describe('reconcileStaleRelease', () => {
     const now = Date.now() / 1000;
     testDb.db.insert(schema.jobs).values([
       makeJobRow({ id: 'release-fail', project: 'proj', kind: 'release', startedAt: now - 60 }) as any,
-      makeJobRow({ id: 'test-fail', project: 'proj', kind: 'test', startedAt: now - 50, finishedAt: now - 40, exitCode: 1 }) as any,
-      makeJobRow({ id: 'fix-fail', project: 'proj', kind: 'fix', startedAt: now - 35, finishedAt: now - 15, exitCode: 0 }) as any,
+      makeJobRow({ id: 'test-fail', project: 'proj', kind: 'test', releaseId: 'release-fail', startedAt: now - 50, finishedAt: now - 40, exitCode: 1 }) as any,
+      makeJobRow({ id: 'fix-fail', project: 'proj', kind: 'fix', releaseId: 'release-fail', startedAt: now - 35, finishedAt: now - 15, exitCode: 0 }) as any,
     ]).run();
 
     const { reconcileStaleRelease: fn } = await import('@/lib/jobs/job-storage');
 
-    const fixJob = makeJob('fix', { project: 'proj', finishedAt: now - 15, exitCode: 0 });
+    const fixJob = makeJob('fix', { project: 'proj', releaseId: 'release-fail', finishedAt: now - 15, exitCode: 0 });
     await fn(fixJob);
 
     const row = testDb.db.select().from(schema.jobs).where(eq(schema.jobs.id, 'release-fail')).get();
@@ -320,15 +320,15 @@ describe('reconcileStaleRelease', () => {
     testDb.db.delete(schema.jobs).run();
     testDb.db.insert(schema.jobs).values([
       makeJobRow({ id: 'release-gap', project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
-      makeJobRow({ id: 'test-gap', project: 'proj', kind: 'test', startedAt: now - 190, finishedAt: now - 130, exitCode: 0 }) as any,
+      makeJobRow({ id: 'test-gap', project: 'proj', kind: 'test', releaseId: 'release-gap', startedAt: now - 190, finishedAt: now - 130, exitCode: 0 }) as any,
       // review starts 80 seconds after test finished (now-130 + 80 = now-50) — gap > 60s → excluded
-      makeJobRow({ id: 'review-gap', project: 'proj', kind: 'review', startedAt: now - 50, finishedAt: now - 20, exitCode: 0 }) as any,
+      makeJobRow({ id: 'review-gap', project: 'proj', kind: 'review', releaseId: 'release-gap', startedAt: now - 50, finishedAt: now - 20, exitCode: 0 }) as any,
     ]).run();
 
     const { reconcileStaleRelease: fn } = await import('@/lib/jobs/job-storage');
 
     // Trigger via the review job finishing (it's within its own chain, but not the release's)
-    const reviewJob = makeJob('review', { project: 'proj', finishedAt: now - 20, exitCode: 0 });
+    const reviewJob = makeJob('review', { project: 'proj', releaseId: 'release-gap', finishedAt: now - 20, exitCode: 0 });
     await fn(reviewJob);
 
     const row = testDb.db.select().from(schema.jobs).where(eq(schema.jobs.id, 'release-gap')).get();
@@ -776,6 +776,124 @@ describe('reviewIsStuck convergence guard', () => {
     await markDoneFn(curReview, 0);
 
     expect(startFixFromJobMock).toHaveBeenCalledWith('first-review');
+  });
+});
+
+// ─── verification cap (counts reviews/tests, not fixes) ──────────────────────
+
+describe('fix→review review-count cap', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let startProjectReviewMock: ReturnType<typeof vi.fn>;
+  let notifyMock: ReturnType<typeof vi.fn>;
+  let tempDir: string;
+
+  function makeFixJob(id: string, overrides: Partial<JobData> = {}): JobData {
+    const now = Date.now() / 1000;
+    return {
+      id,
+      project: 'proj',
+      kind: 'fix',
+      prompt: null,
+      pid: 99999,
+      logPath: null,
+      startedAt: now,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+    testDb = createTestDb();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-review-cap-'));
+    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'review-next' });
+    notifyMock = vi.fn().mockResolvedValue(undefined);
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+      getJobStatus: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
+    vi.doMock('@/lib/git/git-utils', () => ({ markReviewed: vi.fn().mockResolvedValue(undefined) }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({
+        autoPushEnabled: true, autoCommitEnabled: false, releaseAfterRun: false, prWorkflowEnabled: false,
+      }),
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      releaseLock: vi.fn(),
+      getLock: vi.fn().mockReturnValue(null),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/jobs/retention', () => ({ pruneProjectLogs: vi.fn() }));
+    vi.doMock('@/lib/shared/notifications', () => ({ notify: notifyMock }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: vi.fn().mockReturnValue({
+        fix_ci_max_retries: 0, fix_ci_retry_window_seconds: 120, fix_ci_fast_crash_ms: 5000,
+      }),
+    }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('skips review #(MAX+1) when MAX reviews have already run, even with different findings each time', async () => {
+    // Default MAX_STEP_ITERATIONS = 3. Insert 3 prior reviews with DISTINCT
+    // findings (so reviewIsStuck and fixContradictsReview both return false).
+    // The new cap must still trigger and skip the 4th review.
+    const now = Date.now() / 1000;
+    const releaseId = 'release-scope-creep';
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 600 }) as any,
+      makeJobRow({ id: 'r1', project: 'proj', kind: 'review', releaseId, startedAt: now - 500, finishedAt: now - 480, exitCode: 0 }) as any,
+      makeJobRow({ id: 'f1', project: 'proj', kind: 'fix', releaseId, parentJobId: 'r1', startedAt: now - 470, finishedAt: now - 450, exitCode: 0 }) as any,
+      makeJobRow({ id: 'r2', project: 'proj', kind: 'review', releaseId, startedAt: now - 440, finishedAt: now - 420, exitCode: 0 }) as any,
+      makeJobRow({ id: 'f2', project: 'proj', kind: 'fix', releaseId, parentJobId: 'r2', startedAt: now - 410, finishedAt: now - 390, exitCode: 0 }) as any,
+      makeJobRow({ id: 'r3', project: 'proj', kind: 'review', releaseId, startedAt: now - 380, finishedAt: now - 360, exitCode: 0 }) as any,
+    ]).run();
+
+    const { markDone } = await import('@/lib/jobs/job-storage');
+
+    // The current fix's parent is r3 (a review) — fromTestFailure is false,
+    // so we hit the fix→review branch where the cap should bite.
+    const f3 = makeFixJob('f3', { releaseId, parentJobId: 'r3', startedAt: now - 30, finishedAt: null, exitCode: null });
+
+    await markDone(f3, 0);
+
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+    // fix_loop_exhausted should fire as the release-stop notification.
+    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    expect(notifyEvents).toContain('fix_loop_exhausted');
+  });
+
+  it('still chains to review when fewer than MAX reviews have run', async () => {
+    const now = Date.now() / 1000;
+    const releaseId = 'release-under-cap';
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
+      makeJobRow({ id: 'r1', project: 'proj', kind: 'review', releaseId, startedAt: now - 180, finishedAt: now - 160, exitCode: 0 }) as any,
+    ]).run();
+
+    const { markDone } = await import('@/lib/jobs/job-storage');
+
+    const f1 = makeFixJob('f1', { releaseId, parentJobId: 'r1', startedAt: now - 30 });
+    await markDone(f1, 0);
+
+    expect(startProjectReviewMock).toHaveBeenCalledOnce();
+    expect(startProjectReviewMock).toHaveBeenCalledWith('proj');
   });
 });
 

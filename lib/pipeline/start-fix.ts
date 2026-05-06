@@ -86,7 +86,7 @@ Do not commit — just make the code changes.
 
   mkdirSync(logDir, { recursive: true });
 
-  const job = createJob(projectName, 'fix', 0, '');
+  const job = createJob(projectName, 'fix', 0, '', undefined, undefined, undefined, undefined, undefined, undefined, sourceJob.id);
   job.provider = provider;
   const logPath = join(logDir, `${job.id}.log`);
   const promptPath = join(logDir, `${job.id}.prompt`);

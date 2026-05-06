@@ -5,7 +5,7 @@ import { invalidateProject } from '@/lib/shared/gh-status';
 import { exec } from '@/lib/shared/shell';
 import { getImproveConfig, setProjectPushResult } from '@/lib/scheduling/scheduling';
 import { currentParent } from '@/lib/jobs/parent-context';
-import { createJob, markDone, updateJob } from '@/lib/jobs/job-storage';
+import { createJob, getJob, listJobs, markDone, updateJob } from '@/lib/jobs/job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { generateCommitMessage, findIssueContext, detectMainBranch } from './start-commit';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
@@ -15,7 +15,69 @@ export type PushResult =
   | { ok: true; commitSha: string; message: string; prUrl?: string; prNumber?: number; prRepo?: string }
   | { ok: false; status: number; detail: string; blockingJobId?: string };
 
-export async function startProjectPush(projectName: string): Promise<PushResult> {
+const RETRIABLE_RELEASE_STEP_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait', 'fix-push']);
+
+export type ReleaseRetryValidation =
+  | { ok: true; parentJobId: string | null; releaseLinkedRetry: boolean }
+  | { ok: false; status: number; detail: string };
+
+export function validateReleaseLinkedRetry(
+  projectName: string,
+  parentJobId?: string | null,
+): ReleaseRetryValidation {
+  const normalizedParentJobId = parentJobId ?? null;
+  if (!normalizedParentJobId) {
+    return { ok: true, parentJobId: null, releaseLinkedRetry: false };
+  }
+
+  const lock = getLock(projectName);
+  const release = getJob(normalizedParentJobId);
+  if (
+    !lock
+    || lock.lockedByJobId !== normalizedParentJobId
+    || !isLockOwnedByActiveRelease(projectName)
+    || !release
+    || release.project !== projectName
+    || release.kind !== 'release'
+    || release.finishedAt !== null
+  ) {
+    return {
+      ok: false,
+      status: 409,
+      detail: `Release-linked push retry is only allowed for the active release on ${projectName}`,
+    };
+  }
+
+  const latestReleaseStep = listJobs()
+    .filter((job) =>
+      job.project === projectName
+      && job.releaseId === normalizedParentJobId
+      && RETRIABLE_RELEASE_STEP_KINDS.has(job.kind)
+    )
+    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0];
+
+  if (
+    !latestReleaseStep
+    || latestReleaseStep.kind !== 'push'
+    || latestReleaseStep.finishedAt === null
+    || latestReleaseStep.exitCode === null
+    || latestReleaseStep.exitCode === 0
+  ) {
+    return {
+      ok: false,
+      status: 409,
+      detail: `Release-linked push retry is only allowed when the latest step is a failed push for ${projectName}`,
+    };
+  }
+
+  return { ok: true, parentJobId: normalizedParentJobId, releaseLinkedRetry: true };
+}
+
+export async function startProjectPush(
+  projectName: string,
+  options: { parentJobId?: string | null } = {},
+): Promise<PushResult> {
+  const parentJobId = options.parentJobId ?? currentParent();
   // Check for existing pipeline lock — but allow running under a parent
   // release job's lock (this step was kicked off by the release pipeline).
   const underRelease = isLockOwnedByActiveRelease(projectName);
@@ -32,7 +94,7 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
     setProjectPushResult(projectName, 'project not found');
     return { ok: false, status: 404, detail: 'project not found' };
   }
-  const gate = await checkCliStartGate('start a push', { parentJobId: currentParent() });
+  const gate = await checkCliStartGate('start a push', { parentJobId });
   if (!gate.ok) {
     setProjectPushResult(projectName, gate.detail);
     return gate;
@@ -51,6 +113,7 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
     earlyIssueCtx?.number ?? null,
     earlyIssueCtx?.repo ?? null,
     earlyIssueCtx?.title ?? null,
+    options.parentJobId,
   );
   job.provider = gate.provider;
   const logPath = join(logDir, `${job.id}.log`);
@@ -94,23 +157,38 @@ export async function startProjectPush(projectName: string): Promise<PushResult>
 
 // Fire-and-forget variant: creates the job synchronously, runs push in the
 // background, and returns the job ID immediately so callers can stream output.
-// Always push-only (no commit). The "Push to PR" flow uses startProjectCommit
-// instead, which auto-chains to push via the completion hook.
-export function launchProjectPush(projectName: string): { jobId: string } | { error: string; status?: number } {
+// Standalone/manual launches are push-only. Explicit release-linked retries
+// must preserve the full push semantics so PR creation/context propagation
+// still happen before downstream hooks decide whether to start pr-wait/merge.
+export function launchProjectPush(
+  projectName: string,
+  options: { parentJobId?: string | null } = {},
+): { jobId: string } | { error: string; status?: number } {
+  const requestedParentJobId = options.parentJobId ?? currentParent();
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { error: 'project not found' };
+  const retryValidation = validateReleaseLinkedRetry(projectName, requestedParentJobId);
+  if (!retryValidation.ok) {
+    return { error: retryValidation.detail, status: retryValidation.status };
+  }
+  const parentJobId = retryValidation.parentJobId;
+  const releaseLinkedRetry = retryValidation.releaseLinkedRetry;
 
   // If a release pipeline is in flight, the auto-chain will push at the right
   // step. Letting the manual "Push" button race the release lets push run in
   // parallel with test/review/fix and clobbers ordering.
   const lock = getLock(projectName);
-  if (lock) {
+  const underParentRelease = !!parentJobId
+    && !!lock
+    && lock.lockedByJobId === parentJobId
+    && isLockOwnedByActiveRelease(projectName);
+  if (lock && !underParentRelease) {
     return { error: `Pipeline is running for ${projectName} — wait for it to finish before pushing manually`, status: 409 };
   }
 
   const { logDir } = getImproveConfig();
   mkdirSync(logDir, { recursive: true });
-  const job = createJob(projectName, 'push', process.pid, '');
+  const job = createJob(projectName, 'push', process.pid, '', undefined, undefined, undefined, undefined, undefined, undefined, parentJobId);
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
   updateJob(job);
@@ -122,7 +200,7 @@ export function launchProjectPush(projectName: string): { jobId: string } | { er
 
   // Run async in background — do not await
   ;(async () => {
-    const gate = await checkCliStartGate('start a push');
+    const gate = await checkCliStartGate('start a push', { parentJobId });
     if (!gate.ok) {
       append(`\n# push blocked (${gate.status})\n${gate.detail}\n`);
       try { setProjectPushResult(projectName, gate.detail); } catch {}
@@ -136,23 +214,32 @@ export function launchProjectPush(projectName: string): { jobId: string } | { er
     // The pre-check + async acquire has a TOCTOU window — if a release started
     // in between, acquireLock returns { acquired: false } (it does not throw).
     // Bail out in that case so we don't race the release on the same worktree.
-    try {
-      const lockResult = await acquireLock(projectName, job.id);
-      if (!lockResult.acquired) {
-        const detail = `Pipeline is running for ${projectName} — wait for it to finish before pushing manually`;
-        append(`\n# push aborted — ${detail}\n`);
-        try { setProjectPushResult(projectName, detail); } catch {}
+    if (!underParentRelease) {
+      try {
+        const lockResult = await acquireLock(projectName, job.id);
+        if (!lockResult.acquired) {
+          const detail = `Pipeline is running for ${projectName} — wait for it to finish before pushing manually`;
+          append(`\n# push aborted — ${detail}\n`);
+          try { setProjectPushResult(projectName, detail); } catch {}
+          await markDone(job, 1);
+          return;
+        }
+      } catch (e) {
+        console.log(`[launch-push] failed to acquire pipeline lock for ${projectName}:`, e);
+        append(`\n# push aborted — failed to acquire pipeline lock\n`);
         await markDone(job, 1);
         return;
       }
-    } catch (e) {
-      console.log(`[launch-push] failed to acquire pipeline lock for ${projectName}:`, e);
-      append(`\n# push aborted — failed to acquire pipeline lock\n`);
-      await markDone(job, 1);
-      return;
     }
 
-    const result = await runPush(projectName, projPath, append, null, true, gate.provider);
+    const result = await runPush(
+      projectName,
+      projPath,
+      append,
+      releaseLinkedRetry ? undefined : null,
+      !releaseLinkedRetry,
+      gate.provider,
+    );
     try { setProjectPushResult(projectName, result.ok ? null : result.detail); } catch {}
     if (result.ok) {
       invalidateProject(projectName);

@@ -1,6 +1,8 @@
 // Module-level store for terminal session state. Survives component unmounts
 // so switching tabs or navigating away does not drop live streams or history.
 
+import { createParseState, parseStreamLines } from '@/lib/jobs/claude-stream-parser'
+
 export interface ToolEntry {
   name: string
   input?: string
@@ -55,6 +57,7 @@ export interface SessionState {
   streaming: boolean
   streamIsRaw: boolean
   streamStartedAt: number | null
+  streamHistoryBaseLength: number | null
   // meta
   lastStats: RunStats | null
   messageQueue: string[]
@@ -78,6 +81,7 @@ const emptyState = (): SessionState => ({
   streaming: false,
   streamIsRaw: false,
   streamStartedAt: null,
+  streamHistoryBaseLength: null,
   lastStats: null,
   messageQueue: [],
   selectedItems: [],
@@ -88,9 +92,115 @@ const emptyState = (): SessionState => ({
 
 type Listener = () => void
 
+type RecoveredBuffers = Pick<SessionState, 'history' | 'streamBuffer' | 'thinkingBuffer' | 'rawBuffer' | 'streamTools'>
+
+function rebuildRecoveredBuffers(log: string, raw: boolean, passthrough: boolean): RecoveredBuffers {
+  if (!log) {
+    return {
+      history: [],
+      streamBuffer: '',
+      thinkingBuffer: '',
+      rawBuffer: '',
+      streamTools: [],
+    }
+  }
+
+  if (raw) {
+    return {
+      history: [],
+      streamBuffer: '',
+      thinkingBuffer: '',
+      rawBuffer: log,
+      streamTools: [],
+    }
+  }
+
+  if (!passthrough) {
+    return {
+      history: [],
+      streamBuffer: log,
+      thinkingBuffer: '',
+      rawBuffer: '',
+      streamTools: [],
+    }
+  }
+
+  const history: TermEntry[] = []
+  let streamBuffer = ''
+  let thinkingBuffer = ''
+  let rawBuffer = ''
+  let streamTools: ToolEntry[] = []
+
+  const flushRaw = () => {
+    if (!rawBuffer) return
+    history.push({ role: 'raw', text: rawBuffer })
+    rawBuffer = ''
+  }
+
+  const flushClaudeBuffers = () => {
+    if (thinkingBuffer) history.push({ role: 'thinking', text: thinkingBuffer })
+    for (const tool of streamTools) history.push({ role: 'tool', text: '', tool })
+    if (streamBuffer) history.push({ role: 'assistant', text: streamBuffer })
+    thinkingBuffer = ''
+    streamTools = []
+    streamBuffer = ''
+  }
+
+  const events = parseStreamLines(log, {
+    state: createParseState(),
+    onRawLine: (line) => {
+      flushClaudeBuffers()
+      rawBuffer += `${line}\n`
+    },
+  })
+
+  for (const event of events) {
+    if (event.type === 'text') {
+      flushRaw()
+      streamBuffer += event.text
+      continue
+    }
+    if (event.type === 'thinking') {
+      flushRaw()
+      thinkingBuffer += event.text
+      continue
+    }
+    if (event.type === 'tool_use') {
+      flushRaw()
+      if (streamBuffer) {
+        history.push({ role: 'assistant', text: streamBuffer })
+        streamBuffer = ''
+      }
+      streamTools = [...streamTools, { name: event.name, input: event.input }]
+      continue
+    }
+    if (event.type === 'tool_result') {
+      if (streamTools.length === 0) continue
+      const completed = { ...streamTools[streamTools.length - 1], result: event.content }
+      history.push({ role: 'tool', text: '', tool: completed })
+      streamTools = streamTools.slice(0, -1)
+      continue
+    }
+    if (event.type === 'compacting') {
+      flushClaudeBuffers()
+      history.push({ role: 'status', text: 'Compacting context…' })
+    }
+  }
+
+  return {
+    history,
+    streamBuffer,
+    thinkingBuffer,
+    rawBuffer,
+    streamTools,
+  }
+}
+
 class TerminalStore {
   private states = new Map<string, SessionState>()
   private esMap = new Map<string, EventSource>()
+  private recoveryTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private recoveryStartedAt = new Map<string, number>()
   private listeners = new Map<string, Set<Listener>>()
   // Coalesce notifications across a frame. SSE token deltas arrive at hundreds
   // of events per second; without batching, every delta forces a full
@@ -193,6 +303,7 @@ class TerminalStore {
   }
 
   reset(projectName: string): void {
+    this.stopRecovery(projectName)
     this.closeStream(projectName)
     this.replace(projectName, emptyState())
   }
@@ -211,16 +322,187 @@ class TerminalStore {
     return this.esMap.has(projectName)
   }
 
+  private stopRecovery(projectName: string): void {
+    const timer = this.recoveryTimers.get(projectName)
+    if (timer) {
+      clearTimeout(timer)
+      this.recoveryTimers.delete(projectName)
+    }
+    this.recoveryStartedAt.delete(projectName)
+  }
+
+  private scheduleRecovery(
+    projectName: string,
+    jobId: string,
+    raw: boolean,
+    passthrough: boolean,
+    delayMs: number,
+  ): void {
+    const existing = this.recoveryTimers.get(projectName)
+    if (existing) clearTimeout(existing)
+    const timer = setTimeout(() => {
+      this.recoveryTimers.delete(projectName)
+      void this.recoverStream(projectName, jobId, raw, passthrough)
+    }, delayMs)
+    this.recoveryTimers.set(projectName, timer)
+  }
+
+  private finalizeRecoveredStream(
+    projectName: string,
+    jobId: string,
+    payload: Record<string, unknown>,
+    raw: boolean,
+    passthrough: boolean,
+  ): void {
+    this.stopRecovery(projectName)
+    this.update(projectName, (s) => {
+      if (s.currentJobId !== jobId || !s.streaming) return {}
+      const baseLength = s.streamHistoryBaseLength ?? s.history.length
+      const baseHistory = s.history.slice(0, baseLength)
+      const log = typeof payload.log === 'string' ? payload.log : ''
+      const recovered = rebuildRecoveredBuffers(log, raw, passthrough)
+      const newEntries: TermEntry[] = [...baseHistory, ...recovered.history]
+      if (recovered.rawBuffer) newEntries.push({ role: 'raw', text: recovered.rawBuffer })
+      if (recovered.thinkingBuffer) newEntries.push({ role: 'thinking', text: recovered.thinkingBuffer })
+      for (const tool of recovered.streamTools) newEntries.push({ role: 'tool', text: '', tool })
+      if (recovered.streamBuffer) newEntries.push({ role: 'assistant', text: recovered.streamBuffer })
+      const exitCode = typeof payload.exit_code === 'number' ? payload.exit_code : null
+      if (exitCode !== null) {
+        const ok = exitCode === 0
+        newEntries.push({
+          role: ok ? 'status' : 'error',
+          text: ok ? 'exit 0 — ok' : `exit ${exitCode}`,
+        })
+      }
+      let pendingAutoSubmit = s.pendingAutoSubmit
+      let messageQueue = s.messageQueue
+      if (s.messageQueue.length > 0) {
+        const [next, ...rest] = s.messageQueue
+        pendingAutoSubmit = next
+        messageQueue = rest
+      }
+      const sid = typeof payload.session_id === 'string' && payload.session_id
+        ? payload.session_id
+        : s.claudeSessionId
+      const stats: RunStats | null =
+        typeof payload.duration_ms === 'number' || typeof payload.input_tokens === 'number'
+          ? {
+              duration: typeof payload.duration_ms === 'number' ? payload.duration_ms : 0,
+              inputTokens: typeof payload.input_tokens === 'number' ? payload.input_tokens : 0,
+              outputTokens: typeof payload.output_tokens === 'number' ? payload.output_tokens : 0,
+              cacheReadTokens: typeof payload.cache_read_tokens === 'number' ? payload.cache_read_tokens : 0,
+              cacheCreateTokens: typeof payload.cache_create_tokens === 'number' ? payload.cache_create_tokens : 0,
+            }
+          : s.lastStats
+      if (sid && typeof window !== 'undefined') {
+        const target = `/project/${projectName}/terminal/${sid}`
+        if (window.location.pathname !== target) {
+          window.history.replaceState(null, '', target)
+        }
+      }
+      return {
+        history: newEntries,
+        streamBuffer: '',
+        thinkingBuffer: '',
+        rawBuffer: '',
+        streamTools: [],
+        streaming: false,
+        streamStartedAt: null,
+        streamHistoryBaseLength: null,
+        currentJobId: null,
+        claudeSessionId: sid ?? null,
+        sessionKey: sid ?? 'new',
+        sessionProvider: typeof payload.provider === 'string' ? payload.provider : s.sessionProvider,
+        lastStats: stats,
+        pendingAutoSubmit,
+        messageQueue,
+      }
+    })
+  }
+
+  private async recoverStream(
+    projectName: string,
+    jobId: string,
+    raw: boolean,
+    passthrough: boolean,
+  ): Promise<void> {
+    const state = this.get(projectName)
+    if (!state.streaming || state.currentJobId !== jobId) {
+      this.stopRecovery(projectName)
+      return
+    }
+    if (!this.recoveryStartedAt.has(projectName)) {
+      this.recoveryStartedAt.set(projectName, Date.now())
+    }
+    try {
+      const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`)
+      if (!response.ok) throw new Error(`job probe failed: ${response.status}`)
+      const payload = await response.json() as Record<string, unknown>
+      this.update(projectName, (s) => {
+        if (s.currentJobId !== jobId || !s.streaming) return {}
+        const log = typeof payload.log === 'string' ? payload.log : ''
+        const baseLength = s.streamHistoryBaseLength ?? s.history.length
+        const baseHistory = s.history.slice(0, baseLength)
+        const recovered = rebuildRecoveredBuffers(log, raw, passthrough)
+        return {
+          history: [...baseHistory, ...recovered.history],
+          streamBuffer: recovered.streamBuffer,
+          thinkingBuffer: recovered.thinkingBuffer,
+          rawBuffer: recovered.rawBuffer,
+          streamTools: recovered.streamTools,
+        }
+      })
+      const finished = payload.finished_at !== null && payload.finished_at !== undefined
+      const status = typeof payload.status === 'string' ? payload.status : null
+      if (finished || status === 'done' || status === 'aborted') {
+        this.finalizeRecoveredStream(projectName, jobId, payload, raw, passthrough)
+        return
+      }
+      this.scheduleRecovery(projectName, jobId, raw, passthrough, 1000)
+    } catch {
+      const startedAt = this.recoveryStartedAt.get(projectName) ?? Date.now()
+      if (Date.now() - startedAt >= 30_000) {
+        this.stopRecovery(projectName)
+        this.update(projectName, (s) => {
+          if (s.currentJobId !== jobId || !s.streaming) return {}
+          const baseLength = s.streamHistoryBaseLength ?? s.history.length
+          const baseHistory = s.history.slice(0, baseLength)
+          const entries: TermEntry[] = [...baseHistory]
+          if (s.rawBuffer) entries.push({ role: 'raw', text: s.rawBuffer })
+          if (s.thinkingBuffer) entries.push({ role: 'thinking', text: s.thinkingBuffer })
+          for (const t of s.streamTools) entries.push({ role: 'tool', text: '', tool: t })
+          if (s.streamBuffer) entries.push({ role: 'assistant', text: s.streamBuffer })
+          entries.push({ role: 'status', text: 'Stream disconnected while the app was unavailable. Refresh to resume when the server is back.' })
+          return {
+            history: entries,
+            streamBuffer: '',
+            thinkingBuffer: '',
+            rawBuffer: '',
+            streamTools: [],
+            streaming: false,
+            streamStartedAt: null,
+            streamHistoryBaseLength: null,
+            currentJobId: null,
+          }
+        })
+        return
+      }
+      this.scheduleRecovery(projectName, jobId, raw, passthrough, 1000)
+    }
+  }
+
   // Start streaming a jobId. Closes any prior stream for this project.
   // passthrough=true uses ?passthrough=1: non-JSON log lines → `raw` history entries,
   // NDJSON lines → parsed Claude events. Used for release logs.
   startStream(projectName: string, jobId: string, raw = false, passthrough = false): void {
+    this.stopRecovery(projectName)
     this.closeStream(projectName)
     this.update(projectName, () => ({
       currentJobId: jobId,
       streaming: true,
       streamIsRaw: raw,
       streamStartedAt: Date.now(),
+      streamHistoryBaseLength: this.get(projectName).history.length,
       streamBuffer: '',
       thinkingBuffer: '',
       rawBuffer: '',
@@ -412,6 +694,7 @@ class TerminalStore {
           streamTools: [],
           streaming: false,
           streamStartedAt: null,
+          streamHistoryBaseLength: null,
           currentJobId: null,
           claudeSessionId: sid,
           sessionKey: sid ?? 'new',
@@ -425,30 +708,14 @@ class TerminalStore {
 
     es.onerror = () => {
       this.closeStream(projectName)
-      this.update(projectName, (s) => {
-        const newEntries: TermEntry[] = []
-        if (s.thinkingBuffer) newEntries.push({ role: 'thinking', text: s.thinkingBuffer })
-        for (const t of s.streamTools) newEntries.push({ role: 'tool', text: '', tool: t })
-        if (s.streamBuffer) newEntries.push({ role: 'assistant', text: s.streamBuffer })
-        if (newEntries.length === 0) newEntries.push({ role: 'error', text: 'Connection error' })
-        return {
-          history: [...s.history, ...newEntries],
-          streamBuffer: '',
-          thinkingBuffer: '',
-          streamTools: [],
-          streaming: false,
-          streamStartedAt: null,
-          currentJobId: null,
-          messageQueue: [],
-          pendingAutoSubmit: null,
-        }
-      })
+      this.scheduleRecovery(projectName, jobId, raw, passthrough, 1000)
     }
   }
 
   cancelStream(projectName: string): string | null {
     const s = this.get(projectName)
     const jobId = s.currentJobId
+    this.stopRecovery(projectName)
     this.closeStream(projectName)
     this.update(projectName, (st) => {
       const entries: TermEntry[] = []
@@ -461,6 +728,7 @@ class TerminalStore {
         streamTools: [],
         streaming: false,
         streamStartedAt: null,
+        streamHistoryBaseLength: null,
         currentJobId: null,
         messageQueue: [],
         pendingAutoSubmit: null,

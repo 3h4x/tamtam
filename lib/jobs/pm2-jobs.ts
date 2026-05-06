@@ -10,7 +10,7 @@ function resolveLogDir(): string {
   try {
     return getImproveConfig().logDir;
   } catch {
-    return join(homedir(), 'logs');
+    return join(/*turbopackIgnore: true*/ homedir(), 'logs');
   }
 }
 

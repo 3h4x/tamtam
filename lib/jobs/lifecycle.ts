@@ -7,7 +7,6 @@ import { costUsd } from '@/lib/shared/usage-pricing';
 import { getVerdict, readLog, readParsedLog } from './verdict';
 import {
   saveToDb,
-  findActiveReleaseJob,
   listJobs,
   getJob,
   persistVerdict,
@@ -50,8 +49,8 @@ async function getProjectPipelineConfig(projectName: string): Promise<{ autoComm
 
 // Cap runaway review→fix→review loops when auto-push is on. The shared helper
 // keeps lifecycle enforcement, stats snapshots, and docs on the same contract.
-const MAX_FIX_ITERATIONS = getMaxStepIterations();
-const FIX_WINDOW_SECONDS = getStepWindowSeconds();
+const MAX_STEP_ITERATIONS = getMaxStepIterations();
+const STEP_WINDOW_SECONDS = getStepWindowSeconds();
 // fix-ci retries — live-read from settings so the user can tune this in the UI
 // without restarting the server. Only crash-fast failures are retried so real
 // errors still surface.
@@ -100,25 +99,28 @@ function persistReleaseStopReason(release: JobData, stopReason: string): void {
 }
 
 function recentFixPushCount(projectName: string): number {
-  const cutoff = Date.now() / 1000 - FIX_WINDOW_SECONDS;
+  const cutoff = Date.now() / 1000 - STEP_WINDOW_SECONDS;
   return listJobs().filter(
     (j) => j.project === projectName && j.kind === 'fix-push' && j.startedAt >= cutoff
   ).length;
 }
 
-// Count fix iterations that should be billed against the current pipeline
-// run's cap. When the calling job is part of a release (has a `releaseId`),
-// only count fixes inside that same release — a leftover review→fix loop
-// from an earlier release shouldn't eat this release's test→fix budget.
-// Falls back to the 30-min window for ad-hoc fixes outside any release.
-function recentFixCount(projectName: string, currentJob?: JobData): number {
+// Count occurrences of a verification step in the current pipeline run.
+// The pipeline cap applies to verification rounds (test, review, commit,
+// push), not fixes — fixes are unbounded so a final fix always lands, but
+// the next verification step is what closes the loop and counts toward the
+// budget. When the calling job is part of a release (has a `releaseId`),
+// only count steps inside that same release — a leftover loop from an
+// earlier release shouldn't eat this release's budget. Falls back to the
+// 30-min window for ad-hoc steps outside any release.
+function recentStepCount(projectName: string, kind: string, currentJob?: JobData): number {
   const all = listJobs().filter(
-    (j) => j.project === projectName && j.kind === 'fix'
+    (j) => j.project === projectName && j.kind === kind
   );
   if (currentJob?.releaseId) {
     return all.filter((j) => j.releaseId === currentJob.releaseId).length;
   }
-  const cutoff = Date.now() / 1000 - FIX_WINDOW_SECONDS;
+  const cutoff = Date.now() / 1000 - STEP_WINDOW_SECONDS;
   return all.filter((j) => j.startedAt >= cutoff).length;
 }
 
@@ -259,6 +261,31 @@ function appendToReleaseLog(release: JobData, kind: string, job: JobData, extra?
   } catch {}
 }
 
+function linkedReleaseId(job: JobData): string | null {
+  if (job.releaseId) return job.releaseId;
+  const seen = new Set<string>();
+  let parentJobId = job.parentJobId ?? null;
+  while (parentJobId && !seen.has(parentJobId)) {
+    seen.add(parentJobId);
+    const parent = getJob(parentJobId);
+    if (!parent || parent.project !== job.project) return null;
+    if (parent.kind === 'release') return parent.id;
+    if (parent.releaseId) return parent.releaseId;
+    parentJobId = parent.parentJobId ?? null;
+  }
+  return null;
+}
+
+function findLinkedActiveReleaseJob(job: JobData): JobData | null {
+  const releaseId = linkedReleaseId(job);
+  if (!releaseId) return null;
+  const release = getJob(releaseId);
+  if (!release || release.project !== job.project || release.kind !== 'release' || release.finishedAt !== null) {
+    return null;
+  }
+  return release;
+}
+
 // Safety net: if the given job is a pipeline step, make sure the active
 // release for its project eventually gets finalized. The normal path is
 // via runCompletionHooks, but races (concurrent probes, a throw mid-hook)
@@ -277,7 +304,7 @@ const PIPELINE_CHAIN_GAP_SEC = 60;
 
 export async function reconcileStaleRelease(job: JobData): Promise<void> {
   if (!PIPELINE_STEP_KINDS.has(job.kind)) return;
-  const release = findActiveReleaseJob(job.project);
+  const release = findLinkedActiveReleaseJob(job);
   if (!release) return;
   const now = Date.now() / 1000;
   const releaseStart = release.startedAt || 0;
@@ -286,6 +313,7 @@ export async function reconcileStaleRelease(job: JobData): Promise<void> {
   const candidates = listJobs()
     .filter((j) => j.project === release.project
       && PIPELINE_STEP_KINDS.has(j.kind)
+      && linkedReleaseId(j) === release.id
       && (j.startedAt || 0) >= releaseStart - 1)
     .sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
   // Walk the chain: accept the first child if it started within the chain
@@ -366,7 +394,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   // Stream per-step output into the active release meta-log so the user can
   // watch the whole pipeline in one terminal.
   if (['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod'].includes(job.kind)) {
-    const release = findActiveReleaseJob(job.project);
+    const release = findLinkedActiveReleaseJob(job);
     if (release) appendToReleaseLog(release, job.kind, job);
   }
 
@@ -389,7 +417,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     const gate = runAutoChainGates(`continue ${job.kind} chain`);
     if (gate) {
       console.log(`[release] auto-chain halted after ${job.kind} for ${job.project}: ${gate.detail}`);
-      const release = findActiveReleaseJob(job.project);
+      const release = findLinkedActiveReleaseJob(job);
       if (release) {
         appendToReleaseLog(release, job.kind, { ...job, kind: 'chain-halt' as JobData['kind'] });
         await finalizeReleaseJob(release, 1);
@@ -420,7 +448,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     }
     // Release pipeline: review LGTM → push; NEEDS ATTENTION/DO NOT SHIP → fix
     try {
-      const inRelease = !!findActiveReleaseJob(job.project);
+      const inRelease = !!findLinkedActiveReleaseJob(job);
       const pipelineCfg = await getProjectPipelineConfig(job.project);
       if (job.exitCode === 0 && (inRelease || pipelineCfg.autoPushEnabled || pipelineCfg.autoCommitEnabled)) {
         // Treat a missing verdict as NEEDS ATTENTION rather than silently
@@ -480,28 +508,36 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           } else {
             console.log(`[release] skipping mark-dod for ${job.project} (pr_workflow_enabled=${prWorkflow}, hasIssueContext=${hasIssueContext})`);
           }
-          const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
-          const r = await startProjectCommit(job.project);
-          if (!r.ok) {
-            releaseStopReason = `commit failed for ${job.project}: ${r.detail}`;
+          const commitCount = recentStepCount(job.project, 'commit', job);
+          if (commitCount >= MAX_STEP_ITERATIONS) {
+            releaseStopReason = `commit cap reached for ${job.project} (${commitCount}/${MAX_STEP_ITERATIONS}) — commits keep cycling, stopping`;
             noteReleaseStop(releaseStopReason);
+            notificationEvent = 'fix_loop_exhausted';
             forcedReleaseExitCode = 1;
           } else {
-            console.log(`[release] review LGTM → committed ${job.project} (${r.commitSha || 'no-op'})`);
-            // startProjectCommit creates a 'commit' job that will itself chain to push
-            // (or finalize the release) via its own completion hook.
-            chainedNext = true;
+            const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
+            const r = await startProjectCommit(job.project);
+            if (!r.ok) {
+              releaseStopReason = `commit failed for ${job.project}: ${r.detail}`;
+              noteReleaseStop(releaseStopReason);
+              forcedReleaseExitCode = 1;
+            } else {
+              console.log(`[release] review LGTM → committed ${job.project} (${r.commitSha || 'no-op'}) (commit #${commitCount + 1})`);
+              // startProjectCommit creates a 'commit' job that will itself chain to push
+              // (or finalize the release) via its own completion hook.
+              chainedNext = true;
+            }
           }
         } else if (verdict === 'NEEDS ATTENTION' || verdict === 'DO NOT SHIP') {
           if (verdict === 'DO NOT SHIP') {
             notificationEvent = 'review_do_not_ship';
           }
           // Fixes are unbounded — every NEEDS ATTENTION / DO NOT SHIP triggers
-          // a fix. The cap lives on the verification side (fix→review hook),
-          // so the loop terminates by skipping the *next* review once we've
-          // used the review budget. The trailing fix may go unverified, which
-          // is the explicit tradeoff: applying the fix is more useful than
-          // burning a final review we couldn't act on.
+          // a fix. The cap lives on the verification side: the fix→review
+          // hook counts reviews and bails before starting the (MAX+1)-th
+          // review. The trailing fix may go unverified, which is the explicit
+          // tradeoff: applying the fix is more useful than burning a final
+          // review we couldn't act on.
           const contradiction = fixContradictsReview(job);
           const stuck = reviewIsStuck(job);
           if (contradiction.stuck) {
@@ -538,7 +574,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   if (job.kind === 'fix' && job.exitCode === 0) {
     try {
       const { autoCommitEnabled, autoPushEnabled } = await getProjectPipelineConfig(job.project);
-      if (!!findActiveReleaseJob(job.project) || autoPushEnabled || autoCommitEnabled) {
+      if (!!findLinkedActiveReleaseJob(job) || autoPushEnabled || autoCommitEnabled) {
         // Branch on what triggered this fix: a failing test or a NEEDS_ATTENTION
         // review. Both call into the same `fix` kind, but the recovery path is
         // different — a fix from a test failure must re-run tests (the tests are
@@ -551,11 +587,13 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         const fromTestFailure = parent?.kind === 'test' && parent.exitCode !== null && parent.exitCode !== 0;
 
         if (fromTestFailure) {
-          // Bounded by the same fix-iteration cap so a persistently-broken test
-          // can't churn test→fix→test→fix forever.
-          const count = recentFixCount(job.project, job);
-          if (count >= MAX_FIX_ITERATIONS) {
-            releaseStopReason = `fix→test cap reached for ${job.project} (${count}/${MAX_FIX_ITERATIONS}) — tests still need verification`;
+          // Cap on number of test runs — a persistently-broken test can't
+          // churn test→fix→test→fix forever. Counts tests (the verification
+          // round), not fixes; the trailing fix lands but the next test is
+          // skipped once the budget is spent.
+          const testCount = recentStepCount(job.project, 'test', job);
+          if (testCount >= MAX_STEP_ITERATIONS) {
+            releaseStopReason = `test cap reached for ${job.project} (${testCount}/${MAX_STEP_ITERATIONS}) — tests still need verification`;
             noteReleaseStop(releaseStopReason);
             notificationEvent = 'fix_loop_exhausted';
             forcedReleaseExitCode = 1;
@@ -563,7 +601,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
             const { startProjectTest } = await import('@/lib/pipeline/start-test');
             const r = await startProjectTest(job.project);
             if (r.ok) {
-              console.log(`[fix→test] re-running tests after fix ${job.id} (iter ${count})`);
+              console.log(`[fix→test] re-running tests after fix ${job.id} (test #${testCount + 1})`);
               chainedNext = true;
             } else {
               releaseStopReason = `skipped re-test for ${job.project}: ${r.detail}`;
@@ -572,15 +610,28 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
             }
           }
         } else {
-          const { startProjectReview } = await import('@/lib/pipeline/start-review');
-          const r = await startProjectReview(job.project);
-          if (r.ok) {
-            console.log(`[fix→review] auto-started review ${r.jobId} for ${job.project}`);
-            chainedNext = true;
-          } else {
-            releaseStopReason = `skipped auto-review for ${job.project}: ${r.detail}`;
+          // Cap on number of reviews — review loops with scope-creeping fixes
+          // (each iteration finds *new* findings introduced or exposed by the
+          // previous fix) can otherwise loop unbounded since `reviewIsStuck`
+          // and `fixContradictsReview` only catch identical-finding repeats.
+          // Count completed reviews; bail before starting review #(MAX+1).
+          const reviewCount = recentStepCount(job.project, 'review', job);
+          if (reviewCount >= MAX_STEP_ITERATIONS) {
+            releaseStopReason = `review cap reached for ${job.project} (${reviewCount}/${MAX_STEP_ITERATIONS}) — review keeps surfacing new findings, stopping`;
             noteReleaseStop(releaseStopReason);
+            notificationEvent = 'fix_loop_exhausted';
             forcedReleaseExitCode = 1;
+          } else {
+            const { startProjectReview } = await import('@/lib/pipeline/start-review');
+            const r = await startProjectReview(job.project);
+            if (r.ok) {
+              console.log(`[fix→review] auto-started review ${r.jobId} for ${job.project} (review #${reviewCount + 1})`);
+              chainedNext = true;
+            } else {
+              releaseStopReason = `skipped auto-review for ${job.project}: ${r.detail}`;
+              noteReleaseStop(releaseStopReason);
+              forcedReleaseExitCode = 1;
+            }
           }
         }
       }
@@ -592,7 +643,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   if (job.kind === 'commit' && job.exitCode === 0) {
     try {
       const { autoCommitEnabled, autoPushEnabled } = await getProjectPipelineConfig(job.project);
-      const inRelease = !!findActiveReleaseJob(job.project);
+      const inRelease = !!findLinkedActiveReleaseJob(job);
       if (inRelease || autoPushEnabled) {
         // Release the commit job's pipeline lock before chaining to push —
         // otherwise startProjectPush sees the lock as held (by us) and 409s.
@@ -605,15 +656,23 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
             releaseLock(job.project, job.id);
           } catch {}
         }
-        const { startProjectPush } = await import('@/lib/pipeline/start-push');
-        const r = await startProjectPush(job.project);
-        if (r.ok) {
-          chainedNext = true;
-          console.log(`[commit→push] pushed ${job.project} (${r.commitSha || 'no-op'})`);
-        } else {
-          releaseStopReason = `push failed for ${job.project}: ${r.detail}`;
+        const pushCount = recentStepCount(job.project, 'push', job);
+        if (pushCount >= MAX_STEP_ITERATIONS) {
+          releaseStopReason = `push cap reached for ${job.project} (${pushCount}/${MAX_STEP_ITERATIONS}) — pushes keep cycling, stopping`;
           noteReleaseStop(releaseStopReason);
+          notificationEvent = 'fix_loop_exhausted';
           forcedReleaseExitCode = 1;
+        } else {
+          const { startProjectPush } = await import('@/lib/pipeline/start-push');
+          const r = await startProjectPush(job.project);
+          if (r.ok) {
+            chainedNext = true;
+            console.log(`[commit→push] pushed ${job.project} (${r.commitSha || 'no-op'}) (push #${pushCount + 1})`);
+          } else {
+            releaseStopReason = `push failed for ${job.project}: ${r.detail}`;
+            noteReleaseStop(releaseStopReason);
+            forcedReleaseExitCode = 1;
+          }
         }
       } else if (autoCommitEnabled && !autoPushEnabled) {
         // commit-only mode: commit is done, no push needed — finalize here
@@ -627,7 +686,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   if (job.kind === 'test' && job.exitCode === 0) {
     try {
       const { autoCommitEnabled, autoPushEnabled } = await getProjectPipelineConfig(job.project);
-      const inRelease = !!findActiveReleaseJob(job.project);
+      const inRelease = !!findLinkedActiveReleaseJob(job);
       if (inRelease || autoPushEnabled || autoCommitEnabled) {
         const { resolveProjectPath } = await import('@/lib/shared/project-data');
         const { exec } = await import('@/lib/shared/shell');
@@ -648,26 +707,42 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
           const reviewDisabled = !!getProjectTestConfig(job.project)?.reviewDisabled;
           if (freshLgtm) {
-            const { startProjectPush } = await import('@/lib/pipeline/start-push');
-            const r = await startProjectPush(job.project);
-            if (r.ok) {
-              console.log(`[release] tests passed + fresh LGTM → push ${job.project}`);
-              chainedNext = true;
-            } else {
-              releaseStopReason = `test→push skipped for ${job.project}: ${r.detail}`;
+            const pushCount = recentStepCount(job.project, 'push', job);
+            if (pushCount >= MAX_STEP_ITERATIONS) {
+              releaseStopReason = `push cap reached for ${job.project} (${pushCount}/${MAX_STEP_ITERATIONS}) — pushes keep cycling, stopping`;
               noteReleaseStop(releaseStopReason);
+              notificationEvent = 'fix_loop_exhausted';
               forcedReleaseExitCode = 1;
+            } else {
+              const { startProjectPush } = await import('@/lib/pipeline/start-push');
+              const r = await startProjectPush(job.project);
+              if (r.ok) {
+                console.log(`[release] tests passed + fresh LGTM → push ${job.project} (push #${pushCount + 1})`);
+                chainedNext = true;
+              } else {
+                releaseStopReason = `test→push skipped for ${job.project}: ${r.detail}`;
+                noteReleaseStop(releaseStopReason);
+                forcedReleaseExitCode = 1;
+              }
             }
           } else if (reviewDisabled && hasUncommittedChanges) {
-            const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
-            const r = await startProjectCommit(job.project);
-            if (r.ok) {
-              console.log(`[release] tests passed + review disabled → commit for ${job.project}`);
-              chainedNext = true;
-            } else {
-              releaseStopReason = `test→commit skipped for ${job.project}: ${r.detail}`;
+            const commitCount = recentStepCount(job.project, 'commit', job);
+            if (commitCount >= MAX_STEP_ITERATIONS) {
+              releaseStopReason = `commit cap reached for ${job.project} (${commitCount}/${MAX_STEP_ITERATIONS}) — commits keep cycling, stopping`;
               noteReleaseStop(releaseStopReason);
+              notificationEvent = 'fix_loop_exhausted';
               forcedReleaseExitCode = 1;
+            } else {
+              const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
+              const r = await startProjectCommit(job.project);
+              if (r.ok) {
+                console.log(`[release] tests passed + review disabled → commit for ${job.project} (commit #${commitCount + 1})`);
+                chainedNext = true;
+              } else {
+                releaseStopReason = `test→commit skipped for ${job.project}: ${r.detail}`;
+                noteReleaseStop(releaseStopReason);
+                forcedReleaseExitCode = 1;
+              }
             }
           } else if (reviewDisabled && hasUnpushedCommits) {
             const { startProjectPush } = await import('@/lib/pipeline/start-push');
@@ -717,7 +792,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   if (job.kind === 'test' && job.exitCode !== null && job.exitCode !== 0) {
     try {
       const { autoCommitEnabled, autoPushEnabled } = await getProjectPipelineConfig(job.project);
-      const inRelease = !!findActiveReleaseJob(job.project);
+      const inRelease = !!findLinkedActiveReleaseJob(job);
       if (inRelease || autoPushEnabled || autoCommitEnabled) {
         const { startFixFromJob } = await import('@/lib/pipeline/start-fix');
         const r = await startFixFromJob(job.id);
@@ -854,7 +929,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
       console.log(`[release] ${job.kind} ${job.id} finished without chaining — deferring finalization (${otherRunningStep.kind} ${otherRunningStep.id} still running for ${job.project})`);
       return;
     }
-    const release = findActiveReleaseJob(job.project);
+    const release = findLinkedActiveReleaseJob(job);
     if (release) {
       const exitCode = forcedReleaseExitCode ?? pipelineExitCodeForStep(job);
       if (releaseStopReason) {

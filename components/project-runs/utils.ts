@@ -553,6 +553,20 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
     agentOwnedReleaseKeys.add(rel.key)
   }
 
+  for (const parentEntry of otherTopLevel) {
+    if (!parentEntry.chainedChildren || parentEntry.chainedChildren.length === 0) continue
+    const releases = parentEntry.chainedChildren
+      .filter((child) => child.kind === 'release')
+      .sort((a, b) => {
+        if (b.startedAt !== a.startedAt) return b.startedAt - a.startedAt
+        return b.lastActivityAt - a.lastActivityAt
+      })
+    if (releases.length === 0) continue
+    const nonReleases = parentEntry.chainedChildren.filter((child) => child.kind !== 'release')
+    parentEntry.chainedChildren = [...releases, ...nonReleases]
+    parentEntry.releaseOutcome = releaseOutcomeFor(releases[0])
+  }
+
   const parents: Entry[] = Array.from(releasesByKey.values()).filter(
     r => !agentOwnedReleaseKeys.has(r.key)
   )

@@ -392,16 +392,159 @@ describe('TerminalStore – startStream EventSource integration', () => {
     expect(s.messageQueue).toEqual([]);
   });
 
-  it('onerror adds error entry and sets streaming=false', () => {
+  it('onerror keeps the session live until recovery runs', () => {
     const p = proj();
+    vi.useFakeTimers();
     terminalStore.startStream(p, 'job-error');
     const es = esInstances[esInstances.length - 1];
     es.emitError();
     const s = terminalStore.get(p);
+    expect(s.streaming).toBe(true);
+    expect(s.currentJobId).toBe('job-error');
+    expect(s.history.some((e) => e.role === 'error' && e.text === 'Connection error')).toBe(false);
+    terminalStore.reset(p);
+    vi.useRealTimers();
+  });
+
+  it('onerror recovers a running stream from the job log without duplicating history', async () => {
+    const p = proj();
+    vi.useFakeTimers();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        status: 'running',
+        finished_at: null,
+        log: 'replayed output',
+      }),
+    } as Response);
+
+    terminalStore.update(p, () => ({
+      history: [{ role: 'user', text: 'prompt' }],
+    }));
+    terminalStore.startStream(p, 'job-recover');
+    const es = esInstances[esInstances.length - 1];
+    es.emit('message', 'partial output');
+    es.emitError();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    const s = terminalStore.get(p);
+    expect(s.streaming).toBe(true);
+    expect(s.history).toEqual([{ role: 'user', text: 'prompt' }]);
+    expect(s.streamBuffer).toBe('replayed output');
+    expect(s.history.some((e) => e.role === 'assistant' && e.text === 'partial output')).toBe(false);
+    terminalStore.reset(p);
+    fetchSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('onerror finalizes a finished stream from the recovered job state', async () => {
+    const p = proj();
+    vi.useFakeTimers();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        status: 'done',
+        finished_at: 123,
+        exit_code: 0,
+        session_id: 'sess-recovered',
+        duration_ms: 1500,
+        input_tokens: 20,
+        output_tokens: 40,
+        cache_read_tokens: 3,
+        cache_create_tokens: 0,
+        log: 'final output',
+      }),
+    } as Response);
+
+    terminalStore.update(p, () => ({
+      history: [{ role: 'user', text: 'prompt' }],
+      messageQueue: ['next prompt'],
+    }));
+    terminalStore.startStream(p, 'job-finished');
+    const es = esInstances[esInstances.length - 1];
+    es.emit('message', 'partial output');
+    es.emitError();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    const s = terminalStore.get(p);
     expect(s.streaming).toBe(false);
-    expect(s.history.some((e) => e.role === 'error' && e.text === 'Connection error')).toBe(true);
+    expect(s.claudeSessionId).toBe('sess-recovered');
+    expect(s.pendingAutoSubmit).toBe('next prompt');
     expect(s.messageQueue).toEqual([]);
-    expect(s.pendingAutoSubmit).toBeNull();
+    expect(s.history).toEqual([
+      { role: 'user', text: 'prompt' },
+      { role: 'assistant', text: 'final output' },
+      { role: 'status', text: 'exit 0 — ok' },
+    ]);
+    expect(s.lastStats).toEqual({
+      duration: 1500,
+      inputTokens: 20,
+      outputTokens: 40,
+      cacheReadTokens: 3,
+      cacheCreateTokens: 0,
+    });
+    fetchSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('onerror rebuilds passthrough release output with parsed assistant and raw sections intact', async () => {
+    const p = proj();
+    vi.useFakeTimers();
+    const releaseLog = [
+      '# test start',
+      JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Claude says hi' } },
+      }),
+      JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_start', content_block: { type: 'tool_use', name: 'Read' } },
+      }),
+      JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_delta', delta: { type: 'input_json_delta', partial_json: '{"file":"README.md"}' } },
+      }),
+      JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_stop' },
+      }),
+      JSON.stringify({
+        type: 'system',
+        subtype: 'tool_result',
+        content: [{ type: 'text', text: 'tool output' }],
+      }),
+    ].join('\n');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        status: 'done',
+        finished_at: 123,
+        exit_code: 0,
+        log: releaseLog,
+      }),
+    } as Response);
+
+    terminalStore.update(p, () => ({
+      history: [{ role: 'status', text: 'release · May 6' }],
+    }));
+    terminalStore.startStream(p, 'job-release', false, true);
+    const es = esInstances[esInstances.length - 1];
+    es.emit('raw', '# booting');
+    es.emitError();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    const s = terminalStore.get(p);
+    expect(s.streaming).toBe(false);
+    expect(s.history).toEqual([
+      { role: 'status', text: 'release · May 6' },
+      { role: 'raw', text: '# test start\n' },
+      { role: 'assistant', text: 'Claude says hi' },
+      { role: 'tool', text: '', tool: { name: 'Read', input: '{"file":"README.md"}', result: 'tool output' } },
+      { role: 'status', text: 'exit 0 — ok' },
+    ]);
+    expect(s.history.some((e) => e.role === 'raw' && e.text.includes('"type":"stream_event"'))).toBe(false);
+    fetchSpy.mockRestore();
+    vi.useRealTimers();
   });
 
   it('startStream closes previous EventSource before opening new one', () => {
@@ -453,7 +596,7 @@ describe('TerminalStore – notification batching', () => {
       terminalStore.update(p, (s) => ({ streamBuffer: s.streamBuffer + 'x' }));
     }
     expect(listener).not.toHaveBeenCalled();
-    runRaf();
+    terminalStore.__flushNotifications();
     expect(listener).toHaveBeenCalledTimes(1);
     // State writes are still synchronous — the buffer reflects all 100 updates.
     expect(terminalStore.get(p).streamBuffer.length).toBe(100);
@@ -480,7 +623,7 @@ describe('TerminalStore – notification batching', () => {
     terminalStore.update(p1, () => ({ streamBuffer: 'q' }));
     expect(l1).not.toHaveBeenCalled();
     expect(l2).not.toHaveBeenCalled();
-    runRaf();
+    terminalStore.__flushNotifications();
     expect(l1).toHaveBeenCalledTimes(1);
     expect(l2).toHaveBeenCalledTimes(1);
   });

@@ -25,7 +25,32 @@ import { getIssueBranchLock } from '@/lib/shared/project-branch-lock';
 import { getLock } from '@/lib/pipeline/pipeline-lock';
 import { budgetBlockedResult, scheduledBurnRateBlocked } from '@/lib/shared/job-control';
 import { db, schema } from '@/lib/db';
-import { eq } from 'drizzle-orm';
+import { eq, and, isNotNull, desc } from 'drizzle-orm';
+
+// Look up the DB-recorded finish time of the most recent successful run for
+// this agent (kind = `agent:<name>`), in milliseconds. Used at arm time so
+// the next fire is anchored on actual last-run, not on "now" — without this,
+// every Next.js restart resets each agent's clock and an overdue agent
+// silently gets pushed another full period into the future.
+function lookupLastFireMs(project: string, name: string): number | null {
+  try {
+    const row = db
+      .select({ finishedAt: schema.jobs.finishedAt })
+      .from(schema.jobs)
+      .where(and(
+        eq(schema.jobs.project, project),
+        eq(schema.jobs.kind, `agent:${name}`),
+        isNotNull(schema.jobs.finishedAt),
+      ))
+      .orderBy(desc(schema.jobs.finishedAt))
+      .limit(1)
+      .get();
+    if (row?.finishedAt) return row.finishedAt * 1000;
+  } catch {
+    // jobs table may not exist in test environments
+  }
+  return null;
+}
 
 type ScheduleEntry = {
   agentId: string;
@@ -280,13 +305,46 @@ async function fire(entry: ScheduleEntry): Promise<void> {
   }
 }
 
+// When the computed next fire is in the past (agent is overdue — typical
+// case on first arm after a Next.js restart), don't fire instantly. Spread
+// each overdue agent across this window using a stable per-agent offset so
+// 10 overdue agents at boot don't stampede the budget gate or the
+// per-project agent serializer in the same second. The first agent fires
+// after ~30s, last after ~OVERDUE_SPREAD_MS; budget skips that hit early
+// in the window are re-armed normally and re-checked at their next slot.
+const OVERDUE_SPREAD_MS = 5 * 60_000;
+const OVERDUE_FLOOR_MS = 30_000;
+
 function armNext(entry: ScheduleEntry): void {
   if (!entry.enabled) return;
   if (getPaused()) return;
   if (!entries.has(entry.agentId)) return;
   if (entry.timer) clearTimeout(entry.timer);
-  entry.nextFireMs = computeNextFire(entry.schedule, entry.agentId);
-  const delay = Math.max(1000, entry.nextFireMs - Date.now());
+  // Anchor the schedule on the last actual run, not on "now". Without this a
+  // Next.js restart resets every agent's clock — a 30m agent that ran 90m
+  // ago would still be re-armed to "now + 30m", silently dropping fires
+  // across restarts. We seed `lastFireMs` from the DB on the initial arm
+  // (when fireCount is 0 and lastFireMs is null), then `fire()` keeps it
+  // current in-memory. `computeNextFire(schedule, id, fromMs)` returns the
+  // next slot after `fromMs`; if the agent is overdue, that slot is in the
+  // past and we stagger the wake-up below to avoid a boot-time stampede.
+  if (entry.fireCount === 0 && entry.lastFireMs == null) {
+    const dbLast = lookupLastFireMs(entry.project, entry.name);
+    if (dbLast) entry.lastFireMs = dbLast;
+  }
+  const fromMs = entry.lastFireMs ?? Date.now();
+  entry.nextFireMs = computeNextFire(entry.schedule, entry.agentId, fromMs);
+  const rawDelay = entry.nextFireMs - Date.now();
+  let delay: number;
+  if (rawDelay <= 0) {
+    // Overdue: deterministic per-agent offset within OVERDUE_SPREAD_MS so
+    // boot doesn't fire every overdue agent at the same instant.
+    const offset = stableHash(entry.agentId + ':overdue', OVERDUE_SPREAD_MS);
+    delay = OVERDUE_FLOOR_MS + offset;
+    entry.nextFireMs = Date.now() + delay;
+  } else {
+    delay = Math.max(1000, rawDelay);
+  }
   entry.timer = setTimeout(() => { void fire(entry); }, delay);
   // Ensure timers don't keep the process alive on its own — let the server
   // decide when to exit. This matters for tests and for `pnpm stop`.

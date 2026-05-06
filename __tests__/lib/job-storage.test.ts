@@ -233,10 +233,26 @@ describe('job-storage', () => {
       expect(jobB).toBeTruthy();
     });
 
-    it('auto-links releaseId to an active release job for the same project', () => {
+    it('auto-links releaseId when the job is started under the active release parent chain', async () => {
       const releaseJob = createJob('my-proj', 'release', 100, '/log-release');
+      releaseJob.releaseId = releaseJob.id;
+      updateJob(releaseJob);
+      let reviewJob: ReturnType<typeof createJob> | null = null;
+      await runWithParent(releaseJob.id, async () => {
+        reviewJob = createJob('my-proj', 'review', 101, '/log-review');
+      });
+      expect(reviewJob).not.toBeNull();
+      expect(reviewJob!.parentJobId).toBe(releaseJob.id);
+      expect(reviewJob!.releaseId).toBe(releaseJob.id);
+    });
+
+    it('does not auto-link a standalone job just because an active release exists', () => {
+      const releaseJob = createJob('my-proj', 'release', 100, '/log-release');
+      releaseJob.releaseId = releaseJob.id;
+      updateJob(releaseJob);
       const reviewJob = createJob('my-proj', 'review', 101, '/log-review');
-      expect(reviewJob.releaseId).toBe(releaseJob.id);
+      expect(reviewJob.releaseId).toBeNull();
+      expect(reviewJob.parentJobId).toBeNull();
     });
 
     it('does not auto-link releaseId when kind is release (no self-link)', () => {
@@ -1812,7 +1828,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
     } as any).run();
 
-    const job = makeJob('push', null);
+    const job = makeJob('push', null, { releaseId: 'release-job-push' });
     await markDoneFn(job, 0);
 
     const releaseRow = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-job-push');
@@ -1830,7 +1846,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
     } as any).run();
 
-    const job = makeJob('push', null);
+    const job = makeJob('push', null, { releaseId: 'release-job-push-fail' });
     await markDoneFn(job, 1);
 
     const releaseRow = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-job-push-fail');
@@ -1928,7 +1944,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
   it('starts a review when tests pass and auto-push is enabled', async () => {
     // Provide uncommitted changes so the hook takes the review path.
     execMock.mockResolvedValueOnce({ exitCode: 0, stdout: 'M foo.ts\n', stderr: '' });
-    const job = makeJob('test', null);
+    const job = makeJob('test', null, { releaseId: 'active-release-for-testfail' });
 
     await markDoneFn(job, 0);
 
@@ -1937,7 +1953,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
   });
 
   it('does not chain when test fails', async () => {
-    const job = makeJob('test', null);
+    const job = makeJob('test', null, { releaseId: 'active-release-for-testfail' });
 
     await markDoneFn(job, 1);
 
@@ -1946,7 +1962,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
   });
 
   it('starts fix when test fails and autoPushEnabled is on', async () => {
-    const job = makeJob('test', null);
+    const job = makeJob('test', null, { releaseId: 'active-release-for-testfail' });
 
     await markDoneFn(job, 1);
 
@@ -1955,7 +1971,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
   it('starts fix when test fails and only autoCommitEnabled is on', async () => {
     getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: true, autoPushEnabled: false });
-    const job = makeJob('test', null);
+    const job = makeJob('test', null, { releaseId: 'active-release-for-testfail' });
 
     await markDoneFn(job, 1);
 
@@ -2014,7 +2030,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
       seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
     } as any).run();
-    const job = makeJob('test', null);
+    const job = makeJob('test', null, { releaseId: 'active-release-for-testfail' });
 
     await markDoneFn(job, 1);
 
@@ -2163,7 +2179,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     startProjectCommitMock.mockRejectedValue(new Error('git remote down'));
     const logFile = join(tempDir, 'lgtm-throw.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
-    const job = makeJob('review', logFile);
+    const job = makeJob('review', logFile, { releaseId: 'active-release-job' });
 
     await expect(markDoneFn(job, 0)).resolves.toBeUndefined();
   });
@@ -2171,7 +2187,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
   it('continues gracefully when startProjectReview throws', async () => {
     startProjectReviewMock.mockRejectedValue(new Error('spawn failure'));
     execMock.mockResolvedValueOnce({ exitCode: 0, stdout: 'M foo.ts\n', stderr: '' });
-    const job = makeJob('test', null);
+    const job = makeJob('test', null, { releaseId: 'active-release-job' });
 
     await expect(markDoneFn(job, 0)).resolves.toBeUndefined();
   });
@@ -2204,7 +2220,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
     const logFile = join(tempDir, 'needs-cap.log');
     writeFileSync(logFile, 'Verdict: NEEDS ATTENTION\n');
-    const job = makeJob('review', logFile);
+    const job = makeJob('review', logFile, { releaseId: 'active-release-job' });
 
     await markDoneFn(job, 0);
 
@@ -2345,7 +2361,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
   it('does not auto-chain fix→review when auto-push is disabled', async () => {
     getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoPushEnabled: false });
-    const job = makeJob('fix', null);
+    const job = makeJob('fix', null, { releaseId: 'active-release-job' });
 
     await markDoneFn(job, 0);
 
@@ -2356,7 +2372,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: true, autoPushEnabled: false, releaseAfterRun: false });
     const logFile = join(tempDir, 'lgtm-commit-only.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
-    const job = makeJob('review', logFile);
+    const job = makeJob('review', logFile, { releaseId: 'active-release-job' });
 
     await markDoneFn(job, 0);
 
@@ -2368,7 +2384,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: true, autoPushEnabled: true, releaseAfterRun: false });
     const logFile = join(tempDir, 'lgtm-full-push.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
-    const job = makeJob('review', logFile);
+    const job = makeJob('review', logFile, { releaseId: 'active-release-job' });
 
     await markDoneFn(job, 0);
 
@@ -2388,7 +2404,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
   it('auto-chains test→review when autoCommitEnabled=true and there are uncommitted changes', async () => {
     getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: true, autoPushEnabled: false, releaseAfterRun: false });
     execMock.mockResolvedValueOnce({ exitCode: 0, stdout: 'M foo.ts\n', stderr: '' });
-    const job = makeJob('test', null);
+    const job = makeJob('test', null, { releaseId: 'active-release-job' });
 
     await markDoneFn(job, 0);
 
@@ -2399,7 +2415,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
   it('auto-chains test→commit (skips review) when autoCommitEnabled=true, reviewDisabled=true, and there are uncommitted changes', async () => {
     getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: true, autoPushEnabled: false, releaseAfterRun: false, reviewDisabled: true });
     execMock.mockResolvedValueOnce({ exitCode: 0, stdout: 'M foo.ts\n', stderr: '' });
-    const job = makeJob('test', null);
+    const job = makeJob('test', null, { releaseId: 'active-release-job' });
 
     await markDoneFn(job, 0);
 
@@ -2413,7 +2429,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     execMock
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: '1\n', stderr: '' });
-    const job = makeJob('test', null);
+    const job = makeJob('test', null, { releaseId: 'active-release-job' });
 
     await markDoneFn(job, 0);
 
@@ -2906,7 +2922,7 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
     insertActiveRelease();
     const logFile = join(tempDir, 'lgtm-release.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
-    const job = makeJob('review', logFile);
+    const job = makeJob('review', logFile, { releaseId: 'active-release-job' });
 
     await markDoneFn(job, 0);
 
@@ -2919,7 +2935,7 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
     insertActiveRelease();
     // Provide uncommitted changes so the hook routes to review rather than push.
     execMock.mockResolvedValueOnce({ exitCode: 0, stdout: 'M foo.ts\n', stderr: '' });
-    const job = makeJob('test', null);
+    const job = makeJob('test', null, { releaseId: 'active-release-job' });
 
     await markDoneFn(job, 0);
 
@@ -2929,7 +2945,7 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
   it('chains fix success → review when inRelease even though auto-push is disabled', async () => {
     getProjectTestConfigMock.mockReturnValue({ autoPushEnabled: false });
     insertActiveRelease();
-    const job = makeJob('fix', null);
+    const job = makeJob('fix', null, { releaseId: 'active-release-job' });
 
     await markDoneFn(job, 0);
 
@@ -3351,6 +3367,173 @@ describe('markDone – metadata extraction skipped for release kind', () => {
 
     expect(job.model).toBeUndefined();
     expect(job.costUsd).toBeUndefined();
+  });
+});
+
+describe('runCompletionHooks – linked release scoping', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
+  let startProjectReviewMock: ReturnType<typeof vi.fn>;
+  let startProjectPushMock: ReturnType<typeof vi.fn>;
+  let startProjectCommitMock: ReturnType<typeof vi.fn>;
+  let startFixFromJobMock: ReturnType<typeof vi.fn>;
+  let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
+  let tempDir: string;
+
+  function makeJob(kind: string, logPath: string | null, overrides: Partial<JobData> = {}): JobData {
+    return {
+      id: `${kind}-job`,
+      project: 'my-proj',
+      kind,
+      prompt: null,
+      pid: 12345,
+      logPath,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-linked-release-test-'));
+
+    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-auto', pid: 1, logPath: '' });
+    startProjectPushMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abcd123', message: 'pushed' });
+    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abcd123', message: 'committed' });
+    startFixFromJobMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-auto', pid: 2 });
+    getProjectTestConfigMock = vi.fn().mockReturnValue({
+      autoPushEnabled: false,
+      autoCommitEnabled: false,
+      autoPrMergeEnabled: false,
+      prWorkflowEnabled: false,
+    });
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      getJobStatus: vi.fn(),
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shared/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/git/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+      isReviewed: vi.fn().mockResolvedValue(false),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/proj'),
+    }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({
+      startProjectReview: startProjectReviewMock,
+    }));
+    vi.doMock('@/lib/pipeline/start-test', () => ({
+      startProjectTest: vi.fn(),
+    }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({
+      startProjectPush: startProjectPushMock,
+    }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
+      startProjectCommit: startProjectCommitMock,
+    }));
+    vi.doMock('@/lib/pipeline/start-fix', () => ({
+      startFixFromJob: startFixFromJobMock,
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getProjectTestConfig: getProjectTestConfigMock,
+    }));
+    vi.doMock('@/lib/shared/notifications', () => ({
+      notify: vi.fn().mockResolvedValue(undefined),
+    }));
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('does not append or auto-chain a standalone pipeline job just because another release is active', async () => {
+    const now = Date.now() / 1000;
+    const releaseLog = join(tempDir, 'active-release.log');
+    writeFileSync(releaseLog, '# release start\n');
+    testDb.db.insert(schema.jobs).values({
+      id: 'release-live',
+      project: 'my-proj',
+      kind: 'release',
+      prompt: null,
+      pid: 1,
+      logPath: releaseLog,
+      startedAt: now - 20,
+      finishedAt: null,
+      exitCode: null,
+      seen: 0,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      releaseId: 'release-live',
+    } as any).run();
+
+    const testLog = join(tempDir, 'standalone-test.log');
+    writeFileSync(testLog, 'manual test output\n');
+    const job = makeJob('test', testLog, { id: 'manual-test-1' });
+
+    await markDoneFn(job, 0);
+
+    expect(readFileSync(releaseLog, 'utf8')).not.toContain('manual test output');
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+    expect(startProjectPushMock).not.toHaveBeenCalled();
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
+    expect(startFixFromJobMock).not.toHaveBeenCalled();
+    const releaseRow = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-live');
+    expect(releaseRow?.finishedAt).toBeNull();
+  });
+
+  it('appends linked child output into its own active release log', async () => {
+    const now = Date.now() / 1000;
+    const releaseLog = join(tempDir, 'linked-release.log');
+    writeFileSync(releaseLog, '# release start\n');
+    testDb.db.insert(schema.jobs).values({
+      id: 'release-linked',
+      project: 'my-proj',
+      kind: 'release',
+      prompt: null,
+      pid: 1,
+      logPath: releaseLog,
+      startedAt: now - 20,
+      finishedAt: null,
+      exitCode: null,
+      seen: 0,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      releaseId: 'release-linked',
+    } as any).run();
+
+    const childLog = join(tempDir, 'linked-pr-wait.log');
+    writeFileSync(childLog, 'merge poll output\n');
+    const job = makeJob('pr-wait', childLog, { id: 'linked-pr-wait-1', releaseId: 'release-linked' });
+
+    await markDoneFn(job, 0);
+
+    expect(readFileSync(releaseLog, 'utf8')).toContain('merge poll output');
   });
 });
 

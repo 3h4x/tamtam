@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 describe('startProjectPush — push result tracking', () => {
   let startProjectPush: typeof import('@/lib/pipeline/start-push').startProjectPush;
+  let launchProjectPush: typeof import('@/lib/pipeline/start-push').launchProjectPush;
   let execMock: ReturnType<typeof vi.fn>;
   let setProjectPushResultMock: ReturnType<typeof vi.fn>;
   let createJobMock: ReturnType<typeof vi.fn>;
@@ -9,6 +10,12 @@ describe('startProjectPush — push result tracking', () => {
   let updateJobMock: ReturnType<typeof vi.fn>;
   let generateCommitMessageMock: ReturnType<typeof vi.fn>;
   let checkCliStartGateMock: ReturnType<typeof vi.fn>;
+  let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
+  let getLockMock: ReturnType<typeof vi.fn>;
+  let acquireLockMock: ReturnType<typeof vi.fn>;
+  let isLockOwnedByActiveReleaseMock: ReturnType<typeof vi.fn>;
+  let getJobMock: ReturnType<typeof vi.fn>;
+  let listJobsMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -25,6 +32,12 @@ describe('startProjectPush — push result tracking', () => {
     updateJobMock = vi.fn();
     generateCommitMessageMock = vi.fn().mockResolvedValue('feat: test');
     checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
+    getProjectTestConfigMock = vi.fn().mockReturnValue(null);
+    getLockMock = vi.fn().mockReturnValue(null);
+    acquireLockMock = vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } });
+    isLockOwnedByActiveReleaseMock = vi.fn().mockReturnValue(false);
+    getJobMock = vi.fn().mockReturnValue(null);
+    listJobsMock = vi.fn().mockReturnValue([]);
 
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
@@ -36,18 +49,19 @@ describe('startProjectPush — push result tracking', () => {
     vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
-      getProjectTestConfig: vi.fn().mockReturnValue(null),
+      getProjectTestConfig: getProjectTestConfigMock,
     }));
     vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
+      getJob: getJobMock,
+      listJobs: listJobsMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
-      listJobs: vi.fn().mockReturnValue([]),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      getLock: vi.fn().mockReturnValue(null),
-      acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+      getLock: getLockMock,
+      acquireLock: acquireLockMock,
+      isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
     }));
     vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: generateCommitMessageMock,
@@ -59,7 +73,7 @@ describe('startProjectPush — push result tracking', () => {
       checkCliStartGate: checkCliStartGateMock,
     }));
 
-    ({ startProjectPush } = await import('@/lib/pipeline/start-push'));
+    ({ startProjectPush, launchProjectPush } = await import('@/lib/pipeline/start-push'));
   });
 
   afterEach(() => { vi.resetModules(); });
@@ -78,6 +92,129 @@ describe('startProjectPush — push result tracking', () => {
     const r = await startProjectPush('proj');
     expect(r.ok).toBe(true);
     expect(setProjectPushResultMock).toHaveBeenCalledWith('proj', null);
+  });
+
+  it('passes an explicit parentJobId to the CLI start gate for release-linked retries', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0, '1\n'))
+      .mockImplementationOnce(() => resp(0, '# branch.head master\n# branch.ab +0 -0\n'))
+      .mockImplementationOnce(() => resp(0))
+      .mockImplementationOnce(() => resp(0, 'abc1234'));
+
+    const r = await startProjectPush('proj', { parentJobId: 'release-123' });
+
+    expect(r.ok).toBe(true);
+    expect(checkCliStartGateMock).toHaveBeenCalledWith('start a push', { parentJobId: 'release-123' });
+  });
+
+  it('launchProjectPush keeps a release-linked retry under the active release lock and gate context', async () => {
+    getLockMock.mockReturnValue({ project: 'proj', lockedByJobId: 'release-123', acquiredAt: Date.now() / 1000 });
+    isLockOwnedByActiveReleaseMock.mockReturnValue(true);
+    getJobMock.mockReturnValue({ id: 'release-123', project: 'proj', kind: 'release', finishedAt: null });
+    listJobsMock.mockReturnValue([
+      { id: 'push-failed-1', project: 'proj', kind: 'push', startedAt: 200, finishedAt: 210, exitCode: 1, releaseId: 'release-123' },
+    ]);
+    execMock
+      .mockImplementationOnce(() => resp(0, '1\n'))
+      .mockImplementationOnce(() => resp(0, '# branch.head master\n# branch.ab +0 -0\n'))
+      .mockImplementationOnce(() => resp(0))
+      .mockImplementationOnce(() => resp(0, 'abc1234'));
+
+    const result = launchProjectPush('proj', { parentJobId: 'release-123' });
+
+    expect(result).toEqual({ jobId: 'proj-push-test-id' });
+    await vi.waitFor(() => {
+      expect(checkCliStartGateMock).toHaveBeenCalledWith('start a push', { parentJobId: 'release-123' });
+      expect(acquireLockMock).not.toHaveBeenCalled();
+      expect(markDoneMock).toHaveBeenCalledWith(createJobMock.mock.results[0].value, 0);
+    });
+  });
+
+  it('launchProjectPush preserves PR creation semantics for a release-linked retry in PR workflow', async () => {
+    getLockMock.mockReturnValue({ project: 'proj', lockedByJobId: 'release-123', acquiredAt: Date.now() / 1000 });
+    isLockOwnedByActiveReleaseMock.mockReturnValue(true);
+    getJobMock.mockReturnValue({ id: 'release-123', project: 'proj', kind: 'release', finishedAt: null });
+    listJobsMock.mockReturnValue([
+      { id: 'push-failed-1', project: 'proj', kind: 'push', startedAt: 200, finishedAt: 210, exitCode: 1, releaseId: 'release-123' },
+    ]);
+    getProjectTestConfigMock.mockReturnValue({ prWorkflowEnabled: true });
+    execMock
+      .mockImplementationOnce(() => resp(0, '1\n'))
+      .mockImplementationOnce(() => resp(0, '# branch.head feature/release\n# branch.ab +0 -0\n'))
+      .mockImplementationOnce(() => resp(0))
+      .mockImplementationOnce(() => resp(0, 'abc1234'))
+      .mockImplementationOnce(() => resp(0, 'feature/release\n'))
+      .mockImplementationOnce(() => resp(1, '', 'no pull request found'))
+      .mockImplementationOnce(() => resp(0, 'https://github.com/acme/widgets/pull/42\n'))
+      .mockImplementationOnce(() => resp(0, 'acme/widgets\n'))
+      .mockImplementationOnce(() => resp(0))
+      .mockImplementationOnce(() => resp(0));
+
+    const result = launchProjectPush('proj', { parentJobId: 'release-123' });
+
+    expect(result).toEqual({ jobId: 'proj-push-test-id' });
+    await vi.waitFor(() => {
+      expect(checkCliStartGateMock).toHaveBeenCalledWith('start a push', { parentJobId: 'release-123' });
+      expect(markDoneMock).toHaveBeenCalledWith(createJobMock.mock.results[0].value, 0);
+    });
+
+    const prCreateCall = execMock.mock.calls.find(
+      ([cmd, args]) => cmd === 'gh' && Array.isArray(args) && args[0] === 'pr' && args[1] === 'create',
+    );
+    expect(prCreateCall).toBeTruthy();
+    expect(createJobMock.mock.results[0].value.contextMeta).toBe(JSON.stringify({
+      prUrl: 'https://github.com/acme/widgets/pull/42',
+      prNumber: 42,
+      prRepo: 'acme/widgets',
+    }));
+  });
+
+  it('launchProjectPush still blocks unrelated manual pushes while another release holds the lock', () => {
+    getLockMock.mockReturnValue({ project: 'proj', lockedByJobId: 'release-123', acquiredAt: Date.now() / 1000 });
+    isLockOwnedByActiveReleaseMock.mockReturnValue(true);
+
+    const result = launchProjectPush('proj');
+
+    expect(result).toEqual({
+      error: 'Pipeline is running for proj — wait for it to finish before pushing manually',
+      status: 409,
+    });
+    expect(checkCliStartGateMock).not.toHaveBeenCalled();
+    expect(createJobMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stale release-linked retry before creating a push job', () => {
+    getLockMock.mockReturnValue({ project: 'proj', lockedByJobId: 'release-active', acquiredAt: Date.now() / 1000 });
+    isLockOwnedByActiveReleaseMock.mockReturnValue(true);
+    getJobMock.mockReturnValue({ id: 'release-stale', project: 'proj', kind: 'release', finishedAt: Date.now() / 1000 });
+
+    const result = launchProjectPush('proj', { parentJobId: 'release-stale' });
+
+    expect(result).toEqual({
+      error: 'Release-linked push retry is only allowed for the active release on proj',
+      status: 409,
+    });
+    expect(createJobMock).not.toHaveBeenCalled();
+    expect(checkCliStartGateMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a release-linked retry when the latest linked step is not a failed push', () => {
+    getLockMock.mockReturnValue({ project: 'proj', lockedByJobId: 'release-123', acquiredAt: Date.now() / 1000 });
+    isLockOwnedByActiveReleaseMock.mockReturnValue(true);
+    getJobMock.mockReturnValue({ id: 'release-123', project: 'proj', kind: 'release', finishedAt: null });
+    listJobsMock.mockReturnValue([
+      { id: 'review-running', project: 'proj', kind: 'review', startedAt: 250, finishedAt: null, exitCode: null, releaseId: 'release-123' },
+      { id: 'push-failed-older', project: 'proj', kind: 'push', startedAt: 200, finishedAt: 210, exitCode: 1, releaseId: 'release-123' },
+    ]);
+
+    const result = launchProjectPush('proj', { parentJobId: 'release-123' });
+
+    expect(result).toEqual({
+      error: 'Release-linked push retry is only allowed when the latest step is a failed push for proj',
+      status: 409,
+    });
+    expect(createJobMock).not.toHaveBeenCalled();
+    expect(checkCliStartGateMock).not.toHaveBeenCalled();
   });
 
   it('stores error string on push failure', async () => {

@@ -339,7 +339,11 @@ async function runCommit(
   }
 }
 
-export async function startProjectCommit(projectName: string): Promise<CommitResult> {
+export async function startProjectCommit(
+  projectName: string,
+  options: { parentJobId?: string | null } = {},
+): Promise<CommitResult> {
+  const parentJobId = options.parentJobId ?? currentParent();
   // Check for existing pipeline lock — but allow running under a parent
   // release job's lock (this step was kicked off by the release pipeline).
   const underRelease = isLockOwnedByActiveRelease(projectName);
@@ -356,7 +360,7 @@ export async function startProjectCommit(projectName: string): Promise<CommitRes
     setProjectPushResult(projectName, 'project not found');
     return { ok: false, status: 404, detail: 'project not found' };
   }
-  const gate = await checkCliStartGate('start a commit', { parentJobId: currentParent() });
+  const gate = await checkCliStartGate('start a commit', { parentJobId });
   if (!gate.ok) {
     setProjectPushResult(projectName, gate.detail);
     return gate;
@@ -373,6 +377,7 @@ export async function startProjectCommit(projectName: string): Promise<CommitRes
     earlyIssueCtx?.number ?? null,
     earlyIssueCtx?.repo ?? null,
     earlyIssueCtx?.title ?? null,
+    options.parentJobId,
   );
   job.provider = provider;
   const logPath = join(logDir, `${job.id}.log`);

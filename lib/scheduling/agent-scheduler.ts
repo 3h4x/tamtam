@@ -9,7 +9,7 @@ import { normalizeAgentScheduleOrThrow } from './agent-schedule';
 const LAUNCH_AGENTS_DIR = join(homedir(), 'Library', 'LaunchAgents');
 
 function getLogDir(): string {
-  try { return getImproveConfig().logDir; } catch { return join(homedir(), 'logs'); }
+  try { return getImproveConfig().logDir; } catch { return join(/*turbopackIgnore: true*/ homedir(), 'logs'); }
 }
 function getScriptsDir(): string {
   return join(getLogDir(), 'agent-scripts');
@@ -59,7 +59,7 @@ function buildPlist(agentId: string, schedule: string): string {
   const label = agentLabel(agentId);
   const intervalSec = parseScheduleToSeconds(schedule);
   const scriptPath = agentScriptPath(agentId);
-  const logDir = join(homedir(), 'logs');
+  const logDir = join(/*turbopackIgnore: true*/ homedir(), 'logs');
   const logPath = join(logDir, `agent-scheduler-${agentId}.log`);
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -84,7 +84,7 @@ function buildPlist(agentId: string, schedule: string): string {
 
 function ensureDirs(): void {
   mkdirSync(getScriptsDir(), { recursive: true });
-  mkdirSync(join(homedir(), 'logs'), { recursive: true });
+  mkdirSync(join(/*turbopackIgnore: true*/ homedir(), 'logs'), { recursive: true });
 }
 
 function writeScriptAndPrompt(agentId: string, prompt: string): void {

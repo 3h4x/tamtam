@@ -7,15 +7,18 @@ import type { JobData } from '@/lib/jobs/job-storage';
 
 const originalMaxStepIterations = process.env.TAMTAM_MAX_STEP_ITERATIONS;
 const originalLegacyMaxFixIterations = process.env.TAMTAM_MAX_FIX_ITERATIONS;
-const originalFixWindowSeconds = process.env.TAMTAM_FIX_WINDOW_SECONDS;
+const originalStepWindowSeconds = process.env.TAMTAM_STEP_WINDOW_SECONDS;
+const originalLegacyFixWindowSeconds = process.env.TAMTAM_FIX_WINDOW_SECONDS;
 
 function restoreRecoveryBudgetEnv() {
   if (originalMaxStepIterations === undefined) delete process.env.TAMTAM_MAX_STEP_ITERATIONS;
   else process.env.TAMTAM_MAX_STEP_ITERATIONS = originalMaxStepIterations;
   if (originalLegacyMaxFixIterations === undefined) delete process.env.TAMTAM_MAX_FIX_ITERATIONS;
   else process.env.TAMTAM_MAX_FIX_ITERATIONS = originalLegacyMaxFixIterations;
-  if (originalFixWindowSeconds === undefined) delete process.env.TAMTAM_FIX_WINDOW_SECONDS;
-  else process.env.TAMTAM_FIX_WINDOW_SECONDS = originalFixWindowSeconds;
+  if (originalStepWindowSeconds === undefined) delete process.env.TAMTAM_STEP_WINDOW_SECONDS;
+  else process.env.TAMTAM_STEP_WINDOW_SECONDS = originalStepWindowSeconds;
+  if (originalLegacyFixWindowSeconds === undefined) delete process.env.TAMTAM_FIX_WINDOW_SECONDS;
+  else process.env.TAMTAM_FIX_WINDOW_SECONDS = originalLegacyFixWindowSeconds;
 }
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {

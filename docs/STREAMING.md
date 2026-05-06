@@ -34,7 +34,7 @@ PM2 exit handler
   → completion hook runs (pipeline chain, notifications, etc.)
 ```
 
-**Why PM2?** It survives Next.js restarts. The log file is a durable buffer — SSE can reconnect and replay from offset 0 at any time.
+**Why PM2?** It survives Next.js restarts. The log file is a durable buffer, so the browser can recover from a Next.js rebuild by reconstructing the current turn from the job log even if the live SSE transport drops mid-run.
 
 ---
 
@@ -131,6 +131,18 @@ Follow-up messages pass `resumeSessionId` → server adds `--resume <sessionId>`
 ### Typewriter animation
 
 Streamed text → `streamBuffer`. `requestAnimationFrame` loop advances `displayedLength` at ~800 chars/sec. On completion: full buffer committed to `history`, stream state cleared.
+
+### Transport recovery during rebuilds
+
+The terminal does not treat a transient SSE disconnect as a failed Claude run.
+
+- `EventSource.onerror` closes the broken socket but keeps the session live
+- the client probes `GET /api/jobs/[jobId]` and rebuilds the in-flight turn from the persisted log
+- for passthrough jobs such as `release`, the recovery path replays the mixed raw/NDJSON log through the same parser used by `/api/streaming/[jobId]?passthrough=1`, so shell output stays monospace while Claude sections still render as assistant/tool/thinking entries
+- while the job is still running, the terminal polls job state instead of reopening SSE from byte 0 (which would duplicate already-rendered output)
+- once the job finishes, the client finalizes the transcript from the recovered job payload
+
+This is specifically to survive `pnpm run rebuild` / PM2 restarts without injecting `Connection error` or `claude run failed` lines into an otherwise healthy terminal session.
 
 ### Model selection
 
@@ -273,7 +285,7 @@ The `?job=` param is used during live streaming because the session ID isn't kno
 - **+docs** — injects project `docs/*.md` files into the next submission
 - **model selector** — Fast / Normal / Smart; persists to `default_model` setting, with legacy Claude-family aliases still readable
 - **trace ↙** — appears only during an active release pipeline run; links to `/project/[name]/release/[releaseId]` trace view showing per-step verdicts and log excerpts
-- **abort** — appears alongside **trace** during a release; stops the running pipeline step
+- **abort** — appears only while a real release job is running; it calls the release abort route to stop the locked release and its current child step. Standalone test/review/fix strips do not show it.
 
 ### Content rendering
 

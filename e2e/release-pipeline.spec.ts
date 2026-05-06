@@ -15,6 +15,7 @@ type Job = {
   finished_at: number | null;
   verdict?: string;
   session_id?: string;
+  release_id?: string | null;
 };
 
 type Scenario = {
@@ -82,7 +83,8 @@ async function mockScenario(page: import('@playwright/test').Page, scenario: Sce
 }
 
 test.describe('Release pipeline strip', () => {
-  test('renders all stages: test → review → commit → push', async ({ page }) => {
+  test('renders only the linked jobs that actually ran in the active chain', async ({ page }) => {
+    const now = Date.now() / 1000;
     const project = await mockScenario(page, {
       changes: 3,
       reviewed: false,
@@ -91,19 +93,29 @@ test.describe('Release pipeline strip', () => {
       autoPushEnabled: false,
       jobs: [
         {
-          id: `${'demoproj'}-test-1`, project: 'demoproj', kind: 'test',
+          id: 'demoproj-manual-test', project: 'demoproj', kind: 'test',
           status: 'done', exit_code: 0,
-          started_at: Date.now() / 1000 - 60, finished_at: Date.now() / 1000 - 30,
+          started_at: now - 180, finished_at: now - 150,
+        },
+        {
+          id: 'demoproj-review-1', project: 'demoproj', kind: 'review',
+          status: 'done', exit_code: 0, verdict: 'LGTM', release_id: 'rel-1',
+          started_at: now - 90, finished_at: now - 60,
+        },
+        {
+          id: 'demoproj-push-1', project: 'demoproj', kind: 'push',
+          status: 'running', exit_code: null, release_id: 'rel-1',
+          started_at: now - 10, finished_at: null,
         },
       ],
     });
     await page.goto(`/project/${project}/terminal`);
-    // Pipeline strip should list test, review, commit, push in order.
-    const strip = page.locator('text=/test.*→.*review.*→.*commit.*→.*push/i').first();
-    await expect(strip).toBeVisible();
+    await expect(page.getByTitle(/LGTM/i).first()).toBeVisible();
+    await expect(page.getByTitle(/push in progress/i).first()).toBeVisible();
+    await expect(page.getByText('commit')).toHaveCount(0);
   });
 
-  test('LGTM verdict with clean tree marks review done', async ({ page }) => {
+  test('LGTM verdict stays visible while a later linked step is running', async ({ page }) => {
     const now = Date.now() / 1000;
     const project = await mockScenario(page, {
       changes: 0,
@@ -113,20 +125,23 @@ test.describe('Release pipeline strip', () => {
       jobs: [
         {
           id: 'demoproj-review-lgtm', project: 'demoproj', kind: 'review',
-          status: 'done', exit_code: 0, verdict: 'LGTM',
+          status: 'done', exit_code: 0, verdict: 'LGTM', release_id: 'rel-2',
           started_at: now - 60, finished_at: now - 30,
           session_id: 'sess-lgtm',
+        },
+        {
+          id: 'demoproj-push-running', project: 'demoproj', kind: 'push',
+          status: 'running', exit_code: null, release_id: 'rel-2',
+          started_at: now - 5, finished_at: null,
         },
       ],
     });
     await page.goto(`/project/${project}/terminal`);
-    // The review step should carry an "LGTM" state — look for the pipeline
-    // review chip followed by a done glyph (✓) nearby.
     const reviewStep = page.getByTitle(/LGTM/i);
     await expect(reviewStep.first()).toBeVisible();
   });
 
-  test('NEEDS ATTENTION verdict marks review as warning', async ({ page }) => {
+  test('NEEDS ATTENTION verdict stays visible while a linked fix is running', async ({ page }) => {
     const now = Date.now() / 1000;
     const project = await mockScenario(page, {
       changes: 5,
@@ -136,9 +151,14 @@ test.describe('Release pipeline strip', () => {
       jobs: [
         {
           id: 'demoproj-review-na', project: 'demoproj', kind: 'review',
-          status: 'done', exit_code: 0, verdict: 'NEEDS ATTENTION',
+          status: 'done', exit_code: 0, verdict: 'NEEDS ATTENTION', release_id: 'rel-3',
           started_at: now - 60, finished_at: now - 30,
           session_id: 'sess-na',
+        },
+        {
+          id: 'demoproj-fix-running', project: 'demoproj', kind: 'fix',
+          status: 'running', exit_code: null, release_id: 'rel-3',
+          started_at: now - 5, finished_at: null,
         },
       ],
     });
@@ -147,7 +167,7 @@ test.describe('Release pipeline strip', () => {
     await expect(reviewStep.first()).toBeVisible();
   });
 
-  test('clicking a done review step opens its terminal session', async ({ page }) => {
+  test('clicking a done review step opens its terminal session while the strip is visible', async ({ page }) => {
     const now = Date.now() / 1000;
     const project = await mockScenario(page, {
       changes: 0,
@@ -157,9 +177,14 @@ test.describe('Release pipeline strip', () => {
       jobs: [
         {
           id: 'demoproj-review-view', project: 'demoproj', kind: 'review',
-          status: 'done', exit_code: 0, verdict: 'LGTM',
+          status: 'done', exit_code: 0, verdict: 'LGTM', release_id: 'rel-4',
           started_at: now - 60, finished_at: now - 30,
           session_id: 'sess-view',
+        },
+        {
+          id: 'demoproj-push-view', project: 'demoproj', kind: 'push',
+          status: 'running', exit_code: null, release_id: 'rel-4',
+          started_at: now - 5, finished_at: null,
         },
       ],
     });

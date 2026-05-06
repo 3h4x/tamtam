@@ -42,6 +42,7 @@ type MockJob = {
   pid?: number;
   log_path?: string;
   seen?: boolean;
+  parent_job_id?: string | null;
 };
 
 async function mockJobScenario(
@@ -222,6 +223,45 @@ test.describe('Job lifecycle UI badges', () => {
     await page.goto(`/project/${PROJECT}/history`);
     // VerdictBadge renders "✓ LGTM" for a done job with verdict === 'LGTM'
     await expect(page.getByText('✓ LGTM').first()).toBeVisible();
+  });
+
+  test('run row shows the newest nested release outcome when multiple releases share the same parent', async ({ page }) => {
+    const ts = now();
+    const jobs: MockJob[] = [
+      makeJob({
+        id: 'chat-run-1',
+        kind: 'run',
+        status: 'done',
+        exit_code: 0,
+        started_at: ts - 500,
+        finished_at: ts - 490,
+        session_id: 'sess-run-1',
+      }),
+      makeJob({
+        id: 'release-old',
+        kind: 'release',
+        status: 'done',
+        exit_code: 0,
+        started_at: ts - 480,
+        finished_at: ts - 420,
+        parent_job_id: 'chat-run-1',
+      }),
+      makeJob({
+        id: 'release-new',
+        kind: 'release',
+        status: 'running',
+        exit_code: null,
+        started_at: ts - 120,
+        finished_at: null,
+        parent_job_id: 'chat-run-1',
+      }),
+    ];
+    await mockJobScenario(page, jobs);
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const runRow = page.getByRole('button').filter({ hasText: '(empty prompt)' }).first();
+    await expect(runRow.getByText('release running')).toBeVisible();
+    await expect(runRow.getByText('✓ release done')).toHaveCount(0);
   });
 
   // -------------------------------------------------------------------------
