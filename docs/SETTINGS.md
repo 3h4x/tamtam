@@ -141,6 +141,13 @@ All three are read live on each job (not cached), so changing them takes effect 
 | `fix_ci_retry_window_seconds` | number | `120` | Sliding window for counting retry attempts |
 | `fix_ci_fast_crash_ms` | number | `5000` | Jobs that exit in under this many ms are considered boot failures and retried; jobs over this are surfaced as real errors |
 
+### Worktree & Review Gates
+
+| Key | Type | Default | Effect |
+|-----|------|---------|--------|
+| `dirty_worktree_block_threshold` | number | `20` | Block agent runs (manual + scheduled) when the project has at least this many uncommitted files (incl. untracked). Returns 409 `dirty_worktree` from `/api/agents/[id]/run`; scheduler skip-counts the fire and re-arms. Set to `0` to disable. |
+| `incremental_review_enabled` | boolean | `true` | After an `LGTM` verdict, narrow the next pipeline review's diff to commits since that LGTM (uses `refs/tamtam/reviewed/<branch>` git ref). Falls back to `@{u}..HEAD` when the ref is missing or no longer an ancestor of HEAD. |
+
 ### Log & History Retention
 
 | Key | Type | Default | Effect |
