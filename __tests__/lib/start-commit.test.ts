@@ -204,4 +204,73 @@ describe('startProjectCommit', () => {
       title: 'Fix login bug',
     });
   });
+
+  it('findIssueContext skips closed issues and falls back to the next open candidate', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-05T12:00:00Z'));
+    listJobsMock.mockReturnValue([
+      {
+        id: 'issue-42-run',
+        project: 'proj',
+        kind: 'run',
+        startedAt: Date.now() / 1000 - 60,
+        parentJobId: null,
+        ghIssueNumber: 42,
+        ghIssueRepo: 'owner/repo',
+        ghIssueTitle: 'Closed issue',
+      },
+      {
+        id: 'issue-41-run',
+        project: 'proj',
+        kind: 'run',
+        startedAt: Date.now() / 1000 - 120,
+        parentJobId: null,
+        ghIssueNumber: 41,
+        ghIssueRepo: 'owner/repo',
+        ghIssueTitle: 'Still open',
+      },
+    ]);
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'main\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'refs/remotes/origin/main\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '{"state":"CLOSED"}', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '{"state":"OPEN"}', stderr: '' });
+
+    const { findIssueContext } = await import('@/lib/pipeline/start-commit');
+    await expect(findIssueContext('proj', '/path/to/proj')).resolves.toEqual({
+      number: 41,
+      repo: 'owner/repo',
+      title: 'Still open',
+    });
+  });
+
+  it('detectMainBranch returns the remote HEAD branch when available', async () => {
+    execMock.mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: 'refs/remotes/origin/trunk\n',
+      stderr: '',
+    });
+
+    const { detectMainBranch } = await import('@/lib/pipeline/start-commit');
+    await expect(detectMainBranch('/path/to/proj')).resolves.toBe('trunk');
+    expect(execMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('detectMainBranch falls back to main when origin HEAD is unavailable but main exists', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'no origin head' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'deadbeef\n', stderr: '' });
+
+    const { detectMainBranch } = await import('@/lib/pipeline/start-commit');
+    await expect(detectMainBranch('/path/to/proj')).resolves.toBe('main');
+  });
+
+  it('detectMainBranch falls back to master when origin HEAD is unavailable and main is missing', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'no origin head' })
+      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'unknown revision' });
+
+    const { detectMainBranch } = await import('@/lib/pipeline/start-commit');
+    await expect(detectMainBranch('/path/to/proj')).resolves.toBe('master');
+  });
 });

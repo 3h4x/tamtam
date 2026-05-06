@@ -57,7 +57,7 @@ TamTam runs in **production mode** (`next start`) under PM2 — no HMR. After an
 - `components/` — React client components; large pages have a co-located subfolder (e.g. `components/monitoring/`, `components/settings/`, `components/project-detail/`, `components/project-runs/`, `components/terminal/`)
 - `hooks/` — Custom React hooks
 - `lib/` — Server-side business logic, organised into domain folders: `pipeline/`, `scheduling/`, `git/`, `jobs/` (`job-storage` compatibility barrel), `terminal/`, `agents/`, `skills/`, `shared/`, `usage/`, `db/` (`index.ts` domain barrel), `github/`. `lib/client-api.ts` is the only top-level barrel.
-- `scripts/` — server startup, job runners, CLI shims (`pm2-start.sh`, `job-runner.js`, `gemini-shim.js`, `lmstudio-shim.js`, `codex-shim.js`)
+- `scripts/` — server startup, job runners, CLI shims (`pm2-start.sh`, `job-runner.js`, `claude-shim.js`, `gemini-shim.js`, `lmstudio-shim.js`, `codex-shim.js`, `shim-utils.js`)
 - `skills/` — claude-skills submodule
 - `data/` — SQLite database (gitignored)
 - `__tests__/` — vitest unit tests
@@ -204,7 +204,7 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 | `docs/CACHING.md` | Layered TTL cache strategy (in-memory + SQLite) | Adding a new cache layer, changing TTLs, or debugging stale data |
 | `docs/PROFILING.md` | Server/client/Turbopack profiling guide | Investigating perf regressions or high CPU/memory |
 | `docs/SECURITY.md` | Security model: file-agent trust, untrusted input handling, threat surface | Any security-sensitive change: auth, file-agent parsing, untrusted content |
-| `docs/SHIM.md` | Gemini/Codex/LM Studio CLI shim compatibility layer | Touching `scripts/gemini-shim.js`, `codex-shim.js`, `lmstudio-shim.js`, or shim configuration |
+| `docs/SHIM.md` | CLI shim compatibility layer (Claude, Gemini, Codex, LM Studio) | Touching `scripts/claude-shim.js`, `gemini-shim.js`, `codex-shim.js`, `lmstudio-shim.js`, or shim configuration |
 | `docs/UI.md` | Design system: tokens, typography, components, voice | Any visual/UI change — read before touching CSS or components; canonical previews in `docs/ui-preview/*.html` |
 | `docs/PROMPT-SIZE.md` | Prompt size & cache-read cost analysis | Changing skill/prompt composition, adding skills, or investigating token cost |
 | `docs/E2E.md` | Playwright pipeline e2e harness: mocks, scenarios, helpers | Writing or debugging pipeline e2e tests in `e2e/pipeline/` |
