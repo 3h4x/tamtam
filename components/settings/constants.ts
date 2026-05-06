@@ -1,4 +1,4 @@
-export type SettingsFieldKey = 'workspace_path' | 'github_owner' | 'claude_provider' | 'claude_bin' | 'lmstudio_model' | 'log_dir' | 'frequency' | 'daytime' | 'weekends' | 'launchagent_prefix' | 'base_prompt' | 'default_model' | 'permission_mode' | 'commit_style' | 'review_verdict_rules' | 'fix_ci_max_retries' | 'fix_ci_retry_window_seconds' | 'fix_ci_fast_crash_ms' | 'agent_templates' | 'log_retention_count' | 'log_retention_days' | 'job_row_retention_days' | 'notification_webhook_url' | 'notification_webhook_secret' | 'notification_on_release_success' | 'notification_on_release_fail' | 'notification_on_release_aborted' | 'notification_on_fix_loop_exhausted' | 'notification_on_review_do_not_ship' | 'notification_on_agent_run_fail' | 'pipeline_model_review' | 'pipeline_model_fix' | 'pipeline_model_dod' | 'pipeline_model_commit'
+export type SettingsFieldKey = 'workspace_path' | 'github_owner' | 'claude_provider' | 'claude_bin' | 'lmstudio_model' | 'log_dir' | 'frequency' | 'daytime' | 'weekends' | 'launchagent_prefix' | 'base_prompt' | 'default_model' | 'permission_mode' | 'commit_style' | 'review_verdict_rules' | 'fix_ci_max_retries' | 'fix_ci_retry_window_seconds' | 'fix_ci_fast_crash_ms' | 'agent_templates' | 'log_retention_count' | 'log_retention_days' | 'job_row_retention_days' | 'notification_webhook_url' | 'notification_webhook_secret' | 'notification_on_release_success' | 'notification_on_release_fail' | 'notification_on_release_aborted' | 'notification_on_fix_loop_exhausted' | 'notification_on_review_do_not_ship' | 'notification_on_agent_run_fail' | 'pipeline_model_review' | 'pipeline_model_fix' | 'pipeline_model_dod' | 'pipeline_model_commit' | 'dirty_worktree_block_threshold' | 'incremental_review_enabled'
 
 export interface FieldDef {
   label: string
@@ -214,6 +214,18 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
   pipeline_model_commit: {
     label: 'Commit Message Tier',
     help: 'Capability tier used to generate commit messages. Empty defaults to Fast — short well-scoped task.',
+    group: 'pipeline',
+    span: 1,
+  },
+  dirty_worktree_block_threshold: {
+    label: 'Dirty Worktree Block Threshold',
+    help: 'Block agent runs when the project has at least this many uncommitted files (incl. untracked). Set to 0 to disable.',
+    group: 'pipeline',
+    span: 1,
+  },
+  incremental_review_enabled: {
+    label: 'Incremental Review',
+    help: 'After an LGTM verdict, narrow the next review diff to commits since the last LGTM (uses a refs/tamtam/reviewed/<branch> ref).',
     group: 'pipeline',
     span: 1,
   },
