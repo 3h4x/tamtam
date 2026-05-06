@@ -69,7 +69,7 @@ describe('TerminalMessages', () => {
     expect(markup).toContain('>status<')
     expect(markup).toContain('>info<')
     expect(markup).toContain('>success<')
-    expect(markup).toContain('>error<')
+    expect(markup).toContain('>✗ error<')
   })
 
   it('collapses carriage-return progress updates for stored raw output', () => {
