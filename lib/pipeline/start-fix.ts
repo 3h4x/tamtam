@@ -1,14 +1,11 @@
-import { spawn } from 'child_process';
 import { join } from 'path';
-import { homedir } from 'os';
-import { mkdirSync, openSync, closeSync, writeFileSync } from 'fs';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
-import { getSettings } from '@/lib/shared/config';
+import { getSettings, getPermissionModeFlag, getPipelineModel } from '@/lib/shared/config';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { resolveProjectPath } from '@/lib/shared/project-data';
-import { getJob, createJob, readParsedLog, probeJobStatus, updateJob, markDone } from '@/lib/jobs/job-storage';
-import { getPermissionModeFlag, getPipelineModel } from '@/lib/shared/config';
+import { getJob, createJob, readParsedLog, probeJobStatus, updateJob } from '@/lib/jobs/job-storage';
+import { startJob } from '@/lib/jobs/pm2-jobs';
 import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { FIX_OUTPUT_CONTRACT, stripFinalVerdict } from './review-contract';
 
@@ -31,22 +28,12 @@ export async function startFixFromJob(sourceJobId: string): Promise<StartFixResu
   if (!gate.ok) return gate;
   const provider = gate.provider;
   const settings = getSettings();
-  const claudeBin = resolveCliBin(provider, settings);
+  const cliBin = resolveCliBin(provider, settings);
   const cliEnv = resolveCliEnv(provider, settings);
 
   const resumeSessionId = sourceJob.sessionId ?? null;
-
-  // Pull the review's findings out of its log so we can feed them to fix
-  // verbatim. Trusting --resume alone means the fix prompt is just a
-  // boilerplate "fix the issues above", which (a) hides the actual
-  // contract from anyone reading the fix log and (b) leans entirely on
-  // Claude's session memory — which can drop earlier turns under context
-  // pressure or after long delays. Embedding the findings makes the work
-  // explicit and reproducible.
   const rawLog = readParsedLog(sourceJob);
   let findingsBlock = stripFinalVerdict(rawLog);
-  // Cap to keep the resumed-session token budget sane — same 12 KB cap
-  // used by the no-resume path below.
   if (findingsBlock.length > 12000) {
     findingsBlock = '...(truncated)...\n' + findingsBlock.slice(-12000);
   }
@@ -84,49 +71,32 @@ Do not commit — just make the code changes.
 `;
   }
 
-  mkdirSync(logDir, { recursive: true });
-
   const job = createJob(projectName, 'fix', 0, '', undefined, undefined, undefined, undefined, undefined, undefined, sourceJob.id);
   job.provider = provider;
   const logPath = join(logDir, `${job.id}.log`);
-  const promptPath = join(logDir, `${job.id}.prompt`);
   job.logPath = logPath;
   if (resumeSessionId) job.sessionId = resumeSessionId;
   job.promptBytes = Buffer.byteLength(prompt, 'utf8');
+
   try {
-    writeFileSync(promptPath, prompt);
-  } catch (e) {
-    console.log(`[start-fix] failed to write prompt sidecar for ${job.id}:`, e);
+    const pid = await startJob(
+      job.id,
+      `${cliBin} --print --output-format stream-json --include-partial-messages --verbose --model ${getPipelineModel('fix')} ${getPermissionModeFlag()}${resumeSessionId ? ` --resume ${resumeSessionId}` : ''}`,
+      prompt,
+      projPath,
+      { env: cliEnv }
+    );
+    job.pid = pid;
+  } catch (e: unknown) {
+    job.finishedAt = Date.now() / 1000;
+    job.exitCode = -1;
+    updateJob(job);
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, status: 500, detail: `Failed to start fix: ${msg}` };
   }
 
-  const claudeArgs = [
-    '--print',
-    '--output-format', 'stream-json',
-    '--include-partial-messages',
-    '--verbose',
-    '--model', getPipelineModel('fix'),
-    ...getPermissionModeFlag().split(' '),
-  ];
-  if (resumeSessionId) claudeArgs.push('--resume', resumeSessionId);
-
-  const logFd = openSync(logPath, 'w');
-  const proc = spawn(claudeBin, claudeArgs, {
-    cwd: projPath,
-    stdio: ['pipe', logFd, logFd],
-    env: {
-      ...process.env,
-      ...cliEnv,
-      PATH: `${join(homedir(), 'Library', 'pnpm')}:${process.env.PATH ?? ''}`,
-      HOME: homedir(),
-    },
-    detached: true,
-  });
-
-  job.pid = proc.pid ?? 0;
-  proc.unref();
   updateJob(job);
 
-  // Acquire pipeline lock — skip under parent release lock.
   if (!isLockOwnedByActiveRelease(projectName)) {
     try {
       await acquireLock(projectName, job.id);
@@ -134,18 +104,6 @@ Do not commit — just make the code changes.
       console.log(`[start-fix] failed to acquire pipeline lock for ${projectName}:`, e);
     }
   }
-
-  try {
-    proc.stdin?.write(prompt);
-    proc.stdin?.end();
-  } catch {}
-
-  proc.on('exit', (code) => {
-    try { closeSync(logFd); } catch {}
-    markDone(job, code ?? -1).catch((e) => {
-      console.log(`[start-fix] markDone failed for ${job.id}:`, e);
-    });
-  });
 
   return { ok: true, jobId: job.id, pid: job.pid };
 }

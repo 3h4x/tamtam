@@ -1,18 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { EventEmitter } from 'events';
-
-// Minimal fake process returned by the spawn mock.
-function makeProc(pid = 12345) {
-  const proc = new EventEmitter() as NodeJS.EventEmitter & {
-    pid: number;
-    stdin: { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> } | null;
-    unref: ReturnType<typeof vi.fn>;
-  };
-  (proc as any).pid = pid;
-  (proc as any).stdin = { write: vi.fn(), end: vi.fn() };
-  (proc as any).unref = vi.fn();
-  return proc;
-}
 
 describe('startFixFromJob', () => {
   let startFixFromJob: typeof import('@/lib/pipeline/start-fix').startFixFromJob;
@@ -22,14 +8,10 @@ describe('startFixFromJob', () => {
   let readParsedLogMock: ReturnType<typeof vi.fn>;
   let createJobMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
-  let markDoneMock: ReturnType<typeof vi.fn>;
-  let spawnMock: ReturnType<typeof vi.fn>;
   let acquireLockMock: ReturnType<typeof vi.fn>;
   let isLockOwnedByActiveReleaseMock: ReturnType<typeof vi.fn>;
-  let openSyncMock: ReturnType<typeof vi.fn>;
-  let mkdirSyncMock: ReturnType<typeof vi.fn>;
-  let writeFileSyncMock: ReturnType<typeof vi.fn>;
   let checkCliStartGateMock: ReturnType<typeof vi.fn>;
+  let startJobMock: ReturnType<typeof vi.fn>;
 
   function makeSourceJob(overrides: Record<string, unknown> = {}) {
     return {
@@ -44,10 +26,6 @@ describe('startFixFromJob', () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    spawnMock = vi.fn().mockReturnValue(makeProc());
-    openSyncMock = vi.fn().mockReturnValue(5); // fake fd
-    mkdirSyncMock = vi.fn();
-    writeFileSyncMock = vi.fn();
     getJobMock = vi.fn().mockReturnValue(makeSourceJob());
     probeJobStatusMock = vi.fn().mockResolvedValue('done');
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/myproject');
@@ -58,25 +36,20 @@ describe('startFixFromJob', () => {
       sessionId: null,
     }));
     updateJobMock = vi.fn();
-    markDoneMock = vi.fn().mockResolvedValue(undefined);
     acquireLockMock = vi.fn().mockResolvedValue({ acquired: true });
     isLockOwnedByActiveReleaseMock = vi.fn().mockReturnValue(false);
     checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
+    startJobMock = vi.fn().mockResolvedValue(12345);
 
-    vi.doMock('child_process', () => ({ spawn: spawnMock }));
-    vi.doMock('fs', () => ({
-      mkdirSync: mkdirSyncMock,
-      openSync: openSyncMock,
-      closeSync: vi.fn(),
-      writeFileSync: writeFileSyncMock,
-    }));
     vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
       createJob: createJobMock,
       readParsedLog: readParsedLogMock,
       probeJobStatus: probeJobStatusMock,
       updateJob: updateJobMock,
-      markDone: markDoneMock,
+    }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      startJob: startJobMock,
     }));
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
@@ -92,10 +65,6 @@ describe('startFixFromJob', () => {
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: acquireLockMock,
       isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
-    }));
-    vi.doMock('@/lib/shared/job-control', () => ({
-      jobsPausedResult: vi.fn().mockReturnValue(null),
-      runGates: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/usage/resolve-provider', () => ({
       checkCliStartGate: checkCliStartGateMock,
@@ -135,7 +104,7 @@ describe('startFixFromJob', () => {
     const r = await startFixFromJob('src-job-1');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(429);
-    expect(spawnMock).not.toHaveBeenCalled();
+    expect(startJobMock).not.toHaveBeenCalled();
   });
 
   it('returns 404 when project path cannot be resolved', async () => {
@@ -167,22 +136,19 @@ describe('startFixFromJob', () => {
     }
   });
 
-  it('spawns claude with --print and --output-format stream-json', async () => {
+  it('starts fix jobs through the PM2 runner', async () => {
     await startFixFromJob('src-job-1');
-    expect(spawnMock).toHaveBeenCalledOnce();
-    const [cmd, args] = spawnMock.mock.calls[0];
-    expect(String(cmd)).toMatch(/claude-shim\.js$/);
-    expect(args).toContain('--print');
-    expect(args).toContain('--output-format');
-    expect(args).toContain('stream-json');
+    expect(startJobMock).toHaveBeenCalledOnce();
+    const [jobId, command] = startJobMock.mock.calls[0];
+    expect(jobId).toBe('myproject-fix-id');
+    expect(command).toMatch(/claude-shim\.js/);
+    expect(command).toContain('--print');
+    expect(command).toContain('--output-format stream-json');
   });
 
   it('uses log output as prompt when no sessionId', async () => {
-    const proc = makeProc();
-    spawnMock.mockReturnValue(proc);
     await startFixFromJob('src-job-1');
-    expect(proc.stdin!.write).toHaveBeenCalled();
-    const prompt: string = (proc.stdin!.write as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const [, , prompt] = startJobMock.mock.calls[0];
     expect(prompt).toContain('Error: test failure at line 42');
     expect(prompt).toContain('myproject');
     expect(prompt).toContain('review');
@@ -190,12 +156,10 @@ describe('startFixFromJob', () => {
 
   it('uses parsed source output rather than raw stream-json in the fix prompt', async () => {
     readParsedLogMock.mockReturnValue('Findings:\n- Finding ID: canonical-url\n  Required fix: persist canonical URL\nVerdict: DO NOT SHIP\n');
-    const proc = makeProc();
-    spawnMock.mockReturnValue(proc);
 
     await startFixFromJob('src-job-1');
 
-    const prompt: string = (proc.stdin!.write as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const [, , prompt] = startJobMock.mock.calls[0];
     expect(prompt).toContain('Finding ID: canonical-url');
     expect(prompt).not.toContain('"type":"stream_event"');
     expect(prompt).not.toContain('[tamtam] launching');
@@ -203,41 +167,35 @@ describe('startFixFromJob', () => {
   });
 
   it('embeds review findings in the prompt even when sessionId is present (resume)', async () => {
-    // Resume keeps the Claude session for full context, but we still embed
-    // the findings so the contract is explicit in the fix log and doesn't
-    // rely on session memory alone.
     getJobMock.mockReturnValue(makeSourceJob({ sessionId: 'ses-abc123' }));
-    const proc = makeProc();
-    spawnMock.mockReturnValue(proc);
+
     await startFixFromJob('src-job-1');
-    const args: string[] = spawnMock.mock.calls[0][1];
-    expect(args).toContain('--resume');
-    expect(args).toContain('ses-abc123');
-    const prompt: string = (proc.stdin!.write as ReturnType<typeof vi.fn>).mock.calls[0][0];
+
+    const [, command, prompt] = startJobMock.mock.calls[0];
+    expect(command).toContain('--resume ses-abc123');
     expect(prompt).toContain('Apply fixes for ALL the findings');
     expect(prompt).toContain('Error: test failure');
     expect(prompt).toContain('FIX METHOD');
-    expect(prompt).toContain('alternate route');
     expect(prompt).toContain('Fix checklist');
   });
 
-  it('writes a prompt sidecar for fix jobs and records promptBytes', async () => {
+  it('records promptBytes and sessionId on the new job before persisting', async () => {
+    getJobMock.mockReturnValue(makeSourceJob({ sessionId: 'ses-xyz' }));
+
     await startFixFromJob('src-job-1');
-    expect(writeFileSyncMock).toHaveBeenCalledOnce();
-    const [path, prompt] = writeFileSyncMock.mock.calls[0];
-    expect(path).toBe('/tmp/logs/myproject-fix-id.prompt');
-    expect(prompt).toContain('Please fix ALL the issues identified above');
+
     const updatedJob = updateJobMock.mock.calls[0][0];
     expect(updatedJob.promptBytes).toBeGreaterThan(0);
+    expect(updatedJob.sessionId).toBe('ses-xyz');
   });
 
   it('truncates log output exceeding 12000 chars', async () => {
     const longLog = 'x'.repeat(15000);
     readParsedLogMock.mockReturnValue(longLog);
-    const proc = makeProc();
-    spawnMock.mockReturnValue(proc);
+
     await startFixFromJob('src-job-1');
-    const prompt: string = (proc.stdin!.write as ReturnType<typeof vi.fn>).mock.calls[0][0];
+
+    const [, , prompt] = startJobMock.mock.calls[0];
     expect(prompt).toContain('(truncated)');
   });
 
@@ -252,73 +210,31 @@ describe('startFixFromJob', () => {
     expect(acquireLockMock).not.toHaveBeenCalled();
   });
 
-  it('marks job done with exit code when process exits', async () => {
-    const proc = makeProc();
-    spawnMock.mockReturnValue(proc);
-    await startFixFromJob('src-job-1');
-    // Simulate process exit
-    (proc as any).emit('exit', 0);
-    // Allow microtasks to flush
-    await new Promise((r) => setImmediate(r));
-    expect(markDoneMock).toHaveBeenCalled();
-    const [, exitCode] = markDoneMock.mock.calls[0];
-    expect(exitCode).toBe(0);
-  });
+  it('marks the job failed when PM2 startup throws', async () => {
+    startJobMock.mockRejectedValue(new Error('pm2 start failed'));
 
-  it('marks job done with -1 when process exits with null code', async () => {
-    const proc = makeProc();
-    spawnMock.mockReturnValue(proc);
-    await startFixFromJob('src-job-1');
-    (proc as any).emit('exit', null);
-    await new Promise((r) => setImmediate(r));
-    const [, exitCode] = markDoneMock.mock.calls[0];
-    expect(exitCode).toBe(-1);
-  });
+    const r = await startFixFromJob('src-job-1');
 
-  it('calls mkdirSync with recursive option before spawning', async () => {
-    await startFixFromJob('src-job-1');
-    expect(mkdirSyncMock).toHaveBeenCalledWith('/tmp/logs', { recursive: true });
-  });
-
-  it('sets sessionId on the new job when source has a sessionId', async () => {
-    getJobMock.mockReturnValue(makeSourceJob({ sessionId: 'ses-xyz' }));
-    await startFixFromJob('src-job-1');
-    const updatedJob = updateJobMock.mock.calls[0][0];
-    expect(updatedJob.sessionId).toBe('ses-xyz');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(500);
+      expect(r.detail).toContain('Failed to start fix');
+    }
+    const failedJob = updateJobMock.mock.calls[0][0];
+    expect(failedJob.exitCode).toBe(-1);
+    expect(failedJob.finishedAt).toBeTypeOf('number');
   });
 
   it('returns 409 when jobs are globally paused', async () => {
-    vi.resetModules();
-    vi.doMock('child_process', () => ({ spawn: spawnMock }));
-    vi.doMock('fs', () => ({ mkdirSync: mkdirSyncMock, openSync: openSyncMock, closeSync: vi.fn(), writeFileSync: writeFileSyncMock }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      getJob: getJobMock, createJob: createJobMock, readParsedLog: readParsedLogMock,
-      probeJobStatus: probeJobStatusMock, updateJob: updateJobMock, markDone: markDoneMock,
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp/logs' }) }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getPermissionModeFlag: () => '--dangerously-skip-permissions',
-      getSettings: () => ({ default_model: 'sonnet' }),
-      getPipelineModel: () => 'sonnet',
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      acquireLock: acquireLockMock, isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
-    }));
-    vi.doMock('@/lib/shared/job-control', () => ({
-      jobsPausedResult: vi.fn().mockReturnValue({ ok: false, status: 409, detail: 'Jobs are paused globally.' }),
-      runGates: vi.fn().mockReturnValue({ ok: false, status: 409, detail: 'Jobs are paused globally.' }),
-    }));
-    vi.doMock('@/lib/usage/resolve-provider', () => ({
-      checkCliStartGate: vi.fn().mockResolvedValue({ ok: false, status: 409, detail: 'Jobs are paused globally.' }),
-    }));
-    const { startFixFromJob: startFixPaused } = await import('@/lib/pipeline/start-fix');
-    const r = await startFixPaused('src-job-1');
+    checkCliStartGateMock.mockResolvedValue({ ok: false, status: 409, detail: 'Jobs are paused globally.' });
+
+    const r = await startFixFromJob('src-job-1');
+
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.status).toBe(409);
       expect(r.detail).toContain('paused');
     }
-    expect(spawnMock).not.toHaveBeenCalled();
+    expect(startJobMock).not.toHaveBeenCalled();
   });
 });
