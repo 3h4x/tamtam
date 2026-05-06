@@ -315,11 +315,15 @@ describe('instrumentation', () => {
       expect(probeJobStatus).toHaveBeenCalledTimes(1);
     });
 
-    it('skips jobs with non-claude kinds', async () => {
+    it('also probes pipeline-step kinds (test/commit/push/fix-push)', async () => {
+      // A Next.js restart between a pipeline step's exit and the next sweep
+      // tick would otherwise strand these rows: probeJobStatus knows how to
+      // reap them, but only if the sweep dispatches them.
       const { probeJobStatus } = mockJobStorage([
         makeJob('test'),
         makeJob('commit'),
         makeJob('push'),
+        makeJob('fix-push'),
         makeJob('run'),
       ]);
       mockDeps([]);
@@ -327,7 +331,7 @@ describe('instrumentation', () => {
       const { runProbeSweep } = await import('@/instrumentation-node');
       await runProbeSweep();
 
-      expect(probeJobStatus).toHaveBeenCalledTimes(1);
+      expect(probeJobStatus).toHaveBeenCalledTimes(5);
     });
 
     it('swallows individual probe errors and continues probing remaining jobs', async () => {
