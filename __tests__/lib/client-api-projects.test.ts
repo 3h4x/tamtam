@@ -372,3 +372,172 @@ describe('runProject', () => {
     await expect(runProject('myproj', 'do something')).rejects.toThrow('budget exceeded');
   });
 });
+
+describe('pushProject', () => {
+  async function getPushProject() {
+    const { pushProject } = await import('@/lib/client-api');
+    return pushProject;
+  }
+
+  it('posts without a JSON body by default', async () => {
+    const fetchMock = stubFetch(true, { status: 'ok', job_id: 'push-1' });
+    const pushProject = await getPushProject();
+
+    await expect(pushProject('myproj')).resolves.toEqual({ status: 'ok', job_id: 'push-1' });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/by-project/myproj/push');
+    expect(init).toEqual({ method: 'POST' });
+  });
+
+  it('includes commit and release_id only when requested', async () => {
+    const fetchMock = stubFetch(true, { status: 'ok', job_id: 'push-2' });
+    const pushProject = await getPushProject();
+
+    await pushProject('myproj', { commit: true, releaseId: 'rel-7' });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
+    expect(JSON.parse(init.body as string)).toEqual({ commit: true, release_id: 'rel-7' });
+  });
+
+  it('falls back to the HTTP status text when the API omits detail', async () => {
+    stubFetch(false, {}, 502, 'Bad Gateway');
+    const pushProject = await getPushProject();
+
+    await expect(pushProject('myproj')).rejects.toThrow('Failed to push: Bad Gateway');
+  });
+});
+
+describe('branch and changes client helpers', () => {
+  async function getClientApi() {
+    const { checkoutDefaultBranch, fetchChanges } = await import('@/lib/client-api');
+    return { checkoutDefaultBranch, fetchChanges };
+  }
+
+  it('checkoutDefaultBranch sends carryChanges only when requested', async () => {
+    const fetchMock = stubFetch(true, { status: 'ok', branch: 'main', deletedBranch: 'fix-123' });
+    const { checkoutDefaultBranch } = await getClientApi();
+
+    await expect(checkoutDefaultBranch('myproj', { carryChanges: true })).resolves.toEqual({
+      status: 'ok',
+      branch: 'main',
+      deletedBranch: 'fix-123',
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/by-project/myproj/checkout-default');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
+    expect(JSON.parse(init.body as string)).toEqual({ carryChanges: true });
+  });
+
+  it('checkoutDefaultBranch uses detail errors and generic fallback', async () => {
+    stubFetch(false, { detail: 'working tree is dirty' }, 409, 'Conflict');
+    const { checkoutDefaultBranch } = await getClientApi();
+
+    await expect(checkoutDefaultBranch('myproj')).rejects.toThrow('working tree is dirty');
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Server Error',
+        json: async () => {
+          throw new Error('bad json');
+        },
+      }),
+    );
+
+    await expect(checkoutDefaultBranch('myproj')).rejects.toThrow('Failed to switch branch');
+  });
+
+  it('fetchChanges forwards AbortSignal and surfaces API detail errors', async () => {
+    const controller = new AbortController();
+    const fetchMock = stubFetch(true, { files: [], summary: { added: 0, modified: 0, deleted: 0 } });
+    const { fetchChanges } = await getClientApi();
+
+    await expect(fetchChanges('myproj', { signal: controller.signal })).resolves.toEqual({
+      files: [],
+      summary: { added: 0, modified: 0, deleted: 0 },
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/by-project/myproj/changes');
+    expect(init.signal).toBe(controller.signal);
+
+    stubFetch(false, { detail: 'git status failed' }, 500, 'Internal Server Error');
+    await expect(fetchChanges('myproj')).rejects.toThrow('git status failed');
+  });
+});
+
+describe('issue and PR client helpers', () => {
+  async function getClientApi() {
+    const { fetchIssuesAndPRs, mergePR, approvePR, reviewPR } = await import('@/lib/client-api');
+    return { fetchIssuesAndPRs, mergePR, approvePR, reviewPR };
+  }
+
+  it('fetchIssuesAndPRs appends refresh when requested and falls back to status text', async () => {
+    const fetchMock = stubFetch(true, { issues: [], pullRequests: [] });
+    const { fetchIssuesAndPRs } = await getClientApi();
+
+    await expect(fetchIssuesAndPRs('myproj', true)).resolves.toEqual({ issues: [], pullRequests: [] });
+    expect((fetchMock.mock.calls[0] as [string])[0]).toContain('/by-project/myproj/issues?refresh=1');
+
+    stubFetch(false, {}, 503, 'Service Unavailable');
+    await expect(fetchIssuesAndPRs('myproj')).rejects.toThrow('Failed to fetch issues: Service Unavailable');
+  });
+
+  it('mergePR posts merge metadata and surfaces API detail errors', async () => {
+    const fetchMock = stubFetch(true, { status: 'ok', pr: 17, repo: 'owner/repo' });
+    const { mergePR } = await getClientApi();
+
+    await expect(mergePR('myproj', 17, 'squash')).resolves.toEqual({
+      status: 'ok',
+      pr: 17,
+      repo: 'owner/repo',
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/by-project/myproj/issues');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({
+      prNumber: 17,
+      mergeMethod: 'squash',
+      action: 'merge',
+    });
+
+    stubFetch(false, { detail: 'merge blocked by checks' }, 409, 'Conflict');
+    await expect(mergePR('myproj', 17)).rejects.toThrow('merge blocked by checks');
+  });
+
+  it('approvePR and reviewPR send the expected payloads', async () => {
+    const fetchMock = stubFetch(true, { status: 'ok', pr: 21, repo: 'owner/repo' });
+    const { approvePR, reviewPR } = await getClientApi();
+
+    await expect(approvePR('myproj', 21)).resolves.toEqual({
+      status: 'ok',
+      pr: 21,
+      repo: 'owner/repo',
+    });
+    expect(JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string)).toEqual({
+      prNumber: 21,
+      action: 'approve',
+    });
+
+    stubFetch(true, { status: 'started', job_id: 'job-7', pid: 101, log_path: '/tmp/log' });
+    await expect(reviewPR('myproj', 21, 'Fix bug', 'feature', 'main')).resolves.toEqual({
+      status: 'started',
+      job_id: 'job-7',
+      pid: 101,
+      log_path: '/tmp/log',
+    });
+    expect(JSON.parse((vi.mocked(globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit])[1].body as string)).toEqual({
+      prNumber: 21,
+      prTitle: 'Fix bug',
+      headRef: 'feature',
+      baseRef: 'main',
+    });
+  });
+});

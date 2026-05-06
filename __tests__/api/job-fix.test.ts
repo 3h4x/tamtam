@@ -28,7 +28,10 @@ describe('POST /api/jobs/[jobId]/fix', () => {
   let readParsedLogMock: ReturnType<typeof vi.fn>;
   let createJobMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
+  let startJobMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
+  let checkCliStartGateMock: ReturnType<typeof vi.fn>;
+  let getSettingsMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
 
   beforeEach(async () => {
@@ -42,7 +45,16 @@ describe('POST /api/jobs/[jobId]/fix', () => {
       makeJob({ id: 'fix-job-1', kind: 'fix', pid: 0, logPath: null, finishedAt: null, exitCode: null })
     );
     updateJobMock = vi.fn();
+    startJobMock = vi.fn().mockResolvedValue(99999);
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
+    checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
+    getSettingsMock = vi.fn(() => ({
+      default_model: 'fast',
+      cli_bin_claude: '',
+      cli_bin_codex: '',
+      cli_bin_gemini: '',
+      cli_bin_lmstudio: '',
+    }));
 
     vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
@@ -64,17 +76,19 @@ describe('POST /api/jobs/[jobId]/fix', () => {
       resolveProjectPath: resolveProjectPathMock,
     }));
 
-    // Mock child_process.spawn so we don't actually launch claude
-    vi.doMock('child_process', async () => {
-      const actual = await vi.importActual<typeof import('child_process')>('child_process');
-      const mockProc = {
-        pid: 99999,
-        stdin: { write: vi.fn(), end: vi.fn() },
-        on: vi.fn(),
-        unref: vi.fn(),
-      };
-      return { ...actual, spawn: vi.fn().mockReturnValue(mockProc) };
-    });
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      startJob: startJobMock,
+    }));
+
+    vi.doMock('@/lib/shared/config', () => ({
+      getPermissionModeFlag: () => '--permission-mode bypassPermissions',
+      getPipelineModel: () => 'fast',
+      getSettings: getSettingsMock,
+    }));
+
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: checkCliStartGateMock,
+    }));
 
     vi.doMock('@/lib/shared/job-control', () => ({
       runGates: () => null,
@@ -154,5 +168,20 @@ describe('POST /api/jobs/[jobId]/fix', () => {
 
     expect(createJobMock).toHaveBeenCalledOnce();
     expect(updateJobMock).toHaveBeenCalledOnce();
+  });
+
+  it('starts the fix via the PM2 runner after provider gating', async () => {
+    getJobMock.mockReturnValue(makeJob({ provider: 'claude' }));
+
+    const req = new NextRequest('http://localhost/api/jobs/job-source/fix', { method: 'POST' });
+    await POST(req, { params: Promise.resolve({ jobId: 'job-source' }) });
+
+    expect(checkCliStartGateMock).toHaveBeenCalledWith('start a fix job', { parentJobId: 'job-source' });
+    expect(startJobMock).toHaveBeenCalledOnce();
+    const [, command, prompt, cwd] = startJobMock.mock.calls[0];
+    expect(command).toContain('/scripts/claude-shim.js');
+    expect(command).toContain('--model fast');
+    expect(prompt).toContain('Error: something failed');
+    expect(cwd).toBe('/path/to/proj');
   });
 });
