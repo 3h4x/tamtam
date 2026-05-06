@@ -133,4 +133,45 @@ describe('finalizeAgentRunReport', () => {
 
     expect(upsertRecommendationMock).not.toHaveBeenCalled();
   });
+
+  it('falls back to the last paragraph when the report block is missing', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob();
+
+    await finalizeAgentRunReport(
+      job,
+      log('Investigated recent changes.\n\nNo actionable coverage gaps remain after the latest checks.'),
+    );
+
+    expect(job.workSummary).toBe('No actionable coverage gaps remain after the latest checks.');
+    expect(upsertRecommendationMock).not.toHaveBeenCalled();
+  });
+
+  it('deduplicates files found in both git diff and git status', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'M\tsrc/lib/foo.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'M  src/lib/foo.ts\n', stderr: '' });
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob();
+
+    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: Updated tests.\nFiles changed: src/lib/foo.ts\nActionable work: yes\n'));
+
+    expect(JSON.parse(job.modifiedFiles ?? '[]')).toEqual([
+      { path: 'src/lib/foo.ts', status: 'M', confidence: 'high' },
+    ]);
+  });
+
+  it('skips git inspection when the project path cannot be resolved', async () => {
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob();
+
+    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: No repo path.\nFiles changed: none\nActionable work: yes\n'));
+
+    expect(job.modifiedFiles).toBe('[]');
+    expect(execMock).not.toHaveBeenCalled();
+  });
 });
