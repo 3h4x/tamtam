@@ -40,6 +40,8 @@ export function AgentRow({
 }: AgentRowProps) {
   const agentSkills = skills.filter(s => agent.skillIds.includes(s.id))
 
+  const promptOpen = runPromptAgent === agent.id
+
   return (
     <div
       className={`px-3 py-2.5 rounded-lg border transition-colors ${
@@ -52,7 +54,9 @@ export function AgentRow({
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
           <span className="font-medium text-sm text-text-primary">{agent.name}</span>
           <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-secondary">{agent.model}</span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-secondary">{agent.runner}</span>
+          {agent.runner !== 'pm2' && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-secondary">{agent.runner}</span>
+          )}
           {agent.schedule && (
             <>
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${agent.enabled ? 'bg-status-success/10 text-status-success' : 'bg-bg-tertiary text-text-tertiary line-through'}`}>every {agent.schedule}</span>
@@ -96,27 +100,32 @@ export function AgentRow({
           >
             Edit
           </button>
-          <button
-            className="px-2 py-1 text-xs bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={() => onRun(agent)}
-            disabled={runSubmitting === agent.id || agentRunsBlocked}
-            title={agentRunsBlocked ? blockedReason : undefined}
-          >
-            {runSubmitting === agent.id ? 'Starting…' : 'Run'}
-          </button>
-          <button
-            className="px-2 py-1 text-xs border border-accent text-accent rounded-md hover:bg-accent/10 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={() => onToggleRunPrompt(agent.id)}
-            disabled={agentRunsBlocked}
-            title={agentRunsBlocked ? blockedReason : `Run ${agent.name} with a custom prompt`}
-          >
-            + prompt
-          </button>
+          {/* Split Run button: left runs immediately, right toggles custom prompt */}
+          <div className={`inline-flex rounded-md overflow-hidden border ${agentRunsBlocked ? 'border-border opacity-50' : 'border-accent'}`}>
+            <button
+              className="px-2.5 py-1 text-xs bg-accent text-white hover:bg-accent-hover cursor-pointer disabled:cursor-not-allowed"
+              onClick={() => onRun(agent)}
+              disabled={runSubmitting === agent.id || agentRunsBlocked}
+              title={agentRunsBlocked ? blockedReason : undefined}
+            >
+              {runSubmitting === agent.id ? 'Starting…' : 'Run'}
+            </button>
+            <div className="w-px bg-white/20 self-stretch" />
+            <button
+              className="px-1.5 py-1 text-xs bg-accent text-white hover:bg-accent-hover cursor-pointer disabled:cursor-not-allowed"
+              onClick={() => onToggleRunPrompt(agent.id)}
+              disabled={agentRunsBlocked}
+              title={agentRunsBlocked ? blockedReason : `Run ${agent.name} with a custom prompt`}
+              aria-label="Run with custom prompt"
+            >
+              {promptOpen ? '▴' : '▾'}
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Custom prompt input */}
-      {runPromptAgent === agent.id && (
+      {promptOpen && (
         <div className="mt-2 flex gap-2">
           <input
             type="text"
