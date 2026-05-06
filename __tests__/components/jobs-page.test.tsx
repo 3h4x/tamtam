@@ -87,6 +87,8 @@ describe('JobsPage', () => {
 
     expect(container.textContent).not.toContain('live')
     expect(container.textContent).not.toContain('last')
+    // started label must appear exactly once (MetaChip only, no duplicate span)
+    expect(container.textContent!.split('started').length).toBe(2)
     unmount()
   })
 })
