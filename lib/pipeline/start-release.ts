@@ -6,10 +6,10 @@ import { startProjectTest, detectTestCommand } from './start-test';
 import { startProjectReview } from './start-review';
 import { startProjectPush } from './start-push';
 import { startProjectCommit } from './start-commit';
-import { listJobs, probeJobStatus, createJob, updateJob, getJob, markDone, runWithParent } from '@/lib/jobs/job-storage';
+import { listJobs, probeJobStatus, createJob, updateJob, getJob, runWithParent } from '@/lib/jobs/job-storage';
 import { exec } from '@/lib/shared/shell';
 import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/scheduling';
-import { acquireLock, getLock } from './pipeline-lock';
+import { acquireLock, releaseLock, reassignLock } from './pipeline-lock';
 import { detectMainBranch, findIssueContext } from './start-commit';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { hasFreshLgtm, hasLocalCommitsAhead } from './release-state';
@@ -256,47 +256,37 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
     return { ok: false, status: 400, detail: 'Nothing to release — no changes and no unpushed commits' };
   }
 
-  // Pre-check the lock before creating the release job — otherwise a 409 return
-  // leaves an orphan "release" row with finishedAt=null showing as running forever.
-  // Self-heal: if the holder is already terminal (zombie lock from a completion
-  // hook that skipped releaseLock), ignore it — acquireLock below will clean up.
-  const existingLock = getLock(projectName);
-  if (existingLock) {
-    const holder = listJobs().find(j => j.id === existingLock.lockedByJobId);
-    const holderFinished = holder ? holder.finishedAt !== null : false;
-    if (holder && !holderFinished) {
-      if (options.queueIfBlocked) return queueRelease(projectName, existingLock.lockedByJobId);
-      return { ok: false, status: 409, detail: `Pipeline already running for ${projectName}`, blockingJobId: existingLock.lockedByJobId };
-    }
+  // Acquire the lock before creating the release job so that if we can't get
+  // it, we return immediately without creating any DB row. The old approach
+  // (pre-check → create job → acquire) left a race window where a concurrent
+  // caller could sneak in and cause the freshly-created job to be immediately
+  // marked done with exit 1, producing a confusing "release blocked" entry.
+  //
+  // We acquire with a placeholder ID first, create the job, then re-acquire
+  // with the real job ID (onConflictDoUpdate overwrites in place).
+  const placeholderId = `${projectName}-release-pending`;
+  const earlyLock = await acquireLock(projectName, placeholderId);
+  if (!earlyLock.acquired) {
+    if (options.queueIfBlocked) return queueRelease(projectName, earlyLock.blockingJobId);
+    return { ok: false, status: 409, detail: `Pipeline already running for ${projectName}`, blockingJobId: earlyLock.blockingJobId };
   }
 
   const release = await createReleaseJob(projectName, parentJobId, issueContext);
   if (!release) {
+    releaseLock(projectName, placeholderId);
     return { ok: false, status: 500, detail: 'Failed to create release job', retryable: true };
   }
   const releaseJobId = release.id;
+
+  // Update lock from placeholder to real job ID. Force-overwrite — `acquireLock`
+  // would see the placeholder as an existing holder (within self-heal grace)
+  // and refuse, leaking the release row.
+  reassignLock(projectName, releaseJobId);
+
   const releaseJob = getJob(releaseJobId);
   if (releaseJob) {
     releaseJob.provider = gate.provider;
     updateJob(releaseJob);
-  }
-
-  // Acquire lock. If a concurrent caller won the race after our pre-check,
-  // mark our just-created release job done so it doesn't linger as running.
-  const lockResult = await acquireLock(projectName, releaseJobId);
-  if (!lockResult.acquired) {
-    try {
-      const jobRow = listJobs().find(j => j.id === releaseJobId);
-      if (jobRow) {
-        appendFileSync(
-          jobRow.logPath || release.logPath,
-          `# release blocked — pipeline already running for ${projectName}${lockResult.blockingJobId ? ` (${lockResult.blockingJobId})` : ''}\n# release finished — exit 1 — ${new Date().toISOString()}\n`,
-        );
-        await markDone(jobRow, 1);
-      }
-    } catch {}
-    if (options.queueIfBlocked) return queueRelease(projectName, lockResult.blockingJobId);
-    return { ok: false, status: 409, detail: `Pipeline already running for ${projectName}`, blockingJobId: lockResult.blockingJobId };
   }
 
   // Fast-path: the working tree already has a valid LGTM review (hash

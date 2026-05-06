@@ -232,6 +232,65 @@ async function reapAbandonedInlineJobs(): Promise<void> {
   }
 }
 
+// A release meta-job whose orchestrator died (PM2/Next.js restart between
+// `createReleaseJob` and the first-step kickoff) leaves a `release` row
+// finishedAt=null, a bash monitor process polling for hours, and — critically —
+// no child step rows + no pipeline_locks entry. New release attempts then
+// see `isReleasePipelineRunning` = true (because the bash monitor is alive)
+// and bounce with "Release pipeline already running for X" until the monitor
+// times out 4h later. Reap them at boot.
+async function reapOrphanReleases(): Promise<void> {
+  try {
+    const { listJobs, markDone } = await import('./lib/jobs/job-storage');
+    const { db, schema } = await import('./lib/db');
+    const { exec } = await import('./lib/shared/shell');
+    const { eq } = await import('drizzle-orm');
+
+    const candidates = listJobs().filter(j => j.kind === 'release' && j.finishedAt === null);
+    for (const job of candidates) {
+      // Treat as orphan only when there are no live child steps. If a child
+      // step is still running, the release is genuinely in-flight and the
+      // probe sweep / completion hooks will finalize it.
+      const hasLiveChild = listJobs().some(j =>
+        j.releaseId === job.id && j.id !== job.id && j.finishedAt === null
+      );
+      if (hasLiveChild) continue;
+
+      // No child step ever ran AND lock is either absent, owned by this
+      // release, or stuck on the `${project}-release-pending` placeholder
+      // (the failed handoff seen when the start-release flow lost its
+      // second `acquireLock` against self-heal grace). Anything else means
+      // a different release legitimately owns the lock.
+      const lockRow = db.select().from(schema.pipelineLocks).where(eq(schema.pipelineLocks.project, job.project)).get();
+      const placeholderId = `${job.project}-release-pending`;
+      const lockedByThisRelease = !!lockRow && lockRow.lockedByJobId === job.id;
+      const lockedByPlaceholder = !!lockRow && lockRow.lockedByJobId === placeholderId;
+      const ownsOrPlaceholder = !lockRow || lockedByThisRelease || lockedByPlaceholder;
+      if (!ownsOrPlaceholder) continue;
+
+      try {
+        await exec('pm2', ['stop', job.id, '--silent'], { timeout: 5000 });
+        await exec('pm2', ['delete', job.id, '--silent'], { timeout: 5000 });
+      } catch { /* may not be in PM2 */ }
+
+      // Release the lock if this orphan owns it (or it's stuck on the
+      // unfinished placeholder).
+      if (lockedByThisRelease || lockedByPlaceholder) {
+        try { db.delete(schema.pipelineLocks).where(eq(schema.pipelineLocks.project, job.project)).run(); } catch {}
+      }
+
+      try {
+        await markDone(job, -1);
+        console.log(`[boot] reaped orphan release ${job.id} (orchestrator died — no child steps, no lock)`);
+      } catch (err) {
+        console.error(`[boot] failed to reap orphan release ${job.id}:`, err);
+      }
+    }
+  } catch (err) {
+    console.error('[boot] reapOrphanReleases failed:', err);
+  }
+}
+
 // One-shot backfill: populate the new `verdict` column for historical review
 // jobs whose log files are still on disk. Jobs whose logs have already been
 // pruned are irrecoverable and are left as null — they counted as parseFailed
@@ -314,6 +373,7 @@ export async function registerNode(): Promise<void> {
   await migrateLegacyFileWorkflowFlags();
   void backfillVerdicts();
   void reapAbandonedInlineJobs();
+  void reapOrphanReleases();
   void drainBootRecoveryWork();
   void reinstallAgents();
 

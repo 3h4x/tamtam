@@ -134,6 +134,26 @@ export function releaseLock(projectName: string, jobId: string): void {
   }
 }
 
+/**
+ * Force-overwrite the lock to a new holder, bypassing the existing-holder
+ * check. Used by the release flow to upgrade the placeholder lock acquired
+ * before `createReleaseJob` to the real release-job ID.
+ *
+ * Plain `acquireLock` can't do this: its self-heal path keeps the placeholder
+ * alive (no matching jobs row + within 60s grace), and the existing-holder
+ * branch then returns acquired=false. The release would silently leak.
+ */
+export function reassignLock(projectName: string, newJobId: string): void {
+  const now = Date.now() / 1000;
+  db.insert(schema.pipelineLocks)
+    .values({ project: projectName, lockedByJobId: newJobId, acquiredAt: now })
+    .onConflictDoUpdate({
+      target: schema.pipelineLocks.project,
+      set: { lockedByJobId: newJobId, acquiredAt: now },
+    })
+    .run();
+}
+
 async function drainPendingReleaseAsync(projectName: string): Promise<void> {
   try {
     const { drainProjectRecoveryWork } = await import('./recovery-drain');

@@ -92,6 +92,8 @@ describe('startRelease — release pipeline entry decision tree', () => {
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
+      releaseLock: vi.fn(),
+      reassignLock: vi.fn(),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
       getLock: vi.fn().mockReturnValue(null),
     }));
@@ -279,6 +281,8 @@ describe('startRelease — release pipeline entry decision tree', () => {
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
+      releaseLock: vi.fn(),
+      reassignLock: vi.fn(),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
       getLock: vi.fn().mockReturnValue(null),
     }));
@@ -445,6 +449,8 @@ describe('startRelease — release pipeline entry decision tree', () => {
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
+      releaseLock: vi.fn(),
+      reassignLock: vi.fn(),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
       getLock: vi.fn().mockReturnValue(null),
     }));
@@ -565,30 +571,17 @@ describe('startRelease — release pipeline entry decision tree', () => {
     }
   });
 
-  it('marks a release lock race with a readable blocked log', async () => {
+  it('returns 409 without creating a job when lock cannot be acquired', async () => {
     vi.resetModules();
-    let createdRelease: JobData | null = null;
-    createJobMock.mockImplementation((project: string, kind: string) => {
-      createdRelease = {
-        id: `${project}-${kind}-rel-id`, project, kind, pid: 0, logPath: '',
-        prompt: null, startedAt: 0, finishedAt: null, exitCode: null, seen: false,
-        durationMs: null, inputTokens: null, outputTokens: null,
-        cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
-        contextMeta: null, userPrompt: null,
-      };
-      return createdRelease;
-    });
-    listJobsMock.mockImplementation(() => createdRelease ? [createdRelease] : []);
     execMock.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === 'git' && args.includes('status')) return gitStatus(' M foo.ts\n');
       if (cmd === 'git' && args.includes('rev-list')) return gitAhead('0');
-      if (cmd === 'pm2' && args[0] === 'start') return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-      if (cmd === 'pm2' && args[0] === 'jlist') return Promise.resolve({ exitCode: 0, stdout: JSON.stringify([{ name: 'proj-release-rel-id', pid: 1234 }]), stderr: '' });
       return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
     });
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: false, blockingJobId: 'proj-release-running' }),
-      getLock: vi.fn().mockReturnValue(null),
+      releaseLock: vi.fn(),
+      reassignLock: vi.fn(),
     }));
 
     const { startRelease: fn } = await import('@/lib/pipeline/start-release');
@@ -599,13 +592,9 @@ describe('startRelease — release pipeline entry decision tree', () => {
       expect(r.status).toBe(409);
       expect(r.blockingJobId).toBe('proj-release-running');
     }
-    expect(markDoneMock).toHaveBeenCalledWith(createdRelease, 1);
-    const releaseForAssert = markDoneMock.mock.calls[0]?.[0] as JobData;
-    expect(releaseForAssert.logPath).toBeTruthy();
-    const log = readFileSync(releaseForAssert.logPath!, 'utf8');
-    expect(log).toContain('release blocked');
-    expect(log).toContain('proj-release-running');
-    expect(log).toContain('# release finished — exit 1');
+    // No job must be created — the race is resolved before touching the DB
+    expect(createJobMock).not.toHaveBeenCalled();
+    expect(markDoneMock).not.toHaveBeenCalled();
   });
 
   it('skips test+review and commits directly when a fresh LGTM review exists with uncommitted changes', async () => {
@@ -822,6 +811,8 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' }) }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
+      releaseLock: vi.fn(),
+      reassignLock: vi.fn(),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
       getLock: vi.fn().mockReturnValue(null),
     }));
@@ -871,6 +862,8 @@ describe('startRelease — release pipeline entry decision tree', () => {
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
+      releaseLock: vi.fn(),
+      reassignLock: vi.fn(),
       getLock: vi.fn().mockReturnValue(null),
     }));
 
@@ -921,6 +914,8 @@ describe('startRelease — release pipeline entry decision tree', () => {
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
+      releaseLock: vi.fn(),
+      reassignLock: vi.fn(),
       getLock: vi.fn().mockReturnValue(null),
     }));
 
@@ -967,6 +962,8 @@ describe('startRelease — release pipeline entry decision tree', () => {
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
+      releaseLock: vi.fn(),
+      reassignLock: vi.fn(),
       getLock: vi.fn().mockReturnValue(null),
     }));
 
@@ -1012,6 +1009,8 @@ describe('startRelease — release pipeline entry decision tree', () => {
     vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' }) }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: false, lock: {}, blockingJobId: 'blocking-job-42' }),
+      releaseLock: vi.fn(),
+      reassignLock: vi.fn(),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
       getLock: vi.fn().mockReturnValue(null),
     }));
@@ -1125,6 +1124,8 @@ describe('startRelease — legacy review stamp compatibility', () => {
     vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: vi.fn() }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
+      releaseLock: vi.fn(),
+      reassignLock: vi.fn(),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
       getLock: vi.fn().mockReturnValue(null),
     }));

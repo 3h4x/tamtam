@@ -399,7 +399,7 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
           {entries.length === 0 ? (
             <>
               <span className="text-3xl opacity-30">▷</span>
-              <span>No runs yet — trigger an agent or use the Run button above</span>
+              <span>No runs yet — use the Terminal tab or click 🚀 Release in the header</span>
             </>
           ) : search.trim() ? (
             <>

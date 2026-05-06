@@ -167,7 +167,12 @@ describe('POST /api/projects/by-project/{projectName}/release/abort', () => {
     expect(data.status).toBe('aborted');
     // Finished step is not the running one
     expect(data.killed_job_id).toBeNull();
-    expect(execMock).not.toHaveBeenCalled();
+    // No step-job pm2 calls — but the abort still stops the release's own
+    // bash monitor, so allow exec calls targeting only `release-1`.
+    const stepCalls = execMock.mock.calls.filter((c: unknown[]) =>
+      Array.isArray(c[1]) && (c[1] as string[]).includes('push-1')
+    );
+    expect(stepCalls).toHaveLength(0);
   });
 
   it('does not kill the triggering parent job (releaseJob.parentJobId)', async () => {
@@ -215,5 +220,68 @@ describe('POST /api/projects/by-project/{projectName}/release/abort', () => {
     const data = await res.json();
     expect(data.status).toBe('aborted');
     expect(releaseLockMock).toHaveBeenCalledWith('proj1', 'release-1');
+  });
+
+  it('aborts an orphan release (no lock, but unfinished release row exists)', async () => {
+    getLockMock.mockReturnValue(null);
+    getJobMock.mockReturnValue(null);
+    const orphanRelease = makeJob({ id: 'orphan-1' });
+    listJobsMock.mockReturnValue([orphanRelease]);
+
+    const res = await POST(req(), { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('aborted');
+    expect(data.release_id).toBe('orphan-1');
+    expect(orphanRelease.abortedAt).not.toBeNull();
+    expect(orphanRelease.finishedAt).not.toBeNull();
+    expect(orphanRelease.exitCode).toBe(-3);
+    expect(updateJobMock).toHaveBeenCalledWith(orphanRelease);
+    // Lock not held, so releaseLock must not be called
+    expect(releaseLockMock).not.toHaveBeenCalled();
+    // PM2 stop/delete attempted on the orphan release process itself
+    expect(execMock).toHaveBeenCalledWith('pm2', ['stop', 'orphan-1', '--silent'], expect.any(Object));
+    expect(execMock).toHaveBeenCalledWith('pm2', ['delete', 'orphan-1', '--silent'], expect.any(Object));
+  });
+
+  it('returns no_pipeline when no lock and no orphan release exists', async () => {
+    getLockMock.mockReturnValue(null);
+    getJobMock.mockReturnValue(null);
+    listJobsMock.mockReturnValue([
+      makeJob({ id: 'other-1', kind: 'review', project: 'proj1', finishedAt: null }),
+      makeJob({ id: 'done-rel', kind: 'release', project: 'proj1', finishedAt: 9999 }),
+    ]);
+
+    const res = await POST(req(), { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('no_pipeline');
+    expect(data.detail).toBe('no active pipeline lock');
+    expect(releaseLockMock).not.toHaveBeenCalled();
+  });
+
+  it('ignores orphan releases for other projects', async () => {
+    getLockMock.mockReturnValue(null);
+    getJobMock.mockReturnValue(null);
+    // Release for a different project — must not be picked up
+    listJobsMock.mockReturnValue([
+      makeJob({ id: 'other-proj-rel', kind: 'release', project: 'proj2', finishedAt: null }),
+    ]);
+
+    const res = await POST(req('proj1'), { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.status).toBe('no_pipeline');
+  });
+
+  it('stops the release bash monitor process even when no step job is running', async () => {
+    getLockMock.mockReturnValue(makeLock());
+    const releaseJob = makeJob();
+    getJobMock.mockReturnValue(releaseJob);
+    listJobsMock.mockReturnValue([releaseJob]);
+
+    await POST(req(), { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    expect(execMock).toHaveBeenCalledWith('pm2', ['stop', 'release-1', '--silent'], expect.any(Object));
+    expect(execMock).toHaveBeenCalledWith('pm2', ['delete', 'release-1', '--silent'], expect.any(Object));
   });
 });
