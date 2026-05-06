@@ -82,4 +82,43 @@ describe('client jobs helpers', () => {
       'Failed to sync board item: Internal Server Error',
     );
   });
+
+  it('fetchNotifications returns count and job arrays', async () => {
+    const payload = {
+      count: 2,
+      jobs: [{ id: 'job-1' }, { id: 'job-2' }],
+      runningCount: 1,
+      runningJobs: [{ id: 'job-2' }],
+    };
+    const fetchMock = stubFetch(true, payload);
+    const { fetchNotifications } = await getClientJobs();
+
+    await expect(fetchNotifications()).resolves.toEqual(payload);
+    expect((fetchMock.mock.calls[0] as [string])[0]).toBe('/api/jobs/notifications');
+  });
+
+  it('fetchNotifications throws with status text on failure', async () => {
+    stubFetch(false, {}, 'Service Unavailable');
+    const { fetchNotifications } = await getClientJobs();
+
+    await expect(fetchNotifications()).rejects.toThrow(
+      'Failed to fetch notifications: Service Unavailable',
+    );
+  });
+
+  it('markJobSeen posts to the job seen endpoint and returns status', async () => {
+    const fetchMock = stubFetch(true, { status: 'ok' });
+    const { markJobSeen } = await getClientJobs();
+
+    await expect(markJobSeen('job-42')).resolves.toEqual({ status: 'ok' });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/jobs/job-42/seen', { method: 'POST' });
+  });
+
+  it('markJobSeen throws with status text on failure', async () => {
+    stubFetch(false, {}, 'Not Found');
+    const { markJobSeen } = await getClientJobs();
+
+    await expect(markJobSeen('ghost')).rejects.toThrow('Failed to mark seen: Not Found');
+  });
 });
