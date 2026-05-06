@@ -844,6 +844,74 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(fullPrompt).not.toContain('nonexistent');
   });
 
+  describe('dirty worktree gate', () => {
+    it('rejects with 409 dirty_worktree when count >= threshold', async () => {
+      vi.resetModules();
+      vi.doMock('@/lib/git/dirty-worktree', () => ({
+        getDirtyFileCount: vi.fn().mockResolvedValue(38),
+      }));
+      // Re-apply all the other mocks installed in beforeEach for the new module realm.
+      vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+      vi.doMock('@/lib/agents/pending-agent-run', () => ({
+        enqueueAgentRun: enqueueAgentRunMock,
+        tryClaimAgentStartSlot: tryClaimAgentStartSlotMock,
+        releaseAgentStartSlot: vi.fn(),
+        drainNextAgentRun: drainNextAgentRunMock,
+      }));
+      vi.doMock('@/lib/agents/queued-agent-runs', () => ({ enqueueQueuedAgentRun: enqueueQueuedAgentRunMock }));
+      vi.doMock('@/lib/pipeline/pipeline-lock', () => ({ getLock: getLockMock, isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock }));
+      vi.doMock('@/lib/pipeline/pending-release', () => ({ getPendingRelease: getPendingReleaseMock, drainPendingRelease: drainPendingReleaseMock }));
+      vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+      vi.doMock('@/lib/scheduling/scheduling', () => ({
+        getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: '/tmp/logs' }),
+        getProjectTestConfig: vi.fn().mockReturnValue(null),
+      }));
+      vi.doMock('@/lib/jobs/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock, listJobs: listJobsMock, probeJobStatus: probeJobStatusMock }));
+      vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+      vi.doMock('@/lib/skills/skills', () => ({ SKILLS_DIR: tempSkillsDir, DATA_SKILLS_DIR: join(tempSkillsDir, 'data-skills') }));
+      vi.doMock('@/lib/agents/agent-memory', () => ({
+        getAgentMemoryDir: vi.fn().mockReturnValue('/tmp/tamtam-memory'),
+        ensureAgentMemoryDir: vi.fn(),
+        getAgentMemoryPath: vi.fn().mockReturnValue('/tmp/tamtam-memory/proj1/Test Agent.md'),
+        readAgentMemory: vi.fn().mockReturnValue(null),
+        buildMemoryBlock: vi.fn().mockReturnValue(''),
+      }));
+      settingsMock.dirty_worktree_block_threshold = 20;
+      vi.doMock('@/lib/shared/config', () => ({
+        withBasePrompt: (p: string) => p,
+        getPermissionModeFlag: () => '--dangerously-skip-permissions',
+        getSettings: () => settingsMock,
+      }));
+      vi.doMock('@/lib/shared/job-control', () => ({ runGates: runGatesMock, jobsPausedResult: runGatesMock }));
+      vi.doMock('@/lib/usage/resolve-provider', () => ({ checkCliStartGate: checkCliStartGateMock }));
+
+      const mod = await import('@/app/api/agents/[agentId]/run/route');
+      insertAgent();
+      const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+        method: 'POST',
+        body: JSON.stringify({ prompt: 'do something' }),
+      });
+      const res = await mod.POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+      expect(res.status).toBe(409);
+      const data = await res.json();
+      expect(data.code).toBe('dirty_worktree');
+      expect(data.detail).toContain('38');
+      expect(data.detail).toContain('20');
+      expect(startJobMock).not.toHaveBeenCalled();
+    });
+
+    it('does not block when threshold is 0 (disabled)', async () => {
+      // settingsMock already has dirty_worktree_block_threshold: 0 from beforeEach
+      insertAgent();
+      const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+        method: 'POST',
+        body: JSON.stringify({ prompt: 'do something' }),
+      });
+      const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+      expect(res.status).toBe(200);
+    });
+  });
+
   describe('doc_paths', () => {
     it('prepends doc file content before skills in the prompt', async () => {
       const projDir = mkdtempSync(join(tmpdir(), 'tamtam-docpath-'));
