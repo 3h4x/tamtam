@@ -394,6 +394,8 @@ export async function updateProjectConfig(
     issue_auto_branch?: boolean
     tests_disabled?: boolean
     review_disabled?: boolean
+    review_prompt_addendum?: string
+    fix_prompt_addendum?: string
   }
 ): Promise<{ status: string }> {
   const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/config`, {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { writeProjectFieldYaml, getProjectTestConfig, getProjectPushResult } from '@/lib/scheduling/scheduling';
+import { writeProjectFieldYaml, getProjectTestConfig, getProjectPushResult, getProjectPipelinePrompts } from '@/lib/scheduling/scheduling';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/shared/project-data';
 import { reloadConfig } from '@/lib/shared/config';
 import { installTestSchedule, uninstallTestSchedule, parseTestScheduleToCron } from '@/lib/scheduling/test-scheduler';
@@ -19,6 +19,7 @@ export async function GET(
   const pushResult = getProjectPushResult(projectName);
   const fileConfig = loadFileConfig(projPath);
   const branchCtx = getBranchContext(projPath);
+  const pipelinePrompts = getProjectPipelinePrompts(projectName);
 
   return NextResponse.json({
     project: projectName,
@@ -38,6 +39,8 @@ export async function GET(
     issue_auto_branch: testCfg?.issueAutoBranch ?? true,
     tests_disabled: testCfg?.testsDisabled ?? false,
     review_disabled: testCfg?.reviewDisabled ?? false,
+    review_prompt_addendum: pipelinePrompts.reviewPromptAddendum ?? '',
+    fix_prompt_addendum: pipelinePrompts.fixPromptAddendum ?? '',
     last_push_error: pushResult?.lastPushError ?? null,
     last_push_at: pushResult?.lastPushAt ?? null,
     // Keys whose values currently come from .tamtam/config.yml — limited to the
@@ -106,6 +109,17 @@ export async function PATCH(
     if (body[field] !== undefined) {
       touched = true;
       if (!writeProjectFieldYaml(projectName, field, body[field] ? '1' : '0')) return notFound();
+    }
+  }
+
+  // Pipeline prompt addenda — DB-only. Each developer tunes locally; not
+  // synced to .tamtam/config.yml.
+  const promptFields = ['review_prompt_addendum', 'fix_prompt_addendum'] as const;
+  for (const field of promptFields) {
+    if (body[field] !== undefined) {
+      touched = true;
+      const value = typeof body[field] === 'string' && body[field].trim() ? body[field] : null;
+      if (!writeProjectFieldYaml(projectName, field, value)) return notFound();
     }
   }
 

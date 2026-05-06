@@ -201,12 +201,12 @@ describe('pm2-jobs', () => {
       expect(result).toEqual({ status: 'done', exitCode: -1 });
     });
 
-    it('returns done with -1 for unrecognized pm2 status', async () => {
+    it('returns unknown for unrecognized pm2 status (transient states like launching)', async () => {
       const jlist = JSON.stringify([{ name: 'job-1', pm2_env: { status: 'launching' } }]);
       execMock.mockResolvedValue(makeExecResult(0, jlist));
 
       const result = await getJobStatus('job-1');
-      expect(result).toEqual({ status: 'done', exitCode: -1 });
+      expect(result).toEqual({ status: 'unknown', exitCode: null });
     });
 
     it('returns unknown when jlist throws a parse error', async () => {

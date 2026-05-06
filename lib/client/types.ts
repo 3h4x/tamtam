@@ -143,6 +143,8 @@ export interface ProjectConfig {
   issue_auto_branch?: boolean
   tests_disabled?: boolean
   review_disabled?: boolean
+  review_prompt_addendum?: string
+  fix_prompt_addendum?: string
   last_push_error?: string | null
   last_push_at?: number | null
   file_config?: string[]

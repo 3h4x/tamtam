@@ -25,6 +25,8 @@ export const projects = sqliteTable('projects', {
   issueAutoBranch: integer('issue_auto_branch', { mode: 'boolean' }).default(true),
   lastPushError: text('last_push_error'),
   lastPushAt: real('last_push_at'),
+  reviewPromptAddendum: text('review_prompt_addendum'),
+  fixPromptAddendum: text('fix_prompt_addendum'),
 });
 
 export const jobs = sqliteTable('jobs', {

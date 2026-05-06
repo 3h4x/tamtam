@@ -44,7 +44,9 @@ function createTestDb() {
       pr_workflow_enabled INTEGER DEFAULT 0,
       issue_auto_branch INTEGER DEFAULT 1,
       last_push_error TEXT,
-      last_push_at REAL
+      last_push_at REAL,
+      review_prompt_addendum TEXT,
+      fix_prompt_addendum TEXT
     );
   `);
 

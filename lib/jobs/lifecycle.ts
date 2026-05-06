@@ -974,6 +974,18 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     }
   }
 
+  // When a release meta-job itself completes (via probe, abort, or any path
+  // that calls markDone directly rather than finalizeReleaseJob), ensure the
+  // pipeline lock is released. finalizeReleaseJob already calls releaseLock,
+  // but probeJobStatus can call markDone→runCompletionHooks directly, leaving
+  // the lock orphaned. releaseLock is idempotent — calling it twice is safe.
+  if (job.kind === 'release') {
+    try {
+      const { releaseLock } = await import('@/lib/pipeline/pipeline-lock');
+      releaseLock(job.project, job.id);
+    } catch {}
+  }
+
   // Send notification if an event was triggered
   if (notificationEvent) {
     try {

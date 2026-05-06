@@ -144,7 +144,12 @@ export async function getJobStatus(
   if (pm2Status === 'stopped' || pm2Status === 'errored') {
     return { status: 'done', exitCode: info.pm2_env?.exit_code ?? -1 };
   }
-  return { status: 'done', exitCode: -1 };
+  // Transient states ('launching', 'stopping', 'one-launch-status', etc.) —
+  // the process is neither clearly running nor dead. Fall through to the
+  // process.kill(pid, 0) check in probeJobStatus rather than declaring done
+  // prematurely; a false-positive 'done' for a release job would leave an
+  // orphaned pipeline lock that blocks all subsequent releases.
+  return { status: 'unknown', exitCode: null };
 }
 
 export async function deleteJob(jobId: string): Promise<void> {

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/scheduling';
+import { getImproveConfig, getProjectTestConfig, getProjectPipelinePrompts } from '@/lib/scheduling/scheduling';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { currentParent } from '@/lib/jobs/parent-context';
@@ -19,7 +19,7 @@ export type StartReviewResult =
   | { ok: true; jobId: string; pid: number; logPath: string }
   | { ok: false; status: number; detail: string; blockingJobId?: string };
 
-function loadReviewPrompt(): string {
+function loadReviewPrompt(projectName: string): string {
   let content = '';
   if (existsSync(CODE_REVIEWER_SKILL)) {
     content = readFileSync(CODE_REVIEWER_SKILL, 'utf-8');
@@ -29,6 +29,13 @@ function loadReviewPrompt(): string {
     }
   }
   const { review_verdict_rules } = getSettings();
+  let reviewPromptAddendum: string | null = null;
+  try {
+    reviewPromptAddendum = getProjectPipelinePrompts(projectName).reviewPromptAddendum;
+  } catch { /* test env without DB */ }
+  const addendum = reviewPromptAddendum?.trim()
+    ? '\n\n## Project-specific review guidance\n' + reviewPromptAddendum.trim()
+    : '';
   return content +
     '\n\n---\n\n' +
     'Project: {project}\n' +
@@ -50,7 +57,8 @@ function loadReviewPrompt(): string {
     '\n    Verdict: LGTM\n\n' +
     'If you omit the verdict line, the release pipeline treats the review as ' +
     'NEEDS ATTENTION and runs a fix loop — wasted spend. Always emit one.\n\n' +
-    review_verdict_rules;
+    review_verdict_rules +
+    addendum;
 }
 
 type ReviewScope =
@@ -220,7 +228,7 @@ export async function startProjectReview(
   }
 
   const prompt = withBasePrompt(
-    loadReviewPrompt()
+    loadReviewPrompt(projectName)
       .replace('{project}', projectName)
       .replace('{path}', projPath)
       .replace('{review_scope}', scope.prompt)

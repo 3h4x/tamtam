@@ -184,8 +184,28 @@ export function writeProjectFieldYaml(
     db.update(schema.projects).set({ testsDisabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
   } else if (fieldName === 'review_disabled') {
     db.update(schema.projects).set({ reviewDisabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
+  } else if (fieldName === 'review_prompt_addendum') {
+    db.update(schema.projects).set({ reviewPromptAddendum: value }).where(eq(schema.projects.name, projName)).run();
+  } else if (fieldName === 'fix_prompt_addendum') {
+    db.update(schema.projects).set({ fixPromptAddendum: value }).where(eq(schema.projects.name, projName)).run();
   }
   return true;
+}
+
+export function getProjectPipelinePrompts(projName: string): {
+  reviewPromptAddendum: string | null;
+  fixPromptAddendum: string | null;
+} {
+  const row = db
+    .select()
+    .from(schema.projects)
+    .where(eq(schema.projects.name, projName))
+    .get();
+  if (!row) return { reviewPromptAddendum: null, fixPromptAddendum: null };
+  return {
+    reviewPromptAddendum: row.reviewPromptAddendum ?? null,
+    fixPromptAddendum: row.fixPromptAddendum ?? null,
+  };
 }
 
 export function setProjectPushResult(projName: string, error: string | null): void {
