@@ -96,40 +96,44 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
 
   return (
     <div className="border-b border-border last:border-b-0">
-      <div className="px-3 py-2 grid grid-cols-[16px_minmax(0,1fr)] md:grid-cols-[16px_minmax(0,1fr)_auto] items-start gap-2.5 hover:bg-bg-tertiary/50 transition-colors">
+      <div className="px-3 py-2.5 grid grid-cols-[16px_minmax(0,1fr)] lg:grid-cols-[16px_minmax(0,1fr)_auto] items-start gap-2.5 hover:bg-bg-tertiary/50 transition-colors">
         <span className="mt-0.5 shrink-0 text-accent" title="Open Issue">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
             <path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
             <path fillRule="evenodd" d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z" />
           </svg>
         </span>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 min-w-0">
+        <div className="min-w-0 space-y-1.5">
+          <div className="flex items-start gap-2 min-w-0">
             <button
-              className="min-w-0 text-sm text-text-primary font-medium hover:text-accent text-left cursor-pointer truncate"
+              className="min-w-0 flex-1 text-sm text-text-primary font-medium hover:text-accent text-left cursor-pointer leading-5"
               onClick={() => setExpanded((v) => !v)}
               title={issue.title}
             >
-              {issue.title}
+              <span className="line-clamp-2">{issue.title}</span>
             </button>
-            <span className="hidden sm:inline-flex shrink-0">
-              <Labels labels={issue.labels} limit={3} />
+            <span className="shrink-0 rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-mono text-text-secondary tabular-nums">
+              #{issue.number}
             </span>
           </div>
-          <div className="flex items-center gap-x-2 gap-y-1 mt-1 flex-wrap text-xs text-text-tertiary tabular-nums">
-            <span className="font-mono text-text-secondary">#{issue.number}</span>
+          <div className="flex items-center gap-x-2 gap-y-1 flex-wrap text-xs text-text-tertiary tabular-nums">
             <span className="text-text-tertiary">by <span className="text-text-secondary">{issue.author?.login}</span></span>
             <span title={issue.createdAt}>{formatAgo(new Date(issue.createdAt).getTime() / 1000)}</span>
             {issue.assignees?.length > 0 && (
-              <span className="truncate max-w-[220px]" title={issue.assignees.map((a) => a.login).join(', ')}>
+              <span className="truncate max-w-[240px]" title={issue.assignees.map((a) => a.login).join(', ')}>
                 assigned {issue.assignees.map((a) => a.login).join(', ')}
+              </span>
+            )}
+            {issue.labels.length > 0 && (
+              <span className="min-w-0 flex-1 basis-full sm:basis-auto sm:flex-none">
+                <Labels labels={issue.labels} limit={4} />
               </span>
             )}
           </div>
         </div>
-        <div className="col-start-2 md:col-start-auto flex items-center justify-start md:justify-end gap-1.5 shrink-0 md:max-w-[260px] flex-wrap">
+        <div className="col-start-2 lg:col-start-auto flex items-center justify-start lg:justify-end gap-1.5 shrink-0 flex-wrap lg:max-w-[280px]">
           <button
-            className="px-2 py-1 text-xs text-text-tertiary hover:text-text-secondary cursor-pointer"
+            className="px-2 py-1 text-xs rounded-md text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary cursor-pointer transition-colors"
             onClick={discussInTerminal}
             title="Open a discussion about this issue in the terminal (no branch created)"
           >
