@@ -63,6 +63,15 @@ function visibleStateLabel(s: StepState): string | null {
   return null
 }
 
+function summaryLabel(step: PipelineStep | null, doneCount: number, totalSteps: number): string {
+  if (step) {
+    if (step.state === 'running') return `${step.label} running`
+    if (step.state === 'warning') return `${step.label} needs attention`
+    if (step.state === 'failed') return `${step.label} failed`
+  }
+  return totalSteps > 0 ? `${doneCount}/${totalSteps} done` : 'running'
+}
+
 function stepIcon(s: StepState) {
   if (s === 'done') return <span className="text-[10px] leading-none" aria-hidden>✓</span>
   if (s === 'failed') return <span className="text-[10px] leading-none" aria-hidden>✗</span>
@@ -451,29 +460,45 @@ export function PipelineStrip({
       : summaryStep?.state === 'running'
         ? 'text-accent'
         : 'text-text-tertiary'
+  const summaryText = summaryLabel(summaryStep ?? null, doneCount, totalSteps)
   const stripVisible = !!activeReleaseJob || runningStepKinds.size > 0
   const canAbortRelease = !!activeReleaseJob
 
   if (!stripVisible) return null
 
   return (
-    <div className="mt-3 mb-3 px-3 py-2 rounded-md border border-border bg-bg-secondary flex items-center gap-2 flex-wrap">
-      <div className="flex items-baseline gap-1.5 mr-1 shrink-0">
-        <span className={`text-[10px] uppercase tracking-wider ${summaryTone}`}>pipeline</span>
+    <div className="mt-3 mb-3 px-3 py-2 rounded-md border border-border bg-bg-secondary flex items-center gap-x-2 gap-y-1.5 flex-wrap">
+      <div
+        className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 shrink-0 ${stepChipClass(summaryStep?.state ?? 'pending', !!activeStep)}`}
+        aria-label={`pipeline summary: ${summaryText}`}
+      >
+        <span className="inline-flex items-center justify-center w-3.5 h-3.5 shrink-0">
+          {stepIcon(summaryStep?.state ?? 'pending')}
+        </span>
+        <div className="flex flex-col leading-none">
+          <span className={`text-[9px] uppercase tracking-[0.18em] ${summaryTone}`}>pipeline</span>
+          <span className="text-[11px] font-medium text-text-primary">{summaryText}</span>
+        </div>
+        <span
+          className="ml-1 rounded-sm bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-mono tabular-nums text-current/85"
+          title={`${doneCount} of ${totalSteps} steps complete`}
+        >
+          {doneCount}/{totalSteps}
+        </span>
       </div>
       {steps.map((s, i) => {
         const clickable = !!s.action
         const isCurrent = i === runningStepIdx
         const label = visibleStateLabel(s.state)
-        const chipClass = `inline-flex items-center gap-1.5 px-2 py-1 rounded-md border font-mono text-[11px] font-medium transition-colors min-h-[26px] ${stepChipClass(s.state, isCurrent)} ${isCurrent ? 'font-semibold' : ''}`
+        const chipClass = `inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border font-mono text-[11px] font-medium transition-colors min-h-[28px] ${stepChipClass(s.state, isCurrent)} ${isCurrent ? 'font-semibold' : ''}`
         const chip = (
           <>
             <span className="inline-flex items-center justify-center w-3.5 h-3.5 shrink-0">
               {stepIcon(s.state)}
             </span>
-            <span>{s.label}</span>
+            <span className="text-text-primary">{s.label}</span>
             {label && (
-              <span className="hidden md:inline font-sans text-[10px] font-medium leading-none opacity-80">
+              <span className="font-sans text-[9px] font-medium uppercase tracking-wide opacity-80">
                 {label}
               </span>
             )}
@@ -513,14 +538,11 @@ export function PipelineStrip({
               </button>
             )}
             {i < steps.length - 1 && (
-              <span className={`h-0.5 w-3 rounded-full ${connectorClass(s.state)} transition-colors`} aria-hidden />
+              <span className={`h-0.5 w-4 rounded-full ${connectorClass(s.state)} transition-colors`} aria-hidden />
             )}
           </div>
         )
       })}
-      <span className="ml-2 text-[10px] font-mono text-text-tertiary tabular-nums shrink-0" title={`${doneCount} of ${totalSteps} steps complete`}>
-        {doneCount}/{totalSteps}
-      </span>
       {traceReleaseId && (
         <Link
           href={`/project/${encodeURIComponent(projectName)}/release/${encodeURIComponent(traceReleaseId)}`}

@@ -328,7 +328,7 @@ Checks the push job log for strings from husky, lint-staged, eslint, pre-commit 
 
 The strip renders **only the jobs that actually ran** in the current pipeline chain. There are no placeholder "pending" chips for steps that have not started yet. This means:
 
-- A fresh pipeline with only a `test` job running shows exactly one chip: `test running`.
+- A fresh pipeline with only a `test` job running shows a leading summary chip (`pipeline`, `test running`, `0/1`) followed by the `test` step chip.
 - A pipeline that ran `test → review → fix` with `fix` still running shows three chips in chronological order.
 - Steps that the pipeline bypassed (e.g. review/fix/commit on the short-circuit push path) are simply absent.
 
@@ -355,6 +355,15 @@ This keeps unrelated manual `test` / `review` / `fix` runs out of the strip even
 The strip is visible whenever any pipeline-kind job (`test`, `review`, `fix`, `commit`, `push`, `mark-dod`) has `status='running'`. It disappears as soon as no pipeline job is running.
 
 ### Step chip states
+
+The strip starts with a non-clickable summary chip. It mirrors the most salient state in the visible chain:
+
+- running step present: summary reads `<step> running`
+- warning step present with nothing running: summary reads `<step> needs attention`
+- failed step present with nothing running: summary reads `<step> failed`
+- otherwise: summary falls back to `<done>/<total> done`
+
+The trailing counter in the summary chip always shows `<done>/<total>` for the currently visible steps.
 
 | State | Visual | When |
 |-------|--------|------|

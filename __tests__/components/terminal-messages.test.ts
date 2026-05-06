@@ -98,4 +98,106 @@ describe('TerminalMessages', () => {
     expect(markup).not.toContain('Step 1')
     expect(markup).toContain('shell output')
   })
+
+  it('keeps stored raw command-prefixed failures classified as errors', () => {
+    const markup = renderTerminalMessagesMarkup({
+      history: [
+        { role: 'raw', text: 'git fatal: not a repository' },
+      ],
+    })
+
+    expect(markup).toContain('git fatal: not a repository')
+    expect(markup).toContain('>err<')
+    expect(markup).not.toContain('>cmd<')
+  })
+
+  it('keeps live raw command-prefixed failures classified as errors', () => {
+    const markup = renderTerminalMessagesMarkup({
+      streaming: true,
+      rawBuffer: 'npm ERR! missing script: test',
+      streamBuffer: 'pnpm failed with exit 1',
+      streamIsRaw: true,
+    })
+
+    expect(markup).toContain('npm ERR! missing script: test')
+    expect(markup).toContain('pnpm failed with exit 1')
+    expect(markup).toContain('>err<')
+    expect(markup).not.toContain('>cmd<')
+  })
+
+  it('keeps stored ansi-colored raw failures classified as errors', () => {
+    const markup = renderTerminalMessagesMarkup({
+      history: [
+        { role: 'raw', text: '\u001b[31mgit fatal: not a repository\u001b[39m' },
+      ],
+    })
+
+    expect(markup).toContain('git fatal: not a repository')
+    expect(markup).toContain('>err<')
+    expect(markup).not.toContain('>cmd<')
+  })
+
+  it('keeps live ansi-colored raw buffer failures classified as errors', () => {
+    const markup = renderTerminalMessagesMarkup({
+      streaming: true,
+      rawBuffer: '\u001b[31mnpm ERR! missing script: test\u001b[39m',
+    })
+
+    expect(markup).toContain('npm ERR! missing script: test')
+    expect(markup).toContain('>err<')
+    expect(markup).not.toContain('>cmd<')
+  })
+
+  it('keeps live ansi-colored raw stream failures classified as errors', () => {
+    const markup = renderTerminalMessagesMarkup({
+      streaming: true,
+      streamBuffer: '\u001b[31mpnpm failed with exit 1\u001b[39m',
+      streamIsRaw: true,
+    })
+
+    expect(markup).toContain('pnpm failed with exit 1')
+    expect(markup).toContain('>err<')
+    expect(markup).not.toContain('>cmd<')
+  })
+
+  it('preserves multiline ansi styling for stored raw output without leaking escape codes', () => {
+    const markup = renderTerminalMessagesMarkup({
+      history: [
+        { role: 'raw', text: '\u001b[31mline1\nline2\u001b[39m' },
+      ],
+    })
+
+    expect(markup).toContain('line1')
+    expect(markup).toContain('line2')
+    expect(markup).toContain('style="color:#cc6666"')
+    expect(markup).not.toContain('\u001b[31m')
+    expect(markup).not.toContain('\u001b[39m')
+  })
+
+  it('preserves multiline ansi styling for live raw buffer output without leaking escape codes', () => {
+    const markup = renderTerminalMessagesMarkup({
+      streaming: true,
+      rawBuffer: '\u001b[31mline1\nline2\u001b[39m',
+    })
+
+    expect(markup).toContain('line1')
+    expect(markup).toContain('line2')
+    expect(markup).toContain('style="color:#cc6666"')
+    expect(markup).not.toContain('\u001b[31m')
+    expect(markup).not.toContain('\u001b[39m')
+  })
+
+  it('preserves multiline ansi styling for live raw stream output without leaking escape codes', () => {
+    const markup = renderTerminalMessagesMarkup({
+      streaming: true,
+      streamBuffer: '\u001b[31mline1\nline2\u001b[39m',
+      streamIsRaw: true,
+    })
+
+    expect(markup).toContain('line1')
+    expect(markup).toContain('line2')
+    expect(markup).toContain('style="color:#cc6666"')
+    expect(markup).not.toContain('\u001b[31m')
+    expect(markup).not.toContain('\u001b[39m')
+  })
 })
