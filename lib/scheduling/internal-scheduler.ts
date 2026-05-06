@@ -24,6 +24,9 @@ import { normalizeAgentScheduleOrThrow } from './agent-schedule';
 import { getIssueBranchLock } from '@/lib/shared/project-branch-lock';
 import { getLock } from '@/lib/pipeline/pipeline-lock';
 import { budgetBlockedResult, scheduledBurnRateBlocked } from '@/lib/shared/job-control';
+import { getDirtyFileCount } from '@/lib/git/dirty-worktree';
+import { resolveProjectPath } from '@/lib/shared/project-data';
+import { getSettings } from '@/lib/shared/config';
 import { db, schema } from '@/lib/db';
 import { eq, and, isNotNull, desc } from 'drizzle-orm';
 
@@ -223,6 +226,30 @@ async function fire(entry: ScheduleEntry): Promise<void> {
     // Detection failure shouldn't block runs — fall through and fire normally.
   }
 
+  // Skip scheduled fires when the working tree has accumulated a large pile
+  // of uncommitted changes — agent edits would tangle with WIP and end up in
+  // a surprise commit. Re-arm so the next tick re-checks once the user has
+  // committed/stashed/discarded.
+  try {
+    const dirtyThreshold = getSettings().dirty_worktree_block_threshold;
+    if (dirtyThreshold > 0) {
+      const projPath = resolveProjectPath(entry.project);
+      if (projPath) {
+        const dirtyCount = await getDirtyFileCount(projPath);
+        if (dirtyCount >= dirtyThreshold) {
+          entry.skippedCount += 1;
+          entry.lastSkippedReason = `dirty worktree: ${dirtyCount} files (threshold ${dirtyThreshold})`;
+          console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${entry.lastSkippedReason}`);
+          armNext(entry);
+          shouldRearm = false;
+          return;
+        }
+      }
+    }
+  } catch {
+    // Probe failure shouldn't block runs — fall through.
+  }
+
   entry.lastFireMs = Date.now();
   entry.fireCount += 1;
   const url = `${getBaseUrl()}/api/agents/${entry.agentId}/run`;
@@ -270,6 +297,12 @@ async function fire(entry: ScheduleEntry): Promise<void> {
           return;
         }
         if (detail.includes('issue branch')) {
+          entry.skippedCount += 1;
+          entry.lastSkippedReason = detail;
+          console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${detail}`);
+          return;
+        }
+        if (detail.includes('uncommitted files') || detail.includes('dirty worktree')) {
           entry.skippedCount += 1;
           entry.lastSkippedReason = detail;
           console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${detail}`);
