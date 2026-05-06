@@ -1,4 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { issueBranchName } from '@/lib/pipeline/start-commit';
+
+describe('issueBranchName', () => {
+  it('produces fix/issue-N-slug from a normal title', () => {
+    expect(issueBranchName({ number: 42, title: 'Fix login bug' })).toBe('fix/issue-42-fix-login-bug');
+  });
+
+  it('replaces non-alphanumeric chars with dashes and lowercases', () => {
+    expect(issueBranchName({ number: 7, title: 'Add OAuth2 support (GitHub)' })).toBe('fix/issue-7-add-oauth2-support-github');
+  });
+
+  it('trims leading and trailing dashes from the slug', () => {
+    expect(issueBranchName({ number: 1, title: '---Edge case!---' })).toBe('fix/issue-1-edge-case');
+  });
+
+  it('truncates slug at 40 chars', () => {
+    const longTitle = 'A'.repeat(60);
+    const result = issueBranchName({ number: 5, title: longTitle });
+    const slug = result.replace('fix/issue-5-', '');
+    expect(slug.length).toBeLessThanOrEqual(40);
+  });
+
+  it('omits the slug portion when the title produces an empty slug', () => {
+    expect(issueBranchName({ number: 3, title: '---!!!---' })).toBe('fix/issue-3');
+  });
+
+  it('handles a purely numeric title', () => {
+    expect(issueBranchName({ number: 10, title: '12345' })).toBe('fix/issue-10-12345');
+  });
+});
 
 describe('startProjectCommit', () => {
   let setProjectPushResultMock: ReturnType<typeof vi.fn>;
