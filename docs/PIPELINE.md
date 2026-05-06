@@ -388,11 +388,22 @@ All metrics support a **24h / 7d / 30d / all-time** filter.
 
 The global `/pipeline` view shows all projects in a summary table. Clicking a project name (or using the **Pipeline** button on a project page) opens `/pipeline?project=<name>` — the same page scoped to that project's jobs only.
 
+### Per-project prompt addenda
+
+Each project can define text appended to the standard review and fix prompts via the **Config** tab:
+
+- **Review prompt addendum** — appended after `review_verdict_rules` under a `## Project-specific review guidance` heading. Use to tighten or loosen a single project's rigor without changing global settings.
+- **Fix prompt addendum** — appended to the fix instructions under `## Project-specific fix guidance`. Use to constrain scope (e.g. "minimal diffs only") or signal patterns specific to this codebase.
+
+Both are stored in the `projects` table (`review_prompt_addendum`, `fix_prompt_addendum`) and are DB-only — they do not sync to `.tamtam/config.yml`. Empty/whitespace-only values are a no-op.
+
+The recommended **`agent:review-tuner`** built-in agent reads the last ~20 releases for a project (verdicts, fix iterations, durations) and proposes addenda edits in its run report; the user applies them in the Config tab.
+
 ### Tuning guidance
 
 | Metric | What it tells you | Action |
 |---|---|---|
-| LGTM rate < 50% | Reviews consistently block — rules may be too strict | Loosen `review_verdict_rules` in Settings → Behavior |
+| LGTM rate < 50% | Reviews consistently block — rules may be too strict | Loosen `review_verdict_rules` in Settings → Behavior, or add a per-project `review_prompt_addendum` in the project Config tab |
 | Fix convergence low, hit-cap count high | Recovery loops cannot converge inside the configured review/test cap | Increase `TAMTAM_MAX_STEP_ITERATIONS` (legacy alias: `TAMTAM_MAX_FIX_ITERATIONS`) or adjust the review prompt |
 | `review` p95 > 5 min | Review jobs are slow | Check model choice; consider switching to Haiku for review |
 | Pipeline success < 80% | Releases failing frequently | Check step durations + History tab for the most recent failures |

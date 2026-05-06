@@ -71,6 +71,13 @@
       "when": 1778088203334,
       "tag": "0009_burly_alice",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1778097257075,
+      "tag": "0010_past_steel_serpent",
+      "breakpoints": true
     }
   ]
 }

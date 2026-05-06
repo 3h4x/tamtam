@@ -75,6 +75,8 @@ export function ProjectDetailPage({
   const [issueAutoBranchInput, setIssueAutoBranchInput] = useState(true)
   const [testsDisabledInput, setTestsDisabledInput] = useState(false)
   const [reviewDisabledInput, setReviewDisabledInput] = useState(false)
+  const [reviewPromptAddendumInput, setReviewPromptAddendumInput] = useState('')
+  const [fixPromptAddendumInput, setFixPromptAddendumInput] = useState('')
   const [configSaving, setConfigSaving] = useState(false)
   const [configSaved, setConfigSaved] = useState(false)
 
@@ -160,6 +162,8 @@ export function ProjectDetailPage({
     setIssueAutoBranchInput(data.issue_auto_branch ?? true)
     setTestsDisabledInput(!!data.tests_disabled)
     setReviewDisabledInput(!!data.review_disabled)
+    setReviewPromptAddendumInput(data.review_prompt_addendum ?? '')
+    setFixPromptAddendumInput(data.fix_prompt_addendum ?? '')
   }
 
   const handleCustomAction = async (actionName: string) => {
@@ -415,6 +419,8 @@ export function ProjectDetailPage({
     issue_auto_branch: issueAutoBranchInput,
     tests_disabled: testsDisabledInput,
     review_disabled: reviewDisabledInput,
+    review_prompt_addendum: reviewPromptAddendumInput,
+    fix_prompt_addendum: fixPromptAddendumInput,
   }
 
   const handleSaveConfig = async () => {
@@ -444,7 +450,9 @@ export function ProjectDetailPage({
     configInputs.pr_workflow_enabled !== !!config.pr_workflow_enabled ||
     configInputs.issue_auto_branch !== (config.issue_auto_branch ?? true) ||
     configInputs.tests_disabled !== !!config.tests_disabled ||
-    configInputs.review_disabled !== !!config.review_disabled
+    configInputs.review_disabled !== !!config.review_disabled ||
+    configInputs.review_prompt_addendum !== (config.review_prompt_addendum ?? '') ||
+    configInputs.fix_prompt_addendum !== (config.fix_prompt_addendum ?? '')
   )
 
   const actionsDirty = JSON.stringify(editActions) !== JSON.stringify(customActions)
@@ -625,6 +633,10 @@ export function ProjectDetailPage({
             setTestsDisabledInput={setTestsDisabledInput}
             reviewDisabledInput={reviewDisabledInput}
             setReviewDisabledInput={setReviewDisabledInput}
+            reviewPromptAddendumInput={reviewPromptAddendumInput}
+            setReviewPromptAddendumInput={setReviewPromptAddendumInput}
+            fixPromptAddendumInput={fixPromptAddendumInput}
+            setFixPromptAddendumInput={setFixPromptAddendumInput}
             editActions={editActions}
             setEditActions={setEditActions}
             anyDirty={anyDirty}

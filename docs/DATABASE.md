@@ -44,6 +44,8 @@ Project metadata and per-project pipeline config.
 | `autoPushEnabled` | INTEGER | `false` | Boolean; enables auto-chaining outside of a Release run |
 | `lastPushError` | TEXT | — | nullable; last push failure message |
 | `lastPushAt` | REAL | — | nullable; Unix timestamp of last push |
+| `reviewPromptAddendum` | TEXT | — | nullable; appended to the standard review prompt under "Project-specific review guidance" |
+| `fixPromptAddendum` | TEXT | — | nullable; appended to the standard fix prompt under "Project-specific fix guidance" |
 
 ---
 

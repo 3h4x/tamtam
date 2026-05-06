@@ -25,6 +25,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
       writeProjectFieldYaml: vi.fn().mockReturnValue(true),
       getProjectTestConfig: vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false }),
       getProjectPushResult: vi.fn().mockReturnValue(null),
+      getProjectPipelinePrompts: vi.fn().mockReturnValue({ reviewPromptAddendum: null, fixPromptAddendum: null }),
     }));
     vi.doMock('@/lib/scheduling/test-scheduler', () => ({
       installTestSchedule: vi.fn(),
@@ -106,6 +107,35 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     expect(data.review_disabled).toBe(false);
   });
 
+  it('returns empty review/fix prompt addenda when none set', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.review_prompt_addendum).toBe('');
+    expect(data.fix_prompt_addendum).toBe('');
+  });
+
+  it('surfaces review/fix prompt addenda when set', async () => {
+    vi.resetModules();
+    resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
+    vi.doMock('@/lib/shared/config', () => ({ reloadConfig: vi.fn() }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
+      writeProjectFieldYaml: vi.fn().mockReturnValue(true),
+      getProjectTestConfig: vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null }),
+      getProjectPushResult: vi.fn().mockReturnValue(null),
+      getProjectPipelinePrompts: vi.fn().mockReturnValue({ reviewPromptAddendum: 'Be lenient.', fixPromptAddendum: 'Minimal diffs.' }),
+    }));
+    vi.doMock('@/lib/scheduling/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
+    const { GET: GET2 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
+    const res = await GET2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.review_prompt_addendum).toBe('Be lenient.');
+    expect(data.fix_prompt_addendum).toBe('Minimal diffs.');
+  });
+
   it('returns issue_auto_branch=true by default — Work-on branch provision is on unless explicitly disabled', async () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
@@ -127,6 +157,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
         issueAutoBranch: false,
       }),
       getProjectPushResult: vi.fn().mockReturnValue(null),
+      getProjectPipelinePrompts: vi.fn().mockReturnValue({ reviewPromptAddendum: null, fixPromptAddendum: null }),
     }));
     vi.doMock('@/lib/scheduling/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
     const { GET: GET2 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
@@ -150,6 +181,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
         testsDisabled: true, reviewDisabled: false,
       }),
       getProjectPushResult: vi.fn().mockReturnValue(null),
+      getProjectPipelinePrompts: vi.fn().mockReturnValue({ reviewPromptAddendum: null, fixPromptAddendum: null }),
     }));
     vi.doMock('@/lib/scheduling/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
     const { GET: GET2 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
@@ -174,6 +206,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
         testsDisabled: false, reviewDisabled: true,
       }),
       getProjectPushResult: vi.fn().mockReturnValue(null),
+      getProjectPipelinePrompts: vi.fn().mockReturnValue({ reviewPromptAddendum: null, fixPromptAddendum: null }),
     }));
     vi.doMock('@/lib/scheduling/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
     const { GET: GET2 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
@@ -194,6 +227,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
       writeProjectFieldYaml: vi.fn().mockReturnValue(true),
       getProjectTestConfig: vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: true, autoPushEnabled: true, releaseAfterRun: true }),
       getProjectPushResult: vi.fn().mockReturnValue(null),
+      getProjectPipelinePrompts: vi.fn().mockReturnValue({ reviewPromptAddendum: null, fixPromptAddendum: null }),
     }));
     vi.doMock('@/lib/scheduling/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
     const { GET: GET2 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
@@ -272,6 +306,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
       writeProjectFieldYaml: vi.fn().mockReturnValue(true),
       getProjectTestConfig: vi.fn().mockReturnValue({ testCommand: 'custom test cmd', testCronEnabled: false, testCronSchedule: null }),
       getProjectPushResult: vi.fn().mockReturnValue(null),
+      getProjectPipelinePrompts: vi.fn().mockReturnValue({ reviewPromptAddendum: null, fixPromptAddendum: null }),
     }));
     vi.doMock('@/lib/scheduling/test-scheduler', () => ({
       installTestSchedule: vi.fn(),
@@ -320,6 +355,8 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
       getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
       writeProjectFieldYaml: writeProjectFieldYamlMock,
       getProjectTestConfig: getProjectTestConfigMock,
+      getProjectPushResult: vi.fn().mockReturnValue(null),
+      getProjectPipelinePrompts: vi.fn().mockReturnValue({ reviewPromptAddendum: null, fixPromptAddendum: null }),
     }));
     vi.doMock('@/lib/scheduling/test-scheduler', () => ({
       installTestSchedule: installTestScheduleMock,
@@ -671,6 +708,45 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/missing/config', {
       method: 'PATCH',
       body: JSON.stringify({ auto_push_enabled: true }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'missing' }) });
+    expect(res.status).toBe(404);
+  });
+
+  it('persists review_prompt_addendum text', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ review_prompt_addendum: 'Treat console.log as non-blocker.' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'review_prompt_addendum', 'Treat console.log as non-blocker.');
+  });
+
+  it('clears review_prompt_addendum when whitespace-only', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ review_prompt_addendum: '   \n  ' }),
+    });
+    await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'review_prompt_addendum', null);
+  });
+
+  it('persists fix_prompt_addendum text', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ fix_prompt_addendum: 'Prefer minimal diffs.' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'fix_prompt_addendum', 'Prefer minimal diffs.');
+  });
+
+  it('returns 404 when project not found while writing review_prompt_addendum', async () => {
+    writeProjectFieldYamlMock.mockReturnValue(false);
+    const req = new NextRequest('http://localhost/api/projects/by-project/missing/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ review_prompt_addendum: 'foo' }),
     });
     const res = await PATCH(req, { params: Promise.resolve({ projectName: 'missing' }) });
     expect(res.status).toBe(404);

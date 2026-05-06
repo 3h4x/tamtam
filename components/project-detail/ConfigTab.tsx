@@ -30,6 +30,10 @@ export interface ConfigTabProps {
   setTestsDisabledInput: (v: boolean) => void
   reviewDisabledInput: boolean
   setReviewDisabledInput: (v: boolean) => void
+  reviewPromptAddendumInput: string
+  setReviewPromptAddendumInput: (v: string) => void
+  fixPromptAddendumInput: string
+  setFixPromptAddendumInput: (v: string) => void
 
   editActions: CustomAction[]
   setEditActions: (v: CustomAction[]) => void
@@ -65,6 +69,10 @@ export function ConfigTab({
   setTestsDisabledInput,
   reviewDisabledInput,
   setReviewDisabledInput,
+  reviewPromptAddendumInput,
+  setReviewPromptAddendumInput,
+  fixPromptAddendumInput,
+  setFixPromptAddendumInput,
   editActions,
   setEditActions,
   anyDirty,
@@ -326,6 +334,38 @@ export function ConfigTab({
               </>
             )
           })()}
+        </div>
+
+        {/* Per-project review/fix prompt addenda */}
+        <div className="px-4 py-3 border-b border-border space-y-3">
+          <div>
+            <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="review-prompt-addendum">
+              Review prompt addendum
+            </label>
+            <textarea
+              id="review-prompt-addendum"
+              rows={3}
+              className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
+              value={reviewPromptAddendumInput}
+              onChange={(e) => setReviewPromptAddendumInput(e.target.value)}
+              placeholder="e.g. Treat console.log as a non-blocker for this CLI tool."
+            />
+            <p className="text-xs text-text-tertiary mt-1">Appended to the standard review prompt. Empty = use defaults.</p>
+          </div>
+          <div>
+            <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="fix-prompt-addendum">
+              Fix prompt addendum
+            </label>
+            <textarea
+              id="fix-prompt-addendum"
+              rows={3}
+              className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
+              value={fixPromptAddendumInput}
+              onChange={(e) => setFixPromptAddendumInput(e.target.value)}
+              placeholder="e.g. Prefer minimal diffs; do not refactor unrelated code."
+            />
+            <p className="text-xs text-text-tertiary mt-1">Appended to the standard fix prompt. Empty = use defaults.</p>
+          </div>
         </div>
 
         {/* Trigger cadence */}

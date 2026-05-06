@@ -1,5 +1,5 @@
 import { join } from 'path';
-import { getImproveConfig } from '@/lib/scheduling/scheduling';
+import { getImproveConfig, getProjectPipelinePrompts } from '@/lib/scheduling/scheduling';
 import { getSettings, getPermissionModeFlag, getPipelineModel } from '@/lib/shared/config';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
@@ -38,6 +38,14 @@ export async function startFixFromJob(sourceJobId: string): Promise<StartFixResu
     findingsBlock = '...(truncated)...\n' + findingsBlock.slice(-12000);
   }
 
+  let fixPromptAddendum: string | null = null;
+  try {
+    fixPromptAddendum = getProjectPipelinePrompts(projectName).fixPromptAddendum;
+  } catch { /* test env without DB */ }
+  const fixAddendum = fixPromptAddendum?.trim()
+    ? `\n\n## Project-specific fix guidance\n${fixPromptAddendum.trim()}`
+    : '';
+
   let prompt: string;
   if (resumeSessionId) {
     if (findingsBlock) {
@@ -49,13 +57,13 @@ ${findingsBlock}
 
 ${FIX_OUTPUT_CONTRACT}
 
-Edit the files directly. Do not commit — just make the code changes.`;
+Edit the files directly. Do not commit — just make the code changes.${fixAddendum}`;
     } else {
       prompt = `Please fix ALL the issues identified in your review above. Apply the changes directly to the codebase.
 
 ${FIX_OUTPUT_CONTRACT}
 
-Do not commit — just make the code changes.`;
+Do not commit — just make the code changes.${fixAddendum}`;
     }
   } else {
     if (!findingsBlock) return { ok: false, status: 400, detail: 'No output to fix from' };
@@ -67,7 +75,7 @@ ${findingsBlock}
 
 Please fix ALL the issues identified above. Apply the changes directly to the codebase.
 ${FIX_OUTPUT_CONTRACT}
-Do not commit — just make the code changes.
+Do not commit — just make the code changes.${fixAddendum}
 `;
   }
 
