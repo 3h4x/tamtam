@@ -143,6 +143,7 @@ describe('POST /api/agents/{agentId}/run', () => {
       launchagent_prefix: 'com.tamtam',
       base_prompt: '',
       permission_mode: 'bypassPermissions',
+      dirty_worktree_block_threshold: 0,
     };
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
@@ -205,6 +206,9 @@ describe('POST /api/agents/{agentId}/run', () => {
     }));
     vi.doMock('@/lib/usage/resolve-provider', () => ({
       checkCliStartGate: checkCliStartGateMock,
+    }));
+    vi.doMock('@/lib/git/dirty-worktree', () => ({
+      getDirtyFileCount: vi.fn().mockResolvedValue(0),
     }));
 
     const mod = await import('@/app/api/agents/[agentId]/run/route');

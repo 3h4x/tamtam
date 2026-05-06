@@ -57,6 +57,8 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     pipeline_model_fix: '',
     pipeline_model_dod: '',
     pipeline_model_commit: '',
+    dirty_worktree_block_threshold: 20,
+    incremental_review_enabled: true,
     review_retry_on_parse_failure: true,
     budget_block_runs_enabled: false,
     budget_subscription_providers: ['claude', 'codex'],

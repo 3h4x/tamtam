@@ -270,6 +270,8 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   pipeline_model_fix: '',
   pipeline_model_dod: '',
   pipeline_model_commit: '',
+  dirty_worktree_block_threshold: '20',
+  incremental_review_enabled: 'true',
 }
 
 const FIELD_BASE = 'w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors'

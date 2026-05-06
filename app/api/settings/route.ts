@@ -99,6 +99,8 @@ const SETTING_KEYS = [
   'pipeline_model_fix',
   'pipeline_model_dod',
   'pipeline_model_commit',
+  'dirty_worktree_block_threshold',
+  'incremental_review_enabled',
 ] as const;
 
 function serializeSettingValue(key: string, value: unknown): string {
