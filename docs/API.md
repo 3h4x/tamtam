@@ -37,7 +37,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 - `changes` — Uncommitted changes summary (GET, returns `defaultBranch`/`branch`/`ahead`/`behind`/`files`); git pull with strategy (POST: ff-only/merge/rebase)
 - `changes/diff` — Full git diff content (GET)
 - `checkout-default` — Switch to default branch; refuses if uncommitted changes (POST → `{ status: 'switched'|'already-on-branch', branch }`)
-- `push` — Push changes to git (POST)
+- `push` — Push changes to git (POST). Accepts optional JSON body `{ commit?: boolean, release_id?: string }`: `commit: true` runs the commit step first, and `release_id` keeps manual retry/continue pushes linked to an active release chain
 - `create-pr` — Push current branch + create GitHub PR (POST → `{ url }`); refuses on default branch
 - `release` — Trigger release pipeline (POST)
 - `release/[releaseId]` — Release detail: meta-job + ordered pipeline step jobs with verdicts and log excerpts (GET)
@@ -57,7 +57,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 ## Jobs / Runs
 
 - `/api/jobs` — All runs across projects (GET)
-- `/api/jobs/[jobId]` — Job detail (GET, DELETE)
+- `/api/jobs/[jobId]` — Job detail (GET, DELETE). `GET` returns parsed log text for normal jobs, but returns the raw aggregated `log` for `release` jobs because release logs mix plain shell output with NDJSON child streams
 - `/api/jobs/[jobId]/logs` — Job log content (GET)
 - `/api/jobs/[jobId]/board-sync` — Manually sync a finished root job to the GitHub project board (POST); rejects running jobs, requires board sync configured, surfaces GitHub failures instead of swallowing them
 - `/api/jobs/[jobId]/rerun` — Re-run a job (POST)

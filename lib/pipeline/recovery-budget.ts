@@ -19,5 +19,8 @@ export function getFixPushAttemptCap(): number {
 }
 
 export function getStepWindowSeconds(): number {
-  return parsePositiveInt(process.env.TAMTAM_FIX_WINDOW_SECONDS, DEFAULT_STEP_WINDOW_SECONDS);
+  return parsePositiveInt(
+    process.env.TAMTAM_STEP_WINDOW_SECONDS ?? process.env.TAMTAM_FIX_WINDOW_SECONDS,
+    DEFAULT_STEP_WINDOW_SECONDS,
+  );
 }

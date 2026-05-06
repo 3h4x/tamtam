@@ -466,4 +466,184 @@ setInterval(() => {}, 1000);
       }
     }
   });
+
+  it('retries once when codex exits 1 with no stderr after streaming output (transient crash)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
+    tempDirs.push(dir);
+    const fakeCodex = join(dir, 'codex');
+    const attemptFile = join(dir, 'attempt');
+    // First invocation streams a delta then exits 1 with no stderr (the
+    // "transient crash" signature). Second invocation succeeds normally.
+    await writeFile(fakeCodex, `#!/usr/bin/env node
+const fs = require('fs');
+const path = ${JSON.stringify(attemptFile)};
+let attempt = 0;
+try { attempt = parseInt(fs.readFileSync(path, 'utf8'), 10) || 0; } catch {}
+fs.writeFileSync(path, String(attempt + 1));
+if (attempt === 0) {
+  console.log(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'partial' }] } }));
+  console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 3, output_tokens: 1, cached_input_tokens: 2 } } } }));
+  process.exit(1);
+}
+console.log(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'recovered' }] } }));
+console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 5, output_tokens: 2, cached_input_tokens: 1 } } } }));
+`);
+    await chmod(fakeCodex, 0o755);
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--output-format',
+      'stream-json',
+      '--model',
+      'sonnet',
+    ], {
+      ...process.env,
+      CODEX_BIN: fakeCodex,
+    });
+
+    expect(parseInt(await readFile(attemptFile, 'utf8'), 10)).toBe(2);
+    expect(result.code).toBe(0);
+    const lines = result.stdout.trim().split(/\r?\n/).map((l) => JSON.parse(l));
+    const finals = lines.filter((l) => l.type === 'result');
+    expect(finals).toHaveLength(1);
+    expect(finals[0].is_error).toBe(false);
+    expect(finals[0].modelUsage['gpt-5.4']).toMatchObject({
+      inputTokens: 5,
+      outputTokens: 3,
+      cacheReadInputTokens: 3,
+    });
+    const text = lines
+      .filter((l) => l.type === 'stream_event' && l.event?.type === 'content_block_delta')
+      .map((l) => l.event.delta.text)
+      .join('');
+    expect(text).toContain('partial');
+    expect(text).toContain('retrying once');
+    expect(text).toContain('recovered');
+    expect(finals[0].duration_ms).toBeGreaterThanOrEqual(0);
+  });
+
+  it('does not retry when codex exits 1 with stderr (real failure)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
+    tempDirs.push(dir);
+    const fakeCodex = join(dir, 'codex');
+    const attemptFile = join(dir, 'attempt');
+    await writeFile(fakeCodex, `#!/usr/bin/env node
+const fs = require('fs');
+const path = ${JSON.stringify(attemptFile)};
+let attempt = 0;
+try { attempt = parseInt(fs.readFileSync(path, 'utf8'), 10) || 0; } catch {}
+fs.writeFileSync(path, String(attempt + 1));
+console.log(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'oops' }] } }));
+process.stderr.write('apply_patch verification failed\\n');
+process.exit(1);
+`);
+    await chmod(fakeCodex, 0o755);
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--output-format',
+      'stream-json',
+      '--model',
+      'sonnet',
+    ], {
+      ...process.env,
+      CODEX_BIN: fakeCodex,
+    });
+
+    expect(parseInt(await readFile(attemptFile, 'utf8'), 10)).toBe(1);
+    const lines = result.stdout.trim().split(/\r?\n/).map((l) => JSON.parse(l));
+    const final = lines.find((l) => l.type === 'result');
+    expect(final.is_error).toBe(true);
+    expect(final.result).toContain('apply_patch verification failed');
+  });
+
+  it('does not duplicate an already-streamed prefix when the retry restarts the answer', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
+    tempDirs.push(dir);
+    const fakeCodex = join(dir, 'codex');
+    const attemptFile = join(dir, 'attempt');
+    await writeFile(fakeCodex, `#!/usr/bin/env node
+const fs = require('fs');
+const path = ${JSON.stringify(attemptFile)};
+let attempt = 0;
+try { attempt = parseInt(fs.readFileSync(path, 'utf8'), 10) || 0; } catch {}
+fs.writeFileSync(path, String(attempt + 1));
+if (attempt === 0) {
+  console.log(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hello' }] } }));
+  process.exit(1);
+}
+console.log(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hello world' }] } }));
+console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 7, output_tokens: 2 } } } }));
+`);
+    await chmod(fakeCodex, 0o755);
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--output-format',
+      'stream-json',
+      '--model',
+      'sonnet',
+    ], {
+      ...process.env,
+      CODEX_BIN: fakeCodex,
+    });
+
+    expect(parseInt(await readFile(attemptFile, 'utf8'), 10)).toBe(2);
+    expect(result.code).toBe(0);
+    const lines = result.stdout.trim().split(/\r?\n/).map((l) => JSON.parse(l));
+    const text = lines
+      .filter((l) => l.type === 'stream_event' && l.event?.type === 'content_block_delta')
+      .map((l) => l.event.delta.text)
+      .join('');
+    expect(text).toContain('Hello');
+    expect(text).toContain('retrying once');
+    expect(text).toContain(' world');
+    expect(text.match(/Hello/g)?.length).toBe(1);
+    expect(text).not.toContain('HelloHello');
+  });
+
+  it('exits 0 when the retry cleanly replays the exact same answer', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
+    tempDirs.push(dir);
+    const fakeCodex = join(dir, 'codex');
+    const attemptFile = join(dir, 'attempt');
+    await writeFile(fakeCodex, `#!/usr/bin/env node
+const fs = require('fs');
+const path = ${JSON.stringify(attemptFile)};
+let attempt = 0;
+try { attempt = parseInt(fs.readFileSync(path, 'utf8'), 10) || 0; } catch {}
+fs.writeFileSync(path, String(attempt + 1));
+console.log(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hello' }] } }));
+if (attempt === 0) {
+  process.exit(1);
+}
+console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 5, output_tokens: 1 } } } }));
+`);
+    await chmod(fakeCodex, 0o755);
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--output-format',
+      'stream-json',
+      '--model',
+      'sonnet',
+    ], {
+      ...process.env,
+      CODEX_BIN: fakeCodex,
+    });
+
+    expect(parseInt(await readFile(attemptFile, 'utf8'), 10)).toBe(2);
+    expect(result.code).toBe(0);
+    const lines = result.stdout.trim().split(/\r?\n/).map((l) => JSON.parse(l));
+    const finals = lines.filter((l) => l.type === 'result');
+    expect(finals).toHaveLength(1);
+    expect(finals[0].is_error).toBe(false);
+    const text = lines
+      .filter((l) => l.type === 'stream_event' && l.event?.type === 'content_block_delta')
+      .map((l) => l.event.delta.text)
+      .join('');
+    expect(text).toContain('Hello');
+    expect(text).toContain('retrying once');
+    expect(text.match(/Hello/g)?.length).toBe(1);
+  });
 });

@@ -162,10 +162,19 @@ export function createJob(
     timestamp += 1;
     jobId = `${project}-${kind}-${timestamp}`;
   }
-  // Auto-link to the active release so every pipeline step carries releaseId.
-  // Release jobs themselves get releaseId = their own id, set explicitly by
-  // start-release.ts after creation (kind check here avoids circular reference).
-  const autoReleaseId = kind !== 'release' ? (findActiveReleaseJob(project)?.id ?? null) : null;
+  const resolvedParentJobId = parentJobId ?? currentParent();
+  let autoReleaseId: string | null = null;
+  // Only jobs started from an existing parent chain inherit release scope.
+  // Ambient "there happens to be an active release for this project" is not
+  // strong enough: unrelated manual test/review/fix jobs must stay outside the
+  // pipeline strip and release trace unless the caller explicitly starts them
+  // from a release-linked parent.
+  if (kind !== 'release' && resolvedParentJobId) {
+    const parent = getJob(resolvedParentJobId);
+    if (parent?.project === project) {
+      autoReleaseId = parent.kind === 'release' ? parent.id : parent.releaseId ?? null;
+    }
+  }
   const job: JobData = {
     id: jobId,
     project,
@@ -185,7 +194,7 @@ export function createJob(
     sessionId: null,
     contextMeta: contextMeta ?? null,
     userPrompt: userPrompt ?? null,
-    parentJobId: parentJobId ?? currentParent(),
+    parentJobId: resolvedParentJobId,
     ghIssueNumber: ghIssueNumber ?? null,
     ghIssueRepo: ghIssueRepo ?? null,
     ghIssueTitle: ghIssueTitle ?? null,

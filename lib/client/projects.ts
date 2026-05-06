@@ -263,12 +263,15 @@ export async function fetchProjectLogs(projectName: string): Promise<{ logs: Log
 // the "Push to PR" button when the branch already has an open PR).
 export async function pushProject(
   projectName: string,
-  opts: { commit?: boolean } = {},
+  opts: { commit?: boolean; releaseId?: string | null } = {},
 ): Promise<{ status: string; job_id: string }> {
   const init: RequestInit = { method: 'POST' }
-  if (opts.commit) {
+  if (opts.commit || opts.releaseId) {
     init.headers = { 'Content-Type': 'application/json' }
-    init.body = JSON.stringify({ commit: true })
+    init.body = JSON.stringify({
+      ...(opts.commit ? { commit: true } : {}),
+      ...(opts.releaseId ? { release_id: opts.releaseId } : {}),
+    })
   }
   const response = await fetch(`${API_BASE}/by-project/${projectName}/push`, init)
   if (!response.ok) {

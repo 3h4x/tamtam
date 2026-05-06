@@ -21,6 +21,7 @@ interface MockJob {
   finished_at: number | null;
   verdict?: string;
   session_id?: string;
+  release_id?: string | null;
 }
 
 interface FlowScenario {
@@ -125,7 +126,7 @@ test.describe('Release flow — pipeline strip visibility', () => {
       totalChanges: 0, reviewed: true, unpushed: 0, jobs: [],
     });
     await page.goto(`/project/${project}/terminal`);
-    await expect(page.locator('text=/test.*→.*review.*→.*commit.*→.*push/i')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0);
   });
 
   test('shows pipeline strip while a test job is running', async ({ page }) => {
@@ -138,8 +139,8 @@ test.describe('Release flow — pipeline strip visibility', () => {
       }],
     });
     await page.goto(`/project/${project}/terminal`);
-    const strip = page.locator('text=/test.*→.*review.*→.*commit.*→.*push/i').first();
-    await expect(strip).toBeVisible();
+    await expect(page.getByTitle(/tests running/i).first()).toBeVisible();
+    await expect(page.locator('[aria-label^="review:"]')).toHaveCount(0);
   });
 
   test('shows pipeline strip while a push job is running', async ({ page }) => {
@@ -149,101 +150,94 @@ test.describe('Release flow — pipeline strip visibility', () => {
       jobs: [
         {
           id: 'demoproj-review-ok', project: 'demoproj', kind: 'review',
-          status: 'done', exit_code: 0, verdict: 'LGTM',
+          status: 'done', exit_code: 0, verdict: 'LGTM', release_id: 'rel-1',
           started_at: now - 120, finished_at: now - 60,
         },
         {
           id: 'demoproj-push-running', project: 'demoproj', kind: 'push',
-          status: 'running', exit_code: null,
+          status: 'running', exit_code: null, release_id: 'rel-1',
           started_at: now - 10, finished_at: null,
         },
       ],
     });
     await page.goto(`/project/${project}/terminal`);
-    const strip = page.locator('text=/test.*→.*review.*→.*commit.*→.*push/i').first();
-    await expect(strip).toBeVisible();
+    await expect(page.getByTitle(/LGTM/i).first()).toBeVisible();
+    await expect(page.getByTitle(/push in progress/i).first()).toBeVisible();
   });
 
-  test('shows pipeline strip when there is a last_push_error, even with no running jobs', async ({ page }) => {
+  test('hides pipeline strip when there is a last_push_error but no running pipeline', async ({ page }) => {
     const project = await mockFlow(page, {
       totalChanges: 4, reviewed: true, unpushed: 0, testCommand: 'pnpm test',
       lastPushError: 'Commit failed: pre-commit hook rejected',
       jobs: [],
     });
     await page.goto(`/project/${project}/terminal`);
-    const strip = page.locator('text=/test.*→.*review.*→.*commit.*→.*push/i').first();
-    await expect(strip).toBeVisible();
+    await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0);
   });
 });
 
 test.describe('Release flow — review verdict handling', () => {
-  test('LGTM + commit-hook failure keeps review ✓ and shows commit ✗', async ({ page }) => {
-    const now = sec();
-    const project = await mockFlow(page, {
-      totalChanges: 4, reviewed: false, unpushed: 0, testCommand: 'pnpm test',
-      lastPushError: 'Commit failed: husky pre-commit hook rejected the commit\neslint --fix: 2 errors',
-      jobs: [
-        {
-          id: 'demoproj-review-lgtm', project: 'demoproj', kind: 'review',
-          status: 'done', exit_code: 0, verdict: 'LGTM',
-          started_at: now - 120, finished_at: now - 60,
-          session_id: 'sess-lgtm',
-        },
-      ],
-    });
-    await page.goto(`/project/${project}/terminal`);
-    // Review keeps the LGTM hint (with the "commit blocked" nudge).
-    await expect(page.getByTitle(/commit blocked by pre-commit hook/i).first()).toBeVisible();
-    // Commit step carries the explicit error.
-    await expect(page.getByTitle(/Commit failed.*pre-commit/i).first()).toBeVisible();
-  });
-
-  test('LGTM + push in flight keeps review ✓ with "in progress" hint', async ({ page }) => {
+  test('LGTM review stays visible while a linked push is running', async ({ page }) => {
     const now = sec();
     const project = await mockFlow(page, {
       totalChanges: 4, reviewed: false, unpushed: 0, testCommand: 'pnpm test',
       jobs: [
         {
           id: 'demoproj-review-lgtm2', project: 'demoproj', kind: 'review',
-          status: 'done', exit_code: 0, verdict: 'LGTM',
+          status: 'done', exit_code: 0, verdict: 'LGTM', release_id: 'rel-2',
           started_at: now - 120, finished_at: now - 60,
           session_id: 'sess-lgtm2',
         },
         {
           id: 'demoproj-push-mid', project: 'demoproj', kind: 'push',
-          status: 'running', exit_code: null,
+          status: 'running', exit_code: null, release_id: 'rel-2',
           started_at: now - 5, finished_at: null,
         },
       ],
     });
     await page.goto(`/project/${project}/terminal`);
-    await expect(page.getByTitle(/commit & push in progress/i).first()).toBeVisible();
+    await expect(page.getByTitle(/LGTM/i).first()).toBeVisible();
+    await expect(page.getByTitle(/push in progress/i).first()).toBeVisible();
   });
 
-  test('DO NOT SHIP verdict marks review as failed', async ({ page }) => {
+  test('DO NOT SHIP verdict stays visible while a linked fix is running', async ({ page }) => {
     const now = sec();
     const project = await mockFlow(page, {
       totalChanges: 2, reviewed: false, unpushed: 0, testCommand: 'pnpm test',
-      jobs: [{
-        id: 'demoproj-review-no', project: 'demoproj', kind: 'review',
-        status: 'done', exit_code: 0, verdict: 'DO NOT SHIP',
-        started_at: now - 120, finished_at: now - 60,
-        session_id: 'sess-no',
-      }],
+      jobs: [
+        {
+          id: 'demoproj-review-no', project: 'demoproj', kind: 'review',
+          status: 'done', exit_code: 0, verdict: 'DO NOT SHIP', release_id: 'rel-3',
+          started_at: now - 120, finished_at: now - 60,
+          session_id: 'sess-no',
+        },
+        {
+          id: 'demoproj-fix-no', project: 'demoproj', kind: 'fix',
+          status: 'running', exit_code: null, release_id: 'rel-3',
+          started_at: now - 5, finished_at: null,
+        },
+      ],
     });
     await page.goto(`/project/${project}/terminal`);
     await expect(page.getByTitle(/DO NOT SHIP/i).first()).toBeVisible();
   });
 
-  test('review job with non-zero exit shows "review job failed"', async ({ page }) => {
+  test('review job with non-zero exit stays visible while a linked fix is running', async ({ page }) => {
     const now = sec();
     const project = await mockFlow(page, {
       totalChanges: 2, reviewed: false, unpushed: 0, testCommand: 'pnpm test',
-      jobs: [{
-        id: 'demoproj-review-crash', project: 'demoproj', kind: 'review',
-        status: 'done', exit_code: 137,
-        started_at: now - 120, finished_at: now - 60,
-      }],
+      jobs: [
+        {
+          id: 'demoproj-review-crash', project: 'demoproj', kind: 'review',
+          status: 'done', exit_code: 137, release_id: 'rel-4',
+          started_at: now - 120, finished_at: now - 60,
+        },
+        {
+          id: 'demoproj-fix-crash', project: 'demoproj', kind: 'fix',
+          status: 'running', exit_code: null, release_id: 'rel-4',
+          started_at: now - 5, finished_at: null,
+        },
+      ],
     });
     await page.goto(`/project/${project}/terminal`);
     await expect(page.getByTitle(/review job failed/i).first()).toBeVisible();
@@ -256,15 +250,21 @@ test.describe('Release flow — review verdict handling', () => {
 
   test('review with LGTM + rationale (em-dash) shows ✓ LGTM', async ({ page }) => {
     const now = sec();
-    // totalChanges>0 so the strip stays up — LGTM but awaiting commit/push.
     const project = await mockFlow(page, {
       totalChanges: 2, reviewed: true, unpushed: 0, testCommand: 'pnpm test',
-      jobs: [{
-        id: 'demoproj-review-lgtm-emdash', project: 'demoproj', kind: 'review',
-        status: 'done', exit_code: 0, verdict: 'LGTM',
-        started_at: now - 120, finished_at: now - 60,
-        session_id: 'sess-lgtm-emdash',
-      }],
+      jobs: [
+        {
+          id: 'demoproj-review-lgtm-emdash', project: 'demoproj', kind: 'review',
+          status: 'done', exit_code: 0, verdict: 'LGTM', release_id: 'rel-5',
+          started_at: now - 120, finished_at: now - 60,
+          session_id: 'sess-lgtm-emdash',
+        },
+        {
+          id: 'demoproj-push-lgtm-emdash', project: 'demoproj', kind: 'push',
+          status: 'running', exit_code: null, release_id: 'rel-5',
+          started_at: now - 5, finished_at: null,
+        },
+      ],
     });
     await page.goto(`/project/${project}/terminal`);
     // Look for the canonical LGTM hint from the pipeline-strip review step.
@@ -280,12 +280,19 @@ test.describe('Release flow — review verdict handling', () => {
     const now = sec();
     const project = await mockFlow(page, {
       totalChanges: 2, reviewed: false, unpushed: 0, testCommand: 'pnpm test',
-      jobs: [{
-        id: 'demoproj-review-unknown', project: 'demoproj', kind: 'review',
-        status: 'done', exit_code: 0, // verdict intentionally undefined
-        started_at: now - 120, finished_at: now - 60,
-        session_id: 'sess-unknown',
-      }],
+      jobs: [
+        {
+          id: 'demoproj-review-unknown', project: 'demoproj', kind: 'review',
+          status: 'done', exit_code: 0, release_id: 'rel-6', // verdict intentionally undefined
+          started_at: now - 120, finished_at: now - 60,
+          session_id: 'sess-unknown',
+        },
+        {
+          id: 'demoproj-fix-unknown', project: 'demoproj', kind: 'fix',
+          status: 'running', exit_code: null, release_id: 'rel-6',
+          started_at: now - 5, finished_at: null,
+        },
+      ],
     });
     await page.goto(`/project/${project}/terminal`);
     // Hint text is "verdict: unknown — click to view findings" per the
@@ -297,12 +304,19 @@ test.describe('Release flow — review verdict handling', () => {
     const now = sec();
     const project = await mockFlow(page, {
       totalChanges: 2, reviewed: false, unpushed: 0, testCommand: 'pnpm test',
-      jobs: [{
-        id: 'demoproj-review-emptyverdict', project: 'demoproj', kind: 'review',
-        status: 'done', exit_code: 0, verdict: '',
-        started_at: now - 120, finished_at: now - 60,
-        session_id: 'sess-emptyverdict',
-      }],
+      jobs: [
+        {
+          id: 'demoproj-review-emptyverdict', project: 'demoproj', kind: 'review',
+          status: 'done', exit_code: 0, verdict: '', release_id: 'rel-7',
+          started_at: now - 120, finished_at: now - 60,
+          session_id: 'sess-emptyverdict',
+        },
+        {
+          id: 'demoproj-fix-emptyverdict', project: 'demoproj', kind: 'fix',
+          status: 'running', exit_code: null, release_id: 'rel-7',
+          started_at: now - 5, finished_at: null,
+        },
+      ],
     });
     await page.goto(`/project/${project}/terminal`);
     // An empty verdict must NOT show as LGTM ✓ — it's "unknown" and failed.
@@ -313,11 +327,18 @@ test.describe('Release flow — review verdict handling', () => {
     const now = sec();
     const project = await mockFlow(page, {
       totalChanges: 3, reviewed: false, unpushed: 0, testCommand: 'pnpm test',
-      jobs: [{
-        id: 'demoproj-review-na2', project: 'demoproj', kind: 'review',
-        status: 'done', exit_code: 0, verdict: 'NEEDS ATTENTION',
-        started_at: now - 120, finished_at: now - 60,
-      }],
+      jobs: [
+        {
+          id: 'demoproj-review-na2', project: 'demoproj', kind: 'review',
+          status: 'done', exit_code: 0, verdict: 'NEEDS ATTENTION', release_id: 'rel-8',
+          started_at: now - 120, finished_at: now - 60,
+        },
+        {
+          id: 'demoproj-fix-na2', project: 'demoproj', kind: 'fix',
+          status: 'running', exit_code: null, release_id: 'rel-8',
+          started_at: now - 5, finished_at: null,
+        },
+      ],
     });
     await page.goto(`/project/${project}/terminal`);
     await expect(page.getByTitle(/NEEDS ATTENTION/i).first()).toBeVisible();
@@ -328,45 +349,25 @@ test.describe('Release flow — review verdict handling', () => {
   // state. Past fixes kept flipping this back to ○ pending in subtle cases.
   // These tests pin the contract.
 
-  test('LGTM verdict — clean tree, no running jobs → review ✓', async ({ page }) => {
+  test('LGTM verdict stays done while a linked push is running on a clean tree', async ({ page }) => {
     const now = sec();
     const project = await mockFlow(page, {
       totalChanges: 0, reviewed: true, unpushed: 0, testCommand: 'swift test',
-      jobs: [{
-        id: 'demoproj-review-clean-lgtm', project: 'demoproj', kind: 'review',
-        status: 'done', exit_code: 0, verdict: 'LGTM',
-        started_at: now - 600, finished_at: now - 540,
-      }, {
-        id: 'demoproj-push-err', project: 'demoproj', kind: 'push',
-        status: 'done', exit_code: 1, started_at: now - 300, finished_at: now - 240,
-      }],
-      lastPushError: 'Push failed: upstream rejected',
+      jobs: [
+        {
+          id: 'demoproj-review-clean-lgtm', project: 'demoproj', kind: 'review',
+          status: 'done', exit_code: 0, verdict: 'LGTM', release_id: 'rel-9',
+          started_at: now - 600, finished_at: now - 540,
+        },
+        {
+          id: 'demoproj-push-clean-lgtm', project: 'demoproj', kind: 'push',
+          status: 'running', exit_code: null, release_id: 'rel-9',
+          started_at: now - 5, finished_at: null,
+        },
+      ],
     });
     await page.goto(`/project/${project}/terminal`);
     await expect(page.getByTitle(/LGTM/i).first()).toBeVisible();
-  });
-
-  test('LGTM verdict — hash drifted (hasUnreviewed=true) → still ✓', async ({ page }) => {
-    // The exact bioenv case: review LGTM, files changed since (cache files,
-    // build artifacts). Previously this showed ○ pending. Now it stays ✓.
-    const now = sec();
-    const project = await mockFlow(page, {
-      totalChanges: 1, reviewed: false, unpushed: 0, testCommand: 'swift test',
-      jobs: [{
-        id: 'demoproj-review-drifted', project: 'demoproj', kind: 'review',
-        status: 'done', exit_code: 0, verdict: 'LGTM',
-        started_at: now - 60 * 35, finished_at: now - 60 * 35 + 60,
-      }, {
-        id: 'demoproj-push-stale', project: 'demoproj', kind: 'push',
-        status: 'done', exit_code: 1, started_at: now - 1800, finished_at: now - 1700,
-      }],
-      lastPushError: 'Push failed: something',
-    });
-    await page.goto(`/project/${project}/terminal`);
-    // Must find an LGTM tooltip — not a "last verdict was LGTM but files
-    // changed since" downgrade to pending.
-    await expect(page.getByTitle(/LGTM/i).first()).toBeVisible();
-    await expect(page.getByTitle(/last verdict was LGTM but files changed/i)).toHaveCount(0);
   });
 
   test('LGTM verdict — push running → review ✓ with "in progress" hint', async ({ page }) => {
@@ -376,44 +377,36 @@ test.describe('Release flow — review verdict handling', () => {
       jobs: [
         {
           id: 'demoproj-review-lgtm-pushrun', project: 'demoproj', kind: 'review',
-          status: 'done', exit_code: 0, verdict: 'LGTM',
+          status: 'done', exit_code: 0, verdict: 'LGTM', release_id: 'rel-11',
           started_at: now - 120, finished_at: now - 60,
         },
         {
           id: 'demoproj-push-running', project: 'demoproj', kind: 'push',
-          status: 'running', exit_code: null, started_at: now - 5, finished_at: null,
+          status: 'running', exit_code: null, release_id: 'rel-11', started_at: now - 5, finished_at: null,
         },
       ],
     });
     await page.goto(`/project/${project}/terminal`);
-    await expect(page.getByTitle(/commit & push in progress/i).first()).toBeVisible();
-  });
-
-  test('LGTM verdict — commit hook rejected → review ✓ with "blocked" hint, commit ✗', async ({ page }) => {
-    const now = sec();
-    const project = await mockFlow(page, {
-      totalChanges: 3, reviewed: true, unpushed: 0, testCommand: 'pnpm test',
-      lastPushError: 'Commit failed: husky pre-commit rejected',
-      jobs: [{
-        id: 'demoproj-review-lgtm-commiterr', project: 'demoproj', kind: 'review',
-        status: 'done', exit_code: 0, verdict: 'LGTM',
-        started_at: now - 120, finished_at: now - 60,
-      }],
-    });
-    await page.goto(`/project/${project}/terminal`);
-    await expect(page.getByTitle(/commit blocked by pre-commit hook/i).first()).toBeVisible();
-    await expect(page.getByTitle(/Commit failed.*husky/i).first()).toBeVisible();
+    await expect(page.getByTitle(/LGTM/i).first()).toBeVisible();
+    await expect(page.getByTitle(/push in progress/i).first()).toBeVisible();
   });
 
   test('NEEDS ATTENTION verdict → review ! warning (not ✓)', async ({ page }) => {
     const now = sec();
     const project = await mockFlow(page, {
       totalChanges: 2, reviewed: false, unpushed: 0, testCommand: 'pnpm test',
-      jobs: [{
-        id: 'demoproj-review-na-pin', project: 'demoproj', kind: 'review',
-        status: 'done', exit_code: 0, verdict: 'NEEDS ATTENTION',
-        started_at: now - 120, finished_at: now - 60,
-      }],
+      jobs: [
+        {
+          id: 'demoproj-review-na-pin', project: 'demoproj', kind: 'review',
+          status: 'done', exit_code: 0, verdict: 'NEEDS ATTENTION', release_id: 'rel-12',
+          started_at: now - 120, finished_at: now - 60,
+        },
+        {
+          id: 'demoproj-fix-na-pin', project: 'demoproj', kind: 'fix' as JobKind,
+          status: 'running', exit_code: null, release_id: 'rel-12',
+          started_at: now - 5, finished_at: null,
+        },
+      ],
     });
     await page.goto(`/project/${project}/terminal`);
     await expect(page.getByTitle(/verdict: NEEDS ATTENTION/i).first()).toBeVisible();
@@ -423,11 +416,18 @@ test.describe('Release flow — review verdict handling', () => {
     const now = sec();
     const project = await mockFlow(page, {
       totalChanges: 2, reviewed: false, unpushed: 0, testCommand: 'pnpm test',
-      jobs: [{
-        id: 'demoproj-review-dns-pin', project: 'demoproj', kind: 'review',
-        status: 'done', exit_code: 0, verdict: 'DO NOT SHIP',
-        started_at: now - 120, finished_at: now - 60,
-      }],
+      jobs: [
+        {
+          id: 'demoproj-review-dns-pin', project: 'demoproj', kind: 'review',
+          status: 'done', exit_code: 0, verdict: 'DO NOT SHIP', release_id: 'rel-13',
+          started_at: now - 120, finished_at: now - 60,
+        },
+        {
+          id: 'demoproj-fix-dns-pin', project: 'demoproj', kind: 'fix' as JobKind,
+          status: 'running', exit_code: null, release_id: 'rel-13',
+          started_at: now - 5, finished_at: null,
+        },
+      ],
     });
     await page.goto(`/project/${project}/terminal`);
     await expect(page.getByTitle(/verdict: DO NOT SHIP/i).first()).toBeVisible();
@@ -437,50 +437,21 @@ test.describe('Release flow — review verdict handling', () => {
     const now = sec();
     const project = await mockFlow(page, {
       totalChanges: 2, reviewed: false, unpushed: 0, testCommand: 'pnpm test',
-      jobs: [{
-        id: 'demoproj-review-crashed-pin', project: 'demoproj', kind: 'review',
-        status: 'done', exit_code: 137, verdict: 'LGTM', // verdict present but exit != 0
-        started_at: now - 120, finished_at: now - 60,
-      }],
+      jobs: [
+        {
+          id: 'demoproj-review-crashed-pin', project: 'demoproj', kind: 'review',
+          status: 'done', exit_code: 137, verdict: 'LGTM', release_id: 'rel-14', // verdict present but exit != 0
+          started_at: now - 120, finished_at: now - 60,
+        },
+        {
+          id: 'demoproj-fix-crashed-pin', project: 'demoproj', kind: 'fix' as JobKind,
+          status: 'running', exit_code: null, release_id: 'rel-14',
+          started_at: now - 5, finished_at: null,
+        },
+      ],
     });
     await page.goto(`/project/${project}/terminal`);
     await expect(page.getByTitle(/review job failed/i).first()).toBeVisible();
-  });
-
-  test('Ship path: old test ✓ and old review ✓ stay visible while commit+push run', async ({ page }) => {
-    // Regression for the "clicked Ship but test/review showed ○" bug.
-    // When the fast-path skips test+review (LGTM already), the pipeline
-    // strip must still render those earlier steps as ✓ done — the prior
-    // LGTM is what authorized the ship. testJob/reviewJob live in the last
-    // 24h so they should be picked up.
-    const now = sec();
-    const olderTest = {
-      id: 'demoproj-test-old', project: 'demoproj', kind: 'test' as const,
-      status: 'done' as const, exit_code: 0,
-      started_at: now - 3 * 60 * 60, finished_at: now - 3 * 60 * 60 + 30,
-    };
-    const olderReview = {
-      id: 'demoproj-review-old-lgtm', project: 'demoproj', kind: 'review' as const,
-      status: 'done' as const, exit_code: 0, verdict: 'LGTM',
-      started_at: now - 2.5 * 60 * 60, finished_at: now - 2.5 * 60 * 60 + 60,
-      session_id: 'sess-old-lgtm',
-    };
-    const runningPush = {
-      id: 'demoproj-push-ship', project: 'demoproj', kind: 'push' as const,
-      status: 'running' as const, exit_code: null,
-      started_at: now - 5, finished_at: null,
-    };
-    const project = await mockFlow(page, {
-      totalChanges: 2, reviewed: true, unpushed: 0, testCommand: 'pnpm test',
-      jobs: [olderTest, olderReview, runningPush],
-    });
-    await page.goto(`/project/${project}/terminal`);
-    // All four steps must be visible — test/review carrying their earlier
-    // ✓ state and commit/push spinning.
-    await expect(page.getByTitle(/tests passed/i).first()).toBeVisible();
-    await expect(page.getByTitle(/LGTM/i).first()).toBeVisible();
-    // Strip is shown (pipelineRunning because push job is running).
-    await expect(page.locator('text=/test.*→.*review.*→.*commit.*→.*push/i').first()).toBeVisible();
   });
 
   test('Ship button label + tooltip visible when LGTM + reviewed tree', async ({ page }) => {
@@ -525,12 +496,19 @@ test.describe('Release flow — review verdict handling', () => {
     const now = sec();
     const project = await mockFlow(page, {
       totalChanges: 2, reviewed: true, unpushed: 0, testCommand: 'pnpm test',
-      jobs: [{
-        id: 'demoproj-review-renderjson', project: 'demoproj', kind: 'review',
-        status: 'done', exit_code: 0, verdict: 'LGTM',
-        started_at: now - 60, finished_at: now - 30,
-        session_id: 'sess-render',
-      }],
+      jobs: [
+        {
+          id: 'demoproj-review-renderjson', project: 'demoproj', kind: 'review',
+          status: 'done', exit_code: 0, verdict: 'LGTM', release_id: 'rel-27',
+          started_at: now - 60, finished_at: now - 30,
+          session_id: 'sess-render',
+        },
+        {
+          id: 'demoproj-push-renderjson', project: 'demoproj', kind: 'push',
+          status: 'running', exit_code: null, release_id: 'rel-27',
+          started_at: now - 5, finished_at: null,
+        },
+      ],
     });
 
     // Serve a stream-json log with a structured tool_result through
@@ -580,19 +558,21 @@ test.describe('Release flow — review verdict handling', () => {
     expect(body).not.toMatch(/\[\{"type":"text","text":/);
   });
 
-  test('review with LGTM + pending push queued stays ✓ and shows "awaiting push" behind the scenes', async ({ page }) => {
-    // When LGTM lands but there are still tracked changes, the review step
-    // must remain ✓ — not downgrade to ○ / ! — because the verdict is still
-    // valid. The commit step takes over visibility from here.
+  test('review with LGTM stays visible while a linked push is queued/running', async ({ page }) => {
     const now = sec();
     const project = await mockFlow(page, {
       totalChanges: 4, reviewed: true, unpushed: 0, testCommand: 'pnpm test',
       jobs: [
         {
           id: 'demoproj-review-lgtm-pending', project: 'demoproj', kind: 'review',
-          status: 'done', exit_code: 0, verdict: 'LGTM',
+          status: 'done', exit_code: 0, verdict: 'LGTM', release_id: 'rel-22',
           started_at: now - 120, finished_at: now - 60,
           session_id: 'sess-lgtm-pending',
+        },
+        {
+          id: 'demoproj-push-lgtm-pending', project: 'demoproj', kind: 'push',
+          status: 'running', exit_code: null, release_id: 'rel-22',
+          started_at: now - 5, finished_at: null,
         },
       ],
     });
@@ -602,16 +582,23 @@ test.describe('Release flow — review verdict handling', () => {
 });
 
 test.describe('Release flow — commit/push failure surfacing', () => {
-  test('commit error surfaces on commit step with last_push_error', async ({ page }) => {
+  test('commit-hook error surfaces on the failed push chip via last_push_error', async ({ page }) => {
     const now = sec();
     const project = await mockFlow(page, {
       totalChanges: 3, reviewed: true, unpushed: 0, testCommand: 'pnpm test',
       lastPushError: 'Commit failed: husky rejected. ESLint: 2 errors',
-      jobs: [{
-        id: 'demoproj-push-failed', project: 'demoproj', kind: 'push',
-        status: 'done', exit_code: 1,
-        started_at: now - 120, finished_at: now - 60,
-      }],
+      jobs: [
+        {
+          id: 'demoproj-push-failed', project: 'demoproj', kind: 'push',
+          status: 'done', exit_code: 1, release_id: 'rel-23',
+          started_at: now - 120, finished_at: now - 60,
+        },
+        {
+          id: 'demoproj-dod-after-push-fail', project: 'demoproj', kind: 'fix' as JobKind,
+          status: 'running', exit_code: null, release_id: 'rel-23',
+          started_at: now - 5, finished_at: null,
+        },
+      ],
     });
     await page.goto(`/project/${project}/terminal`);
     await expect(page.getByTitle(/Commit failed.*ESLint/i).first()).toBeVisible();
@@ -622,26 +609,40 @@ test.describe('Release flow — commit/push failure surfacing', () => {
     const project = await mockFlow(page, {
       totalChanges: 0, reviewed: true, unpushed: 1, testCommand: 'pnpm test',
       lastPushError: 'Push failed: remote rejected: protected branch',
-      jobs: [{
-        id: 'demoproj-push-rejected', project: 'demoproj', kind: 'push',
-        status: 'done', exit_code: 1,
-        started_at: now - 60, finished_at: now - 30,
-      }],
+      jobs: [
+        {
+          id: 'demoproj-push-rejected', project: 'demoproj', kind: 'push',
+          status: 'done', exit_code: 1, release_id: 'rel-24',
+          started_at: now - 60, finished_at: now - 30,
+        },
+        {
+          id: 'demoproj-fix-after-push-rejected', project: 'demoproj', kind: 'fix' as JobKind,
+          status: 'running', exit_code: null, release_id: 'rel-24',
+          started_at: now - 5, finished_at: null,
+        },
+      ],
     });
     await page.goto(`/project/${project}/terminal`);
     await expect(page.getByTitle(/Push failed.*protected branch/i).first()).toBeVisible();
   });
 
-  test('clicking commit step opens push job log', async ({ page }) => {
+  test('clicking the failed push chip opens the push job log', async ({ page }) => {
     const now = sec();
     const project = await mockFlow(page, {
       totalChanges: 3, reviewed: true, unpushed: 0, testCommand: 'pnpm test',
       lastPushError: 'Commit failed: husky rejected',
-      jobs: [{
-        id: 'demoproj-push-to-open', project: 'demoproj', kind: 'push',
-        status: 'done', exit_code: 1,
-        started_at: now - 60, finished_at: now - 30,
-      }],
+      jobs: [
+        {
+          id: 'demoproj-push-to-open', project: 'demoproj', kind: 'push',
+          status: 'done', exit_code: 1, release_id: 'rel-25',
+          started_at: now - 60, finished_at: now - 30,
+        },
+        {
+          id: 'demoproj-fix-to-open', project: 'demoproj', kind: 'fix' as JobKind,
+          status: 'running', exit_code: null, release_id: 'rel-25',
+          started_at: now - 5, finished_at: null,
+        },
+      ],
     });
     await page.goto(`/project/${project}/terminal`);
     await page.getByTitle(/Commit failed/i).first().click();
@@ -713,11 +714,18 @@ test.describe('Release flow — pipeline stage glyphs', () => {
     const now = sec();
     const project = await mockFlow(page, {
       totalChanges: 3, reviewed: false, unpushed: 0, testCommand: 'pnpm test',
-      jobs: [{
-        id: 'demoproj-test-fail', project: 'demoproj', kind: 'test',
-        status: 'done', exit_code: 2,
-        started_at: now - 120, finished_at: now - 60,
-      }],
+      jobs: [
+        {
+          id: 'demoproj-test-fail', project: 'demoproj', kind: 'test',
+          status: 'done', exit_code: 2, release_id: 'rel-16',
+          started_at: now - 120, finished_at: now - 60,
+        },
+        {
+          id: 'demoproj-fix-after-test-fail', project: 'demoproj', kind: 'fix',
+          status: 'running', exit_code: null, release_id: 'rel-16',
+          started_at: now - 5, finished_at: null,
+        },
+      ],
     });
     await page.goto(`/project/${project}/terminal`);
     await expect(page.getByTitle(/tests failed \(exit 2\)/i).first()).toBeVisible();
@@ -748,7 +756,7 @@ test.describe('Release flow — pipeline stage glyphs', () => {
     });
     await page.goto(`/project/${project}/terminal`);
     // Strip should hide — nothing running, nothing failed.
-    await expect(page.locator('text=/test.*→.*review.*→.*commit.*→.*push/i')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0);
   });
 });
 
@@ -793,16 +801,17 @@ test.describe('Release flow — in-flight state rendering', () => {
       jobs: [
         {
           id: 'demoproj-review-na-pin', project: 'demoproj', kind: 'review',
-          status: 'done', exit_code: 0, verdict: 'NEEDS ATTENTION',
+          status: 'done', exit_code: 0, verdict: 'NEEDS ATTENTION', release_id: 'rel-17',
           started_at: now - 300, finished_at: now - 240,
         },
         {
           id: 'demoproj-fix-running-pin', project: 'demoproj', kind: 'fix',
-          status: 'running', exit_code: null, started_at: now - 30, finished_at: null,
+          status: 'running', exit_code: null, release_id: 'rel-17', started_at: now - 30, finished_at: null,
         },
       ],
     });
     await page.goto(`/project/${project}/terminal`);
+    await expect(page.getByTitle(/verdict: NEEDS ATTENTION/i).first()).toBeVisible();
     await expect(page.getByTitle(/fix in progress/i).first()).toBeVisible();
   });
 });
@@ -815,8 +824,13 @@ test.describe('Release flow — click navigation', () => {
       jobs: [
         {
           id: 'demoproj-test-clickable', project: 'demoproj', kind: 'test',
-          status: 'done', exit_code: 2, // failed — keeps strip visible
+          status: 'done', exit_code: 2, release_id: 'rel-18',
           started_at: now - 300, finished_at: now - 240,
+        },
+        {
+          id: 'demoproj-fix-clickable', project: 'demoproj', kind: 'fix',
+          status: 'running', exit_code: null, release_id: 'rel-18',
+          started_at: now - 5, finished_at: null,
         },
       ],
     });
@@ -829,12 +843,19 @@ test.describe('Release flow — click navigation', () => {
     const now = sec();
     const project = await mockFlow(page, {
       totalChanges: 2, reviewed: true, unpushed: 0, testCommand: 'pnpm test',
-      jobs: [{
-        id: 'demoproj-review-click', project: 'demoproj', kind: 'review',
-        status: 'done', exit_code: 0, verdict: 'LGTM',
-        started_at: now - 60, finished_at: now - 30,
-        session_id: 'sess-clicky',
-      }],
+      jobs: [
+        {
+          id: 'demoproj-review-click', project: 'demoproj', kind: 'review',
+          status: 'done', exit_code: 0, verdict: 'LGTM', release_id: 'rel-19',
+          started_at: now - 60, finished_at: now - 30,
+          session_id: 'sess-clicky',
+        },
+        {
+          id: 'demoproj-push-click-running', project: 'demoproj', kind: 'push',
+          status: 'running', exit_code: null, release_id: 'rel-19',
+          started_at: now - 5, finished_at: null,
+        },
+      ],
     });
     await page.goto(`/project/${project}/terminal`);
     // Target the review step specifically — the Ship button also carries
@@ -851,10 +872,16 @@ test.describe('Release flow — click navigation', () => {
     const project = await mockFlow(page, {
       totalChanges: 0, reviewed: true, unpushed: 1, testCommand: 'pnpm test',
       lastPushError: 'Push failed: upstream rejected',
-      jobs: [{
-        id: 'demoproj-push-click', project: 'demoproj', kind: 'push',
-        status: 'done', exit_code: 1, started_at: now - 60, finished_at: now - 30,
-      }],
+      jobs: [
+        {
+          id: 'demoproj-push-click', project: 'demoproj', kind: 'push',
+          status: 'done', exit_code: 1, release_id: 'rel-20', started_at: now - 60, finished_at: now - 30,
+        },
+        {
+          id: 'demoproj-dod-click', project: 'demoproj', kind: 'fix' as JobKind,
+          status: 'running', exit_code: null, release_id: 'rel-20', started_at: now - 5, finished_at: null,
+        },
+      ],
     });
     await page.goto(`/project/${project}/terminal`);
     await page.getByTitle(/Push failed/i).first().click();
@@ -931,9 +958,14 @@ test.describe('Release flow — state-machine invariants', () => {
         // Newer review says LGTM — this is what the UI should reflect
         {
           id: 'demoproj-review-new', project: 'demoproj', kind: 'review',
-          status: 'done', exit_code: 0, verdict: 'LGTM',
+          status: 'done', exit_code: 0, verdict: 'LGTM', release_id: 'rel-21',
           started_at: now - 120, finished_at: now - 60,
           session_id: 'sess-newest',
+        },
+        {
+          id: 'demoproj-push-new', project: 'demoproj', kind: 'push',
+          status: 'running', exit_code: null, release_id: 'rel-21',
+          started_at: now - 5, finished_at: null,
         },
       ],
     });
@@ -948,6 +980,6 @@ test.describe('Release flow — state-machine invariants', () => {
     });
     await page.goto(`/project/${project}/terminal`);
     // Strip must be gone — nothing to display.
-    await expect(page.locator('text=/test.*→.*review.*→.*commit.*→.*push/i')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0);
   });
 });

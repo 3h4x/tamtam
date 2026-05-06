@@ -101,6 +101,13 @@ describe('startProjectCommit', () => {
     );
   });
 
+  it('passes an explicit parentJobId to the CLI start gate for release-linked retries', async () => {
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
+    const result = await startProjectCommit('proj', { parentJobId: 'release-456' });
+    expect(result.ok).toBe(false);
+    expect(checkCliStartGateMock).toHaveBeenCalledWith('start a commit', { parentJobId: 'release-456' });
+  });
+
   it('findIssueContext recovers issue metadata from the active release trigger chain', async () => {
     const releaseJob = {
       id: 'release-1',

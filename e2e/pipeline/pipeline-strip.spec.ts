@@ -43,6 +43,8 @@ type MockJob = {
   pid?: number;
   log_path?: string;
   seen?: boolean;
+  parent_job_id?: string | null;
+  release_id?: string | null;
 };
 
 function makeJob(
@@ -151,7 +153,7 @@ test.describe('PipelineStrip visibility', () => {
   // ---------------------------------------------------------------------------
   // Strip visible when review is running
   // ---------------------------------------------------------------------------
-  test('pipeline strip shows step labels when a review job is running', async ({ page }) => {
+  test('pipeline strip shows step labels for a standalone running review without abort controls', async ({ page }) => {
     const jobs: MockJob[] = [
       makeJob({
         id: 'strip-review-running',
@@ -166,19 +168,96 @@ test.describe('PipelineStrip visibility', () => {
     await mockScenario(page, jobs);
     await page.goto(`/project/${PROJECT}/terminal`);
 
-    // The strip renders step labels as text inside button/div chips.
-    // 'review' chip is present and shown as running (title hint is distinctive).
+    // The strip renders only jobs that actually ran — a single review chip.
     await expect(
       page.getByTitle('review in progress — click to open terminal'),
     ).toBeVisible({ timeout: 8_000 });
 
-    // Downstream pending steps must also be rendered.
-    await expect(page.getByText('fix').first()).toBeVisible();
-    await expect(page.getByText('commit').first()).toBeVisible();
-    await expect(page.getByText('push').first()).toBeVisible();
+    // Pending downstream steps are not shown; only the running job appears.
+    await expect(page.getByText('fix')).not.toBeVisible();
+    await expect(page.getByText('commit')).not.toBeVisible();
+    await expect(page.getByText('push')).not.toBeVisible();
 
-    // The abort button is unique to the strip.
-    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible();
+    // Standalone pipeline-kind jobs do not expose the release abort control.
+    await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0);
+  });
+
+  test('pipeline strip keeps parent-linked ancestors visible without a release trace link', async ({ page }) => {
+    const jobs: MockJob[] = [
+      makeJob({
+        id: 'strip-parent-test',
+        kind: 'test',
+        status: 'done',
+        exit_code: 0,
+        started_at: now() - 40,
+        finished_at: now() - 30,
+      }),
+      makeJob({
+        id: 'strip-parent-review',
+        kind: 'review',
+        status: 'done',
+        exit_code: 0,
+        started_at: now() - 25,
+        finished_at: now() - 20,
+        verdict: 'NEEDS ATTENTION',
+        parent_job_id: 'strip-parent-test',
+      }),
+      makeJob({
+        id: 'strip-parent-fix',
+        kind: 'fix',
+        status: 'running',
+        exit_code: null,
+        started_at: now() - 10,
+        finished_at: null,
+        parent_job_id: 'strip-parent-review',
+        session_id: 'sess-parent-fix',
+      }),
+    ];
+    await mockScenario(page, jobs);
+    await page.goto(`/project/${PROJECT}/terminal`);
+
+    await expect(page.getByTitle(/tests passed/i).first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByTitle(/verdict: NEEDS ATTENTION/i).first()).toBeVisible();
+    await expect(page.getByTitle(/fix in progress/i).first()).toBeVisible();
+    await expect(page.getByTitle('View unified release trace')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0);
+  });
+
+  test('pipeline strip excludes concurrent standalone jobs from the active release chain', async ({ page }) => {
+    const jobs: MockJob[] = [
+      makeJob({
+        id: 'strip-release-root',
+        kind: 'release',
+        status: 'running',
+        exit_code: null,
+        started_at: now() - 30,
+        finished_at: null,
+      }),
+      makeJob({
+        id: 'strip-release-review',
+        kind: 'review',
+        status: 'running',
+        exit_code: null,
+        started_at: now() - 20,
+        finished_at: null,
+        session_id: 'sess-release-review',
+        release_id: 'strip-release-root',
+      }),
+      makeJob({
+        id: 'strip-manual-test',
+        kind: 'test',
+        status: 'running',
+        exit_code: null,
+        started_at: now() - 10,
+        finished_at: null,
+      }),
+    ];
+    await mockScenario(page, jobs);
+    await page.goto(`/project/${PROJECT}/terminal`);
+
+    await expect(page.getByTitle('review in progress — click to open terminal')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByTitle('tests running — click to open terminal')).toHaveCount(0);
+    await expect(page.getByTitle('View unified release trace')).toBeVisible();
   });
 
   // ---------------------------------------------------------------------------
@@ -206,12 +285,35 @@ test.describe('PipelineStrip visibility', () => {
     });
   });
 
+  test('pipeline strip hides once a failed step is idle with no running pipeline jobs', async ({ page }) => {
+    const jobs: MockJob[] = [
+      makeJob({
+        id: 'strip-push-failed',
+        kind: 'push',
+        status: 'done',
+        exit_code: 1,
+        started_at: now() - 120,
+        finished_at: now() - 60,
+        release_id: 'rel-failed',
+      }),
+    ];
+    await mockScenario(page, jobs);
+    await page.goto(`/project/${PROJECT}/terminal`);
+
+    await expect(page.getByRole('button', { name: 'abort' })).not.toBeVisible({
+      timeout: 5_000,
+    });
+    await expect(page.getByTitle(/push failed/i)).toHaveCount(0);
+  });
+
   // ---------------------------------------------------------------------------
   // Strip shows doneCount / totalSteps progress indicator
   // ---------------------------------------------------------------------------
-  test('pipeline strip progress counter reflects running step position', async ({ page }) => {
-    // review is running (index 0 of rendered steps since no test command),
-    // fix/commit/push are pending — doneCount = 0, totalSteps = 4.
+  test('pipeline strip progress counter shows running step label when one job is running', async ({ page }) => {
+    // Only a review job is running — the strip renders exactly one step.
+    // When there is a running step, the summary shows "<label> running" rather
+    // than "doneCount/totalSteps done" (the counter only appears when all steps
+    // are finished and none is actively running).
     const jobs: MockJob[] = [
       makeJob({
         id: 'strip-review-prog',
@@ -226,9 +328,8 @@ test.describe('PipelineStrip visibility', () => {
     await mockScenario(page, jobs);
     await page.goto(`/project/${PROJECT}/terminal`);
 
-    // Progress counter is rendered as "doneCount/totalSteps".
-    // With no test command: 4 steps (review, fix, commit, push); 0 done.
-    await expect(page.getByText('0/4')).toBeVisible({ timeout: 8_000 });
+    // The summary text is "review running" (label + stateLabel of the running step).
+    await expect(page.getByText('review running')).toBeVisible({ timeout: 8_000 });
   });
 
   // ---------------------------------------------------------------------------
@@ -237,6 +338,14 @@ test.describe('PipelineStrip visibility', () => {
   test('pipeline strip shows abort confirmation on first click', async ({ page }) => {
     const jobs: MockJob[] = [
       makeJob({
+        id: 'strip-abort-release',
+        kind: 'release',
+        status: 'running',
+        exit_code: null,
+        started_at: now() - 20,
+        finished_at: null,
+      }),
+      makeJob({
         id: 'strip-abort-confirm',
         kind: 'review',
         status: 'running',
@@ -244,6 +353,7 @@ test.describe('PipelineStrip visibility', () => {
         started_at: now() - 15,
         finished_at: null,
         session_id: 'sess-strip-abort',
+        release_id: 'strip-abort-release',
       }),
     ];
     // The abort POST goes to the real server; mock it to avoid affecting state.
@@ -276,7 +386,7 @@ test.describe('PipelineStrip completion transition', () => {
   // ---------------------------------------------------------------------------
   // Strip disappears when the running pipeline job completes
   // ---------------------------------------------------------------------------
-  test('pipeline strip disappears from terminal tab when running job transitions to done', async ({
+  test('pipeline strip disappears from terminal tab when a release-backed running job transitions to done', async ({
     page,
   }) => {
     let serveRunning = true;
@@ -293,6 +403,14 @@ test.describe('PipelineStrip completion transition', () => {
         const jobs = serveRunning
           ? [
               makeJob({
+                id: 'strip-transition-release',
+                kind: 'release',
+                status: 'running',
+                exit_code: null,
+                started_at: now() - 10,
+                finished_at: null,
+              }),
+              makeJob({
                 id: 'strip-transition-job',
                 kind: 'review',
                 status: 'running',
@@ -300,6 +418,7 @@ test.describe('PipelineStrip completion transition', () => {
                 started_at: now() - 5,
                 finished_at: null,
                 session_id: 'sess-strip-trans',
+                release_id: 'strip-transition-release',
               }),
             ]
           : [];

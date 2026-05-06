@@ -473,7 +473,7 @@ describe('runCompletionHooks – mark-dod excluded from pipeline endpoint', () =
 
   it('pr-wait still finalizes the active release job with exit 0 (regression)', async () => {
     insertReleaseJob(testDb.db, 'release-prwait-0');
-    await markDoneFn(makeJob('pr-wait'), 0);
+    await markDoneFn({ ...makeJob('pr-wait'), releaseId: 'release-prwait-0' }, 0);
     const row = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-prwait-0');
     expect(row?.finishedAt).not.toBeNull();
     expect(row?.exitCode).toBe(0);
@@ -481,7 +481,7 @@ describe('runCompletionHooks – mark-dod excluded from pipeline endpoint', () =
 
   it('pr-wait still finalizes the active release job with exit 1 (regression)', async () => {
     insertReleaseJob(testDb.db, 'release-prwait-1');
-    await markDoneFn(makeJob('pr-wait'), 1);
+    await markDoneFn({ ...makeJob('pr-wait'), releaseId: 'release-prwait-1' }, 1);
     const row = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-prwait-1');
     expect(row?.finishedAt).not.toBeNull();
     expect(row?.exitCode).toBe(1);

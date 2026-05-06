@@ -277,6 +277,22 @@ function usageFromTokenCount(event) {
   };
 }
 
+function emptyUsage() {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadInputTokens: 0,
+  };
+}
+
+function addUsageTotals(total, current) {
+  return {
+    inputTokens: total.inputTokens + (current.inputTokens || 0),
+    outputTokens: total.outputTokens + (current.outputTokens || 0),
+    cacheReadInputTokens: total.cacheReadInputTokens + (current.cacheReadInputTokens || 0),
+  };
+}
+
 function sessionFromEvent(event) {
   return event?.session_id || event?.thread_id || event?.id || event?.payload?.session_id || event?.payload?.thread_id || event?.payload?.id || '';
 }
@@ -304,9 +320,59 @@ function shouldEmitText(text, emittedTexts) {
   return true;
 }
 
-function launchCodex({ prompt, model, streamJson }) {
+// Codex occasionally exits 1 with empty stderr after streaming a few bytes of
+// assistant text — most often a transient backend hiccup, never accompanied by
+// a structured `error` event. Retrying once almost always succeeds. Any non-
+// silent failure (real stderr, hang, no assistant output) skips retry.
+const MAX_TRANSIENT_RETRIES = 1;
+
+function createRetryState(streamJson) {
+  return {
+    emitter: makeTextEmitter(streamJson),
+    startedAt: Date.now(),
+    logicalText: '',
+    replayPrefix: '',
+    replayCursor: 0,
+    emittedTexts: new Set(),
+    usageTotals: emptyUsage(),
+    sessionId: '',
+  };
+}
+
+function trimRetriedPrefix(text, retryState, attempt) {
+  if (attempt === 0 || !text || retryState.replayCursor >= retryState.replayPrefix.length) {
+    return text;
+  }
+  const remainingPrefix = retryState.replayPrefix.slice(retryState.replayCursor);
+  let matched = 0;
+  while (
+    matched < text.length &&
+    matched < remainingPrefix.length &&
+    text[matched] === remainingPrefix[matched]
+  ) {
+    matched += 1;
+  }
+  retryState.replayCursor += matched;
+  if (matched === text.length) {
+    return '';
+  }
+  if (matched > 0) {
+    return text.slice(matched);
+  }
+  retryState.replayCursor = retryState.replayPrefix.length;
+  return text;
+}
+
+function writeLogicalText(text, emitter, retryState, attempt) {
+  const trimmed = trimRetriedPrefix(text, retryState, attempt);
+  if (!trimmed) return '';
+  retryState.logicalText += trimmed;
+  emitter.write(trimmed);
+  return trimmed;
+}
+
+function launchCodex({ prompt, model, streamJson, attempt = 0, retryState = null }) {
   return new Promise((resolve, reject) => {
-    const startedAt = Date.now();
     const codexBin = process.env.CODEX_BIN || 'codex';
     const codexArgs = [
       ...permissionArgsFor(permissionMode),
@@ -351,13 +417,14 @@ function launchCodex({ prompt, model, streamJson }) {
     });
 
     const watchdog = installInactivityWatchdog(child, { shimName: 'codex-shim' });
-    const emitter = makeTextEmitter(streamJson);
+    const state = retryState || createRetryState(streamJson);
+    const emitter = state.emitter;
     let stdoutBuffer = '';
     let stderr = '';
     let fullText = '';
-    let usage = { inputTokens: estimateTokens(prompt), outputTokens: 0, cacheReadInputTokens: 0 };
-    let sessionId = resumeSessionId;
-    const emittedTexts = new Set();
+    let usage = emptyUsage();
+    let usageCaptured = false;
+    let sessionId = state.sessionId || resumeSessionId;
 
     child.stdin.end(prompt);
 
@@ -372,8 +439,10 @@ function launchCodex({ prompt, model, streamJson }) {
       const payload = unwrapCodexEvent(event);
       const type = payload?.type || event.type || '';
       sessionId = sessionFromEvent(payload) || sessionFromEvent(event) || sessionId;
+      if (sessionId) state.sessionId = sessionId;
       if (type === 'token_count' || type === 'turn.completed') {
         usage = usageFromTokenCount(payload);
+        usageCaptured = true;
         return;
       }
       if (
@@ -385,23 +454,27 @@ function launchCodex({ prompt, model, streamJson }) {
       ) {
         if (event.type === 'response_item' && type === 'message' && payload?.role !== 'assistant') return;
         const text = textFromEvent(payload);
-        if (!shouldEmitText(text, emittedTexts)) return;
-        fullText += text;
-        emitter.write(text);
+        if (!shouldEmitText(text, state.emittedTexts)) return;
+        const written = writeLogicalText(text, emitter, state, attempt);
+        if (!written) return;
+        fullText += written;
       } else if (type === 'item.completed') {
         const text = textFromCompletedItem(event);
-        if (!shouldEmitText(text, emittedTexts)) return;
-        fullText += text;
-        emitter.write(text);
+        if (!shouldEmitText(text, state.emittedTexts)) return;
+        const written = writeLogicalText(text, emitter, state, attempt);
+        if (!written) return;
+        fullText += written;
       } else if (type === 'task_complete') {
         const text = typeof payload.last_agent_message === 'string' ? payload.last_agent_message : '';
-        if (!shouldEmitText(text, emittedTexts)) return;
-        fullText += text;
-        emitter.write(text);
+        if (!shouldEmitText(text, state.emittedTexts)) return;
+        const written = writeLogicalText(text, emitter, state, attempt);
+        if (!written) return;
+        fullText += written;
       } else if (type === 'error') {
         const message = textFromEvent(payload) || payload.error?.message || event.error?.message || 'Codex error';
-        fullText += message;
-        emitter.write(message);
+        const written = writeLogicalText(message, emitter, state, attempt);
+        if (!written) return;
+        fullText += written;
       }
     };
 
@@ -430,27 +503,49 @@ function launchCodex({ prompt, model, streamJson }) {
         stderr = `[codex-shim] killed by inactivity watchdog after ${process.env.SHIM_INACTIVITY_TIMEOUT_MS || 600000}ms with no output from child`;
       }
       if (stdoutBuffer) handleLine(stdoutBuffer);
+      state.usageTotals = addUsageTotals(
+        state.usageTotals,
+        usageCaptured ? usage : { inputTokens: estimateTokens(prompt), outputTokens: 0, cacheReadInputTokens: 0 }
+      );
+      const isSilentCrash = streamJson
+        && code === 1
+        && !signal
+        && !stderr.trim()
+        && fullText.trim();
+      if (isSilentCrash && attempt < MAX_TRANSIENT_RETRIES) {
+        // Surface the retry to the user-visible stream so the log explains the
+        // gap, then re-launch with the same args. Don't close the emitter —
+        // attempt 2's stream concatenates into the same content block.
+        state.replayPrefix = state.logicalText;
+        state.replayCursor = 0;
+        emitter.write(`\n[codex-shim] codex exited 1 with no stderr after streaming output — retrying once (attempt ${attempt + 2}/${MAX_TRANSIENT_RETRIES + 1})\n`);
+        process.stderr.write(`[codex-shim] transient codex crash (exit 1, no stderr) — retrying\n`);
+        launchCodex({ prompt, model, streamJson, attempt: attempt + 1, retryState: state })
+          .then(resolve, reject);
+        return;
+      }
       emitter.close();
       if (!streamJson && fullText && !fullText.endsWith('\n')) process.stdout.write('\n');
+      const logicalOutput = state.logicalText.trim();
       if (streamJson) {
-        const noAssistantOutput = code === 0 && !fullText.trim();
+        const noAssistantOutput = code === 0 && !logicalOutput;
         emitResult({
           model,
-          durationMs: Date.now() - startedAt,
-          sessionId,
-          inputTokens: usage.inputTokens || estimateTokens(prompt),
-          outputTokens: usage.outputTokens || estimateTokens(fullText),
-          cacheReadInputTokens: usage.cacheReadInputTokens || 0,
+          durationMs: Date.now() - state.startedAt,
+          sessionId: state.sessionId || sessionId,
+          inputTokens: state.usageTotals.inputTokens || estimateTokens(prompt),
+          outputTokens: state.usageTotals.outputTokens || estimateTokens(state.logicalText),
+          cacheReadInputTokens: state.usageTotals.cacheReadInputTokens || 0,
           error: code !== 0 || noAssistantOutput,
           result: code === 0
             ? (noAssistantOutput ? '[codex-shim] codex produced no assistant output' : '')
-            : errorResultText({ code, signal, stderr, fullText }),
+            : errorResultText({ code, signal, stderr, fullText: state.logicalText || fullText }),
         });
       } else if (code !== 0 && stderr.trim()) {
         process.stderr.write(stderr);
       }
       const signalExitCode = signal ? 128 + (require('os').constants.signals[signal] || 0) : 1;
-      resolve((code === 0 && streamJson && !fullText.trim()) ? 1 : (code ?? signalExitCode));
+      resolve((code === 0 && streamJson && !logicalOutput) ? 1 : (code ?? signalExitCode));
     });
   });
 }

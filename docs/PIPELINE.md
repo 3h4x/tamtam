@@ -89,14 +89,14 @@ startRelease()
 TEST
   ├─ exit 0  → completion hook → start REVIEW when uncommitted changes or unpushed commits exist
   │                              → otherwise start PUSH/no-op
-  └─ exit ≠0 → completion hook → start FIX (if iterations < 3 per 30 min)
+  └─ exit ≠0 → completion hook → start FIX → re-run TEST (capped at 3 tests per release)
                                  → otherwise finalize release (exit 1)
 
 REVIEW
   ├─ exit 0  → completion hook → extract verdict
   │   ├─ LGTM              → start PUSH
-  │   ├─ NEEDS ATTENTION   → start FIX (if iterations < 3 per 30 min)
-  │   ├─ DO NOT SHIP       → start FIX (if iterations < 3 per 30 min)
+  │   ├─ NEEDS ATTENTION   → start FIX → re-run REVIEW (capped at 3 reviews per release)
+  │   ├─ DO NOT SHIP       → start FIX → re-run REVIEW (capped at 3 reviews per release)
   │   └─ No verdict found  → finalize release (exit 1)
   └─ exit ≠0 → completion hook → finalize release (exit 1)
 
@@ -211,7 +211,7 @@ Accepts markdown wrapping (`**LGTM**`, `` `LGTM` ``) and optional colon/dash del
 
 | Cap | Limit | Window | Setting |
 |-----|-------|--------|---------|
-| Review→Fix loop | unbounded fixes; 3 verification iterations cap | per release; 30 min fallback for standalone chaining | `TAMTAM_MAX_STEP_ITERATIONS` (default 3, legacy alias: `TAMTAM_MAX_FIX_ITERATIONS`), `TAMTAM_FIX_WINDOW_SECONDS=1800`. Every NEEDS ATTENTION/DO NOT SHIP review or red test triggers a fix; the cap fires on the *next* verification step (fix→test, fix→review). After the budget is exhausted the trailing fix still runs unverified and the release stops without re-running test/review. |
+| Review→Fix loop | unbounded fixes; 3 verification rounds per kind | per release; 30 min fallback for standalone chaining | `TAMTAM_MAX_STEP_ITERATIONS` (default 3, legacy alias: `TAMTAM_MAX_FIX_ITERATIONS`), `TAMTAM_STEP_WINDOW_SECONDS=1800` (legacy alias: `TAMTAM_FIX_WINDOW_SECONDS`). Every NEEDS ATTENTION/DO NOT SHIP review or red test triggers a fix; the cap counts **verification** runs (`test`, `review`, `commit`, `push`) not fixes. Each chain bails before launching a (MAX+1)-th of any verification kind. The cap is per-kind, so a release can naturally run 1 commit + 1 push without burning either budget; the cap is purely defensive against unexpected loops. After the budget is exhausted the trailing fix still runs unverified and the release stops. |
 | Fix-Push attempts | 2 attempts | 30 min | hardcoded `MAX_FIX_PUSH_ATTEMPTS=2` |
 | Fix-CI auto-retry | configurable | configurable | `fix_ci_max_retries` (default 2), `fix_ci_retry_window_seconds` (default 120) |
 | Fix-CI fast-crash | — | — | `fix_ci_fast_crash_ms` (default 5000ms) — only retries if job died in under this |
@@ -289,40 +289,48 @@ Checks the push job log for strings from husky, lint-staged, eslint, pre-commit 
 
 ---
 
-## Pipeline Strip — Desired UX & Scoped Fix
+## Pipeline Strip
 
-### The problem
+### Model: job-driven rendering
 
-The strip currently shows misleading state when a **standalone test** runs on a clean repo:
+The strip renders **only the jobs that actually ran** in the current pipeline chain. There are no placeholder "pending" chips for steps that have not started yet. This means:
 
-```
-test ✓  →  review ✓  →  commit ✓  →  push ✓
-```
+- A fresh pipeline with only a `test` job running shows exactly one chip: `test running`.
+- A pipeline that ran `test → review → fix` with `fix` still running shows three chips in chronological order.
+- Steps that the pipeline bypassed (e.g. review/fix/commit on the short-circuit push path) are simply absent.
 
-`commitState` and `pushState` are derived from git cleanliness (`hasChanges`, `unpushed`), not from actual job runs. On a repo with nothing uncommitted/unpushed, those steps are always green — even if the user just ran `test` in isolation and no release pipeline was ever triggered.
+### Chain detection
 
-### Rule: strip is release-scoped
+The strip derives the current chain from persisted job linkage, not from timestamps:
 
-The pipeline strip should only reflect an **active or recently-completed Release run**. Standalone test/review/fix runs (not triggered by 🚀 Release) must **not** surface the strip.
+1. Start with the currently-running pipeline job.
+2. If that job has `release_id`, include every visible pipeline step with the same `release_id`.
+3. If `release_id` is absent, walk `parent_job_id` upward:
+   - if the chain reaches a `release` job, treat that release id as the chain key and include siblings that resolve to the same release ancestor
+   - otherwise, show only the running job plus any visible pipeline ancestors directly linked by `parent_job_id`
 
-### Desired step states
+Release scope is inherited from parentage, not ambient project state. A standalone manual `test` / `review` / `fix` started while some other release is active does not join that release chain unless it was launched from a release-linked parent job.
 
-| Step | Shows as ✓ when | Shows as ○ (pending) when | Shows as ✗ when |
-|------|-----------------|---------------------------|-----------------|
-| **test** | test job in this release exited 0 | no test command, or not yet run | exit ≠ 0 |
-| **review** | review job in this release has verdict `LGTM` | not yet run | exit ≠ 0 or verdict ≠ LGTM |
-| **commit** | push job in this release exited 0 (commit is part of push) | not yet run | `last_push_error` starts with "Commit failed" |
-| **push** | push job in this release exited 0 | not yet run | push job exit ≠ 0 |
-| **dod** *(PR Workflow)* | mark-dod job exited 0 | not yet run | exit ≠ 0 |
-| **merge** *(PR Workflow, auto-merge on)* | PR merged successfully | not yet run | CI failed or merge rejected |
+The `trace →` link is shown only when the visible chain resolves to an actual `release` job. Parent-only fallback chains stay on the terminal view because there is no release trace route to open.
+
+The `abort` control is also release-scoped. It appears only while a real `release` job is still running, because the abort route stops the release lock and its current child step. Standalone `test` / `review` / `fix` chains remain inspectable in the strip but do not expose an abort button.
+
+This keeps unrelated manual `test` / `review` / `fix` runs out of the strip even if they happened moments before an active release step on the same project.
 
 ### Visibility rule
 
-Show the strip **only** when:
-1. There is an active release job (`kind='release'`, `status='running'`) for this project, **or**
-2. There is a release job that completed within the last hour
+The strip is visible whenever any pipeline-kind job (`test`, `review`, `fix`, `commit`, `push`, `mark-dod`) has `status='running'`. It disappears as soon as no pipeline job is running.
 
-Hide it otherwise.
+### Step chip states
+
+| State | Visual | When |
+|-------|--------|------|
+| running | spinning ring, accent color | `job.status === 'running'` |
+| done (✓) | green | `job.exit_code === 0` |
+| attention (!) | yellow | review job with `verdict === 'NEEDS ATTENTION'` |
+| failed (✗) | red | `job.exit_code !== 0`; review with `verdict === 'DO NOT SHIP'` |
+
+The `mark-dod` kind maps to a `dod` chip label. All other kinds use their `job.kind` as the chip label directly.
 
 ---
 
@@ -367,7 +375,7 @@ Recovery-loop attribution prefers explicit `releaseId` links on `fix` / `fix-pus
 
 The `configSnapshot` section reflects the same shared recovery-budget helper used by runtime enforcement:
 - review/test cap: `TAMTAM_MAX_STEP_ITERATIONS` with legacy fallback to `TAMTAM_MAX_FIX_ITERATIONS`
-- fallback window: `TAMTAM_FIX_WINDOW_SECONDS`
+- fallback window: `TAMTAM_STEP_WINDOW_SECONDS` (legacy alias: `TAMTAM_FIX_WINDOW_SECONDS`)
 - fix-push cap: hardcoded `2`
 
 ---
@@ -378,7 +386,7 @@ The `configSnapshot` section reflects the same shared recovery-budget helper use
 |---------|-------------|-----|
 | Pipeline stops after test with no next step | `auto_push_enabled` is off and no active Release | Use 🚀 Release button or enable `auto_push_enabled` |
 | Review exits 0 but no verdict found | Verdict buried early in a long log | Check last 2000 chars of log; rephrase review prompt to emit verdict at the end |
-| Fix loop runs 3 times then stops | Review/test verification cap reached within the configured fallback window | Fix manually, increase `TAMTAM_MAX_STEP_ITERATIONS` (legacy alias: `TAMTAM_MAX_FIX_ITERATIONS`), or wait for `TAMTAM_FIX_WINDOW_SECONDS` to reset |
+| Fix loop runs 3 times then stops | Review/test verification cap reached within the configured fallback window | Fix manually, increase `TAMTAM_MAX_STEP_ITERATIONS` (legacy alias: `TAMTAM_MAX_FIX_ITERATIONS`), or wait for `TAMTAM_STEP_WINDOW_SECONDS` to reset |
 | Push fails, no `fix-push` triggered | Hook strings not matched by `isHookRejection` | Check the push log for hook output; add new hook string patterns to `lib/start-fix-push.ts` |
 | Release button grayed out / 400 | No changes and no unpushed commits | Make a change or verify `git status` |
 | `DO NOT SHIP` verdict loops forever | Fix cap reached | Inspect fix logs; may need manual code changes |

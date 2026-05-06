@@ -392,6 +392,24 @@ describe('groupReleaseChildren', () => {
     expect(out[0].chainedChildren?.[0].children?.[0].kind).toBe('test');
   });
 
+  it('uses the newest nested release outcome on the triggering run row', () => {
+    const run = makeStepEntry('run-1', 'run', 1000, null, 0);
+    run.bucket = 'run';
+    run.title = 'ship it';
+    const oldRelease = makeReleaseEntry('rel-old', 1010, 1030, 'run-1', 0);
+    const newRelease = makeReleaseEntry('rel-new', 1100, null, 'run-1', 0);
+
+    const out = groupReleaseChildren([run, oldRelease, newRelease]);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].releaseOutcome).toEqual({
+      status: 'running',
+      label: 'release running',
+      releaseJobId: 'rel-new',
+    });
+    expect(out[0].chainedChildren?.map((entry) => entry.navJobId)).toEqual(['rel-new', 'rel-old']);
+  });
+
   it('labels a nested failed release with no steps as blocked instead of a raw exit code', () => {
     const run = makeStepEntry('agent-1', 'agent:improve', 1000, null, 0);
     run.bucket = 'agent';

@@ -163,6 +163,92 @@ describe('internal-scheduler', () => {
     });
   });
 
+  describe('overdue-aware initial arm', () => {
+    afterEach(() => {
+      vi.resetModules();
+    });
+
+    it('fires almost immediately when the DB shows the agent is overdue (regression: restarts must not push fire times forward)', async () => {
+      // Simulate: a 30m agent whose last successful run finished 90m ago.
+      // Without the fix, armNext would set nextFireMs = now + 30m and a
+      // server restart every <30m would silently never fire it. With the
+      // fix, computeNextFire is anchored on the last run, so the next
+      // slot lands in the past and the timer is clamped to ~1s.
+      vi.resetModules();
+      const ninetyMinAgoSec = (Date.now() - 90 * 60_000) / 1000;
+      const getMock = vi.fn().mockReturnValue({ finishedAt: ninetyMinAgoSec });
+      const limitMock = vi.fn().mockReturnValue({ get: getMock });
+      const orderByMock = vi.fn().mockReturnValue({ limit: limitMock });
+      const whereMock = vi.fn().mockReturnValue({ orderBy: orderByMock });
+      const fromMock = vi.fn().mockReturnValue({ where: whereMock });
+      const selectMock = vi.fn().mockReturnValue({ from: fromMock });
+      vi.doMock('@/lib/db', () => ({
+        db: { select: selectMock },
+        schema: { jobs: { project: 'project', kind: 'kind', finishedAt: 'finished_at' } },
+      }));
+
+      const mod = await import('@/lib/scheduling/internal-scheduler');
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+      vi.stubGlobal('fetch', fetchMock);
+      mod.setSchedulerBaseUrl('http://test');
+
+      mod.upsertAgentSchedule({ id: 'a-overdue', project: 'p', name: 'n', schedule: '30m', prompt: 'go', enabled: true });
+
+      // The lookup must have happened (the fix's whole point).
+      expect(getMock).toHaveBeenCalled();
+
+      // Overdue: nextFireMs is in the future but bounded by the spread
+      // window (≤ 30s + 5min). It is NOT in the past — that would be a
+      // boot-stampede. And it's NOT 30 minutes — that would be the
+      // restart-resets-clock bug.
+      const dump = mod.dumpInternalScheduler();
+      const entry = dump.entries.find(e => e.agentId === 'a-overdue');
+      expect(entry).toBeDefined();
+      const minutesFromNow = (entry!.nextFireMs - Date.now()) / 60_000;
+      expect(minutesFromNow).toBeGreaterThan(0);          // not stampede
+      expect(minutesFromNow).toBeLessThan(6);             // within spread+floor
+      expect(minutesFromNow).toBeLessThan(30 - 1);        // not pushed-to-next-period
+
+      // Advance past the maximum spread window; the agent must fire.
+      await vi.advanceTimersByTimeAsync(6 * 60_000);
+      for (let _i = 0; _i < 20; _i++) await Promise.resolve();
+      expect(fetchMock).toHaveBeenCalledOnce();
+
+      mod.stopInternalScheduler();
+    });
+
+    it('still fires at next-period when the agent is fresh (last run within the period)', async () => {
+      vi.resetModules();
+      const oneMinAgoSec = (Date.now() - 60_000) / 1000;
+      const getMock = vi.fn().mockReturnValue({ finishedAt: oneMinAgoSec });
+      const limitMock = vi.fn().mockReturnValue({ get: getMock });
+      const orderByMock = vi.fn().mockReturnValue({ limit: limitMock });
+      const whereMock = vi.fn().mockReturnValue({ orderBy: orderByMock });
+      const fromMock = vi.fn().mockReturnValue({ where: whereMock });
+      const selectMock = vi.fn().mockReturnValue({ from: fromMock });
+      vi.doMock('@/lib/db', () => ({
+        db: { select: selectMock },
+        schema: { jobs: { project: 'project', kind: 'kind', finishedAt: 'finished_at' } },
+      }));
+
+      const mod = await import('@/lib/scheduling/internal-scheduler');
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+      vi.stubGlobal('fetch', fetchMock);
+      mod.setSchedulerBaseUrl('http://test');
+
+      mod.upsertAgentSchedule({ id: 'a-fresh', project: 'p', name: 'n', schedule: '30m', prompt: 'go', enabled: true });
+
+      const dump = mod.dumpInternalScheduler();
+      const entry = dump.entries.find(e => e.agentId === 'a-fresh')!;
+      // Next fire should be ~29 minutes from now (30m - 1m elapsed).
+      const minutesFromNow = (entry.nextFireMs - Date.now()) / 60_000;
+      expect(minutesFromNow).toBeGreaterThan(28);
+      expect(minutesFromNow).toBeLessThan(30);
+
+      mod.stopInternalScheduler();
+    });
+  });
+
   describe('startInternalScheduler', () => {
     it('arms a schedule for every input agent and is idempotent on re-call', () => {
       startInternalScheduler([
@@ -282,6 +368,15 @@ describe('internal-scheduler — issue-branch skip', () => {
       budgetBlockedResult: vi.fn().mockReturnValue(null),
       scheduledBurnRateBlocked: vi.fn().mockReturnValue(null),
     }));
+    // The scheduler now anchors initial nextFireMs on the DB-recorded last
+    // fire time. Without mocking @/lib/db here, the test would hit the real
+    // production DB and a stale `agent:tests` row would back-date nextFireMs
+    // into the past, causing the timer to fire ~60 times during the 60s
+    // vi.advanceTimersByTimeAsync window. Stub to "no last run".
+    vi.doMock('@/lib/db', () => ({
+      db: { select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ limit: () => ({ get: () => undefined }) }) }) }) }) },
+      schema: { jobs: { project: 'project', kind: 'kind', finishedAt: 'finished_at' } },
+    }));
 
     const mod = await import('@/lib/scheduling/internal-scheduler');
     upsertAgentScheduleDynamic = mod.upsertAgentSchedule;
@@ -390,6 +485,14 @@ describe('internal-scheduler — budget skip', () => {
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
+    }));
+    // Stub the DB lookup so the new "anchored on last run" arming uses
+    // "now" (no last run) and arms a single timer at +1m, not a flood of
+    // 1s retries against a stale production row. See the issue-branch
+    // skip describe for the same workaround.
+    vi.doMock('@/lib/db', () => ({
+      db: { select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ limit: () => ({ get: () => undefined }) }) }) }) }) },
+      schema: { jobs: { project: 'project', kind: 'kind', finishedAt: 'finished_at' } },
     }));
 
     const mod = await import('@/lib/scheduling/internal-scheduler');
