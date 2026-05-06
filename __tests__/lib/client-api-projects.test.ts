@@ -541,3 +541,309 @@ describe('issue and PR client helpers', () => {
     });
   });
 });
+
+describe('fetchProjects', () => {
+  async function getFetchProjects() {
+    const { fetchProjects } = await import('@/lib/client-api');
+    return fetchProjects;
+  }
+
+  it('returns the parsed response on success', async () => {
+    const fetchMock = stubFetch(true, { projects: [{ name: 'myproj' }] });
+    const fetchProjects = await getFetchProjects();
+
+    const result = await fetchProjects();
+
+    expect(result).toEqual({ projects: [{ name: 'myproj' }] });
+    expect((fetchMock.mock.calls[0] as [string])[0]).toContain('/api/projects');
+  });
+
+  it('throws with the HTTP status text on failure', async () => {
+    stubFetch(false, {}, 503, 'Service Unavailable');
+    const fetchProjects = await getFetchProjects();
+
+    await expect(fetchProjects()).rejects.toThrow('Failed to fetch projects: Service Unavailable');
+  });
+});
+
+describe('setPriority', () => {
+  async function getSetPriority() {
+    const { setPriority } = await import('@/lib/client-api');
+    return setPriority;
+  }
+
+  it('patches priority JSON to the correct endpoint', async () => {
+    const fetchMock = stubFetch(true, { status: 'ok' });
+    const setPriority = await getSetPriority();
+
+    const result = await setPriority('task-1', 'high');
+
+    expect(result).toEqual({ status: 'ok' });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/projects/task-1/priority');
+    expect(init.method).toBe('PATCH');
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
+    expect(JSON.parse(init.body as string)).toEqual({ priority: 'high' });
+  });
+
+  it('throws with the HTTP status text on failure', async () => {
+    stubFetch(false, {}, 400, 'Bad Request');
+    const setPriority = await getSetPriority();
+
+    await expect(setPriority('task-1', 'invalid')).rejects.toThrow('Failed to set priority: Bad Request');
+  });
+});
+
+describe('pauseProject and resumeProject', () => {
+  async function getClientApi() {
+    const { pauseProject, resumeProject } = await import('@/lib/client-api');
+    return { pauseProject, resumeProject };
+  }
+
+  it('pauseProject posts to the pause endpoint', async () => {
+    const fetchMock = stubFetch(true, { status: 'paused' });
+    const { pauseProject } = await getClientApi();
+
+    const result = await pauseProject('task-7');
+
+    expect(result).toEqual({ status: 'paused' });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/projects/task-7/pause');
+    expect(init.method).toBe('POST');
+  });
+
+  it('pauseProject throws with the HTTP status text on failure', async () => {
+    stubFetch(false, {}, 404, 'Not Found');
+    const { pauseProject } = await getClientApi();
+
+    await expect(pauseProject('task-7')).rejects.toThrow('Failed to pause: Not Found');
+  });
+
+  it('resumeProject posts to the resume endpoint', async () => {
+    const fetchMock = stubFetch(true, { status: 'running' });
+    const { resumeProject } = await getClientApi();
+
+    const result = await resumeProject('task-8');
+
+    expect(result).toEqual({ status: 'running' });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/projects/task-8/resume');
+    expect(init.method).toBe('POST');
+  });
+
+  it('resumeProject throws with the HTTP status text on failure', async () => {
+    stubFetch(false, {}, 409, 'Conflict');
+    const { resumeProject } = await getClientApi();
+
+    await expect(resumeProject('task-8')).rejects.toThrow('Failed to resume: Conflict');
+  });
+});
+
+describe('fetchTaskDetail', () => {
+  async function getFetchTaskDetail() {
+    const { fetchTaskDetail } = await import('@/lib/client-api');
+    return fetchTaskDetail;
+  }
+
+  it('returns parsed task detail on success', async () => {
+    const fetchMock = stubFetch(true, { id: 'task-3', title: 'Fix bug', status: 'open' });
+    const fetchTaskDetail = await getFetchTaskDetail();
+
+    const result = await fetchTaskDetail('task-3');
+
+    expect(result).toEqual({ id: 'task-3', title: 'Fix bug', status: 'open' });
+    expect((fetchMock.mock.calls[0] as [string])[0]).toContain('/api/projects/task-3/detail');
+  });
+
+  it('throws with the HTTP status text on failure', async () => {
+    stubFetch(false, {}, 404, 'Not Found');
+    const fetchTaskDetail = await getFetchTaskDetail();
+
+    await expect(fetchTaskDetail('missing')).rejects.toThrow('Failed to fetch task detail: Not Found');
+  });
+});
+
+describe('fixCi, reviewProject, testProject', () => {
+  async function getClientApi() {
+    const { fixCi, reviewProject, testProject } = await import('@/lib/client-api');
+    return { fixCi, reviewProject, testProject };
+  }
+
+  it('fixCi posts to the fix-ci endpoint and returns the job info', async () => {
+    const fetchMock = stubFetch(true, { status: 'started', job_id: 'ci-1', pid: 50, log_path: '/tmp/ci', ci_url: 'https://ci/1' });
+    const { fixCi } = await getClientApi();
+
+    const result = await fixCi('myproj');
+
+    expect(result).toEqual({ status: 'started', job_id: 'ci-1', pid: 50, log_path: '/tmp/ci', ci_url: 'https://ci/1' });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/by-project/myproj/fix-ci');
+    expect(init.method).toBe('POST');
+  });
+
+  it('fixCi surfaces API detail errors and falls back to status text', async () => {
+    stubFetch(false, { detail: 'no CI configured' }, 422, 'Unprocessable Entity');
+    const { fixCi } = await getClientApi();
+
+    await expect(fixCi('myproj')).rejects.toThrow('no CI configured');
+
+    stubFetch(false, {}, 500, 'Internal Server Error');
+    await expect(fixCi('myproj')).rejects.toThrow('Failed to start CI fix: Internal Server Error');
+  });
+
+  it('reviewProject posts to the review endpoint and returns the job info', async () => {
+    const fetchMock = stubFetch(true, { status: 'started', job_id: 'rev-1', pid: 60, log_path: '/tmp/rev' });
+    const { reviewProject } = await getClientApi();
+
+    const result = await reviewProject('myproj');
+
+    expect(result).toEqual({ status: 'started', job_id: 'rev-1', pid: 60, log_path: '/tmp/rev' });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/by-project/myproj/review');
+    expect(init.method).toBe('POST');
+  });
+
+  it('reviewProject surfaces API detail errors', async () => {
+    stubFetch(false, { detail: 'review already running' }, 409, 'Conflict');
+    const { reviewProject } = await getClientApi();
+
+    await expect(reviewProject('myproj')).rejects.toThrow('review already running');
+  });
+
+  it('testProject posts to the test endpoint and returns the job info', async () => {
+    const fetchMock = stubFetch(true, { status: 'started', job_id: 'tst-1', pid: 70, log_path: '/tmp/tst' });
+    const { testProject } = await getClientApi();
+
+    const result = await testProject('myproj');
+
+    expect(result).toEqual({ status: 'started', job_id: 'tst-1', pid: 70, log_path: '/tmp/tst' });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/by-project/myproj/test');
+    expect(init.method).toBe('POST');
+  });
+
+  it('testProject falls back to status text when detail is absent', async () => {
+    stubFetch(false, {}, 503, 'Service Unavailable');
+    const { testProject } = await getClientApi();
+
+    await expect(testProject('myproj')).rejects.toThrow('Failed to start tests: Service Unavailable');
+  });
+});
+
+describe('fetchPersonas and fetchProjectLogs', () => {
+  async function getClientApi() {
+    const { fetchPersonas, fetchProjectLogs } = await import('@/lib/client-api');
+    return { fetchPersonas, fetchProjectLogs };
+  }
+
+  it('fetchPersonas returns personas list on success', async () => {
+    const fetchMock = stubFetch(true, { personas: [{ id: 'cto', name: 'CTO' }] });
+    const { fetchPersonas } = await getClientApi();
+
+    const result = await fetchPersonas();
+
+    expect(result).toEqual({ personas: [{ id: 'cto', name: 'CTO' }] });
+    expect((fetchMock.mock.calls[0] as [string])[0]).toContain('/api/projects/personas');
+  });
+
+  it('fetchPersonas throws with status text on failure', async () => {
+    stubFetch(false, {}, 500, 'Internal Server Error');
+    const { fetchPersonas } = await getClientApi();
+
+    await expect(fetchPersonas()).rejects.toThrow('Failed to fetch personas: Internal Server Error');
+  });
+
+  it('fetchProjectLogs returns log entries on success', async () => {
+    const fetchMock = stubFetch(true, { logs: [{ id: 'log-1', message: 'started' }] });
+    const { fetchProjectLogs } = await getClientApi();
+
+    const result = await fetchProjectLogs('myproj');
+
+    expect(result).toEqual({ logs: [{ id: 'log-1', message: 'started' }] });
+    expect((fetchMock.mock.calls[0] as [string])[0]).toContain('/by-project/myproj/logs');
+  });
+
+  it('fetchProjectLogs throws with status text on failure', async () => {
+    stubFetch(false, {}, 404, 'Not Found');
+    const { fetchProjectLogs } = await getClientApi();
+
+    await expect(fetchProjectLogs('missing')).rejects.toThrow('Failed to fetch logs: Not Found');
+  });
+});
+
+describe('fetchBranch', () => {
+  async function getFetchBranch() {
+    const { fetchBranch } = await import('@/lib/client-api');
+    return fetchBranch;
+  }
+
+  it('returns branch info on success', async () => {
+    const fetchMock = stubFetch(true, { branch: 'feature/x', defaultBranch: 'main', commitsAhead: 2 });
+    const fetchBranch = await getFetchBranch();
+
+    const result = await fetchBranch('myproj');
+
+    expect(result).toEqual({ branch: 'feature/x', defaultBranch: 'main', commitsAhead: 2 });
+    expect((fetchMock.mock.calls[0] as [string])[0]).toContain('/by-project/myproj/branch');
+  });
+
+  it('throws on failure', async () => {
+    stubFetch(false, {}, 500, 'Internal Server Error');
+    const fetchBranch = await getFetchBranch();
+
+    await expect(fetchBranch('myproj')).rejects.toThrow('Failed to fetch branch');
+  });
+});
+
+describe('fetchChangeDiff', () => {
+  async function getFetchChangeDiff() {
+    const { fetchChangeDiff } = await import('@/lib/client-api');
+    return fetchChangeDiff;
+  }
+
+  it('encodes the filename in the query string and returns the diff', async () => {
+    const fetchMock = stubFetch(true, { diff: '--- a/foo.ts\n+++ b/foo.ts\n@@ -1 +1 @@' });
+    const fetchChangeDiff = await getFetchChangeDiff();
+
+    const result = await fetchChangeDiff('myproj', 'src/foo.ts');
+
+    expect(result).toEqual({ diff: '--- a/foo.ts\n+++ b/foo.ts\n@@ -1 +1 @@' });
+    const url = (fetchMock.mock.calls[0] as [string])[0];
+    expect(url).toContain('/by-project/myproj/changes/diff');
+    expect(url).toContain('file=src%2Ffoo.ts');
+  });
+
+  it('surfaces API detail errors and falls back to status text', async () => {
+    stubFetch(false, { detail: 'file not found' }, 404, 'Not Found');
+    const fetchChangeDiff = await getFetchChangeDiff();
+
+    await expect(fetchChangeDiff('myproj', 'missing.ts')).rejects.toThrow('file not found');
+
+    stubFetch(false, {}, 500, 'Internal Server Error');
+    await expect(fetchChangeDiff('myproj', 'other.ts')).rejects.toThrow('Failed to fetch diff: Internal Server Error');
+  });
+});
+
+describe('fetchProjectDocs', () => {
+  async function getFetchProjectDocs() {
+    const { fetchProjectDocs } = await import('@/lib/client-api');
+    return fetchProjectDocs;
+  }
+
+  it('returns docs list on success', async () => {
+    const fetchMock = stubFetch(true, { docs: [{ id: 'doc-1', title: 'README', content: 'hello' }] });
+    const fetchProjectDocs = await getFetchProjectDocs();
+
+    const result = await fetchProjectDocs('myproj');
+
+    expect(result).toEqual({ docs: [{ id: 'doc-1', title: 'README', content: 'hello' }] });
+    expect((fetchMock.mock.calls[0] as [string])[0]).toContain('/by-project/myproj/docs');
+  });
+
+  it('throws on failure', async () => {
+    stubFetch(false, {}, 500, 'Internal Server Error');
+    const fetchProjectDocs = await getFetchProjectDocs();
+
+    await expect(fetchProjectDocs('myproj')).rejects.toThrow('Failed to fetch docs');
+  });
+});
