@@ -90,4 +90,52 @@ describe('client agents helpers', () => {
       blockingJobId: 'release-1',
     });
   });
+
+  it('updateAgent patches the agent and returns the updated record', async () => {
+    const fetchMock = stubFetch(true, { agent: { id: 'agent-1', model: 'smart' } });
+    const { updateAgent } = await getClientAgents();
+
+    await expect(updateAgent('agent-1', { model: 'smart' })).resolves.toEqual({
+      agent: { id: 'agent-1', model: 'smart' },
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/agents/agent-1');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toEqual({ model: 'smart' });
+  });
+
+  it('updateAgent surfaces API detail errors', async () => {
+    stubFetch(false, { detail: 'agent not found' });
+    const { updateAgent } = await getClientAgents();
+
+    await expect(updateAgent('missing', { model: 'fast' })).rejects.toThrow('agent not found');
+  });
+
+  it('updateAgent falls back to generic error when detail is absent', async () => {
+    stubFetch(false, {}, 'Internal Server Error');
+    const { updateAgent } = await getClientAgents();
+
+    await expect(updateAgent('agent-1', { enabled: false })).rejects.toThrow(
+      'Failed to update agent',
+    );
+  });
+
+  it('deleteAgent sends DELETE to the agent endpoint', async () => {
+    const fetchMock = stubFetch(true, {});
+    const { deleteAgent } = await getClientAgents();
+
+    await expect(deleteAgent('agent-1')).resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/agents/agent-1');
+    expect((init as RequestInit).method).toBe('DELETE');
+  });
+
+  it('deleteAgent throws on failure', async () => {
+    stubFetch(false, {}, 'Not Found');
+    const { deleteAgent } = await getClientAgents();
+
+    await expect(deleteAgent('ghost')).rejects.toThrow('Failed to delete agent');
+  });
 });
