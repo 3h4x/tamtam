@@ -1,9 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { renderAnsi, hasAnsi } from '@/lib/terminal/ansi-render'
+import { renderAnsi, renderAnsiLines, hasAnsi, stripAnsi } from '@/lib/terminal/ansi-render'
 import type { TermEntry, ToolEntry, SkillItem } from '@/lib/terminal/terminal-session-store'
 import { ToolBlock } from './ToolBlock'
 
@@ -59,6 +59,7 @@ interface TerminalMessagesProps {
 const spinnerChars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
 type LogTone = 'default' | 'info' | 'success' | 'warning' | 'error'
+type RawLineKind = 'ambient' | 'meta' | 'command' | 'divider'
 
 const LOG_TONE_STYLES: Record<LogTone, { badge: string; line: string; text: string }> = {
   default: {
@@ -91,11 +92,30 @@ const LOG_TONE_STYLES: Record<LogTone, { badge: string; line: string; text: stri
 function classifyLogLine(text: string, fallback: LogTone = 'default'): LogTone {
   const line = text.trim()
   if (!line) return fallback
-  if (/\b(error|failed|failure|fatal|panic|exception|traceback|not found|exit [1-9]\d*|do not ship)\b/i.test(line)) return 'error'
+  if (/\b(err(?:or)?!?|failed|failure|fatal|panic|exception|traceback|not found|exit [1-9]\d*|do not ship)\b/i.test(line)) return 'error'
   if (/\b(warn(?:ing)?|needs attention|deprecated|retry|timeout|idle)\b/i.test(line)) return 'warning'
   if (/\b(done|passed|success|succeeded|complete(?:d)?|lgtm|ok)\b/i.test(line)) return 'success'
   if (/\b(start(?:ed|ing)?|running|review|testing|pushing|committing|building|loading|fetching)\b/i.test(line)) return 'info'
   return fallback
+}
+
+function classifyRawLine(text: string): { kind: RawLineKind; tone: LogTone } {
+  const trimmed = text.trim()
+  if (!trimmed) return { kind: 'ambient', tone: 'default' }
+  const tone = classifyLogLine(trimmed)
+  if (/^[=-]{3,}$/.test(trimmed) || /^#{2,}\s/.test(trimmed)) return { kind: 'divider', tone: 'info' }
+  if ((/^\$ /.test(trimmed) || /^(pnpm|npm|node|git|gh|bash|sh)\b/.test(trimmed)) && tone === 'default') {
+    return { kind: 'command', tone: 'info' }
+  }
+  if (/^\[[^\]]+\]/.test(trimmed) || /^\d{1,2}:\d{2}:\d{2}\b/.test(trimmed)) return { kind: 'meta', tone }
+  return { kind: 'ambient', tone }
+}
+
+function paneClass(tone: LogTone, variant: 'flat' | 'terminal' = 'flat'): string {
+  if (variant === 'terminal') return 'rounded-r-md border-l-2 border-border/60 bg-[#101214] text-text-secondary'
+  if (tone === 'error') return 'rounded-r-md border-l-2 border-status-error/60 bg-status-error/[0.06] text-text-secondary'
+  if (tone === 'info') return 'rounded-r-md border-l-2 border-accent/30 bg-bg-primary text-text-secondary'
+  return 'rounded-r-md border-l-2 border-border/30 bg-transparent text-text-secondary'
 }
 
 function RoleBadge({ label, tone = 'default' }: { label: string; tone?: LogTone }) {
@@ -103,6 +123,14 @@ function RoleBadge({ label, tone = 'default' }: { label: string; tone?: LogTone 
   return (
     <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono ${style.badge}`}>
       {label}
+    </span>
+  )
+}
+
+function renderLogLineContent(line: string, renderedLine: ReactNode[] | null, className: string) {
+  return (
+    <span className={className}>
+      {renderedLine && renderedLine.length > 0 ? renderedLine : line || ' '}
     </span>
   )
 }
@@ -119,32 +147,71 @@ function LogBlock({
   structured?: boolean
 }) {
   const collapsed = collapseCarriageReturns(text)
+  const plainLines = collapsed.split('\n')
+  const ansiLines = allowAnsi && hasAnsi(collapsed) ? renderAnsiLines(collapsed) : null
   if (!structured) {
-    if (allowAnsi && hasAnsi(text)) {
-      return <pre className="m-0 whitespace-pre-wrap text-xs text-text-secondary">{renderAnsi(collapsed)}</pre>
-    }
-    return <pre className="m-0 whitespace-pre-wrap text-xs text-text-secondary">{collapsed}</pre>
-  }
+    return (
+      <div className="space-y-0.5">
+        {plainLines.map((line, index) => {
+          const plainLine = stripAnsi(line)
+          const { kind, tone } = classifyRawLine(plainLine)
+          const style = LOG_TONE_STYLES[tone]
+          const renderedLine = ansiLines?.[index] ?? null
 
-  if (allowAnsi && hasAnsi(text)) {
-    return <pre className="m-0 whitespace-pre-wrap text-xs text-text-secondary">{renderAnsi(collapsed)}</pre>
+          if (kind === 'divider') {
+            return (
+              <div key={`${index}:${line}`} className="border-t border-border/60 pt-1.5 text-[10px] uppercase tracking-[0.2em] text-text-tertiary/80">
+                {plainLine.replace(/^[#=\-\s]+/, '') || 'section'}
+              </div>
+            )
+          }
+
+          if (kind === 'command') {
+            return (
+              <div key={`${index}:${line}`} className={`flex items-start gap-2 border-l-2 pl-2 ${style.line}`}>
+                <span className={`mt-0.5 inline-flex min-w-10 justify-center rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono shrink-0 ${style.badge}`}>
+                  cmd
+                </span>
+                {renderLogLineContent(line, renderedLine, 'min-w-0 flex-1 whitespace-pre-wrap break-words text-xs text-text-primary')}
+              </div>
+            )
+          }
+
+          if (kind === 'meta' || tone !== 'default') {
+            return (
+              <div key={`${index}:${line}`} className={`flex items-start gap-2 border-l pl-2 ${style.line}`}>
+                <span className={`mt-0.5 inline-flex min-w-10 justify-center rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono shrink-0 ${style.badge}`}>
+                  {tone === 'success' ? 'ok' : tone === 'warning' ? 'warn' : tone === 'error' ? 'err' : kind === 'meta' ? 'meta' : tone}
+                </span>
+                {renderLogLineContent(line, renderedLine, `min-w-0 flex-1 whitespace-pre-wrap break-words text-xs ${style.text}`)}
+              </div>
+            )
+          }
+
+          return (
+            <div key={`${index}:${line}`} className="border-l border-border/25 pl-2">
+              {renderLogLineContent(line, renderedLine, 'min-w-0 whitespace-pre-wrap break-words text-xs text-text-secondary')}
+            </div>
+          )
+        })}
+      </div>
+    )
   }
 
   return (
     <div className="space-y-0.5">
-      {collapsed.split('\n').map((line, index) => {
+      {plainLines.map((line, index) => {
         // Always use 'default' as classifier fallback so unclassified lines
         // return 'default' and positively-matched tones (info/success/warning/
         // error) always get a badge regardless of the block's fallbackTone.
-        const tone = classifyLogLine(line)
+        const tone = classifyLogLine(stripAnsi(line))
         const isAmbient = tone === 'default'
         const style = LOG_TONE_STYLES[tone]
+        const renderedLine = ansiLines?.[index] ?? null
         if (isAmbient) {
           return (
             <div key={`${index}:${line}`} className="border-l border-border/25 pl-2">
-              <span className="min-w-0 whitespace-pre-wrap break-words text-text-secondary text-xs">
-                {line || ' '}
-              </span>
+              {renderLogLineContent(line, renderedLine, 'min-w-0 whitespace-pre-wrap break-words text-text-secondary text-xs')}
             </div>
           )
         }
@@ -153,9 +220,7 @@ function LogBlock({
             <span className={`mt-0.5 inline-flex min-w-10 justify-center rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono shrink-0 ${style.badge}`}>
               {tone === 'success' ? 'ok' : tone === 'warning' ? 'warn' : tone === 'error' ? 'err' : tone}
             </span>
-            <span className={`min-w-0 flex-1 whitespace-pre-wrap break-words text-xs ${style.text}`}>
-              {line || ' '}
-            </span>
+            {renderLogLineContent(line, renderedLine, `min-w-0 flex-1 whitespace-pre-wrap break-words text-xs ${style.text}`)}
           </div>
         )
       })}
@@ -165,8 +230,8 @@ function LogBlock({
 
 function ThinkingBlock({ text }: { text: string }) {
   return (
-    <div className="px-4 py-2 border-l-2 border-accent/35 ml-4 mr-4 my-1 bg-accent/[0.04] rounded-r">
-      <div className="text-[10px] text-accent/60 mb-1 uppercase tracking-wider">thinking</div>
+    <div className="mx-3 my-1 rounded-r-md border-l-2 border-accent/35 bg-accent/[0.04] px-4 py-2">
+      <div className="mb-1 text-[10px] uppercase tracking-wider text-accent/60">thinking</div>
       <div className="text-text-tertiary text-xs whitespace-pre-wrap">{text}</div>
     </div>
   )
@@ -204,7 +269,7 @@ export function TerminalMessages({
     const trimmed = streamBuffer.trimEnd()
     const lastNl = trimmed.lastIndexOf('\n')
     const line = lastNl === -1 ? trimmed : trimmed.slice(lastNl + 1)
-    return line.trim().slice(0, 120) || ''
+    return stripAnsi(line).trim().slice(0, 120) || ''
   })()
 
   return (
@@ -263,12 +328,12 @@ export function TerminalMessages({
               <div className="mx-4 my-2 border-t border-border/25" aria-hidden />
             )}
           <div
-            className={`group relative mx-3 my-1 rounded-r-md px-4 py-2 ${
-              entry.role === 'user' ? 'border-l-2 border-accent/45 bg-accent/[0.03] text-text-primary whitespace-pre-wrap' :
-              entry.role === 'error' ? 'border-l-2 border-status-error/60 bg-status-error/[0.06] text-text-secondary text-xs' :
-              entry.role === 'status' ? 'border-l-2 border-accent/30 bg-bg-primary text-text-secondary text-xs' :
-              entry.role === 'raw' ? 'border-l-2 border-border/60 bg-[#101214] text-text-secondary text-xs' :
-              'border-l-2 border-border/30 bg-transparent text-text-secondary terminal-markdown'
+            className={`group relative mx-3 my-1 px-4 py-2 ${
+              entry.role === 'user' ? 'rounded-r-md border-l-2 border-accent/45 bg-accent/[0.03] text-text-primary whitespace-pre-wrap' :
+              entry.role === 'error' ? `${paneClass('error')} text-xs` :
+              entry.role === 'status' ? `${paneClass('info')} text-xs` :
+              entry.role === 'raw' ? `${paneClass('default', 'terminal')} text-xs` :
+              `${paneClass('default')} terminal-markdown`
             }`}
           >
             {(entry.role === 'assistant' || entry.role === 'user' || entry.role === 'status' || entry.role === 'error' || entry.role === 'raw') && (
@@ -331,9 +396,10 @@ export function TerminalMessages({
 
         {/* Live raw lines from passthrough streaming (test output, section headers, etc.) */}
         {streaming && rawBuffer && (
-          <div className="mx-3 my-1 rounded-r-md border-l-2 border-border/60 bg-[#101214] px-4 py-2 text-xs text-text-secondary">
-            <div className="mb-1.5">
-              <RoleBadge label="raw" />
+          <div className={`mx-3 my-1 px-4 py-2 text-xs ${paneClass('default', 'terminal')}`}>
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <RoleBadge label="raw output" />
+              <span className="text-[10px] uppercase tracking-wider text-text-tertiary font-mono">live log</span>
             </div>
             <LogBlock text={rawBuffer} allowAnsi fallbackTone="default" structured={false} />
           </div>
@@ -341,9 +407,12 @@ export function TerminalMessages({
 
         {/* Live streamed assistant text */}
         {streaming && streamBuffer && (
-          <div className={`mx-3 my-1 rounded-r-md border-l-2 px-4 py-2 ${streamIsRaw ? 'border-border/60 bg-[#101214] text-text-secondary font-mono text-xs' : 'border-border/30 text-text-secondary terminal-markdown'}`}>
-            <div className="mb-1.5">
+          <div className={`mx-3 my-1 px-4 py-2 ${streamIsRaw ? `${paneClass('default', 'terminal')} font-mono text-xs` : `${paneClass('default')} terminal-markdown`}`}>
+            <div className="mb-1.5 flex items-center justify-between gap-2">
               <RoleBadge label={streamIsRaw ? 'raw' : 'agent'} tone={streamIsRaw ? 'default' : 'info'} />
+              <span className="text-[10px] uppercase tracking-wider text-text-tertiary font-mono">
+                {streamIsRaw ? 'passthrough' : 'streaming'}
+              </span>
             </div>
             {streamIsRaw
               ? <LogBlock text={streamBuffer} allowAnsi fallbackTone="default" structured={false} />
@@ -387,8 +456,24 @@ export function TerminalMessages({
           const isVeryIdle = idleSec >= 10
           const idleLabel = isIdle ? ` · idle ${idleSec}s` : ''
           return (
-            <div className="px-4 py-2 flex items-center gap-2 border-l-2 border-accent/30 bg-accent/[0.02]">
-              <span className="relative inline-flex items-center justify-center w-5 h-5 shrink-0">
+            <div className="mx-3 mt-1 rounded-r-md border-l-2 border-accent/30 bg-accent/[0.03] px-4 py-2">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <RoleBadge label="live run" tone={isIdle ? 'warning' : 'info'} />
+                  <span className={`text-[10px] uppercase tracking-wider font-mono ${isIdle ? 'text-status-warning' : 'text-text-tertiary'}`}>
+                    {isIdle ? 'waiting for output' : 'receiving output'}
+                  </span>
+                </div>
+                <button
+                  className="shrink-0 rounded bg-status-error/20 px-1.5 py-0.5 text-[10px] text-status-error hover:bg-status-error/40 cursor-pointer border-none font-mono leading-none"
+                  onClick={onCancel}
+                  title="Cancel execution"
+                >
+                  cancel
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center">
                 {isVeryIdle && (
                   <span className="absolute inset-0 rounded-full bg-status-warning/20 animate-pulse" style={{ animationDuration: '2s' }} />
                 )}
@@ -398,13 +483,7 @@ export function TerminalMessages({
               <span className={`text-xs font-mono truncate flex-1 ${pendingTool ? 'text-status-warning' : isIdle ? 'text-status-warning/80' : 'text-text-tertiary'}`}>
                 {label}{idleLabel}
               </span>
-              <button
-                className="text-[10px] px-1.5 py-0.5 rounded bg-status-error/20 text-status-error hover:bg-status-error/40 cursor-pointer border-none font-mono leading-none shrink-0"
-                onClick={onCancel}
-                title="Cancel execution"
-              >
-                cancel
-              </button>
+              </div>
             </div>
           )
         })()}

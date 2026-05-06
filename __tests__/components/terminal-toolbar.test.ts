@@ -113,7 +113,7 @@ describe('TerminalToolbar', () => {
     const buttons = Array.from(container.querySelectorAll('button'))
     const skillsButton = buttons.find(button => button.textContent === 'skills 2')
     const docsButton = buttons.find(button => button.textContent === 'docs 2')
-    const overflowChip = Array.from(container.querySelectorAll('span')).find(span => span.textContent === '+1')
+    const overflowChip = buttons.find(button => button.textContent === '+1')
 
     skillsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     docsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))

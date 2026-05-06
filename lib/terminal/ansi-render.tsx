@@ -63,6 +63,10 @@ export function hasAnsi(text: string): boolean {
   return false
 }
 
+export function stripAnsi(text: string): string {
+  return text.replace(ANSI_REGEX, '')
+}
+
 function reflow(text: string): string {
   if (text.includes('\n')) return text
   return text
@@ -72,21 +76,30 @@ function reflow(text: string): string {
     .replace(/^\n+/, '')
 }
 
-export function renderAnsi(text: string): ReactNode[] {
+function parseAnsi(text: string): ReactNode[][] {
   text = reflow(text)
   const regex = new RegExp(ANSI_REGEX.source, 'g')
-  const parts: ReactNode[] = []
+  const lines: ReactNode[][] = [[]]
   let state: State = {}
   let lastIndex = 0
   let match: RegExpExecArray | null
   let key = 0
   const push = (chunk: string) => {
     if (!chunk) return
-    const hasStyle = state.fg || state.bg || state.bold || state.dim || state.italic || state.underline
-    if (hasStyle) {
-      parts.push(<span key={key++} style={styleFor(state)}>{chunk}</span>)
-    } else {
-      parts.push(chunk)
+    const pieces = chunk.split('\n')
+    for (let index = 0; index < pieces.length; index++) {
+      const piece = pieces[index]
+      if (piece) {
+        const hasStyle = state.fg || state.bg || state.bold || state.dim || state.italic || state.underline
+        if (hasStyle) {
+          lines[lines.length - 1].push(<span key={key++} style={styleFor(state)}>{piece}</span>)
+        } else {
+          lines[lines.length - 1].push(piece)
+        }
+      }
+      if (index < pieces.length - 1) {
+        lines.push([])
+      }
     }
   }
   while ((match = regex.exec(text)) !== null) {
@@ -96,5 +109,19 @@ export function renderAnsi(text: string): ReactNode[] {
     lastIndex = regex.lastIndex
   }
   push(text.slice(lastIndex))
+  return lines
+}
+
+export function renderAnsiLines(text: string): ReactNode[][] {
+  return parseAnsi(text)
+}
+
+export function renderAnsi(text: string): ReactNode[] {
+  const lines = parseAnsi(text)
+  const parts: ReactNode[] = []
+  for (let index = 0; index < lines.length; index++) {
+    if (index > 0) parts.push('\n')
+    parts.push(...lines[index])
+  }
   return parts
 }

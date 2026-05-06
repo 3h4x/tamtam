@@ -68,6 +68,8 @@ export function TerminalToolbar({
 }: TerminalToolbarProps) {
   const skillSearchRef = useRef<HTMLInputElement>(null)
   const docsSearchRef = useRef<HTMLInputElement>(null)
+  const toolbarButtonClass = 'inline-flex items-center gap-1 rounded-md border border-border bg-bg-primary px-2 py-1 text-[11px] text-text-secondary font-mono leading-none transition-colors hover:text-text-primary cursor-pointer'
+  const pickerButtonClass = 'inline-flex items-center gap-1 rounded-md border px-2 py-1 font-mono text-[11px] leading-none transition-colors cursor-pointer'
 
   useEffect(() => {
     if (showSkillPicker) skillSearchRef.current?.focus()
@@ -84,19 +86,23 @@ export function TerminalToolbar({
   const SHOW = 3
   const visible = allSelected.slice(0, SHOW)
   const overflow = allSelected.length - SHOW
+  const hasSelections = allSelected.length > 0
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2 bg-bg-secondary border-b border-border shrink-0">
-      <div className="flex flex-wrap items-center gap-1.5">
+    <div className="border-b border-border bg-bg-secondary px-3 py-2 shrink-0">
+      <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="px-1 text-[10px] uppercase tracking-wider text-text-tertiary font-mono">session</span>
+          <div className="flex flex-wrap items-center gap-1.5">
         <button
-          className="inline-flex items-center h-7 px-2 rounded-md border border-border bg-bg-primary text-[11px] text-text-tertiary hover:text-text-primary cursor-pointer font-mono leading-none transition-colors"
+              className={toolbarButtonClass}
           onClick={onNewSession}
           title="New session"
         >
           new
         </button>
         <button
-          className="inline-flex items-center h-7 px-2 rounded-md border border-border bg-bg-primary text-[11px] text-text-tertiary hover:text-text-primary cursor-pointer font-mono leading-none gap-1 transition-colors"
+              className={toolbarButtonClass}
           onClick={onToggleSessions}
           title="Recent sessions"
         >
@@ -106,7 +112,7 @@ export function TerminalToolbar({
           )}
         </button>
         {streaming && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-warning/20 text-status-warning font-mono leading-none flex items-center gap-1">
+              <span className="inline-flex items-center gap-1 rounded-full bg-status-warning/15 px-2 py-1 text-[10px] text-status-warning font-mono leading-none">
             <span className="w-1.5 h-1.5 rounded-full bg-status-warning animate-pulse" />
             live
           </span>
@@ -120,46 +126,35 @@ export function TerminalToolbar({
             trace ↗
           </Link>
         )}
-      </div>
+          </div>
+        </div>
 
-      <div className="flex flex-wrap items-center justify-end gap-1.5">
+        <div className="flex flex-wrap items-start justify-end gap-x-2 gap-y-1.5">
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
         <button
-          className={`inline-flex items-center h-7 px-2 rounded-md border border-border cursor-pointer font-mono text-[11px] leading-none transition-colors ${showThinking ? 'bg-accent/15 text-accent' : 'bg-bg-primary text-text-tertiary hover:text-text-primary'}`}
+              className={`${toolbarButtonClass} ${showThinking ? 'border-accent bg-accent/10 text-accent' : ''}`}
           onClick={onToggleThinking}
           title="Toggle thinking blocks"
         >
           thinking
         </button>
-        {visible.map(item => (
-          <span key={item.key} className="inline-flex items-center h-6 max-w-[120px] gap-1 rounded-full border border-accent/20 bg-accent/10 px-2 text-[10px] text-accent font-mono">
-            <span className="truncate">{item.label}</span>
-            <button className="text-accent/45 hover:text-accent cursor-pointer border-none bg-transparent leading-none shrink-0" onClick={item.remove} title={`Remove ${item.label}`}>×</button>
-          </span>
-        ))}
-        {overflow > 0 && (
-          <span
-            className="inline-flex items-center h-6 rounded-full border border-border bg-bg-primary px-2 text-[10px] text-text-tertiary font-mono cursor-pointer hover:bg-accent/10 hover:text-text-primary transition-colors"
-            title={allSelected.slice(SHOW).map(i => i.label).join(', ')}
-            onClick={onToggleSkillPicker}
-          >
-            +{overflow}
-          </span>
-        )}
-        <div className="relative">
+            <div className="inline-flex items-center rounded-md border border-border bg-bg-primary px-1.5 py-1">
+              <span className="px-1 text-[10px] uppercase tracking-wider text-text-tertiary font-mono">attach</span>
+              <div className="relative">
           <button
-            className={`inline-flex items-center h-7 rounded-md border px-2 font-mono text-[11px] leading-none transition-colors cursor-pointer ${
-              showSkillPicker ? 'border-accent bg-accent/10 text-accent' : 'border-border bg-bg-primary text-text-tertiary hover:text-text-primary'
+                  className={`${pickerButtonClass} ${
+                    showSkillPicker ? 'border-accent bg-accent/10 text-accent' : 'border-transparent bg-transparent text-text-secondary hover:text-text-primary'
             }`}
             onClick={onToggleSkillPicker}
           >
-            skills{selectedItems.length > 0 ? ` ${selectedItems.length}` : ''}
+                  skills{selectedItems.length > 0 ? ` ${selectedItems.length}` : ''}
           </button>
           {showSkillPicker && (
             <div className="absolute top-full right-0 mt-1 w-96 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden">
               <input
                 ref={skillSearchRef}
                 type="text"
-                className="w-full px-3 py-2.5 text-sm bg-bg-primary border-b border-border text-text-primary outline-none placeholder:text-text-tertiary/40 font-mono"
+                    className="focus-ring w-full px-3 py-2.5 text-sm bg-bg-primary border-b border-border text-text-primary outline-none placeholder:text-text-tertiary/40 font-mono"
                 value={skillSearch}
                 onChange={(e) => onSkillSearchChange(e.target.value)}
                 placeholder="search skills..."
@@ -179,7 +174,7 @@ export function TerminalToolbar({
                     return (
                       <button
                         key={item.id}
-                        className={`w-full px-3 py-2 text-left text-xs cursor-pointer border-none font-mono flex items-center justify-between gap-2 transition-colors ${
+                            className={`w-full border-none px-3 py-2 text-left cursor-pointer font-mono transition-colors ${
                           isSelected
                             ? 'bg-accent/10 hover:bg-accent/15 text-accent'
                             : 'hover:bg-bg-tertiary bg-transparent text-text-primary'
@@ -187,14 +182,25 @@ export function TerminalToolbar({
                         onClick={() => onToggleItem(item)}
                         title={item.description || item.name}
                       >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="shrink-0 w-3 text-center text-[10px]">{isSelected ? '✓' : ''}</span>
-                          <span className="truncate">{item.name}</span>
-                          <span className="text-text-tertiary/50 shrink-0">{item.source === 'db' ? 'db' : 'file'}</span>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex min-w-0 items-start gap-2">
+                                <span className="mt-0.5 shrink-0 w-3 text-center text-[10px]">{isSelected ? '✓' : ''}</span>
+                                <div className="min-w-0">
+                                  <div className="truncate text-xs">{item.name}</div>
+                                  {item.description && (
+                                    <div className="mt-0.5 truncate text-[10px] text-text-tertiary">
+                                      {item.description}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="text-[10px] text-text-tertiary/60">{item.source === 'db' ? 'db' : 'file'}</span>
+                                {(skillUsage[item.id] || 0) > 0 && (
+                                  <span className="text-[10px] text-text-tertiary/50">{skillUsage[item.id]}</span>
+                                )}
+                              </div>
                         </div>
-                        {(skillUsage[item.id] || 0) > 0 && (
-                          <span className="text-[10px] text-text-tertiary/40 shrink-0">{skillUsage[item.id]}</span>
-                        )}
                       </button>
                     )
                   })
@@ -205,19 +211,19 @@ export function TerminalToolbar({
         </div>
         <div className="relative">
           <button
-            className={`inline-flex items-center h-7 rounded-md border px-2 font-mono text-[11px] leading-none transition-colors cursor-pointer ${
-              showDocsPicker ? 'border-accent bg-accent/10 text-accent' : 'border-border bg-bg-primary text-text-tertiary hover:text-text-primary'
+                  className={`${pickerButtonClass} ${
+                    showDocsPicker ? 'border-accent bg-accent/10 text-accent' : 'border-transparent bg-transparent text-text-secondary hover:text-text-primary'
             }`}
             onClick={onToggleDocsPicker}
           >
-            docs{selectedDocs.length > 0 ? ` ${selectedDocs.length}` : ''}
+                  docs{selectedDocs.length > 0 ? ` ${selectedDocs.length}` : ''}
           </button>
           {showDocsPicker && (
             <div className="absolute top-full right-0 mt-1 w-72 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden">
               <input
                 ref={docsSearchRef}
                 type="text"
-                className="w-full px-3 py-2.5 text-sm bg-bg-primary border-b border-border text-text-primary outline-none placeholder:text-text-tertiary/40 font-mono"
+                    className="focus-ring w-full px-3 py-2.5 text-sm bg-bg-primary border-b border-border text-text-primary outline-none placeholder:text-text-tertiary/40 font-mono"
                 value={docsSearch}
                 onChange={(e) => onDocsSearchChange(e.target.value)}
                 placeholder="search docs..."
@@ -237,13 +243,15 @@ export function TerminalToolbar({
                     return (
                       <button
                         key={doc.name}
-                        className={`w-full px-3 py-2 text-left text-xs cursor-pointer border-none font-mono flex items-center gap-2 transition-colors ${
+                            className={`w-full border-none px-3 py-2 text-left text-xs cursor-pointer font-mono transition-colors ${
                           isSelected ? 'bg-accent/10 hover:bg-accent/15 text-accent' : 'hover:bg-bg-tertiary bg-transparent text-text-primary'
                         }`}
                         onClick={() => onToggleDoc(doc)}
                       >
-                        <span className="shrink-0 w-3 text-center text-[10px]">{isSelected ? '✓' : ''}</span>
-                        <span className="truncate">{doc.name}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="shrink-0 w-3 text-center text-[10px]">{isSelected ? '✓' : ''}</span>
+                              <span className="truncate">{doc.name}</span>
+                            </div>
                       </button>
                     )
                   })
@@ -252,15 +260,16 @@ export function TerminalToolbar({
             </div>
           )}
         </div>
-        <div className="inline-flex items-center gap-1 rounded-md border border-border bg-bg-primary px-1.5 h-7">
-          <span className="text-[10px] uppercase tracking-wider text-text-tertiary font-mono">model</span>
+            </div>
+            <div className="inline-flex items-center rounded-md border border-border bg-bg-primary px-1.5 py-1">
+              <span className="px-1 text-[10px] uppercase tracking-wider text-text-tertiary font-mono">model</span>
           {MODEL_TIERS.map((m) => (
             <button
               key={m}
-              className={`h-5 rounded px-1.5 text-[10px] cursor-pointer border-none font-mono leading-none transition-colors ${
+                  className={`rounded px-1.5 py-0.5 text-[10px] cursor-pointer border-none font-mono leading-none transition-colors ${
                 model === m
                   ? 'bg-accent/15 text-accent'
-                  : 'bg-transparent text-text-tertiary hover:text-text-primary'
+                    : 'bg-transparent text-text-secondary hover:text-text-primary'
               }`}
               onClick={async () => {
                 onModelChange(m)
@@ -277,6 +286,29 @@ export function TerminalToolbar({
               {MODEL_LABELS[m]}
             </button>
           ))}
+            </div>
+          </div>
+
+          {hasSelections && (
+            <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+              <span className="px-1 text-[10px] uppercase tracking-wider text-text-tertiary font-mono">selected</span>
+              {visible.map(item => (
+                <span key={item.key} className="inline-flex max-w-[180px] items-center gap-1 rounded-full border border-accent/20 bg-accent/10 px-2 py-1 text-[10px] text-accent font-mono">
+                  <span className="truncate">{item.label}</span>
+                  <button className="shrink-0 border-none bg-transparent leading-none text-accent/45 hover:text-accent cursor-pointer" onClick={item.remove} title={`Remove ${item.label}`}>×</button>
+                </span>
+              ))}
+              {overflow > 0 && (
+                <button
+                  className="inline-flex items-center rounded-full border border-border bg-bg-primary px-2 py-1 text-[10px] text-text-tertiary font-mono cursor-pointer hover:bg-accent/10 hover:text-text-primary transition-colors"
+                  title={allSelected.slice(SHOW).map(i => i.label).join(', ')}
+                  onClick={onToggleSkillPicker}
+                >
+                  +{overflow}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

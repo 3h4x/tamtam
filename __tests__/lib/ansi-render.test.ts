@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { CSSProperties } from 'react';
-import { hasAnsi, renderAnsi } from '@/lib/terminal/ansi-render';
+import { hasAnsi, renderAnsi, renderAnsiLines } from '@/lib/terminal/ansi-render';
 
 type SpanNode = { type: string; props: { style: CSSProperties; children?: string } };
 
@@ -184,5 +184,20 @@ describe('renderAnsi — reflow (vitest compact output reflowing)', () => {
     const input = '\x1b[32m ✓ first test';
     const text = flatText(renderAnsi(input));
     expect(text.startsWith('\n')).toBe(false);
+  });
+});
+
+describe('renderAnsiLines', () => {
+  it('preserves ansi state across newline boundaries', () => {
+    const lines = renderAnsiLines('\x1b[31mline1\nline2\x1b[0m');
+    expect(lines).toHaveLength(2);
+
+    const firstLineSpan = asSpan(lines[0][0]);
+    const secondLineSpan = asSpan(lines[1][0]);
+
+    expect(firstLineSpan.props.style.color).toBe('#cc6666');
+    expect(firstLineSpan.props.children).toBe('line1');
+    expect(secondLineSpan.props.style.color).toBe('#cc6666');
+    expect(secondLineSpan.props.children).toBe('line2');
   });
 });

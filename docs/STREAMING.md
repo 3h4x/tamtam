@@ -274,17 +274,16 @@ The `?job=` param is used during live streaming because the session ID isn't kno
 ### Toolbar controls
 
 ```
-[ new ] [ recent ] [ ● live ]          [ thinking ] [ +skill ] [ +docs ] [ Normal ▾ ]
+[ session: new recent ● live trace ]   [ thinking ] [ attach: skills 2 docs 1 ] [ model: Fast Normal Smart ]
 ```
 
 - **new** — clears the terminal and starts a fresh session (prompt: `type a message...`)
 - **recent** — opens the session picker dropdown
-- **● live** — appears only while a job is actively streaming; replaces "recent" during live mode
+- **● live** — appears only while a job is actively streaming
 - **thinking** — toggles visibility of Claude's `<thinking>` blocks
-- **+skill** — opens skill picker; selected skills appear as removable tags (e.g. `Senior Fullstack ×`) and are injected as context on the *first* message only
-- **+docs** — injects project `docs/*.md` files into the next submission
-- **model selector** — Fast / Normal / Smart; persists to `default_model` setting, with legacy Claude-family aliases still readable
-- **trace ↙** — appears only during an active release pipeline run; links to `/project/[name]/release/[releaseId]` trace view showing per-step verdicts and log excerpts
+- **skills N / docs N** — live inside the `attach` group. They open the skill and docs pickers and show the current selection counts. Selected items also appear as removable pills in a separate `selected` row when anything is attached. Skills and docs are injected only on the *first* message of a new session.
+- **model buttons** — Fast / Normal / Smart are direct buttons, not a dropdown. The selection persists to `default_model`, with legacy Claude-family aliases still readable.
+- **trace ↗** — appears only during an active release pipeline run; links to `/project/[name]/release/[releaseId]` trace view showing per-step verdicts and log excerpts
 - **abort** — appears only while a real release job is running; it calls the release abort route to stop the locked release and its current child step. Standalone test/review/fix strips do not show it.
 
 ### Content rendering
@@ -296,6 +295,10 @@ The `?job=` param is used during live streaming because the session ID isn't kno
 **Tool calls** — indented block with `Tool: [ToolName]` header, tool input and output shown below. During live streaming, tool calls show as collapsed single-line rows (`tool_name ›`) until the result arrives.
 
 **Thinking blocks** — hidden by default; toggle with the **thinking** button.
+
+**Raw / passthrough output** — shell-heavy or release-style logs render in a dark monospace pane. Live raw buffers use a `raw output` badge plus a `live log` eyebrow; raw assistant passthrough streams use a `raw` badge plus a `passthrough` eyebrow. Individual lines are classified with badges such as `cmd`, `meta`, `ok`, `warn`, and `err`, and multiline ANSI colors are preserved across newline boundaries.
+
+**Live run status** — while a run is active, a dedicated `live run` panel shows elapsed time, the latest streamed line or pending tool name, idle/waiting state, and the inline `cancel` action.
 
 **Context compaction** — when Claude compacts its context window, a `[context compacted]` marker appears inline in the conversation.
 
