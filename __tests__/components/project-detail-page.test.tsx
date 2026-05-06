@@ -1,0 +1,332 @@
+/* @vitest-environment jsdom */
+
+import React from 'react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createRoot } from 'react-dom/client'
+import { flushSync } from 'react-dom'
+import { ProjectDetailPage } from '@/components/ProjectDetailPage'
+import type { FleetHealth } from '@/hooks/useProjectHealth'
+import type { CustomAction, ProjectConfig } from '@/lib/client-api'
+
+const {
+  paramsState,
+  pushMock,
+  toastMock,
+  fetchJobsMock,
+  fetchProjectConfigMock,
+  updateProjectConfigMock,
+  fetchCustomActionsMock,
+  saveCustomActionsMock,
+  runCustomActionMock,
+  fetchBehindMock,
+  fetchIssuesAndPRsMock,
+  fetchBranchMock,
+  tabNavPropsMock,
+  terminalTabPropsMock,
+} = vi.hoisted(() => ({
+  paramsState: {
+    name: 'acme/widgets',
+    tab: undefined as string | undefined,
+    sessionId: undefined as string | undefined,
+  },
+  pushMock: vi.fn(),
+  toastMock: vi.fn(),
+  fetchJobsMock: vi.fn(),
+  fetchProjectConfigMock: vi.fn(),
+  updateProjectConfigMock: vi.fn(),
+  fetchCustomActionsMock: vi.fn(),
+  saveCustomActionsMock: vi.fn(),
+  runCustomActionMock: vi.fn(),
+  fetchBehindMock: vi.fn(),
+  fetchIssuesAndPRsMock: vi.fn(),
+  fetchBranchMock: vi.fn(),
+  tabNavPropsMock: vi.fn(),
+  terminalTabPropsMock: vi.fn(),
+}))
+
+vi.mock('next/navigation', () => ({
+  useParams: () => paramsState,
+  useRouter: () => ({ push: pushMock }),
+}))
+
+vi.mock('@/components/Toast', () => ({
+  useToast: () => ({ toast: toastMock }),
+}))
+
+vi.mock('@/lib/client-api', () => ({
+  fixCi: vi.fn(),
+  releaseProject: vi.fn(),
+  fetchJobs: fetchJobsMock,
+  fetchProjectConfig: fetchProjectConfigMock,
+  updateProjectConfig: updateProjectConfigMock,
+  fetchCustomActions: fetchCustomActionsMock,
+  runCustomAction: runCustomActionMock,
+  saveCustomActions: saveCustomActionsMock,
+  pullProject: vi.fn(),
+  fetchBehind: fetchBehindMock,
+  PullDivergedError: class PullDivergedError extends Error {},
+  testProject: vi.fn(),
+  fetchIssuesAndPRs: fetchIssuesAndPRsMock,
+  pushProject: vi.fn(),
+  fetchBranch: fetchBranchMock,
+  createProjectPR: vi.fn(),
+}))
+
+vi.mock('@/components/TerminalTab', () => ({
+  TerminalTab: (props: { projectName: string; initialSessionId?: string }) => {
+    terminalTabPropsMock(props)
+    return <div data-testid="terminal-tab">{props.initialSessionId ?? 'no-session'}</div>
+  },
+}))
+
+vi.mock('@/components/ProjectRunsTab', () => ({
+  ProjectRunsTab: ({ projectName }: { projectName: string }) => <div data-testid="history-tab">{projectName}</div>,
+}))
+
+vi.mock('@/components/ChangesTab', () => ({
+  ChangesTab: ({ projectName }: { projectName: string }) => <div data-testid="changes-tab">{projectName}</div>,
+}))
+
+vi.mock('@/components/IssuesTab', () => ({
+  IssuesTab: ({ projectName }: { projectName: string }) => <div data-testid="issues-tab">{projectName}</div>,
+}))
+
+vi.mock('@/components/DocsTab', () => ({
+  DocsTab: ({ projectName }: { projectName: string }) => <div data-testid="docs-tab">{projectName}</div>,
+}))
+
+vi.mock('@/components/RecommendationsTab', () => ({
+  RecommendationsTab: ({ projectName }: { projectName: string }) => <div data-testid="recommendations-tab">{projectName}</div>,
+}))
+
+vi.mock('@/components/project-detail/ConfigTab', () => ({
+  ConfigTab: (props: {
+    config: ProjectConfig | null
+    configLoading: boolean
+    anyDirty: boolean
+    setTestCommandInput: (value: string) => void
+    setEditActions: (value: CustomAction[]) => void
+    onSaveAll: () => Promise<void>
+  }) => (
+    <div data-testid="config-tab">
+      <div data-loading={props.configLoading ? 'loading' : 'ready'} />
+      <div data-command={props.config?.test_command ?? 'none'} />
+      <div data-dirty={props.anyDirty ? 'yes' : 'no'} />
+      <button type="button" onClick={() => props.setTestCommandInput('pnpm lint')}>change config</button>
+      <button type="button" onClick={() => props.setEditActions([{ name: 'Deploy', command: 'pnpm deploy --prod' }])}>change actions</button>
+      <button type="button" onClick={() => void props.onSaveAll()}>save all</button>
+    </div>
+  ),
+}))
+
+vi.mock('@/components/project-detail/PipelineStrip', () => ({
+  PipelineStrip: () => <div data-testid="pipeline-strip" />,
+}))
+
+vi.mock('@/components/project-detail/ProjectActions', () => ({
+  ProjectActions: (props: { onCustomAction: (name: string) => Promise<void> }) => (
+    <button type="button" onClick={() => void props.onCustomAction('Deploy')}>run custom action</button>
+  ),
+}))
+
+vi.mock('@/components/project-detail/TabNav', () => ({
+  TabNav: (props: { activeTab: string }) => {
+    tabNavPropsMock(props)
+    return <div data-testid="tab-nav">{props.activeTab}</div>
+  },
+}))
+
+vi.mock('@/components/project-detail/OverviewTab', () => ({
+  OverviewTab: ({ projectName }: { projectName: string }) => <div data-testid="overview-tab">{projectName}</div>,
+}))
+
+function buildConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
+  return {
+    project: 'acme/widgets',
+    test_command: 'pnpm test',
+    detected_test_command: 'pnpm test',
+    effective_test_command: 'pnpm test',
+    test_cron_enabled: false,
+    test_cron_schedule: '0 * * * *',
+    auto_commit_enabled: false,
+    auto_push_enabled: false,
+    auto_pr_merge_enabled: false,
+    release_after_run: false,
+    pr_workflow_enabled: false,
+    issue_auto_branch: true,
+    tests_disabled: false,
+    review_disabled: false,
+    last_push_error: null,
+    last_push_at: null,
+    ...overrides,
+  }
+}
+
+function buildFleet(): FleetHealth {
+  return {
+    projects: [{
+      project: 'acme/widgets',
+      status: 'healthy',
+      tasks: [],
+      totalChanges: 2,
+      unpushed: 1,
+      unreviewedCount: 0,
+      lastRunAgo: null,
+    }],
+    errorCount: 0,
+    warningCount: 0,
+    healthyCount: 1,
+    unknownCount: 0,
+    totalTasks: 0,
+    totalChanges: 2,
+    totalUnreviewed: 0,
+  }
+}
+
+function renderPage() {
+  const onRefresh = vi.fn().mockResolvedValue(undefined)
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+
+  flushSync(() => {
+    root.render(React.createElement(ProjectDetailPage, {
+      fleet: buildFleet(),
+      onRefresh,
+    }))
+  })
+
+  return {
+    container,
+    onRefresh,
+    unmount: () => {
+      root.unmount()
+      container.remove()
+    },
+  }
+}
+
+function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
+  const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent?.trim() === text)
+  if (!(button instanceof HTMLButtonElement)) throw new Error(`button not found: ${text}`)
+  return button
+}
+
+describe('ProjectDetailPage', () => {
+  beforeEach(() => {
+    paramsState.name = 'acme/widgets'
+    paramsState.tab = undefined
+    paramsState.sessionId = undefined
+
+    pushMock.mockReset()
+    toastMock.mockReset()
+    fetchJobsMock.mockReset()
+    fetchProjectConfigMock.mockReset()
+    updateProjectConfigMock.mockReset()
+    fetchCustomActionsMock.mockReset()
+    saveCustomActionsMock.mockReset()
+    runCustomActionMock.mockReset()
+    fetchBehindMock.mockReset()
+    fetchIssuesAndPRsMock.mockReset()
+    fetchBranchMock.mockReset()
+    tabNavPropsMock.mockReset()
+    terminalTabPropsMock.mockReset()
+
+    fetchJobsMock.mockResolvedValue({ jobs: [] })
+    fetchProjectConfigMock.mockResolvedValue(buildConfig())
+    updateProjectConfigMock.mockResolvedValue(buildConfig({ test_command: 'pnpm lint' }))
+    fetchCustomActionsMock.mockResolvedValue({ actions: [{ name: 'Deploy', command: 'pnpm deploy' }] })
+    saveCustomActionsMock.mockResolvedValue({ actions: [{ name: 'Deploy', command: 'pnpm deploy' }] })
+    runCustomActionMock.mockResolvedValue({ job_id: 'job-123' })
+    fetchBehindMock.mockResolvedValue({ behind: 0 })
+    fetchIssuesAndPRsMock.mockResolvedValue({ prs: [], issues: [] })
+    fetchBranchMock.mockResolvedValue({ branch: 'master', defaultBranch: 'master', commitsAhead: 0 })
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      json: async () => ({ settings: {} }),
+    }))
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    document.body.innerHTML = ''
+  })
+
+  it('forces the terminal tab when a session id is present', async () => {
+    paramsState.tab = 'config'
+    paramsState.sessionId = 'sess-42'
+
+    const { container, unmount } = renderPage()
+
+    await vi.waitFor(() => {
+      expect(tabNavPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ activeTab: 'terminal' }))
+      expect(terminalTabPropsMock).toHaveBeenLastCalledWith({
+        projectName: 'acme/widgets',
+        initialSessionId: 'sess-42',
+      })
+      expect(container.querySelector('[data-testid="terminal-tab"]')?.textContent).toBe('sess-42')
+    })
+
+    unmount()
+  })
+
+  it('saves both config and custom actions from the config tab', async () => {
+    paramsState.tab = 'config'
+    fetchProjectConfigMock
+      .mockResolvedValueOnce(buildConfig())
+      .mockResolvedValueOnce(buildConfig({ test_command: 'pnpm lint' }))
+
+    const { container, unmount } = renderPage()
+
+    await vi.waitFor(() => {
+      expect(fetchProjectConfigMock).toHaveBeenCalledWith('acme/widgets')
+      expect(fetchCustomActionsMock).toHaveBeenCalledWith('acme/widgets')
+      expect(container.querySelector('[data-testid="config-tab"]')).not.toBeNull()
+      expect(container.querySelector('[data-loading="ready"]')).not.toBeNull()
+      expect(container.querySelector('[data-command="pnpm test"]')).not.toBeNull()
+    })
+
+    flushSync(() => {
+      buttonByText(container, 'change config').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      buttonByText(container, 'change actions').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-dirty="yes"]')).not.toBeNull()
+    })
+
+    flushSync(() => {
+      buttonByText(container, 'save all').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    await vi.waitFor(() => {
+      expect(updateProjectConfigMock).toHaveBeenCalledWith('acme/widgets', expect.objectContaining({
+        test_command: 'pnpm lint',
+        test_cron_enabled: false,
+        auto_push_enabled: false,
+      }))
+      expect(saveCustomActionsMock).toHaveBeenCalledWith('acme/widgets', [
+        { name: 'Deploy', command: 'pnpm deploy --prod' },
+      ])
+      expect(fetchProjectConfigMock).toHaveBeenCalledTimes(2)
+    })
+
+    unmount()
+  })
+
+  it('starts a custom action and opens its terminal job', async () => {
+    const { container, unmount } = renderPage()
+
+    flushSync(() => {
+      buttonByText(container, 'run custom action').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    await vi.waitFor(() => {
+      expect(runCustomActionMock).toHaveBeenCalledWith('acme/widgets', 'Deploy')
+      expect(toastMock).toHaveBeenCalledWith('Deploy started for acme/widgets', 'success')
+      expect(pushMock).toHaveBeenCalledWith('/project/acme/widgets/terminal?job=job-123')
+    })
+
+    unmount()
+  })
+})
