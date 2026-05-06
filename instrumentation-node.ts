@@ -76,11 +76,11 @@ export async function reinstallAgents(): Promise<void> {
 // sweep fixes that: list running Claude-backed jobs and probe them.
 export async function runProbeSweep(): Promise<void> {
   try {
-    const { listJobs, probeJobStatus } = await import('./lib/jobs/job-storage');
+    const { listJobs, probeJobStatus, PIPELINE_STEP_KINDS } = await import('./lib/jobs/job-storage');
     const claudeKinds = new Set(['run', 'review', 'fix', 'fix-ci', 'fix-push']);
     const running = listJobs().filter(j =>
       j.finishedAt === null
-      && (claudeKinds.has(j.kind) || j.kind.startsWith('agent:'))
+      && (claudeKinds.has(j.kind) || j.kind.startsWith('agent:') || PIPELINE_STEP_KINDS.has(j.kind))
     );
     for (const job of running) {
       try { await probeJobStatus(job); } catch {}
@@ -280,6 +280,13 @@ export async function registerNode(): Promise<void> {
   void reapAbandonedInlineJobs();
   void drainStalePendingReleases();
   void reinstallAgents();
+
+  // Replay lifecycle hooks for any PM2 child that finished while the server
+  // was down. Without this, a restart between a child's exit and the next
+  // periodic sweep silently strands the pipeline (no follow-on step, no
+  // `# release finished` line, lock held until the bash monitor times out).
+  // Runs once at boot in addition to the 30-second interval below.
+  void runProbeSweep();
 
   if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
 
