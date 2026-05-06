@@ -109,7 +109,7 @@ function RoleBadge({ label, tone = 'default' }: { label: string; tone?: LogTone 
 
 function LogBlock({
   text,
-  fallbackTone = 'default',
+  fallbackTone: _fallbackTone = 'default',
   allowAnsi = false,
   structured = true,
 }: {
@@ -131,16 +131,29 @@ function LogBlock({
   }
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-0.5">
       {collapsed.split('\n').map((line, index) => {
-        const tone = classifyLogLine(line, fallbackTone)
+        // Always use 'default' as classifier fallback so unclassified lines
+        // return 'default' and positively-matched tones (info/success/warning/
+        // error) always get a badge regardless of the block's fallbackTone.
+        const tone = classifyLogLine(line)
+        const isAmbient = tone === 'default'
         const style = LOG_TONE_STYLES[tone]
+        if (isAmbient) {
+          return (
+            <div key={`${index}:${line}`} className="border-l border-border/25 pl-2">
+              <span className="min-w-0 whitespace-pre-wrap break-words text-text-secondary text-xs">
+                {line || ' '}
+              </span>
+            </div>
+          )
+        }
         return (
-          <div key={`${index}:${line}`} className={`flex items-start gap-2 border-l pl-2 ${style.line}`}>
-            <span className={`mt-0.5 inline-flex min-w-12 justify-center rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono ${style.badge}`}>
+          <div key={`${index}:${line}`} className={`flex items-start gap-2 border-l-2 pl-2 ${style.line}`}>
+            <span className={`mt-0.5 inline-flex min-w-12 justify-center rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono shrink-0 ${style.badge}`}>
               {tone}
             </span>
-            <span className={`min-w-0 flex-1 whitespace-pre-wrap break-words ${style.text}`}>
+            <span className={`min-w-0 flex-1 whitespace-pre-wrap break-words text-xs ${style.text}`}>
               {line || ' '}
             </span>
           </div>

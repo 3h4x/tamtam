@@ -16,6 +16,7 @@ import { getJobKind, isAgentJobKind } from '@/lib/jobs/kinds';
 import { withBasePrompt, getPermissionModeFlag } from '@/lib/shared/config';
 import { errMsg } from '@/lib/shared/types';
 import { exec } from '@/lib/shared/shell';
+import { getDirtyFileCount } from '@/lib/git/dirty-worktree';
 import { parseFileAgentId, loadFileAgent } from '@/lib/agents/tamtam-file-agents';
 import { getAgentMemoryDir, getAgentMemoryPath, readAgentMemory, ensureAgentMemoryDir, buildMemoryBlock } from '@/lib/agents/agent-memory';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
@@ -201,6 +202,28 @@ export async function POST(
           },
           { status: 202 },
         );
+      }
+    }
+
+    // Don't start an agent on top of a large pile of uncommitted changes.
+    // Agent edits would tangle with WIP and either get committed by mistake
+    // (auto-commit pipelines) or trigger noisy review/fix loops over code the
+    // user is mid-refactor. Threshold of 0 disables the gate.
+    const settings = getSettings();
+    const dirtyThreshold = settings.dirty_worktree_block_threshold;
+    if (dirtyThreshold > 0) {
+      const projPath = resolveProjectPath(agent.project);
+      if (projPath) {
+        const dirtyCount = await getDirtyFileCount(projPath);
+        if (dirtyCount >= dirtyThreshold) {
+          return NextResponse.json(
+            {
+              code: 'dirty_worktree',
+              detail: `Agent '${agent.name}' skipped — ${dirtyCount} uncommitted files exceed threshold (${dirtyThreshold}). Commit, stash, or discard changes first.`,
+            },
+            { status: 409 },
+          );
+        }
       }
     }
 

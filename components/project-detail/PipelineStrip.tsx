@@ -38,10 +38,10 @@ interface PipelineChainContext {
 }
 
 function stepChipClass(s: StepState, isRunning: boolean): string {
-  if (s === 'done') return 'bg-status-success/12 text-status-success border-status-success/25'
-  if (s === 'failed') return 'bg-status-error/15 text-status-error border-status-error/40'
-  if (s === 'warning') return 'bg-status-warning/15 text-status-warning border-status-warning/40'
-  if (s === 'running') return `bg-accent/15 text-accent border-accent/50 ${isRunning ? 'ring-2 ring-accent/40' : ''}`
+  if (s === 'done') return 'bg-status-success/12 text-status-success border-status-success/40'
+  if (s === 'failed') return 'bg-status-error/15 text-status-error border-status-error/65'
+  if (s === 'warning') return 'bg-status-warning/15 text-status-warning border-status-warning/65'
+  if (s === 'running') return `bg-accent/15 text-accent border-accent/55 ${isRunning ? 'ring-2 ring-accent/45' : ''}`
   if (s === 'skipped') return 'bg-bg-tertiary text-text-tertiary border-border/40'
   return 'bg-bg-secondary/40 text-text-tertiary border-border/70'
 }
@@ -88,10 +88,10 @@ function stepIcon(s: StepState) {
 }
 
 function connectorClass(prev: StepState): string {
-  if (prev === 'done') return 'bg-status-success/40'
-  if (prev === 'failed') return 'bg-status-error/40'
-  if (prev === 'warning') return 'bg-status-warning/40'
-  if (prev === 'running') return 'bg-accent/40'
+  if (prev === 'done') return 'bg-status-success/50'
+  if (prev === 'failed') return 'bg-status-error/55'
+  if (prev === 'warning') return 'bg-status-warning/55'
+  if (prev === 'running') return 'bg-accent/50'
   if (prev === 'skipped') return 'bg-border/60'
   return 'bg-border/50'
 }
