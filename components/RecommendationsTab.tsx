@@ -48,7 +48,32 @@ export function RecommendationsTab({ projectName }: RecommendationsTabProps) {
   }
 
   if (loading) {
-    return <div className="text-sm text-text-tertiary py-8">Loading recommendations...</div>
+    return (
+      <div className="space-y-4">
+        <div className="flex items-baseline justify-between gap-3">
+          <div>
+            <div className="skeleton h-5 w-36 rounded" />
+            <div className="skeleton h-3 w-56 rounded mt-2" />
+          </div>
+          <div className="skeleton h-3 w-12 rounded" />
+        </div>
+        <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="border-b border-border last:border-b-0 p-3 flex items-start justify-between gap-3" style={{ opacity: 1 - i * 0.25 }}>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="skeleton h-4 w-16 rounded" />
+                  <div className="skeleton h-3 w-24 rounded" />
+                </div>
+                <div className="skeleton h-3.5 w-3/5 rounded mt-2" />
+                <div className="skeleton h-3 w-4/5 rounded mt-1.5" />
+              </div>
+              <div className="skeleton h-6 w-14 rounded shrink-0" />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
   }
 
   return (
