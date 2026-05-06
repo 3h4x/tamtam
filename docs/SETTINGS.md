@@ -120,14 +120,16 @@ Outbound webhooks for release pipeline events. Never blocks pipeline progress â€
 | `notification_webhook_secret` | string | `''` | Optional secret for HMAC-SHA256 signature verification. If set, payloads include `X-TamTam-Signature` header. |
 | `notification_on_release_success` | boolean | `false` | Stored as `'true'`/`'false'`. Notify when a release pipeline completes successfully. |
 | `notification_on_release_fail` | boolean | `false` | Notify when a release pipeline fails. |
+| `notification_on_release_aborted` | boolean | `false` | Notify when a release pipeline is aborted mid-run. |
 | `notification_on_fix_loop_exhausted` | boolean | `false` | Notify when a release exhausts automated recovery budget (`test`/`review` retries or `fix-push` attempts) or stops for non-converging fix/review loops. |
 | `notification_on_review_do_not_ship` | boolean | `false` | Notify when a code review verdict is "DO NOT SHIP". |
 | `notification_on_agent_run_fail` | boolean | `false` | Notify when an agent run fails. |
+| `notification_on_budget_blocked` | boolean | `false` | Notify when a run is refused because the selected agent subscription budget threshold is exceeded. |
 
 **Payload format:** 
 - **Slack**: Formatted as block kit with event, project, status, verdict (if review), cost (if available), and a log link.
 - **Discord**: Embedded message with event details and a timestamp.
-- **Generic**: JSON POST with `{ event, project, job_id, status, verdict?, agent?, cost_usd?, log_url?, timestamp }`.
+- **Generic**: JSON POST with `{ event, project, job_id, status, verdict?, agent?, cost_usd?, log_url?, timestamp }`. The full event union is documented in the later **Payload shape** section below.
 
 **Test notification:** Use the "Send Test" button in the Notifications tab to verify webhook connectivity before enabling production events.
 
@@ -203,7 +205,14 @@ Budget gate semantics:
 
 ```typescript
 {
-  event: 'release_success' | 'release_fail' | 'fix_loop_exhausted' | 'review_do_not_ship' | 'agent_run_fail';
+  event:
+    | 'release_success'
+    | 'release_fail'
+    | 'release_aborted'
+    | 'fix_loop_exhausted'
+    | 'review_do_not_ship'
+    | 'agent_run_fail'
+    | 'budget_blocked';
   project: string;
   agent?: string;         // set for agent_run_fail events
   job_id: string;

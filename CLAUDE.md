@@ -14,7 +14,7 @@ Steps are pluggable per project. The **🚀 Release** button triggers the pipeli
 **See `docs/PIPELINE.md`** for the full state machine, completion-hook chain, helper modules (`lib/pipeline/start-*.ts`), verdict-detection rules, fresh-LGTM skip logic, and `mark-dod` / `pr-wait` behavior.
 
 ## Concepts
-- **Skills** — reusable prompt/instruction blocks (DB-backed + file-based personas from `skills/docs/skills/` and `data/skills/`)
+- **Skills** — reusable prompt/instruction blocks (DB-backed + file-based skills from `skills/docs/skills/` and `data/skills/`)
 - **Agents** — composed from skills + model + prompt + interval schedule + runner. `pm2` is the default runner; `launchctl` is deprecated.
 - **Runs** — individual executions of an agent; the legacy `/jobs` URL redirects to `/runs`
 - **Custom Actions** — per-project bash commands (e.g. deploy) with configurable button color
@@ -26,7 +26,7 @@ Steps are pluggable per project. The **🚀 Release** button triggers the pipeli
 - **Streaming**: SSE via route handlers for real-time run output
 - **Styling**: Tailwind CSS v4
 - **Agent providers**: Claude CLI plus Gemini, LM Studio, Codex, and custom backends through compatibility shims
-- **Skills**: `skills/` submodule (claude-skills) — file-based personas; user-defined personas in `data/skills/`
+- **Skills**: `skills/` submodule (claude-skills) — file-based skills; user-defined skills in `data/skills/`
 - **Testing**: vitest + Playwright (e2e)
 - **Package Manager**: pnpm
 - **Release**: semantic-release on push to master (GitHub releases only, no npm)
