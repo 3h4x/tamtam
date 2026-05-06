@@ -231,7 +231,7 @@ export function TerminalMessages({
           <div className="flex-1 flex flex-col items-center justify-center gap-2 select-none py-16">
             <span className="text-3xl font-mono text-border">_</span>
             <span className="text-sm font-mono text-text-tertiary">start a conversation</span>
-            <span className="text-[11px] font-mono text-text-tertiary/60">type below · ⌘↵ to send</span>
+            <span className="text-[11px] font-mono text-text-tertiary/60">type below · ↵ to send · Shift+↵ newline</span>
             {allItems.length > 0 && (
               <div className="flex flex-col items-center gap-2 mt-3">
                 <span className="text-[10px] font-mono text-text-tertiary/40 uppercase tracking-wider">attach a skill</span>
