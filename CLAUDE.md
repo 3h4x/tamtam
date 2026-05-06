@@ -16,7 +16,7 @@ Steps are pluggable per project. The **🚀 Release** button triggers the pipeli
 ## Concepts
 - **Skills** — reusable prompt/instruction blocks (DB-backed + file-based personas from `skills/docs/skills/` and `data/skills/`)
 - **Agents** — composed from skills + model + prompt + interval schedule + runner. `pm2` is the default runner; `launchctl` is deprecated.
-- **Runs** — individual executions of an agent (previously called "jobs")
+- **Runs** — individual executions of an agent; the legacy `/jobs` URL redirects to `/runs`
 - **Custom Actions** — per-project bash commands (e.g. deploy) with configurable button color
 - **Release Pipeline** — see Vision above
 

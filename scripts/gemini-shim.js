@@ -10,19 +10,6 @@ const { spawn } = require('child_process');
 const readline = require('readline');
 const { installInactivityWatchdog } = require('./shim-utils');
 
-function resolveGeminiModel(model) {
-  const aliases = {
-    fast: process.env.GEMINI_FAST_MODEL || process.env.GEMINI_HAIKU_MODEL || 'flash',
-    normal: process.env.GEMINI_NORMAL_MODEL || process.env.GEMINI_SONNET_MODEL || 'pro',
-    smart: process.env.GEMINI_SMART_MODEL || process.env.GEMINI_OPUS_MODEL || 'pro',
-    haiku: process.env.GEMINI_FAST_MODEL || process.env.GEMINI_HAIKU_MODEL || 'flash',
-    sonnet: process.env.GEMINI_NORMAL_MODEL || process.env.GEMINI_SONNET_MODEL || 'pro',
-    opus: process.env.GEMINI_SMART_MODEL || process.env.GEMINI_OPUS_MODEL || 'pro',
-    thinking: process.env.GEMINI_THINKING_MODEL || 'thinking',
-  };
-  return aliases[model] || process.env.GEMINI_MODEL || model;
-}
-
 // Mapping Claude permission modes to Gemini approval modes
 const APPROVAL_MAP = {
   'bypassPermissions': 'yolo',
@@ -31,250 +18,197 @@ const APPROVAL_MAP = {
   'default': 'default'
 };
 
-const args = process.argv.slice(2);
-const geminiArgs = ['--prompt', '-'];
-
-let model = resolveGeminiModel('fast');
-let approvalMode = 'yolo';
-let cwd = process.cwd();
-
-// Parse incoming Claude-style arguments
-for (let i = 0; i < args.length; i++) {
-  const arg = args[i];
-  if (arg === '--model') {
-    if (i + 1 < args.length) {
-      const val = args[++i];
-      model = resolveGeminiModel(val);
-    }
-  } else if (arg.startsWith('--model=')) {
-    const val = arg.substring('--model='.length);
-    model = resolveGeminiModel(val);
-  } else if (arg === '--permission-mode') {
-    if (i + 1 < args.length) {
-      const val = args[++i];
-      approvalMode = APPROVAL_MAP[val] || val;
-    }
-  } else if (arg.startsWith('--permission-mode=')) {
-    const val = arg.substring('--permission-mode='.length);
-    approvalMode = APPROVAL_MAP[val] || val;
-  } else if (arg === '--cwd') {
-    if (i + 1 < args.length) {
-      cwd = args[++i];
-    }
-  } else if (arg.startsWith('--cwd=')) {
-    cwd = arg.substring('--cwd='.length);
-  } else if (arg === '--output-format') {
-    if (i + 1 < args.length && !args[i + 1].startsWith('--')) {
-      i++; // consume next arg (assumed 'stream-json')
-    }
-  } else if (arg.startsWith('--output-format=')) {
-    // do nothing
-  }
+function resolveGeminiModel(model, env) {
+  const e = env || process.env;
+  const aliases = {
+    fast: e.GEMINI_FAST_MODEL || e.GEMINI_HAIKU_MODEL || 'flash',
+    normal: e.GEMINI_NORMAL_MODEL || e.GEMINI_SONNET_MODEL || 'pro',
+    smart: e.GEMINI_SMART_MODEL || e.GEMINI_OPUS_MODEL || 'pro',
+    haiku: e.GEMINI_FAST_MODEL || e.GEMINI_HAIKU_MODEL || 'flash',
+    sonnet: e.GEMINI_NORMAL_MODEL || e.GEMINI_SONNET_MODEL || 'pro',
+    opus: e.GEMINI_SMART_MODEL || e.GEMINI_OPUS_MODEL || 'pro',
+    thinking: e.GEMINI_THINKING_MODEL || 'thinking',
+  };
+  return aliases[model] || e.GEMINI_MODEL || model;
 }
 
-geminiArgs.push('--model', model);
-geminiArgs.push('--approval-mode', approvalMode);
-geminiArgs.push('--output-format', 'stream-json');
+/**
+ * Parse Claude-style CLI args and build the args array to pass to gemini.
+ * Returns { model, approvalMode, cwd, geminiArgs }.
+ */
+function parseShimArgs(argv, env) {
+  const e = env || process.env;
+  let model = resolveGeminiModel('fast', e);
+  let approvalMode = 'yolo';
+  let cwd = '';
 
-// Launch Gemini CLI. Pipe stderr (was 'inherit') so the inactivity watchdog
-// can observe it; we forward stderr chunks to the parent's stderr below.
-const geminiBin = process.env.GEMINI_BIN || 'gemini';
-const gemini = spawn(geminiBin, geminiArgs, {
-  stdio: ['pipe', 'pipe', 'pipe'],
-  cwd: cwd,
-  env: { ...process.env, FORCE_COLOR: '0' }
-});
-
-const watchdog = installInactivityWatchdog(gemini, { shimName: 'gemini-shim' });
-gemini.stdout.on('data', () => watchdog.markActivity());
-gemini.stderr.on('data', (chunk) => {
-  watchdog.markActivity();
-  process.stderr.write(chunk);
-});
-
-// Forward stdin (the prompt) to Gemini
-process.stdin.pipe(gemini.stdin);
-
-const rl = readline.createInterface({
-  input: gemini.stdout,
-  terminal: false
-});
-
-let inTextBlock = false;
-
-// Map Gemini JSON events to Claude JSON events
-rl.on('line', (line) => {
-  let data;
-  try {
-    data = JSON.parse(line);
-  } catch {
-    // Pass through non-JSON lines (e.g. status messages)
-    // but don't emit them as JSON to avoid confusing the parser
-    console.log(line);
-    return;
-  }
-
-  try {
-    // Assistant message -> text_delta
-    if (data.type === 'message' && data.role === 'assistant') {
-      if (!inTextBlock) {
-        console.log(JSON.stringify({
-          type: 'stream_event',
-          event: {
-            type: 'content_block_start',
-            content_block: {
-              type: 'text',
-              text: ''
-            }
-          }
-        }));
-        inTextBlock = true;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--model') {
+      if (i + 1 < argv.length) {
+        const val = argv[++i];
+        model = resolveGeminiModel(val, e);
       }
-      console.log(JSON.stringify({
-        type: 'stream_event',
-        event: {
-          type: 'content_block_delta',
-          delta: {
-            type: 'text_delta',
-            text: data.content
-          }
-        }
-      }));
-    } 
-    // Tool use -> content_block_start + content_block_delta + content_block_stop
-    else if (data.type === 'tool_use') {
-       if (inTextBlock) {
-         console.log(JSON.stringify({
-           type: 'stream_event',
-           event: {
-             type: 'content_block_stop'
-           }
-         }));
-         inTextBlock = false;
-       }
-       console.log(JSON.stringify({
-         type: 'stream_event',
-         event: {
-           type: 'content_block_start',
-           content_block: {
-             type: 'tool_use',
-             name: data.tool_name,
-             id: data.tool_id
-           }
-         }
-       }));
-       console.log(JSON.stringify({
-         type: 'stream_event',
-         event: {
-           type: 'content_block_delta',
-           delta: {
-             type: 'input_json_delta',
-             partial_json: JSON.stringify(data.parameters || {})
-           }
-         }
-       }));
-       console.log(JSON.stringify({
-         type: 'stream_event',
-         event: {
-           type: 'content_block_stop'
-         }
-       }));
-    } 
-    // Tool result -> system tool_result
-    else if (data.type === 'tool_result') {
-      if (inTextBlock) {
-        console.log(JSON.stringify({
-          type: 'stream_event',
-          event: {
-            type: 'content_block_stop'
-          }
-        }));
-        inTextBlock = false;
+    } else if (arg.startsWith('--model=')) {
+      model = resolveGeminiModel(arg.substring('--model='.length), e);
+    } else if (arg === '--permission-mode') {
+      if (i + 1 < argv.length) {
+        const val = argv[++i];
+        approvalMode = APPROVAL_MAP[val] || val;
       }
-      console.log(JSON.stringify({
-        type: 'system',
-        subtype: 'tool_result',
-        content: `[Tool ${data.status || 'finished'}]`
-      }));
-    } 
-    // Final result -> summary result
-    else if (data.type === 'result') {
-      if (inTextBlock) {
-        console.log(JSON.stringify({
-          type: 'stream_event',
-          event: {
-            type: 'content_block_stop'
-          }
-        }));
-        inTextBlock = false;
+    } else if (arg.startsWith('--permission-mode=')) {
+      const val = arg.substring('--permission-mode='.length);
+      approvalMode = APPROVAL_MAP[val] || val;
+    } else if (arg === '--cwd') {
+      if (i + 1 < argv.length) cwd = argv[++i];
+    } else if (arg.startsWith('--cwd=')) {
+      cwd = arg.substring('--cwd='.length);
+    } else if (arg === '--output-format') {
+      if (i + 1 < argv.length && !argv[i + 1].startsWith('--')) {
+        i++; // consume next arg (assumed 'stream-json')
       }
-      const stats = data.stats || {};
-      const modelName = data.model || model;
-      console.log(JSON.stringify({
-        type: 'result',
-        modelUsage: {
-          [modelName]: {
-            inputTokens: stats.input_tokens || 0,
-            outputTokens: stats.output_tokens || 0,
-            cacheReadInputTokens: stats.cached || 0,
-            cacheCreationInputTokens: 0
-          }
-        },
-        duration_ms: stats.duration_ms || 0,
-        is_error: data.status === 'error',
-        result: data.error || ''
-      }));
+    } else if (arg.startsWith('--output-format=')) {
+      // do nothing — consumed
     }
-  } catch (err) {
-    // Emitting error event in Claude protocol format
-    console.log(JSON.stringify({
-      type: 'result',
-      is_error: true,
-      result: `Internal shim error: ${err instanceof Error ? err.message : String(err)}`
-    }));
   }
-});
 
-gemini.on('exit', (code, signal) => {
-  watchdog.dispose();
-  if (inTextBlock) {
-    console.log(JSON.stringify({
-      type: 'stream_event',
-      event: {
-        type: 'content_block_stop'
+  const geminiArgs = ['--prompt', '-', '--model', model, '--approval-mode', approvalMode, '--output-format', 'stream-json'];
+  return { model, approvalMode, cwd, geminiArgs };
+}
+
+/**
+ * Create a stateful Gemini → Claude stream-json translator.
+ * translateLine(line) returns an array of JSON strings to emit.
+ * flush() closes any open text block and returns its JSON strings.
+ */
+function createGeminiTranslator(modelName) {
+  let inTextBlock = false;
+
+  function translateLine(line) {
+    const outputs = [];
+    const emit = (obj) => outputs.push(JSON.stringify(obj));
+
+    let data;
+    try {
+      data = JSON.parse(line);
+    } catch {
+      outputs.push(line);
+      return outputs;
+    }
+
+    try {
+      if (data.type === 'message' && data.role === 'assistant') {
+        if (!inTextBlock) {
+          emit({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'text', text: '' } } });
+          inTextBlock = true;
+        }
+        emit({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: data.content } } });
+      } else if (data.type === 'tool_use') {
+        if (inTextBlock) {
+          emit({ type: 'stream_event', event: { type: 'content_block_stop' } });
+          inTextBlock = false;
+        }
+        emit({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'tool_use', name: data.tool_name, id: data.tool_id } } });
+        emit({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'input_json_delta', partial_json: JSON.stringify(data.parameters || {}) } } });
+        emit({ type: 'stream_event', event: { type: 'content_block_stop' } });
+      } else if (data.type === 'tool_result') {
+        if (inTextBlock) {
+          emit({ type: 'stream_event', event: { type: 'content_block_stop' } });
+          inTextBlock = false;
+        }
+        emit({ type: 'system', subtype: 'tool_result', content: `[Tool ${data.status || 'finished'}]` });
+      } else if (data.type === 'result') {
+        if (inTextBlock) {
+          emit({ type: 'stream_event', event: { type: 'content_block_stop' } });
+          inTextBlock = false;
+        }
+        const stats = data.stats || {};
+        const model = data.model || modelName;
+        emit({
+          type: 'result',
+          modelUsage: {
+            [model]: {
+              inputTokens: stats.input_tokens || 0,
+              outputTokens: stats.output_tokens || 0,
+              cacheReadInputTokens: stats.cached || 0,
+              cacheCreationInputTokens: 0,
+            }
+          },
+          duration_ms: stats.duration_ms || 0,
+          is_error: data.status === 'error',
+          result: data.error || '',
+        });
       }
-    }));
-    inTextBlock = false;
+    } catch (err) {
+      emit({ type: 'result', is_error: true, result: `Internal shim error: ${err instanceof Error ? err.message : String(err)}` });
+    }
+
+    return outputs;
   }
-  if (watchdog.timedOut()) {
-    console.log(JSON.stringify({
-      type: 'result',
-      is_error: true,
-      result: '[gemini-shim] killed by inactivity watchdog'
-    }));
-    process.exit(124);
+
+  function flush() {
+    const outputs = [];
+    if (inTextBlock) {
+      outputs.push(JSON.stringify({ type: 'stream_event', event: { type: 'content_block_stop' } }));
+      inTextBlock = false;
+    }
+    return outputs;
   }
-  if (signal) {
+
+  return { translateLine, flush };
+}
+
+if (require.main === module) {
+  const { model, geminiArgs, cwd } = parseShimArgs(process.argv.slice(2));
+
+  const geminiBin = process.env.GEMINI_BIN || 'gemini';
+  const gemini = spawn(geminiBin, geminiArgs, {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    cwd: cwd || process.cwd(),
+    env: { ...process.env, FORCE_COLOR: '0' }
+  });
+
+  const watchdog = installInactivityWatchdog(gemini, { shimName: 'gemini-shim' });
+  gemini.stdout.on('data', () => watchdog.markActivity());
+  gemini.stderr.on('data', (chunk) => {
+    watchdog.markActivity();
+    process.stderr.write(chunk);
+  });
+
+  process.stdin.pipe(gemini.stdin);
+
+  const rl = readline.createInterface({ input: gemini.stdout, terminal: false });
+  const translator = createGeminiTranslator(model);
+
+  rl.on('line', (line) => {
+    for (const out of translator.translateLine(line)) {
+      console.log(out);
+    }
+  });
+
+  gemini.on('exit', (code, signal) => {
+    watchdog.dispose();
+    for (const out of translator.flush()) {
+      console.log(out);
+    }
+    if (watchdog.timedOut()) {
+      console.log(JSON.stringify({ type: 'result', is_error: true, result: '[gemini-shim] killed by inactivity watchdog' }));
+      process.exit(124);
+    }
+    if (signal) {
+      process.exit(1);
+    }
+    process.exit(code !== null ? code : 0);
+  });
+
+  gemini.on('error', (err) => {
+    watchdog.dispose();
+    for (const out of translator.flush()) {
+      console.log(out);
+    }
+    console.log(JSON.stringify({ type: 'result', is_error: true, result: `[shim] gemini error: ${err.message}` }));
     process.exit(1);
-  }
-  process.exit(code !== null ? code : 0);
-});
+  });
+}
 
-gemini.on('error', (err) => {
-  watchdog.dispose();
-  if (inTextBlock) {
-    console.log(JSON.stringify({
-      type: 'stream_event',
-      event: {
-        type: 'content_block_stop'
-      }
-    }));
-    inTextBlock = false;
-  }
-  console.log(JSON.stringify({
-    type: 'result',
-    is_error: true,
-    result: `[shim] gemini error: ${err.message}`
-  }));
-  process.exit(1);
-});
+module.exports = { resolveGeminiModel, APPROVAL_MAP, parseShimArgs, createGeminiTranslator };

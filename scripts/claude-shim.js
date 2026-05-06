@@ -27,76 +27,85 @@ const TIER_DEFAULTS = {
   smart: 'opus',
 };
 
-function resolveClaudeModel(value) {
+function resolveClaudeModel(value, env) {
+  const e = env || process.env;
   const v = String(value || '').trim();
   if (!v) return v;
-  if (v === 'fast') return process.env.CLAUDE_FAST_MODEL || TIER_DEFAULTS.fast;
-  if (v === 'normal') return process.env.CLAUDE_NORMAL_MODEL || TIER_DEFAULTS.normal;
-  if (v === 'smart') return process.env.CLAUDE_SMART_MODEL || TIER_DEFAULTS.smart;
+  if (v === 'fast') return e.CLAUDE_FAST_MODEL || TIER_DEFAULTS.fast;
+  if (v === 'normal') return e.CLAUDE_NORMAL_MODEL || TIER_DEFAULTS.normal;
+  if (v === 'smart') return e.CLAUDE_SMART_MODEL || TIER_DEFAULTS.smart;
   // Already a Claude alias or full model ID — leave it alone.
   return v;
 }
 
-const argv = process.argv.slice(2);
-const out = [];
-for (let i = 0; i < argv.length; i++) {
-  const a = argv[i];
-  if (a === '--model' && i + 1 < argv.length) {
-    out.push(a, resolveClaudeModel(argv[i + 1]));
-    i += 1;
-  } else if (a.startsWith('--model=')) {
-    out.push(`--model=${resolveClaudeModel(a.slice('--model='.length))}`);
-  } else if (a === '--fallback-model' && i + 1 < argv.length) {
-    out.push(a, resolveClaudeModel(argv[i + 1]));
-    i += 1;
-  } else if (a.startsWith('--fallback-model=')) {
-    out.push(`--fallback-model=${resolveClaudeModel(a.slice('--fallback-model='.length))}`);
-  } else {
-    out.push(a);
+function transformArgs(argv, env) {
+  const out = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--model' && i + 1 < argv.length) {
+      out.push(a, resolveClaudeModel(argv[i + 1], env));
+      i += 1;
+    } else if (a.startsWith('--model=')) {
+      out.push(`--model=${resolveClaudeModel(a.slice('--model='.length), env)}`);
+    } else if (a === '--fallback-model' && i + 1 < argv.length) {
+      out.push(a, resolveClaudeModel(argv[i + 1], env));
+      i += 1;
+    } else if (a.startsWith('--fallback-model=')) {
+      out.push(`--fallback-model=${resolveClaudeModel(a.slice('--fallback-model='.length), env)}`);
+    } else {
+      out.push(a);
+    }
   }
+  return out;
 }
 
-// Default mirrors TamTam's `claude_bin` default in lib/shared/config.ts so
-// users who relied on `~/.local/bin/claude` don't need to set CLAUDE_BIN.
-const bin = process.env.CLAUDE_BIN || join(homedir(), '.local', 'bin', 'claude');
-// Pipe stdout/stderr so the inactivity watchdog can observe data events,
-// then forward each chunk to the parent's stdout/stderr so streaming
-// output and exit codes pass through unchanged.
-const child = spawn(bin, out, { stdio: ['inherit', 'pipe', 'pipe'], env: process.env });
+if (require.main === module) {
+  const out = transformArgs(process.argv.slice(2));
 
-const watchdog = installInactivityWatchdog(child, { shimName: 'claude-shim' });
-child.stdout.on('data', (chunk) => {
-  watchdog.markActivity();
-  process.stdout.write(chunk);
-});
-child.stderr.on('data', (chunk) => {
-  watchdog.markActivity();
-  process.stderr.write(chunk);
-});
+  // Default mirrors TamTam's `claude_bin` default in lib/shared/config.ts so
+  // users who relied on `~/.local/bin/claude` don't need to set CLAUDE_BIN.
+  const bin = process.env.CLAUDE_BIN || join(homedir(), '.local', 'bin', 'claude');
+  // Pipe stdout/stderr so the inactivity watchdog can observe data events,
+  // then forward each chunk to the parent's stdout/stderr so streaming
+  // output and exit codes pass through unchanged.
+  const child = spawn(bin, out, { stdio: ['inherit', 'pipe', 'pipe'], env: process.env });
 
-function forward(sig) {
-  return () => {
-    try { child.kill(sig); } catch { /* child may already be gone */ }
-  };
+  const watchdog = installInactivityWatchdog(child, { shimName: 'claude-shim' });
+  child.stdout.on('data', (chunk) => {
+    watchdog.markActivity();
+    process.stdout.write(chunk);
+  });
+  child.stderr.on('data', (chunk) => {
+    watchdog.markActivity();
+    process.stderr.write(chunk);
+  });
+
+  function forward(sig) {
+    return () => {
+      try { child.kill(sig); } catch { /* child may already be gone */ }
+    };
+  }
+  process.on('SIGTERM', forward('SIGTERM'));
+  process.on('SIGINT', forward('SIGINT'));
+  process.on('SIGHUP', forward('SIGHUP'));
+
+  child.on('error', (err) => {
+    watchdog.dispose();
+    process.stderr.write(`[claude-shim] failed to launch ${bin}: ${err.message}\n`);
+    process.exit(1);
+  });
+  child.on('close', (code, signal) => {
+    watchdog.dispose();
+    if (watchdog.timedOut()) {
+      process.stderr.write(`[claude-shim] killed by inactivity watchdog\n`);
+      process.exit(124);
+    }
+    if (signal) {
+      const sigCode = require('os').constants.signals[signal] || 0;
+      process.exit(128 + sigCode);
+    }
+    process.exit(code ?? 0);
+  });
 }
-process.on('SIGTERM', forward('SIGTERM'));
-process.on('SIGINT', forward('SIGINT'));
-process.on('SIGHUP', forward('SIGHUP'));
 
-child.on('error', (err) => {
-  watchdog.dispose();
-  process.stderr.write(`[claude-shim] failed to launch ${bin}: ${err.message}\n`);
-  process.exit(1);
-});
-child.on('close', (code, signal) => {
-  watchdog.dispose();
-  if (watchdog.timedOut()) {
-    process.stderr.write(`[claude-shim] killed by inactivity watchdog\n`);
-    process.exit(124);
-  }
-  if (signal) {
-    const sigCode = require('os').constants.signals[signal] || 0;
-    process.exit(128 + sigCode);
-  }
-  process.exit(code ?? 0);
-});
+module.exports = { resolveClaudeModel, transformArgs };

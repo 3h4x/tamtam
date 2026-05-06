@@ -891,3 +891,32 @@ describe('project board integration', () => {
     expect(storedMeta.itemId).toBe('DI_ITEM_VALID');
   });
 });
+
+describe('isBoardSyncRateLimitError', () => {
+  beforeEach(() => vi.resetModules());
+
+  it('returns true for an error whose name is RateLimitError', async () => {
+    const { isBoardSyncRateLimitError } = await import('@/lib/github/project-board');
+    const err = Object.assign(new Error('GitHub board sync skipped: rate-limit cooldown active'), { name: 'RateLimitError' });
+    expect(isBoardSyncRateLimitError(err)).toBe(true);
+  });
+
+  it('returns true for an Error whose message matches a rate-limit pattern', async () => {
+    const { isBoardSyncRateLimitError } = await import('@/lib/github/project-board');
+    expect(isBoardSyncRateLimitError(new Error('rate limit exceeded'))).toBe(true);
+    expect(isBoardSyncRateLimitError(new Error('secondary rate limit triggered'))).toBe(true);
+    expect(isBoardSyncRateLimitError(new Error('GitHub abuse detection triggered'))).toBe(true);
+  });
+
+  it('returns true for a non-Error value whose string representation matches', async () => {
+    const { isBoardSyncRateLimitError } = await import('@/lib/github/project-board');
+    expect(isBoardSyncRateLimitError('rate-limit cooldown active')).toBe(true);
+  });
+
+  it('returns false for a generic error that does not match any rate-limit pattern', async () => {
+    const { isBoardSyncRateLimitError } = await import('@/lib/github/project-board');
+    expect(isBoardSyncRateLimitError(new Error('HTTP 403: Resource not accessible by integration'))).toBe(false);
+    expect(isBoardSyncRateLimitError(new Error('network timeout'))).toBe(false);
+    expect(isBoardSyncRateLimitError(null)).toBe(false);
+  });
+});

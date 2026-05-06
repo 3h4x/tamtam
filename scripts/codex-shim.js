@@ -114,16 +114,17 @@ function readStdin() {
   });
 }
 
-function resolveModel(model) {
+function resolveModel(model, env) {
+  const e = env || process.env;
   const byAlias = {
-    fast: process.env.CODEX_FAST_MODEL || process.env.CODEX_HAIKU_MODEL || 'gpt-5.4-mini',
-    normal: process.env.CODEX_NORMAL_MODEL || process.env.CODEX_SONNET_MODEL || 'gpt-5.4',
-    smart: process.env.CODEX_SMART_MODEL || process.env.CODEX_OPUS_MODEL || 'gpt-5.5',
-    haiku: process.env.CODEX_FAST_MODEL || process.env.CODEX_HAIKU_MODEL || 'gpt-5.4-mini',
-    sonnet: process.env.CODEX_NORMAL_MODEL || process.env.CODEX_SONNET_MODEL || 'gpt-5.4',
-    opus: process.env.CODEX_SMART_MODEL || process.env.CODEX_OPUS_MODEL || 'gpt-5.5',
+    fast: e.CODEX_FAST_MODEL || e.CODEX_HAIKU_MODEL || 'gpt-5.4-mini',
+    normal: e.CODEX_NORMAL_MODEL || e.CODEX_SONNET_MODEL || 'gpt-5.4',
+    smart: e.CODEX_SMART_MODEL || e.CODEX_OPUS_MODEL || 'gpt-5.5',
+    haiku: e.CODEX_FAST_MODEL || e.CODEX_HAIKU_MODEL || 'gpt-5.4-mini',
+    sonnet: e.CODEX_NORMAL_MODEL || e.CODEX_SONNET_MODEL || 'gpt-5.4',
+    opus: e.CODEX_SMART_MODEL || e.CODEX_OPUS_MODEL || 'gpt-5.5',
   };
-  return byAlias[model] || process.env.CODEX_MODEL || model;
+  return byAlias[model] || e.CODEX_MODEL || model;
 }
 
 function sandboxFor(mode) {
@@ -550,7 +551,7 @@ function launchCodex({ prompt, model, streamJson, attempt = 0, retryState = null
   });
 }
 
-(async () => {
+if (require.main === module) (async () => {
   const stdinPrompt = await readStdin();
   const prompt = promptArg || stdinPrompt;
   const streamJson = outputFormat === 'stream-json';
@@ -572,3 +573,5 @@ function launchCodex({ prompt, model, streamJson, attempt = 0, retryState = null
     process.exit(1);
   }
 })();
+
+module.exports = { resolveModel, permissionArgsFor, sandboxFor, approvalFor };
