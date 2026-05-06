@@ -105,6 +105,7 @@ See `docs/API.md` for the full route reference. New routes must be documented th
 - Run `pnpm test` after every non-trivial code change. All tests must pass before committing.
 - Test naming: `__tests__/api/<route-name>.test.ts` mirroring `app/api/<route-name>/route.ts`.
 - **`createTestDb()` pattern**: each test file defines its own local `createTestDb()` opening `new Database(':memory:')` with `pragma journal_mode = WAL` and creates only the tables that test needs via raw SQL. No shared helper — copy from the nearest similar test. Never import the real DB connection in tests.
+- **Match the nearby test style**: this repo already mixes one-route-per-file tests with broader coverage files for closely related endpoints/components. Extend the nearest existing test when it already owns that behavior; do not introduce a new shared test utility layer just to avoid a little duplication.
 - **E2e vs unit**: three kinds of Playwright tests — (1) browser tests in `e2e/` for UI rendering; (2) pipeline e2e in `e2e/pipeline/` for full pipeline chains where completion hooks and PM2 lifecycle must be exercised; (3) API integration tests via `request` fixture. Write a pipeline e2e when you need to verify cross-step hook chaining or probe-sweep-driven follow-ons. See `docs/E2E.md`.
 - **What must be tested**: new API route handlers (happy + error), new lib functions with branching logic or state mutations. Skip trivial passthroughs.
 - **Pipeline e2e isolation**: `pnpm test:e2e:pipeline` uses port 1338, temp DB at `/tmp/tamtam-e2e-pipeline/`, intercepts `git`/`gh` via shims in `e2e/pipeline/mocks/bin/`. Sequential workers. Never run pipeline e2e against production server or DB.
@@ -120,6 +121,8 @@ See `docs/API.md` for the full route reference. New routes must be documented th
 - Runtime config is stored in DB (`settings`, `projects`, `skills`, `agents`); shared per-project config and file-agent prompts can also live in committed `.tamtam/` files.
 - Workspace path configured in Settings UI; projects discovered by scanning for git repos.
 - Most CLI calls (git, gh, launchctl, pm2) go through `lib/shared/shell.ts`. `lib/shared/project-data.ts` assembles project data with 10s TTL cache.
+- Client-side API helpers live under `lib/client/` and are surfaced through `lib/client-api.ts`. When a fetch pattern is reused across components, add or extend a helper there instead of duplicating request/response handling in the component.
+- Direct `child_process` usage is the exception, not the default: keep ordinary shelling in `lib/shared/shell.ts`; only use raw spawn/process control in the runner/shim/streaming paths that already need it, and keep the reason obvious in code.
 - Terminal runs use `claude --output-format stream-json` for token-by-token streaming via PM2 + log file + fs.watch + NDJSON parser. SSE at `/api/streaming/[jobId]`. See `docs/STREAMING.md`.
 - Agent runs compose skill content into the prompt before sending to the configured provider. See `docs/AGENT.md` for skill composition, scheduling, runner lifecycle.
 - `commit_style` setting injects a style guide into commit-message generation; `review_verdict_rules` drives LGTM/NEEDS ATTENTION/DO NOT SHIP — both configurable in Settings → Pipeline. All settings keys/types/defaults: `docs/SETTINGS.md`.
@@ -220,6 +223,7 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 - **Async**: `async/await` throughout, no raw `.then()` chains. Parallelise independent work with `Promise.all`.
 - **UI styling**: use design tokens and component patterns from `docs/UI.md`; do not introduce one-off color scales, spacing systems, or global CSS outside the existing Tailwind v4 token setup.
 - **Linting/typing**: `pnpm lint` after significant edits; `pnpm type-check` before committing.
+- **Formatting**: there is no Prettier in this repo. Preserve the surrounding file's formatting style and use ESLint-driven fixes where needed; do not mass-reformat unrelated files.
 - **Turbopack NFT comments**: Next.js 16 (Turbopack) traces server-route deps at build time. When a route's dep tree calls `path.join(dynamicVar, …)` or any `fs` call (`existsSync`, `readFileSync`, `readFile`, `openSync`, `statSync`, `watch`, `readdirSync`) with a *runtime-dynamic* path — settings paths, project paths, log paths, `homedir()`, `process.cwd() + userVar` — the static analyzer can't bound it and traces the **whole project**, dragging `next.config.ts` into every route bundle (warning: `Encountered unexpected file in NFT list`). Annotate the dynamic argument with `/*turbopackIgnore: true*/` inline at each call site (not just the original `join`). Examples: `existsSync(/*turbopackIgnore: true*/ p)`, `readFile(/*turbopackIgnore: true*/ path, 'utf8')`. Statically-scoped joins like `join(process.cwd(), 'data', name)` are fine.
 
 ## Dependency & Supply-Chain Security
@@ -239,6 +243,7 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 
 ## Scope & Safety Rules
 - **Destructive git**: do not run `git reset --hard`, `git clean`, force pushes, branch deletion, or history rewrites unless explicitly requested.
+- **Dirty worktrees are normal**: before editing, check whether the target file already has local changes. Preserve unrelated edits, work around them when possible, and never revert someone else's in-progress work just to get a clean diff.
 - **Production data**: do not delete or rewrite `data/db/tamtam.db`, run destructive SQL, or remove project log directories without explicit approval.
 - **Schema safety**: migrations must be additive or carefully backfilled; document any irreversible data loss before applying.
 - **External side effects**: treat `git push`, GitHub issue/PR actions, webhook sends, and PM2 process changes as real side effects. Run only when required by the task and the target is clear.
