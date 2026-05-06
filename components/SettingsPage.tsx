@@ -70,6 +70,8 @@ interface SettingsMap {
   pipeline_model_fix: string
   pipeline_model_dod: string
   pipeline_model_commit: string
+  dirty_worktree_block_threshold: string
+  incremental_review_enabled: string
 }
 
 const SETTINGS_DEFAULTS: SettingsMap = {
