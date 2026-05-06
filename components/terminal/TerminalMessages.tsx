@@ -261,7 +261,7 @@ export function TerminalMessages({
             {(entry.role === 'assistant' || entry.role === 'user' || entry.role === 'status' || entry.role === 'error' || entry.role === 'raw') && (
               <div className="mb-1.5">
                 <RoleBadge
-                  label={entry.role === 'assistant' ? 'agent' : entry.role === 'user' ? 'you' : entry.role}
+                  label={entry.role === 'assistant' ? 'agent' : entry.role === 'user' ? 'you' : entry.role === 'error' ? '✗ error' : entry.role}
                   tone={entry.role === 'error' ? 'error' : entry.role === 'status' ? 'info' : entry.role === 'user' ? 'info' : 'default'}
                 />
               </div>
@@ -275,7 +275,7 @@ export function TerminalMessages({
               : entry.role === 'status'
                 ? <LogBlock text={entry.text} fallbackTone="info" />
               : entry.role === 'error'
-                ? <LogBlock text={entry.text} fallbackTone="error" />
+                ? <pre className="m-0 whitespace-pre-wrap text-status-error">{entry.text}</pre>
               : hasAnsi(entry.text)
                 ? <pre className="whitespace-pre-wrap font-mono text-xs m-0 inline">{renderAnsi(entry.text)}</pre>
                 : entry.text}
