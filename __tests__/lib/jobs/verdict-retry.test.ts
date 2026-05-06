@@ -188,4 +188,34 @@ describe('retryVerdictWithClaude — spawn error handling', () => {
     const result = await retryVerdictWithClaude(makeJob());
     expect(result).toBeNull();
   });
+
+  it('falls back to claude when job.provider is not a CLI provider', async () => {
+    mockSpawn.mockReturnValue(makeMockChild('LGTM') as ReturnType<typeof spawn>);
+
+    const result = await retryVerdictWithClaude(makeJob({ provider: 'openai' }));
+
+    expect(result).toBe('LGTM');
+    expect(mockResolveCliBin).toHaveBeenCalledWith('claude', expect.anything());
+    expect(mockResolveCliEnv).toHaveBeenCalledWith('claude', expect.anything());
+  });
+
+  it('returns null when stdin write fails after spawn', async () => {
+    const child = new EventEmitter() as ReturnType<typeof spawn>;
+    const stdout = new EventEmitter();
+    const stdin = {
+      write: vi.fn(() => {
+        throw new Error('EPIPE');
+      }),
+      end: vi.fn(),
+    };
+    (child as unknown as Record<string, unknown>).stdout = stdout;
+    (child as unknown as Record<string, unknown>).stdin = stdin;
+    (child as unknown as Record<string, unknown>).kill = vi.fn();
+    mockSpawn.mockReturnValue(child);
+
+    const result = await retryVerdictWithClaude(makeJob());
+
+    expect(result).toBeNull();
+    expect(stdin.end).not.toHaveBeenCalled();
+  });
 });
