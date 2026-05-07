@@ -23,6 +23,7 @@ import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { enqueueAgentRun, tryClaimAgentStartSlot, releaseAgentStartSlot, drainNextAgentRun } from '@/lib/agents/pending-agent-run';
 import { getSettings } from '@/lib/shared/config';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
+import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 
 export async function POST(
@@ -97,6 +98,21 @@ export async function POST(
         agent: agent.name,
       },
       { status: 202 },
+    );
+  }
+
+  const blockingJob = await findBlockingRunningJob(
+    agent.project,
+    (job) => !isAgentJobKind(job.kind),
+  );
+  if (blockingJob) {
+    return NextResponse.json(
+      {
+        code: 'project_busy',
+        detail: `Job '${blockingJob.kind}' is already running for ${agent.project} (job ${blockingJob.id})`,
+        blockingJobId: blockingJob.id,
+      },
+      { status: 409 },
     );
   }
 
@@ -357,6 +373,7 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   const gate = await checkCliStartGate('start an agent run', {
     preferred: agent.provider ?? null,
     requestedModel,
+    respectJobsPaused: triggeredBy === 'schedule',
   });
   if (!gate.ok) {
     const gateCode =

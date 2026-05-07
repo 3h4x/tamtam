@@ -7,10 +7,11 @@ import { flushSync } from 'react-dom'
 import { ProjectRunsTab } from '@/components/ProjectRunsTab'
 import type { JobInfo } from '@/lib/client-api'
 
-const { pushMock, fetchJobsMock, releaseProjectMock, syncJobBoardMock } = vi.hoisted(() => ({
+const { pushMock, fetchJobsMock, releaseProjectMock, pushProjectMock, syncJobBoardMock } = vi.hoisted(() => ({
   pushMock: vi.fn(),
   fetchJobsMock: vi.fn(),
   releaseProjectMock: vi.fn(),
+  pushProjectMock: vi.fn(),
   syncJobBoardMock: vi.fn(),
 }))
 
@@ -21,6 +22,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/lib/client-api', () => ({
   fetchJobs: fetchJobsMock,
   releaseProject: releaseProjectMock,
+  pushProject: pushProjectMock,
   syncJobBoard: syncJobBoardMock,
 }))
 
@@ -96,6 +98,7 @@ describe('ProjectRunsTab release actions', () => {
       release_job_id: 'rel-2',
       message: 'started',
     })
+    pushProjectMock.mockResolvedValue({ status: 'started', job_id: 'commit-retry' })
     syncJobBoardMock.mockResolvedValue({ status: 'ok' })
   })
 
@@ -103,6 +106,7 @@ describe('ProjectRunsTab release actions', () => {
     pushMock.mockReset()
     fetchJobsMock.mockReset()
     releaseProjectMock.mockReset()
+    pushProjectMock.mockReset()
     syncJobBoardMock.mockReset()
     document.body.innerHTML = ''
   })
@@ -159,6 +163,35 @@ describe('ProjectRunsTab release actions', () => {
     })
 
     vi.unstubAllGlobals()
+    unmount()
+  })
+
+  it('shows retry commit for the newest release when its commit step failed', async () => {
+    fetchJobsMock.mockResolvedValue({
+      jobs: [
+        makeJob({ id: 'rel-commit-failed', kind: 'release', started_at: 100, finished_at: 140, exit_code: 1 }),
+        makeJob({ id: 'review-ok', kind: 'review', started_at: 110, finished_at: 120, exit_code: 0, verdict: 'LGTM' }),
+        makeJob({ id: 'commit-failed', kind: 'commit', started_at: 125, finished_at: 135, exit_code: 1 }),
+      ],
+      pendingReleaseProjects: [],
+    })
+    const { container, unmount } = renderTab()
+
+    await vi.waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(buttonByText(container, 'Retry commit')).toBeInstanceOf(HTMLButtonElement)
+    })
+
+    buttonByText(container, 'Retry commit').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(pushProjectMock).toHaveBeenCalledWith('alpha', {
+        commit: true,
+        releaseId: 'rel-commit-failed',
+      })
+    })
+    expect(releaseProjectMock).not.toHaveBeenCalled()
+
     unmount()
   })
 

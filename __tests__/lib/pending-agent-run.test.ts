@@ -280,6 +280,30 @@ describe('drainNextAgentRun', () => {
     expect(listQueuedAgents('p1').map((e) => e.agentId)).toEqual(['a']);
   });
 
+  it('keeps the head entry queued on transient 409 project_busy and drains it after retrying later', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            code: 'project_busy',
+            detail: "Job 'run' is already running for p1 (job run-123)",
+            blockingJobId: 'run-123',
+          },
+          409,
+        )
+      )
+      .mockResolvedValueOnce(textResponse('', 200));
+
+    enqueueAgentRun('p1', { agentId: 'a', agentName: 'A', triggeredBy: 'schedule', prompt: '', enqueuedAt: 1 });
+
+    await drainNextAgentRun('p1');
+    expect(listQueuedAgents('p1').map((e) => e.agentId)).toEqual(['a']);
+
+    await drainNextAgentRun('p1');
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(listQueuedAgents('p1')).toEqual([]);
+  });
+
   it('drops the head and lets a later valid entry drain when 409 reports agent_disabled', async () => {
     fetchSpy
       .mockResolvedValueOnce(

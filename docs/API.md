@@ -6,7 +6,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 
 - `/api/agents` — CRUD for agents (GET: accepts `?project=` and `?name=` filters, POST)
 - `/api/agents/[agentId]` — Agent detail (GET, PATCH, DELETE)
-- `/api/agents/[agentId]/run` — Run agent (POST) — composes skills into prompt; returns `200 { status: 'started', job_id, pid, agent }`, `202 { status: 'queued', detail, agent, blockingJobId?, code? }` when another agent on the same project is running/still starting, when an active release lock defers the run with `code: 'pipeline_lock'`, or when an older queued release must run first with `code: 'pending_release'`, and `409` for same-agent duplicates
+- `/api/agents/[agentId]/run` — Run agent (POST) — composes skills into prompt; returns `200 { status: 'started', job_id, pid, agent }`, `202 { status: 'queued', detail, agent, blockingJobId?, code? }` when another agent on the same project is running/still starting, when an active release lock defers the run with `code: 'pipeline_lock'`, or when an older queued release must run first with `code: 'pending_release'`; returns `409 { code: 'already_running'|'already_starting'|'project_busy', detail, blockingJobId? }` for same-agent duplicates, start-slot duplicates, or when a non-agent project job is already running. Manual (non-scheduled) agent runs bypass `jobs_paused`; scheduled runs are still blocked by the global pause.
 - `/api/agents/by-name` — Update agent by project+name without knowing its UUID (PATCH: `{ project, name, ...fields }`) — enables agents to self-improve
 - `/api/agents/scheduler-health` — Verify the internal scheduler matches the DB (GET returns `{ ok, expected, actual, missing, orphans, errors, internal: { started, entries: [...] } }`); POST reinstalls anything missing and sweeps legacy PM2 cron orphans, returns `{ before, after, installed, installFailures }`. Surfaced on `/monitoring`.
 
@@ -29,10 +29,10 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 
 - `action` — Custom actions (GET, PUT, POST). POST is pause-gated and returns `409 { detail }` when `jobs_paused` is enabled globally.
 - `config` — Project test command + workflow flags + per-project pipeline prompt addenda (`review_prompt_addendum`, `fix_prompt_addendum`) (GET, PATCH)
-- `run` — Run Claude on project (POST, accepts `model` param)
+- `run` — Run Claude on project (POST, accepts `model` param). Returns `409 { detail, blocking_job_id }` when another job is already running for the project. Manual terminal runs bypass `jobs_paused` — the global pause does not block this endpoint.
 - `review` — Start AI code review (POST)
 - `review-pr` — Start AI review of a GitHub PR (POST). PR review prompts ignore `.tamtam/` metadata changes unless the review is explicitly about TamTam configuration.
-- `fix-ci` — Start AI CI fix run (POST)
+- `fix-ci` — Start AI CI fix run (POST). Returns `409 { detail, blocking_job_id }` when another job is already running for the project
 - `test` — Run project test command (POST)
 - `changes` — Uncommitted changes summary (GET, returns `defaultBranch`/`branch`/`ahead`/`behind`/`files`); git pull with strategy (POST: ff-only/merge/rebase)
 - `changes/diff` — Full git diff content (GET)
@@ -60,7 +60,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 - `/api/jobs/[jobId]` — Job detail (GET, DELETE). `GET` returns parsed log text for normal jobs, but returns the raw aggregated `log` for `release` jobs because release logs mix plain shell output with NDJSON child streams
 - `/api/jobs/[jobId]/logs` — Job log content (GET)
 - `/api/jobs/[jobId]/board-sync` — Manually sync a finished root job to the GitHub project board (POST); rejects running jobs, requires board sync configured, surfaces GitHub failures instead of swallowing them
-- `/api/jobs/[jobId]/rerun` — Re-run a job (POST)
+- `/api/jobs/[jobId]/rerun` — Re-run a job (POST). Returns `409 { detail, blocking_job_id }` when another job is already running for the project
 - `/api/jobs/[jobId]/fix` — Start AI fix run for a failed job (POST)
 - `/api/jobs/[jobId]/seen` — Mark job as seen (POST)
 - `/api/jobs/notifications` — Unseen job notifications (GET)

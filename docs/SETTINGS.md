@@ -200,6 +200,7 @@ Budget gate semantics:
 - Release/test/push entrypoints use the same chooser up front, so a full legacy `claude_provider` snapshot does not block work when another enabled provider is still healthy.
 - The weekly burn-rate throttle is enforced only for scheduled agent fires via `scheduledBurnRateBlocked()` in the internal scheduler; manual buttons and root pipeline starts do not 429 on projected 7-day pace alone.
 - Agent runs that were queued behind an active release lock or an older `pending_release` stay persisted in `queued_agent_runs` if replay hits a temporary 429 budget block; they are retried when the budget recovers, when jobs resume from pause, on boot, and by the periodic queued-agent recovery sweep.
+- `jobs_paused` blocks scheduled agent runs, pipeline steps, reruns, and CI-fix starts. It does **not** block manual terminal runs (`POST /api/projects/by-project/[name]/run`) or manually-triggered agent runs (`POST /api/agents/[id]/run` without `x-tamtam-trigger: schedule`); those two entry-points bypass the gate so operators can always run things interactively even while the pipeline is paused.
 
 **Payload shape** (generic JSON POST):
 

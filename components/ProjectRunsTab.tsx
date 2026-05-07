@@ -2,7 +2,7 @@
 
 import { Fragment, useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { fetchJobs, releaseProject, syncJobBoard } from '@/lib/client-api'
+import { fetchJobs, releaseProject, pushProject, syncJobBoard } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import {
   formatTokens,
@@ -80,6 +80,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [releaseActionState, setReleaseActionState] = useState<{ jobId: string; label: string } | null>(null)
+  const [stepRetryState, setStepRetryState] = useState<{ jobId: string; label: string } | null>(null)
   const [boardActionState, setBoardActionState] = useState<{ jobId: string; label: string } | null>(null)
   const toggleExpanded = (key: string) => {
     setExpanded((prev) => {
@@ -220,6 +221,31 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     setReleaseActionState(null)
   }
 
+  const failedRetryableStep = (release: Entry): Entry | null => {
+    const failed = (release.children ?? [])
+      .filter((child) => child.status === 'done' && child.exitCode !== null && child.exitCode !== 0)
+      .sort((a, b) => b.startedAt - a.startedAt)[0]
+    return failed?.kind === 'commit' ? failed : null
+  }
+
+  const retryPipelineStep = async (release: Entry, step: Entry) => {
+    if (jobsPaused) return
+    setStepRetryState({ jobId: step.navJobId, label: 'retrying' })
+    try {
+      if (step.kind === 'commit') {
+        await pushProject(projectName, { commit: true })
+      }
+      await loadJobs()
+      setExpanded((prev) => new Set(prev).add(release.key))
+    } catch (error) {
+      console.error('[history] step retry failed', error)
+      setStepRetryState({ jobId: step.navJobId, label: 'failed' })
+      setTimeout(() => setStepRetryState(null), 2500)
+      return
+    }
+    setStepRetryState(null)
+  }
+
   const releaseActionsFor = (e: Entry): React.ReactNode => {
     const outcomeStatus = e.releaseOutcome?.status
       ?? (e.kind === 'release' && (e.status === 'done' || e.status === 'aborted') && e.exitCode !== null && e.exitCode !== 0
@@ -229,6 +255,26 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     // older failed releases reflect a past project state, and retrying them
     // would silently rerun on whatever's currently checked out.
     const isLatestRelease = e.kind === 'release' && e.key === latestTopLevelReleaseKey
+    const isRealRelease = e.kind === 'release' && !e.key.startsWith('vgroup:')
+    const retryableStep = isLatestRelease && isRealRelease ? failedRetryableStep(e) : null
+    const stepRetryButton = retryableStep ? (
+      (() => {
+        const active = stepRetryState?.jobId === retryableStep.navJobId
+        return (
+          <button
+            type="button"
+            className="px-2 py-0.5 text-[10px] rounded border border-status-warning/40 text-status-warning bg-status-warning/10 hover:bg-status-warning/15 disabled:opacity-60 cursor-pointer"
+            disabled={jobsPaused || active}
+            onClick={() => retryPipelineStep(e, retryableStep)}
+            title={jobsPaused
+              ? 'Jobs are paused globally. Resume jobs to retry this step.'
+              : 'Retry the failed commit step for this release'}
+          >
+            {active ? stepRetryState?.label : 'Retry commit'}
+          </button>
+        )
+      })()
+    ) : null
     const releaseButton = isLatestRelease && (outcomeStatus === 'blocked' || outcomeStatus === 'failed') ? (
       (() => {
         const active = releaseActionState?.jobId === e.navJobId
@@ -273,9 +319,10 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
         {boardActive ? boardActionState?.label : 'Sync board'}
       </button>
     ) : null
-    if (!releaseButton) return boardButton
-    if (!boardButton) return releaseButton
-    return <div className="flex items-center gap-2">{releaseButton}{boardButton}</div>
+    const buttonCount = [stepRetryButton, releaseButton, boardButton].filter(Boolean).length
+    if (buttonCount === 0) return null
+    if (buttonCount === 1) return stepRetryButton ?? releaseButton ?? boardButton
+    return <div className="flex items-center gap-2">{stepRetryButton}{releaseButton}{boardButton}</div>
   }
 
   return (

@@ -10,6 +10,7 @@ import { errMsg } from '@/lib/shared/types';
 import { resolveCliBin, resolveCliDefaultModel, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { isCliProvider } from '@/lib/usage/cli-providers';
+import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 
 export async function POST(
   request: NextRequest,
@@ -30,6 +31,14 @@ export async function POST(
   const projPath = resolveProjectPath(projectName);
   if (!projPath) {
     return NextResponse.json({ detail: `project '${projectName}' not found` }, { status: 404 });
+  }
+
+  const blockingJob = await findBlockingRunningJob(projectName);
+  if (blockingJob) {
+    return NextResponse.json({
+      detail: `Job '${blockingJob.kind}' is already running for ${projectName} (job ${blockingJob.id})`,
+      blocking_job_id: blockingJob.id,
+    }, { status: 409 });
   }
 
   // For review and fix-ci, delegate to those endpoints

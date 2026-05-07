@@ -182,6 +182,7 @@ export async function drainNextAgentRun(project: string): Promise<void> {
       const transient =
         code === 'already_running' ||
         code === 'already_starting' ||
+        code === 'project_busy' ||
         code === 'jobs_paused' ||
         (parsed?.detail ?? raw).includes('Jobs are paused globally');
       if (transient) {

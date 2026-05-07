@@ -71,6 +71,7 @@ describe('POST /api/agents/{agentId}/run', () => {
   let drainNextAgentRunMock: ReturnType<typeof vi.fn>;
   let tryClaimAgentStartSlotMock: ReturnType<typeof vi.fn>;
   let checkCliStartGateMock: ReturnType<typeof vi.fn>;
+  let findBlockingRunningJobMock: ReturnType<typeof vi.fn>;
   let getLockMock: ReturnType<typeof vi.fn>;
   let isLockOwnedByActiveReleaseMock: ReturnType<typeof vi.fn>;
   let getPendingReleaseMock: ReturnType<typeof vi.fn>;
@@ -127,6 +128,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     drainNextAgentRunMock = vi.fn().mockResolvedValue(undefined);
     tryClaimAgentStartSlotMock = vi.fn().mockReturnValue({ ok: true });
     checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
+    findBlockingRunningJobMock = vi.fn().mockResolvedValue(null);
     getLockMock = vi.fn().mockReturnValue(null);
     isLockOwnedByActiveReleaseMock = vi.fn().mockReturnValue(false);
     getPendingReleaseMock = vi.fn().mockReturnValue(false);
@@ -182,6 +184,9 @@ describe('POST /api/agents/{agentId}/run', () => {
       updateJob: updateJobMock,
       listJobs: listJobsMock,
       probeJobStatus: probeJobStatusMock,
+    }));
+    vi.doMock('@/lib/jobs/project-active-job', () => ({
+      findBlockingRunningJob: findBlockingRunningJobMock,
     }));
 
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
@@ -323,8 +328,8 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(startJobMock).not.toHaveBeenCalled();
   });
 
-  it('returns a coded 409 when jobs are paused so queue drains can preserve the head', async () => {
-    insertAgent();
+  it('returns a coded 409 for scheduled runs when jobs are paused so queue drains can preserve the head', async () => {
+    insertAgent({ schedule: '1h' });
     checkCliStartGateMock.mockResolvedValue({
       ok: false,
       status: 409,
@@ -332,6 +337,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     });
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
       body: JSON.stringify({ prompt: 'do something' }),
     });
     const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
@@ -419,6 +425,25 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(entry.agentName).toBe('Test Agent');
     expect(entry.triggeredBy).toBe('schedule');
     expect(entry.prompt).toBe('do something');
+  });
+
+  it('returns 409 project_busy when a non-agent project job is already running', async () => {
+    insertAgent({ schedule: '1h' });
+    findBlockingRunningJobMock.mockResolvedValue(makeJob({ id: 'run-123', kind: 'run' }));
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.code).toBe('project_busy');
+    expect(data.blockingJobId).toBe('run-123');
+    expect(data.detail).toContain("Job 'run' is already running");
+    expect(enqueueAgentRunMock).not.toHaveBeenCalled();
+    expect(startJobMock).not.toHaveBeenCalled();
   });
 
   it('releases the starting slot after a pre-start failure so same-agent retries are not stranded', async () => {
@@ -662,6 +687,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(checkCliStartGateMock).toHaveBeenCalledWith('start an agent run', {
       preferred: 'claude',
       requestedModel: 'normal',
+      respectJobsPaused: false,
     });
     const [, cmd] = startJobMock.mock.calls[0];
     expect(cmd).toContain('/scripts/codex-shim.js');

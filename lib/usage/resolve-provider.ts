@@ -15,6 +15,8 @@ export interface ResolveProviderOptions {
   requestedModel?: ModelTier | null;
   /** Skip quota fetch + picker; useful in tests. */
   fallback?: CliProvider;
+  /** Defaults to true; set false only for explicit manual bypasses. */
+  respectJobsPaused?: boolean;
 }
 
 export type CliStartGateResult =
@@ -96,9 +98,11 @@ export async function checkCliStartGate(
   action: string,
   opts: ResolveProviderOptions = {},
 ): Promise<CliStartGateResult> {
-  const paused = jobsPausedResult(action);
-  if (paused) {
-    return { ok: false, status: paused.status, detail: paused.detail };
+  if (opts.respectJobsPaused ?? true) {
+    const paused = jobsPausedResult(action);
+    if (paused) {
+      return { ok: false, status: paused.status, detail: paused.detail };
+    }
   }
   const picked = await resolveProviderForRun(opts);
   if (!picked.provider) {

@@ -117,6 +117,12 @@ are included, or cite passing/failing/skipped/partial suites as findings. Tests
 are only review material when the code diff itself creates a concrete missing
 coverage risk.
 
+Working-tree reviewers are also told to resolve obvious documentation-only
+findings during the review itself. If the only remaining issue is a clear docs
+edit, the reviewer should apply that edit and return `LGTM` rather than forcing
+a fix→review loop that spends another model call on the same documentation
+change.
+
 Project review prompts and PR review prompts both tell the reviewer to ignore
 `.tamtam/` changes. Those files are TamTam scheduler/config metadata for the
 tracked project, not product code, unless a review is explicitly about TamTam
