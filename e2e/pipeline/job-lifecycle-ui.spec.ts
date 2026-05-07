@@ -286,6 +286,28 @@ test.describe('Job lifecycle UI badges', () => {
   });
 
   // -------------------------------------------------------------------------
+  // History tab — DO NOT SHIP verdict
+  // -------------------------------------------------------------------------
+  test('DO NOT SHIP review shows "✗ DNS" verdict badge', async ({ page }) => {
+    const jobs: MockJob[] = [
+      makeJob({
+        id: 'job-dns-1',
+        kind: 'review',
+        status: 'done',
+        exit_code: 0,
+        started_at: now() - 120,
+        finished_at: now() - 60,
+        verdict: 'DO NOT SHIP',
+        session_id: 'sess-dns-1',
+      }),
+    ];
+    await mockJobScenario(page, jobs);
+    await page.goto(`/project/${PROJECT}/history`);
+    // VerdictBadge renders "✗ DNS" for verdict === 'DO NOT SHIP'
+    await expect(page.getByText('✗ DNS').first()).toBeVisible();
+  });
+
+  // -------------------------------------------------------------------------
   // History tab — successful job without verdict shows "done"
   // -------------------------------------------------------------------------
   test('completed push job shows "done" badge in history tab', async ({ page }) => {
