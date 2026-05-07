@@ -345,4 +345,60 @@ test.describe('Concurrent jobs across projects', () => {
     await page.getByRole('button', { name: /^done/ }).click();
     await expect(page.getByText(/no done runs/i)).toBeVisible();
   });
+
+  test('/runs page keeps concurrent job transitions isolated when one job finishes and the other keeps running', async ({
+    page,
+  }) => {
+    const ALPHA = 'alpha-project';
+    const BETA = 'beta-project';
+    let alphaDone = false;
+
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && !url.searchParams.has('project'),
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            jobs: [
+              makeJob('job-alpha', ALPHA, alphaDone ? 'done' : 'running', alphaDone ? 0 : null, 'review'),
+              makeJob('job-beta', BETA, 'running', null, 'test'),
+            ],
+            pendingReleaseProjects: [],
+          },
+        }),
+    );
+
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({ json: { notifications: [] } }),
+    );
+    await page.route('**/api/settings', (route: Route) =>
+      route.fulfill({ json: { jobs_paused: false, github_owner: '' } }),
+    );
+    await page.route('**/api/projects', (route: Route) =>
+      route.fulfill({
+        json: {
+          tasks: [makeTask(ALPHA), makeTask(BETA)],
+          priorities: [],
+          issueCounts: {},
+        },
+      }),
+    );
+
+    await page.goto('/runs');
+
+    await expect(page.getByText(ALPHA).first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText(BETA).first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.locator('span.animate-pulse')).toHaveCount(2, { timeout: 8_000 });
+
+    alphaDone = true;
+
+    await expect(page.locator('span.animate-pulse')).toHaveCount(1, { timeout: 12_000 });
+
+    await page.getByRole('button', { name: /^running/ }).click();
+    await expect(page.getByText(BETA).first()).toBeVisible();
+    await expect(page.getByText(ALPHA).first()).not.toBeVisible();
+
+    await page.getByRole('button', { name: /^done/ }).click();
+    await expect(page.getByText(ALPHA).first()).toBeVisible();
+    await expect(page.getByText(BETA).first()).not.toBeVisible();
+  });
 });

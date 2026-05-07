@@ -32,7 +32,10 @@ function makeTask(project: string, changes = 5, unpushed = 0) {
   };
 }
 
-async function stubCommonRoutes(page: import('@playwright/test').Page): Promise<void> {
+async function stubCommonRoutes(
+  page: import('@playwright/test').Page,
+  settingsOverride?: Record<string, unknown>,
+): Promise<void> {
   await page.route('**/api/projects', (route: Route) =>
     route.fulfill({
       json: { tasks: [makeTask(PROJECT)], priorities: [], issueCounts: {} },
@@ -84,7 +87,11 @@ async function stubCommonRoutes(page: import('@playwright/test').Page): Promise<
     route.fulfill({ json: { notifications: [] } }),
   );
   await page.route('**/api/settings', (route: Route) =>
-    route.fulfill({ json: { settings: { jobs_paused: 'false' }, github_owner: '' } }),
+    route.fulfill({
+      json: settingsOverride
+        ? { settings: settingsOverride, github_owner: '' }
+        : { settings: { jobs_paused: 'false' }, github_owner: '' },
+    }),
   );
   // No running jobs — so isPipelineRunning = false and Release button is active.
   await page.route(
@@ -93,6 +100,22 @@ async function stubCommonRoutes(page: import('@playwright/test').Page): Promise<
       route.fulfill({ json: { jobs: [], pendingReleaseProjects: [] } }),
   );
 }
+
+// ---------------------------------------------------------------------------
+// Test 0: jobs paused — release button disabled before click
+// ---------------------------------------------------------------------------
+test('Release button is disabled up front when jobs are paused globally', async ({
+  page,
+}) => {
+  await stubCommonRoutes(page, { jobs_paused: 'true' });
+
+  await page.goto(`/project/${PROJECT}/issues`);
+
+  const releaseBtn = page.getByRole('button', { name: /release/i }).first();
+  await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
+  await expect(releaseBtn).toBeDisabled();
+  await expect(releaseBtn).toHaveAttribute('title', /jobs are paused globally/i);
+});
 
 // ---------------------------------------------------------------------------
 // Test 1: jobs paused — toast must show server's "paused" detail message
