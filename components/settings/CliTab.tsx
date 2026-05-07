@@ -294,16 +294,16 @@ export function CliTab({
           <p className="text-xs text-text-tertiary mt-0.5">Skip enabled CLIs whose 5-hour quota window is close to exhausted</p>
         </div>
         <div className="px-5 py-4 space-y-4">
-          <label className="flex items-start gap-3 cursor-pointer">
+          <label className="flex items-center gap-2.5 cursor-pointer">
             <input
               type="checkbox"
               checked={blockEnabled}
               onChange={(e) => onChange('budget_block_runs_enabled', e.target.checked ? 'true' : 'false')}
-              className="w-4 h-4 accent-accent rounded mt-0.5 shrink-0 cursor-pointer"
+              className="w-4 h-4 accent-accent rounded shrink-0 cursor-pointer"
             />
-            <div className="flex-1 min-w-0">
-              <div className="font-medium text-sm text-text-primary">Skip CLIs over budget</div>
-              <div className="text-xs text-text-tertiary">If every enabled CLI is over budget the run is rejected with a 429.</div>
+            <div className="flex-1 min-w-0 flex items-baseline gap-1.5 flex-wrap">
+              <span className="font-medium text-sm text-text-primary shrink-0">Skip CLIs over budget</span>
+              <span className="text-xs text-text-tertiary">If every enabled CLI is over budget the run is rejected with a 429.</span>
             </div>
           </label>
           <div className="grid grid-cols-2 gap-4">
