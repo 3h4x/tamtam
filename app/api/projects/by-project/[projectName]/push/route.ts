@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { launchProjectPush, validateReleaseLinkedRetry } from '@/lib/pipeline/start-push';
+import {
+  launchProjectPush,
+  validateReleaseLinkedRetry,
+  validateReleaseLinkedCommitRetry,
+} from '@/lib/pipeline/start-push';
 import { startProjectCommit } from '@/lib/pipeline/start-commit';
 
 export async function POST(
@@ -10,7 +14,8 @@ export async function POST(
   // Optional `{ commit: true }` body → run the commit step (Claude generates
   // the message, stages everything, commits). The completion hook then
   // auto-chains to push when `auto_push_enabled` is set on the project, so
-  // the new commits land on the existing PR. Used by the "Push to PR" button.
+  // the new commits land on the existing PR. Used by the "Push to PR" and
+  // History "Retry commit" buttons.
   let commit = false;
   let releaseId: string | null = null;
   try {
@@ -21,7 +26,13 @@ export async function POST(
       releaseId = typeof body.release_id === 'string' && body.release_id ? body.release_id : null;
     }
   } catch { /* no body or invalid JSON — default push-only */ }
-  const retryValidation = validateReleaseLinkedRetry(projectName, releaseId);
+  // Commit-with-release retries (History "Retry commit") use a looser validator
+  // that allows the targeted release to be finished — the strict push-retry
+  // path requires an active release lock, which doesn't exist after the prior
+  // commit failed and the pipeline ended.
+  const retryValidation = commit
+    ? validateReleaseLinkedCommitRetry(projectName, releaseId)
+    : validateReleaseLinkedRetry(projectName, releaseId);
   if (!retryValidation.ok) {
     return NextResponse.json({ detail: retryValidation.detail }, { status: retryValidation.status });
   }

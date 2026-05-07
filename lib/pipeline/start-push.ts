@@ -73,6 +73,79 @@ export function validateReleaseLinkedRetry(
   return { ok: true, parentJobId: normalizedParentJobId, releaseLinkedRetry: true };
 }
 
+/**
+ * Looser validator for the History "Retry commit" button on a finished
+ * release whose last pipeline step was a failed commit. The strict
+ * `validateReleaseLinkedRetry` rejects this case (lock released, release
+ * finished, last step is commit-not-push), but a user-driven retry on the
+ * latest release of a project is exactly the workflow we want to support:
+ * file changes from the prior fix are still on disk; the user wants a fresh
+ * commit attempt linked back to the trace of the original release.
+ *
+ * Rules:
+ *   - release must exist + belong to project + be the *latest* release for it
+ *   - latest pipeline step on that release must be a failed commit
+ *   - no active pipeline lock (a release in flight blocks the retry — wait)
+ */
+export function validateReleaseLinkedCommitRetry(
+  projectName: string,
+  parentJobId?: string | null,
+): ReleaseRetryValidation {
+  const normalizedParentJobId = parentJobId ?? null;
+  if (!normalizedParentJobId) {
+    return { ok: true, parentJobId: null, releaseLinkedRetry: false };
+  }
+  const release = getJob(normalizedParentJobId);
+  if (!release || release.project !== projectName || release.kind !== 'release') {
+    return { ok: false, status: 404, detail: `Release ${normalizedParentJobId} not found for ${projectName}` };
+  }
+  // Reject when a pipeline is running — let it finish before retrying.
+  const lock = getLock(projectName);
+  if (lock && release.finishedAt === null && lock.lockedByJobId === normalizedParentJobId) {
+    // Same active release — fall through to the strict validator's behaviour.
+    return validateReleaseLinkedRetry(projectName, normalizedParentJobId);
+  }
+  if (lock) {
+    return {
+      ok: false,
+      status: 409,
+      detail: `Pipeline is running for ${projectName} — wait for it to finish before retrying the commit`,
+    };
+  }
+  // Must be the project's most recent release.
+  const allReleases = listJobs().filter((j) => j.project === projectName && j.kind === 'release');
+  const latestRelease = allReleases.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0];
+  if (!latestRelease || latestRelease.id !== normalizedParentJobId) {
+    return {
+      ok: false,
+      status: 409,
+      detail: `Retry commit is only available for the latest release on ${projectName}`,
+    };
+  }
+  // Latest pipeline step on this release must be a failed commit.
+  const latestStep = listJobs()
+    .filter((j) =>
+      j.project === projectName
+      && j.releaseId === normalizedParentJobId
+      && RETRIABLE_RELEASE_STEP_KINDS.has(j.kind)
+    )
+    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0];
+  if (
+    !latestStep
+    || latestStep.kind !== 'commit'
+    || latestStep.finishedAt === null
+    || latestStep.exitCode === null
+    || latestStep.exitCode === 0
+  ) {
+    return {
+      ok: false,
+      status: 409,
+      detail: `Retry commit is only allowed when the latest step on the release is a failed commit for ${projectName}`,
+    };
+  }
+  return { ok: true, parentJobId: normalizedParentJobId, releaseLinkedRetry: true };
+}
+
 export async function startProjectPush(
   projectName: string,
   options: { parentJobId?: string | null } = {},
