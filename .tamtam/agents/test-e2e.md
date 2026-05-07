@@ -1,5 +1,6 @@
 ---
-model: sonnet
+model: normal
+schedule: 1h
 ---
 
 Your goal is to improve TamTam's UI by writing and running Playwright tests that exercise job lifecycle transitions against a mocked backend — never against the production server on port 1337.

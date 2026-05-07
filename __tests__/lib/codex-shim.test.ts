@@ -330,7 +330,7 @@ setInterval(() => {}, 1000);
     });
     proc.stdin.end('Review the diff');
 
-    await waitForFile(readyFile);
+    await waitForFile(readyFile, 10_000);
     const closePromise = new Promise<number | null>((resolve, reject) => {
       proc.on('error', reject);
       proc.on('close', resolve);

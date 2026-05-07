@@ -179,6 +179,104 @@ test.describe('Auto-polling live update', () => {
   });
 });
 
+// ─── Test 2a: Live running → failed transition ───────────────────────────────
+//
+// Mirrors the running→done test above but for the failure case.
+// Verifies that when a running job transitions to done with exit_code=1 the UI
+// shows the "exit 1" failure badge on the next poll cycle, with no spinner left.
+
+test.describe('Auto-polling live update: running → failed', () => {
+  test('history tab transitions running→exit 1 via 5s poll cycle without page reload', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+
+    await stubCommonRoutes(page, PROJECT);
+
+    await page.route(
+      (url) =>
+        url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        route.fulfill({
+          json: {
+            jobs: [
+              makeJob(
+                'fail-poll-job',
+                PROJECT,
+                serveRunning ? 'running' : 'done',
+                serveRunning ? null : 1,
+                'test',
+              ),
+            ],
+            pendingReleaseProjects: [],
+          },
+        });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    // Phase 1: job is running — confirm badge is visible.
+    await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
+
+    // Flip mock so next poll returns the failed state.
+    serveRunning = false;
+
+    // Phase 2: polling picks up failure without a page reload.
+    await expect(page.getByText('exit 1').first()).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('running', { exact: true })).not.toBeVisible();
+  });
+});
+
+// ─── Test 2b: Live running → cancelled transition ────────────────────────────
+//
+// Verifies that a running job that transitions to done with exit_code=-3
+// (aborted pipeline) shows the "exit -3" cancelled badge on the next poll
+// cycle, with no orphaned spinner remaining.
+
+test.describe('Auto-polling live update: running → cancelled', () => {
+  test('history tab transitions running→exit -3 via 5s poll cycle without page reload', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+
+    await stubCommonRoutes(page, PROJECT);
+
+    await page.route(
+      (url) =>
+        url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        route.fulfill({
+          json: {
+            jobs: [
+              makeJob(
+                'cancel-poll-job',
+                PROJECT,
+                serveRunning ? 'running' : 'done',
+                serveRunning ? null : -3,
+                'test',
+              ),
+            ],
+            pendingReleaseProjects: [],
+          },
+        });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    // Phase 1: running badge visible initially.
+    await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
+
+    // Flip mock so the next poll delivers the cancelled state.
+    serveRunning = false;
+
+    // Phase 2: cancellation badge appears; no spinner remains.
+    await expect(page.getByText('exit -3').first()).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('running', { exact: true })).not.toBeVisible();
+  });
+});
+
 // ─── Test 2: Concurrent jobs across projects ─────────────────────────────────
 //
 // The global /runs page fetches /api/jobs without a project filter and renders
@@ -225,17 +323,15 @@ test.describe('Concurrent jobs across projects', () => {
 
     await page.goto('/runs');
 
-    // Both project names must be visible in the table.
+    // Both project names must be visible in the job list.
     await expect(page.getByText(ALPHA).first()).toBeVisible({ timeout: 8_000 });
     await expect(page.getByText(BETA).first()).toBeVisible({ timeout: 8_000 });
 
-    // The table body must have exactly 2 rows (one per mocked job).
-    const rows = page.locator('tbody tr');
-    await expect(rows).toHaveCount(2, { timeout: 8_000 });
-
-    // Each row must carry a "running" status badge (not "done", not "exit N").
-    await expect(rows.nth(0).getByText('running')).toBeVisible();
-    await expect(rows.nth(1).getByText('running')).toBeVisible();
+    // The job list uses div-based cards (not table rows). Each running job card
+    // renders an animate-pulse dot (●) inside the status badge — count those
+    // to verify exactly 2 independent running jobs are visible.
+    const runningDots = page.locator('span.animate-pulse');
+    await expect(runningDots).toHaveCount(2, { timeout: 8_000 });
 
     // Clicking the "running" filter chip must keep both projects visible —
     // verifying that independent job state is preserved per project.
@@ -243,8 +339,8 @@ test.describe('Concurrent jobs across projects', () => {
     await expect(page.getByText(ALPHA).first()).toBeVisible();
     await expect(page.getByText(BETA).first()).toBeVisible();
 
-    // The "done" filter chip must show 0 jobs (neither job is done).
+    // The "done" filter chip must show 0 jobs — verified by the empty state message.
     await page.getByRole('button', { name: /^done/ }).click();
-    await expect(page.locator('tbody tr')).toHaveCount(0);
+    await expect(page.getByText(/no done runs/i)).toBeVisible();
   });
 });
