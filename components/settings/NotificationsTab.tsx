@@ -127,21 +127,21 @@ export function NotificationsTab({
           <h3 className="text-sm font-semibold text-text-primary">Notification Events</h3>
           <p className="text-xs text-text-tertiary">Choose which events trigger notifications</p>
         </div>
-        <div className="px-5 py-4 space-y-3">
+        <div className="px-4 py-1 divide-y divide-border/40">
           {eventToggles.map(({ key, label, description }) => (
             <label
               key={key}
-              className="flex items-start gap-3 p-3 rounded-lg hover:bg-bg-tertiary/50 cursor-pointer transition-colors"
+              className="flex items-center gap-2.5 py-2 px-1 -mx-1 rounded hover:bg-bg-tertiary/40 cursor-pointer transition-colors"
             >
               <input
                 type="checkbox"
                 checked={settings[key] === 'true'}
                 onChange={(e) => onChange(key, e.target.checked ? 'true' : 'false')}
-                className="w-4 h-4 accent-accent rounded mt-0.5 shrink-0 cursor-pointer"
+                className="w-4 h-4 accent-accent rounded shrink-0 cursor-pointer"
               />
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-sm text-text-primary">{label}</div>
-                <div className="text-xs text-text-tertiary">{description}</div>
+              <div className="flex-1 min-w-0 flex items-baseline gap-1.5 flex-wrap">
+                <span className="font-medium text-sm text-text-primary shrink-0">{label}</span>
+                <span className="text-xs text-text-tertiary">{description}</span>
               </div>
             </label>
           ))}

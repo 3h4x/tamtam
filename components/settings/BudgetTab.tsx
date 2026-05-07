@@ -56,51 +56,48 @@ export function BudgetTab({
             Pause new pipeline runs when the selected agent subscription quota is close to exhausted
           </p>
         </div>
-        <div className="px-5 py-4 space-y-4">
+        <div className="px-5 py-3 space-y-3">
           <div>
             <div className="font-medium text-sm text-text-primary mb-1.5">Tracked subscriptions</div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="divide-y divide-border/40 -mx-1">
               {BUDGET_SUBSCRIPTION_PROVIDERS.map((provider) => (
                 <label
                   key={provider}
-                  className="flex items-start gap-3 p-3 rounded-lg hover:bg-bg-tertiary/50 cursor-pointer transition-colors"
+                  className="flex items-center gap-2.5 py-2 px-1 rounded hover:bg-bg-tertiary/40 cursor-pointer transition-colors"
                 >
                   <input
                     type="checkbox"
                     checked={providers.includes(provider)}
                     disabled={providers.length === 1 && providers.includes(provider)}
                     onChange={(e) => toggleProvider(provider, e.target.checked)}
-                    className="w-4 h-4 accent-accent rounded mt-0.5 shrink-0 cursor-pointer"
+                    className="w-4 h-4 accent-accent rounded shrink-0 cursor-pointer"
                   />
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm text-text-primary">
+                  <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
+                    <span className="font-medium text-sm text-text-primary shrink-0">
                       {provider === 'claude' ? 'Claude' : 'Codex'}
-                    </div>
-                    <div className="text-xs text-text-tertiary">
-                      Show pace and quota state for this subscription in Settings and Stats.
-                    </div>
+                    </span>
+                    <span className="text-xs text-text-tertiary">Show pace and quota state in Settings and Stats.</span>
                   </div>
                 </label>
               ))}
             </div>
             <p className="text-xs text-text-tertiary mt-1.5">
-              Runs still use the selected agent provider. These checkboxes control which subscriptions TamTam tracks in budget views.
+              These checkboxes control which subscriptions TamTam tracks in budget views — not which provider runs use.
             </p>
           </div>
 
-          <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-bg-tertiary/50 cursor-pointer transition-colors">
+          <label className="flex items-center gap-2.5 py-2 px-1 -mx-1 rounded hover:bg-bg-tertiary/40 cursor-pointer transition-colors">
             <input
               type="checkbox"
               checked={enabled}
               onChange={(e) => onChange('budget_block_runs_enabled', e.target.checked ? 'true' : 'false')}
-              className="w-4 h-4 accent-accent rounded mt-0.5 shrink-0 cursor-pointer"
+              className="w-4 h-4 accent-accent rounded shrink-0 cursor-pointer"
             />
-            <div className="flex-1 min-w-0">
-              <div className="font-medium text-sm text-text-primary">Block runs over budget</div>
-              <div className="text-xs text-text-tertiary">
-                When enabled, agent runs, terminal runs, and the release pipeline are refused once the
-                5-hour window crosses the block threshold.
-              </div>
+            <div className="flex-1 min-w-0 flex items-baseline gap-1.5 flex-wrap">
+              <span className="font-medium text-sm text-text-primary shrink-0">Block runs over budget</span>
+              <span className="text-xs text-text-tertiary">
+                Refuse agent runs, terminal runs, and pipeline once the 5-hour window crosses the block threshold.
+              </span>
             </div>
           </label>
 
