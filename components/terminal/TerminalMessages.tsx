@@ -61,31 +61,36 @@ const spinnerChars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '�
 type LogTone = 'default' | 'info' | 'success' | 'warning' | 'error'
 type RawLineKind = 'ambient' | 'meta' | 'command' | 'divider'
 
-const LOG_TONE_STYLES: Record<LogTone, { badge: string; line: string; text: string }> = {
+const LOG_TONE_STYLES: Record<LogTone, { badge: string; line: string; text: string; block: string }> = {
   default: {
     badge: 'bg-bg-tertiary text-text-tertiary',
     line: 'border-border/30',
     text: 'text-text-secondary',
+    block: 'bg-transparent',
   },
   info: {
     badge: 'bg-accent/15 text-accent',
     line: 'border-accent/25',
     text: 'text-text-secondary',
+    block: 'bg-accent/[0.04]',
   },
   success: {
     badge: 'bg-status-success/15 text-status-success',
     line: 'border-status-success/25',
     text: 'text-text-secondary',
+    block: 'bg-status-success/[0.05]',
   },
   warning: {
     badge: 'bg-status-warning/15 text-status-warning',
     line: 'border-status-warning/25',
     text: 'text-text-secondary',
+    block: 'bg-status-warning/[0.06]',
   },
   error: {
     badge: 'bg-status-error/15 text-status-error',
     line: 'border-status-error/25',
     text: 'text-status-error',
+    block: 'bg-status-error/[0.07]',
   },
 }
 
@@ -137,7 +142,7 @@ function renderLogLineContent(line: string, renderedLine: ReactNode[] | null, cl
 
 function LogBlock({
   text,
-  fallbackTone: _fallbackTone = 'default',
+  fallbackTone = 'default',
   allowAnsi = false,
   structured = true,
 }: {
@@ -160,15 +165,19 @@ function LogBlock({
 
           if (kind === 'divider') {
             return (
-              <div key={`${index}:${line}`} className="border-t border-border/60 pt-1.5 text-[10px] uppercase tracking-[0.2em] text-text-tertiary/80">
-                {plainLine.replace(/^[#=\-\s]+/, '') || 'section'}
+              <div key={`${index}:${line}`} className="flex items-center gap-2 py-1.5">
+                <span className="h-px flex-1 bg-border/60" />
+                <span className="shrink-0 text-[10px] uppercase tracking-[0.2em] text-text-tertiary/80">
+                  {plainLine.replace(/^[#=\-\s]+/, '') || 'section'}
+                </span>
+                <span className="h-px flex-1 bg-border/60" />
               </div>
             )
           }
 
           if (kind === 'command') {
             return (
-              <div key={`${index}:${line}`} className={`flex items-start gap-2 border-l-2 pl-2 ${style.line}`}>
+              <div key={`${index}:${line}`} className={`flex items-start gap-2 rounded-r-sm border-l-2 px-2 py-1 ${style.line} ${style.block}`}>
                 <span className={`mt-0.5 inline-flex min-w-10 justify-center rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono shrink-0 ${style.badge}`}>
                   cmd
                 </span>
@@ -179,7 +188,7 @@ function LogBlock({
 
           if (kind === 'meta' || tone !== 'default') {
             return (
-              <div key={`${index}:${line}`} className={`flex items-start gap-2 border-l pl-2 ${style.line}`}>
+              <div key={`${index}:${line}`} className={`flex items-start gap-2 rounded-r-sm border-l px-2 py-1 ${style.line} ${style.block}`}>
                 <span className={`mt-0.5 inline-flex min-w-10 justify-center rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono shrink-0 ${style.badge}`}>
                   {tone === 'success' ? 'ok' : tone === 'warning' ? 'warn' : tone === 'error' ? 'err' : kind === 'meta' ? 'meta' : tone}
                 </span>
@@ -201,10 +210,7 @@ function LogBlock({
   return (
     <div className="space-y-0.5">
       {plainLines.map((line, index) => {
-        // Always use 'default' as classifier fallback so unclassified lines
-        // return 'default' and positively-matched tones (info/success/warning/
-        // error) always get a badge regardless of the block's fallbackTone.
-        const tone = classifyLogLine(stripAnsi(line))
+        const tone = classifyLogLine(stripAnsi(line), fallbackTone)
         const isAmbient = tone === 'default'
         const style = LOG_TONE_STYLES[tone]
         const renderedLine = ansiLines?.[index] ?? null
@@ -216,7 +222,7 @@ function LogBlock({
           )
         }
         return (
-          <div key={`${index}:${line}`} className={`flex items-start gap-2 border-l-2 pl-2 ${style.line}`}>
+          <div key={`${index}:${line}`} className={`flex items-start gap-2 rounded-r-sm border-l-2 px-2 py-1 ${style.line} ${style.block}`}>
             <span className={`mt-0.5 inline-flex min-w-10 justify-center rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono shrink-0 ${style.badge}`}>
               {tone === 'success' ? 'ok' : tone === 'warning' ? 'warn' : tone === 'error' ? 'err' : tone}
             </span>
@@ -353,7 +359,7 @@ export function TerminalMessages({
               : entry.role === 'status'
                 ? <LogBlock text={entry.text} fallbackTone="info" />
               : entry.role === 'error'
-                ? <pre className="m-0 whitespace-pre-wrap text-status-error">{entry.text}</pre>
+                ? <LogBlock text={entry.text} fallbackTone="error" />
               : hasAnsi(entry.text)
                 ? <pre className="whitespace-pre-wrap font-mono text-xs m-0 inline">{renderAnsi(entry.text)}</pre>
                 : entry.text}

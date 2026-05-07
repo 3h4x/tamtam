@@ -8,6 +8,7 @@ import { db, schema } from '@/lib/db';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { createJob, updateJob } from '@/lib/jobs/job-storage';
 import { getSettings } from '@/lib/shared/config';
+import { jobsPausedResult } from '@/lib/shared/job-control';
 import { loadFileConfig, writeFileConfig } from '@/lib/skills/tamtam-file-config';
 
 export interface CustomAction {
@@ -99,6 +100,11 @@ export async function POST(
 
   if (!actionName) {
     return NextResponse.json({ detail: 'action name is required' }, { status: 400 });
+  }
+
+  const paused = jobsPausedResult(`run custom action "${actionName}"`);
+  if (paused) {
+    return NextResponse.json({ detail: paused.detail }, { status: paused.status });
   }
 
   const actions = getCustomActions(projectName);

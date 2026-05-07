@@ -46,17 +46,26 @@ function makeJob({
   } as JobInfo
 }
 
-function renderTab() {
+function renderTab(props: Partial<React.ComponentProps<typeof ProjectRunsTab>> = {}) {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
 
-  flushSync(() => {
-    root.render(React.createElement(ProjectRunsTab, { projectName: 'alpha' }))
-  })
+  const render = (nextProps: Partial<React.ComponentProps<typeof ProjectRunsTab>> = {}) => {
+    flushSync(() => {
+      root.render(React.createElement(ProjectRunsTab, {
+        projectName: 'alpha',
+        jobsPaused: false,
+        ...nextProps,
+      }))
+    })
+  }
+
+  render(props)
 
   return {
     container,
+    rerender: render,
     unmount: () => {
       root.unmount()
       container.remove()
@@ -227,6 +236,28 @@ describe('ProjectRunsTab release actions', () => {
         queueIfBlocked: true,
         sourceJobId: 'dod-success',
       })
+    })
+
+    unmount()
+  })
+
+  it('disables release retry while jobs are paused and re-enables it live', async () => {
+    const { container, rerender, unmount } = renderTab({ jobsPaused: true })
+
+    await vi.waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(buttonByText(container, 'Continue release').disabled).toBe(true)
+      expect(buttonByText(container, 'Continue release').title).toContain('Jobs are paused globally')
+    })
+
+    buttonByText(container, 'Continue release').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(releaseProjectMock).not.toHaveBeenCalled()
+
+    rerender({ jobsPaused: false })
+
+    await vi.waitFor(() => {
+      expect(buttonByText(container, 'Continue release').disabled).toBe(false)
+      expect(buttonByText(container, 'Continue release').title).toContain('Start a new release attempt')
     })
 
     unmount()

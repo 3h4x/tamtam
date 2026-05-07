@@ -70,12 +70,17 @@ function renderPrRow(props: React.ComponentProps<typeof PRRow>) {
   document.body.appendChild(container)
   const root = createRoot(container)
 
-  flushSync(() => {
-    root.render(React.createElement(PRRow, props))
-  })
+  const render = (nextProps: React.ComponentProps<typeof PRRow>) => {
+    flushSync(() => {
+      root.render(React.createElement(PRRow, nextProps))
+    })
+  }
+
+  render(props)
 
   return {
     container,
+    rerender: render,
     unmount: () => {
       root.unmount()
       container.remove()
@@ -201,6 +206,136 @@ describe('PRRow', () => {
     const payload = JSON.parse(sessionStorage.getItem(pendingUrl.split('pending=')[1]) ?? '{}')
     expect(payload.prompt).toContain('Review pull request #77')
     expect(payload.prompt).toContain('fix/issue-77-gates → master')
+    unmount()
+  })
+
+  it('keeps the fourth PR label visible before collapsing into overflow', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        issueNumber: null,
+        tests: 'pass',
+        review: 'warn',
+        dod: 'none',
+        dodSummary: null,
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container, unmount } = renderPrRow({
+      pr: buildPr({
+        labels: [
+          { name: 'release', color: 'ff6600' },
+          { name: 'security', color: 'ff0000' },
+          { name: 'backend', color: '0000ff' },
+          { name: 'customer', color: '00aa88' },
+          { name: 'needs-docs', color: 'aa00aa' },
+        ],
+      }),
+      projectName: 'acme/widgets',
+      onMerged: vi.fn(),
+    })
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(container.textContent).toContain('release')
+    expect(container.textContent).toContain('security')
+    expect(container.textContent).toContain('backend')
+    expect(container.textContent).toContain('customer')
+    expect(container.textContent).not.toContain('needs-docs')
+    expect(container.querySelector('[title="needs-docs"]')?.textContent).toBe('+1')
+    unmount()
+  })
+
+  it('disables PR review while jobs are paused and re-enables it live', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        issueNumber: null,
+        tests: 'pass',
+        review: 'warn',
+        dod: 'none',
+        dodSummary: null,
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container, rerender, unmount } = renderPrRow({
+      pr: buildPr(),
+      projectName: 'acme/widgets',
+      jobsPaused: true,
+      onMerged: vi.fn(),
+    })
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const reviewButton = Array.from(container.querySelectorAll('button')).find(node => node.textContent?.trim() === 'Review')
+    expect(reviewButton).toBeInstanceOf(HTMLButtonElement)
+    expect((reviewButton as HTMLButtonElement).disabled).toBe(true)
+    expect(reviewButton?.getAttribute('title')).toContain('Jobs are paused globally')
+
+    rerender({
+      pr: buildPr(),
+      projectName: 'acme/widgets',
+      jobsPaused: false,
+      onMerged: vi.fn(),
+    })
+
+    await vi.waitFor(() => {
+      const enabledReviewButton = Array.from(container.querySelectorAll('button')).find(node => node.textContent?.trim() === 'Review') as HTMLButtonElement | undefined
+      expect(enabledReviewButton?.disabled).toBe(false)
+      expect(enabledReviewButton?.getAttribute('title')).toBe('AI code review of this PR\'s diff')
+    })
+
+    unmount()
+  })
+
+  it('disables DoD verification while jobs are paused and re-enables it live', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        issueNumber: 77,
+        tests: 'pass',
+        review: 'warn',
+        dod: 'warn',
+        dodSummary: '2/3',
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    runMarkDod.mockResolvedValue({ jobId: 'job-789' })
+
+    const { container, rerender, unmount } = renderPrRow({
+      pr: buildPr(),
+      projectName: 'acme/widgets',
+      jobsPaused: true,
+      onMerged: vi.fn(),
+    })
+
+    await vi.waitFor(() => expect(container.textContent).toContain('2/3'))
+    const pausedDodButton = Array.from(container.querySelectorAll('button')).find(node => node.textContent?.includes('2/3'))
+    expect(pausedDodButton).toBeInstanceOf(HTMLButtonElement)
+    expect((pausedDodButton as HTMLButtonElement).disabled).toBe(true)
+    expect(pausedDodButton?.getAttribute('title')).toContain('Jobs are paused globally')
+    pausedDodButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(runMarkDod).not.toHaveBeenCalled()
+
+    rerender({
+      pr: buildPr(),
+      projectName: 'acme/widgets',
+      jobsPaused: false,
+      onMerged: vi.fn(),
+    })
+
+    await vi.waitFor(() => {
+      const enabledDodButton = Array.from(container.querySelectorAll('button')).find(node => node.textContent?.includes('2/3')) as HTMLButtonElement | undefined
+      expect(enabledDodButton?.disabled).toBe(false)
+      expect(enabledDodButton?.getAttribute('title')).toContain('Click to verify acceptance criteria')
+    })
+
+    const enabledDodButton = Array.from(container.querySelectorAll('button')).find(node => node.textContent?.includes('2/3'))
+    enabledDodButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await vi.waitFor(() =>
+      expect(runMarkDod).toHaveBeenCalledWith('acme/widgets', { issue_number: 77, repo: 'acme/widgets' }),
+    )
+
     unmount()
   })
 })

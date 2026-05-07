@@ -89,6 +89,7 @@ function renderStrip(overrides: Partial<React.ComponentProps<typeof PipelineStri
     unpushed: 0,
     hasUnreviewed: false,
     verdict: undefined,
+    jobsPaused: false,
     onRefresh,
     ...overrides,
   }
@@ -287,6 +288,28 @@ describe('PipelineStrip', () => {
       expect(pushProjectMock).toHaveBeenCalledWith('acme/widgets', { releaseId: 'rel-4' })
       expect(pushMock).toHaveBeenCalledWith('/project/acme/widgets/terminal?job=push-2')
     })
+
+    unmount()
+  })
+
+  it('disables failed-push retry while jobs are paused', () => {
+    const { container, unmount } = renderStrip({
+      jobsPaused: true,
+      config: buildConfig({ auto_pr_merge_enabled: true }),
+      projectJobs: [
+        buildJob({ id: 'review-1', kind: 'review', started_at: 100, verdict: 'LGTM', release_id: 'rel-4' }),
+        buildJob({ id: 'push-1', kind: 'push', started_at: 150, exit_code: 1, finished_at: 160, release_id: 'rel-4' }),
+        buildJob({ id: 'dod-1', kind: 'mark-dod', started_at: 200, status: 'running', finished_at: null, exit_code: null, release_id: 'rel-4' }),
+      ],
+    })
+
+    const retryButton = container.querySelector('button[title="Jobs are paused globally. Resume jobs to start a push."]')
+    if (!(retryButton instanceof HTMLButtonElement)) throw new Error('retry button not found')
+    expect(retryButton.disabled).toBe(true)
+
+    retryButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(pushProjectMock).not.toHaveBeenCalled()
+    expect(toastMock).not.toHaveBeenCalled()
 
     unmount()
   })

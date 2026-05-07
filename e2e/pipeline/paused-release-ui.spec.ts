@@ -84,7 +84,7 @@ async function stubCommonRoutes(page: import('@playwright/test').Page): Promise<
     route.fulfill({ json: { notifications: [] } }),
   );
   await page.route('**/api/settings', (route: Route) =>
-    route.fulfill({ json: { jobs_paused: false, github_owner: '' } }),
+    route.fulfill({ json: { settings: { jobs_paused: 'false' }, github_owner: '' } }),
   );
   // No running jobs — so isPipelineRunning = false and Release button is active.
   await page.route(
@@ -116,7 +116,7 @@ test('clicking Release when jobs are paused shows a "paused" toast, not "already
     }
   });
 
-  await page.goto(`/project/${PROJECT}`);
+  await page.goto(`/project/${PROJECT}/issues`);
 
   // Release button is enabled when changes > 0 and pipeline is idle.
   const releaseBtn = page.getByRole('button', { name: /release/i }).first();
@@ -155,7 +155,7 @@ test('clicking Release when pipeline is already running shows a "Pipeline is run
     }
   });
 
-  await page.goto(`/project/${PROJECT}`);
+  await page.goto(`/project/${PROJECT}/issues`);
 
   const releaseBtn = page.getByRole('button', { name: /release/i }).first();
   await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
@@ -192,7 +192,7 @@ test('successful release shows an info toast with the step name', async ({ page 
     }
   });
 
-  await page.goto(`/project/${PROJECT}`);
+  await page.goto(`/project/${PROJECT}/issues`);
 
   const releaseBtn = page.getByRole('button', { name: /release/i }).first();
   await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
@@ -260,7 +260,7 @@ test('Release button is disabled when there are no local changes', async ({ page
     route.fulfill({ json: { notifications: [] } }),
   );
   await page.route('**/api/settings', (route: Route) =>
-    route.fulfill({ json: { jobs_paused: false, github_owner: '' } }),
+    route.fulfill({ json: { settings: { jobs_paused: 'false' }, github_owner: '' } }),
   );
   await page.route(
     (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
@@ -268,10 +268,224 @@ test('Release button is disabled when there are no local changes', async ({ page
       route.fulfill({ json: { jobs: [], pendingReleaseProjects: [] } }),
   );
 
-  await page.goto(`/project/${PROJECT}`);
+  await page.goto(`/project/${PROJECT}/issues`);
 
   // Release button should exist but be disabled.
   const releaseBtn = page.getByRole('button', { name: /release/i }).first();
   await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
   await expect(releaseBtn).toBeDisabled();
+});
+
+// ---------------------------------------------------------------------------
+// Test 5: release button disabled when jobs are paused globally
+// ---------------------------------------------------------------------------
+test('Release button is disabled when jobs are paused globally', async ({ page }) => {
+  await page.route('**/api/projects', (route: Route) =>
+    route.fulfill({
+      json: { tasks: [makeTask(PROJECT, 5, 0)], priorities: [], issueCounts: {} },
+    }),
+  );
+  await page.route(
+    `**/api/projects/by-project/${PROJECT}/config`,
+    (route: Route) =>
+      route.fulfill({
+        json: {
+          project: PROJECT,
+          test_command: '',
+          detected_test_command: '',
+          effective_test_command: '',
+          test_cron_enabled: false,
+          test_cron_schedule: '',
+          auto_push_enabled: false,
+          auto_commit_enabled: false,
+          auto_pr_merge_enabled: false,
+          pr_workflow_enabled: false,
+          release_after_run: false,
+          tests_disabled: true,
+          review_disabled: false,
+          issue_auto_branch: false,
+        },
+      }),
+  );
+  await page.route(`**/api/projects/by-project/${PROJECT}/action`, (route: Route) =>
+    route.fulfill({ json: { actions: [] } }),
+  );
+  await page.route(`**/api/agents?project=${PROJECT}`, (route: Route) =>
+    route.fulfill({ json: { agents: [] } }),
+  );
+  await page.route(`**/api/projects/by-project/${PROJECT}/branch`, (route: Route) =>
+    route.fulfill({ json: { branch: 'master', defaultBranch: 'master', commitsAhead: null } }),
+  );
+  await page.route(`**/api/projects/by-project/${PROJECT}/behind`, (route: Route) =>
+    route.fulfill({ json: { behind: 0, ahead: 0 } }),
+  );
+  await page.route(`**/api/projects/by-project/${PROJECT}/issues`, (route: Route) =>
+    route.fulfill({ json: { prs: [], issues: [] } }),
+  );
+  await page.route('**/api/streaming/**', (route: Route) =>
+    route.fulfill({ status: 204, body: '' }),
+  );
+  await page.route('**/api/jobs/notifications', (route: Route) =>
+    route.fulfill({ json: { notifications: [] } }),
+  );
+  await page.route('**/api/settings', (route: Route) =>
+    route.fulfill({ json: { settings: { jobs_paused: 'true' }, github_owner: '' } }),
+  );
+  await page.route(
+    (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+    (route: Route) =>
+      route.fulfill({ json: { jobs: [], pendingReleaseProjects: [] } }),
+  );
+
+  await page.goto(`/project/${PROJECT}/issues`);
+
+  const releaseBtn = page.getByRole('button', { name: /release/i }).first();
+  await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
+  await expect(releaseBtn).toBeDisabled();
+  await expect(releaseBtn).toHaveAttribute('title', /jobs are paused globally/i);
+});
+
+// ---------------------------------------------------------------------------
+// Test 6: toggling the header pause switch updates Release and PR Review live
+// ---------------------------------------------------------------------------
+test('header pause toggle updates Release and PR Review without reloading', async ({ page }) => {
+  let jobsPaused = false;
+
+  await page.route('**/api/projects', (route: Route) =>
+    route.fulfill({
+      json: { tasks: [makeTask(PROJECT, 5, 0)], priorities: [], issueCounts: {} },
+    }),
+  );
+  await page.route(
+    `**/api/projects/by-project/${PROJECT}/config`,
+    (route: Route) =>
+      route.fulfill({
+        json: {
+          project: PROJECT,
+          test_command: '',
+          detected_test_command: '',
+          effective_test_command: '',
+          test_cron_enabled: false,
+          test_cron_schedule: '',
+          auto_push_enabled: false,
+          auto_commit_enabled: false,
+          auto_pr_merge_enabled: false,
+          pr_workflow_enabled: false,
+          release_after_run: false,
+          tests_disabled: true,
+          review_disabled: false,
+          issue_auto_branch: false,
+        },
+      }),
+  );
+  await page.route(`**/api/projects/by-project/${PROJECT}/action`, (route: Route) =>
+    route.fulfill({ json: { actions: [] } }),
+  );
+  await page.route(`**/api/agents?project=${PROJECT}`, (route: Route) =>
+    route.fulfill({ json: { agents: [] } }),
+  );
+  await page.route(`**/api/projects/by-project/${PROJECT}/branch`, (route: Route) =>
+    route.fulfill({ json: { branch: 'master', defaultBranch: 'master', commitsAhead: null } }),
+  );
+  await page.route(`**/api/projects/by-project/${PROJECT}/behind`, (route: Route) =>
+    route.fulfill({ json: { behind: 0, ahead: 0 } }),
+  );
+  await page.route(`**/api/projects/by-project/${PROJECT}/issues`, (route: Route) =>
+    route.fulfill({
+      json: {
+        prs: [{
+          number: 77,
+          title: 'Improve release gating',
+          state: 'OPEN',
+          author: { login: 'octocat' },
+          url: 'https://github.com/acme/widgets/pull/77',
+          createdAt: '2026-05-01T10:00:00Z',
+          updatedAt: '2026-05-01T10:00:00Z',
+          headRefName: 'fix/issue-77-gates',
+          baseRefName: 'master',
+          isDraft: false,
+          reviewDecision: 'REVIEW_REQUIRED',
+          labels: [],
+          body: 'Fixes #77',
+          statusCheckRollup: null,
+        }],
+        issues: [],
+      },
+    }),
+  );
+  await page.route(`**/api/projects/by-project/${PROJECT}/pr-gates**`, (route: Route) =>
+    route.fulfill({
+      json: {
+        issueNumber: null,
+        tests: 'pass',
+        review: 'warn',
+        dod: 'warn',
+        dodSummary: '2/2',
+      },
+    }),
+  );
+  await page.route('**/api/streaming/**', (route: Route) =>
+    route.fulfill({ status: 204, body: '' }),
+  );
+  await page.route('**/api/jobs/notifications', (route: Route) =>
+    route.fulfill({ json: { notifications: [] } }),
+  );
+  await page.route('**/api/usage/quota', (route: Route) =>
+    route.fulfill({
+      json: {
+        gateEnabled: false,
+        sevenDay: { utilization: 0, resetsAt: null, msUntilReset: null },
+      },
+    }),
+  );
+  await page.route('**/api/settings', async (route: Route) => {
+    if (route.request().method() === 'PATCH') {
+      const body = route.request().postDataJSON() as { jobs_paused?: string };
+      jobsPaused = body.jobs_paused === 'true';
+      await route.fulfill({ json: { ok: true } });
+      return;
+    }
+
+    await route.fulfill({
+      json: { settings: { jobs_paused: jobsPaused ? 'true' : 'false' }, github_owner: '' },
+    });
+  });
+  await page.route(
+    (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+    (route: Route) =>
+      route.fulfill({ json: { jobs: [], pendingReleaseProjects: [] } }),
+  );
+
+  await page.goto(`/project/${PROJECT}/issues`);
+
+  const releaseBtn = page.getByRole('button', { name: /release/i }).first();
+  const reviewBtn = page.getByRole('button', { name: 'Review', exact: true });
+  const dodBtn = page.getByRole('button', { name: /2\/2/i });
+  const pauseToggle = page.getByRole('switch');
+
+  await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
+  await expect(reviewBtn).toBeVisible({ timeout: 8_000 });
+  await expect(dodBtn).toBeVisible({ timeout: 8_000 });
+  await expect(releaseBtn).toBeEnabled();
+  await expect(reviewBtn).toBeEnabled();
+  await expect(dodBtn).toBeEnabled();
+  await expect(releaseBtn).not.toHaveAttribute('title', /jobs are paused globally/i);
+  await expect(reviewBtn).not.toHaveAttribute('title', /jobs are paused globally/i);
+  await expect(dodBtn).not.toHaveAttribute('title', /jobs are paused globally/i);
+
+  await pauseToggle.click();
+  await expect(releaseBtn).toBeDisabled();
+  await expect(reviewBtn).toBeDisabled();
+  await expect(dodBtn).toBeDisabled();
+  await expect(releaseBtn).toHaveAttribute('title', /jobs are paused globally/i);
+  await expect(reviewBtn).toHaveAttribute('title', /jobs are paused globally/i);
+  await expect(dodBtn).toHaveAttribute('title', /jobs are paused globally/i);
+
+  await pauseToggle.click();
+  await expect(releaseBtn).toBeEnabled();
+  await expect(reviewBtn).toBeEnabled();
+  await expect(dodBtn).toBeEnabled();
+  await expect(releaseBtn).not.toHaveAttribute('title', /jobs are paused globally/i);
+  await expect(reviewBtn).not.toHaveAttribute('title', /jobs are paused globally/i);
+  await expect(dodBtn).not.toHaveAttribute('title', /jobs are paused globally/i);
 });

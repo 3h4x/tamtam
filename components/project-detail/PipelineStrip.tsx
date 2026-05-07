@@ -27,6 +27,7 @@ export interface PipelineStripProps {
   unpushed: number
   hasUnreviewed: boolean
   verdict: string | undefined
+  jobsPaused: boolean
   onRefresh: () => Promise<void>
 }
 
@@ -113,6 +114,7 @@ export function PipelineStrip({
   unpushed,
   hasUnreviewed,
   verdict,
+  jobsPaused,
   onRefresh,
 }: PipelineStripProps) {
   const router = useRouter()
@@ -153,6 +155,10 @@ export function PipelineStrip({
   if (!displayReleaseJob) return null
 
   const handleRetryPush = async () => {
+    if (jobsPaused) {
+      toast('Jobs are paused globally. Resume jobs to start a push.', 'info')
+      return
+    }
     if (retryingPush) return
     setRetryingPush(true)
     try {
@@ -529,8 +535,8 @@ export function PipelineStrip({
                 type="button"
                 className="text-[10px] px-1.5 py-0.5 rounded border border-status-error/40 text-status-error hover:bg-status-error/10 cursor-pointer disabled:opacity-50 font-mono leading-none inline-flex items-center justify-center w-[22px]"
                 onClick={s.retryAction}
-                disabled={retryingPush}
-                title="Retry push"
+                disabled={retryingPush || jobsPaused}
+                title={jobsPaused ? 'Jobs are paused globally. Resume jobs to start a push.' : 'Retry push'}
               >
                 {retryingPush
                   ? <span className="inline-block w-2 h-2 rounded-full border border-current border-t-transparent animate-spin" />

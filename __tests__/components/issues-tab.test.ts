@@ -18,7 +18,14 @@ vi.mock('@/lib/client-api', () => ({
 }))
 
 vi.mock('@/components/issues-tab/PRRow', () => ({
-  PRRow: ({ pr }: { pr: GhPullRequest }) => React.createElement('div', { 'data-testid': `pr-${pr.number}` }, pr.title),
+  PRRow: ({ pr, jobsPaused }: { pr: GhPullRequest; jobsPaused?: boolean }) => React.createElement(
+    'div',
+    {
+      'data-testid': `pr-${pr.number}`,
+      'data-jobs-paused': jobsPaused ? 'true' : 'false',
+    },
+    pr.title,
+  ),
 }))
 
 vi.mock('@/components/issues-tab/IssueRow', () => ({
@@ -96,12 +103,17 @@ function renderIssuesTab(props: React.ComponentProps<typeof IssuesTab>) {
   document.body.appendChild(container)
   const root = createRoot(container)
 
-  flushSync(() => {
-    root.render(React.createElement(IssuesTab, props))
-  })
+  const render = (nextProps: React.ComponentProps<typeof IssuesTab>) => {
+    flushSync(() => {
+      root.render(React.createElement(IssuesTab, nextProps))
+    })
+  }
+
+  render(props)
 
   return {
     container,
+    rerender: render,
     unmount: () => {
       root.unmount()
       container.remove()
@@ -217,6 +229,92 @@ describe('IssuesTab', () => {
       expect(fetchIssuesAndPRs).toHaveBeenNthCalledWith(2, 'acme/widgets', false)
       expect(container.querySelector('[data-testid="issue-55"]')?.textContent).toContain('Retry succeeded')
     })
+
+    unmount()
+  })
+
+  it('does not refetch project config when only onCountChange changes', async () => {
+    fetchIssuesAndPRs
+      .mockResolvedValueOnce({
+        prs: [buildPullRequest()],
+        issues: [buildIssue()],
+        repo: 'acme/widgets',
+        error: null,
+        cachedAt: null,
+        cached: false,
+      })
+      .mockResolvedValueOnce({
+        prs: [buildPullRequest({ number: 8 })],
+        issues: [buildIssue({ number: 56 })],
+        repo: 'acme/widgets',
+        error: null,
+        cachedAt: null,
+        cached: false,
+      })
+
+    const firstOnCountChange = vi.fn()
+    const secondOnCountChange = vi.fn()
+    const { rerender, unmount } = renderIssuesTab({
+      projectName: 'acme/widgets',
+      onCountChange: firstOnCountChange,
+    })
+
+    await vi.waitFor(() => {
+      expect(fetchProjectConfig).toHaveBeenCalledTimes(1)
+      expect(fetchIssuesAndPRs).toHaveBeenCalledTimes(1)
+      expect(firstOnCountChange).toHaveBeenCalledWith({ prs: 1, issues: 1 })
+    })
+
+    rerender({
+      projectName: 'acme/widgets',
+      onCountChange: secondOnCountChange,
+    })
+
+    await vi.waitFor(() => {
+      expect(fetchProjectConfig).toHaveBeenCalledTimes(1)
+    })
+    expect(fetchIssuesAndPRs).toHaveBeenCalledTimes(1)
+
+    const refreshButton = Array.from(document.querySelectorAll('button')).find(button => button.textContent?.includes('Refresh'))
+    refreshButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(fetchIssuesAndPRs).toHaveBeenNthCalledWith(2, 'acme/widgets', true)
+      expect(secondOnCountChange).toHaveBeenCalledWith({ prs: 1, issues: 1 })
+    })
+    expect(firstOnCountChange).toHaveBeenCalledTimes(1)
+
+    unmount()
+  })
+
+  it('forwards jobsPaused to PR rows without refetching data', async () => {
+    fetchIssuesAndPRs.mockResolvedValue({
+      prs: [buildPullRequest()],
+      issues: [],
+      repo: 'acme/widgets',
+      error: null,
+      cachedAt: null,
+      cached: false,
+    })
+
+    const { container, rerender, unmount } = renderIssuesTab({
+      projectName: 'acme/widgets',
+      jobsPaused: false,
+    })
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="pr-7"]')?.getAttribute('data-jobs-paused')).toBe('false')
+    })
+
+    rerender({
+      projectName: 'acme/widgets',
+      jobsPaused: true,
+    })
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="pr-7"]')?.getAttribute('data-jobs-paused')).toBe('true')
+    })
+    expect(fetchIssuesAndPRs).toHaveBeenCalledTimes(1)
 
     unmount()
   })

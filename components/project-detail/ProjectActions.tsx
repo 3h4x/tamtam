@@ -11,6 +11,7 @@ export interface ProjectActionsProps {
   aggregateCi: string | null
   ciFailedUrl: string | null
   githubUrl: string | null
+  jobsPaused: boolean
 
   config: ProjectConfig | null
   verdict: string | undefined
@@ -58,6 +59,7 @@ export function ProjectActions({
   aggregateCi,
   ciFailedUrl,
   githubUrl,
+  jobsPaused,
   config,
   verdict,
   hasUnreviewed,
@@ -93,6 +95,11 @@ export function ProjectActions({
   onDismissDiverged,
 }: ProjectActionsProps) {
   const busy = releasing || isPipelineRunning
+  const releaseBlocked = jobsPaused || busy
+  const fixCiBlocked = jobsPaused || fixingCi || isCiFixRunning
+  const pushToPrBlocked = jobsPaused || pushingToPr
+  const testBlocked = jobsPaused || testing || isTestRunning
+  const pushBlocked = jobsPaused || pushing
   const nothingToRelease = totalChanges === 0 && (unpushed ?? 0) === 0
   const hasTestCommand = !!(config?.effective_test_command || config?.detected_test_command)
   const freshLgtm = verdict === 'LGTM' && !hasUnreviewed && totalChanges > 0
@@ -129,8 +136,14 @@ export function ProjectActions({
         <Button
           variant="danger"
           onClick={onFixCi}
-          disabled={fixingCi || isCiFixRunning}
-          title={isCiFixRunning ? 'CI fix already in progress' : 'Start CI fix'}
+          disabled={fixCiBlocked}
+          title={
+            jobsPaused
+              ? 'Jobs are paused globally. Resume jobs to start a CI fix.'
+              : isCiFixRunning
+                ? 'CI fix already in progress'
+                : 'Start CI fix'
+          }
         >
           {fixingCi || isCiFixRunning ? 'CI Fix in Progress…' : 'Fix CI'}
         </Button>
@@ -143,9 +156,11 @@ export function ProjectActions({
       <Button
         variant="primary"
         onClick={onRelease}
-        disabled={busy || nothingToRelease}
+        disabled={releaseBlocked || nothingToRelease}
         title={
-          nothingToRelease
+          jobsPaused
+            ? 'Jobs are paused globally. Resume jobs to start a release.'
+            : nothingToRelease
             ? 'Nothing to release — no changes and no unpushed commits'
             : busy
               ? 'Release pipeline already running'
@@ -168,8 +183,12 @@ export function ProjectActions({
       {hasOpenPr && totalChanges > 0 && (
         <Button
           onClick={onPushToPr}
-          disabled={pushingToPr}
-          title={`Stage ${totalChanges} change${totalChanges === 1 ? '' : 's'}, commit (Claude-generated message), push — attaches to existing PR. Skips test + review (use Release for the full pipeline).`}
+          disabled={pushToPrBlocked}
+          title={
+            jobsPaused
+              ? 'Jobs are paused globally. Resume jobs to start a push.'
+              : `Stage ${totalChanges} change${totalChanges === 1 ? '' : 's'}, commit (Claude-generated message), push — attaches to existing PR. Skips test + review (use Release for the full pipeline).`
+          }
         >
           {pushingToPr ? 'Pushing…' : `Push to PR${openPrByBranch[currentBranch ?? ''] ? ` #${openPrByBranch[currentBranch ?? '']}` : ''}`}
         </Button>
@@ -177,8 +196,14 @@ export function ProjectActions({
       {hasTestCommand && (
         <Button
           onClick={onTest}
-          disabled={testing || isTestRunning}
-          title={isTestRunning ? 'Tests already running' : `Run: ${config?.effective_test_command || config?.detected_test_command}`}
+          disabled={testBlocked}
+          title={
+            jobsPaused
+              ? 'Jobs are paused globally. Resume jobs to start tests.'
+              : isTestRunning
+                ? 'Tests already running'
+                : `Run: ${config?.effective_test_command || config?.detected_test_command}`
+          }
         >
           {testing || isTestRunning ? 'Testing…' : 'Test'}
         </Button>
@@ -189,8 +214,12 @@ export function ProjectActions({
           className="btn-custom"
           style={{ '--btn-color': action.color || 'var(--color-accent)' } as React.CSSProperties}
           onClick={() => onCustomAction(action.name)}
-          disabled={runningActions.has(action.name)}
-          title={`Run: ${action.command}`}
+          disabled={jobsPaused || runningActions.has(action.name)}
+          title={
+            jobsPaused
+              ? 'Jobs are paused globally. Resume jobs to run this custom action.'
+              : `Run: ${action.command}`
+          }
         >
           {runningActions.has(action.name) ? `${action.name}…` : action.name}
         </button>
@@ -199,8 +228,12 @@ export function ProjectActions({
         <Button
           variant="warning"
           onClick={onPush}
-          disabled={pushing}
-          title={`Push ${unpushed} commit${unpushed !== 1 ? 's' : ''} to origin`}
+          disabled={pushBlocked}
+          title={
+            jobsPaused
+              ? 'Jobs are paused globally. Resume jobs to start a push.'
+              : `Push ${unpushed} commit${unpushed !== 1 ? 's' : ''} to origin`
+          }
         >
           {pushing ? 'Pushing…' : `Push (${unpushed})`}
         </Button>

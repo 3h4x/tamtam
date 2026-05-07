@@ -5,6 +5,14 @@ import Link from 'next/link'
 import type { SkillItem, DocItem } from '@/lib/terminal/terminal-session-store'
 import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, type ModelTier } from '@/lib/agents/model-aliases'
 
+function CountBadge({ count }: { count: number }) {
+  return (
+    <span className="inline-flex min-w-4 items-center justify-center rounded-full bg-bg-tertiary px-1 text-[10px] leading-none text-text-tertiary tabular-nums">
+      {count}
+    </span>
+  )
+}
+
 interface TerminalToolbarProps {
   projectName: string
   streaming: boolean
@@ -142,7 +150,8 @@ export function TerminalToolbar({
                   className={`toolbar-tab${showSkillPicker ? ' active' : ''}`}
                   onClick={onToggleSkillPicker}
                 >
-                  skills{selectedItems.length > 0 ? ` ${selectedItems.length}` : ''}
+                  <span>skills</span>
+                  {selectedItems.length > 0 && <CountBadge count={selectedItems.length} />}
                 </button>
                 {showSkillPicker && (
                   <div className="absolute top-full right-0 mt-1 w-96 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden">
@@ -211,7 +220,8 @@ export function TerminalToolbar({
                   className={`toolbar-tab${showDocsPicker ? ' active' : ''}`}
                   onClick={onToggleDocsPicker}
                 >
-                  docs{selectedDocs.length > 0 ? ` ${selectedDocs.length}` : ''}
+                  <span>docs</span>
+                  {selectedDocs.length > 0 && <CountBadge count={selectedDocs.length} />}
                 </button>
                 {showDocsPicker && (
                   <div className="absolute top-full right-0 mt-1 w-72 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden">
@@ -283,7 +293,7 @@ export function TerminalToolbar({
           {/* Selected pills */}
           {hasSelections && (
             <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-              <span className="toolbar-label">selected</span>
+              <span className="toolbar-label">{allSelected.length} attached</span>
               {visible.map(item => (
                 <span key={item.key} className="toolbar-pill">
                   <span className="truncate">{item.label}</span>

@@ -27,7 +27,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 
 ## Project actions (`by-project/[name]/...`)
 
-- `action` — Custom actions (GET, PUT, POST)
+- `action` — Custom actions (GET, PUT, POST). POST is pause-gated and returns `409 { detail }` when `jobs_paused` is enabled globally.
 - `config` — Project test command + workflow flags + per-project pipeline prompt addenda (`review_prompt_addendum`, `fix_prompt_addendum`) (GET, PATCH)
 - `run` — Run Claude on project (POST, accepts `model` param)
 - `review` — Start AI code review (POST)
