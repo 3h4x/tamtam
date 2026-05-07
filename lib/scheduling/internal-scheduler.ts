@@ -23,7 +23,11 @@ import { stableHash } from './fire-times';
 import { normalizeAgentScheduleOrThrow } from './agent-schedule';
 import { getIssueBranchLock } from '@/lib/shared/project-branch-lock';
 import { getLock } from '@/lib/pipeline/pipeline-lock';
-import { budgetBlockedResult, scheduledBurnRateBlocked } from '@/lib/shared/job-control';
+import {
+  budgetBlockedAcrossProviders,
+  scheduledBurnRateBlockedAcrossProviders,
+  warmEnabledProviderSnapshots,
+} from '@/lib/shared/job-control';
 import { getDirtyFileCount } from '@/lib/git/dirty-worktree';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getSettings } from '@/lib/shared/config';
@@ -161,7 +165,16 @@ async function fire(entry: ScheduleEntry): Promise<void> {
   if (getPaused() || !entry.enabled) return;
   let shouldRearm = true;
 
-  const budget = budgetBlockedResult('start scheduled agent');
+  // Warm quota-aware provider caches before consulting the synchronous
+  // multi-provider budget gates so the first scheduled fire after boot
+  // doesn't depend on whichever cache happened to be warm already.
+  await warmEnabledProviderSnapshots();
+
+  // Multi-provider budget gates: skip a scheduled fire only when EVERY enabled
+  // provider is unavailable or over the cap. Once any quota-aware snapshot is
+  // known, a quota-aware sibling with a missing snapshot no longer counts as
+  // healthy fallback — same rule the manual route gate uses.
+  const budget = budgetBlockedAcrossProviders('start scheduled agent');
   if (budget) {
     entry.skippedCount += 1;
     entry.lastSkippedReason = budget.detail;
@@ -171,15 +184,12 @@ async function fire(entry: ScheduleEntry): Promise<void> {
     return;
   }
 
-  // Burn-rate gate: skip scheduled fires when 7d projection is over quota.
-  // Manual buttons stay free (this gate is only consulted here). Re-arm so the
-  // scheduler keeps probing — once usage decays under the cap or the window
-  // resets, scheduled work resumes automatically without user intervention.
-  const burn = scheduledBurnRateBlocked();
+  const burn = scheduledBurnRateBlockedAcrossProviders();
   if (burn) {
+    const reason = `${burn.reason} (worstProvider=${burn.worstProvider})`;
     entry.skippedCount += 1;
-    entry.lastSkippedReason = burn.reason;
-    console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${burn.reason}`);
+    entry.lastSkippedReason = reason;
+    console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — ${reason}`);
     armNext(entry);
     shouldRearm = false;
     return;

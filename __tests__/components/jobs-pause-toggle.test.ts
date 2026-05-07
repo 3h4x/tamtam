@@ -102,6 +102,13 @@ describe('JobsPauseToggle', () => {
             resetsAt: '2026-05-10T12:00:00.000Z',
             msUntilReset: 24 * 60 * 60 * 1000,
           },
+          // Server-side multi-provider verdict: every enabled provider is over.
+          schedulerThrottle: {
+            reason: '7d burn rate too high: 90% used, projected 180%',
+            projectedPct: 180,
+            worstProvider: 'claude',
+            resumesAtMs: new Date('2026-05-10T12:00:00.000Z').getTime(),
+          },
         })
       }
       throw new Error(`Unexpected fetch: ${input}`)
@@ -114,7 +121,8 @@ describe('JobsPauseToggle', () => {
       const button = getButton(container)
       expect(button.textContent).toBe('scheduled paused')
       expect(button.getAttribute('aria-checked')).toBe('false')
-      expect(button.title).toContain('Scheduled agents paused by weekly budget')
+      expect(button.title).toContain('Scheduled agents paused')
+      expect(button.title).toContain('claude')
       expect(button.title).toContain('May 10, 2026, 12:00')
     })
 

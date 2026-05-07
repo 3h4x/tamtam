@@ -1,8 +1,16 @@
 import * as internalScheduler from '@/lib/scheduling/internal-scheduler';
-import { getSettings } from '@/lib/shared/config';
-import { peekQuotaCache, prefetchQuota } from '@/lib/usage/quota';
+import { getActiveCliProvider, getSettings } from '@/lib/shared/config';
+import {
+  getQuotaSnapshots,
+  peekQuotaCache,
+  peekQuotaSnapshots,
+  prefetchQuota,
+  prefetchQuotaProviders,
+} from '@/lib/usage/quota';
 import { notify } from '@/lib/shared/notifications';
 import { computeWeeklyBurnThrottle } from '@/lib/shared/budget-throttle';
+import { hardGateUtilizationFor } from '@/lib/usage/cli-picker';
+import { CLI_PROVIDERS_WITH_QUOTA, type CliProvider } from '@/lib/usage/cli-providers';
 
 export type JobsPausedResult = { ok: false; status: 409; detail: string };
 export type BudgetBlockedResult = {
@@ -177,6 +185,171 @@ export function scheduledBurnRateBlocked(): { reason: string; projectedPct: numb
   const burn = computeWeeklyBurnThrottle(snapshot.sevenDay);
   if (!burn) return null;
   return { reason: burn.reason, projectedPct: burn.projectedPct };
+}
+
+function hasQuotaFetcher(provider: CliProvider): boolean {
+  return CLI_PROVIDERS_WITH_QUOTA.includes(provider);
+}
+
+function getEnabledProviders(): CliProvider[] {
+  try {
+    const settings = getSettings();
+    if (!settings) return [];
+    const enabled = Array.isArray(settings.cli_enabled_providers)
+      ? settings.cli_enabled_providers
+      : [];
+    if (enabled.length > 0) return enabled;
+    return [getActiveCliProvider({
+      cli_enabled_providers: enabled,
+      claude_provider: settings.claude_provider,
+    })];
+  } catch {
+    return [];
+  }
+}
+
+export async function warmEnabledProviderSnapshots(
+  options: { force?: boolean } = {},
+): Promise<void> {
+  const enabled = getEnabledProviders().filter(hasQuotaFetcher);
+  if (enabled.length === 0) return;
+  try {
+    await getQuotaSnapshots(enabled, options);
+  } catch {
+    // fail open
+  }
+}
+
+export interface SchedulerThrottle {
+  reason: string;
+  projectedPct: number;
+  worstProvider: CliProvider;
+  resumesAtMs: number | null;
+}
+
+/**
+ * Multi-provider variant of `scheduledBurnRateBlocked`. Blocks the scheduler
+ * ONLY when EVERY enabled provider's 7d burn projection trips. If any provider
+ * still has weekly headroom (or has no quota fetcher and so counts as
+ * "always available"), returns null and the picker handles the fan-out.
+ *
+ * Mirrors the per-provider availability rules used by the manual start path:
+ * once any quota-aware provider has a known snapshot, another quota-aware
+ * sibling with a missing snapshot no longer counts as available fallback.
+ */
+export function scheduledBurnRateBlockedAcrossProviders(): SchedulerThrottle | null {
+  let cfg;
+  try { cfg = getSettings(); } catch { return null; }
+  if (!cfg?.budget_block_runs_enabled) return null;
+  const enabled = getEnabledProviders();
+  if (enabled.length === 0) return null;
+  const snapshots = peekQuotaSnapshots(enabled);
+  const hasKnownQuotaAwareProvider = enabled.some((provider) =>
+    hasQuotaFetcher(provider) && !!(snapshots.get(provider) ?? null)
+  );
+
+  let worst: { provider: CliProvider; reason: string; projectedPct: number; resumesAtMs: number | null } | null = null;
+  for (const provider of enabled) {
+    if (!hasQuotaFetcher(provider)) {
+      // Providers without quota fetchers are always eligible fallback targets.
+      return null;
+    }
+    const snap = snapshots.get(provider) ?? null;
+    if (!snap) {
+      if (!hasKnownQuotaAwareProvider) return null;
+      continue;
+    }
+    const burn = computeWeeklyBurnThrottle(snap.sevenDay);
+    if (!burn) {
+      // This provider has weekly headroom — the picker will route here.
+      return null;
+    }
+    if (!worst || burn.projectedPct > worst.projectedPct) {
+      worst = {
+        provider,
+        reason: burn.reason,
+        projectedPct: burn.projectedPct,
+        resumesAtMs: typeof burn.resumesAtMs === 'number' ? burn.resumesAtMs : null,
+      };
+    }
+  }
+  if (!worst) return null;
+  return {
+    reason: worst.reason,
+    projectedPct: worst.projectedPct,
+    worstProvider: worst.provider,
+    resumesAtMs: worst.resumesAtMs,
+  };
+}
+
+/**
+ * Multi-provider variant of `budgetBlockedResult`. Returns null when at least
+ * one enabled provider is under the 5h hard cap (the picker would route there).
+ * Reports the worst-loaded provider when every enabled provider is blocked.
+ * Missing snapshots from quota-aware providers are treated as unavailable once
+ * a sibling quota-aware provider has a known snapshot, matching the manual
+ * route gate after it fetches provider snapshots.
+ */
+export function budgetBlockedAcrossProviders(action = 'start new jobs'): BudgetBlockedResult | null {
+  let cfg;
+  try { cfg = getSettings(); } catch { return null; }
+  if (!cfg?.budget_block_runs_enabled) return null;
+  const enabled = getEnabledProviders();
+  if (enabled.length === 0) return budgetBlockedResult(action);
+  const limit = cfg.budget_block_at_pct;
+  const snapshots = peekQuotaSnapshots(enabled);
+  const quotaAwareProviders = enabled.filter(hasQuotaFetcher);
+  const hasKnownQuotaAwareProvider = quotaAwareProviders.some((provider) => !!(snapshots.get(provider) ?? null));
+  prefetchQuotaProviders(quotaAwareProviders);
+
+  let worst: { snapshot: import('@/lib/usage/quota-types').QuotaSnapshot; util: number } | null = null;
+  for (const provider of enabled) {
+    if (!hasQuotaFetcher(provider)) {
+      // No quota fetcher means this provider remains available for routing.
+      return null;
+    }
+    const snap = snapshots.get(provider) ?? null;
+    if (!snap) {
+      if (!hasKnownQuotaAwareProvider) {
+        prefetchQuota();
+        return null;
+      }
+      continue;
+    }
+    const util = hardGateUtilizationFor(snap);
+    if (util < limit) {
+      // At least one provider has headroom — picker will route there.
+      return null;
+    }
+    if (!worst || util > worst.util) worst = { snapshot: snap, util };
+  }
+  if (!worst) return null;
+  // Every enabled provider is blocked — report the worst one through the
+  // existing single-provider 5h/credits message format for consistency.
+  const snapshot = worst.snapshot;
+  const extraUtilization = snapshot.extra?.utilization;
+  if (snapshot.extra?.isEnabled && typeof extraUtilization === 'number' && extraUtilization >= limit) {
+    const provider = snapshot.provider === 'codex' ? 'Codex' : 'Claude';
+    const detail = snapshot.provider === 'codex'
+      ? `${provider} model credit gate blocked (${extraUtilization.toFixed(0)}%). Will resume when Codex reports model credits are available.`
+      : `${provider} credits exhausted (${extraUtilization.toFixed(0)}%). Will resume when quota or credits are available.`;
+    fireBudgetBlockedNotification('credits', extraUtilization, null, action);
+    return { ok: false, status: 429, detail, window: 'credits', utilization: extraUtilization, resetsAt: null };
+  }
+  const win = snapshot.fiveHour;
+  fireBudgetBlockedNotification('5h', win.utilization, win.resetsAt, action);
+  const provider = snapshot.provider === 'codex' ? 'Codex' : 'Claude';
+  const resumesLabel = win.resetsAt
+    ? `Will resume after ${new Date(win.resetsAt).toLocaleTimeString()}.`
+    : 'Will resume when quota or credits are available.';
+  return {
+    ok: false,
+    status: 429,
+    detail: `All enabled providers over budget; ${provider} 5h at ${win.utilization.toFixed(0)}%. ${resumesLabel}`,
+    window: '5h',
+    utilization: win.utilization,
+    resetsAt: win.resetsAt,
+  };
 }
 
 async function drainAllRecoveryWorkAsync(): Promise<void> {

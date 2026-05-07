@@ -58,6 +58,21 @@ describe('pickCliProvider', () => {
     expect(result.reason).toBe('all_blocked');
   });
 
+  it('returns null when one quota-aware provider is over budget and the sibling snapshot is missing', () => {
+    const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+      ['claude', snapshot('claude', 99)],
+      ['codex', null],
+    ]);
+    const result = pickCliProvider({
+      enabled: ['claude', 'codex'],
+      snapshots,
+      budgetBlockAtPct: 95,
+      blockEnabled: true,
+    });
+    expect(result.provider).toBeNull();
+    expect(result.reason).toBe('all_blocked');
+  });
+
   it('treats providers without a snapshot (gemini, lmstudio) as 0% utilization', () => {
     const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
       ['claude', snapshot('claude', 80)],

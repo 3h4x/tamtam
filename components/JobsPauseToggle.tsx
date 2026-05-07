@@ -3,17 +3,27 @@
 import { useCallback, useEffect, useState } from 'react'
 import { errMsg } from '@/lib/shared/types'
 import { fmtAbsolute } from '@/lib/shared/format-date'
-import { computeWeeklyBurnThrottle, type WeeklyBurnThrottle } from '@/lib/shared/budget-throttle'
 import { dispatchJobsPausedChanged } from '@/lib/shared/jobs-paused-events'
 
 interface QuotaWindow { utilization: number; resetsAt: string | null; msUntilReset: number | null }
-interface QuotaSnapshot { fiveHour: QuotaWindow; sevenDay: QuotaWindow; gateEnabled?: boolean }
+interface SchedulerThrottle {
+  reason: string
+  projectedPct: number
+  worstProvider: string
+  resumesAtMs: number | null
+}
+interface QuotaSnapshot {
+  fiveHour: QuotaWindow
+  sevenDay: QuotaWindow
+  gateEnabled?: boolean
+  schedulerThrottle?: SchedulerThrottle | null
+}
 
 export function JobsPauseToggle() {
   const [jobsPaused, setJobsPaused] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [autoThrottle, setAutoThrottle] = useState<WeeklyBurnThrottle | null>(null)
+  const [autoThrottle, setAutoThrottle] = useState<SchedulerThrottle | null>(null)
 
   useEffect(() => {
     let live = true
@@ -43,8 +53,11 @@ export function JobsPauseToggle() {
         if (!live) return
         // Only flag throttle when the server-side gate is enabled — otherwise
         // the indicator would lie about scheduled agents being paused.
+        // The server now computes the multi-provider verdict so we don't
+        // light up "scheduled paused" when one provider is over but a sibling
+        // (e.g. Codex) still has weekly headroom.
         if (!snap.gateEnabled) { setAutoThrottle(null); return }
-        setAutoThrottle(computeWeeklyBurnThrottle(snap.sevenDay))
+        setAutoThrottle(snap.schedulerThrottle ?? null)
       } catch {
         // ignore — fail open
       }
@@ -91,7 +104,7 @@ export function JobsPauseToggle() {
   const title = jobsPaused
     ? 'Jobs paused — click to resume'
     : showThrottle
-      ? `Scheduled agents paused by weekly budget (7d projects ${autoThrottle!.projectedPct.toFixed(0)}%) — resume ${fmtAbsolute(autoThrottle!.resumesAtMs)}. Click to also pause manual runs.`
+      ? `Scheduled agents paused — every enabled provider over weekly budget (worst: ${autoThrottle!.worstProvider} at ${autoThrottle!.projectedPct.toFixed(0)}%${autoThrottle!.resumesAtMs ? `, resume ${fmtAbsolute(autoThrottle!.resumesAtMs)}` : ''}). Click to also pause manual runs.`
       : 'Pause jobs'
 
   return (

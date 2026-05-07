@@ -71,6 +71,12 @@ export function effectiveUtilizationFor(
  * hard-gate utilization can block a manual/root start; weekly windows still
  * influence preference among otherwise healthy providers. Tie-breaks by the
  * order of `enabled`. Returns null if every enabled provider is blocked.
+ *
+ * When at least one quota-aware provider has a known snapshot, another
+ * quota-aware provider with a missing snapshot is treated as unavailable
+ * rather than as an "unknown but maybe healthy" fallback. This keeps the
+ * route-level start gate aligned with the scheduler's synchronous
+ * multi-provider budget verdicts after warm/fetch attempts.
  */
 export function pickCliProvider(opts: PickCliOptions): PickCliResult {
   const { enabled, snapshots, budgetBlockAtPct, blockEnabled, requestedModel } = opts;
@@ -85,9 +91,12 @@ export function pickCliProvider(opts: PickCliOptions): PickCliResult {
   let bestUtilization = 0;
   for (const provider of enabled) {
     const snapshot = snapshots.get(provider) ?? null;
+    const missingKnownQuotaAware =
+      !snapshot && hasKnownQuotaAwareProvider && hasQuotaFetcher(provider);
+    if (blockEnabled && missingKnownQuotaAware) continue;
     const hardGateUtilization = hardGateUtilizationFor(snapshot);
     if (blockEnabled && hardGateUtilization >= budgetBlockAtPct) continue;
-    const utilization = !snapshot && hasKnownQuotaAwareProvider && hasQuotaFetcher(provider)
+    const utilization = missingKnownQuotaAware
       ? 100
       : effectiveUtilizationFor(snapshot, requestedModel);
     const headroom = 100 - utilization;

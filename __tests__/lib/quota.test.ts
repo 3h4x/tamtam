@@ -4,6 +4,7 @@ import {
   getQuota,
   getQuotaForProvider,
   peekQuotaCache,
+  prefetchQuotaProviders,
   prefetchQuota,
 } from '@/lib/usage/quota';
 
@@ -103,6 +104,12 @@ describe('quota provider selector', () => {
     expect(mocks.codex.prefetchQuota).toHaveBeenCalledOnce();
     expect(mocks.claude.clearQuotaCache).not.toHaveBeenCalled();
     expect(mocks.claude.prefetchQuota).not.toHaveBeenCalled();
+  });
+
+  it('prefetches every supported provider in a list and skips unsupported ones', () => {
+    prefetchQuotaProviders(['claude', 'gemini', 'codex', 'claude']);
+    expect(mocks.claude.prefetchQuota).toHaveBeenCalledOnce();
+    expect(mocks.codex.prefetchQuota).toHaveBeenCalledOnce();
   });
 
   it('falls back to the legacy provider when enabled providers are missing', async () => {

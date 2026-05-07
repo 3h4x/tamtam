@@ -1,4 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+vi.mock('@/lib/shared/job-control', () => ({
+  budgetBlockedAcrossProviders: vi.fn().mockReturnValue(null),
+  scheduledBurnRateBlockedAcrossProviders: vi.fn().mockReturnValue(null),
+  warmEnabledProviderSnapshots: vi.fn().mockResolvedValue(undefined),
+}));
+
 import {
   computeNextFire,
   startInternalScheduler,
@@ -366,7 +372,10 @@ describe('internal-scheduler — issue-branch skip', () => {
     // `fetchMock` flaky.
     vi.doMock('@/lib/shared/job-control', () => ({
       budgetBlockedResult: vi.fn().mockReturnValue(null),
+      budgetBlockedAcrossProviders: vi.fn().mockReturnValue(null),
       scheduledBurnRateBlocked: vi.fn().mockReturnValue(null),
+      scheduledBurnRateBlockedAcrossProviders: vi.fn().mockReturnValue(null),
+      warmEnabledProviderSnapshots: vi.fn().mockResolvedValue(undefined),
     }));
     // The scheduler now anchors initial nextFireMs on the DB-recorded last
     // fire time. Without mocking @/lib/db here, the test would hit the real
@@ -478,7 +487,10 @@ describe('internal-scheduler — budget skip', () => {
     budgetBlockedResultMock = vi.fn().mockReturnValue(null);
     vi.doMock('@/lib/shared/job-control', () => ({
       budgetBlockedResult: budgetBlockedResultMock,
+      budgetBlockedAcrossProviders: budgetBlockedResultMock,
       scheduledBurnRateBlocked: vi.fn().mockReturnValue(null),
+      scheduledBurnRateBlockedAcrossProviders: vi.fn().mockReturnValue(null),
+      warmEnabledProviderSnapshots: vi.fn().mockResolvedValue(undefined),
     }));
     vi.doMock('@/lib/shared/project-branch-lock', () => ({
       getIssueBranchLock: vi.fn().mockResolvedValue(null),

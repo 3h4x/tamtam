@@ -12,6 +12,7 @@ import {
   peekCodexQuotaCache,
   prefetchCodexQuota,
 } from '@/lib/usage/codex-quota';
+import { CLI_PROVIDERS_WITH_QUOTA, type CliProvider } from '@/lib/usage/cli-providers';
 
 function isCodexProvider(): boolean {
   try {
@@ -45,12 +46,38 @@ export function peekQuotaCache(): QuotaSnapshot | null {
   return isCodexProvider() ? peekCodexQuotaCache() : peekClaudeQuotaCache();
 }
 
+/**
+ * Synchronous peek over a list of providers — returns the cached snapshot for
+ * each (or null if no fetcher / cache cold). Used by the scheduler's
+ * multi-provider gate so it doesn't block when one provider has headroom.
+ */
+export function peekQuotaSnapshots(
+  providers: CliProvider[],
+): Map<CliProvider, QuotaSnapshot | null> {
+  const out = new Map<CliProvider, QuotaSnapshot | null>();
+  for (const provider of providers) {
+    if (provider === 'claude') out.set(provider, peekClaudeQuotaCache());
+    else if (provider === 'codex') out.set(provider, peekCodexQuotaCache());
+    else out.set(provider, null);
+  }
+  return out;
+}
+
 export function prefetchQuota(): void {
   if (isCodexProvider()) prefetchCodexQuota();
   else prefetchClaudeQuota();
 }
 
-import type { CliProvider } from '@/lib/usage/cli-providers';
+export function prefetchQuotaProviders(providers: CliProvider[]): void {
+  const seen = new Set<CliProvider>();
+  for (const provider of providers) {
+    if (seen.has(provider)) continue;
+    seen.add(provider);
+    if (!CLI_PROVIDERS_WITH_QUOTA.includes(provider)) continue;
+    if (provider === 'claude') prefetchClaudeQuota();
+    if (provider === 'codex') prefetchCodexQuota();
+  }
+}
 
 /**
  * Fetch quota snapshots for the given providers in parallel. Providers
