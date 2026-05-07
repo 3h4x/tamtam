@@ -34,7 +34,7 @@ Steps are pluggable per project. The **🚀 Release** button triggers the pipeli
 ## Commands
 - `pnpm dev` — `next dev` foreground on port 1337 (HMR enabled, no PM2). Local debugging only.
 - `pnpm start` — start (or idempotently restart) production server via PM2 on port 1337. Self-heals if a previous orphan is squatting on the port. Canonical way to run TamTam.
-- `pnpm run rebuild` / `pnpm restart` — `pnpm build && pnpm start`. Canonical post-edit command. (Note: bare `pnpm rebuild` triggers pnpm's native-deps rebuild instead — use `pnpm run rebuild`.)
+- `pnpm run rebuild` / `pnpm restart` — build then restart under PM2. `pnpm run rebuild` expands to `pnpm build && pnpm start`; `pnpm restart` expands to `pnpm build && bash scripts/pm2-start.sh`. Canonical post-edit command. (Note: bare `pnpm rebuild` triggers pnpm's native-deps rebuild instead — use `pnpm run rebuild`.)
 - `pnpm stop` — stop the PM2 server.
 - `pnpm logs` — view PM2 logs.
 - `pnpm mcp:http <tool> [json_args]` — call local TamTam HTTP endpoints via the sibling `mcp-http-tools` checkout (`.tamtam/mcp-http-tools.yaml`). Prefer `tamtam_api_get` for path-only GET routes, e.g. `pnpm mcp:http tamtam_api_get '{"path":"jobs/notifications"}'`.
