@@ -51,6 +51,10 @@ function loadReviewPrompt(projectName: string): string {
     'TAMTAM INTERNAL CONFIG CONTEXT:\n' +
     '- Ignore `.tamtam/` changes during review. They are TamTam scheduler/config metadata, not product code for this project.\n' +
     '- Do not raise findings about `.tamtam/agents/*.md`, `.tamtam/config.yml`, or other `.tamtam/` files unless the review task is explicitly about TamTam configuration.\n\n' +
+    'DOCUMENTATION-ONLY FIX CONTEXT:\n' +
+    '- If the only remaining issue is a documentation update and the exact docs change is obvious, apply the documentation edit yourself during this review.\n' +
+    '- After applying that docs-only fix, do not emit a NEEDS ATTENTION finding for it; summarize the docs edit and end with Verdict: LGTM.\n' +
+    '- Do not use this rule for code, tests, configuration behavior, migrations, security issues, or ambiguous documentation work; those still require normal findings.\n\n' +
     REVIEW_OUTPUT_CONTRACT + '\n\n' +
     'OUTPUT FORMAT — strict. Your final non-empty line must be exactly one of:\n\n' +
     '    Verdict: LGTM\n' +

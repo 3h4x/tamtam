@@ -691,6 +691,15 @@ describe('startProjectReview', () => {
     expect(prompt).toContain('`.tamtam/agents/*.md`, `.tamtam/config.yml`, or other `.tamtam/` files');
   });
 
+  it('tells reviewers to fix obvious documentation-only issues and return LGTM', async () => {
+    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
+    await startProjectReview('proj');
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('DOCUMENTATION-ONLY FIX CONTEXT');
+    expect(prompt).toContain('apply the documentation edit yourself during this review');
+    expect(prompt).toContain('end with Verdict: LGTM');
+  });
+
   it('includes prior release review and fix context in follow-up reviews', async () => {
     listJobsMock.mockReturnValue([
       makeJob({ id: 'release-1', kind: 'release', finishedAt: null, startedAt: 10 }),

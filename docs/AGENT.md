@@ -148,6 +148,17 @@ the budget gate clears, on boot recovery, and from the periodic recovery sweep.
 }
 ```
 
+When a non-agent job already owns the project worktree, the route instead
+returns `409` with `code: "project_busy"` plus the blocking job id:
+
+```json
+{
+  "code": "project_busy",
+  "detail": "Job 'run' is already running for myapp (job run-1705276900123)",
+  "blockingJobId": "run-1705276900123"
+}
+```
+
 The agent starts immediately as a PM2 process. Output is streamed to a log file and can be watched via SSE at `/api/streaming/{job_id}`.
 
 When an agent finishes, TamTam asks it to include a short `TamTam Run Report` in the final response. The lifecycle parser stores a concise `work_summary` and `modified_files` JSON array on the job row. If a scheduled agent repeatedly finds no actionable work and changes no files, TamTam creates an open project recommendation instead of silently changing the schedule.

@@ -10,6 +10,7 @@ import { errMsg } from '@/lib/shared/types';
 import { resolveCliBin, resolveCliDefaultModel, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { isCliProvider } from '@/lib/usage/cli-providers';
+import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 
 export async function POST(
   request: NextRequest,
@@ -28,6 +29,17 @@ export async function POST(
         { status: 409 }
       );
     }
+  }
+
+  const blockingJob = await findBlockingRunningJob(
+    projectName,
+    (job) => job.kind !== 'fix-ci',
+  );
+  if (blockingJob) {
+    return NextResponse.json({
+      detail: `Job '${blockingJob.kind}' is already running for ${projectName} (job ${blockingJob.id})`,
+      blocking_job_id: blockingJob.id,
+    }, { status: 409 });
   }
 
   const { projects, logDir } = getImproveConfig();

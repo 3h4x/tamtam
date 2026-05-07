@@ -33,6 +33,7 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
   let execMock: ReturnType<typeof vi.fn>;
   let dbGetMock: ReturnType<typeof vi.fn>;
   let checkCliStartGateMock: ReturnType<typeof vi.fn>;
+  let findBlockingRunningJobMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -45,6 +46,7 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
     startJobMock = vi.fn().mockResolvedValue(42);
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: 'Build failed\nError: test suite failed', stderr: '' });
     checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'codex' });
+    findBlockingRunningJobMock = vi.fn().mockResolvedValue(null);
 
     dbGetMock = vi.fn().mockReturnValue({ project: 'proj1', ciFailedUrl: CI_URL });
 
@@ -69,6 +71,9 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
     vi.doMock('@/lib/shared/config', () => ({ getPermissionModeFlag: vi.fn().mockReturnValue(''), getSettings: vi.fn().mockReturnValue({ default_model: 'sonnet' }) }));
     vi.doMock('@/lib/usage/resolve-provider', () => ({
       checkCliStartGate: checkCliStartGateMock,
+    }));
+    vi.doMock('@/lib/jobs/project-active-job', () => ({
+      findBlockingRunningJob: findBlockingRunningJobMock,
     }));
     vi.doMock('@/lib/db', () => ({
       db: {
@@ -119,6 +124,20 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
     expect(data.detail).toContain('No failed CI URL');
   });
 
+  it('returns 409 with blocking_job_id when another project job is already running', async () => {
+    findBlockingRunningJobMock.mockResolvedValue(makeJob({ id: 'run-123', kind: 'run' }));
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/fix-ci', { method: 'POST' });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.detail).toContain("Job 'run' is already running");
+    expect(data.blocking_job_id).toBe('run-123');
+    expect(checkCliStartGateMock).not.toHaveBeenCalled();
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
   it('returns 400 when no failed CI URL (no ciFailedUrl field)', async () => {
     dbGetMock.mockReturnValue({ project: 'proj1', ciFailedUrl: null });
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/fix-ci', { method: 'POST' });
@@ -133,6 +152,22 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
     expect(res.status).toBe(500);
     const data = await res.json();
     expect(data.detail).toContain('Could not fetch CI failure logs');
+  });
+
+  it('returns the global pause conflict when jobs are paused', async () => {
+    checkCliStartGateMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      detail: 'Jobs are paused globally. Turn the switch back on in Settings to start a CI fix.',
+    });
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/fix-ci', { method: 'POST' });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.detail).toContain('Jobs are paused globally');
+    expect(startJobMock).not.toHaveBeenCalled();
   });
 
   it('starts fix-ci job and returns job info', async () => {
@@ -258,6 +293,9 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci weekly model scorin
     }));
     vi.doMock('@/lib/usage/quota', () => ({
       getQuotaSnapshots: vi.fn().mockResolvedValue(snapshots),
+    }));
+    vi.doMock('@/lib/jobs/project-active-job', () => ({
+      findBlockingRunningJob: vi.fn().mockResolvedValue(null),
     }));
     vi.doMock('@/lib/db', () => ({
       db: {

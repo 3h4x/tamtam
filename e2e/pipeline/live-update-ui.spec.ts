@@ -231,11 +231,12 @@ test.describe('Auto-polling live update: running → failed', () => {
 // ─── Test 2b: Live running → cancelled transition ────────────────────────────
 //
 // Verifies that a running job that transitions to done with exit_code=-3
-// (aborted pipeline) shows the "exit -3" cancelled badge on the next poll
-// cycle, with no orphaned spinner remaining.
+// (aborted pipeline) shows the "cancelled" badge on the next poll cycle,
+// with no orphaned spinner remaining.
+// RunRow maps exit_code=-3 to the "cancelled" label via statusFailureLabel.
 
 test.describe('Auto-polling live update: running → cancelled', () => {
-  test('history tab transitions running→exit -3 via 5s poll cycle without page reload', async ({
+  test('history tab transitions running→cancelled via 5s poll cycle without page reload', async ({
     page,
   }) => {
     let serveRunning = true;
@@ -271,8 +272,9 @@ test.describe('Auto-polling live update: running → cancelled', () => {
     // Flip mock so the next poll delivers the cancelled state.
     serveRunning = false;
 
-    // Phase 2: cancellation badge appears; no spinner remains.
-    await expect(page.getByText('exit -3').first()).toBeVisible({ timeout: 12_000 });
+    // Phase 2: "cancelled" badge appears (exit_code=-3 maps to label "cancelled");
+    // no spinner remains.
+    await expect(page.getByText('cancelled').first()).toBeVisible({ timeout: 12_000 });
     await expect(page.getByText('running', { exact: true })).not.toBeVisible();
   });
 });

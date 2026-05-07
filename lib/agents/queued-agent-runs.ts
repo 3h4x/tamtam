@@ -121,7 +121,13 @@ function parseQueueDrainResponse(raw: string): QueueDrainResponse | null {
 
 function shouldKeepQueuedRunOn409(parsed: QueueDrainResponse | null, raw: string): boolean {
   const code = parsed?.code ?? '';
-  if (code === 'already_running' || code === 'already_starting' || code === 'jobs_paused' || code === 'issue_branch') {
+  if (
+    code === 'already_running' ||
+    code === 'already_starting' ||
+    code === 'project_busy' ||
+    code === 'jobs_paused' ||
+    code === 'issue_branch'
+  ) {
     return true;
   }
   return (parsed?.detail ?? raw).includes('Jobs are paused globally');

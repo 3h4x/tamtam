@@ -15,6 +15,7 @@ import { getSettings } from '@/lib/shared/config';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { isCliProvider } from '@/lib/usage/cli-providers';
+import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 
 export async function POST(
   request: NextRequest,
@@ -106,6 +107,14 @@ export async function POST(
     }, { status: 400 });
   }
 
+  const blockingJob = await findBlockingRunningJob(projectName);
+  if (blockingJob) {
+    return NextResponse.json({
+      detail: `Job '${blockingJob.kind}' is already running for ${projectName} (job ${blockingJob.id})`,
+      blocking_job_id: blockingJob.id,
+    }, { status: 409 });
+  }
+
   // When resuming, pin to the originating provider — session IDs are stored
   // per-CLI (codex rollouts ≠ claude sessions ≠ gemini threads), so a
   // cross-provider resume yields a cryptic "no rollout / session not found"
@@ -116,6 +125,7 @@ export async function POST(
   const gate = await checkCliStartGate('start a terminal run', {
     preferred: preferredProvider,
     requestedModel: model,
+    respectJobsPaused: false,
   });
   if (!gate.ok) {
     return NextResponse.json({ detail: gate.detail }, { status: gate.status });

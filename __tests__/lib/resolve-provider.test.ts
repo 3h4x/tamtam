@@ -194,6 +194,32 @@ describe('resolveProviderForRun', () => {
     expect(result).toEqual({ ok: true, provider: 'codex' });
   });
 
+  it('enforces the global pause by default', async () => {
+    jobsPausedResultMock.mockReturnValue({
+      ok: false,
+      status: 409,
+      detail: 'Jobs are paused globally. Turn the switch back on in Settings to start a release.',
+    });
+    const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
+    const result = await checkCliStartGate('start a release');
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      detail: 'Jobs are paused globally. Turn the switch back on in Settings to start a release.',
+    });
+  });
+
+  it('allows an explicit manual bypass when the caller opts out of jobs_paused', async () => {
+    jobsPausedResultMock.mockReturnValue({
+      ok: false,
+      status: 409,
+      detail: 'Jobs are paused globally. Turn the switch back on in Settings to start a terminal run.',
+    });
+    const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
+    const result = await checkCliStartGate('start a terminal run', { respectJobsPaused: false });
+    expect(result).toEqual({ ok: true, provider: 'codex' });
+  });
+
   it('does not block a root start gate on weekly burn alone', async () => {
     const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
     getSettingsMock.mockReturnValue({

@@ -30,6 +30,7 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
   let getSettingsMock: ReturnType<typeof vi.fn>;
   let checkCliStartGateMock: ReturnType<typeof vi.fn>;
   let fetchMock: ReturnType<typeof vi.fn>;
+  let findBlockingRunningJobMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -42,6 +43,7 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
     startJobMock = vi.fn().mockResolvedValue(9999);
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'codex' });
+    findBlockingRunningJobMock = vi.fn().mockResolvedValue(null);
     fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ status: 'started', job_id: 'delegated-job' }), {
         status: 200,
@@ -85,6 +87,9 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
 
     vi.doMock('@/lib/usage/resolve-provider', () => ({
       checkCliStartGate: checkCliStartGateMock,
+    }));
+    vi.doMock('@/lib/jobs/project-active-job', () => ({
+      findBlockingRunningJob: findBlockingRunningJobMock,
     }));
 
     vi.doMock('@/lib/shared/job-control', () => ({
@@ -174,6 +179,48 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
     expect(command).toContain('/scripts/codex-shim.js');
   });
 
+  it('returns the global pause conflict for non-delegated reruns when jobs are paused', async () => {
+    getJobMock.mockReturnValue(makeJob({ provider: 'claude' }));
+    checkCliStartGateMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      detail: 'Jobs are paused globally. Turn the switch back on in Settings to rerun a job.',
+    });
+
+    const req = new NextRequest('http://localhost/api/jobs/job-source/rerun', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ jobId: 'job-source' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.detail).toContain('Jobs are paused globally');
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 with blocking_job_id when another project job is already running', async () => {
+    getJobMock.mockReturnValue(makeJob({ kind: 'fix' }));
+    findBlockingRunningJobMock.mockResolvedValue(makeJob({
+      id: 'run-123',
+      kind: 'run',
+      finishedAt: null,
+      exitCode: null,
+    }));
+
+    const req = new NextRequest('http://localhost/api/jobs/job-source/rerun', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ jobId: 'job-source' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.detail).toContain("Job 'run' is already running");
+    expect(data.blocking_job_id).toBe('run-123');
+    expect(checkCliStartGateMock).not.toHaveBeenCalled();
+    expect(startJobMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('forwards the source provider to delegated review reruns without re-gating locally', async () => {
     getJobMock.mockReturnValue(makeJob({ kind: 'review', provider: 'claude' }));
 
@@ -208,6 +255,31 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
     const [, init] = fetchMock.mock.calls[0];
     const headers = init?.headers as Headers;
     expect(headers.get('x-tamtam-provider-preferred')).toBe('codex');
+  });
+
+  it('passes through busy conflicts from delegated fix-ci reruns', async () => {
+    getJobMock.mockReturnValue(makeJob({ kind: 'fix-ci', provider: 'codex' }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        detail: "Job 'run' is already running for proj1 (job run-123)",
+        blocking_job_id: 'run-123',
+      }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const req = new NextRequest('http://localhost/api/jobs/job-source/rerun', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ jobId: 'job-source' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.detail).toContain("Job 'run' is already running");
+    expect(data.blocking_job_id).toBe('run-123');
+    expect(checkCliStartGateMock).not.toHaveBeenCalled();
+    expect(startJobMock).not.toHaveBeenCalled();
   });
 
   it('calls updateJob after startJob', async () => {
@@ -308,6 +380,9 @@ describe('POST /api/jobs/{jobId}/rerun weekly quota gating', () => {
     }));
     vi.doMock('@/lib/usage/quota', () => ({
       getQuotaSnapshots: vi.fn().mockResolvedValue(snapshots),
+    }));
+    vi.doMock('@/lib/jobs/project-active-job', () => ({
+      findBlockingRunningJob: vi.fn().mockResolvedValue(null),
     }));
 
     const mod = await import('@/app/api/jobs/[jobId]/rerun/route');

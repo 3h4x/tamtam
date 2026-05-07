@@ -6,7 +6,7 @@ import { tmpdir } from 'os';
 import type { CliProvider } from '@/lib/usage/cli-providers';
 import type { QuotaSnapshot } from '@/lib/usage/quota-types';
 
-function makeJob() {
+function makeJob(overrides: Record<string, unknown> = {}) {
   return {
     id: 'test-job-id',
     project: 'proj1',
@@ -18,6 +18,7 @@ function makeJob() {
     finishedAt: null,
     exitCode: null,
     seen: false,
+    ...overrides,
   };
 }
 
@@ -28,6 +29,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
   let createJobMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
   let checkCliStartGateMock: ReturnType<typeof vi.fn>;
+  let findBlockingRunningJobMock: ReturnType<typeof vi.fn>;
   let getSettingsMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
   let skillsDir: string;
@@ -43,6 +45,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     createJobMock = vi.fn().mockImplementation(() => makeJob());
     updateJobMock = vi.fn();
     checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
+    findBlockingRunningJobMock = vi.fn().mockResolvedValue(null);
     getSettingsMock = vi.fn(() => ({
       cli_enabled_providers: ['claude'],
       cli_bin_claude: '/legacy/claude',
@@ -61,6 +64,9 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       updateJob: updateJobMock,
+    }));
+    vi.doMock('@/lib/jobs/project-active-job', () => ({
+      findBlockingRunningJob: findBlockingRunningJobMock,
     }));
 
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
@@ -157,6 +163,23 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(res.status).toBe(429);
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 with blocking_job_id when another project job is already running', async () => {
+    findBlockingRunningJobMock.mockResolvedValue(makeJob({ id: 'run-123', kind: 'review' }));
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'run my agent' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.detail).toContain("Job 'review' is already running");
+    expect(data.blocking_job_id).toBe('run-123');
+    expect(checkCliStartGateMock).not.toHaveBeenCalled();
     expect(startJobMock).not.toHaveBeenCalled();
   });
 
@@ -257,6 +280,21 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(createJobMock).toHaveBeenCalledOnce();
     expect(updateJobMock).toHaveBeenCalledOnce();
+  });
+
+  it('bypasses the global pause for manual terminal runs explicitly', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'hello' }),
+    });
+
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    expect(checkCliStartGateMock).toHaveBeenCalledWith('start a terminal run', {
+      preferred: undefined,
+      requestedModel: 'fast',
+      respectJobsPaused: false,
+    });
   });
 
   it('prepends persona content when persona file exists', async () => {
@@ -520,6 +558,9 @@ describe('POST /api/projects/by-project/{projectName}/run weekly quota gating', 
     vi.doMock('@/lib/jobs/job-storage', () => ({
       createJob: createJobMock,
       updateJob: updateJobMock,
+    }));
+    vi.doMock('@/lib/jobs/project-active-job', () => ({
+      findBlockingRunningJob: vi.fn().mockResolvedValue(null),
     }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       startJob: startJobMock,
