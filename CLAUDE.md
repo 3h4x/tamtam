@@ -118,7 +118,7 @@ See `docs/API.md` for the full route reference. New routes must be documented th
 - Do NOT claim frontend work complete without the Chrome MCP screenshot step
 
 ## Key Patterns
-- Runtime config is stored in DB (`settings`, `projects`, `skills`, `agents`); shared per-project config and file-agent prompts can also live in committed `.tamtam/` files.
+- Runtime config is stored in DB (`settings`, `projects`, `jobs`, `skills`, `agents`, `recommendations`, `ghStatus`, `ghIssuesCache`, `pipelineLocks`, `queuedAgentRuns`); shared per-project config and file-agent prompts can also live in committed `.tamtam/` files.
 - Workspace path configured in Settings UI; projects discovered by scanning for git repos.
 - Most CLI calls (git, gh, launchctl, pm2) go through `lib/shared/shell.ts`. `lib/shared/project-data.ts` assembles project data with 10s TTL cache.
 - Client-side API helpers live under `lib/client/` and are surfaced through `lib/client-api.ts`. When a fetch pattern is reused across components, add or extend a helper there instead of duplicating request/response handling in the component.
