@@ -11,13 +11,21 @@ function providerFromRequest(request: NextRequest): 'active' | 'claude' | 'codex
   return provider === 'claude' || provider === 'codex' ? provider : 'active';
 }
 
+function quotaErrorMessage(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (msg.includes('Anthropic usage API rate-limited') || msg.includes('backing off after Anthropic usage API rate limit')) {
+    return 'Claude quota temporarily unavailable: Anthropic usage API is rate-limited and no cached snapshot exists yet.';
+  }
+  return msg;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const snapshot = await getQuotaForProvider(providerFromRequest(request));
     return NextResponse.json({ ...snapshot, gateEnabled: gateEnabled() });
   } catch (e) {
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : String(e) },
+      { error: quotaErrorMessage(e) },
       { status: 502 }
     );
   }
@@ -30,7 +38,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ...snapshot, gateEnabled: gateEnabled() });
   } catch (e) {
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : String(e) },
+      { error: quotaErrorMessage(e) },
       { status: 502 }
     );
   }

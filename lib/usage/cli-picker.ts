@@ -21,6 +21,10 @@ function finiteOrZero(n: number | null | undefined): number {
   return typeof n === 'number' && Number.isFinite(n) ? n : 0;
 }
 
+function hasQuotaFetcher(provider: CliProvider): boolean {
+  return provider === 'claude' || provider === 'codex';
+}
+
 /**
  * Compute the hard-gate utilization (%) for a single provider snapshot.
  * This is the only signal that can 429 a manual/root start:
@@ -73,6 +77,9 @@ export function pickCliProvider(opts: PickCliOptions): PickCliResult {
   if (enabled.length === 0) {
     return { provider: null, reason: 'no_enabled_providers' };
   }
+  const hasKnownQuotaAwareProvider = enabled.some((provider) =>
+    hasQuotaFetcher(provider) && !!(snapshots.get(provider) ?? null)
+  );
   let bestProvider: CliProvider | null = null;
   let bestHeadroom = -Infinity;
   let bestUtilization = 0;
@@ -80,7 +87,9 @@ export function pickCliProvider(opts: PickCliOptions): PickCliResult {
     const snapshot = snapshots.get(provider) ?? null;
     const hardGateUtilization = hardGateUtilizationFor(snapshot);
     if (blockEnabled && hardGateUtilization >= budgetBlockAtPct) continue;
-    const utilization = effectiveUtilizationFor(snapshot, requestedModel);
+    const utilization = !snapshot && hasKnownQuotaAwareProvider && hasQuotaFetcher(provider)
+      ? 100
+      : effectiveUtilizationFor(snapshot, requestedModel);
     const headroom = 100 - utilization;
     if (headroom > bestHeadroom) {
       bestProvider = provider;

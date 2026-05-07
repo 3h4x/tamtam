@@ -16,6 +16,7 @@ interface CacheState {
   snapshot: unknown;
   fetchedAt: number;
   retryAfterMs: number;
+  rateLimitFailures?: number;
   inFlight: Promise<unknown> | null;
 }
 
@@ -115,12 +116,28 @@ describe('claude-quota', () => {
       snapshot: first,
       fetchedAt: 0, // expired so we attempt fetch
       retryAfterMs: 0,
+      rateLimitFailures: 0,
       inFlight: null,
     };
 
     const second = await getClaudeQuota();
     expect(second.stale).toBe(true);
     expect(second.fiveHour.utilization).toBe(55);
+  });
+
+  it('backs off after rate-limit when no cached snapshot exists', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    execMock.mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+    readFileMock.mockResolvedValue(
+      JSON.stringify({ claudeAiOauth: { accessToken: 'tok' } })
+    );
+    fetchMock.mockResolvedValue(makeRes({}, 429));
+
+    const { getClaudeQuota } = await import('@/lib/usage/claude-quota');
+
+    await expect(getClaudeQuota()).rejects.toThrow(/rate-limited/);
+    await expect(getClaudeQuota()).rejects.toThrow(/backing off/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('returns cached snapshot within TTL without re-fetching', async () => {
