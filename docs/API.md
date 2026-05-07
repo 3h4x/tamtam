@@ -34,7 +34,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 - `review-pr` — Start AI review of a GitHub PR (POST). PR review prompts ignore `.tamtam/` metadata changes unless the review is explicitly about TamTam configuration.
 - `fix-ci` — Start AI CI fix run (POST). Returns `409 { detail, blocking_job_id }` when another job is already running for the project
 - `test` — Run project test command (POST)
-- `changes` — Uncommitted changes summary (GET, returns `defaultBranch`/`branch`/`ahead`/`behind`/`files`); git pull with strategy (POST: ff-only/merge/rebase)
+- `changes` — Uncommitted changes summary (GET, returns `defaultBranch`/`branch`/`ahead`/`behind`/`files`); git pull with strategy (POST: ff-only/merge/rebase). Pull returns `409 { detail, diverged: true }` on branch divergence and `409 { detail }` when the working tree has tracked or untracked local changes, so callers must commit or stash before pulling.
 - `changes/diff` — Full git diff content (GET)
 - `checkout-default` — Switch to default branch; refuses if uncommitted changes (POST → `{ status: 'switched'|'already-on-branch', branch }`)
 - `push` — Push changes to git (POST). Accepts optional JSON body `{ commit?: boolean, release_id?: string }`: `commit: true` runs the commit step first, and `release_id` keeps manual retry/continue pushes linked to an active release chain

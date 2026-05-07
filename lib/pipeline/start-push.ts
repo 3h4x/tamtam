@@ -288,6 +288,23 @@ export async function pushCurrentBranch(
   return { ok: true, commitSha: shaR.exitCode === 0 ? shaR.stdout.trim() : '' };
 }
 
+async function switchToDefaultBranchAfterPrPush(
+  projPath: string,
+  log: (s: string) => void,
+): Promise<void> {
+  const mainBranch = await detectMainBranch(projPath);
+  log(`\n# switching back to ${mainBranch} and pulling\n`);
+  const coR = await exec('git', ['-C', projPath, 'checkout', mainBranch], { timeout: 10000 });
+  if (coR.stdout) log(coR.stdout);
+  if (coR.stderr) log(coR.stderr);
+  if (coR.exitCode === 0) {
+    const pullR = await exec('git', ['-C', projPath, 'pull', '--ff-only', 'origin', mainBranch], { timeout: 30000 });
+    if (pullR.stdout) log(pullR.stdout);
+    if (pullR.stderr) log(pullR.stderr);
+  }
+  clearProjectDataCache();
+}
+
 async function runPush(
   projectName: string,
   projPath: string,
@@ -427,21 +444,18 @@ async function runPush(
   //   - Non-issue push without pr_workflow_enabled → push to current branch,
   //     no PR.
   const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
-  const prWorkflowEnabled = !!getProjectTestConfig(projectName)?.prWorkflowEnabled;
+  const pipelineConfig = getProjectTestConfig(projectName);
+  const prWorkflowEnabled = !!pipelineConfig?.prWorkflowEnabled;
+  const autoPrMergeEnabled = !!pipelineConfig?.autoPrMergeEnabled;
 
   if (issueCtx) {
     const prUrl = await createIssuePR(projPath, log, issueCtx);
-    const mainBranch = await detectMainBranch(projPath);
-    log(`\n# switching back to ${mainBranch} and pulling\n`);
-    const coR = await exec('git', ['-C', projPath, 'checkout', mainBranch], { timeout: 10000 });
-    if (coR.stdout) log(coR.stdout);
-    if (coR.stderr) log(coR.stderr);
-    if (coR.exitCode === 0) {
-      const pullR = await exec('git', ['-C', projPath, 'pull', '--ff-only', 'origin', mainBranch], { timeout: 30000 });
-      if (pullR.stdout) log(pullR.stdout);
-      if (pullR.stderr) log(pullR.stderr);
+    if (autoPrMergeEnabled) {
+      log(`\n# staying on issue branch until PR is merged (handled by pr-wait)\n`);
+      clearProjectDataCache();
+    } else {
+      await switchToDefaultBranchAfterPrPush(projPath, log);
     }
-    clearProjectDataCache();
     if (prUrl) {
       const prNumber = parseInt(prUrl.split('/').pop() ?? '0', 10) || undefined;
       return { ok: true, commitSha, message: `PR created: ${prUrl}`, prUrl, prNumber, prRepo: issueCtx.repo };
@@ -469,15 +483,10 @@ async function runPush(
     const prResult = await createGenericPR(projPath, log);
     if (prResult) {
       const prNumber = parseInt(prResult.prUrl.split('/').pop() ?? '0', 10) || undefined;
-      const mainBranch = await detectMainBranch(projPath);
-      log(`\n# switching back to ${mainBranch} and pulling\n`);
-      const coR = await exec('git', ['-C', projPath, 'checkout', mainBranch], { timeout: 10000 });
-      if (coR.stdout) log(coR.stdout);
-      if (coR.stderr) log(coR.stderr);
-      if (coR.exitCode === 0) {
-        const pullR = await exec('git', ['-C', projPath, 'pull', '--ff-only', 'origin', mainBranch], { timeout: 30000 });
-        if (pullR.stdout) log(pullR.stdout);
-        if (pullR.stderr) log(pullR.stderr);
+      if (autoPrMergeEnabled) {
+        log(`\n# staying on feature branch until PR is merged (handled by pr-wait)\n`);
+      } else {
+        await switchToDefaultBranchAfterPrPush(projPath, log);
       }
       return { ok: true, commitSha, message: `PR created: ${prResult.prUrl}`, prUrl: prResult.prUrl, prNumber, prRepo: prResult.prRepo };
     }

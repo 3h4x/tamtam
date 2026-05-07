@@ -224,6 +224,17 @@ export async function POST(
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
 
+  const statusR = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
+  if (statusR.exitCode !== 0) {
+    return NextResponse.json({ detail: 'git status failed' }, { status: 422 });
+  }
+  if (statusR.stdout.trim()) {
+    return NextResponse.json(
+      { detail: 'Working tree has local changes; commit or stash them before pulling' },
+      { status: 409 },
+    );
+  }
+
   const args =
     strategy === 'rebase'
       ? ['pull', '--rebase']
