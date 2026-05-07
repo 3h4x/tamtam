@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { fetchIssuesAndPRs, fetchProjectConfig } from '@/lib/client-api'
 import type { GhPullRequest, GhIssue, ProjectConfig } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
@@ -14,9 +14,10 @@ export type { GhPullRequest, GhIssue, ProjectConfig }
 interface IssuesTabProps {
   projectName: string
   onCountChange?: (count: { prs: number; issues: number }) => void
+  jobsPaused?: boolean
 }
 
-export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
+export function IssuesTab({ projectName, onCountChange, jobsPaused = false }: IssuesTabProps) {
   const [prs, setPrs] = useState<GhPullRequest[]>([])
   const [issues, setIssues] = useState<GhIssue[]>([])
   const [repo, setRepo] = useState<string | null>(null)
@@ -27,6 +28,11 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
   const [cachedAt, setCachedAt] = useState<number | null>(null)
   const [fromCache, setFromCache] = useState(false)
   const [projectCfg, setProjectCfg] = useState<ProjectConfig | null>(null)
+  const onCountChangeRef = useRef(onCountChange)
+
+  useEffect(() => {
+    onCountChangeRef.current = onCountChange
+  }, [onCountChange])
 
   // Preload project config so the "Work on" tooltip can show the effective
   // pipeline chain. Swallowed on error — the tooltip just falls back to a
@@ -50,7 +56,7 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
       setGhError(res.error)
       setCachedAt(res.cachedAt)
       setFromCache(res.cached)
-      onCountChange?.({ prs: res.prs.length, issues: res.issues.length })
+      onCountChangeRef.current?.({ prs: res.prs.length, issues: res.issues.length })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load issues')
     } finally {
@@ -65,9 +71,9 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
 
   if (loading) {
     return (
-      <div className="mt-2 space-y-3">
+      <div className="mt-2 space-y-2.5">
         <div className="rounded-md border border-border bg-bg-secondary px-3 py-2">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <div className="skeleton h-4 w-28" />
             <div className="skeleton h-5 w-14 rounded-full" />
             <div className="skeleton h-5 w-[4.5rem] rounded-full" />
@@ -76,9 +82,9 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
         </div>
         <div className="overflow-hidden rounded-md border border-border bg-bg-secondary">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="grid grid-cols-[16px_minmax(0,1fr)_auto] items-start gap-2.5 border-b border-border px-3 py-2.5 last:border-0" style={{ opacity: 1 - i * 0.16 }}>
+            <div key={i} className="grid grid-cols-[16px_minmax(0,1fr)_auto] items-start gap-2 border-b border-border px-3 py-2 last:border-0" style={{ opacity: 1 - i * 0.16 }}>
               <div className="skeleton h-4 w-4 rounded-full mt-0.5 shrink-0" />
-              <div className="min-w-0 space-y-2">
+              <div className="min-w-0 space-y-1.5">
                 <div className="flex items-start gap-2">
                   <div className="skeleton h-4 w-3/5" />
                   <div className="skeleton h-5 w-12 rounded-full shrink-0" />
@@ -112,24 +118,24 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
   }
 
   return (
-    <div className="mt-2 space-y-3">
+    <div className="mt-2 space-y-2.5">
       <div className="rounded-md border border-border bg-bg-secondary px-3 py-2">
-        <div className="flex flex-wrap items-start gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               {repo && (
                 <span className="min-w-0 truncate text-xs font-mono text-text-secondary">{repo}</span>
               )}
-              <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-2 py-0.5 text-[11px] font-medium text-text-secondary tabular-nums">
+              <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary tabular-nums">
                 <span className="mr-1 text-text-primary">{prs.length}</span>
                 {' '}PR{prs.length === 1 ? '' : 's'}
               </span>
-              <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-2 py-0.5 text-[11px] font-medium text-text-secondary tabular-nums">
+              <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary tabular-nums">
                 <span className="mr-1 text-text-primary">{issues.length}</span>
                 {' '}issue{issues.length === 1 ? '' : 's'}
               </span>
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-tertiary">
+            <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-text-tertiary">
               {fromCache && cachedAt && (
                 <span className="inline-flex items-center gap-1" title={new Date(cachedAt * 1000).toLocaleString()}>
                   <span className="h-1 w-1 rounded-full bg-text-tertiary/60" />
@@ -142,7 +148,7 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
             </div>
           </div>
           <button
-            className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border bg-bg-secondary px-2.5 py-1.5 text-xs text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-60"
+            className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border bg-bg-secondary px-2 py-1 text-[11px] text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-60"
             onClick={() => load('refresh')}
             disabled={refreshing}
             title="Force refresh from GitHub"
@@ -167,10 +173,16 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
           </div>
           <div className="border border-border rounded-md overflow-hidden bg-bg-secondary">
             {prs.map((pr) => (
-              <PRRow key={pr.number} pr={pr} projectName={projectName} onMerged={() => load('refresh')} />
+              <PRRow
+                key={pr.number}
+                pr={pr}
+                projectName={projectName}
+                jobsPaused={jobsPaused}
+                onMerged={() => load('refresh')}
+              />
             ))}
-          </div>
         </div>
+      </div>
       )}
 
       {issues.length > 0 && (

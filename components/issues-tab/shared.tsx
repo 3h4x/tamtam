@@ -7,11 +7,11 @@ export function Labels({ labels, limit }: { labels: GhLabel[]; limit?: number })
   const visible = typeof limit === 'number' ? labels.slice(0, limit) : labels
   const hidden = labels.length - visible.length
   return (
-    <span className="flex items-center gap-1 flex-wrap">
+    <span className="flex flex-wrap items-center gap-1">
       {visible.map((l) => (
         <span
           key={l.name}
-          className="px-1.5 py-0.5 text-[10px] rounded-full font-medium"
+          className="rounded-full px-1.5 py-0.5 text-[9px] font-medium"
           style={{ background: `#${l.color}22`, color: `#${l.color}`, border: `1px solid #${l.color}44` }}
         >
           {l.name}
@@ -19,7 +19,7 @@ export function Labels({ labels, limit }: { labels: GhLabel[]; limit?: number })
       ))}
       {hidden > 0 && (
         <span
-          className="px-1.5 py-0.5 text-[10px] rounded-full font-medium bg-bg-tertiary text-text-tertiary border border-border"
+          className="rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[9px] font-medium text-text-tertiary"
           title={labels.slice(visible.length).map((l) => l.name).join(', ')}
         >
           +{hidden}
@@ -69,22 +69,24 @@ export function GateBadge({
   title,
   onClick,
   busy,
+  disabled,
 }: {
   label: string
   state: GateState
   title: string
   onClick?: () => void
   busy?: boolean
+  disabled?: boolean
 }) {
-  const cls = `inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${GATE_CLASS[state]} ${onClick ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`
+  const cls = `inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${GATE_CLASS[state]} ${onClick && !disabled ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''} ${disabled ? 'cursor-not-allowed opacity-60' : ''}`
   if (onClick) {
     return (
       <button
         type="button"
         className={cls}
         title={title}
-        onClick={(e) => { e.stopPropagation(); if (!busy) onClick() }}
-        disabled={busy}
+        onClick={(e) => { e.stopPropagation(); if (!busy && !disabled) onClick() }}
+        disabled={busy || disabled}
       >
         <span>{busy ? '⟳' : GATE_SYMBOL[state]}</span>
         <span>{label}</span>

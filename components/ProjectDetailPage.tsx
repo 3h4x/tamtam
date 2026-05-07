@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject, fetchIssuesAndPRs, pushProject, fetchBranch, createProjectPR } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
@@ -14,6 +14,7 @@ import { DocsTab } from '@/components/DocsTab'
 import { RecommendationsTab } from '@/components/RecommendationsTab'
 import { useToast } from '@/components/Toast'
 import { isPipelineBusy } from '@/lib/pipeline/pipeline-status'
+import { subscribeToJobsPausedChanged } from '@/lib/shared/jobs-paused-events'
 import { ConfigTab } from '@/components/project-detail/ConfigTab'
 import { PipelineStrip } from '@/components/project-detail/PipelineStrip'
 import { ProjectActions } from '@/components/project-detail/ProjectActions'
@@ -56,6 +57,8 @@ export function ProjectDetailPage({
   const [creatingPr, setCreatingPr] = useState(false)
   const [pushingToPr, setPushingToPr] = useState(false)
   const [boardUrl, setBoardUrl] = useState<string>('')
+  const [jobsPaused, setJobsPaused] = useState(false)
+  const jobsPausedEventSeqRef = useRef(0)
 
   // Custom actions
   const [customActions, setCustomActions] = useState<CustomAction[]>([])
@@ -111,16 +114,30 @@ export function ProjectDetailPage({
 
   // Load board URL for the optional "Board ↗" header chip
   useEffect(() => {
+    let cancelled = false
+    const unsubscribe = subscribeToJobsPausedChanged((paused) => {
+      jobsPausedEventSeqRef.current += 1
+      setJobsPaused(paused)
+    })
+    const fetchSeq = jobsPausedEventSeqRef.current
     fetch('/api/settings')
       .then((r) => r.json())
       .then((data) => {
+        if (cancelled) return
         const s = data?.settings ?? data
+        if (jobsPausedEventSeqRef.current === fetchSeq) {
+          setJobsPaused(s?.jobs_paused === 'true')
+        }
         if (s?.github_board_sync_enabled === 'true') {
           const url = (typeof s?.github_board_view_url === 'string' && s.github_board_view_url) || (typeof s?.github_board_project_url === 'string' ? s.github_board_project_url : '')
           if (url) setBoardUrl(url)
         }
       })
       .catch(() => undefined)
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
   }, [])
 
   // Poll issues/PRs + current/default branch together
@@ -168,6 +185,10 @@ export function ProjectDetailPage({
 
   const handleCustomAction = async (actionName: string) => {
     if (!name || runningActions.has(actionName)) return
+    if (jobsPaused) {
+      toast('Jobs are paused globally. Resume jobs to run this custom action.', 'info')
+      return
+    }
     setRunningActions((prev) => new Set(prev).add(actionName))
     try {
       const result = await runCustomAction(name, actionName)
@@ -534,6 +555,7 @@ export function ProjectDetailPage({
             aggregateCi={aggregateCi}
             ciFailedUrl={ciFailedUrl}
             githubUrl={githubUrl}
+            jobsPaused={jobsPaused}
             config={config}
             verdict={verdict}
             hasUnreviewed={hasUnreviewed}
@@ -648,11 +670,11 @@ export function ProjectDetailPage({
       )}
 
       {activeTab === 'changes' && name && (
-        <ChangesTab projectName={name} />
+        <ChangesTab projectName={name} jobsPaused={jobsPaused} />
       )}
 
       {activeTab === 'issues' && name && (
-        <IssuesTab projectName={name} onCountChange={setIssueCount} />
+          <IssuesTab projectName={name} onCountChange={setIssueCount} jobsPaused={jobsPaused} />
       )}
 
       {activeTab === 'docs' && name && (
@@ -660,7 +682,7 @@ export function ProjectDetailPage({
       )}
 
       {activeTab === 'history' && name && (
-        <ProjectRunsTab projectName={name} />
+        <ProjectRunsTab projectName={name} jobsPaused={jobsPaused} />
       )}
 
       {activeTab === 'recommendations' && name && (
@@ -678,6 +700,7 @@ export function ProjectDetailPage({
             unpushed={project.unpushed ?? 0}
             hasUnreviewed={hasUnreviewed}
             verdict={verdict}
+            jobsPaused={jobsPaused}
             onRefresh={onRefresh}
           />
           <Suspense fallback={null}>

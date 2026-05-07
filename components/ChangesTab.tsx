@@ -29,6 +29,7 @@ const STAT_BAR_BOXES = 5
 
 interface ChangesTabProps {
   projectName: string
+  jobsPaused?: boolean
 }
 
 interface DiffEntry {
@@ -84,7 +85,7 @@ function StatBar({ additions, deletions }: { additions: number; deletions: numbe
   )
 }
 
-export function ChangesTab({ projectName }: ChangesTabProps) {
+export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps) {
   const router = useRouter()
   const [data, setData] = useState<ChangesResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -149,6 +150,10 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
   }, [projectName, load])
 
   const doPush = async () => {
+    if (jobsPaused) {
+      setPushError('Jobs are paused globally. Resume jobs to start a push.')
+      return
+    }
     setPushing(true)
     setPushError(null)
     try {
@@ -240,6 +245,10 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
 
   if (!data || data.files.length === 0) {
     const onNonDefault = !!(data?.branch && data.defaultBranch && data.branch !== data.defaultBranch)
+    const pushBlocked = jobsPaused || pushing
+    const pushTitle = jobsPaused
+      ? 'Jobs are paused globally. Resume jobs to start a push.'
+      : `Push ${data?.ahead ?? 0} commit${data?.ahead === 1 ? '' : 's'} to origin`
     return (
       <div className="p-6 text-center text-text-secondary">
         <p className="text-sm">No uncommitted changes.</p>
@@ -283,8 +292,8 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
             <button
               className="px-4 py-1.5 text-sm border border-status-warning/60 bg-status-warning/10 text-status-warning rounded-md hover:bg-status-warning/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
               onClick={doPush}
-              disabled={pushing}
-              title={`Push ${data!.ahead} commit${data!.ahead !== 1 ? 's' : ''} to origin`}
+              disabled={pushBlocked}
+              title={pushTitle}
             >
               {pushing ? 'Pushing…' : `Push ${data!.ahead} commit${data!.ahead !== 1 ? 's' : ''}`}
             </button>
@@ -294,6 +303,11 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
       </div>
     )
   }
+
+  const pushBlocked = jobsPaused || pushing
+  const pushTitle = jobsPaused
+    ? 'Jobs are paused globally. Resume jobs to start a push.'
+    : `Push ${data.ahead} commit${data.ahead !== 1 ? 's' : ''} to origin/${data.branch}`
 
   return (
     <div className="mt-2">
@@ -372,8 +386,8 @@ export function ChangesTab({ projectName }: ChangesTabProps) {
             <button
               className="px-2 py-1 text-xs border border-status-warning/60 bg-status-warning/10 text-status-warning rounded-md hover:bg-status-warning/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
               onClick={doPush}
-              disabled={pushing}
-              title={`Push ${data.ahead} commit${data.ahead !== 1 ? 's' : ''} to origin/${data.branch}`}
+              disabled={pushBlocked}
+              title={pushTitle}
             >
               {pushing ? 'Pushing…' : 'Push'}
             </button>

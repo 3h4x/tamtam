@@ -7,6 +7,7 @@ import { flushSync } from 'react-dom'
 import { ProjectDetailPage } from '@/components/ProjectDetailPage'
 import type { FleetHealth } from '@/hooks/useProjectHealth'
 import type { CustomAction, ProjectConfig } from '@/lib/client-api'
+import { dispatchJobsPausedChanged } from '@/lib/shared/jobs-paused-events'
 
 const {
   paramsState,
@@ -23,6 +24,10 @@ const {
   fetchBranchMock,
   tabNavPropsMock,
   terminalTabPropsMock,
+  issuesTabPropsMock,
+  changesTabPropsMock,
+  historyTabPropsMock,
+  pipelineStripPropsMock,
 } = vi.hoisted(() => ({
   paramsState: {
     name: 'acme/widgets',
@@ -42,6 +47,10 @@ const {
   fetchBranchMock: vi.fn(),
   tabNavPropsMock: vi.fn(),
   terminalTabPropsMock: vi.fn(),
+  issuesTabPropsMock: vi.fn(),
+  changesTabPropsMock: vi.fn(),
+  historyTabPropsMock: vi.fn(),
+  pipelineStripPropsMock: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -80,15 +89,24 @@ vi.mock('@/components/TerminalTab', () => ({
 }))
 
 vi.mock('@/components/ProjectRunsTab', () => ({
-  ProjectRunsTab: ({ projectName }: { projectName: string }) => <div data-testid="history-tab">{projectName}</div>,
+  ProjectRunsTab: ({ projectName, jobsPaused }: { projectName: string; jobsPaused?: boolean }) => {
+    historyTabPropsMock({ projectName, jobsPaused })
+    return <div data-testid="history-tab" data-jobs-paused={jobsPaused ? 'true' : 'false'}>{projectName}</div>
+  },
 }))
 
 vi.mock('@/components/ChangesTab', () => ({
-  ChangesTab: ({ projectName }: { projectName: string }) => <div data-testid="changes-tab">{projectName}</div>,
+  ChangesTab: ({ projectName, jobsPaused }: { projectName: string; jobsPaused?: boolean }) => {
+    changesTabPropsMock({ projectName, jobsPaused })
+    return <div data-testid="changes-tab" data-jobs-paused={jobsPaused ? 'true' : 'false'}>{projectName}</div>
+  },
 }))
 
 vi.mock('@/components/IssuesTab', () => ({
-  IssuesTab: ({ projectName }: { projectName: string }) => <div data-testid="issues-tab">{projectName}</div>,
+  IssuesTab: ({ projectName, jobsPaused }: { projectName: string; jobsPaused?: boolean }) => {
+    issuesTabPropsMock({ projectName, jobsPaused })
+    return <div data-testid="issues-tab" data-jobs-paused={jobsPaused ? 'true' : 'false'}>{projectName}</div>
+  },
 }))
 
 vi.mock('@/components/DocsTab', () => ({
@@ -120,12 +138,21 @@ vi.mock('@/components/project-detail/ConfigTab', () => ({
 }))
 
 vi.mock('@/components/project-detail/PipelineStrip', () => ({
-  PipelineStrip: () => <div data-testid="pipeline-strip" />,
+  PipelineStrip: (props: { jobsPaused: boolean }) => {
+    pipelineStripPropsMock(props)
+    return <div data-testid="pipeline-strip" data-jobs-paused={props.jobsPaused ? 'true' : 'false'} />
+  },
 }))
 
 vi.mock('@/components/project-detail/ProjectActions', () => ({
-  ProjectActions: (props: { onCustomAction: (name: string) => Promise<void> }) => (
-    <button type="button" onClick={() => void props.onCustomAction('Deploy')}>run custom action</button>
+  ProjectActions: (props: { jobsPaused: boolean; onCustomAction: (name: string) => Promise<void> }) => (
+    <div>
+      <button type="button" onClick={() => void props.onCustomAction('Deploy')}>run custom action</button>
+      <div
+        data-testid="project-actions"
+        data-jobs-paused={props.jobsPaused ? 'true' : 'false'}
+      />
+    </div>
   ),
 }))
 
@@ -231,6 +258,10 @@ describe('ProjectDetailPage', () => {
     fetchBranchMock.mockReset()
     tabNavPropsMock.mockReset()
     terminalTabPropsMock.mockReset()
+    issuesTabPropsMock.mockReset()
+    changesTabPropsMock.mockReset()
+    historyTabPropsMock.mockReset()
+    pipelineStripPropsMock.mockReset()
 
     fetchJobsMock.mockResolvedValue({ jobs: [] })
     fetchProjectConfigMock.mockResolvedValue(buildConfig())
@@ -325,6 +356,189 @@ describe('ProjectDetailPage', () => {
       expect(runCustomActionMock).toHaveBeenCalledWith('acme/widgets', 'Deploy')
       expect(toastMock).toHaveBeenCalledWith('Deploy started for acme/widgets', 'success')
       expect(pushMock).toHaveBeenCalledWith('/project/acme/widgets/terminal?job=job-123')
+    })
+
+    unmount()
+  })
+
+  it('blocks custom actions while jobs are paused on an already open page', async () => {
+    const { container, unmount } = renderPage()
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="project-actions"]')?.getAttribute('data-jobs-paused')).toBe('false')
+    })
+
+    flushSync(() => {
+      dispatchJobsPausedChanged(true)
+    })
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="project-actions"]')?.getAttribute('data-jobs-paused')).toBe('true')
+    })
+
+    flushSync(() => {
+      buttonByText(container, 'run custom action').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    await vi.waitFor(() => {
+      expect(runCustomActionMock).not.toHaveBeenCalled()
+      expect(toastMock).toHaveBeenCalledWith('Jobs are paused globally. Resume jobs to run this custom action.', 'info')
+    })
+
+    unmount()
+  })
+
+  it('updates release pause state live without remounting the project page', async () => {
+    paramsState.tab = 'issues'
+    const { container, unmount } = renderPage()
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="project-actions"]')?.getAttribute('data-jobs-paused')).toBe('false')
+      expect(issuesTabPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ jobsPaused: false }))
+    })
+
+    flushSync(() => {
+      dispatchJobsPausedChanged(true)
+    })
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="project-actions"]')?.getAttribute('data-jobs-paused')).toBe('true')
+      expect(issuesTabPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ jobsPaused: true }))
+    })
+
+    flushSync(() => {
+      dispatchJobsPausedChanged(false)
+    })
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="project-actions"]')?.getAttribute('data-jobs-paused')).toBe('false')
+      expect(issuesTabPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ jobsPaused: false }))
+    })
+
+    unmount()
+  })
+
+  it('updates changes-tab push pause state live without remounting the project page', async () => {
+    paramsState.tab = 'changes'
+    const { container, unmount } = renderPage()
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="changes-tab"]')?.getAttribute('data-jobs-paused')).toBe('false')
+      expect(changesTabPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ jobsPaused: false }))
+    })
+
+    flushSync(() => {
+      dispatchJobsPausedChanged(true)
+    })
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="changes-tab"]')?.getAttribute('data-jobs-paused')).toBe('true')
+      expect(changesTabPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ jobsPaused: true }))
+    })
+
+    flushSync(() => {
+      dispatchJobsPausedChanged(false)
+    })
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="changes-tab"]')?.getAttribute('data-jobs-paused')).toBe('false')
+      expect(changesTabPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ jobsPaused: false }))
+    })
+
+    unmount()
+  })
+
+  it('updates history-tab release pause state live without remounting the project page', async () => {
+    paramsState.tab = 'history'
+    const { container, unmount } = renderPage()
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="history-tab"]')?.getAttribute('data-jobs-paused')).toBe('false')
+      expect(historyTabPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ jobsPaused: false }))
+    })
+
+    flushSync(() => {
+      dispatchJobsPausedChanged(true)
+    })
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="history-tab"]')?.getAttribute('data-jobs-paused')).toBe('true')
+      expect(historyTabPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ jobsPaused: true }))
+    })
+
+    flushSync(() => {
+      dispatchJobsPausedChanged(false)
+    })
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="history-tab"]')?.getAttribute('data-jobs-paused')).toBe('false')
+      expect(historyTabPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ jobsPaused: false }))
+    })
+
+    unmount()
+  })
+
+  it('updates terminal pipeline retry pause state live without remounting the project page', async () => {
+    paramsState.tab = 'terminal'
+    const { container, unmount } = renderPage()
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="pipeline-strip"]')?.getAttribute('data-jobs-paused')).toBe('false')
+      expect(pipelineStripPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ jobsPaused: false }))
+    })
+
+    flushSync(() => {
+      dispatchJobsPausedChanged(true)
+    })
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="pipeline-strip"]')?.getAttribute('data-jobs-paused')).toBe('true')
+      expect(pipelineStripPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ jobsPaused: true }))
+    })
+
+    unmount()
+  })
+
+  it('keeps live pause state after a stale settings fetch resolves late', async () => {
+    paramsState.tab = 'issues'
+
+    let resolveSettings!: (value: { json: () => Promise<{ settings: { jobs_paused: string } }> }) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => {
+      resolveSettings = resolve
+    })))
+
+    const { container, unmount } = renderPage()
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="project-actions"]')?.getAttribute('data-jobs-paused')).toBe('false')
+      expect(issuesTabPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ jobsPaused: false }))
+    })
+
+    flushSync(() => {
+      dispatchJobsPausedChanged(true)
+    })
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="project-actions"]')?.getAttribute('data-jobs-paused')).toBe('true')
+      expect(issuesTabPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ jobsPaused: true }))
+    })
+
+    resolveSettings({
+      json: async () => ({ settings: { jobs_paused: 'false' } }),
+    })
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="project-actions"]')?.getAttribute('data-jobs-paused')).toBe('true')
+      expect(issuesTabPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ jobsPaused: true }))
+    })
+
+    flushSync(() => {
+      buttonByText(container, 'run custom action').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    await vi.waitFor(() => {
+      expect(runCustomActionMock).not.toHaveBeenCalled()
+      expect(toastMock).toHaveBeenCalledWith('Jobs are paused globally. Resume jobs to run this custom action.', 'info')
     })
 
     unmount()

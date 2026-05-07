@@ -96,14 +96,14 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
 
   return (
     <div className="border-b border-border last:border-b-0">
-      <div className="grid grid-cols-[16px_minmax(0,1fr)] items-start gap-2.5 px-3 py-2.5 hover:bg-bg-tertiary/50 lg:grid-cols-[16px_minmax(0,1fr)_auto] transition-colors">
+      <div className="grid grid-cols-[16px_minmax(0,1fr)] items-start gap-2 px-3 py-2 hover:bg-bg-tertiary/50 lg:grid-cols-[16px_minmax(0,1fr)_auto] transition-colors">
         <span className="mt-0.5 shrink-0 text-accent" title="Open Issue">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
             <path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
             <path fillRule="evenodd" d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z" />
           </svg>
         </span>
-        <div className="min-w-0 space-y-2">
+        <div className="min-w-0 space-y-1.5">
           <div className="flex min-w-0 items-start gap-2">
             <button
               className="min-w-0 flex-1 text-sm text-text-primary font-medium hover:text-accent text-left cursor-pointer leading-5"
@@ -116,7 +116,7 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
               #{issue.number}
             </span>
           </div>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-tertiary tabular-nums">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-text-tertiary tabular-nums">
             <span className="text-text-tertiary">by <span className="text-text-secondary">{issue.author?.login}</span></span>
             <span title={issue.createdAt}>{formatAgo(new Date(issue.createdAt).getTime() / 1000)}</span>
             {issue.assignees?.length > 0 && (
@@ -126,14 +126,14 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
             )}
           </div>
           {issue.labels.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1">
               <Labels labels={issue.labels} limit={4} />
             </div>
           )}
         </div>
-        <div className="col-start-2 flex flex-wrap items-center justify-start gap-1.5 border-t border-border/60 pt-2 lg:col-start-auto lg:max-w-[280px] lg:justify-end lg:border-t-0 lg:pt-0 shrink-0">
+        <div className="col-start-2 flex flex-wrap items-center justify-start gap-1 border-t border-border/60 pt-1.5 lg:col-start-auto lg:max-w-[280px] lg:justify-end lg:border-t-0 lg:pt-0 shrink-0">
           <button
-            className="rounded-md px-2 py-1 text-[11px] text-text-tertiary hover:bg-bg-tertiary hover:text-text-primary cursor-pointer transition-colors"
+            className="rounded-md px-2 py-1 text-[10px] text-text-tertiary hover:bg-bg-tertiary hover:text-text-primary cursor-pointer transition-colors"
             onClick={discussInTerminal}
             title="Open a discussion about this issue in the terminal (no branch created)"
           >
@@ -141,7 +141,7 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
           </button>
           {hasContext ? (
             <button
-              className="inline-flex items-center gap-1.5 rounded-md border border-accent/40 bg-accent/10 px-2 py-1 text-[11px] text-accent hover:bg-accent/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-1 rounded-md border border-accent/40 bg-accent/10 px-2 py-1 text-[10px] text-accent hover:bg-accent/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={continueWork}
               disabled={continuing}
               title="Resume the last Claude session for this issue. Auto-prompts only the acceptance criteria still unverified."
@@ -151,7 +151,7 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
             </button>
           ) : (
             <button
-              className="rounded-md border border-border bg-bg-secondary px-2 py-1 text-[11px] text-text-primary hover:bg-bg-tertiary cursor-pointer"
+              className="rounded-md border border-border bg-bg-secondary px-2 py-1 text-[10px] text-text-primary hover:bg-bg-tertiary cursor-pointer"
               onClick={openInTerminal}
               title={workOnChainSummary(projectCfg)}
             >

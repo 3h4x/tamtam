@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { JobsPauseToggle } from '@/components/JobsPauseToggle'
+import { JOBS_PAUSED_CHANGED_EVENT } from '@/lib/shared/jobs-paused-events'
 
 const { fmtAbsoluteMock } = vi.hoisted(() => ({
   fmtAbsoluteMock: vi.fn(() => 'May 10, 2026, 12:00'),
@@ -171,6 +172,65 @@ describe('JobsPauseToggle', () => {
       expect(errorSpy).toHaveBeenCalledWith('[jobs-pause-toggle]', 'write failed')
     })
     expect(fmtAbsoluteMock).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('broadcasts pause-state changes after a successful toggle', async () => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input === '/api/settings' && !init) {
+        return makeResponse({ settings: { jobs_paused: 'false' } })
+      }
+      if (input === '/api/usage/quota') {
+        return makeResponse({
+          gateEnabled: false,
+          sevenDay: {
+            utilization: 10,
+            resetsAt: '2026-05-10T12:00:00.000Z',
+            msUntilReset: 24 * 60 * 60 * 1000,
+          },
+        })
+      }
+      if (input === '/api/settings' && init?.method === 'PATCH') {
+        return makeResponse({})
+      }
+      throw new Error(`Unexpected fetch: ${input}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
+
+    const { container, unmount } = renderToggle()
+
+    await vi.waitFor(() => {
+      expect(getButton(container).textContent).toBe('jobs running')
+      expect(getButton(container).disabled).toBe(false)
+    })
+
+    getButton(container).click()
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/settings', expect.objectContaining({
+        method: 'PATCH',
+      }))
+    })
+    await vi.waitFor(() => {
+      expect(dispatchSpy).toHaveBeenCalledTimes(1)
+      expect(dispatchSpy.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+        type: JOBS_PAUSED_CHANGED_EVENT,
+        detail: { paused: true },
+      }))
+      expect(getButton(container).getAttribute('aria-checked')).toBe('true')
+      expect(getButton(container).disabled).toBe(false)
+    })
+
+    getButton(container).click()
+    await vi.waitFor(() => {
+      expect(dispatchSpy).toHaveBeenCalledTimes(2)
+      expect(dispatchSpy.mock.calls[1]?.[0]).toEqual(expect.objectContaining({
+        type: JOBS_PAUSED_CHANGED_EVENT,
+        detail: { paused: false },
+      }))
+      expect(getButton(container).getAttribute('aria-checked')).toBe('false')
+    })
+
     unmount()
   })
 })

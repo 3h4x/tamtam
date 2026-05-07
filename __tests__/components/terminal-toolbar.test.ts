@@ -98,8 +98,9 @@ describe('TerminalToolbar', () => {
   it('shows the selected counts, overflow chip, and encoded release trace link', () => {
     const { container, unmount } = renderTerminalToolbar()
 
-    expect(container.textContent).toContain('skills 2')
-    expect(container.textContent).toContain('docs 2')
+    expect(container.textContent).toContain('skills')
+    expect(container.textContent).toContain('docs')
+    expect(container.textContent).toContain('4 attached')
     expect(container.textContent).toContain('+1')
     expect(container.textContent).toContain('live')
 
@@ -111,8 +112,8 @@ describe('TerminalToolbar', () => {
   it('opens the controlled pickers from the toolbar buttons and overflow chip', () => {
     const { container, onToggleSkillPicker, onToggleDocsPicker, unmount } = renderTerminalToolbar()
     const buttons = Array.from(container.querySelectorAll('button'))
-    const skillsButton = buttons.find(button => button.textContent === 'skills 2')
-    const docsButton = buttons.find(button => button.textContent === 'docs 2')
+    const skillsButton = buttons.find(button => button.textContent?.includes('skills'))
+    const docsButton = buttons.find(button => button.textContent?.includes('docs'))
     const overflowChip = buttons.find(button => button.textContent === '+1')
 
     skillsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))

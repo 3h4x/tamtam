@@ -72,6 +72,17 @@ describe('TerminalMessages', () => {
     expect(markup).toContain('>✗ error<')
   })
 
+  it('keeps neutral error-role text styled as an error', () => {
+    const markup = renderTerminalMessagesMarkup({
+      history: [
+        { role: 'error', text: 'Claude said no.' },
+      ],
+    })
+
+    expect(markup).toContain('Claude said no.')
+    expect(markup).toContain('>✗ error<')
+  })
+
   it('collapses carriage-return progress updates for stored raw output', () => {
     const markup = renderTerminalMessagesMarkup({
       history: [

@@ -23,6 +23,7 @@ import { RunRow } from '@/components/project-runs/RunRow'
 
 interface ProjectRunsTabProps {
   projectName: string
+  jobsPaused?: boolean
 }
 
 // One-axis filter: either a kind bucket, or a status shortcut.
@@ -70,7 +71,7 @@ function renderChain(
   )
 }
 
-export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
+export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsTabProps) {
   const router = useRouter()
   const [jobs, setJobs] = useState<JobInfo[]>([])
   const [pendingReleaseQueued, setPendingReleaseQueued] = useState(false)
@@ -202,6 +203,7 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
   }
 
   const retryRelease = async (source: Entry) => {
+    if (jobsPaused) return
     setReleaseActionState({ jobId: source.navJobId, label: 'starting' })
     try {
       const result = await releaseProject(projectName, { queueIfBlocked: true, sourceJobId: source.navJobId })
@@ -231,13 +233,16 @@ export function ProjectRunsTab({ projectName }: ProjectRunsTabProps) {
       (() => {
         const active = releaseActionState?.jobId === e.navJobId
         const label = active ? releaseActionState.label : outcomeStatus === 'blocked' ? 'Retry release' : 'Continue release'
+        const releaseBlocked = jobsPaused || active
         return (
           <button
             type="button"
             className="px-2 py-0.5 text-[10px] rounded border border-accent/40 text-accent bg-accent/10 hover:bg-accent/15 disabled:opacity-60 cursor-pointer"
-            disabled={active}
+            disabled={releaseBlocked}
             onClick={() => retryRelease(e)}
-            title="Start a new release attempt from the current project state"
+            title={jobsPaused
+              ? 'Jobs are paused globally. Resume jobs to start a release.'
+              : 'Start a new release attempt from the current project state'}
           >
             {label}
           </button>

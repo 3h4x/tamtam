@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { errMsg } from '@/lib/shared/types'
 import { fmtAbsolute } from '@/lib/shared/format-date'
 import { computeWeeklyBurnThrottle, type WeeklyBurnThrottle } from '@/lib/shared/budget-throttle'
+import { dispatchJobsPausedChanged } from '@/lib/shared/jobs-paused-events'
 
 interface QuotaWindow { utilization: number; resetsAt: string | null; msUntilReset: number | null }
 interface QuotaSnapshot { fiveHour: QuotaWindow; sevenDay: QuotaWindow; gateEnabled?: boolean }
@@ -68,6 +69,7 @@ export function JobsPauseToggle() {
         const data = await res.json().catch(() => ({}))
         throw new Error(data.detail || res.statusText)
       }
+      dispatchJobsPausedChanged(next)
     } catch (e: unknown) {
       setJobsPaused(!next)
       console.error('[jobs-pause-toggle]', errMsg(e))

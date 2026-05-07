@@ -395,3 +395,118 @@ describe('action API — file mirroring (.tamtam/config.yml)', () => {
     expect(data.actions).toEqual([]);
   });
 });
+
+describe('action API POST pause gate', () => {
+  let POST: any;
+  let tmpDir: string;
+  let jobsPausedResultMock: ReturnType<typeof vi.fn>;
+  let createJobMock: ReturnType<typeof vi.fn>;
+  let updateJobMock: ReturnType<typeof vi.fn>;
+  let spawnMock: ReturnType<typeof vi.fn>;
+  let procOnMock: ReturnType<typeof vi.fn>;
+  let procUnrefMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    tmpDir = join(tmpdir(), `tamtam-action-post-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(tmpDir, { recursive: true });
+
+    jobsPausedResultMock = vi.fn();
+    createJobMock = vi.fn(() => ({
+      id: 'job-123',
+      pid: 0,
+      logPath: '',
+      exitCode: null,
+      finishedAt: null,
+    }));
+    updateJobMock = vi.fn();
+    procOnMock = vi.fn();
+    procUnrefMock = vi.fn();
+    spawnMock = vi.fn(() => ({
+      pid: 4321,
+      on: procOnMock,
+      unref: procUnrefMock,
+    }));
+
+    vi.doMock('@/lib/db', () => ({ db: {}, schema: {} }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: (projectName: string) => projectName === 'proj1' ? tmpDir : null,
+    }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: () => ({ log_dir: join(tmpDir, 'logs') }),
+    }));
+    vi.doMock('@/lib/shared/job-control', () => ({
+      jobsPausedResult: jobsPausedResultMock,
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: createJobMock,
+      updateJob: updateJobMock,
+    }));
+    vi.doMock('@/lib/skills/tamtam-file-config', () => ({
+      loadFileConfig: () => ({ custom_actions: [{ name: 'Deploy', command: 'pnpm deploy' }] }),
+      writeFileConfig: vi.fn(),
+    }));
+    vi.doMock('child_process', () => ({
+      spawn: spawnMock,
+    }));
+
+    const mod = await import('@/app/api/projects/by-project/[projectName]/action/route');
+    POST = mod.POST;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns 409 and does not spawn when jobs are paused', async () => {
+    jobsPausedResultMock.mockReturnValue({
+      ok: false,
+      status: 409,
+      detail: 'Jobs are paused globally. Turn the switch back on in Settings to run custom action "Deploy".',
+    });
+
+    const response = await POST(
+      new NextRequest('http://localhost/api/projects/by-project/proj1/action', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'Deploy' }),
+      }),
+      { params: Promise.resolve({ projectName: 'proj1' }) }
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      detail: 'Jobs are paused globally. Turn the switch back on in Settings to run custom action "Deploy".',
+    });
+    expect(jobsPausedResultMock).toHaveBeenCalledWith('run custom action "Deploy"');
+    expect(createJobMock).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('starts the custom action normally after jobs resume', async () => {
+    jobsPausedResultMock.mockReturnValue(null);
+
+    const response = await POST(
+      new NextRequest('http://localhost/api/projects/by-project/proj1/action', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'Deploy' }),
+      }),
+      { params: Promise.resolve({ projectName: 'proj1' }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      status: 'started',
+      job_id: 'job-123',
+      pid: 4321,
+      action: 'Deploy',
+    });
+    expect(createJobMock).toHaveBeenCalledWith('proj1', 'Deploy', 0, '');
+    expect(spawnMock).toHaveBeenCalledWith('bash', ['-c', 'pnpm deploy'], expect.objectContaining({
+      cwd: tmpDir,
+      detached: true,
+    }));
+    expect(procUnrefMock).toHaveBeenCalledOnce();
+    expect(updateJobMock).toHaveBeenCalled();
+  });
+});

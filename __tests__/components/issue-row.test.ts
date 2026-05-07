@@ -181,4 +181,35 @@ describe('IssueRow', () => {
     expect(payload.prompt).toContain('Work on GitHub issue #42')
     unmount()
   })
+
+  it('keeps the fourth label visible before collapsing into overflow', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ hasContext: false }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container, unmount } = renderIssueRow({
+      issue: buildIssue({
+        labels: [
+          { name: 'bug', color: 'ff0000' },
+          { name: 'urgent', color: 'ffaa00' },
+          { name: 'backend', color: '0000ff' },
+          { name: 'release-blocker', color: 'aa00aa' },
+          { name: 'needs-triage', color: '00aa88' },
+        ],
+      }),
+      projectName: 'acme/widgets',
+      projectCfg: buildConfig(),
+    })
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(container.textContent).toContain('bug')
+    expect(container.textContent).toContain('urgent')
+    expect(container.textContent).toContain('backend')
+    expect(container.textContent).toContain('release-blocker')
+    expect(container.textContent).not.toContain('needs-triage')
+    expect(container.querySelector('[title="needs-triage"]')?.textContent).toBe('+1')
+    unmount()
+  })
 })
