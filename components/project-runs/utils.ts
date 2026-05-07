@@ -66,6 +66,22 @@ export type KindBucket =
   | 'agent'
   | 'other'
 
+export const ACTIVE_WORK_BUCKET_ORDER: KindBucket[] = [
+  'run',
+  'release',
+  'review',
+  'test',
+  'fix',
+  'fix-ci',
+  'fix-push',
+  'commit',
+  'push',
+  'mark-dod',
+  'pr-wait',
+  'agent',
+  'other',
+]
+
 export function bucketOf(kind: string): KindBucket {
   if (kind === 'run') return 'run'
   if (kind === 'release') return 'release'
@@ -112,6 +128,26 @@ export const KIND_COLOR: Record<KindBucket, string> = {
   'pr-wait': 'bg-status-info/15 text-status-info',
   agent: 'bg-bg-tertiary text-text-secondary border border-border',
   other: 'bg-text-tertiary/15 text-text-secondary',
+}
+
+export function activeWorkBadgeLabel(kindOrBucket: string): string {
+  if (kindOrBucket in KIND_LABEL) return KIND_LABEL[kindOrBucket as KindBucket]
+  return KIND_LABEL[bucketOf(kindOrBucket)]
+}
+
+export function activeWorkAccentClass(kind: string): string {
+  const bucket = bucketOf(kind)
+  if (bucket === 'run' || bucket === 'release') return 'border-l-accent'
+  if (bucket === 'review' || bucket === 'mark-dod' || bucket === 'pr-wait') return 'border-l-status-info'
+  if (bucket === 'test' || bucket === 'commit' || bucket === 'push') return 'border-l-status-success'
+  if (bucket === 'fix' || bucket === 'fix-ci' || bucket === 'fix-push') return 'border-l-status-warning'
+  return 'border-l-border'
+}
+
+export function activeWorkTitle(job: JobInfo): string {
+  const bucket = bucketOf(job.kind)
+  if (bucket === 'run') return 'chat'
+  return titleForJob(job, bucket)
 }
 
 // Kinds that belong to a release pipeline. When a `release` meta-job is
