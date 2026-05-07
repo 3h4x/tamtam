@@ -110,6 +110,8 @@ See `docs/API.md` for the full route reference. New routes must be documented th
 - **What must be tested**: new API route handlers (happy + error), new lib functions with branching logic or state mutations. Skip trivial passthroughs.
 - **Pipeline e2e isolation**: `pnpm test:e2e:pipeline` uses port 1338, temp DB at `/tmp/tamtam-e2e-pipeline/`, intercepts `git`/`gh` via shims in `e2e/pipeline/mocks/bin/`. Sequential workers. Never run pipeline e2e against production server or DB.
 - **Pre-push hook** (`.husky/pre-push`): runs `pnpm lint && pnpm type-check && pnpm test`. If it fails, fix the root cause — do not bypass with `--no-verify`.
+1. When testing route handlers or server modules that read settings, cache state, or other module-level singletons at import time, follow the existing pattern: `vi.resetModules()`, register mocks with `vi.doMock()`, then `await import(...)` the subject under test inside `beforeEach`. Do not statically import the module first and expect late mocks to apply.
+2. For client-component tests, keep using `jsdom`, stub `next/navigation` and `fetch` at module scope, and use `vi.hoisted()` when a mock factory needs stable shared references across imports.
 
 ## Definition of Done for UI/Frontend Changes
 - Server must be running (`pnpm start`, or `pnpm rebuild` if a build is needed) before testing
@@ -140,6 +142,7 @@ See `docs/API.md` for the full route reference. New routes must be documented th
 - **GitHub project board sync**: lifecycle-triggered sync in `lib/github/project-board.ts` + `lib/github/project-board-status.ts`. Auto-sync from `lib/jobs/storage.ts` (start) and `lib/jobs/lifecycle.ts` (finish) is best-effort; manual sync routes (`/api/jobs/[jobId]/board-sync`, `/api/settings/board-resync`) are strict and surface errors. Pipeline child jobs update the root release card rather than creating duplicates.
 - **Local HTTP MCP tools**: `.tamtam/mcp-http-tools.yaml` defines read-only TamTam API tools for the sibling `mcp-http-tools` project. Use `pnpm mcp:http tamtam_api_get '{"path":"..."}'` for arbitrary GET, or named wrappers like `pnpm mcp:http tamtam_usage_quota '{"provider":"codex"}'`.
 - Dependabot with grouped PRs (production deps, dev deps, actions).
+1. Mutable server-side coordination state is intentional in a few places (`globalThis.__tamtamScheduler`, pause gates, in-memory agent queues). If you add another singleton, only do it when cross-route/process coordination truly requires it, pin it on `globalThis` when Next.js module duplication would otherwise fork state, and document its boot/reload behavior in the relevant `docs/*.md`.
 
 ## `.tamtam/` Directory (per-project, committed to version control)
 
@@ -233,6 +236,8 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 - **No silent additions**: never add a new dependency without explicit user approval. Justify every new dep in the commit message.
 - **Verify before adding**: prefer packages with >1 M weekly downloads and >1 year of history.
 - **Audit after changes**: run `pnpm audit` after any `pnpm add`/`pnpm remove`; fix or document high-severity findings before committing.
+1. Use `pnpm` for all manifest and lockfile changes. Do not run `npm install`, `yarn add`, or any other package-manager command that can desync `pnpm-lock.yaml`.
+2. Before proposing a new package, inspect the npm registry entry for maintainer continuity and release history, not just download count. Treat sudden ownership flips, very recent first publishes, or thin version history as a blocker unless the user explicitly accepts that risk.
 
 ## Commit & Branch Rules
 - **Conventional commits**: `type(scope): message` — observed types: `feat`, `fix`, `test`, `docs`, `refactor`, `perf`, `chore`. Subject under 72 chars.
