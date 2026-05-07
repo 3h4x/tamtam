@@ -128,7 +128,7 @@ export function AgentModal({
         aria-labelledby="agent-modal-title"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
+        <div className="flex items-center justify-between px-6 py-3 border-b border-border shrink-0">
           <h2 id="agent-modal-title" className="text-base font-semibold text-text-primary">
             {isNew ? 'New Agent' : `Edit — ${agent.name}`}
           </h2>
@@ -144,7 +144,7 @@ export function AgentModal({
         </div>
 
         {/* Scrollable body */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-5 min-h-0">
+        <div className="flex-1 overflow-y-auto px-6 py-4 flex flex-col gap-4 min-h-0">
 
           {/* Row 1: Name + Model */}
           <div className="flex gap-4 items-end">
@@ -154,7 +154,7 @@ export function AgentModal({
                 ref={nameRef}
                 id="agent-name"
                 type="text"
-                className="w-full px-3 py-2.5 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors"
+                className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) handleSave() }}
@@ -173,7 +173,7 @@ export function AgentModal({
                       key={m}
                       type="button"
                       title={desc}
-                      className={`px-4 py-2 rounded-md text-sm font-medium cursor-pointer transition-all whitespace-nowrap ${
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-all whitespace-nowrap ${
                         sel
                           ? 'bg-accent text-white shadow-sm'
                           : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
@@ -198,8 +198,8 @@ export function AgentModal({
             </label>
             <textarea
               id="agent-prompt"
-              className="w-full px-3 py-2.5 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors font-mono resize-none"
-              rows={8}
+              className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors font-mono resize-none"
+              rows={6}
               value={agentPrompt}
               onChange={(e) => setAgentPrompt(e.target.value)}
               placeholder={selectedSkills.length > 0
@@ -282,7 +282,7 @@ export function AgentModal({
                         <button
                           key={item.id}
                           type="button"
-                          className={`w-full px-3 py-2.5 text-left border-none cursor-pointer transition-colors flex items-center gap-3 ${
+                          className={`w-full px-3 py-2 text-left border-none cursor-pointer transition-colors flex items-center gap-3 ${
                             isSelected ? 'bg-accent/8 text-text-primary' : 'bg-transparent text-text-primary hover:bg-bg-secondary'
                           }`}
                           onClick={() => toggleSkill(item.id)}
@@ -327,7 +327,7 @@ export function AgentModal({
                       <button
                         key={doc.path}
                         type="button"
-                        className={`w-full px-3 py-2.5 text-left border-none cursor-pointer transition-colors flex items-center gap-3 ${
+                        className={`w-full px-3 py-2 text-left border-none cursor-pointer transition-colors flex items-center gap-3 ${
                           isSelected ? 'bg-status-success/8 text-text-primary' : 'bg-transparent text-text-primary hover:bg-bg-secondary'
                         }`}
                         onClick={() => toggleDoc(doc.path)}
@@ -354,7 +354,7 @@ export function AgentModal({
           </div>
 
           {/* Settings strip: Schedule / Runner / Enabled */}
-          <div className="flex items-center gap-4 px-4 py-3 rounded-lg bg-bg-secondary border border-border">
+          <div className="flex items-center gap-4 px-3 py-2.5 rounded-lg bg-bg-secondary border border-border">
             <div className="flex items-center gap-2 flex-1">
               <span className="text-xs text-text-tertiary whitespace-nowrap font-medium">Schedule</span>
               <select
@@ -397,7 +397,7 @@ export function AgentModal({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-border shrink-0">
+        <div className="flex items-center justify-between px-6 py-3 border-t border-border shrink-0">
           <div>
             {onDelete && !confirmDelete && (
               <button
