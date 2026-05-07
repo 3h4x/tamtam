@@ -2,17 +2,25 @@
 
 import { useRouter } from 'next/navigation'
 import { AgentsTab } from '@/components/AgentsTab'
+import {
+  ACTIVE_WORK_BUCKET_ORDER,
+  activeWorkAccentClass,
+  activeWorkBadgeLabel,
+  activeWorkTitle,
+  bucketOf,
+  type KindBucket,
+} from '@/components/project-runs/utils'
 import { StatusStrip } from '@/components/project-detail/StatusStrip'
 import { formatAgo } from '@/lib/shared/format'
 import type { JobInfo, ProjectConfig } from '@/lib/client-api'
 
 type Verdict = 'LGTM' | 'NEEDS ATTENTION' | 'DO NOT SHIP'
 
-function runLabel(j: JobInfo): string {
-  if (j.kind === 'run') return 'chat'
-  if (j.kind.startsWith('agent:')) return j.kind.slice('agent:'.length)
-  if (j.kind === 'fix-ci') return 'fix-ci'
-  return j.kind
+function runMeta(j: JobInfo): string[] {
+  const meta = [`started ${formatAgo(j.started_at)}`]
+  if (j.model) meta.push(j.model)
+  else if (j.provider) meta.push(j.provider)
+  return meta
 }
 
 export interface OverviewTabProps {
@@ -58,31 +66,94 @@ export function OverviewTab({
   onOpenChanges,
 }: OverviewTabProps) {
   const router = useRouter()
+  const activeCounts = runningJobs.reduce(
+    (acc, job) => {
+      acc[bucketOf(job.kind)] += 1
+      return acc
+    },
+    {
+      run: 0,
+      release: 0,
+      review: 0,
+      test: 0,
+      fix: 0,
+      'fix-ci': 0,
+      'fix-push': 0,
+      commit: 0,
+      push: 0,
+      'mark-dod': 0,
+      'pr-wait': 0,
+      agent: 0,
+      other: 0,
+    } satisfies Record<KindBucket, number>,
+  )
+  const visibleRunningJobs = runningJobs.slice(0, 4)
 
   return (
     <>
       {runningJobs.length > 0 && (
-        <div className="mb-4 border border-status-warning/40 bg-status-warning/5 rounded-lg px-3 py-2 flex items-center gap-3 flex-wrap">
-          <span className="inline-flex items-center gap-1.5 text-sm text-status-warning font-medium">
-            <span className="inline-block w-2 h-2 rounded-full bg-status-warning animate-pulse" />
-            {runningJobs.length} running
-          </span>
-          <div className="flex items-center gap-2 flex-wrap text-xs">
-            {runningJobs.slice(0, 5).map((j) => (
+        <section className="mb-4 rounded-lg border border-border bg-bg-secondary">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 text-sm font-medium text-text-primary">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-status-info opacity-60" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-status-info" />
+                </span>
+                active work
+              </div>
+              <div className="mt-0.5 text-xs text-text-secondary tabular-nums">
+                {runningJobs.length} running now
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-text-secondary tabular-nums">
+              {ACTIVE_WORK_BUCKET_ORDER.map((bucket) => {
+                const count = activeCounts[bucket]
+                if (count === 0) return null
+                return (
+                  <span key={bucket} className="rounded-full border border-border bg-bg-tertiary px-2 py-0.5">
+                    {activeWorkBadgeLabel(bucket)} {count}
+                  </span>
+                )
+              })}
+            </div>
+          </div>
+          <div className="grid gap-2 p-3 md:grid-cols-2">
+            {visibleRunningJobs.map((j) => (
               <button
                 key={j.id}
+                type="button"
                 onClick={() => router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(j.id)}`)}
-                className="px-2 py-0.5 border border-border rounded-full bg-bg-secondary hover:bg-bg-tertiary cursor-pointer font-mono"
+                className={`min-w-0 rounded-md border border-border border-l-2 ${activeWorkAccentClass(j.kind)} bg-bg-primary px-3 py-2 text-left transition-colors hover:bg-bg-tertiary cursor-pointer`}
                 title={`Open ${j.kind} started ${formatAgo(j.started_at)}`}
               >
-                {runLabel(j)} · {formatAgo(j.started_at)}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="spinner-sm shrink-0 !h-3 !w-3 !border-[1.5px]" aria-hidden />
+                      <span className="truncate text-sm font-medium text-text-primary">{activeWorkTitle(j)}</span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
+                      {runMeta(j).map((item) => (
+                        <span key={item} className="font-mono tabular-nums">
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <span className="shrink-0 rounded-full border border-border bg-bg-secondary px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-tertiary">
+                    {activeWorkBadgeLabel(j.kind)}
+                  </span>
+                </div>
               </button>
             ))}
-            {runningJobs.length > 5 && (
-              <span className="text-text-tertiary">+{runningJobs.length - 5} more</span>
-            )}
           </div>
-        </div>
+          {runningJobs.length > visibleRunningJobs.length && (
+            <div className="border-t border-border px-3 py-2 text-xs text-text-secondary tabular-nums">
+              +{runningJobs.length - visibleRunningJobs.length} more running job{runningJobs.length - visibleRunningJobs.length === 1 ? '' : 's'}
+            </div>
+          )}
+        </section>
       )}
 
       <StatusStrip
