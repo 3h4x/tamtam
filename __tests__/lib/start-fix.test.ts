@@ -237,4 +237,44 @@ describe('startFixFromJob', () => {
     }
     expect(startJobMock).not.toHaveBeenCalled();
   });
+
+  it('appends fixPromptAddendum to the prompt when configured', async () => {
+    vi.resetModules();
+    startJobMock = vi.fn().mockResolvedValue(12345);
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      getJob: vi.fn().mockReturnValue(makeSourceJob()),
+      createJob: vi.fn().mockImplementation((project: string, kind: string) => ({
+        id: `${project}-${kind}-id`, project, kind, pid: 0, logPath: '',
+        prompt: null, startedAt: 0, finishedAt: null, exitCode: null, seen: false, sessionId: null,
+      })),
+      readParsedLog: vi.fn().mockReturnValue('Error: something broke\n'),
+      probeJobStatus: vi.fn().mockResolvedValue('done'),
+      updateJob: vi.fn(),
+    }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue('/path') }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp/logs' }),
+      getProjectPipelinePrompts: () => ({ fixPromptAddendum: 'Always run pnpm lint.', reviewPromptAddendum: null }),
+    }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getPermissionModeFlag: () => '--dangerously-skip-permissions',
+      getSettings: () => ({ default_model: 'sonnet' }),
+      getPipelineModel: () => 'sonnet',
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
+    }));
+
+    const { startFixFromJob: fn } = await import('@/lib/pipeline/start-fix');
+    await fn('src-job-1');
+
+    const [, , prompt] = startJobMock.mock.calls[0];
+    expect(prompt).toContain('Project-specific fix guidance');
+    expect(prompt).toContain('Always run pnpm lint.');
+  });
 });

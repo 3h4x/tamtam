@@ -2,14 +2,7 @@
 
 import Link from 'next/link'
 import type { CustomAction, ProjectConfig } from '@/lib/client-api'
-
-const BTN_BASE = 'px-3 py-1.5 text-sm rounded-md font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
-const BTN_SECONDARY = `${BTN_BASE} border border-border bg-bg-secondary text-text-primary hover:bg-bg-tertiary`
-const BTN_GHOST = `${BTN_BASE} border border-transparent text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/60`
-const BTN_PRIMARY = `${BTN_BASE} border border-accent bg-accent/10 text-accent hover:bg-accent/20`
-const BTN_WARNING = `${BTN_BASE} border border-status-warning/60 bg-status-warning/10 text-status-warning hover:bg-status-warning/20`
-const BTN_ERROR = `${BTN_BASE} border border-status-error text-status-error hover:bg-status-error/10`
-const BTN_INFO = `${BTN_BASE} border border-status-info/50 bg-status-info/10 text-status-info hover:bg-status-info/20`
+import { Button, buttonVariants } from '@/components/ui/Button'
 
 export interface ProjectActionsProps {
   projectName: string
@@ -128,31 +121,27 @@ export function ProjectActions({
     : `Create pull request for branch ${currentBranch}`
 
   const pullPrimaryDisabled = pulling || totalChanges > 0 || behindCount === 0
-  const pullClass = totalChanges > 0
-    ? `${BTN_BASE} border border-border bg-bg-secondary text-text-primary cursor-not-allowed`
-    : behindCount > 0
-      ? BTN_WARNING
-      : BTN_SECONDARY
+  const pullVariant = totalChanges > 0 ? 'secondary' : behindCount > 0 ? 'warning' : 'secondary'
 
   return (
     <>
       {aggregateCi === 'failure' && ciFailedUrl && (
-        <button
-          className={BTN_ERROR}
+        <Button
+          variant="danger"
           onClick={onFixCi}
           disabled={fixingCi || isCiFixRunning}
           title={isCiFixRunning ? 'CI fix already in progress' : 'Start CI fix'}
         >
           {fixingCi || isCiFixRunning ? 'CI Fix in Progress…' : 'Fix CI'}
-        </button>
+        </Button>
       )}
       {fixCiResult && (
         <span className={`text-xs ${fixCiResult.startsWith('CI fix started') ? 'text-status-success' : 'text-status-error'}`}>
           {fixCiResult}
         </span>
       )}
-      <button
-        className={BTN_PRIMARY}
+      <Button
+        variant="primary"
         onClick={onRelease}
         disabled={busy || nothingToRelease}
         title={
@@ -166,36 +155,33 @@ export function ProjectActions({
         }
       >
         {busy ? 'Releasing…' : freshLgtm ? '🚢 Ship (LGTM)' : '🚀 Release'}
-      </button>
+      </Button>
       {showCreatePr && (
-        <button
-          className={BTN_SECONDARY}
+        <Button
           onClick={onCreatePr}
           disabled={createPrDisabled}
           title={createPrTitle}
         >
           {creatingPr ? 'Creating PR…' : 'Create PR'}
-        </button>
+        </Button>
       )}
       {hasOpenPr && totalChanges > 0 && (
-        <button
-          className={BTN_SECONDARY}
+        <Button
           onClick={onPushToPr}
           disabled={pushingToPr}
           title={`Stage ${totalChanges} change${totalChanges === 1 ? '' : 's'}, commit (Claude-generated message), push — attaches to existing PR. Skips test + review (use Release for the full pipeline).`}
         >
           {pushingToPr ? 'Pushing…' : `Push to PR${openPrByBranch[currentBranch ?? ''] ? ` #${openPrByBranch[currentBranch ?? '']}` : ''}`}
-        </button>
+        </Button>
       )}
       {hasTestCommand && (
-        <button
-          className={BTN_SECONDARY}
+        <Button
           onClick={onTest}
           disabled={testing || isTestRunning}
           title={isTestRunning ? 'Tests already running' : `Run: ${config?.effective_test_command || config?.detected_test_command}`}
         >
           {testing || isTestRunning ? 'Testing…' : 'Test'}
-        </button>
+        </Button>
       )}
       {customActions.map((action) => (
         <button
@@ -210,34 +196,33 @@ export function ProjectActions({
         </button>
       ))}
       {(unpushed ?? 0) > 0 && totalChanges === 0 && (
-        <button
-          className={BTN_WARNING}
+        <Button
+          variant="warning"
           onClick={onPush}
           disabled={pushing}
           title={`Push ${unpushed} commit${unpushed !== 1 ? 's' : ''} to origin`}
         >
           {pushing ? 'Pushing…' : `Push (${unpushed})`}
-        </button>
+        </Button>
       )}
       {pullDiverged ? (
         <span className="inline-flex items-center gap-1.5 pl-2 pr-1 py-0.5 rounded-md bg-status-error/10 border border-status-error/40">
           <span className="text-xs text-status-error font-medium">Diverged:</span>
-          <button
-            className={BTN_INFO}
+          <Button
+            variant="info"
             onClick={() => onPull('rebase')}
             disabled={pulling}
             title="git pull --rebase"
           >
             {pulling ? 'Working…' : 'Rebase'}
-          </button>
-          <button
-            className={BTN_SECONDARY}
+          </Button>
+          <Button
             onClick={() => onPull('merge')}
             disabled={pulling}
             title="git pull --no-ff"
           >
             {pulling ? 'Working…' : 'Merge'}
-          </button>
+          </Button>
           <button
             className="px-1.5 py-1 text-xs text-text-tertiary hover:text-text-secondary cursor-pointer"
             onClick={onDismissDiverged}
@@ -246,10 +231,10 @@ export function ProjectActions({
           >✕</button>
         </span>
       ) : (
-        <button
-          className={pullClass}
+        <Button
+          variant={pullVariant}
           onClick={() => onPull('ff-only')}
-          disabled={pullPrimaryDisabled}
+          disabled={pullPrimaryDisabled || totalChanges > 0}
           title={
             totalChanges > 0
               ? `Commit or stash your ${totalChanges} local change${totalChanges !== 1 ? 's' : ''} before pulling`
@@ -259,7 +244,7 @@ export function ProjectActions({
           }
         >
           {pulling ? 'Pulling…' : behindCount > 0 ? `Pull (${behindCount})` : 'Pull'}
-        </button>
+        </Button>
       )}
       {pullResult && (
         <span className={`text-xs ${pullResult.includes('failed') || pullResult.includes('error') ? 'text-status-error' : 'text-status-success'}`}>
@@ -272,7 +257,7 @@ export function ProjectActions({
       {projectName && (
         <Link
           href={`/pipeline?project=${encodeURIComponent(projectName)}`}
-          className={`${BTN_GHOST} inline-flex items-center no-underline`}
+          className={buttonVariants({ variant: 'ghost' })}
           title="View pipeline metrics for this project"
         >
           Pipeline
@@ -280,7 +265,7 @@ export function ProjectActions({
       )}
       {githubUrl && (
         <a
-          className={`${BTN_GHOST} inline-flex items-center gap-1 no-underline`}
+          className={buttonVariants({ variant: 'ghost' })}
           href={githubUrl}
           target="_blank"
           rel="noopener noreferrer"
