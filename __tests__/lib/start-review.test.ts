@@ -760,4 +760,58 @@ describe('startProjectReview', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(400);
   });
+
+  it('appends reviewPromptAddendum to the review prompt when configured', async () => {
+    vi.resetModules();
+    startJobMock = vi.fn().mockResolvedValue(9999);
+    vi.doMock('@/lib/shared/shell', () => ({
+      exec: vi.fn()
+        .mockResolvedValueOnce(resp(0, 'M lib/foo.ts'))
+        .mockResolvedValueOnce(resp(0, ' lib/foo.ts | 2 +-\n'))
+        .mockResolvedValueOnce(resp(0, 'diff --git a/lib/foo.ts\n+change\n')),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      getProjectPipelinePrompts: () => ({ reviewPromptAddendum: 'Focus on security issues.', fixPromptAddendum: null }),
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: createJobMock, updateJob: updateJobMock,
+      listJobs: vi.fn().mockReturnValue([]), readLog: vi.fn().mockReturnValue(''),
+      readParsedLog: vi.fn().mockReturnValue(''), probeJobStatus: vi.fn().mockResolvedValue('done'),
+    }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: () => ({ review_verdict_rules: '' }),
+      withBasePrompt: (s: string) => s,
+      getPermissionModeFlag: () => '--dangerously-skip-permissions',
+      getPipelineModel: () => 'sonnet',
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/code-reviewer.md' }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
+    }));
+    vi.doMock('fs', () => ({
+      existsSync: vi.fn().mockReturnValue(false),
+      lstatSync: vi.fn(),
+      readFileSync: vi.fn(),
+      mkdirSync: vi.fn(),
+      appendFileSync: vi.fn(),
+    }));
+
+    const { startProjectReview: fn } = await import('@/lib/pipeline/start-review');
+    const r = await fn('proj');
+
+    expect(r.ok).toBe(true);
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('Project-specific review guidance');
+    expect(prompt).toContain('Focus on security issues.');
+  });
 });

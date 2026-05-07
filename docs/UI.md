@@ -114,13 +114,51 @@ Default transition for hovers is `transition-colors duration-150`. **Never anima
 
 ---
 
-## Components (from `app/globals.css`)
+## Components
 
-Use these reusable classes when Tailwind utilities would produce repetition:
+### Button component (`components/ui/Button.tsx`)
 
-- `.btn-primary` — accent-filled button (the marquee action)
-- `.btn-secondary` — bordered neutral button
-- `.btn-custom` — outline button colored by `--btn-color` inline (used for project custom-actions)
+The canonical way to render buttons in TamTam. Import `Button` for interactive elements and `buttonVariants` when you need the class string applied to a non-button element (e.g. `<Link>`, `<a>`).
+
+```tsx
+import { Button, buttonVariants } from '@/components/ui/Button'
+
+// interactive button
+<Button variant="primary" onClick={handleSave}>Save</Button>
+
+// link styled as a button
+<Link href="/pipeline" className={buttonVariants({ variant: 'ghost' })}>Pipeline</Link>
+```
+
+**Variants** (prop `variant`, default `secondary`):
+
+| Variant | Visual | Typical usage |
+|---------|--------|---------------|
+| `secondary` | bordered neutral | default workhorse — most action buttons |
+| `primary` | translucent accent (border + bg/10) | contextual primary actions |
+| `solid` | solid accent fill | marquee save/submit actions |
+| `ghost` | transparent, text-secondary | nav links, separators, low-priority actions |
+| `danger` | error text + hover fill | "Delete" before confirmation |
+| `danger-solid` | solid red fill | confirmed destructive action |
+| `warning` | amber border + translucent bg | caution states (e.g. pull with conflicts) |
+| `info` | blue border + translucent bg | informational actions (e.g. Rebase) |
+
+**Size** (prop `size`, default `md`):
+
+| Size | Padding | Text |
+|------|---------|------|
+| `md` | `px-3 py-1.5` | `text-sm` |
+| `sm` | `px-2 py-1` | `text-xs` |
+
+All variants automatically apply `disabled:opacity-50 disabled:cursor-not-allowed` — pass `disabled` as a boolean prop.
+
+### CSS utility classes (from `app/globals.css`)
+
+Use these reusable classes when Tailwind utilities would produce repetition. **Prefer the `Button` component** over raw CSS classes for all interactive buttons.
+
+- `.btn-primary` — accent-filled button (legacy; prefer `<Button variant="solid">`)
+- `.btn-secondary` — bordered neutral button (legacy; prefer `<Button variant="secondary">`)
+- `.btn-custom` — outline button colored by `--btn-color` inline (project custom-actions; no `Button` equivalent)
 - `.spinner` / `.spinner-sm` — 20px / 14px circular spinner
 - `.skeleton` — pulsing loading rectangle
 - `.focus-ring` — consistent ring for inputs

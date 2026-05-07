@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { fetchProjectDocs } from '@/lib/client-api'
 import type { Agent, Skill, Persona, ProjectDoc } from '@/lib/client-api'
+import { Button } from '@/components/ui/Button'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, normalizeModelInput } from '@/lib/agents/model-aliases'
 
@@ -400,51 +401,39 @@ export function AgentModal({
         <div className="flex items-center justify-between px-6 py-3 border-t border-border shrink-0">
           <div>
             {onDelete && !confirmDelete && (
-              <button
-                type="button"
-                className="px-3 py-1.5 text-sm text-status-error hover:bg-status-error/10 rounded-lg transition-colors cursor-pointer"
-                onClick={() => setConfirmDelete(true)}
-              >
+              <Button type="button" variant="danger" onClick={() => setConfirmDelete(true)}>
                 Delete
-              </button>
+              </Button>
             )}
             {onDelete && confirmDelete && (
               <div className="flex items-center gap-2">
                 <span className="text-sm text-status-error">Delete this agent?</span>
-                <button
+                <Button
                   type="button"
-                  className="px-3 py-1.5 text-sm text-white bg-status-error rounded-lg hover:bg-status-error/90 cursor-pointer"
+                  variant="danger-solid"
                   onClick={() => { onDelete(); onClose() }}
                 >
                   Delete
-                </button>
-                <button
-                  type="button"
-                  className="px-3 py-1.5 text-sm text-text-secondary hover:text-text-primary cursor-pointer"
-                  onClick={() => setConfirmDelete(false)}
-                >
+                </Button>
+                <Button type="button" variant="ghost" onClick={() => setConfirmDelete(false)}>
                   Cancel
-                </button>
+                </Button>
               </div>
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="px-4 py-2 text-sm border border-border rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors cursor-pointer"
-              onClick={onClose}
-            >
+            <Button type="button" variant="ghost" onClick={onClose}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+              variant="solid"
               onClick={handleSave}
               disabled={!name.trim() || saving}
             >
               {saving && <span className="inline-block w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin shrink-0" />}
               {saving ? 'Saving…' : isNew ? 'Create Agent' : 'Save Changes'}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
