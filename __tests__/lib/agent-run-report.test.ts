@@ -29,12 +29,14 @@ const log = (text: string) => [
 describe('finalizeAgentRunReport', () => {
   let execMock: ReturnType<typeof vi.fn>;
   let upsertRecommendationMock: ReturnType<typeof vi.fn>;
+  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.resetModules();
     execMock = vi.fn();
     upsertRecommendationMock = vi.fn();
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue('/repo') }));
+    resolveProjectPathMock = vi.fn().mockReturnValue('/repo');
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/recommendations/recommendations', () => ({ upsertRecommendation: upsertRecommendationMock }));
   });
@@ -165,7 +167,7 @@ describe('finalizeAgentRunReport', () => {
   });
 
   it('skips git inspection when the project path cannot be resolved', async () => {
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
+    resolveProjectPathMock.mockReturnValue(null);
     const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
     const job = makeJob();
 
