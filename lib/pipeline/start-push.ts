@@ -361,22 +361,6 @@ export async function pushCurrentBranch(
   return { ok: true, commitSha: shaR.exitCode === 0 ? shaR.stdout.trim() : '' };
 }
 
-async function switchToDefaultBranchAfterPrPush(
-  projPath: string,
-  log: (s: string) => void,
-): Promise<void> {
-  const mainBranch = await detectMainBranch(projPath);
-  log(`\n# switching back to ${mainBranch} and pulling\n`);
-  const coR = await exec('git', ['-C', projPath, 'checkout', mainBranch], { timeout: 10000 });
-  if (coR.stdout) log(coR.stdout);
-  if (coR.stderr) log(coR.stderr);
-  if (coR.exitCode === 0) {
-    const pullR = await exec('git', ['-C', projPath, 'pull', '--ff-only', 'origin', mainBranch], { timeout: 30000 });
-    if (pullR.stdout) log(pullR.stdout);
-    if (pullR.stderr) log(pullR.stderr);
-  }
-  clearProjectDataCache();
-}
 
 async function runPush(
   projectName: string,
@@ -519,16 +503,16 @@ async function runPush(
   const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
   const pipelineConfig = getProjectTestConfig(projectName);
   const prWorkflowEnabled = !!pipelineConfig?.prWorkflowEnabled;
-  const autoPrMergeEnabled = !!pipelineConfig?.autoPrMergeEnabled;
 
   if (issueCtx) {
     const prUrl = await createIssuePR(projPath, log, issueCtx);
-    if (autoPrMergeEnabled) {
-      log(`\n# staying on issue branch until PR is merged (handled by pr-wait)\n`);
-      clearProjectDataCache();
-    } else {
-      await switchToDefaultBranchAfterPrPush(projPath, log);
-    }
+    // Stay on the issue branch until the PR merges, regardless of whether
+    // auto-merge is enabled. The user iterates on the branch (more fixes,
+    // more pushes); switching to main now strands them with conflicts. The
+    // post-merge return-to-main is handled by start-pr-wait when auto-merge
+    // is on, or by an explicit user "Back to main" action when it's off.
+    log(`\n# staying on issue branch until PR is merged\n`);
+    clearProjectDataCache();
     if (prUrl) {
       const prNumber = parseInt(prUrl.split('/').pop() ?? '0', 10) || undefined;
       return { ok: true, commitSha, message: `PR created: ${prUrl}`, prUrl, prNumber, prRepo: issueCtx.repo };
@@ -556,11 +540,10 @@ async function runPush(
     const prResult = await createGenericPR(projPath, log);
     if (prResult) {
       const prNumber = parseInt(prResult.prUrl.split('/').pop() ?? '0', 10) || undefined;
-      if (autoPrMergeEnabled) {
-        log(`\n# staying on feature branch until PR is merged (handled by pr-wait)\n`);
-      } else {
-        await switchToDefaultBranchAfterPrPush(projPath, log);
-      }
+      // Stay on the feature branch until the PR merges. start-pr-wait handles
+      // post-merge return-to-main when auto-merge is on; otherwise the user
+      // returns manually.
+      log(`\n# staying on feature branch until PR is merged\n`);
       return { ok: true, commitSha, message: `PR created: ${prResult.prUrl}`, prUrl: prResult.prUrl, prNumber, prRepo: prResult.prRepo };
     }
     if (prResult === false) {
