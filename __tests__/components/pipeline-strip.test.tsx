@@ -197,6 +197,25 @@ describe('PipelineStrip', () => {
     unmount()
   })
 
+  it('keeps the summary chip non-actionable while removing click CTA copy for running steps', () => {
+    const { container, unmount } = renderStrip({
+      projectJobs: [
+        buildJob({ id: 'review-running-1', kind: 'review', started_at: 100, status: 'running', finished_at: null, exit_code: null, session_id: 'review-running-session' }),
+      ],
+    })
+
+    const summary = container.querySelector('[aria-label^="pipeline summary:"]')
+    if (!(summary instanceof HTMLDivElement)) throw new Error('summary chip not found')
+    expect(summary.textContent).not.toContain('click to')
+    expect(summary.getAttribute('title')).toBe('review in progress')
+
+    const reviewButton = container.querySelector('[aria-label^="review: running."]')
+    if (!(reviewButton instanceof HTMLButtonElement)) throw new Error('review button not found')
+    expect(reviewButton.getAttribute('title')).toBe('review in progress — click to open terminal')
+
+    unmount()
+  })
+
   it('shows parent-linked pipeline ancestors when release_id is absent and omits the trace link', () => {
     const { container, unmount } = renderStrip({
       projectJobs: [
@@ -235,6 +254,26 @@ describe('PipelineStrip', () => {
     if (!(fixButton instanceof HTMLButtonElement)) throw new Error('fix button not found')
     fixButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(pushMock).toHaveBeenCalledWith('/project/acme/widgets/terminal/fix-session')
+
+    unmount()
+  })
+
+  it('keeps the summary chip non-actionable while removing click CTA copy for attention states', () => {
+    const { container, unmount } = renderStrip({
+      projectJobs: [
+        buildJob({ id: 'release-attention-root', kind: 'release', started_at: 90, status: 'running', finished_at: null, exit_code: null }),
+        buildJob({ id: 'review-attention-1', kind: 'review', started_at: 100, verdict: 'NEEDS ATTENTION', session_id: 'review-attention-session', release_id: 'release-attention-root' }),
+      ],
+    })
+
+    const summary = container.querySelector('[aria-label^="pipeline summary:"]')
+    if (!(summary instanceof HTMLDivElement)) throw new Error('summary chip not found')
+    expect(summary.textContent).not.toContain('click to')
+    expect(summary.getAttribute('title')).toBe('verdict: NEEDS ATTENTION')
+
+    const reviewButton = container.querySelector('[aria-label^="review: attention."]')
+    if (!(reviewButton instanceof HTMLButtonElement)) throw new Error('review button not found')
+    expect(reviewButton.getAttribute('title')).toBe('verdict: NEEDS ATTENTION — click to view findings')
 
     unmount()
   })
