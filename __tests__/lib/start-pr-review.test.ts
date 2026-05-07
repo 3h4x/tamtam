@@ -195,6 +195,15 @@ describe('startPrReview', () => {
     expect(prompt).toContain('Use LGTM / NEEDS ATTENTION / DO NOT SHIP.');
   });
 
+  it('tells reviewers to ignore TamTam internal config changes', async () => {
+    execMock.mockResolvedValueOnce(resp(0, 'diff --git a/.tamtam/config.yml b/.tamtam/config.yml'));
+    await startPrReview('proj', 1, 'Title', 'feat/1', 'main');
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('TAMTAM INTERNAL CONFIG CONTEXT');
+    expect(prompt).toContain('Ignore `.tamtam/` changes during review');
+    expect(prompt).toContain('`.tamtam/agents/*.md`, `.tamtam/config.yml`, or other `.tamtam/` files');
+  });
+
   it('only checks review-kind running jobs (ignores fix/test)', async () => {
     listJobsMock.mockReturnValue([
       makeJob({ kind: 'fix', finishedAt: null }),
@@ -225,6 +234,7 @@ describe('startPrReview', () => {
     const savedJob = updateJobMock.mock.calls[0][0];
     expect(savedJob.pid).toBe(9999);
     expect(savedJob.logPath).toMatch(/\.log$/);
+    expect(JSON.parse(savedJob.contextMeta)).toMatchObject({ sourceType: 'pr_review', prNumber: 1 });
   });
 
   it('returns 400 when gh pr diff exits non-zero with no stdout', async () => {

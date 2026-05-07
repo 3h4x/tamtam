@@ -123,7 +123,6 @@ function ndjsonText(text: string): string {
 
 describe('reconcileStaleRelease', () => {
   let testDb: ReturnType<typeof createTestDb>;
-  let reconcileStaleRelease: typeof import('@/lib/jobs/job-storage').reconcileStaleRelease;
   let releaseLockMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
 
@@ -1321,6 +1320,124 @@ describe('setReviewedRef incremental_review_enabled guard', () => {
     await markDoneFn(makeReviewJob('rev-na', logPath), 0);
 
     expect(setReviewedRefMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('review completion preserves the git index', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
+  let execMock: ReturnType<typeof vi.fn>;
+  let markReviewedMock: ReturnType<typeof vi.fn>;
+  let tempDir: string;
+
+  function makeReviewJob(id: string, logPath: string, overrides: Partial<JobData> = {}): JobData {
+    const now = Date.now() / 1000;
+    return {
+      id,
+      project: 'proj',
+      kind: 'review',
+      prompt: null,
+      pid: 0,
+      logPath,
+      startedAt: now,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      provider: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+    testDb = createTestDb();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-review-index-'));
+    execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+    markReviewedMock = vi.fn().mockResolvedValue(undefined);
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+      getJobStatus: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/git/git-utils', () => ({
+      markReviewed: markReviewedMock,
+      setReviewedRef: vi.fn().mockResolvedValue(undefined),
+      getCurrentBranch: vi.fn().mockResolvedValue('main'),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({
+        autoPushEnabled: false,
+        autoCommitEnabled: false,
+        releaseAfterRun: false,
+        prWorkflowEnabled: false,
+      }),
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      releaseLock: vi.fn(),
+      getLock: vi.fn().mockReturnValue(null),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/jobs/retention', () => ({ pruneProjectLogs: vi.fn() }));
+    vi.doMock('@/lib/shared/notifications', () => ({
+      notify: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shared/job-control', () => ({
+      runAutoChainGates: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: vi.fn().mockReturnValue({
+        fix_ci_max_retries: 0,
+        fix_ci_retry_window_seconds: 120,
+        fix_ci_fast_crash_ms: 5000,
+        incremental_review_enabled: false,
+        review_retry_on_parse_failure: false,
+      }),
+    }));
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('does not stage files after a successful standalone review', async () => {
+    const logPath = join(tempDir, 'standalone.log');
+    writeFileSync(logPath, 'Findings: none\nVerdict: LGTM\n');
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+    await markDoneFn(makeReviewJob('review-standalone', logPath), 0);
+
+    expect(markReviewedMock).toHaveBeenCalledWith('proj', '/path/to/proj');
+    expect(execMock.mock.calls.some((call) => call[0] === 'git' && call[1][2] === 'add')).toBe(false);
+  });
+
+  it('does not stage files after a successful PR review', async () => {
+    const logPath = join(tempDir, 'pr-review.log');
+    writeFileSync(logPath, 'Findings: none\nVerdict: LGTM\n');
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+    await markDoneFn(
+      makeReviewJob('review-pr', logPath, {
+        contextMeta: JSON.stringify({ sourceType: 'pr_review', prNumber: 7 }),
+      }),
+      0
+    );
+
+    expect(markReviewedMock).toHaveBeenCalledWith('proj', '/path/to/proj');
+    expect(execMock.mock.calls.some((call) => call[0] === 'git' && call[1][2] === 'add')).toBe(false);
   });
 });
 

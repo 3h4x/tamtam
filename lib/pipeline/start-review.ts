@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { existsSync, readFileSync, statSync } from 'fs';
+import { join, resolve } from 'path';
 import { getImproveConfig, getProjectTestConfig, getProjectPipelinePrompts } from '@/lib/scheduling/scheduling';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
@@ -48,6 +48,9 @@ function loadReviewPrompt(projectName: string): string {
     '- Do not run tests, inspect test runner coverage, audit which package test commands are included, or report that a test command was not run.\n' +
     '- Do not cite passing, failing, skipped, partial, or unexercised test suites as review findings.\n' +
     '- Only mention tests when the code diff itself creates a concrete missing-coverage risk, and describe the behavior that lacks coverage instead of validating the suite.\n\n' +
+    'TAMTAM INTERNAL CONFIG CONTEXT:\n' +
+    '- Ignore `.tamtam/` changes during review. They are TamTam scheduler/config metadata, not product code for this project.\n' +
+    '- Do not raise findings about `.tamtam/agents/*.md`, `.tamtam/config.yml`, or other `.tamtam/` files unless the review task is explicitly about TamTam configuration.\n\n' +
     REVIEW_OUTPUT_CONTRACT + '\n\n' +
     'OUTPUT FORMAT — strict. Your final non-empty line must be exactly one of:\n\n' +
     '    Verdict: LGTM\n' +
@@ -71,17 +74,89 @@ type ReviewScope =
   | { ok: true; prompt: string }
   | { ok: false; detail: string };
 
+const REVIEW_DIFF_MAX_CHARS = 120_000;
+const REVIEW_UNTRACKED_FILE_MAX_CHARS = 24_000;
+
+function trimForPrompt(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return value.slice(0, maxChars) + `\n\n[truncated at ${maxChars} chars]\n`;
+}
+
+function statusPath(line: string): string {
+  const raw = line.slice(3).trim();
+  const renamed = raw.split(' -> ');
+  return renamed[renamed.length - 1] || raw;
+}
+
+function isTamtamPath(path: string): boolean {
+  return path === '.tamtam' || path.startsWith('.tamtam/');
+}
+
+function reviewablePathsFromStatus(status: string): string[] {
+  const paths: string[] = [];
+  for (const line of status.split('\n')) {
+    if (!line.trim()) continue;
+    const path = statusPath(line);
+    if (!path || isTamtamPath(path)) continue;
+    paths.push(path);
+  }
+  return [...new Set(paths)];
+}
+
+function hasNonTamtamStatus(status: string): boolean {
+  return status.split('\n').some((line) => {
+    if (!line.trim()) return false;
+    return !isTamtamPath(statusPath(line));
+  });
+}
+
+function readUntrackedFileForPrompt(projPath: string, relPath: string): string | null {
+  const rootPath = resolve(projPath);
+  const fullPath = resolve(rootPath, relPath);
+  if (!fullPath.startsWith(rootPath + '/') || !existsSync(fullPath)) return null;
+  try {
+    const stat = statSync(/*turbopackIgnore: true*/ fullPath);
+    if (!stat.isFile()) return null;
+    const body = readFileSync(/*turbopackIgnore: true*/ fullPath, 'utf-8');
+    return trimForPrompt(body, REVIEW_UNTRACKED_FILE_MAX_CHARS);
+  } catch {
+    return null;
+  }
+}
+
 async function determineReviewScope(projPath: string): Promise<ReviewScope> {
   const statusR = await exec('git', ['-C', projPath, 'status', '--porcelain', '--ignore-submodules'], { timeout: 5000 });
-  const hasUncommittedChanges = statusR.exitCode === 0 && statusR.stdout.trim().length > 0;
-  if (hasUncommittedChanges) {
+  const status = statusR.exitCode === 0 ? statusR.stdout : '';
+  const reviewablePaths = reviewablePathsFromStatus(status);
+  if (reviewablePaths.length > 0) {
+    const [statR, diffR] = await Promise.all([
+      exec('git', ['-C', projPath, 'diff', '--stat', 'HEAD', '--', '.', ':(exclude).tamtam/**'], { timeout: 5000 }),
+      exec('git', ['-C', projPath, 'diff', '--no-ext-diff', 'HEAD', '--', '.', ':(exclude).tamtam/**'], { timeout: 5000 }),
+    ]);
+    const untrackedFiles = reviewablePaths.filter((p) =>
+      status.split('\n').some((line) => line.startsWith('??') && statusPath(line) === p)
+    );
+    const untrackedBlocks = untrackedFiles
+      .map((p) => {
+        const body = readUntrackedFileForPrompt(projPath, p);
+        return body === null ? `### ${p}\n[untracked file omitted: binary, missing, or unreadable]` : `### ${p}\n${body}`;
+      })
+      .join('\n\n');
+    const diff = diffR.exitCode === 0 ? trimForPrompt(diffR.stdout, REVIEW_DIFF_MAX_CHARS) : '[unable to compute working-tree diff]';
+    const stat = statR.exitCode === 0 ? statR.stdout.trim() : '';
     return {
       ok: true,
       prompt:
-        'There are uncommitted changes in this repository. Use git and any other tools ' +
-        'you need to inspect the changes yourself (git status, git diff, read files, ' +
-        'etc.), then review them.',
+        'TamTam computed this review scope before launching the reviewer. Git commands may be blocked in the review context.\n' +
+        'Review ONLY the non-.tamtam working-tree changes listed here. This scope includes staged tracked changes, unstaged tracked changes, and untracked files.\n\n' +
+        `Working-tree files to review:\n${reviewablePaths.map((p) => `- ${p}`).join('\n')}\n\n` +
+        (stat ? `Working-tree diff stat:\n${stat}\n\n` : '') +
+        `Working-tree tracked-file diff (vs HEAD):\n${diff || '[no tracked-file diff; review untracked files below]'}\n` +
+        (untrackedBlocks ? `\nUntracked file contents:\n${untrackedBlocks}` : ''),
     };
+  }
+  if (statusR.exitCode === 0 && hasNonTamtamStatus(status)) {
+    return { ok: false, detail: 'No non-.tamtam changes to review' };
   }
 
   const aheadR = await exec('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });

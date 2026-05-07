@@ -64,7 +64,7 @@ describe('GET /api/projects/by-project/{projectName}/docs', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.docs).toHaveLength(2);
-    const names = data.docs.map((d: any) => d.name).sort();
+    const names = data.docs.map((d: any) => d.name);
     expect(names).toEqual(['API.md', 'ARCHITECTURE.md']);
     const arch = data.docs.find((d: any) => d.name === 'ARCHITECTURE.md');
     expect(arch.content).toBe('# Architecture\ndetails here');

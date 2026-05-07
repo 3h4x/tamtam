@@ -31,7 +31,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 - `config` — Project test command + workflow flags + per-project pipeline prompt addenda (`review_prompt_addendum`, `fix_prompt_addendum`) (GET, PATCH)
 - `run` — Run Claude on project (POST, accepts `model` param)
 - `review` — Start AI code review (POST)
-- `review-pr` — Start AI review of a GitHub PR (POST)
+- `review-pr` — Start AI review of a GitHub PR (POST). PR review prompts ignore `.tamtam/` metadata changes unless the review is explicitly about TamTam configuration.
 - `fix-ci` — Start AI CI fix run (POST)
 - `test` — Run project test command (POST)
 - `changes` — Uncommitted changes summary (GET, returns `defaultBranch`/`branch`/`ahead`/`behind`/`files`); git pull with strategy (POST: ff-only/merge/rebase)
