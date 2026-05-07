@@ -233,7 +233,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     setStepRetryState({ jobId: step.navJobId, label: 'retrying' })
     try {
       if (step.kind === 'commit') {
-        await pushProject(projectName, { commit: true })
+        await pushProject(projectName, { commit: true, releaseId: release.navJobId ?? null })
       }
       await loadJobs()
       setExpanded((prev) => new Set(prev).add(release.key))
