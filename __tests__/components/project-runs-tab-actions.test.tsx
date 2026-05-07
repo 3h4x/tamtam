@@ -147,6 +147,33 @@ describe('ProjectRunsTab release actions', () => {
     unmount()
   })
 
+  it('uses the info tone for running summary text and running filter chips', async () => {
+    fetchJobsMock.mockResolvedValue({
+      jobs: [
+        makeJob({ id: 'running-review', kind: 'review', started_at: 100, finished_at: null, status: 'running', exit_code: null }),
+      ],
+      pendingReleaseProjects: [],
+    })
+
+    const { container, unmount } = renderTab()
+
+    await vi.waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(container.textContent).toContain('1 running')
+    })
+
+    const runningSummary = Array.from(container.querySelectorAll('span')).find((node) => node.textContent?.trim() === '1 running')
+    if (!(runningSummary instanceof HTMLSpanElement)) throw new Error('running summary not found')
+
+    const runningFilter = buttonByText(container, 'running')
+    expect(runningSummary.className).toContain('text-status-info')
+    expect(runningSummary.className).not.toContain('text-status-warning')
+    expect(runningFilter.className).toContain('text-status-info')
+    expect(runningFilter.className).not.toContain('text-status-warning')
+
+    unmount()
+  })
+
   it('keeps Sync board available even if an unrelated global fetch fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('settings offline')))
     const { container, unmount } = renderTab()

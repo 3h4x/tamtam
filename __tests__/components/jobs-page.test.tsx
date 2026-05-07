@@ -92,6 +92,28 @@ describe('JobsPage', () => {
     unmount()
   })
 
+  it('uses the same info tone for the running filter chip and running row badge', async () => {
+    const { container, unmount } = renderJobsPage()
+
+    await vi.waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 50 })
+      expect(container.textContent).toContain('running 1')
+    })
+
+    const runningButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('running 1'))
+    if (!(runningButton instanceof HTMLButtonElement)) throw new Error('running filter button not found')
+
+    const runningBadge = Array.from(container.querySelectorAll('span')).find((span) => {
+      const className = typeof span.className === 'string' ? span.className : ''
+      return span.textContent?.includes('running') && className.includes('border-status-info/30')
+    })
+    if (!(runningBadge instanceof HTMLSpanElement)) throw new Error('running row badge not found')
+
+    expect(runningButton.className).toContain('text-status-info')
+    expect(runningButton.className).not.toContain('text-status-warning')
+    expect(runningBadge.className).toContain('text-status-info')
+  })
+
   it('counts aborted jobs as failed and excludes them from done', async () => {
     fetchJobsMock.mockResolvedValue({
       jobs: [

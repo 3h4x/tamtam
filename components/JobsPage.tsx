@@ -57,10 +57,10 @@ function getJobStatus(job: JobInfo): {
   return {
     isRunning,
     isFailed,
-    border: isRunning ? 'border-l-status-warning' : isFailed ? 'border-l-status-error' : 'border-l-status-success',
+    border: isRunning ? 'border-l-status-info' : isFailed ? 'border-l-status-error' : 'border-l-status-success',
     badge: isRunning ? 'running' : isAborted ? 'cancelled' : isFailed ? `exit ${job.exit_code}` : 'done',
     badgeClass: isRunning
-      ? 'border-status-warning/30 bg-status-warning/15 text-status-warning'
+      ? 'border-status-info/30 bg-status-info/15 text-status-info'
       : isFailed
         ? 'border-status-error/30 bg-status-error/15 text-status-error'
         : 'border-status-success/30 bg-status-success/15 text-status-success',
@@ -129,13 +129,12 @@ function VerdictBadge({ verdict }: { verdict: NonNullable<JobInfo['verdict']> })
       : verdict === 'DO NOT SHIP'
       ? 'bg-status-error/15 text-status-error border-status-error/30'
       : 'bg-status-warning/15 text-status-warning border-status-warning/30'
-  const label = verdict === 'LGTM' ? '✓ LGTM' : verdict === 'DO NOT SHIP' ? '✗ DNS' : '⚠ ATTN'
   return (
     <span
       className={`inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full font-mono font-medium border ${cls}`}
       title={`Review verdict: ${verdict}`}
     >
-      {label}
+      {verdict === 'LGTM' ? '✓ LGTM' : verdict === 'DO NOT SHIP' ? '✗ DNS' : '⚠ ATTN'}
     </span>
   )
 }
@@ -286,7 +285,7 @@ export function JobsPage() {
           const count = f === 'all' ? jobs.length : f === 'running' ? runningCount : f === 'failed' ? failedCount : doneCount
           const active = filter === f
           const tone =
-            f === 'running' ? (active ? 'border-status-warning bg-status-warning/15 text-status-warning' : 'border-border bg-bg-secondary text-text-secondary hover:text-status-warning') :
+            f === 'running' ? (active ? 'border-status-info bg-status-info/15 text-status-info' : 'border-border bg-bg-secondary text-text-secondary hover:text-status-info') :
             f === 'failed' ? (active ? 'border-status-error bg-status-error/15 text-status-error' : 'border-border bg-bg-secondary text-text-secondary hover:text-status-error') :
             f === 'done' ? (active ? 'border-status-success bg-status-success/15 text-status-success' : 'border-border bg-bg-secondary text-text-secondary hover:text-status-success') :
             (active ? 'border-accent bg-accent/15 text-accent' : 'border-border bg-bg-secondary text-text-secondary hover:text-text-primary')
@@ -375,8 +374,6 @@ export function JobsPage() {
                       </Link>
                       <KindBadge kind={job.kind} />
                       {job.verdict && !status.isRunning && <VerdictBadge verdict={job.verdict} />}
-                      <MetaChip label="dur" value={durationLabel} />
-                      <MetaChip label="started" value={startedLabel} />
                     </div>
 
                     <div
@@ -398,9 +395,15 @@ export function JobsPage() {
                     </div>
                   </div>
 
-                  <div className="shrink-0">
+                  <div className="shrink-0 text-right">
+                    <div className="font-mono text-sm font-semibold tabular-nums text-text-primary">
+                      {durationLabel}
+                    </div>
+                    <div className="mt-1 flex justify-end">
+                      <MetaChip label="started" value={startedLabel} />
+                    </div>
                     {(totalTokens || cost || tokenPair) && (
-                      <div className="flex flex-col items-end gap-1 rounded-md border border-border bg-bg-primary/50 px-2 py-1 font-mono text-[11px] tabular-nums">
+                      <div className="mt-2 flex flex-col items-end gap-1 rounded-md border border-border bg-bg-primary/50 px-2 py-1 font-mono text-[11px] tabular-nums">
                         {tokenPair && (
                           <span className="text-text-tertiary" title="Input / output tokens">
                             <span className="text-status-success">{tokenPair.split(' ')[0]}</span>{' '}

@@ -362,7 +362,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
           <span>
             {filtered.length} {filtered.length === 1 ? 'entry' : 'entries'}
             {totals.running > 0 && (
-              <> · <span className="text-status-warning">{totals.running} running</span></>
+              <> · <span className="text-status-info">{totals.running} running</span></>
             )}
             {totals.tokens > 0 && <> · {formatTokens(totals.tokens)} tok</>}
             {totals.costUsd > 0 && <> · <span className="text-accent">{formatCost(totals.costUsd)}</span></>}
@@ -380,14 +380,14 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
       <div className="flex items-center gap-1.5 overflow-x-auto mb-3 pb-0.5 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent" style={{ scrollbarWidth: 'thin' }}>
         {([
           { f: { kind: 'all' } as Filter, label: 'all', tone: 'neutral' },
-          { f: { kind: 'running' } as Filter, label: 'running', tone: 'warning' },
+          { f: { kind: 'running' } as Filter, label: 'running', tone: 'info' },
           { f: { kind: 'failed' } as Filter, label: 'failed', tone: 'error' },
         ] as const).map(({ f, label, tone }) => {
           const count = counts[f.kind] ?? 0
           if ((f.kind === 'running' || f.kind === 'failed') && count === 0 && filterKey(filter) !== filterKey(f)) return null
           const active = filterKey(filter) === filterKey(f)
           const toneCls =
-            tone === 'warning' ? (active ? 'border-status-warning bg-status-warning/15 text-status-warning' : 'border-border bg-bg-secondary text-text-secondary hover:text-status-warning') :
+            tone === 'info' ? (active ? 'border-status-info bg-status-info/15 text-status-info' : 'border-border bg-bg-secondary text-text-secondary hover:text-status-info') :
             tone === 'error' ? (active ? 'border-status-error bg-status-error/15 text-status-error' : 'border-border bg-bg-secondary text-text-secondary hover:text-status-error') :
             (active ? 'border-accent bg-accent/15 text-accent' : 'border-border bg-bg-secondary text-text-secondary hover:text-text-primary')
           return (
