@@ -162,6 +162,32 @@ describe('ProjectRunsTab release actions', () => {
     unmount()
   })
 
+  it('keeps Sync board available for aborted finished rows', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('settings offline')))
+    fetchJobsMock.mockResolvedValue({
+      jobs: [
+        makeJob({ id: 'aborted-release', kind: 'release', started_at: 100, finished_at: 120, status: 'aborted', exit_code: -3 }),
+      ],
+      pendingReleaseProjects: [],
+    })
+
+    const { container, unmount } = renderTab()
+
+    await vi.waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(buttonByText(container, 'Sync board')).toBeInstanceOf(HTMLButtonElement)
+    })
+
+    buttonByText(container, 'Sync board').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(syncJobBoardMock).toHaveBeenCalledWith('aborted-release')
+    })
+
+    vi.unstubAllGlobals()
+    unmount()
+  })
+
   it('hides retry on an older top-level release when a newer nested release exists under an agent run', async () => {
     fetchJobsMock.mockResolvedValue({
       jobs: [

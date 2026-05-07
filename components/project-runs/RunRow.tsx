@@ -125,6 +125,9 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
   const effectiveRunning = entryIsRunning(e)
   const effectiveNeedsAttention = entryNeedsAttention(e)
   const statusFailureLabel = e.failureLabel
+    ?? (e.status === 'aborted' || e.exitCode === -3
+      ? 'cancelled'
+      : null)
     ?? (e.kind === 'review' && e.verdict === 'DO NOT SHIP'
       ? 'do not ship'
       : e.kind === 'review' && e.verdict == null && e.status === 'done'

@@ -222,7 +222,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
 
   const releaseActionsFor = (e: Entry): React.ReactNode => {
     const outcomeStatus = e.releaseOutcome?.status
-      ?? (e.kind === 'release' && e.status === 'done' && e.exitCode !== null && e.exitCode !== 0
+      ?? (e.kind === 'release' && (e.status === 'done' || e.status === 'aborted') && e.exitCode !== null && e.exitCode !== 0
         ? (e.children?.length ?? 0) === 0 ? 'blocked' : 'failed'
         : null)
     // Only the latest release for the project should offer continue/retry —
@@ -250,7 +250,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
       })()
     ) : null
     const boardActive = boardActionState?.jobId === e.navJobId
-    const canManualSyncBoard = e.status === 'done'
+    const canManualSyncBoard = e.status !== 'running' && !entryIsRunning(e)
     const boardButton = canManualSyncBoard ? (
       <button
         type="button"

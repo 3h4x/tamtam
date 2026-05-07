@@ -160,7 +160,7 @@ export interface JobInfo {
   prompt: string | null
   pid: number
   log_path: string
-  status: 'running' | 'done'
+  status: 'running' | 'done' | 'aborted'
   exit_code: number | null
   started_at: number
   finished_at: number | null

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { fetchJobs } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
+import { jobIsAborted, jobIsRunning, jobNeedsAttention, jobSucceeded } from '@/lib/client/job-status'
 import { formatAgo } from '@/lib/shared/format'
 import { MetaChip } from '@/components/MetaChip'
 
@@ -50,13 +51,14 @@ function getJobStatus(job: JobInfo): {
   badge: string
   badgeClass: string
 } {
-  const isRunning = job.status === 'running'
-  const isFailed = !isRunning && job.exit_code !== null && job.exit_code !== 0
+  const isRunning = jobIsRunning(job)
+  const isAborted = jobIsAborted(job)
+  const isFailed = jobNeedsAttention(job)
   return {
     isRunning,
     isFailed,
     border: isRunning ? 'border-l-status-warning' : isFailed ? 'border-l-status-error' : 'border-l-status-success',
-    badge: isRunning ? 'running' : isFailed ? `exit ${job.exit_code}` : 'done',
+    badge: isRunning ? 'running' : isAborted ? 'cancelled' : isFailed ? `exit ${job.exit_code}` : 'done',
     badgeClass: isRunning
       ? 'border-status-warning/30 bg-status-warning/15 text-status-warning'
       : isFailed
@@ -216,9 +218,9 @@ export function JobsPage() {
   }, [loading, hasMore, jobs.length])
 
   const filtered = jobs.filter((j) => {
-    if (filter === 'running' && j.status !== 'running') return false
-    if (filter === 'failed' && !(j.status === 'done' && j.exit_code !== null && j.exit_code !== 0)) return false
-    if (filter === 'done' && !(j.status === 'done' && (j.exit_code === 0 || j.exit_code === null))) return false
+    if (filter === 'running' && !jobIsRunning(j)) return false
+    if (filter === 'failed' && !jobNeedsAttention(j)) return false
+    if (filter === 'done' && !jobSucceeded(j)) return false
     if (search) {
       const q = search.toLowerCase()
       const haystack = [
@@ -236,8 +238,8 @@ export function JobsPage() {
     return true
   })
 
-  const runningCount = jobs.filter(j => j.status === 'running').length
-  const failedCount = jobs.filter(j => j.status === 'done' && j.exit_code !== null && j.exit_code !== 0).length
+  const runningCount = jobs.filter(jobIsRunning).length
+  const failedCount = jobs.filter(jobNeedsAttention).length
   const doneCount = jobs.length - runningCount - failedCount
 
   return (

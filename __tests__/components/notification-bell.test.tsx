@@ -199,6 +199,36 @@ describe('NotificationBell', () => {
     unmount()
   })
 
+  it('marks aborted finished jobs seen when opened from the dropdown', async () => {
+    fetchNotificationsMock.mockResolvedValue({
+      count: 1,
+      jobs: [makeJob({ id: 'aborted-job', kind: 'release', status: 'aborted', exit_code: -3, project: 'abort-proj' })],
+      runningCount: 0,
+      runningJobs: [],
+    })
+
+    const { container, unmount } = renderBell()
+
+    await vi.waitFor(() => {
+      expect(fetchNotificationsMock).toHaveBeenCalled()
+    })
+
+    bellButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(notificationRow(container, 'abort-proj')).toBeInstanceOf(HTMLButtonElement)
+    })
+
+    notificationRow(container, 'abort-proj').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(markJobSeenMock).toHaveBeenCalledWith('aborted-job')
+      expect(pushMock).toHaveBeenCalledWith('/project/abort-proj/terminal?job=aborted-job')
+    })
+
+    unmount()
+  })
+
   it.each([
     ['fix', 'fix-ok'],
     ['fix-ci', 'fix-ci-ok'],

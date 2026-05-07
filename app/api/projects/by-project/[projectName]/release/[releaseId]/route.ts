@@ -5,6 +5,12 @@ import { resolveProjectPath } from '@/lib/shared/project-data';
 
 const PIPELINE_STEP_KINDS = ['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod'];
 
+function jobStatus(job: { abortedAt?: number | null; finishedAt: number | null }): 'running' | 'done' | 'aborted' {
+  if (job.abortedAt != null) return 'aborted';
+  if (job.finishedAt != null) return 'done';
+  return 'running';
+}
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ projectName: string; releaseId: string }> },
@@ -55,7 +61,7 @@ export async function GET(
     return {
       job_id: j.id,
       kind: j.kind,
-      status: j.finishedAt !== null ? ('done' as const) : ('running' as const),
+      status: jobStatus(j),
       exit_code: j.exitCode ?? null,
       started_at: j.startedAt,
       finished_at: j.finishedAt ?? null,
@@ -90,6 +96,7 @@ export async function GET(
     release_id: releaseId,
     project: projectName,
     branch,
+    status: jobStatus(releaseJob),
     started_at: releaseJob.startedAt,
     finished_at: releaseJob.finishedAt ?? null,
     exit_code: releaseJob.exitCode ?? null,

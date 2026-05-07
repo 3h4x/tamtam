@@ -236,6 +236,12 @@ try {
 try {
   sqlite.exec('ALTER TABLE projects ADD COLUMN review_disabled INTEGER DEFAULT 0');
 } catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN review_prompt_addendum TEXT');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN fix_prompt_addendum TEXT');
+} catch {}
 
 // Migrate: add cost_usd and model columns to jobs
 try {
