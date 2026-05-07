@@ -9,7 +9,18 @@ export const CLAUDE_SHIM = join(__dirname, 'mocks', 'claude-shim.js');
 export const CODEX_BIN = join(__dirname, 'mocks', 'codex-bin.js');
 
 // Projects exercised by the pipeline specs.
-const PROJECTS = ['happy-path', 'needs-attention', 'abort', 'paused', 'ui-live', 'codex-shim', 'review-cap-exhaustion', 'review-failure'];
+const PROJECTS = [
+  'happy-path',
+  'needs-attention',
+  'abort',
+  'paused',
+  'ui-live',
+  'history-live-done',
+  'history-live-abort',
+  'codex-shim',
+  'review-cap-exhaustion',
+  'review-failure',
+];
 
 export default async function globalSetup(): Promise<void> {
   // Clean up any previous run and start fresh.
