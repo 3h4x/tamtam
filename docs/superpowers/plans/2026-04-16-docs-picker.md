@@ -174,13 +174,9 @@ Expected: all 5 tests pass.
 
 Evidence: `app/api/projects/by-project/[projectName]/docs/route.ts` now sorts `docs/*.md` alphabetically even when no root `README.md` exists, while still keeping `README.md` first when present. Verified with `pnpm test __tests__/api/project-docs.test.ts` and `pnpm type-check` on 2026-05-07.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
-```bash
-cd /Users/3h4x/workspace/tamtam
-git add app/api/projects/by-project/[projectName]/docs/route.ts __tests__/api/project-docs.test.ts
-git commit -m "feat: add GET /api/projects/by-project/[name]/docs route"
-```
+Already committed as b16fd5b "fix(project-docs): sort docs when readme is absent".
 
 ---
 
@@ -196,7 +192,7 @@ The changes are:
 4. Add `+docs` button + picker in the title bar (after the `+skill` block, around line 408)
 5. Clear selected docs on new session in `handleNewSession`
 
-- [ ] **Step 1: Add docs state after the skills state block**
+- [x] **Step 1: Add docs state after the skills state block**
 
 In `components/ExperimentalTab.tsx`, find the line:
 ```typescript
@@ -217,7 +213,7 @@ Add immediately after it:
   const docsSearchRef = useRef<HTMLInputElement>(null)
 ```
 
-- [ ] **Step 2: Add useEffect to focus docs search input**
+- [x] **Step 2: Add useEffect to focus docs search input**
 
 After the existing `useEffect` that focuses `skillSearchRef`:
 ```typescript
@@ -242,7 +238,7 @@ Add:
   }, [showDocsPicker, projectName, allDocs.length])
 ```
 
-- [ ] **Step 3: Add filtered docs and toggle function**
+- [x] **Step 3: Add filtered docs and toggle function**
 
 After the `toggleItem` function (around line 105), add:
 
@@ -263,7 +259,7 @@ After the `toggleItem` function (around line 105), add:
   }
 ```
 
-- [ ] **Step 4: Inject doc content in handleSubmit**
+- [x] **Step 4: Inject doc content in handleSubmit**
 
 In `handleSubmit`, find the DB skill injection block:
 ```typescript
@@ -291,7 +287,7 @@ Replace with:
       }
 ```
 
-- [ ] **Step 5: Clear selected docs in handleNewSession**
+- [x] **Step 5: Clear selected docs in handleNewSession**
 
 Find `handleNewSession`:
 ```typescript
@@ -322,7 +318,7 @@ Replace with:
   }
 ```
 
-- [ ] **Step 6: Add +docs button and picker to title bar**
+- [x] **Step 6: Add +docs button and picker to title bar**
 
 Find the closing `</div>` after the `+skill` picker block (after line 408):
 ```typescript
@@ -402,7 +398,7 @@ Replace with:
             ))}
 ```
 
-- [ ] **Step 7: Type-check**
+- [x] **Step 7: Type-check**
 
 ```bash
 cd /Users/3h4x/workspace/tamtam && pnpm type-check 2>&1 | tail -20
@@ -410,7 +406,7 @@ cd /Users/3h4x/workspace/tamtam && pnpm type-check 2>&1 | tail -20
 
 Expected: no errors.
 
-- [ ] **Step 8: Run full test suite**
+- [x] **Step 8: Run full test suite**
 
 ```bash
 cd /Users/3h4x/workspace/tamtam && pnpm test 2>&1 | tail -20
@@ -418,10 +414,6 @@ cd /Users/3h4x/workspace/tamtam && pnpm test 2>&1 | tail -20
 
 Expected: same pass/fail ratio as before (1 pre-existing failure in config.test.ts, all others pass).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
-```bash
-cd /Users/3h4x/workspace/tamtam
-git add components/ExperimentalTab.tsx
-git commit -m "feat: add +docs picker to experimental tab"
-```
+Feature was implemented as part of the TerminalTab refactor. Code lives in `components/terminal/TerminalToolbar.tsx`, `components/terminal/useHandleSubmit.ts`, `components/terminal/useSessionManager.ts`, `components/terminal/useTerminalBootstrap.ts`, and `components/TerminalTab.tsx`. All 7 project-docs tests pass. Plan fully complete as of 2026-05-07.
