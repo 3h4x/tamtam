@@ -5,6 +5,7 @@ describe('POST /api/projects/by-project/[projectName]/checkout-default', () => {
   let POST: (req: NextRequest, ctx: { params: Promise<{ projectName: string }> }) => Promise<Response>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let clearProjectDataCacheMock: ReturnType<typeof vi.fn>;
+  let clearIssueBranchLockCacheMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
   let detectMainBranchMock: ReturnType<typeof vi.fn>;
 
@@ -23,12 +24,16 @@ describe('POST /api/projects/by-project/[projectName]/checkout-default', () => {
 
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     clearProjectDataCacheMock = vi.fn();
+    clearIssueBranchLockCacheMock = vi.fn();
     execMock = vi.fn().mockResolvedValue(makeExecResult());
     detectMainBranchMock = vi.fn().mockResolvedValue('main');
 
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: clearProjectDataCacheMock,
+    }));
+    vi.doMock('@/lib/shared/project-branch-lock', () => ({
+      clearIssueBranchLockCache: clearIssueBranchLockCacheMock,
     }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/pipeline/start-commit', () => ({ detectMainBranch: detectMainBranchMock }));
@@ -80,17 +85,18 @@ describe('POST /api/projects/by-project/[projectName]/checkout-default', () => {
     const data = await res.json();
     expect(data.status).toBe('already-on-branch');
     expect(data.branch).toBe('main');
-    // No checkout command should be issued
     expect(execMock).toHaveBeenCalledTimes(2);
   });
 
   // ── Happy path ────────────────────────────────────────────────────────────
 
-  it('checks out the default branch and returns switched', async () => {
+  it('checks out the default branch and returns switched from an issue branch without GitHub lookups', async () => {
     execMock
-      .mockResolvedValueOnce(makeExecResult({ stdout: '' }))              // git status --porcelain
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/x\n' }))     // git branch --show-current
-      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));            // git checkout main
+      .mockResolvedValueOnce(makeExecResult({ stdout: '' })) // git status --porcelain
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'fix/issue-7-login\n' })) // git branch --show-current
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })) // fetch
+      .mockResolvedValueOnce(makeExecResult({ stdout: '1\n' })) // rev-list (ahead)
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 })); // git checkout main
     detectMainBranchMock.mockResolvedValue('main');
 
     const res = await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -100,21 +106,40 @@ describe('POST /api/projects/by-project/[projectName]/checkout-default', () => {
     expect(data.branch).toBe('main');
   });
 
-  it('calls clearProjectDataCache after a successful checkout', async () => {
+  it('does not shell out to gh while switching branches', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'fix/issue-7-login\n' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }))
+      .mockResolvedValueOnce(makeExecResult({ stdout: '1\n' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));
+    detectMainBranchMock.mockResolvedValue('main');
+
+    await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
+
+    expect(execMock.mock.calls.some(([cmd]) => cmd === 'gh')).toBe(false);
+  });
+
+  it('calls clear caches after a successful checkout', async () => {
     execMock
       .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
       .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/x\n' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }))
+      .mockResolvedValueOnce(makeExecResult({ stdout: '1\n' }))
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));
     detectMainBranchMock.mockResolvedValue('main');
 
     await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(clearProjectDataCacheMock).toHaveBeenCalledTimes(1);
+    expect(clearIssueBranchLockCacheMock).toHaveBeenCalledWith('myproj');
   });
 
   it('works with master as the default branch', async () => {
     execMock
       .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
       .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/y\n' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }))
+      .mockResolvedValueOnce(makeExecResult({ stdout: '1\n' }))
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));
     detectMainBranchMock.mockResolvedValue('master');
 
@@ -167,6 +192,8 @@ describe('POST /api/projects/by-project/[projectName]/checkout-default', () => {
     execMock
       .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
       .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/x\n' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }))
+      .mockResolvedValueOnce(makeExecResult({ stdout: '1\n' }))
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));
     detectMainBranchMock.mockResolvedValue('main');
 

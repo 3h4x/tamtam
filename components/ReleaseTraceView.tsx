@@ -7,7 +7,7 @@ import { ErrorState } from './ErrorState'
 interface ReleaseStep {
   job_id: string
   kind: string
-  status: 'running' | 'done'
+  status: 'running' | 'done' | 'aborted'
   exit_code: number | null
   started_at: number
   finished_at: number | null
@@ -30,6 +30,7 @@ interface ReleaseTrace {
   release_id: string
   project: string
   branch: string | null
+  status: 'running' | 'done' | 'aborted'
   started_at: number
   finished_at: number | null
   exit_code: number | null
@@ -60,6 +61,9 @@ function StepGlyph({ step }: { step: ReleaseStep }) {
     return (
       <span className="inline-block w-4 h-4 rounded-full border-2 border-accent border-t-transparent animate-spin" />
     )
+  }
+  if (step.status === 'aborted') {
+    return <span className="text-status-error font-bold">✗</span>
   }
   if (step.exit_code === 0) {
     return <span className="text-status-success font-bold">✓</span>
@@ -188,8 +192,9 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
   }
 
   const isRunning = trace.finished_at === null
-  const isSuccess = trace.exit_code === 0 && !isRunning
-  const isFailed = trace.exit_code !== null && trace.exit_code !== 0
+  const isCancelled = trace.status === 'aborted'
+  const isSuccess = trace.status === 'done' && trace.exit_code === 0 && !isRunning
+  const isFailed = !isCancelled && trace.exit_code !== null && trace.exit_code !== 0
 
   const totalDurationMs = trace.finished_at
     ? Math.round((trace.finished_at - trace.started_at) * 1000)
@@ -244,6 +249,11 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
             {isSuccess && (
               <span className="text-xs px-2.5 py-1 rounded-full bg-status-success/15 text-status-success font-mono border border-status-success/30">
                 success
+              </span>
+            )}
+            {isCancelled && (
+              <span className="text-xs px-2.5 py-1 rounded-full bg-status-error/15 text-status-error font-mono border border-status-error/30">
+                cancelled
               </span>
             )}
             {isFailed && (
@@ -310,6 +320,7 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
                     >
                       <span className={`font-mono text-sm font-semibold w-20 shrink-0 ${
                         step.status === 'running' ? 'text-accent' :
+                        step.status === 'aborted' ? 'text-status-error' :
                         step.exit_code === 0 || step.verdict === 'LGTM' ? 'text-text-primary' :
                         step.verdict === 'NEEDS ATTENTION' ? 'text-status-warning' :
                         step.exit_code !== null ? 'text-status-error' : 'text-text-secondary'
@@ -323,6 +334,9 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
                         )}
                         {step.status === 'running' && (
                           <span className="text-[10px] text-accent font-mono">running…</span>
+                        )}
+                        {step.status === 'aborted' && (
+                          <span className="text-[10px] text-status-error font-mono">cancelled</span>
                         )}
                       </div>
                       <span className="text-[10px] text-text-tertiary font-mono shrink-0">

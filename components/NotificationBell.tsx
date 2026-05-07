@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { fetchNotifications, markNotificationsSeen, markJobSeen } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
+import { jobIsFinished } from '@/lib/client/job-status'
 
 function timeAgo(date: Date): string {
   const s = Math.floor((Date.now() - date.getTime()) / 1000)
@@ -159,7 +160,7 @@ export function NotificationBell() {
 
   const handleJobClick = (job: JobInfo) => {
     setOpen(false)
-    if (job.status === 'done') markJobSeen(job.id).catch(() => {})
+    if (jobIsFinished(job)) markJobSeen(job.id).catch(() => {})
     if (job.kind === 'run' && job.session_id) {
       router.push(`/project/${job.project}/terminal/${job.session_id}`)
     } else {

@@ -41,10 +41,10 @@ export async function POST(
     );
   }
 
-  const defaultBranch = await detectMainBranch(projPath);
-
   const currentR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
   const currentBranch = currentR.stdout.trim();
+
+  const defaultBranch = await detectMainBranch(projPath);
   if (currentBranch === defaultBranch) {
     return NextResponse.json({ status: 'already-on-branch', branch: defaultBranch });
   }

@@ -150,6 +150,37 @@ describe('GET /api/projects/by-project/{name}/release/{releaseId}', () => {
     expect(data.finished_at).toBeNull();
   });
 
+  it('preserves aborted status for the release and its step jobs', async () => {
+    const releaseJob = makeJob({
+      id: 'rel-1',
+      project: 'proj1',
+      kind: 'release',
+      startedAt: 1000,
+      finishedAt: 1040,
+      exitCode: -3,
+      abortedAt: 1035,
+    });
+    const abortedStep = makeJob({
+      id: 'review-1',
+      project: 'proj1',
+      kind: 'review',
+      startedAt: 1001,
+      finishedAt: 1030,
+      exitCode: -3,
+      abortedAt: 1029,
+      releaseId: 'rel-1',
+    });
+
+    listJobsMock.mockReturnValue([releaseJob, abortedStep]);
+
+    const res = await GET(req(), params());
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('aborted');
+    expect(data.steps[0].status).toBe('aborted');
+    expect(data.steps[0].exit_code).toBe(-3);
+  });
+
   it('orders steps by startedAt ascending', async () => {
     const releaseJob = makeJob({ id: 'rel-1', project: 'proj1', kind: 'release', startedAt: 1000 });
     const commit = makeJob({ id: 'commit-1', project: 'proj1', kind: 'commit', startedAt: 1050, finishedAt: 1055, exitCode: 0, releaseId: 'rel-1' });

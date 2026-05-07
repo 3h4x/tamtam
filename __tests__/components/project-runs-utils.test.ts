@@ -458,6 +458,18 @@ describe('groupReleaseChildren', () => {
     expect(vg.children).toHaveLength(2);
   });
 
+  it('an orphaned pipeline cluster ending in abort stays terminal and cancelled', () => {
+    const test = makeStepEntry('t1', 'test', 1000);
+    const review = makeStepEntry('r1', 'review', 1100);
+    review.status = 'aborted';
+    review.exitCode = -3;
+    const out = groupReleaseChildren([test, review]);
+    const vg = out[0];
+    expect(vg.status).toBe('aborted');
+    expect(vg.exitCode).toBe(-3);
+    expect(vg.failureLabel).toBe('pipeline cancelled');
+  });
+
   it('two orphaned pipeline steps more than 30 min apart are NOT clustered', () => {
     const t1 = makeStepEntry('t1', 'test', 1000);
     // 31 min gap

@@ -174,7 +174,7 @@ export interface Entry {
   startedAt: number
   lastActivityAt: number
   finishedAt: number | null
-  status: 'running' | 'done'
+  status: 'running' | 'done' | 'aborted'
   exitCode: number | null
   durationMs: number | null
   inputTokens: number
@@ -224,6 +224,9 @@ function releaseOutcomeFor(rel: Entry): ReleaseOutcome {
   if (rel.status === 'running') {
     return { status: 'running', label: 'release running', releaseJobId: rel.navJobId }
   }
+  if (rel.status === 'aborted') {
+    return { status: 'failed', label: 'release cancelled', releaseJobId: rel.navJobId }
+  }
   if (rel.exitCode === 0) {
     return { status: 'done', label: 'release done', releaseJobId: rel.navJobId }
   }
@@ -248,6 +251,9 @@ function advisoryNonTerminalStep(e: Entry): boolean {
 function virtualGroupAttentionState(cluster: Entry[]): { exitCode: number; failureLabel: string } | null {
   if (cluster.length === 0) return null
   const last = cluster[cluster.length - 1]
+  if (last.status === 'aborted') {
+    return { exitCode: last.exitCode ?? -3, failureLabel: 'pipeline cancelled' }
+  }
   if (last.exitCode !== null && last.exitCode !== 0) {
     return { exitCode: last.exitCode, failureLabel: 'pipeline failed' }
   }
@@ -266,11 +272,18 @@ function virtualGroupAttentionState(cluster: Entry[]): { exitCode: number; failu
   return null
 }
 
+function virtualGroupStatus(cluster: Entry[]): 'running' | 'done' | 'aborted' {
+  if (cluster.some((entry) => entry.status === 'running')) return 'running'
+  const last = cluster[cluster.length - 1]
+  return last?.status === 'aborted' ? 'aborted' : 'done'
+}
+
 export function entryIsRunning(e: Entry): boolean {
   return e.status === 'running' || e.releaseOutcome?.status === 'running'
 }
 
 export function entryNeedsAttention(e: Entry): boolean {
+  if (e.status === 'aborted') return true
   if (e.status === 'done' && e.exitCode !== null && e.exitCode !== 0) return true
   if (reviewNeedsAttention(e)) return true
   if (e.kind === 'review' && e.status === 'done' && e.verdict == null) return true
@@ -543,7 +556,9 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
   const releasesByKey = new Map<string, Entry>()
   for (const r of releases) {
     const kids = (childrenByParent.get(r.key) ?? []).sort((a, b) => a.startedAt - b.startedAt)
-    const failureLabel = r.status === 'done' && r.exitCode !== null && r.exitCode !== 0
+    const failureLabel = r.status === 'aborted'
+      ? 'release cancelled'
+      : r.status === 'done' && r.exitCode !== null && r.exitCode !== 0
       ? kids.length === 0 ? 'release blocked' : 'release failed'
       : r.failureLabel
     releasesByKey.set(r.key, { ...r, children: kids, chainedChildren: buildChain(r, kids), failureLabel })
@@ -626,11 +641,12 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
         clustered.push(...cluster)
       } else {
         const last = cluster[cluster.length - 1]
-        const allDone = cluster.every(e => e.status === 'done')
+        const status = virtualGroupStatus(cluster)
+        const finished = status !== 'running'
         // Outcome is the chain's terminal state, but recovery steps are not
         // terminal. A cluster ending on fix/fix-push or a non-LGTM review
         // still needs follow-up work before it can read green.
-        const attention = allDone ? virtualGroupAttentionState(cluster) : null
+        const attention = finished ? virtualGroupAttentionState(cluster) : null
         const vgroup: Entry = {
           key: `vgroup:${cluster[0].startedAt}`,
           kind: 'release',
@@ -640,8 +656,8 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
           startedAt: cluster[0].startedAt,
           lastActivityAt: last.lastActivityAt,
           finishedAt: last.finishedAt,
-          status: allDone ? 'done' : 'running',
-          exitCode: allDone ? attention?.exitCode ?? 0 : null,
+          status,
+          exitCode: finished ? attention?.exitCode ?? 0 : null,
           durationMs: null,
           inputTokens: cluster.reduce((s, e) => s + e.inputTokens, 0),
           outputTokens: cluster.reduce((s, e) => s + e.outputTokens, 0),
