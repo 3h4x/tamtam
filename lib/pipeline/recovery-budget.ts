@@ -1,6 +1,9 @@
+import { getSettings } from '@/lib/shared/config';
+
 const DEFAULT_MAX_STEP_ITERATIONS = 3;
 const DEFAULT_FIX_PUSH_ATTEMPTS = 2;
 const DEFAULT_STEP_WINDOW_SECONDS = 30 * 60;
+const DEFAULT_REVIEW_FIX_MAX_ITERATIONS = 3;
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(raw ?? '', 10);
@@ -12,6 +15,19 @@ export function getMaxStepIterations(): number {
     process.env.TAMTAM_MAX_STEP_ITERATIONS ?? process.env.TAMTAM_MAX_FIX_ITERATIONS,
     DEFAULT_MAX_STEP_ITERATIONS,
   );
+}
+
+export function getReviewFixMaxIterations(): number {
+  const envValue = parsePositiveInt(
+    process.env.TAMTAM_REVIEW_FIX_MAX_ITERATIONS,
+    DEFAULT_REVIEW_FIX_MAX_ITERATIONS,
+  );
+  try {
+    const value = getSettings().review_fix_max_iterations;
+    return Number.isFinite(value) && value > 0 ? value : envValue;
+  } catch {
+    return envValue;
+  }
 }
 
 export function getFixPushAttemptCap(): number {

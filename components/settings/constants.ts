@@ -1,4 +1,4 @@
-export type SettingsFieldKey = 'workspace_path' | 'github_owner' | 'claude_provider' | 'claude_bin' | 'lmstudio_model' | 'log_dir' | 'frequency' | 'daytime' | 'weekends' | 'launchagent_prefix' | 'base_prompt' | 'default_model' | 'permission_mode' | 'commit_style' | 'review_verdict_rules' | 'fix_ci_max_retries' | 'fix_ci_retry_window_seconds' | 'fix_ci_fast_crash_ms' | 'agent_templates' | 'log_retention_count' | 'log_retention_days' | 'job_row_retention_days' | 'notification_webhook_url' | 'notification_webhook_secret' | 'notification_on_release_success' | 'notification_on_release_fail' | 'notification_on_release_aborted' | 'notification_on_fix_loop_exhausted' | 'notification_on_review_do_not_ship' | 'notification_on_agent_run_fail' | 'pipeline_model_review' | 'pipeline_model_fix' | 'pipeline_model_dod' | 'pipeline_model_commit' | 'dirty_worktree_block_threshold' | 'incremental_review_enabled'
+export type SettingsFieldKey = 'workspace_path' | 'github_owner' | 'claude_provider' | 'claude_bin' | 'lmstudio_model' | 'log_dir' | 'frequency' | 'daytime' | 'weekends' | 'launchagent_prefix' | 'base_prompt' | 'default_model' | 'permission_mode' | 'commit_style' | 'review_verdict_rules' | 'review_fix_max_iterations' |'agent_templates' | 'log_retention_count' | 'log_retention_days' | 'job_row_retention_days' | 'notification_webhook_url' | 'notification_webhook_secret' | 'notification_on_release_success' | 'notification_on_release_fail' | 'notification_on_release_aborted' | 'notification_on_fix_loop_exhausted' | 'notification_on_review_do_not_ship' | 'notification_on_agent_run_fail' | 'pipeline_model_review' | 'pipeline_model_fix' | 'pipeline_model_dod' | 'pipeline_model_commit' | 'dirty_worktree_block_threshold' | 'incremental_review_enabled'
 
 export interface FieldDef {
   label: string
@@ -101,24 +101,10 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     group: 'pipeline',
     span: 2,
   },
-  fix_ci_max_retries: {
-    label: 'Fix-CI Max Retries',
-    help: 'How many times to auto-retry a fix-ci job that crashes fast before giving up. 0 disables retries.',
+  review_fix_max_iterations: {
+    label: 'Review Fix Loop Iterations',
+    help: 'How many NEEDS ATTENTION review→fix verification rounds to attempt per release before filing a follow-up issue with the unresolved findings and shipping the partial work. This setting only governs review-side exhaustion; test/commit/push safety caps still use the shared advanced env guard. DO NOT SHIP reviews still stop the release. Default 3.',
     group: 'pipeline',
-    span: 1,
-  },
-  fix_ci_retry_window_seconds: {
-    label: 'Fix-CI Retry Window (s)',
-    help: 'Window in seconds within which retries are counted toward the cap',
-    group: 'pipeline',
-    advanced: true,
-    span: 1,
-  },
-  fix_ci_fast_crash_ms: {
-    label: 'Fix-CI Fast-Crash (ms)',
-    help: 'Duration under which a non-zero exit is treated as a boot crash and retried. Longer failures surface as-is.',
-    group: 'pipeline',
-    advanced: true,
     span: 1,
   },
   agent_templates: {
@@ -251,9 +237,7 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
 - NEEDS ATTENTION when you have at least one finding but nothing that risks data loss, security regressions, or breakage in production. Orphaned code, dead imports, missing imports that happen to compile, hardcoded strings that should use env vars, non-ideal UX state leaks, stylistic inconsistencies — all NEEDS ATTENTION.
 - DO NOT SHIP when there is a real risk of breakage, data loss, security regression, or a test that hides behavior.
 - If LGTM, just confirm the changes look good and add nothing else.`,
-  fix_ci_max_retries: '2',
-  fix_ci_retry_window_seconds: '120',
-  fix_ci_fast_crash_ms: '5000',
+  review_fix_max_iterations: '3',
   agent_templates: '',
   log_retention_count: '200',
   log_retention_days: '30',

@@ -173,10 +173,13 @@ test.describe('PipelineStrip visibility', () => {
       page.getByTitle('review in progress — click to open terminal'),
     ).toBeVisible({ timeout: 8_000 });
 
-    // Pending downstream steps are not shown; only the running job appears.
-    await expect(page.getByText('fix')).not.toBeVisible();
-    await expect(page.getByText('commit')).not.toBeVisible();
-    await expect(page.getByText('push')).not.toBeVisible();
+    // Pending downstream steps are not shown in the pipeline strip; only the
+    // running job appears. Scope the assertion to the strip itself so it
+    // doesn't collide with always-visible header buttons (e.g. "Push").
+    const strip = page.locator('[aria-label^="pipeline summary"]').locator('..');
+    await expect(strip.getByText('fix', { exact: true })).not.toBeVisible();
+    await expect(strip.getByText('commit', { exact: true })).not.toBeVisible();
+    await expect(strip.getByText('push', { exact: true })).not.toBeVisible();
 
     // Standalone pipeline-kind jobs do not expose the release abort control.
     await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0);

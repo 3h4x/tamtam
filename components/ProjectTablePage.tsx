@@ -9,6 +9,7 @@ import { formatAgo } from '@/lib/shared/format'
 import { getAggregateCi, getCiFailedUrl } from '@/lib/shared/statusConstants'
 import { LoadingState } from '@/components/LoadingState'
 import { useToast } from '@/components/Toast'
+import { computeWeeklyBurnThrottle } from '@/lib/shared/budget-throttle'
 
 type SortKey = 'project' | 'status' | 'changes' | 'last_run' | 'next_run' | 'ci'
 type SortDir = 'asc' | 'desc'
@@ -21,6 +22,17 @@ interface SchedulerEntry {
   enabled: boolean
   nextFireMs: number
   lastFireMs: number | null
+}
+
+interface QuotaWindow {
+  utilization: number
+  resetsAt: string | null
+  msUntilReset: number | null
+}
+
+interface QuotaSnapshot {
+  sevenDay: QuotaWindow
+  gateEnabled?: boolean
 }
 
 function formatNextFire(ms: number): { text: string; tone: 'overdue' | 'imminent' | 'normal' | 'far' } {
@@ -175,6 +187,7 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
   const [agentsByProject, setAgentsByProject] = useState<Record<string, Agent[]>>({})
   const [schedulerByProject, setSchedulerByProject] = useState<Record<string, SchedulerEntry[]>>({})
   const [schedulerPaused, setSchedulerPaused] = useState(false)
+  const [scheduledThrottlePaused, setScheduledThrottlePaused] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('project')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [sortReady, setSortReady] = useState(false)
@@ -215,6 +228,24 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
     // next-fire predictions may be stale for up to 45s, but this is acceptable since
     // scheduler state changes infrequently.
     const interval = setInterval(load, 45000)
+    return () => { active = false; clearInterval(interval) }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      try {
+        const r = await fetch('/api/usage/quota')
+        if (!r.ok) return
+        const data = (await r.json()) as QuotaSnapshot
+        if (!active) return
+        setScheduledThrottlePaused(!!data.gateEnabled && !!computeWeeklyBurnThrottle(data.sevenDay))
+      } catch {
+        if (active) setScheduledThrottlePaused(false)
+      }
+    }
+    load()
+    const interval = setInterval(load, 60000)
     return () => { active = false; clearInterval(interval) }
   }, [])
 
@@ -334,8 +365,9 @@ const isReviewRunning = (projectName: string) =>
         cmp = getRecentTs(a.project) - getRecentTs(b.project)
         break
       case 'next_run': {
-        const na = getNextFire(a.project)?.ms ?? Number.POSITIVE_INFINITY
-        const nb = getNextFire(b.project)?.ms ?? Number.POSITIVE_INFINITY
+        const paused = schedulerPaused || scheduledThrottlePaused
+        const na = paused ? Number.POSITIVE_INFINITY : getNextFire(a.project)?.ms ?? Number.POSITIVE_INFINITY
+        const nb = paused ? Number.POSITIVE_INFINITY : getNextFire(b.project)?.ms ?? Number.POSITIVE_INFINITY
         cmp = na - nb
         break
       }
@@ -434,6 +466,7 @@ const isReviewRunning = (projectName: string) =>
             const projectPaused = project.tasks.some(th => th.task.launchctl === 'paused')
             const outOfSync = project.tasks.some(th => th.task.sync === false)
             const nextFire = getNextFire(project.project)
+            const schedulesPaused = schedulerPaused || scheduledThrottlePaused
 
             return (
               <tr
@@ -491,8 +524,11 @@ const isReviewRunning = (projectName: string) =>
                         error
                       </span>
                     )}
-                    {schedulerPaused ? (
-                      <span title="Internal scheduler paused (Resume jobs in header)" className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30">
+                    {schedulesPaused ? (
+                      <span
+                        title={schedulerPaused ? 'Internal scheduler paused (Resume jobs in header)' : 'Scheduled agents paused by weekly budget'}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30"
+                      >
                         ⏸ paused
                       </span>
                     ) : projectPaused && (
@@ -506,13 +542,13 @@ const isReviewRunning = (projectName: string) =>
                         out of sync
                       </span>
                     )}
-                    {showWarning && !projectPaused && !outOfSync && (
+                    {showWarning && !projectPaused && !outOfSync && !schedulesPaused && (
                       <span title="Project flagged with a warning (e.g. stale data)" className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30">
                         <WarningDot />
                         warning
                       </span>
                     )}
-                    {scheduledCount > 0 && !schedulerPaused && (
+                    {scheduledCount > 0 && !schedulesPaused && (
                       <span title={`${scheduledCount} scheduled agent${scheduledCount !== 1 ? 's' : ''}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-bg-tertiary text-text-secondary border border-border">
                         <svg className="w-3 h-3 shrink-0" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
                           <circle cx="7" cy="7" r="5.5" />
@@ -599,7 +635,11 @@ const isReviewRunning = (projectName: string) =>
 
                 {/* Next Run */}
                 <td className="px-4 py-2 text-sm">
-                  {nextFire ? (() => {
+                  {schedulesPaused && scheduledCount > 0 ? (
+                    <span title={schedulerPaused ? 'Internal scheduler paused' : 'Scheduled agents paused by weekly budget'} className="text-status-warning font-medium">
+                      paused
+                    </span>
+                  ) : nextFire ? (() => {
                     const f = formatNextFire(nextFire.ms)
                     const toneClass =
                       f.tone === 'overdue' ? 'text-status-error font-medium' :

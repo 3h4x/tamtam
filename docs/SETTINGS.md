@@ -139,9 +139,7 @@ All three are read live on each job (not cached), so changing them takes effect 
 
 | Key | Type | Default | Effect |
 |-----|------|---------|--------|
-| `fix_ci_max_retries` | number | `2` | Max auto-retries for `fix-ci` jobs on fast crashes. Set to `0` to disable. |
-| `fix_ci_retry_window_seconds` | number | `120` | Sliding window for counting retry attempts |
-| `fix_ci_fast_crash_ms` | number | `5000` | Jobs that exit in under this many ms are considered boot failures and retried; jobs over this are surfaced as real errors |
+| `review_fix_max_iterations` | number | `3` | Cap on **NEEDS ATTENTION** review→fix verification rounds per release. It applies only to the review-side recovery loop. When the cap (or stuck-findings / fix-contradicts-review) trips, TamTam files a follow-up GitHub issue tagged `tamtam` `review-followup` `priority-medium` with the unresolved Finding IDs and continues to commit + push so the partial work ships. **DO NOT SHIP** reviews are not downgraded by this setting; they still stop the release before commit/push. Test/commit/push safety caps still come from the shared env guard (`TAMTAM_MAX_STEP_ITERATIONS`). |
 
 ### Worktree & Review Gates
 
@@ -284,7 +282,7 @@ cli_default_model_gemini, cli_default_model_lmstudio, log_dir,
 frequency, daytime, weekends, launchagent_prefix, workspace_path,
 base_prompt, default_model, permission_mode, commit_style,
 review_verdict_rules, jobs_paused,
-fix_ci_max_retries, fix_ci_retry_window_seconds, fix_ci_fast_crash_ms,
+review_fix_max_iterations,
 agent_templates, log_retention_count, log_retention_days,
 job_row_retention_days, notification_webhook_url,
 notification_webhook_secret, notification_on_release_success,
@@ -327,14 +325,14 @@ These live on the `projects` table row, accessed via `GET/PATCH /api/projects/by
 | Use conventional commits | `commit_style` — already the default |
 | Run agents 24/7 (not just nights) | `daytime = true` |
 | Run agents on weekends | `weekends = on` |
-| Disable fix-CI auto-retry | `fix_ci_max_retries = 0` |
+| Tighten the review→fix loop | `review_fix_max_iterations = 1` (issue is filed after a single failing review; test/commit/push caps are unchanged) |
 | Faster polling after a run | Handled automatically by `startFastPolling()` in UI |
 
 ### Settings that take effect immediately vs on next run
 
 | Immediate (no restart) | Next job only |
 |-----------------------|---------------|
-| `fix_ci_max_retries`, `fix_ci_retry_window_seconds`, `fix_ci_fast_crash_ms` | `base_prompt`, `commit_style`, `review_verdict_rules` (read at job start) |
+| `review_fix_max_iterations` | `base_prompt`, `commit_style`, `review_verdict_rules` (read at job start) |
 | `workspace_path` (next projects scan) | `claude_bin`, `permission_mode` (read at job start) |
 
 ### Common Issues
@@ -344,5 +342,5 @@ These live on the `projects` table row, accessed via `GET/PATCH /api/projects/by
 | Projects list empty | `workspace_path` not set or wrong path | Go to Settings → set workspace path |
 | Claude not found | `claude_bin` path wrong | Verify with `which claude` and update the setting |
 | Reviews always pass | `review_verdict_rules` too permissive | Tighten the rules in Settings → Behavior |
-| fix-CI loops on a flaky test | `fix_ci_max_retries` too high | Lower to `1` or `0` to disable auto-retry |
+| Reviews keep churning until cap, never landing | `review_fix_max_iterations` too high for the project | Lower to `2` or `1`; partial work still ships and a follow-up issue is filed |
 | Agents run during the day unexpectedly | `daytime = true` | Set `daytime = false` for night-only |

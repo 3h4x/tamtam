@@ -69,6 +69,7 @@ describe('settings API', () => {
       expect(data.settings).toEqual({
         claude_provider: 'claude',
         cli_enabled_providers: 'claude',
+        review_fix_max_iterations: '3',
       });
     });
 
@@ -104,6 +105,33 @@ describe('settings API', () => {
 
       expect(data.settings.default_model).toBe('fast');
       expect(data.settings.pipeline_model_review).toBe('');
+    });
+
+    it('returns the effective review_fix_max_iterations when the stored row is invalid', async () => {
+      testDb.db.insert(schema.settings).values({ key: 'review_fix_max_iterations', value: 'abc' }).run();
+
+      const response = await GET();
+      const data = await response.json();
+
+      expect(data.settings.review_fix_max_iterations).toBe('3');
+    });
+
+    it('returns the effective review_fix_max_iterations when the stored row is zero', async () => {
+      testDb.db.insert(schema.settings).values({ key: 'review_fix_max_iterations', value: '0' }).run();
+
+      const response = await GET();
+      const data = await response.json();
+
+      expect(data.settings.review_fix_max_iterations).toBe('3');
+    });
+
+    it('returns the effective review_fix_max_iterations when the stored row is negative', async () => {
+      testDb.db.insert(schema.settings).values({ key: 'review_fix_max_iterations', value: '-1' }).run();
+
+      const response = await GET();
+      const data = await response.json();
+
+      expect(data.settings.review_fix_max_iterations).toBe('3');
     });
 
     it('canonicalizes CLI provider and per-provider model settings in the API response', async () => {
@@ -300,9 +328,7 @@ describe('settings API', () => {
         'commit_style',
         'review_verdict_rules',
         'jobs_paused',
-        'fix_ci_max_retries',
-        'fix_ci_retry_window_seconds',
-        'fix_ci_fast_crash_ms',
+        'review_fix_max_iterations',
         'agent_templates',
         'notification_webhook_url',
         'notification_webhook_secret',
@@ -318,6 +344,7 @@ describe('settings API', () => {
         k,
         k === 'default_model' ? 'fast'
           : k.startsWith('pipeline_model_') ? 'normal'
+          : k === 'review_fix_max_iterations' ? '5'
           : k === 'agent_templates'
             ? JSON.stringify([{ name: 'template', description: 'desc', model: 'smart', schedule: '', runner: 'pm2', prompt: '' }])
             : 'test-value',
@@ -420,15 +447,68 @@ describe('settings API', () => {
       expect(rows.cli_bin_claude).toBe('/custom/claude');
     });
 
-    it('saves fix_ci_max_retries setting', async () => {
+    it('saves review_fix_max_iterations setting', async () => {
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',
-        body: JSON.stringify({ fix_ci_max_retries: '5' }),
+        body: JSON.stringify({ review_fix_max_iterations: '5' }),
       });
-      await PATCH(request);
+      const response = await PATCH(request);
 
-      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'fix_ci_max_retries');
+      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'review_fix_max_iterations');
       expect(row?.value).toBe('5');
+      await expect(response.json()).resolves.toMatchObject({
+        status: 'ok',
+        settings: expect.objectContaining({
+          review_fix_max_iterations: '5',
+        }),
+      });
+    });
+
+    it('returns canonicalized review_fix_max_iterations in PATCH responses', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ review_fix_max_iterations: '03' }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        status: 'ok',
+        settings: expect.objectContaining({
+          review_fix_max_iterations: '3',
+        }),
+      });
+
+      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'review_fix_max_iterations');
+      expect(row?.value).toBe('3');
+    });
+
+    it('rejects non-numeric review_fix_max_iterations values', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ review_fix_max_iterations: 'abc' }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('review_fix_max_iterations must be a positive integer'),
+      });
+      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
+    });
+
+    it('rejects non-positive review_fix_max_iterations values', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ review_fix_max_iterations: '0' }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('review_fix_max_iterations must be a positive integer'),
+      });
+      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
     });
 
     it('saves review_verdict_rules setting', async () => {
