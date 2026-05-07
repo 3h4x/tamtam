@@ -57,11 +57,34 @@ function stateLabel(s: StepState): string {
 }
 
 function visibleStateLabel(s: StepState): string | null {
+  if (s === 'done') return 'done'
   if (s === 'running') return 'running'
   if (s === 'failed') return 'failed'
   if (s === 'warning') return 'attention'
   if (s === 'skipped') return 'skipped'
-  return null
+  return 'pending'
+}
+
+function stateTextClass(s: StepState): string {
+  if (s === 'done') return 'text-status-success'
+  if (s === 'failed') return 'text-status-error'
+  if (s === 'warning') return 'text-status-warning'
+  if (s === 'running') return 'text-accent'
+  if (s === 'skipped') return 'text-text-tertiary'
+  return 'text-text-secondary'
+}
+
+function stateBadgeClass(s: StepState): string {
+  if (s === 'done') return 'bg-status-success/12 text-status-success border-status-success/25'
+  if (s === 'failed') return 'bg-status-error/12 text-status-error border-status-error/30'
+  if (s === 'warning') return 'bg-status-warning/12 text-status-warning border-status-warning/30'
+  if (s === 'running') return 'bg-accent/12 text-accent border-accent/30'
+  if (s === 'skipped') return 'bg-bg-tertiary text-text-tertiary border-border/50'
+  return 'bg-bg-tertiary/70 text-text-secondary border-border/60'
+}
+
+function summaryHintText(hint: string): string {
+  return hint.replace(/\s+—\s+click to .*$/i, '')
 }
 
 function summaryLabel(step: PipelineStep | null, doneCount: number, totalSteps: number): string {
@@ -469,21 +492,29 @@ export function PipelineStrip({
   const summaryText = summaryLabel(summaryStep ?? null, doneCount, totalSteps)
   const stripVisible = !!activeReleaseJob || runningStepKinds.size > 0
   const canAbortRelease = !!activeReleaseJob
+  const summaryHint = summaryHintText(activeStep?.hint ?? attentionStep?.hint ?? 'Pipeline running')
 
   if (!stripVisible) return null
 
   return (
-    <div className="mt-3 mb-3 px-3 py-2 rounded-md border border-border bg-bg-secondary flex items-center gap-x-2 gap-y-1.5 flex-wrap">
+    <div className="mt-3 mb-3 rounded-md border border-border bg-bg-secondary px-3 py-2.5">
+      <div className="flex items-center gap-x-2 gap-y-2 flex-wrap">
       <div
-        className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 shrink-0 ${stepChipClass(summaryStep?.state ?? 'pending', !!activeStep)}`}
+        className={`flex min-w-[170px] items-center gap-2 rounded-md border px-2.5 py-2 shrink-0 ${stepChipClass(summaryStep?.state ?? 'pending', !!activeStep)}`}
         aria-label={`pipeline summary: ${summaryText}`}
+        title={summaryHint}
       >
         <span className="inline-flex items-center justify-center w-3.5 h-3.5 shrink-0">
           {stepIcon(summaryStep?.state ?? 'pending')}
         </span>
-        <div className="flex flex-col leading-none">
+        <div className="min-w-0 flex-1 leading-none">
           <span className={`text-[9px] uppercase tracking-[0.18em] ${summaryTone}`}>pipeline</span>
-          <span className="text-[11px] font-medium text-text-primary">{summaryText}</span>
+          <div className="mt-1 flex items-center gap-2">
+            <span className="truncate text-[11px] font-medium text-text-primary">{summaryText}</span>
+            <span className={`truncate text-[10px] ${stateTextClass(summaryStep?.state ?? 'pending')}`}>
+              {summaryHint}
+            </span>
+          </div>
         </div>
         <span
           className="ml-1 rounded-sm bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-mono tabular-nums text-current/85"
@@ -496,18 +527,21 @@ export function PipelineStrip({
         const clickable = !!s.action
         const isCurrent = i === runningStepIdx
         const label = visibleStateLabel(s.state)
-        const chipClass = `inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border font-mono text-[11px] font-medium transition-colors min-h-[28px] ${stepChipClass(s.state, isCurrent)} ${isCurrent ? 'font-semibold' : ''}`
+        const chipClass = `inline-flex min-h-[36px] items-center gap-2 rounded-md border px-2.5 py-1.5 text-[11px] transition-colors ${stepChipClass(s.state, isCurrent)} ${isCurrent ? 'font-semibold' : ''}`
         const chip = (
           <>
             <span className="inline-flex items-center justify-center w-3.5 h-3.5 shrink-0">
               {stepIcon(s.state)}
             </span>
-            <span className="text-text-primary">{s.label}</span>
-            {label && (
-              <span className="font-sans text-[9px] font-medium uppercase tracking-wide opacity-80">
+            <div className="flex min-w-0 flex-col items-start leading-none">
+              <div className="flex items-center gap-1.5">
+                <span className="font-sans text-[11px] font-medium text-text-primary">{s.label}</span>
+                <span className="font-mono text-[9px] text-text-tertiary">{String(i + 1).padStart(2, '0')}</span>
+              </div>
+              <span className={`mt-1 inline-flex items-center rounded-sm border px-1.5 py-0.5 font-sans text-[9px] font-medium uppercase tracking-[0.12em] ${stateBadgeClass(s.state)}`}>
                 {label}
               </span>
-            )}
+            </div>
           </>
         )
         return (
@@ -533,7 +567,7 @@ export function PipelineStrip({
             {s.retryAction && (
               <button
                 type="button"
-                className="text-[10px] px-1.5 py-0.5 rounded border border-status-error/40 text-status-error hover:bg-status-error/10 cursor-pointer disabled:opacity-50 font-mono leading-none inline-flex items-center justify-center w-[22px]"
+                className="inline-flex w-[22px] items-center justify-center rounded border border-status-error/40 px-1.5 py-0.5 font-mono text-[10px] leading-none text-status-error hover:bg-status-error/10 cursor-pointer disabled:opacity-50"
                 onClick={s.retryAction}
                 disabled={retryingPush || jobsPaused}
                 title={jobsPaused ? 'Jobs are paused globally. Resume jobs to start a push.' : 'Retry push'}
@@ -590,6 +624,7 @@ export function PipelineStrip({
           </button>
         )
       )}
+      </div>
     </div>
   )
 }
