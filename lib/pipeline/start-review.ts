@@ -9,6 +9,7 @@ import { createJob, listJobs, probeJobStatus, readParsedLog, updateJob } from '@
 import { startJob } from '@/lib/jobs/pm2-jobs';
 import { exec } from '@/lib/shared/shell';
 import { getCurrentBranch, getReviewedRefSha, isAncestor, clearReviewedRef } from '@/lib/git/git-utils';
+import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { CODE_REVIEWER_SKILL } from '@/lib/skills/skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings, getPipelineModel } from '@/lib/shared/config';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
@@ -42,6 +43,11 @@ function loadReviewPrompt(projectName: string): string {
     'Path: {path}\n\n' +
     '{review_scope}\n\n' +
     '{release_context}\n\n' +
+    'PIPELINE TEST CONTEXT:\n' +
+    '- The pipeline owns test execution. Treat the pipeline test step as the source of truth for whether tests pass.\n' +
+    '- Do not run tests, inspect test runner coverage, audit which package test commands are included, or report that a test command was not run.\n' +
+    '- Do not cite passing, failing, skipped, partial, or unexercised test suites as review findings.\n' +
+    '- Only mention tests when the code diff itself creates a concrete missing-coverage risk, and describe the behavior that lacks coverage instead of validating the suite.\n\n' +
     REVIEW_OUTPUT_CONTRACT + '\n\n' +
     'OUTPUT FORMAT — strict. Your final non-empty line must be exactly one of:\n\n' +
     '    Verdict: LGTM\n' +
@@ -187,7 +193,7 @@ export async function startProjectReview(
   } catch { /* ignore — test env without DB */ }
 
   const { logDir } = getImproveConfig();
-  const reviewModel = getPipelineModel('review');
+  const reviewModel = normalizeModelInput(getPipelineModel('review'), 'normal');
   const projPath = resolveProjectPath(projectName);
   if (!projPath) {
     return { ok: false, status: 404, detail: `project '${projectName}' not found` };
@@ -195,6 +201,7 @@ export async function startProjectReview(
   const gate = await checkCliStartGate('start a review', {
     parentJobId: currentParent(),
     preferred: options.preferredProvider ?? null,
+    requestedModel: reviewModel,
   });
   if (!gate.ok) return gate;
   const provider = gate.provider;

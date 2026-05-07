@@ -6,6 +6,8 @@ import { tmpdir } from 'os';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/lib/db/schema';
+import type { CliProvider } from '@/lib/usage/cli-providers';
+import type { QuotaSnapshot } from '@/lib/usage/quota-types';
 
 function createTestDb() {
   const sqlite = new Database(':memory:');
@@ -109,6 +111,7 @@ describe('POST /api/agents/{agentId}/run', () => {
 
   beforeEach(async () => {
     vi.resetModules();
+    vi.doUnmock('@/lib/usage/resolve-provider');
     testDb = createTestDb();
     tempSkillsDir = mkdtempSync(join(tmpdir(), 'tamtam-agent-run-test-'));
 
@@ -656,7 +659,10 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-    expect(checkCliStartGateMock).toHaveBeenCalledWith('start an agent run', { preferred: 'claude' });
+    expect(checkCliStartGateMock).toHaveBeenCalledWith('start an agent run', {
+      preferred: 'claude',
+      requestedModel: 'normal',
+    });
     const [, cmd] = startJobMock.mock.calls[0];
     expect(cmd).toContain('/scripts/codex-shim.js');
   });
@@ -995,5 +1001,160 @@ describe('POST /api/agents/{agentId}/run', () => {
         rmSync(projDir, { recursive: true, force: true });
       }
     });
+  });
+});
+
+describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let POST: any;
+  let startJobMock: ReturnType<typeof vi.fn>;
+  let createJobMock: ReturnType<typeof vi.fn>;
+  let updateJobMock: ReturnType<typeof vi.fn>;
+  let tempSkillsDir: string;
+
+  const now = Date.now() / 1000;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    tempSkillsDir = mkdtempSync(join(tmpdir(), 'tamtam-agent-run-weekly-test-'));
+
+    testDb.db.insert(schema.agents).values({
+      id: 'agent-123',
+      name: 'Test Agent',
+      project: 'proj1',
+      skillIds: '[]',
+      model: 'sonnet',
+      prompt: 'do something',
+      schedule: null,
+      runner: 'pm2',
+      enabled: true,
+      provider: 'claude',
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+
+    startJobMock = vi.fn().mockResolvedValue(12345);
+    createJobMock = vi.fn().mockImplementation(() => makeJob());
+    updateJobMock = vi.fn();
+
+    const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+      ['claude', {
+        provider: 'claude',
+        fiveHour: { utilization: 24, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 99, resetsAt: null, msUntilReset: null },
+        sevenDaySonnet: { utilization: 100, resetsAt: null, msUntilReset: null },
+        sevenDayOpus: null,
+        fetchedAt: 0,
+        stale: false,
+      }],
+      ['codex', {
+        provider: 'codex',
+        fiveHour: { utilization: 97, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 10, resetsAt: null, msUntilReset: null },
+        fetchedAt: 0,
+        stale: false,
+      }],
+    ]);
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/agents/pending-agent-run', () => ({
+      enqueueAgentRun: vi.fn(),
+      tryClaimAgentStartSlot: vi.fn().mockReturnValue({ ok: true }),
+      releaseAgentStartSlot: vi.fn(),
+      drainNextAgentRun: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/agents/queued-agent-runs', () => ({
+      enqueueQueuedAgentRun: vi.fn(),
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/pipeline/pending-release', () => ({
+      getPendingRelease: vi.fn().mockReturnValue(false),
+      drainPendingRelease: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: '/tmp/logs' }),
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: createJobMock,
+      updateJob: updateJobMock,
+      listJobs: vi.fn().mockReturnValue([]),
+      probeJobStatus: vi.fn().mockResolvedValue('done'),
+    }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      startJob: startJobMock,
+    }));
+    vi.doMock('@/lib/skills/skills', () => ({
+      SKILLS_DIR: tempSkillsDir,
+      DATA_SKILLS_DIR: join(tempSkillsDir, 'data-skills'),
+    }));
+    vi.doMock('@/lib/agents/agent-memory', () => ({
+      getAgentMemoryDir: vi.fn().mockReturnValue('/tmp/tamtam-memory'),
+      ensureAgentMemoryDir: vi.fn(),
+      getAgentMemoryPath: vi.fn().mockReturnValue('/tmp/tamtam-memory/proj1/Test Agent.md'),
+      readAgentMemory: vi.fn().mockReturnValue(null),
+      buildMemoryBlock: vi.fn().mockReturnValue(''),
+    }));
+    vi.doMock('@/lib/shared/config', () => ({
+      withBasePrompt: (p: string) => p,
+      getPermissionModeFlag: () => '--dangerously-skip-permissions',
+      getSettings: vi.fn(() => ({
+        workspace_path: '',
+        github_owner: '',
+        claude_bin: 'claude',
+        log_dir: '/tmp/logs',
+        cli_enabled_providers: ['claude', 'codex'],
+        claude_provider: 'claude',
+        budget_block_at_pct: 95,
+        budget_block_runs_enabled: true,
+        cli_bin_claude: '',
+        cli_bin_codex: '',
+        cli_bin_gemini: '',
+        cli_bin_lmstudio: '',
+        frequency: '1h',
+        daytime: false,
+        weekends: false,
+        launchagent_prefix: 'com.tamtam',
+        base_prompt: '',
+        permission_mode: 'bypassPermissions',
+        dirty_worktree_block_threshold: 0,
+      })),
+    }));
+    vi.doMock('@/lib/shared/job-control', () => ({
+      runGates: vi.fn().mockReturnValue(null),
+      jobsPausedResult: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/git/dirty-worktree', () => ({
+      getDirtyFileCount: vi.fn().mockResolvedValue(0),
+    }));
+    vi.doMock('@/lib/usage/quota', () => ({
+      getQuotaSnapshots: vi.fn().mockResolvedValue(snapshots),
+    }));
+
+    const mod = await import('@/app/api/agents/[agentId]/run/route');
+    POST = mod.POST;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    rmSync(tempSkillsDir, { recursive: true, force: true });
+  });
+
+  it('does not 429 a manual agent run when only weekly quota is hot', async () => {
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    expect(res.status).toBe(200);
+    expect(startJobMock).toHaveBeenCalledOnce();
+    expect(createJobMock.mock.results[0]?.value.provider).toBe('claude');
   });
 });

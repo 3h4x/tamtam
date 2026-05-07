@@ -10,7 +10,7 @@ import { createJob, updateJob } from '@/lib/jobs/job-storage';
 import { startJob } from '@/lib/jobs/pm2-jobs';
 import { withBasePrompt, getPermissionModeFlag } from '@/lib/shared/config';
 import { errMsg } from '@/lib/shared/types';
-import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
+import { parseOptionalKnownModelInput, type ModelTier } from '@/lib/agents/model-aliases';
 import { getSettings } from '@/lib/shared/config';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
@@ -29,7 +29,7 @@ export async function POST(
   let prompt = '';
   let personaPaths: string[] = [];
   const attachmentPaths: string[] = [];
-  let model = 'fast';
+  let model: ModelTier = 'fast';
   let resumeSessionId = '';
   let contextMeta = '';
   let userPrompt = '';
@@ -113,7 +113,10 @@ export async function POST(
   const preferredProvider = resumeSessionId && pinnedProvider && isCliProvider(pinnedProvider)
     ? pinnedProvider
     : undefined;
-  const gate = await checkCliStartGate('start a terminal run', { preferred: preferredProvider });
+  const gate = await checkCliStartGate('start a terminal run', {
+    preferred: preferredProvider,
+    requestedModel: model,
+  });
   if (!gate.ok) {
     return NextResponse.json({ detail: gate.detail }, { status: gate.status });
   }

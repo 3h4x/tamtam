@@ -183,6 +183,7 @@ describe('startProjectReview', () => {
     expect(checkCliStartGateMock).toHaveBeenCalledWith('start a review', {
       parentJobId: null,
       preferred: 'codex',
+      requestedModel: 'normal',
     });
   });
 
@@ -445,6 +446,17 @@ describe('startProjectReview', () => {
     expect(prompt).toContain('alternate routes or background jobs');
     expect(prompt).toContain('docs/*.md');
     expect(prompt).toContain('Do not require docs for trivial refactors');
+  });
+
+  it('tells reviewers the pipeline test step already validated the suite', async () => {
+    execMock.mockResolvedValueOnce(resp(0, 'M lib/foo.ts'));
+    await startProjectReview('proj');
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('PIPELINE TEST CONTEXT');
+    expect(prompt).toContain('The pipeline owns test execution');
+    expect(prompt).toContain('Do not run tests, inspect test runner coverage, audit which package test commands are included');
+    expect(prompt).toContain('Do not cite passing, failing, skipped, partial, or unexercised test suites as review findings');
+    expect(prompt).toContain('Only mention tests when the code diff itself creates a concrete missing-coverage risk');
   });
 
   it('includes prior release review and fix context in follow-up reviews', async () => {

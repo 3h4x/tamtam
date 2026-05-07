@@ -3,6 +3,8 @@ import { NextRequest } from 'next/server';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import type { CliProvider } from '@/lib/usage/cli-providers';
+import type { QuotaSnapshot } from '@/lib/usage/quota-types';
 
 function makeJob() {
   return {
@@ -471,5 +473,183 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
       null,
       null,
     );
+  });
+});
+
+describe('POST /api/projects/by-project/{projectName}/run weekly quota gating', () => {
+  let POST: any;
+  let startJobMock: ReturnType<typeof vi.fn>;
+  let createJobMock: ReturnType<typeof vi.fn>;
+  let updateJobMock: ReturnType<typeof vi.fn>;
+  let tempDir: string;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.doUnmock('@/lib/usage/resolve-provider');
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-proj-run-weekly-test-'));
+
+    startJobMock = vi.fn().mockResolvedValue(99999);
+    createJobMock = vi.fn().mockImplementation(() => makeJob());
+    updateJobMock = vi.fn();
+
+    const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+      ['claude', {
+        provider: 'claude',
+        fiveHour: { utilization: 24, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 99, resetsAt: null, msUntilReset: null },
+        sevenDaySonnet: { utilization: 100, resetsAt: null, msUntilReset: null },
+        sevenDayOpus: null,
+        fetchedAt: 0,
+        stale: false,
+      }],
+      ['codex', {
+        provider: 'codex',
+        fiveHour: { utilization: 97, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 10, resetsAt: null, msUntilReset: null },
+        fetchedAt: 0,
+        stale: false,
+      }],
+    ]);
+
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/project'),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: join(tempDir, 'logs') }),
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: createJobMock,
+      updateJob: updateJobMock,
+    }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      startJob: startJobMock,
+    }));
+    vi.doMock('@/lib/skills/skills', () => ({
+      SKILLS_DIR: join(tempDir, 'skills'),
+      DATA_SKILLS_DIR: join(tempDir, 'data-skills'),
+    }));
+    vi.doMock('@/lib/shared/config', () => ({
+      withBasePrompt: (p: string) => p,
+      getPermissionModeFlag: () => '--permission-mode bypassPermissions',
+      getSettings: vi.fn(() => ({
+        cli_enabled_providers: ['claude', 'codex'],
+        claude_provider: 'claude',
+        budget_block_at_pct: 95,
+        budget_block_runs_enabled: true,
+        cli_bin_claude: '/legacy/claude',
+        cli_bin_codex: '',
+        cli_bin_gemini: '',
+        cli_bin_lmstudio: '',
+      })),
+    }));
+    vi.doMock('@/lib/shared/job-control', () => ({
+      jobsPausedResult: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/usage/quota', () => ({
+      getQuotaSnapshots: vi.fn().mockResolvedValue(snapshots),
+    }));
+
+    const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
+    POST = mod.POST;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('does not 429 a manual terminal run when only weekly quota is hot', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'run my agent' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(startJobMock).toHaveBeenCalledOnce();
+    const [, cmd, , , options] = startJobMock.mock.calls[0];
+    expect(cmd).toContain('/scripts/claude-shim.js');
+    expect(options).toEqual({ env: { CLAUDE_BIN: '/legacy/claude' } });
+  });
+
+  it('keeps Claude selected for a fast terminal run when only the sonnet weekly window is hot', async () => {
+    vi.resetModules();
+    vi.doUnmock('@/lib/usage/resolve-provider');
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-proj-run-weekly-tier-test-'));
+
+    startJobMock = vi.fn().mockResolvedValue(99999);
+    createJobMock = vi.fn().mockImplementation(() => makeJob());
+    updateJobMock = vi.fn();
+
+    const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+      ['claude', {
+        provider: 'claude',
+        fiveHour: { utilization: 24, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 20, resetsAt: null, msUntilReset: null },
+        sevenDaySonnet: { utilization: 100, resetsAt: null, msUntilReset: null },
+        sevenDayOpus: null,
+        fetchedAt: 0,
+        stale: false,
+      }],
+      ['codex', {
+        provider: 'codex',
+        fiveHour: { utilization: 30, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 50, resetsAt: null, msUntilReset: null },
+        fetchedAt: 0,
+        stale: false,
+      }],
+    ]);
+
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/project'),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: join(tempDir, 'logs') }),
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: createJobMock,
+      updateJob: updateJobMock,
+    }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      startJob: startJobMock,
+    }));
+    vi.doMock('@/lib/skills/skills', () => ({
+      SKILLS_DIR: join(tempDir, 'skills'),
+      DATA_SKILLS_DIR: join(tempDir, 'data-skills'),
+    }));
+    vi.doMock('@/lib/shared/config', () => ({
+      withBasePrompt: (p: string) => p,
+      getPermissionModeFlag: () => '--permission-mode bypassPermissions',
+      getSettings: vi.fn(() => ({
+        cli_enabled_providers: ['claude', 'codex'],
+        claude_provider: 'claude',
+        budget_block_at_pct: 95,
+        budget_block_runs_enabled: true,
+        cli_bin_claude: '/legacy/claude',
+        cli_bin_codex: '',
+        cli_bin_gemini: '',
+        cli_bin_lmstudio: '',
+      })),
+    }));
+    vi.doMock('@/lib/shared/job-control', () => ({
+      jobsPausedResult: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/usage/quota', () => ({
+      getQuotaSnapshots: vi.fn().mockResolvedValue(snapshots),
+    }));
+
+    const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
+    POST = mod.POST;
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'run my agent', model: 'fast' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    expect(res.status).toBe(200);
+    expect(startJobMock).toHaveBeenCalledOnce();
+    const [, cmd, , , options] = startJobMock.mock.calls[0];
+    expect(cmd).toContain('/scripts/claude-shim.js');
+    expect(options).toEqual({ env: { CLAUDE_BIN: '/legacy/claude' } });
   });
 });

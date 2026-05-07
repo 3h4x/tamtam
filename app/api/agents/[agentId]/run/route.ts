@@ -352,8 +352,12 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     },
   });
 
+  const requestedModel = agent.model ? normalizeModelInput(agent.model, 'normal') : null;
   const { logDir } = getImproveConfig();
-  const gate = await checkCliStartGate('start an agent run', { preferred: agent.provider ?? null });
+  const gate = await checkCliStartGate('start an agent run', {
+    preferred: agent.provider ?? null,
+    requestedModel,
+  });
   if (!gate.ok) {
     const gateCode =
       gate.status === 409 ? 'jobs_paused' :
@@ -382,7 +386,7 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   // Build command. We prepend the composed skills directly to the prompt
   // (stdin) rather than using --append-system-prompt, which requires a value
   // argument and would need escaping for multi-line content.
-  const modelFlag = agent.model ? `--model ${normalizeModelInput(agent.model, 'normal')}` : '';
+  const modelFlag = requestedModel ? `--model ${requestedModel}` : '';
   const cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()} ${modelFlag}`;
 
   const corePrompt = systemPrompt && taskPrompt

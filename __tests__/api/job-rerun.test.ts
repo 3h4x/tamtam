@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import type { JobData } from '@/lib/jobs/job-storage';
+import type { CliProvider } from '@/lib/usage/cli-providers';
+import type { QuotaSnapshot } from '@/lib/usage/quota-types';
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
   return {
@@ -234,4 +236,96 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
     expect(savedJob.finishedAt).not.toBeNull();
   });
 
+});
+
+describe('POST /api/jobs/{jobId}/rerun weekly quota gating', () => {
+  let POST: any;
+  let startJobMock: ReturnType<typeof vi.fn>;
+  let updateJobMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.doUnmock('@/lib/usage/resolve-provider');
+
+    const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+      ['claude', {
+        provider: 'claude',
+        fiveHour: { utilization: 24, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 99, resetsAt: null, msUntilReset: null },
+        sevenDaySonnet: { utilization: 100, resetsAt: null, msUntilReset: null },
+        sevenDayOpus: null,
+        fetchedAt: 0,
+        stale: false,
+      }],
+      ['codex', {
+        provider: 'codex',
+        fiveHour: { utilization: 97, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 10, resetsAt: null, msUntilReset: null },
+        fetchedAt: 0,
+        stale: false,
+      }],
+    ]);
+
+    startJobMock = vi.fn().mockResolvedValue(9999);
+    updateJobMock = vi.fn();
+
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      getJob: vi.fn().mockReturnValue(makeJob({ provider: 'claude' })),
+      createJob: vi.fn().mockImplementation(() =>
+        makeJob({ id: 'job-new', finishedAt: null, exitCode: null })
+      ),
+      updateJob: updateJobMock,
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: vi.fn().mockReturnValue({
+        claudeBin: 'claude',
+        logDir: '/tmp/tamtam-logs',
+      }),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+    }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      startJob: startJobMock,
+    }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getPermissionModeFlag: () => '--permission-mode bypassPermissions',
+      getSettings: vi.fn(() => ({
+        default_model: 'fast',
+        cli_enabled_providers: ['claude', 'codex'],
+        claude_provider: 'claude',
+        budget_block_at_pct: 95,
+        budget_block_runs_enabled: true,
+        cli_default_model_claude: 'normal',
+        cli_bin_claude: '',
+        cli_bin_codex: '',
+        cli_bin_gemini: '',
+        cli_bin_lmstudio: '',
+      })),
+    }));
+    vi.doMock('@/lib/shared/job-control', () => ({
+      jobsPausedResult: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/usage/quota', () => ({
+      getQuotaSnapshots: vi.fn().mockResolvedValue(snapshots),
+    }));
+
+    const mod = await import('@/app/api/jobs/[jobId]/rerun/route');
+    POST = mod.POST;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('does not 429 a rerun when only the preferred provider weekly quota is hot', async () => {
+    const req = new NextRequest('http://localhost/api/jobs/job-source/rerun', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ jobId: 'job-source' }) });
+    expect(res.status).toBe(200);
+    expect(startJobMock).toHaveBeenCalledOnce();
+    const [, command] = startJobMock.mock.calls[0];
+    expect(command).toContain('/scripts/claude-shim.js');
+  });
 });
