@@ -1790,3 +1790,112 @@ describe('pushCurrentBranch', () => {
     }
   });
 });
+
+describe('validateReleaseLinkedCommitRetry', () => {
+  let getJobMock: ReturnType<typeof vi.fn>;
+  let listJobsMock: ReturnType<typeof vi.fn>;
+  let getLockMock: ReturnType<typeof vi.fn>;
+
+  function makeRelease(id: string, project: string, opts: { startedAt?: number; finishedAt?: number | null } = {}) {
+    return { id, project, kind: 'release' as const, startedAt: opts.startedAt ?? 1000, finishedAt: opts.finishedAt ?? 2000, exitCode: 1 };
+  }
+  function makeStep(kind: string, opts: { releaseId: string; project?: string; startedAt?: number; finishedAt?: number | null; exitCode?: number | null }) {
+    return {
+      id: `${opts.project ?? 'proj'}-${kind}-${opts.startedAt ?? 1500}`,
+      project: opts.project ?? 'proj', kind, releaseId: opts.releaseId,
+      startedAt: opts.startedAt ?? 1500, finishedAt: opts.finishedAt ?? 1800, exitCode: opts.exitCode ?? 0,
+    };
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    getJobMock = vi.fn();
+    listJobsMock = vi.fn().mockReturnValue([]);
+    getLockMock = vi.fn().mockReturnValue(null);
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      getJob: getJobMock, listJobs: listJobsMock,
+      createJob: vi.fn(), markDone: vi.fn(), updateJob: vi.fn(),
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      getLock: getLockMock, acquireLock: vi.fn(),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn(), clearProjectDataCache: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn() }));
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: () => ({ logDir: '/tmp', claudeBin: 'claude', projects: {} }),
+      setProjectPushResult: vi.fn(), getProjectTestConfig: vi.fn(),
+    }));
+    vi.doMock('@/lib/jobs/parent-context', () => ({ currentParent: () => null }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({ checkCliStartGate: vi.fn() }));
+    vi.doMock('@/lib/pipeline/pr-create', () => ({ createGenericPR: vi.fn(), createIssuePR: vi.fn() }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
+      generateCommitMessage: vi.fn(), findIssueContext: vi.fn(), detectMainBranch: vi.fn(),
+    }));
+  });
+  afterEach(() => vi.resetModules());
+
+  it('returns ok with null parent when no releaseId is given', async () => {
+    const { validateReleaseLinkedCommitRetry } = await import('@/lib/pipeline/start-push');
+    expect(validateReleaseLinkedCommitRetry('proj', null)).toEqual({ ok: true, parentJobId: null, releaseLinkedRetry: false });
+  });
+
+  it('rejects 404 when the release id does not exist', async () => {
+    getJobMock.mockReturnValue(null);
+    const { validateReleaseLinkedCommitRetry } = await import('@/lib/pipeline/start-push');
+    const r = validateReleaseLinkedCommitRetry('proj', 'missing');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(404);
+  });
+
+  it('rejects when the release is not the latest for the project', async () => {
+    const older = makeRelease('older', 'proj', { startedAt: 1000 });
+    const newer = makeRelease('newer', 'proj', { startedAt: 2000 });
+    getJobMock.mockReturnValue(older);
+    listJobsMock.mockReturnValue([older, newer]);
+    const { validateReleaseLinkedCommitRetry } = await import('@/lib/pipeline/start-push');
+    const r = validateReleaseLinkedCommitRetry('proj', 'older');
+    expect(r.ok).toBe(false);
+    if (!r.ok) { expect(r.status).toBe(409); expect(r.detail).toContain('latest release'); }
+  });
+
+  it('rejects when the latest step on the release is not a failed commit', async () => {
+    const release = makeRelease('rel', 'proj');
+    getJobMock.mockReturnValue(release);
+    listJobsMock.mockReturnValue([
+      release,
+      makeStep('push', { releaseId: 'rel', startedAt: 1500, exitCode: 1 }),
+    ]);
+    const { validateReleaseLinkedCommitRetry } = await import('@/lib/pipeline/start-push');
+    const r = validateReleaseLinkedCommitRetry('proj', 'rel');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.detail).toContain('failed commit');
+  });
+
+  it('accepts a failed commit on the latest finished release (the seo-tools repro)', async () => {
+    const release = makeRelease('rel', 'proj', { finishedAt: 3000 });
+    const failedCommit = makeStep('commit', { releaseId: 'rel', startedAt: 2500, finishedAt: 2700, exitCode: -1 });
+    getJobMock.mockReturnValue(release);
+    listJobsMock.mockReturnValue([
+      release,
+      makeStep('test', { releaseId: 'rel', startedAt: 1100, exitCode: 0 }),
+      makeStep('review', { releaseId: 'rel', startedAt: 1300, exitCode: 0 }),
+      failedCommit,
+    ]);
+    const { validateReleaseLinkedCommitRetry } = await import('@/lib/pipeline/start-push');
+    const r = validateReleaseLinkedCommitRetry('proj', 'rel');
+    expect(r).toEqual({ ok: true, parentJobId: 'rel', releaseLinkedRetry: true });
+  });
+
+  it('rejects when another pipeline holds the project lock (avoid racing in-flight work)', async () => {
+    const release = makeRelease('rel', 'proj', { finishedAt: 3000 });
+    getJobMock.mockReturnValue(release);
+    listJobsMock.mockReturnValue([release]);
+    getLockMock.mockReturnValue({ lockedByJobId: 'other-release-job' });
+    const { validateReleaseLinkedCommitRetry } = await import('@/lib/pipeline/start-push');
+    const r = validateReleaseLinkedCommitRetry('proj', 'rel');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.detail).toContain('Pipeline is running');
+  });
+});
