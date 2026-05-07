@@ -1218,6 +1218,22 @@ describe('verdict retry rescue', () => {
     expect(retryVerdictMock).toHaveBeenCalledOnce();
     expect(startFixFromJobMock).toHaveBeenCalledWith('rev-retry-null');
   });
+
+  it('swallows retryVerdictWithClaude throws — defaults to NEEDS ATTENTION and starts fix', async () => {
+    retryVerdictMock.mockRejectedValue(new Error('spawn ENOENT'));
+    const logPath = join(tempDir, 'no-verdict-throw.log');
+    writeFileSync(logPath, 'Review text that has no verdict line.\n');
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+
+    // Must not throw even though retryVerdictWithClaude rejects
+    await expect(markDoneFn(makeReviewJob('rev-retry-throw', logPath), 0)).resolves.not.toThrow();
+
+    expect(retryVerdictMock).toHaveBeenCalledOnce();
+    // After swallowed throw, rawVerdict is null → defaults to NEEDS ATTENTION → fix started
+    expect(startFixFromJobMock).toHaveBeenCalledWith('rev-retry-throw');
+  });
 });
 
 // ─── incremental review ref guard ────────────────────────────────────────────
