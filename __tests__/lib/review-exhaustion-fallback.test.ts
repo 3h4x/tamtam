@@ -82,6 +82,7 @@ describe('fileReviewExhaustionIssue', () => {
   it('files an issue with all extracted Finding IDs and the canonical labels', async () => {
     execMock
       .mockImplementationOnce(() => resp(0, 'owner/repo'))                          // gh repo view
+      .mockImplementationOnce(() => resp(0, JSON.stringify([{ name: 'tamtam' }, { name: 'review-followup' }, { name: 'priority-medium' }]))) // gh label list
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/repo/issues/42\n')); // gh issue create
 
     const { fileReviewExhaustionIssue } = await import('@/lib/pipeline/review-exhaustion-fallback');
@@ -91,6 +92,9 @@ describe('fileReviewExhaustionIssue', () => {
 
     const createCall = (execMock.mock.calls as [string, string[]][]).find(([cmd, a]) => cmd === 'gh' && a.includes('issue') && a.includes('create'));
     expect(createCall).toBeTruthy();
+    const labelListCall = (execMock.mock.calls as [string, string[]][]).find(([cmd, a]) => cmd === 'gh' && a.includes('label') && a.includes('list'));
+    expect(labelListCall).toBeTruthy();
+    expect(labelListCall![1]).toEqual(expect.arrayContaining(['--limit', '1000']));
     const args = createCall![1];
     expect(args).toContain('-R');
     expect(args).toContain('owner/repo');
@@ -130,6 +134,7 @@ describe('fileReviewExhaustionIssue', () => {
   it('returns ok:false when gh issue create fails', async () => {
     execMock
       .mockImplementationOnce(() => resp(0, 'owner/repo'))
+      .mockImplementationOnce(() => resp(0, JSON.stringify([{ name: 'tamtam' }, { name: 'review-followup' }, { name: 'priority-medium' }])))
       .mockImplementationOnce(() => resp(1, '', 'rate limit'));
 
     const { fileReviewExhaustionIssue } = await import('@/lib/pipeline/review-exhaustion-fallback');
@@ -157,11 +162,29 @@ describe('fileReviewExhaustionIssue', () => {
     }));
     execMock
       .mockImplementationOnce(() => resp(0, 'owner/repo'))
+      .mockImplementationOnce(() => resp(0, JSON.stringify([{ name: 'tamtam' }, { name: 'review-followup' }, { name: 'priority-medium' }])))
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/repo/issues/7\n'));
 
     const { fileReviewExhaustionIssue } = await import('@/lib/pipeline/review-exhaustion-fallback');
     const r = await fileReviewExhaustionIssue(makeReviewJob(), 'review-cap');
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.issueNumber).toBe(7);
+  });
+
+  it('skips missing labels and still files the follow-up issue', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0, 'owner/repo'))
+      .mockImplementationOnce(() => resp(0, JSON.stringify([{ name: 'review-followup' }])))
+      .mockImplementationOnce(() => resp(0, 'https://github.com/owner/repo/issues/9\n'));
+
+    const { fileReviewExhaustionIssue } = await import('@/lib/pipeline/review-exhaustion-fallback');
+    const r = await fileReviewExhaustionIssue(makeReviewJob(), 'review-cap');
+
+    expect(r).toEqual({ ok: true, issueNumber: 9, issueUrl: 'https://github.com/owner/repo/issues/9' });
+    const createCall = (execMock.mock.calls as [string, string[]][]).find(([cmd, a]) => cmd === 'gh' && a.includes('issue') && a.includes('create'));
+    expect(createCall).toBeTruthy();
+    const args = createCall![1];
+    const labels = args.reduce<string[]>((acc, v, i) => (args[i - 1] === '--label' ? [...acc, v] : acc), []);
+    expect(labels).toEqual(['review-followup']);
   });
 });
