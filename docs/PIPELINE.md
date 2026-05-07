@@ -104,8 +104,12 @@ For working-tree reviews, TamTam scopes the prompt to the full non-`.tamtam`
 working-tree diff computed before the model starts. That scope includes staged
 tracked changes, unstaged tracked changes, and untracked files, so a manual
 review or release review cannot silently skip code just because it is already
-in the git index. Successful reviews still record a review stamp for the
-fresh-LGTM skip, but they do not mutate the caller's git index.
+in the git index. Untracked-file previews are limited to repo-local regular
+files; symlinks, sockets, directories, missing files, and unreadable files are
+omitted instead of being read into the prompt. Successful working-tree reviews
+still record a review stamp for the fresh-LGTM skip, but they do not mutate the
+caller's git index. PR reviews do not update that local review stamp or the
+incremental reviewed ref used to narrow later local-commit reviews.
 
 Working-tree review prompts explicitly tell the reviewer that the pipeline owns test
 execution. The reviewer should not run tests, audit which package test commands
@@ -172,7 +176,7 @@ In the per-project **History** tab, pipeline children (`test`, `review`, `fix`, 
 Called by `markDone()` after every job finishes. Hooks run in order:
 
 1. **Release meta-log**: For pipeline jobs, if an active release exists for the project, append a log section.
-2. **Review mark**: If `review` exits 0, call `markReviewed(project, path)` to store a commit-aware review fingerprint (`git status` + `HEAD` + upstream) used by the fresh-LGTM skip. On `LGTM` verdict, also pin `refs/tamtam/reviewed/<branch>` to `HEAD` — the next pipeline review narrows its scope from `@{u}..HEAD` to `<ref>..HEAD` so already-approved commits aren't re-reviewed (gated by `incremental_review_enabled`, default on; falls back to full scope when the ref isn't an ancestor of HEAD, e.g. after a rebase).
+2. **Review mark**: If a working-tree `review` exits 0, call `markReviewed(project, path)` to store a commit-aware review fingerprint (`git status` + `HEAD` + upstream) used by the fresh-LGTM skip. PR-diff reviews (`sourceType: 'pr_review'`) do not update that local fingerprint or the incremental reviewed ref. On `LGTM` verdict from a working-tree review, also pin `refs/tamtam/reviewed/<branch>` to `HEAD` — the next pipeline review narrows its scope from `@{u}..HEAD` to `<ref>..HEAD` so already-approved commits aren't re-reviewed (gated by `incremental_review_enabled`, default on; falls back to full scope when the ref isn't an ancestor of HEAD, e.g. after a rebase).
 3. **Review chaining**: If `review` exits 0 AND (in-release OR `auto_push_enabled`): LGTM → start PUSH; NEEDS ATTENTION / DO NOT SHIP → start FIX (within iteration cap), unless the new review repeats the previous findings or contradicts the most recent fix's `Status: fixed` claims for the same `Finding ID`s, in which case the release stops as non-converging.
 4. **Fix chaining**: If `fix` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW.
 5. **Test chaining**: If `test` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW.
