@@ -9,7 +9,6 @@ import { formatAgo } from '@/lib/shared/format'
 import { getAggregateCi, getCiFailedUrl } from '@/lib/shared/statusConstants'
 import { LoadingState } from '@/components/LoadingState'
 import { useToast } from '@/components/Toast'
-import { computeWeeklyBurnThrottle } from '@/lib/shared/budget-throttle'
 
 type SortKey = 'project' | 'status' | 'changes' | 'last_run' | 'next_run' | 'ci'
 type SortDir = 'asc' | 'desc'
@@ -33,6 +32,12 @@ interface QuotaWindow {
 interface QuotaSnapshot {
   sevenDay: QuotaWindow
   gateEnabled?: boolean
+  schedulerThrottle?: {
+    reason: string
+    projectedPct: number
+    worstProvider: string
+    resumesAtMs: number | null
+  } | null
 }
 
 function formatNextFire(ms: number): { text: string; tone: 'overdue' | 'imminent' | 'normal' | 'far' } {
@@ -239,7 +244,7 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
         if (!r.ok) return
         const data = (await r.json()) as QuotaSnapshot
         if (!active) return
-        setScheduledThrottlePaused(!!data.gateEnabled && !!computeWeeklyBurnThrottle(data.sevenDay))
+        setScheduledThrottlePaused(!!data.gateEnabled && data.schedulerThrottle != null)
       } catch {
         if (active) setScheduledThrottlePaused(false)
       }
@@ -532,8 +537,8 @@ const isReviewRunning = (projectName: string) =>
                         ⏸ scheduled paused
                       </span>
                     ) : projectPaused && (
-                      <span title="launchctl paused" className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30">
-                        ⏸ paused
+                      <span title="Project schedule paused" className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30">
+                        ⏸ scheduled paused
                       </span>
                     )}
                     {outOfSync && (

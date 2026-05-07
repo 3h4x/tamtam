@@ -190,6 +190,12 @@ describe('ProjectTablePage', () => {
               resetsAt: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString(),
               msUntilReset: 6 * 24 * 60 * 60 * 1000,
             },
+            schedulerThrottle: {
+              reason: '7d burn rate too high: 20% used, projected 140%',
+              projectedPct: 140,
+              worstProvider: 'claude',
+              resumesAtMs: Date.now() + 60_000,
+            },
           }),
         }
       }
@@ -218,6 +224,144 @@ describe('ProjectTablePage', () => {
       expect(container.textContent).toContain('acme/widgets')
       expect(container.textContent).toContain('scheduled paused')
       expect(container.textContent).not.toContain('now')
+      expect(container.textContent).not.toContain('⏸ paused')
+    })
+
+    unmount()
+  })
+
+  it('keeps showing the next run when the displayed quota window is over pace but another provider is available', async () => {
+    const nextFireMs = Date.now() + 10_000
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/agents/scheduler-health') {
+        return {
+          ok: true,
+          json: async () => ({
+            internal: {
+              paused: false,
+              entries: [{
+                agentId: 'agent-1',
+                project: 'acme/widgets',
+                name: 'nightly',
+                schedule: '1h',
+                enabled: true,
+                nextFireMs,
+                lastFireMs: null,
+              }],
+            },
+          }),
+        }
+      }
+      if (url === '/api/usage/quota') {
+        return {
+          ok: true,
+          json: async () => ({
+            gateEnabled: true,
+            sevenDay: {
+              utilization: 90,
+              resetsAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+              msUntilReset: 24 * 60 * 60 * 1000,
+            },
+            schedulerThrottle: null,
+          }),
+        }
+      }
+      return { ok: false, json: async () => ({}) }
+    }))
+
+    const fleet = createFleetHealth([
+      {
+        project: 'acme/widgets',
+        status: 'healthy',
+        tasks: [],
+        totalChanges: 0,
+        unpushed: 0,
+        unreviewedCount: 0,
+        lastRunAgo: null,
+      },
+    ])
+
+    const { container, unmount } = renderProjectTablePage({
+      fleet,
+      issueCounts: {},
+      loading: false,
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('acme/widgets')
+      expect(container.textContent).toContain('now')
+      expect(container.textContent).not.toContain('scheduled paused')
+    })
+
+    unmount()
+  })
+
+  it('labels legacy per-project paused schedules as scheduled paused even when jobs are currently running', async () => {
+    fetchJobs.mockResolvedValue({
+      jobs: [
+        {
+          id: 'job-1',
+          project: 'filmpick',
+          kind: 'review',
+          prompt: null,
+          pid: 123,
+          log_path: '/tmp/job-1.log',
+          status: 'running',
+          exit_code: null,
+          started_at: 100,
+          finished_at: null,
+          seen: false,
+        },
+      ],
+    })
+
+    const fleet = createFleetHealth([
+      {
+        project: 'filmpick',
+        status: 'healthy',
+        tasks: [{
+          task: {
+            id: 'task-1',
+            project: 'filmpick',
+            job: 'nightly',
+            priority: 'medium',
+            launchctl: 'paused',
+            path: '/tmp/filmpick',
+            fires_at: '* * * * *',
+            sync: true,
+            changes: 0,
+            unpushed: 0,
+            reviewed: true,
+            last_run: null,
+            last_run_ago: null,
+            last_run_duration_s: null,
+            last_run_exit: null,
+            release_tag: null,
+            ci: 'success',
+            ci_failed_url: null,
+            github: null,
+          },
+          status: 'healthy',
+          summary: 'nightly paused',
+        }],
+        totalChanges: 0,
+        unpushed: 0,
+        unreviewedCount: 0,
+        lastRunAgo: null,
+      },
+    ])
+
+    const { container, unmount } = renderProjectTablePage({
+      fleet,
+      issueCounts: {},
+      loading: false,
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('filmpick')
+      expect(container.textContent).toContain('running')
+      expect(container.textContent).toContain('scheduled paused')
       expect(container.textContent).not.toContain('⏸ paused')
     })
 
