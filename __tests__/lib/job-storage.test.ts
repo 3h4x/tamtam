@@ -355,7 +355,7 @@ describe('job-storage', () => {
     it('returns only unseen finished jobs', () => {
       const job1 = createJob('proj1', 'review', 111, '/log1');
       const job2 = createJob('proj2', 'test', 222, '/log2');
-      const job3 = createJob('proj3', 'run', 333, '/log3');
+      const _job3 = createJob('proj3', 'run', 333, '/log3');
 
       // Mark job1 as finished and unseen
       job1.finishedAt = Date.now() / 1000;
@@ -1904,8 +1904,22 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
     await markDoneFn(job, 0);
 
+    expect(execMock).not.toHaveBeenCalledWith('git', ['-C', '/proj', 'add', '-A'], { timeout: 10_000 });
     expect(startProjectCommitMock).toHaveBeenCalledWith('my-proj');
     expect(startFixFromJobMock).not.toHaveBeenCalled();
+  });
+
+  it('does not stage local worktree after a PR review', async () => {
+    const logFile = join(tempDir, 'pr-lgtm.log');
+    writeFileSync(logFile, 'Verdict: LGTM\n');
+    const job = makeJob('review', logFile, {
+      contextMeta: JSON.stringify({ sourceType: 'pr_review', prNumber: 12 }),
+    });
+
+    await markDoneFn(job, 0);
+
+    expect(execMock).not.toHaveBeenCalledWith('git', ['-C', '/proj', 'add', '-A'], { timeout: 10_000 });
+    expect(startProjectCommitMock).toHaveBeenCalledWith('my-proj');
   });
 
   it('starts a fix when review verdict is NEEDS ATTENTION and auto-push is enabled', async () => {

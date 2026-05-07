@@ -441,7 +441,9 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
       try {
         const { resolveProjectPath } = await import('@/lib/shared/project-data');
         const projPath = resolveProjectPath(job.project);
-        if (projPath) await markReviewed(job.project, projPath);
+        if (projPath) {
+          await markReviewed(job.project, projPath);
+        }
       } catch {}
       // Always persist verdict so it survives log pruning. Standalone reviews
       // (not in a pipeline) reach this point but not the pipeline branch below.

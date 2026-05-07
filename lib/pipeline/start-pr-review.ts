@@ -34,6 +34,9 @@ function loadReviewPrompt(): string {
     'Branch: {headRef} → {baseRef}\n\n' +
     'The diff is below. Review the changes thoroughly.\n\n' +
     '{diff}\n\n' +
+    'TAMTAM INTERNAL CONFIG CONTEXT:\n' +
+    '- Ignore `.tamtam/` changes during review. They are TamTam scheduler/config metadata, not product code for this project.\n' +
+    '- Do not raise findings about `.tamtam/agents/*.md`, `.tamtam/config.yml`, or other `.tamtam/` files unless the review task is explicitly about TamTam configuration.\n\n' +
     'End with a verdict: LGTM / NEEDS ATTENTION / DO NOT SHIP\n\n' +
     review_verdict_rules;
 }
@@ -91,6 +94,7 @@ export async function startPrReview(
 
   const job = createJob(projectName, 'review', 0, '');
   job.provider = provider;
+  job.contextMeta = JSON.stringify({ sourceType: 'pr_review', prNumber, headRef, baseRef });
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
 

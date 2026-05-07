@@ -100,11 +100,23 @@ REVIEW
   │   └─ No verdict found  → finalize release (exit 1)
   └─ exit ≠0 → completion hook → finalize release (exit 1)
 
-Review prompts explicitly tell the reviewer that the pipeline owns test
+For working-tree reviews, TamTam scopes the prompt to the full non-`.tamtam`
+working-tree diff computed before the model starts. That scope includes staged
+tracked changes, unstaged tracked changes, and untracked files, so a manual
+review or release review cannot silently skip code just because it is already
+in the git index. Successful reviews still record a review stamp for the
+fresh-LGTM skip, but they do not mutate the caller's git index.
+
+Working-tree review prompts explicitly tell the reviewer that the pipeline owns test
 execution. The reviewer should not run tests, audit which package test commands
 are included, or cite passing/failing/skipped/partial suites as findings. Tests
 are only review material when the code diff itself creates a concrete missing
 coverage risk.
+
+Project review prompts and PR review prompts both tell the reviewer to ignore
+`.tamtam/` changes. Those files are TamTam scheduler/config metadata for the
+tracked project, not product code, unless a review is explicitly about TamTam
+configuration.
 
 When a release enters a follow-up review after a fix, TamTam feeds the review job the
 parsed output from earlier review/fix steps in the same release. Repeated structured

@@ -514,6 +514,60 @@ describe('project board integration', () => {
     expect(newFieldWrites).toHaveLength(0);
   });
 
+  it('clears a stale Agent custom field when syncing a non-agent run', async () => {
+    const job = makeJob({
+      id: 'run-clear-agent',
+      kind: 'run',
+      prompt: 'plain run',
+      contextMeta: JSON.stringify({
+        githubBoard: {
+          itemId: 'DI_EXISTING',
+          customFields: {
+            project: 'borged',
+            agent: 'ui-components',
+            kind: 'agent:ui-components',
+            branch: 'main',
+          },
+        },
+      }),
+      finishedAt: 100,
+      exitCode: 0,
+    });
+
+    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    resolveProjectPathMock.mockReturnValue('/tmp/repo');
+    getJobMock.mockImplementation((id: string) => (id === 'run-clear-agent' ? job : null));
+
+    const calls: string[][] = [];
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'git') return { exitCode: 0, stdout: 'main\n', stderr: '' };
+      if (args[0] === 'project' && args[1] === 'item-edit') {
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true }), stderr: '' };
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
+    await syncJobToProjectBoard(job, 'manual', { requireConfigured: true });
+
+    const clearCall = calls.find((entry) =>
+      entry[1] === 'project' &&
+      entry[2] === 'item-edit' &&
+      entry.includes('F_AGENT') &&
+      entry.includes('--clear'),
+    );
+    expect(clearCall).toBeDefined();
+
+    const storedMeta = JSON.parse(job.contextMeta ?? '{}').githubBoard;
+    expect(storedMeta.customFields).toEqual({
+      project: 'proj',
+      agent: '',
+      kind: 'run',
+      branch: 'main',
+    });
+  });
+
   it('auto-upgrades legacy board settings during sync and persists the new IDs', async () => {
     const job = makeJob({
       id: 'legacy-sync-1',
@@ -804,6 +858,49 @@ describe('project board integration', () => {
     expect(calls.some((entry) => entry[1] === 'project' && entry[2] === 'item-create')).toBe(false);
     const storedMeta = JSON.parse(job.contextMeta ?? '{}').githubBoard;
     expect(storedMeta.itemId).toBe('ITEM_ADDED_99');
+  });
+
+  it('falls back to the pull URL when adding the issues URL fails', async () => {
+    const job = makeJob({
+      id: 'run-pr-fallback',
+      kind: 'run',
+      prompt: 'Review PR 7',
+      ghIssueNumber: 7,
+      ghIssueRepo: '3h4x/tamtam',
+    });
+
+    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    resolveProjectPathMock.mockReturnValue('/tmp/repo');
+    getJobMock.mockImplementation((id: string) => (id === 'run-pr-fallback' ? job : null));
+
+    const calls: string[][] = [];
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'git') return { exitCode: 0, stdout: 'main\n', stderr: '' };
+      if (args[0] === 'project' && args[1] === 'item-list') {
+        return { exitCode: 0, stdout: JSON.stringify({ items: [] }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-add' && args.some((arg) => arg.endsWith('/issues/7'))) {
+        return { exitCode: 1, stdout: '', stderr: 'resource is a pull request' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-add' && args.some((arg) => arg.endsWith('/pull/7'))) {
+        return { exitCode: 0, stdout: JSON.stringify({ id: 'ITEM_PR_FALLBACK' }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-edit') {
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true }), stderr: '' };
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
+    await syncJobToProjectBoard(job, 'manual', { requireConfigured: true });
+
+    const addCalls = calls.filter((entry) => entry[1] === 'project' && entry[2] === 'item-add');
+    expect(addCalls).toHaveLength(2);
+    expect(addCalls[0]).toContain('https://github.com/3h4x/tamtam/issues/7');
+    expect(addCalls[1]).toContain('https://github.com/3h4x/tamtam/pull/7');
+    const storedMeta = JSON.parse(job.contextMeta ?? '{}').githubBoard;
+    expect(storedMeta.itemId).toBe('ITEM_PR_FALLBACK');
   });
 
   it('recovers from a deleted board card by clearing the stored itemId and re-creating', async () => {

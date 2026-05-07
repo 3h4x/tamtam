@@ -29,7 +29,7 @@ describe('startProjectReview', () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    execMock = vi.fn();
+    execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     startJobMock = vi.fn().mockResolvedValue(9999);
     updateJobMock = vi.fn();
     listJobsMock = vi.fn().mockReturnValue([]);
@@ -82,6 +82,7 @@ describe('startProjectReview', () => {
     vi.doMock('fs', () => ({
       existsSync: vi.fn().mockReturnValue(false),
       readFileSync: vi.fn(),
+      statSync: vi.fn(),
       mkdirSync: vi.fn(),
       appendFileSync: vi.fn(),
     }));
@@ -117,7 +118,7 @@ describe('startProjectReview', () => {
       isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
     }));
     vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/code-reviewer.md' }));
-    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
+    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), statSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
     const { startProjectReview: fn } = await import('@/lib/pipeline/start-review');
     const r = await fn('proj');
     expect(r.ok).toBe(false);
@@ -152,7 +153,7 @@ describe('startProjectReview', () => {
       isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
     }));
     vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/path' }));
-    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
+    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), statSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
 
     const { startProjectReview: fn } = await import('@/lib/pipeline/start-review');
     const r = await fn('missing');
@@ -242,6 +243,32 @@ describe('startProjectReview', () => {
     }
   });
 
+  it('reviews staged changes in the working tree', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, 'M  lib/foo.ts'))
+      .mockResolvedValueOnce(resp(0, ' lib/foo.ts | 2 +-\n'))
+      .mockResolvedValueOnce(resp(0, 'diff --git a/lib/foo.ts b/lib/foo.ts\n+staged change\n'));
+    const r = await startProjectReview('proj');
+    expect(r.ok).toBe(true);
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('Working-tree files to review');
+    expect(prompt).toContain('- lib/foo.ts');
+    expect(prompt).toContain('Working-tree tracked-file diff (vs HEAD)');
+  });
+
+  it('returns 400 when only .tamtam changes remain', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, ' M .tamtam/agents/improve.md'))
+      .mockResolvedValueOnce(resp(0, '0'));
+    const r = await startProjectReview('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(400);
+      expect(r.detail).toContain('No uncommitted changes or unpushed commits');
+    }
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
   it('returns 400 when the worktree is clean and there are no unpushed commits', async () => {
     execMock
       .mockResolvedValueOnce(resp(0, ''))
@@ -311,7 +338,7 @@ describe('startProjectReview', () => {
     vi.doMock('@/lib/usage/resolve-provider', () => ({
       checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
     }));
-    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
+    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), statSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
 
     const { startProjectReview: fn } = await import('@/lib/pipeline/start-review');
     const r = await fn('proj');
@@ -363,7 +390,7 @@ describe('startProjectReview', () => {
     vi.doMock('@/lib/usage/resolve-provider', () => ({
       checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
     }));
-    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
+    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), statSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
 
     const { startProjectReview: fn } = await import('@/lib/pipeline/start-review');
     const r = await fn('proj');
@@ -376,7 +403,10 @@ describe('startProjectReview', () => {
   });
 
   it('returns ok with jobId and pid when review starts successfully', async () => {
-    execMock.mockResolvedValueOnce(resp(0, 'M lib/foo.ts')); // git status → has changes
+    execMock
+      .mockResolvedValueOnce(resp(0, ' M lib/foo.ts')) // git status → has unstaged changes
+      .mockResolvedValueOnce(resp(0, ' lib/foo.ts | 2 +-\n'))
+      .mockResolvedValueOnce(resp(0, 'diff --git a/lib/foo.ts b/lib/foo.ts\n'));
     const r = await startProjectReview('proj');
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -388,9 +418,27 @@ describe('startProjectReview', () => {
     expect(startJobMock).toHaveBeenCalled();
   });
 
+  it('passes the full non-.tamtam working-tree scope into the review prompt', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, 'M  lib/already-reviewed.ts\n M lib/new-fix.ts\n M .tamtam/config.yml'))
+      .mockResolvedValueOnce(resp(0, ' lib/already-reviewed.ts | 1 +\n lib/new-fix.ts | 3 ++-\n'))
+      .mockResolvedValueOnce(resp(0, 'diff --git a/lib/already-reviewed.ts b/lib/already-reviewed.ts\ndiff --git a/lib/new-fix.ts b/lib/new-fix.ts\n+fixed\n'));
+
+    const r = await startProjectReview('proj');
+
+    expect(r.ok).toBe(true);
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('Review ONLY the non-.tamtam working-tree changes');
+    expect(prompt).toContain('- lib/already-reviewed.ts');
+    expect(prompt).toContain('- lib/new-fix.ts');
+    expect(prompt).toContain('diff --git a/lib/already-reviewed.ts b/lib/already-reviewed.ts');
+    expect(prompt).toContain('diff --git a/lib/new-fix.ts b/lib/new-fix.ts');
+    expect(prompt).not.toContain('- .tamtam/config.yml');
+  });
+
   it('persists job failure when startJob throws', async () => {
     startJobMock.mockRejectedValueOnce(new Error('spawn failed'));
-    execMock.mockResolvedValueOnce(resp(0, 'M lib/foo.ts'));
+    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
     const r = await startProjectReview('proj');
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -405,20 +453,20 @@ describe('startProjectReview', () => {
   });
 
   it('acquires pipeline lock after successful job start when not under release', async () => {
-    execMock.mockResolvedValueOnce(resp(0, 'M lib/foo.ts'));
+    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
     await startProjectReview('proj');
     expect(acquireLockMock).toHaveBeenCalledWith('proj', 'proj-review-id');
   });
 
   it('does not acquire pipeline lock when running under active release', async () => {
     isLockOwnedByActiveReleaseMock.mockReturnValue(true);
-    execMock.mockResolvedValueOnce(resp(0, 'M lib/foo.ts'));
+    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
     await startProjectReview('proj');
     expect(acquireLockMock).not.toHaveBeenCalled();
   });
 
   it('passes project name and path into the prompt', async () => {
-    execMock.mockResolvedValueOnce(resp(0, 'M lib/foo.ts'));
+    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
     await startProjectReview('proj');
     // startJob(jobId, command, prompt, cwd) → prompt is at index 2
     const prompt: string = startJobMock.mock.calls[0][2];
@@ -427,14 +475,14 @@ describe('startProjectReview', () => {
   });
 
   it('injects review_verdict_rules into the prompt', async () => {
-    execMock.mockResolvedValueOnce(resp(0, 'M lib/foo.ts'));
+    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
     await startProjectReview('proj');
     const prompt: string = startJobMock.mock.calls[0][2];
     expect(prompt).toContain('Use LGTM / NEEDS ATTENTION / DO NOT SHIP.');
   });
 
   it('requires structured findings with blast-radius review context', async () => {
-    execMock.mockResolvedValueOnce(resp(0, 'M lib/foo.ts'));
+    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
     await startProjectReview('proj');
     const prompt: string = startJobMock.mock.calls[0][2];
     expect(prompt).toContain('Finding ID: stable-kebab-case-id');
@@ -449,7 +497,7 @@ describe('startProjectReview', () => {
   });
 
   it('tells reviewers the pipeline test step already validated the suite', async () => {
-    execMock.mockResolvedValueOnce(resp(0, 'M lib/foo.ts'));
+    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
     await startProjectReview('proj');
     const prompt: string = startJobMock.mock.calls[0][2];
     expect(prompt).toContain('PIPELINE TEST CONTEXT');
@@ -457,6 +505,15 @@ describe('startProjectReview', () => {
     expect(prompt).toContain('Do not run tests, inspect test runner coverage, audit which package test commands are included');
     expect(prompt).toContain('Do not cite passing, failing, skipped, partial, or unexercised test suites as review findings');
     expect(prompt).toContain('Only mention tests when the code diff itself creates a concrete missing-coverage risk');
+  });
+
+  it('tells reviewers to ignore TamTam internal config changes', async () => {
+    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
+    await startProjectReview('proj');
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('TAMTAM INTERNAL CONFIG CONTEXT');
+    expect(prompt).toContain('Ignore `.tamtam/` changes during review');
+    expect(prompt).toContain('`.tamtam/agents/*.md`, `.tamtam/config.yml`, or other `.tamtam/` files');
   });
 
   it('includes prior release review and fix context in follow-up reviews', async () => {
@@ -480,7 +537,7 @@ describe('startProjectReview', () => {
       }
       return 'Fix checklist:\n- Finding ID: shared-server-validation\n  Status: fixed\n';
     });
-    execMock.mockResolvedValueOnce(resp(0, 'M lib/foo.ts'));
+    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
 
     await startProjectReview('proj');
 
@@ -506,7 +563,7 @@ describe('startProjectReview', () => {
       }
       return 'Fix checklist:\n- Root cause: updated cache flush path\n  id: shared-placeholder\n';
     });
-    execMock.mockResolvedValueOnce(resp(0, 'M lib/foo.ts'));
+    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
 
     await startProjectReview('proj');
 

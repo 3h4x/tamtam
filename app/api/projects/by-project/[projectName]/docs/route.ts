@@ -14,6 +14,7 @@ export async function GET(
   }
 
   const docs: { name: string; path: string; content: string }[] = [];
+  let hasRootReadme = false;
 
   // README at project root
   for (const candidate of ['README.md', 'readme.md', 'Readme.md']) {
@@ -21,6 +22,7 @@ export async function GET(
     if (existsSync(/*turbopackIgnore: true*/ p)) {
       try {
         docs.push({ name: 'README.md', path: candidate, content: readFileSync(/*turbopackIgnore: true*/ p, 'utf-8') });
+        hasRootReadme = true;
       } catch {}
       break;
     }
@@ -36,8 +38,13 @@ export async function GET(
         docs.push({ name: entry.name, path: `docs/${entry.name}`, content });
       } catch {}
     }
+  }
+
+  if (hasRootReadme) {
     const rest = docs.splice(1).sort((a, b) => a.name.localeCompare(b.name));
     docs.push(...rest);
+  } else {
+    docs.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   return NextResponse.json({ docs });

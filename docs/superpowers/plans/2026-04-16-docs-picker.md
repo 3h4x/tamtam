@@ -25,7 +25,7 @@
 **Files:**
 - Create: `app/api/projects/by-project/[projectName]/docs/route.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `__tests__/api/project-docs.test.ts`:
 
@@ -116,7 +116,7 @@ describe('GET /api/projects/by-project/{projectName}/docs', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to confirm it fails**
+- [x] **Step 2: Run test to confirm it fails**
 
 ```bash
 cd /Users/3h4x/workspace/tamtam && pnpm test __tests__/api/project-docs.test.ts 2>&1 | tail -20
@@ -124,7 +124,7 @@ cd /Users/3h4x/workspace/tamtam && pnpm test __tests__/api/project-docs.test.ts 
 
 Expected: fails with import error (file doesn't exist yet).
 
-- [ ] **Step 3: Create the API route**
+- [x] **Step 3: Create the API route**
 
 Create `app/api/projects/by-project/[projectName]/docs/route.ts`:
 
@@ -164,13 +164,15 @@ export async function GET(
 }
 ```
 
-- [ ] **Step 4: Run tests to confirm they pass**
+- [x] **Step 4: Run tests to confirm they pass**
 
 ```bash
 cd /Users/3h4x/workspace/tamtam && pnpm test __tests__/api/project-docs.test.ts 2>&1 | tail -20
 ```
 
 Expected: all 5 tests pass.
+
+Evidence: `app/api/projects/by-project/[projectName]/docs/route.ts` now sorts `docs/*.md` alphabetically even when no root `README.md` exists, while still keeping `README.md` first when present. Verified with `pnpm test __tests__/api/project-docs.test.ts` and `pnpm type-check` on 2026-05-07.
 
 - [ ] **Step 5: Commit**
 
