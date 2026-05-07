@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getQuotaForProvider, clearQuotaCache } from '@/lib/usage/quota';
 import { getSettings } from '@/lib/shared/config';
+import {
+  scheduledBurnRateBlockedAcrossProviders,
+  warmEnabledProviderSnapshots,
+} from '@/lib/shared/job-control';
 
 function gateEnabled(): boolean {
   try { return getSettings()?.budget_block_runs_enabled === true; } catch { return false; }
@@ -22,7 +26,9 @@ function quotaErrorMessage(e: unknown): string {
 export async function GET(request: NextRequest) {
   try {
     const snapshot = await getQuotaForProvider(providerFromRequest(request));
-    return NextResponse.json({ ...snapshot, gateEnabled: gateEnabled() });
+    await warmEnabledProviderSnapshots();
+    const throttle = scheduledBurnRateBlockedAcrossProviders();
+    return NextResponse.json({ ...snapshot, gateEnabled: gateEnabled(), schedulerThrottle: throttle });
   } catch (e) {
     return NextResponse.json(
       { error: quotaErrorMessage(e) },
@@ -35,7 +41,9 @@ export async function POST(request: NextRequest) {
   clearQuotaCache();
   try {
     const snapshot = await getQuotaForProvider(providerFromRequest(request), { force: true });
-    return NextResponse.json({ ...snapshot, gateEnabled: gateEnabled() });
+    await warmEnabledProviderSnapshots({ force: true });
+    const throttle = scheduledBurnRateBlockedAcrossProviders();
+    return NextResponse.json({ ...snapshot, gateEnabled: gateEnabled(), schedulerThrottle: throttle });
   } catch (e) {
     return NextResponse.json(
       { error: quotaErrorMessage(e) },

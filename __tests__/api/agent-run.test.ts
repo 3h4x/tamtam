@@ -1037,11 +1037,13 @@ describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
   let createJobMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
   let tempSkillsDir: string;
+  let snapshots: Map<CliProvider, QuotaSnapshot | null>;
 
   const now = Date.now() / 1000;
 
   beforeEach(async () => {
     vi.resetModules();
+    vi.doUnmock('@/lib/usage/resolve-provider');
     testDb = createTestDb();
     tempSkillsDir = mkdtempSync(join(tmpdir(), 'tamtam-agent-run-weekly-test-'));
 
@@ -1064,7 +1066,7 @@ describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
     createJobMock = vi.fn().mockImplementation(() => makeJob());
     updateJobMock = vi.fn();
 
-    const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+    snapshots = new Map<CliProvider, QuotaSnapshot | null>([
       ['claude', {
         provider: 'claude',
         fiveHour: { utilization: 24, resetsAt: null, msUntilReset: null },
@@ -1161,7 +1163,7 @@ describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
       getDirtyFileCount: vi.fn().mockResolvedValue(0),
     }));
     vi.doMock('@/lib/usage/quota', () => ({
-      getQuotaSnapshots: vi.fn().mockResolvedValue(snapshots),
+      getQuotaSnapshots: vi.fn(() => Promise.resolve(snapshots)),
     }));
 
     const mod = await import('@/app/api/agents/[agentId]/run/route');
@@ -1182,5 +1184,28 @@ describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
     expect(res.status).toBe(200);
     expect(startJobMock).toHaveBeenCalledOnce();
     expect(createJobMock.mock.results[0]?.value.provider).toBe('claude');
+  });
+
+  it('returns 429 when a sibling quota-aware provider is missing and the known provider is over the hard cap', async () => {
+    snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+      ['claude', {
+        provider: 'claude',
+        fiveHour: { utilization: 99, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 10, resetsAt: null, msUntilReset: null },
+        fetchedAt: 0,
+        stale: false,
+      }],
+      ['codex', null],
+    ]);
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+    expect(res.status).toBe(429);
+    expect(data.code).toBe('providers_over_budget');
+    expect(data.detail).toContain('All enabled CLI providers are over budget');
+    expect(startJobMock).not.toHaveBeenCalled();
   });
 });

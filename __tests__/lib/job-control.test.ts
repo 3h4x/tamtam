@@ -13,8 +13,11 @@ describe('job-control', () => {
   let listQueuedProjectsMock: ReturnType<typeof vi.fn>;
   let drainQueuedAgentMock: ReturnType<typeof vi.fn>;
   let getSettingsMock: ReturnType<typeof vi.fn>;
+  let getQuotaSnapshotsMock: ReturnType<typeof vi.fn>;
   let peekQuotaCacheMock: ReturnType<typeof vi.fn>;
+  let peekQuotaSnapshotsMock: ReturnType<typeof vi.fn>;
   let prefetchQuotaMock: ReturnType<typeof vi.fn>;
+  let prefetchQuotaProvidersMock: ReturnType<typeof vi.fn>;
   let notifyMock: ReturnType<typeof vi.fn>;
 
   function makeSettings(overrides: Record<string, unknown> = {}) {
@@ -44,8 +47,11 @@ describe('job-control', () => {
     listQueuedProjectsMock = vi.fn().mockReturnValue([]);
     drainQueuedAgentMock = vi.fn().mockResolvedValue(undefined);
     getSettingsMock = vi.fn().mockReturnValue(makeSettings());
+    getQuotaSnapshotsMock = vi.fn().mockResolvedValue(new Map());
     peekQuotaCacheMock = vi.fn().mockReturnValue(null);
+    peekQuotaSnapshotsMock = vi.fn().mockReturnValue(new Map());
     prefetchQuotaMock = vi.fn();
+    prefetchQuotaProvidersMock = vi.fn();
     notifyMock = vi.fn().mockResolvedValue(undefined);
     vi.doMock('@/lib/scheduling/internal-scheduler', () => ({
       pauseInternalScheduler: pauseInternalSchedulerMock,
@@ -60,10 +66,20 @@ describe('job-control', () => {
     }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: getSettingsMock,
+      getActiveCliProvider: vi.fn((settings) => {
+        const enabled = Array.isArray(settings?.cli_enabled_providers)
+          ? settings.cli_enabled_providers
+          : [];
+        if (enabled.length > 0) return enabled[0];
+        return settings?.claude_provider ?? 'claude';
+      }),
     }));
     vi.doMock('@/lib/usage/quota', () => ({
+      getQuotaSnapshots: getQuotaSnapshotsMock,
       peekQuotaCache: peekQuotaCacheMock,
+      peekQuotaSnapshots: peekQuotaSnapshotsMock,
       prefetchQuota: prefetchQuotaMock,
+      prefetchQuotaProviders: prefetchQuotaProvidersMock,
     }));
     vi.doMock('@/lib/shared/notifications', () => ({
       notify: notifyMock,
@@ -304,6 +320,175 @@ describe('job-control', () => {
       expect(result).not.toBeNull();
       expect(result!.status).toBe(429);
       if (result && 'window' in result) expect(result.window).toBe('5h');
+    });
+  });
+
+  describe('scheduledBurnRateBlockedAcrossProviders', () => {
+    function weeklyBurningSnapshot(provider: 'claude' | 'codex', sevenDayPct: number) {
+      // Half the 7-day window has elapsed → projection ~= utilization * 2.
+      const sevenDayMs = 7 * 24 * 60 * 60 * 1000;
+      return {
+        provider,
+        fiveHour: { utilization: 10, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: sevenDayPct, resetsAt: null, msUntilReset: sevenDayMs / 2 },
+        fetchedAt: Date.now(),
+        stale: false,
+      };
+    }
+
+    it('returns null when at least one enabled provider has weekly headroom', async () => {
+      getSettingsMock.mockReturnValue(makeSettings({ cli_enabled_providers: ['claude', 'codex'] }));
+      // claude projects ~160%, codex projects ~20% — codex still has headroom.
+      peekQuotaSnapshotsMock.mockReturnValue(new Map([
+        ['claude', weeklyBurningSnapshot('claude', 80)],
+        ['codex', weeklyBurningSnapshot('codex', 10)],
+      ]));
+      const { scheduledBurnRateBlockedAcrossProviders } = await import('@/lib/shared/job-control');
+      expect(scheduledBurnRateBlockedAcrossProviders()).toBeNull();
+    });
+
+    it('blocks when every enabled provider projects over and reports the worst', async () => {
+      getSettingsMock.mockReturnValue(makeSettings({ cli_enabled_providers: ['claude', 'codex'] }));
+      peekQuotaSnapshotsMock.mockReturnValue(new Map([
+        ['claude', weeklyBurningSnapshot('claude', 80)],   // ~160% projected
+        ['codex',  weeklyBurningSnapshot('codex',  60)],   // ~120% projected
+      ]));
+      const { scheduledBurnRateBlockedAcrossProviders } = await import('@/lib/shared/job-control');
+      const r = scheduledBurnRateBlockedAcrossProviders();
+      expect(r).not.toBeNull();
+      expect(r!.worstProvider).toBe('claude');
+      expect(r!.projectedPct).toBeGreaterThan(150);
+    });
+
+    it('returns null when an enabled provider has no fetcher / cold cache (treated as available)', async () => {
+      getSettingsMock.mockReturnValue(makeSettings({ cli_enabled_providers: ['claude', 'gemini'] }));
+      peekQuotaSnapshotsMock.mockReturnValue(new Map([
+        ['claude', weeklyBurningSnapshot('claude', 80)],
+        ['gemini', null],
+      ]));
+      const { scheduledBurnRateBlockedAcrossProviders } = await import('@/lib/shared/job-control');
+      expect(scheduledBurnRateBlockedAcrossProviders()).toBeNull();
+    });
+
+    it('does not fail open when a quota-aware sibling is missing but another is known over the cap', async () => {
+      getSettingsMock.mockReturnValue(makeSettings({ cli_enabled_providers: ['claude', 'codex'] }));
+      peekQuotaSnapshotsMock.mockReturnValue(new Map([
+        ['claude', weeklyBurningSnapshot('claude', 80)],
+        ['codex', null],
+      ]));
+      const { scheduledBurnRateBlockedAcrossProviders } = await import('@/lib/shared/job-control');
+      const r = scheduledBurnRateBlockedAcrossProviders();
+      expect(r).not.toBeNull();
+      expect(r!.worstProvider).toBe('claude');
+    });
+
+    it('blocks single-provider claude when it is over (regression)', async () => {
+      getSettingsMock.mockReturnValue(makeSettings({ cli_enabled_providers: ['claude'] }));
+      peekQuotaSnapshotsMock.mockReturnValue(new Map([
+        ['claude', weeklyBurningSnapshot('claude', 80)],
+      ]));
+      const { scheduledBurnRateBlockedAcrossProviders } = await import('@/lib/shared/job-control');
+      const r = scheduledBurnRateBlockedAcrossProviders();
+      expect(r).not.toBeNull();
+      expect(r!.worstProvider).toBe('claude');
+    });
+
+    it('falls back to the legacy active provider when cli_enabled_providers is missing', async () => {
+      getSettingsMock.mockReturnValue(makeSettings({
+        claude_provider: 'codex',
+        cli_enabled_providers: undefined,
+      }));
+      peekQuotaSnapshotsMock.mockReturnValue(new Map([
+        ['codex', weeklyBurningSnapshot('codex', 80)],
+      ]));
+      const { scheduledBurnRateBlockedAcrossProviders, warmEnabledProviderSnapshots } = await import('@/lib/shared/job-control');
+      const r = scheduledBurnRateBlockedAcrossProviders();
+      expect(r).not.toBeNull();
+      expect(r!.worstProvider).toBe('codex');
+      await warmEnabledProviderSnapshots({ force: true });
+      expect(getQuotaSnapshotsMock).toHaveBeenCalledWith(['codex'], { force: true });
+    });
+
+    it('returns null when budget gate is disabled', async () => {
+      getSettingsMock.mockReturnValue(makeSettings({ budget_block_runs_enabled: false, cli_enabled_providers: ['claude', 'codex'] }));
+      peekQuotaSnapshotsMock.mockReturnValue(new Map([
+        ['claude', weeklyBurningSnapshot('claude', 80)],
+        ['codex',  weeklyBurningSnapshot('codex',  80)],
+      ]));
+      const { scheduledBurnRateBlockedAcrossProviders } = await import('@/lib/shared/job-control');
+      expect(scheduledBurnRateBlockedAcrossProviders()).toBeNull();
+    });
+  });
+
+  describe('budgetBlockedAcrossProviders', () => {
+    it('returns null when at least one provider is under the 5h cap', async () => {
+      getSettingsMock.mockReturnValue(makeSettings({ cli_enabled_providers: ['claude', 'codex'] }));
+      peekQuotaSnapshotsMock.mockReturnValue(new Map([
+        ['claude', { ...makeSnapshot(98, 40), provider: 'claude' }],
+        ['codex',  { ...makeSnapshot(20, 5),  provider: 'codex'  }],
+      ]));
+      const { budgetBlockedAcrossProviders } = await import('@/lib/shared/job-control');
+      expect(budgetBlockedAcrossProviders()).toBeNull();
+    });
+
+    it('blocks when every enabled provider is over the 5h cap', async () => {
+      getSettingsMock.mockReturnValue(makeSettings({ cli_enabled_providers: ['claude', 'codex'] }));
+      peekQuotaSnapshotsMock.mockReturnValue(new Map([
+        ['claude', { ...makeSnapshot(98, 40), provider: 'claude' }],
+        ['codex',  { ...makeSnapshot(99, 40), provider: 'codex'  }],
+      ]));
+      const { budgetBlockedAcrossProviders } = await import('@/lib/shared/job-control');
+      const r = budgetBlockedAcrossProviders('start scheduled agent');
+      expect(r).not.toBeNull();
+      expect(r!.status).toBe(429);
+      if (r && 'window' in r) expect(r.window).toBe('5h');
+    });
+
+    it('treats unknown-fetcher providers as available so claude alone does not block scheduling', async () => {
+      getSettingsMock.mockReturnValue(makeSettings({ cli_enabled_providers: ['claude', 'lmstudio'] }));
+      peekQuotaSnapshotsMock.mockReturnValue(new Map([
+        ['claude',   { ...makeSnapshot(99, 40), provider: 'claude' }],
+        ['lmstudio', null],
+      ]));
+      const { budgetBlockedAcrossProviders } = await import('@/lib/shared/job-control');
+      expect(budgetBlockedAcrossProviders()).toBeNull();
+    });
+
+    it('does not fail open when a quota-aware sibling is missing but another is over the 5h cap', async () => {
+      getSettingsMock.mockReturnValue(makeSettings({ cli_enabled_providers: ['claude', 'codex'] }));
+      peekQuotaSnapshotsMock.mockReturnValue(new Map([
+        ['claude', { ...makeSnapshot(99, 40), provider: 'claude' }],
+        ['codex', null],
+      ]));
+      const { budgetBlockedAcrossProviders } = await import('@/lib/shared/job-control');
+      const r = budgetBlockedAcrossProviders('start scheduled agent');
+      expect(r).not.toBeNull();
+      expect(r!.status).toBe(429);
+      expect(prefetchQuotaProvidersMock).toHaveBeenCalledWith(['claude', 'codex']);
+    });
+
+    it('falls back to the legacy active provider when cli_enabled_providers is missing', async () => {
+      getSettingsMock.mockReturnValue(makeSettings({
+        claude_provider: 'codex',
+        cli_enabled_providers: undefined,
+      }));
+      peekQuotaSnapshotsMock.mockReturnValue(new Map([
+        ['codex', { ...makeSnapshot(99, 40), provider: 'codex' }],
+      ]));
+      const { budgetBlockedAcrossProviders } = await import('@/lib/shared/job-control');
+      const r = budgetBlockedAcrossProviders('start scheduled agent');
+      expect(r).not.toBeNull();
+      expect(r!.status).toBe(429);
+      expect(prefetchQuotaProvidersMock).toHaveBeenCalledWith(['codex']);
+    });
+  });
+
+  describe('warmEnabledProviderSnapshots', () => {
+    it('warms every enabled quota-aware provider and skips providers without fetchers', async () => {
+      getSettingsMock.mockReturnValue(makeSettings({ cli_enabled_providers: ['claude', 'gemini', 'codex'] }));
+      const { warmEnabledProviderSnapshots } = await import('@/lib/shared/job-control');
+      await warmEnabledProviderSnapshots({ force: true });
+      expect(getQuotaSnapshotsMock).toHaveBeenCalledWith(['claude', 'codex'], { force: true });
     });
   });
 });

@@ -89,6 +89,23 @@ describe('resolveProviderForRun', () => {
     expect(result.provider).toBe('codex');
   });
 
+  it('does not route to a missing quota-aware snapshot when a sibling is known over budget', async () => {
+    getSettingsMock.mockReturnValue({
+      cli_enabled_providers: ['claude', 'codex'],
+      claude_provider: 'claude',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: true,
+    });
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['claude', { fiveHour: { utilization: 99 } }],
+      ['codex', null],
+    ]));
+    const { resolveProviderForRun } = await import('@/lib/usage/resolve-provider');
+    const result = await resolveProviderForRun();
+    expect(result.provider).toBeNull();
+    expect(result.reason).toBe('all_blocked');
+  });
+
   it('fails open to provider order when all quota-aware providers are unknown', async () => {
     getQuotaSnapshotsMock.mockResolvedValue(new Map([
       ['claude', null],
@@ -192,6 +209,22 @@ describe('resolveProviderForRun', () => {
     const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
     const result = await checkCliStartGate('start a release');
     expect(result).toEqual({ ok: true, provider: 'codex' });
+  });
+
+  it('blocks the start gate when one provider is over budget and the sibling quota-aware snapshot is missing', async () => {
+    getSettingsMock.mockReturnValue({
+      cli_enabled_providers: ['claude', 'codex'],
+      claude_provider: 'claude',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: true,
+    });
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['claude', { fiveHour: { utilization: 99 } }],
+      ['codex', null],
+    ]));
+    const { checkCliStartGate, ALL_PROVIDERS_BLOCKED_DETAIL } = await import('@/lib/usage/resolve-provider');
+    const result = await checkCliStartGate('start a release');
+    expect(result).toEqual({ ok: false, status: 429, detail: ALL_PROVIDERS_BLOCKED_DETAIL });
   });
 
   it('enforces the global pause by default', async () => {
