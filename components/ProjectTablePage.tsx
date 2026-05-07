@@ -529,7 +529,7 @@ const isReviewRunning = (projectName: string) =>
                         title={schedulerPaused ? 'Internal scheduler paused (Resume jobs in header)' : 'Scheduled agents paused by weekly budget'}
                         className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30"
                       >
-                        ⏸ paused
+                        ⏸ scheduled paused
                       </span>
                     ) : projectPaused && (
                       <span title="launchctl paused" className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30">
@@ -637,7 +637,7 @@ const isReviewRunning = (projectName: string) =>
                 <td className="px-4 py-2 text-sm">
                   {schedulesPaused && scheduledCount > 0 ? (
                     <span title={schedulerPaused ? 'Internal scheduler paused' : 'Scheduled agents paused by weekly budget'} className="text-status-warning font-medium">
-                      paused
+                      scheduled paused
                     </span>
                   ) : nextFire ? (() => {
                     const f = formatNextFire(nextFire.ms)

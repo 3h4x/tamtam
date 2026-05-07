@@ -157,7 +157,7 @@ describe('ProjectTablePage', () => {
     unmount()
   })
 
-  it('shows scheduled projects as paused while the weekly budget throttle is active', async () => {
+  it('labels scheduler-paused projects as scheduled paused so running manual work is not misread as fully paused', async () => {
     const nextFireMs = Date.now() + 10_000
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
@@ -216,9 +216,9 @@ describe('ProjectTablePage', () => {
 
     await vi.waitFor(() => {
       expect(container.textContent).toContain('acme/widgets')
-      expect(container.textContent).toContain('paused')
+      expect(container.textContent).toContain('scheduled paused')
       expect(container.textContent).not.toContain('now')
-      expect(container.textContent).not.toContain('scheduled')
+      expect(container.textContent).not.toContain('⏸ paused')
     })
 
     unmount()
