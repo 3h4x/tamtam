@@ -51,6 +51,32 @@ describe('GET /api/usage/quota', () => {
     expect(body.error).toMatch(/No token/);
   });
 
+  it('does not expose raw Anthropic 429 cache internals', async () => {
+    getQuotaForProviderMock.mockRejectedValue(new Error('Anthropic usage API rate-limited (429); no cached value to return'));
+
+    const { GET } = await import('@/app/api/usage/quota/route');
+    const res = await GET(new NextRequest('http://localhost/api/usage/quota?provider=claude'));
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.error).toContain('Claude quota temporarily unavailable');
+    expect(body.error).not.toContain('no cached value to return');
+  });
+
+  it('does not expose ISO retry timestamp from backing-off error', async () => {
+    const isoTimestamp = new Date(Date.now() + 60_000).toISOString();
+    getQuotaForProviderMock.mockRejectedValue(
+      new Error(`Claude quota temporarily unavailable; backing off after Anthropic usage API rate limit until ${isoTimestamp}`)
+    );
+
+    const { GET } = await import('@/app/api/usage/quota/route');
+    const res = await GET(new NextRequest('http://localhost/api/usage/quota?provider=claude'));
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.error).toContain('Claude quota temporarily unavailable');
+    expect(body.error).not.toContain(isoTimestamp);
+    expect(body.error).not.toContain('backing off');
+  });
+
   it('POST clears the cache and re-fetches', async () => {
     const snapshot = {
       fiveHour: { utilization: 10, resetsAt: null, msUntilReset: null },

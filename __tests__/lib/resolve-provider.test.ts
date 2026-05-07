@@ -79,6 +79,26 @@ describe('resolveProviderForRun', () => {
     expect(result.provider).toBe('codex');
   });
 
+  it('picks a known healthy provider when another quota-aware provider has no snapshot', async () => {
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['claude', null],
+      ['codex', { fiveHour: { utilization: 0 }, sevenDay: { utilization: 25 } }],
+    ]));
+    const { resolveProviderForRun } = await import('@/lib/usage/resolve-provider');
+    const result = await resolveProviderForRun();
+    expect(result.provider).toBe('codex');
+  });
+
+  it('fails open to provider order when all quota-aware providers are unknown', async () => {
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['claude', null],
+      ['codex', null],
+    ]));
+    const { resolveProviderForRun } = await import('@/lib/usage/resolve-provider');
+    const result = await resolveProviderForRun();
+    expect(result.provider).toBe('claude');
+  });
+
   it('uses only the requested Claude tier when consulting model-specific weekly windows', async () => {
     getQuotaSnapshotsMock.mockResolvedValue(new Map([
       ['claude', { fiveHour: { utilization: 24 }, sevenDay: { utilization: 20 }, sevenDaySonnet: { utilization: 100 } }],

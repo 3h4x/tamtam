@@ -8,16 +8,19 @@ interface CacheState {
   snapshot: QuotaSnapshot | null;
   fetchedAt: number;
   retryAfterMs: number;
+  rateLimitFailures: number;
   inFlight: Promise<QuotaSnapshot> | null;
 }
 
 const TTL_MS = 180_000;
 const FETCH_TIMEOUT_MS = 5_000;
+const BASE_RATE_LIMIT_BACKOFF_MS = 30_000;
+const MAX_RATE_LIMIT_BACKOFF_MS = 30 * 60_000;
 
 const globalAny = globalThis as unknown as { __tamtamQuota?: CacheState };
 function getCache(): CacheState {
   if (!globalAny.__tamtamQuota) {
-    globalAny.__tamtamQuota = { snapshot: null, fetchedAt: 0, retryAfterMs: 0, inFlight: null };
+    globalAny.__tamtamQuota = { snapshot: null, fetchedAt: 0, retryAfterMs: 0, rateLimitFailures: 0, inFlight: null };
   }
   return globalAny.__tamtamQuota;
 }
@@ -121,16 +124,25 @@ function buildSnapshot(raw: RawUsageResponse, now: number, stale: boolean): Quot
   };
 }
 
+function rateLimitBackoffMs(cache: CacheState, retryAfterHeader: string | null): number {
+  const retryAfterSeconds = Number(retryAfterHeader ?? '');
+  const retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+    ? retryAfterSeconds * 1000
+    : 0;
+  const exponent = Math.max(0, cache.rateLimitFailures - 1);
+  const exponentialMs = Math.min(BASE_RATE_LIMIT_BACKOFF_MS * (2 ** exponent), MAX_RATE_LIMIT_BACKOFF_MS);
+  return Math.max(retryAfterMs, exponentialMs);
+}
+
 export async function getClaudeQuota(options: { force?: boolean } = {}): Promise<QuotaSnapshot> {
   const cache = getCache();
   const now = Date.now();
 
-  if (!options.force) {
-    if (cache.snapshot && now - cache.fetchedAt < TTL_MS) return cache.snapshot;
-    if (cache.snapshot && cache.retryAfterMs > now) {
-      return { ...cache.snapshot, stale: true };
-    }
+  if (cache.retryAfterMs > now) {
+    if (cache.snapshot) return { ...cache.snapshot, stale: true };
+    throw new Error(`Claude quota temporarily unavailable; backing off after Anthropic usage API rate limit until ${new Date(cache.retryAfterMs).toISOString()}`);
   }
+  if (!options.force && cache.snapshot && now - cache.fetchedAt < TTL_MS) return cache.snapshot;
 
   if (cache.inFlight) return cache.inFlight;
 
@@ -151,8 +163,8 @@ export async function getClaudeQuota(options: { force?: boolean } = {}): Promise
       });
 
       if (res.status === 429 || res.status === 503) {
-        const retryAfter = Number(res.headers.get('retry-after') ?? 300);
-        cache.retryAfterMs = Date.now() + retryAfter * 1000;
+        cache.rateLimitFailures += 1;
+        cache.retryAfterMs = Date.now() + rateLimitBackoffMs(cache, res.headers.get('retry-after'));
         if (cache.snapshot) return { ...cache.snapshot, stale: true };
         throw new Error(`Anthropic usage API rate-limited (${res.status}); no cached value to return`);
       }
@@ -167,6 +179,7 @@ export async function getClaudeQuota(options: { force?: boolean } = {}): Promise
       cache.snapshot = snapshot;
       cache.fetchedAt = snapshot.fetchedAt;
       cache.retryAfterMs = 0;
+      cache.rateLimitFailures = 0;
       return snapshot;
     } catch (e) {
       if (cache.snapshot) return { ...cache.snapshot, stale: true };
@@ -184,6 +197,7 @@ export function clearQuotaCache(): void {
   cache.snapshot = null;
   cache.fetchedAt = 0;
   cache.retryAfterMs = 0;
+  cache.rateLimitFailures = 0;
   cache.inFlight = null;
 }
 
