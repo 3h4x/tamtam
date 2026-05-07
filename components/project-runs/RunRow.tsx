@@ -224,14 +224,20 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
               </div>
               <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                 {statusBadge}
+                {verdictBadge}
+                {releaseBadge}
                 {e.logPruned && (
                   <span className="inline-flex items-center rounded-full bg-text-tertiary/15 px-1.5 py-0.5 text-[10px] font-medium text-text-tertiary" title="Log file deleted by retention policy">
                     pruned
                   </span>
                 )}
-                {verdictBadge}
-                {releaseBadge}
-                <MetaChip label="dur" value={durationLabel} />
+              </div>
+            </div>
+            <div className="shrink-0 text-right">
+              <div className="font-mono text-sm font-semibold tabular-nums text-text-primary">
+                {durationLabel}
+              </div>
+              <div className="mt-1 flex justify-end">
                 <MetaChip label="started" value={startedLabel} />
               </div>
             </div>
