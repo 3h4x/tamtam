@@ -1,0 +1,17 @@
+{
+  "description": "Review cap exhaustion: review returns NEEDS ATTENTION with a Finding ID, fix runs, then the cap (review_fix_max_iterations=1) trips before review #2 starts. The exhaustion fallback files a follow-up issue and chains to commit + push.",
+  "steps": [
+    {
+      "label": "review-1",
+      "text": "- Finding ID: persistent-null-check\n  Severity: medium\n  Root cause: handler still missing null guard\n  Required fix: add a guard\n\nVerdict: NEEDS ATTENTION"
+    },
+    {
+      "label": "fix-1",
+      "text": "Fix checklist:\n- Finding ID: persistent-null-check\n  Status: fixed\n  Files changed: src/index.js\n  Tests: pnpm vitest run — passed\n  Remaining risk: none"
+    },
+    {
+      "label": "commit-message",
+      "text": "chore: partial fix landed; follow-up issue tracks remaining findings"
+    }
+  ]
+}

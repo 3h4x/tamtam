@@ -46,9 +46,7 @@ interface SettingsMap {
   commit_style: string
   review_verdict_rules: string
   jobs_paused: string
-  fix_ci_max_retries: string
-  fix_ci_retry_window_seconds: string
-  fix_ci_fast_crash_ms: string
+  review_fix_max_iterations: string
   agent_templates: string
   log_retention_count: string
   log_retention_days: string
@@ -129,6 +127,10 @@ interface ProjectEntry {
   priority: string | null
 }
 
+function mergeLoadedSettings(settings: Partial<SettingsMap> | undefined): SettingsMap {
+  return { ...SETTINGS_DEFAULTS, ...(settings ?? {}) }
+}
+
 export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
   const router = useRouter()
   const [settings, setSettings]           = useState<SettingsMap>({ ...SETTINGS_DEFAULTS })
@@ -156,7 +158,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
     fetch('/api/settings')
       .then((r) => r.json())
       .then((data) => {
-        const loaded = { ...SETTINGS_DEFAULTS, ...data.settings }
+        const loaded = mergeLoadedSettings(data.settings)
         setSettings(loaded)
         setSavedSettings(loaded)
         setLoading(false)
@@ -197,7 +199,10 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
         const data = await res.json().catch(() => ({}))
         throw new Error(data.detail || res.statusText)
       }
-      setSavedSettings({ ...settings })
+      const data = await res.json().catch(() => ({}))
+      const canonical = mergeLoadedSettings(data.settings)
+      setSettings(canonical)
+      setSavedSettings(canonical)
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
       loadProjects()

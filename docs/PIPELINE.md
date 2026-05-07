@@ -191,7 +191,8 @@ Called by `markDone()` after every job finishes. Hooks run in order:
 8. **DoD (PR Workflow)**: If `push` exits 0 and `pr_workflow_enabled`: start MARK-DOD.
 9. **PR merge wait (PR Workflow)**: If `mark-dod` completes and `auto_pr_merge_enabled`: start PR-MERGE-WAIT.
 10. **Release finalization**: If a pipeline job ran but no chaining happened, write `# release finished — exit {code}` to meta-log and mark the release job done.
-11. **Fix-CI auto-retry**: If `fix-ci` exits ≠0 and duration < `fix_ci_fast_crash_ms`: schedule retry after 500–3000ms backoff.
+11. **Fix-CI auto-retry**: If `fix-ci` exits ≠0 within ~5 s of starting (boot crash): schedule retry after 500–3000 ms backoff. Capped at 2 retries within a 120-s window. These are hardcoded constants — not user-tunable.
+12. **Review-exhaustion fallback**: If a **NEEDS ATTENTION** review→fix loop hits `review_fix_max_iterations`, repeats the same findings (`reviewIsStuck`), or the fixer claims a Finding ID was fixed but the reviewer still flags it (`fixContradictsReview`): file a `chore(review): finish review findings from release …` issue tagged `tamtam` `review-followup` `priority-medium` containing the unresolved Finding IDs, then chain to commit + push so the partial work ships. Falls back to the legacy abort if `gh issue create` fails. **DO NOT SHIP** reviews never use this path — they still stop the release before commit/push.
 
 ### Pending-release recovery
 
@@ -272,10 +273,11 @@ Accepts markdown wrapping (`**LGTM**`, `` `LGTM` ``) and optional colon/dash del
 
 | Cap | Limit | Window | Setting |
 |-----|-------|--------|---------|
-| Review→Fix loop | unbounded fixes; 3 verification rounds per kind | per release; 30 min fallback for standalone chaining | `TAMTAM_MAX_STEP_ITERATIONS` (default 3, legacy alias: `TAMTAM_MAX_FIX_ITERATIONS`), `TAMTAM_STEP_WINDOW_SECONDS=1800` (legacy alias: `TAMTAM_FIX_WINDOW_SECONDS`). Every NEEDS ATTENTION/DO NOT SHIP review or red test triggers a fix; the cap counts **verification** runs (`test`, `review`, `commit`, `push`) not fixes. Each chain bails before launching a (MAX+1)-th of any verification kind. The cap is per-kind, so a release can naturally run 1 commit + 1 push without burning either budget; the cap is purely defensive against unexpected loops. After the budget is exhausted the trailing fix still runs unverified and the release stops. |
+| Review→Fix loop | unbounded fixes; configurable review verification rounds | per release; 30 min fallback for standalone chaining | `review_fix_max_iterations` (DB setting, default 3) governs the **review-side** verification budget only. Cap counts completed `review` runs, not fixes. On **NEEDS ATTENTION** review-side exhaustion (cap, stuck, fix-contradicts-review) TamTam files a follow-up issue and chains to commit+push (see step 12 above) instead of aborting. **DO NOT SHIP** review exhaustion still aborts before commit/push. |
+| Test / Commit / Push safety cap | configurable via env | per release; 30 min fallback for standalone chaining | `TAMTAM_MAX_STEP_ITERATIONS` (legacy alias `TAMTAM_MAX_FIX_ITERATIONS`, default 3) still guards `test`, `commit`, and `push` verification loops. `TAMTAM_STEP_WINDOW_SECONDS=1800` (alias `TAMTAM_FIX_WINDOW_SECONDS`) controls the standalone fallback window. These caps still abort when exhausted. |
 | Fix-Push attempts | 2 attempts | 30 min | hardcoded `MAX_FIX_PUSH_ATTEMPTS=2` |
-| Fix-CI auto-retry | configurable | configurable | `fix_ci_max_retries` (default 2), `fix_ci_retry_window_seconds` (default 120) |
-| Fix-CI fast-crash | — | — | `fix_ci_fast_crash_ms` (default 5000ms) — only retries if job died in under this |
+| Fix-CI auto-retry | 2 attempts | 120 s | hardcoded constants in `lib/jobs/lifecycle.ts` (boot-crash recovery only — non-user-tunable since 2026-05) |
+| Fix-CI fast-crash | — | — | hardcoded `5000` ms — only retries if job died in under this |
 
 ---
 

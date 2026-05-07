@@ -23,6 +23,21 @@ function firstEnabledProvider(value: string | null | undefined): string {
   return enabled[0] ?? 'claude';
 }
 
+function parsePositiveIntegerSetting(
+  value: unknown,
+  label: string,
+): { value: string | null; error: string | null } {
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) {
+    return { value: null, error: `${label} must be a positive integer.` };
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return { value: null, error: `${label} must be a positive integer.` };
+  }
+  return { value: String(parsed), error: null };
+}
+
 function buildSettingsResponse(): Record<string, string> {
   const rows = db.select().from(schema.settings).all();
   const settings: Record<string, string> = {};
@@ -33,6 +48,7 @@ function buildSettingsResponse(): Record<string, string> {
   const effective = getSettings();
   settings.claude_provider = serializeSettingValue('claude_provider', effective.claude_provider);
   settings.cli_enabled_providers = serializeSettingValue('cli_enabled_providers', effective.cli_enabled_providers);
+  settings.review_fix_max_iterations = serializeSettingValue('review_fix_max_iterations', effective.review_fix_max_iterations);
   if (effective.cli_bin_claude) {
     settings.cli_bin_claude = serializeSettingValue('cli_bin_claude', effective.cli_bin_claude);
   }
@@ -75,9 +91,7 @@ const SETTING_KEYS = [
   'commit_style',
   'review_verdict_rules',
   'jobs_paused',
-  'fix_ci_max_retries',
-  'fix_ci_retry_window_seconds',
-  'fix_ci_fast_crash_ms',
+  'review_fix_max_iterations',
   'agent_templates',
   'log_retention_count',
   'log_retention_days',
@@ -175,6 +189,10 @@ function validateAndSerializeSettingValue(
     const parsed = parseOptionalKnownModelInput(value, 'fast');
     if (parsed.error) return { value: null, error: parsed.error };
     return { value: parsed.model, error: null };
+  }
+
+  if (key === 'review_fix_max_iterations') {
+    return parsePositiveIntegerSetting(value, 'review_fix_max_iterations');
   }
 
   if (key === 'agent_templates') {
@@ -289,5 +307,5 @@ export async function PATCH(request: NextRequest) {
 
   reloadConfig();
   syncJobsPauseState(getSettings().jobs_paused);
-  return NextResponse.json({ status: 'ok' });
+  return NextResponse.json({ status: 'ok', settings: buildSettingsResponse() });
 }

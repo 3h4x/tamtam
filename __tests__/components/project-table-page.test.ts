@@ -156,4 +156,71 @@ describe('ProjectTablePage', () => {
 
     unmount()
   })
+
+  it('shows scheduled projects as paused while the weekly budget throttle is active', async () => {
+    const nextFireMs = Date.now() + 10_000
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/agents/scheduler-health') {
+        return {
+          ok: true,
+          json: async () => ({
+            internal: {
+              paused: false,
+              entries: [{
+                agentId: 'agent-1',
+                project: 'acme/widgets',
+                name: 'nightly',
+                schedule: '1h',
+                enabled: true,
+                nextFireMs,
+                lastFireMs: null,
+              }],
+            },
+          }),
+        }
+      }
+      if (url === '/api/usage/quota') {
+        return {
+          ok: true,
+          json: async () => ({
+            gateEnabled: true,
+            sevenDay: {
+              utilization: 20,
+              resetsAt: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString(),
+              msUntilReset: 6 * 24 * 60 * 60 * 1000,
+            },
+          }),
+        }
+      }
+      return { ok: false, json: async () => ({}) }
+    }))
+
+    const fleet = createFleetHealth([
+      {
+        project: 'acme/widgets',
+        status: 'healthy',
+        tasks: [],
+        totalChanges: 0,
+        unpushed: 0,
+        unreviewedCount: 0,
+        lastRunAgo: null,
+      },
+    ])
+
+    const { container, unmount } = renderProjectTablePage({
+      fleet,
+      issueCounts: {},
+      loading: false,
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('acme/widgets')
+      expect(container.textContent).toContain('paused')
+      expect(container.textContent).not.toContain('now')
+      expect(container.textContent).not.toContain('scheduled')
+    })
+
+    unmount()
+  })
 })

@@ -344,6 +344,9 @@ describe('reviewIsStuck convergence guard', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   let startFixFromJobMock: ReturnType<typeof vi.fn>;
+  let fileReviewExhaustionIssueMock: ReturnType<typeof vi.fn>;
+  let startProjectCommitMock: ReturnType<typeof vi.fn>;
+  let notifyMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
 
   function makeReviewJob(id: string, logPath: string | null, overrides: Partial<JobData> = {}): JobData {
@@ -374,6 +377,9 @@ describe('reviewIsStuck convergence guard', () => {
     testDb = createTestDb();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-stuck-test-'));
     startFixFromJobMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-auto' });
+    fileReviewExhaustionIssueMock = vi.fn().mockResolvedValue({ ok: true, issueNumber: 42, issueUrl: 'https://github.com/owner/repo/issues/42' });
+    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'commit ok', jobId: 'commit-auto' });
+    notifyMock = vi.fn().mockResolvedValue(undefined);
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
@@ -406,17 +412,21 @@ describe('reviewIsStuck convergence guard', () => {
       pruneProjectLogs: vi.fn(),
     }));
     vi.doMock('@/lib/shared/notifications', () => ({
-      notify: vi.fn().mockResolvedValue(undefined),
+      notify: notifyMock,
     }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: vi.fn().mockReturnValue({
-        fix_ci_max_retries: 0,
-        fix_ci_retry_window_seconds: 120,
-        fix_ci_fast_crash_ms: 5000,
+        review_fix_max_iterations: 3,
       }),
     }));
     vi.doMock('@/lib/pipeline/start-fix', () => ({
       startFixFromJob: startFixFromJobMock,
+    }));
+    vi.doMock('@/lib/pipeline/review-exhaustion-fallback', () => ({
+      fileReviewExhaustionIssue: fileReviewExhaustionIssueMock,
+    }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
+      startProjectCommit: startProjectCommitMock,
     }));
   });
 
@@ -567,6 +577,10 @@ describe('reviewIsStuck convergence guard', () => {
     const row = testDb.db.select().from(schema.jobs).all().find((r) => r.id === 'release-stuck-final');
     expect(row?.exitCode).toBe(1);
     expect(row?.finishedAt).not.toBeNull();
+    expect(fileReviewExhaustionIssueMock).not.toHaveBeenCalled();
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
+    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    expect(notifyEvents).toContain('review_do_not_ship');
   });
 
   it('DOES start a fix when the previous review has different findings', async () => {
@@ -666,9 +680,13 @@ describe('reviewIsStuck convergence guard', () => {
     await markDoneFn(curReview, 0);
 
     expect(startFixFromJobMock).not.toHaveBeenCalled();
+    expect(fileReviewExhaustionIssueMock).not.toHaveBeenCalled();
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
     const row = testDb.db.select().from(schema.jobs).all().find((r) => r.id === 'release-contradict');
     expect(row?.exitCode).toBe(1);
     expect(row?.finishedAt).not.toBeNull();
+    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    expect(notifyEvents).toContain('review_do_not_ship');
   });
 
   it('does NOT treat fix claiming Status: not fixed as a contradiction', async () => {
@@ -783,6 +801,8 @@ describe('reviewIsStuck convergence guard', () => {
 describe('fix→review review-count cap', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let startProjectReviewMock: ReturnType<typeof vi.fn>;
+  let fileReviewExhaustionIssueMock: ReturnType<typeof vi.fn>;
+  let startProjectCommitMock: ReturnType<typeof vi.fn>;
   let notifyMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
 
@@ -814,6 +834,8 @@ describe('fix→review review-count cap', () => {
     testDb = createTestDb();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-review-cap-'));
     startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'review-next' });
+    fileReviewExhaustionIssueMock = vi.fn().mockResolvedValue({ ok: true, issueNumber: 7, issueUrl: 'https://github.com/owner/repo/issues/7' });
+    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'commit ok', jobId: 'commit-auto' });
     notifyMock = vi.fn().mockResolvedValue(undefined);
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
@@ -838,10 +860,16 @@ describe('fix→review review-count cap', () => {
     vi.doMock('@/lib/shared/notifications', () => ({ notify: notifyMock }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: vi.fn().mockReturnValue({
-        fix_ci_max_retries: 0, fix_ci_retry_window_seconds: 120, fix_ci_fast_crash_ms: 5000,
+        review_fix_max_iterations: 3,
       }),
     }));
     vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/pipeline/review-exhaustion-fallback', () => ({
+      fileReviewExhaustionIssue: fileReviewExhaustionIssueMock,
+    }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
+      startProjectCommit: startProjectCommitMock,
+    }));
   });
 
   afterEach(() => {
@@ -893,6 +921,182 @@ describe('fix→review review-count cap', () => {
 
     expect(startProjectReviewMock).toHaveBeenCalledOnce();
     expect(startProjectReviewMock).toHaveBeenCalledWith('proj');
+  });
+
+  it('does NOT file an exhaustion issue or start commit when the capped review is DO NOT SHIP', async () => {
+    const now = Date.now() / 1000;
+    const releaseId = 'release-cap-do-not-ship';
+    const reviewLog = join(tempDir, 'r3-review.log');
+    writeFileSync(reviewLog, ndjsonText([
+      'Findings:',
+      '- Finding ID: auth-bypass',
+      'Verdict: DO NOT SHIP',
+    ].join('\n')));
+
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 600 }) as any,
+      makeJobRow({ id: 'r1', project: 'proj', kind: 'review', releaseId, startedAt: now - 500, finishedAt: now - 480, exitCode: 0 }) as any,
+      makeJobRow({ id: 'f1', project: 'proj', kind: 'fix', releaseId, parentJobId: 'r1', startedAt: now - 470, finishedAt: now - 450, exitCode: 0 }) as any,
+      makeJobRow({ id: 'r2', project: 'proj', kind: 'review', releaseId, startedAt: now - 440, finishedAt: now - 420, exitCode: 0 }) as any,
+      makeJobRow({ id: 'f2', project: 'proj', kind: 'fix', releaseId, parentJobId: 'r2', startedAt: now - 410, finishedAt: now - 390, exitCode: 0 }) as any,
+      makeJobRow({ id: 'r3', project: 'proj', kind: 'review', releaseId, logPath: reviewLog, startedAt: now - 380, finishedAt: now - 360, exitCode: 0 }) as any,
+    ]).run();
+
+    const { markDone } = await import('@/lib/jobs/job-storage');
+    const f3 = makeFixJob('f3', { releaseId, parentJobId: 'r3', startedAt: now - 30, finishedAt: null, exitCode: null });
+
+    await markDone(f3, 0);
+
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+    expect(fileReviewExhaustionIssueMock).not.toHaveBeenCalled();
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
+    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    expect(notifyEvents).toContain('review_do_not_ship');
+  });
+});
+
+describe('review_fix_max_iterations only caps review-side recovery', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let startProjectTestMock: ReturnType<typeof vi.fn>;
+  let startProjectReviewMock: ReturnType<typeof vi.fn>;
+  let fileReviewExhaustionIssueMock: ReturnType<typeof vi.fn>;
+  let startProjectCommitMock: ReturnType<typeof vi.fn>;
+  let notifyMock: ReturnType<typeof vi.fn>;
+
+  function makeFixJob(id: string, overrides: Partial<JobData> = {}): JobData {
+    const now = Date.now() / 1000;
+    return {
+      id,
+      project: 'proj',
+      kind: 'fix',
+      prompt: null,
+      pid: 99999,
+      logPath: null,
+      startedAt: now,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+    testDb = createTestDb();
+    startProjectTestMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'test-next' });
+    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'review-next' });
+    fileReviewExhaustionIssueMock = vi.fn().mockResolvedValue({ ok: true, issueNumber: 7, issueUrl: 'https://github.com/owner/repo/issues/7' });
+    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'commit ok', jobId: 'commit-auto' });
+    notifyMock = vi.fn().mockResolvedValue(undefined);
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+      getJobStatus: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
+    vi.doMock('@/lib/git/git-utils', () => ({ markReviewed: vi.fn().mockResolvedValue(undefined) }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({
+        autoPushEnabled: true, autoCommitEnabled: false, releaseAfterRun: false, prWorkflowEnabled: false,
+      }),
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      releaseLock: vi.fn(),
+      getLock: vi.fn().mockReturnValue(null),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/jobs/retention', () => ({ pruneProjectLogs: vi.fn() }));
+    vi.doMock('@/lib/shared/notifications', () => ({ notify: notifyMock }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: vi.fn().mockReturnValue({
+        review_fix_max_iterations: 1,
+      }),
+    }));
+    vi.doMock('@/lib/pipeline/start-test', () => ({ startProjectTest: startProjectTestMock }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/pipeline/review-exhaustion-fallback', () => ({
+      fileReviewExhaustionIssue: fileReviewExhaustionIssueMock,
+    }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
+      startProjectCommit: startProjectCommitMock,
+    }));
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('still re-runs tests after a failed test fix when review_fix_max_iterations is 1', async () => {
+    const now = Date.now() / 1000;
+    const releaseId = 'release-test-retry';
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
+      makeJobRow({ id: 't1', project: 'proj', kind: 'test', releaseId, startedAt: now - 180, finishedAt: now - 160, exitCode: 1 }) as any,
+    ]).run();
+
+    const { markDone } = await import('@/lib/jobs/job-storage');
+    const fixJob = makeFixJob('f1', { releaseId, parentJobId: 't1', startedAt: now - 30 });
+
+    await markDone(fixJob, 0);
+
+    expect(startProjectTestMock).toHaveBeenCalledOnce();
+    expect(startProjectTestMock).toHaveBeenCalledWith('proj');
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+    expect(fileReviewExhaustionIssueMock).not.toHaveBeenCalled();
+    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    expect(notifyEvents).not.toContain('fix_loop_exhausted');
+  });
+
+  it('caps the next review when review_fix_max_iterations is 1', async () => {
+    const now = Date.now() / 1000;
+    const releaseId = 'release-review-cap-1';
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
+      makeJobRow({ id: 'r1', project: 'proj', kind: 'review', releaseId, startedAt: now - 180, finishedAt: now - 160, exitCode: 0 }) as any,
+    ]).run();
+
+    const { markDone } = await import('@/lib/jobs/job-storage');
+    const fixJob = makeFixJob('f1', { releaseId, parentJobId: 'r1', startedAt: now - 30 });
+
+    await markDone(fixJob, 0);
+
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+    expect(fileReviewExhaustionIssueMock).toHaveBeenCalledOnce();
+    expect(startProjectCommitMock).toHaveBeenCalledOnce();
+    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    expect(notifyEvents).toContain('fix_loop_exhausted');
+  });
+
+  it('stops the release when exhaustion issue filing succeeds but the follow-up commit cannot start', async () => {
+    startProjectCommitMock.mockResolvedValueOnce({ ok: false, detail: 'git status failed' });
+    const now = Date.now() / 1000;
+    const releaseId = 'release-review-cap-commit-fail';
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
+      makeJobRow({ id: 'r1', project: 'proj', kind: 'review', releaseId, startedAt: now - 180, finishedAt: now - 160, exitCode: 0 }) as any,
+    ]).run();
+
+    const { markDone } = await import('@/lib/jobs/job-storage');
+    const fixJob = makeFixJob('f1', { releaseId, parentJobId: 'r1', startedAt: now - 30 });
+
+    await markDone(fixJob, 0);
+
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+    expect(fileReviewExhaustionIssueMock).toHaveBeenCalledOnce();
+    expect(startProjectCommitMock).toHaveBeenCalledOnce();
+    const releaseRow = testDb.db.select().from(schema.jobs).all().find((row) => row.id === releaseId);
+    expect(releaseRow?.exitCode).toBe(1);
+    expect(releaseRow?.finishedAt).not.toBeNull();
+    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    expect(notifyEvents).toContain('fix_loop_exhausted');
   });
 });
 

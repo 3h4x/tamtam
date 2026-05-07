@@ -28,10 +28,17 @@ function recordCall() {
 
 recordCall();
 
-const sub = args[0] ?? '';
+// Strip leading `-R <repo>` so the subcommand dispatch works for both
+// `gh issue create ...` and `gh -R owner/repo issue create ...` forms.
+function strippedArgs() {
+  if (args[0] === '-R' || args[0] === '--repo') return args.slice(2);
+  return args;
+}
+const cmdArgs = strippedArgs();
+const sub = cmdArgs[0] ?? '';
 
 if (sub === 'pr') {
-  const action = args[1] ?? '';
+  const action = cmdArgs[1] ?? '';
   if (action === 'create') {
     // Return a fake PR URL
     process.stdout.write('https://github.com/test/repo/pull/1\n');
@@ -53,11 +60,23 @@ if (sub === 'pr') {
 }
 
 if (sub === 'issue') {
+  const action = cmdArgs[1] ?? '';
+  if (action === 'create') {
+    // Mimic real `gh issue create` output: a single line with the issue URL.
+    process.stdout.write('https://github.com/test/repo/issues/42\n');
+    process.exit(0);
+  }
   process.stdout.write(JSON.stringify({ number: 1, title: 'Test issue', body: '- [ ] Task 1' }) + '\n');
   process.exit(0);
 }
 
 if (sub === 'repo') {
+  // Honor `-q .nameWithOwner` (used by review-exhaustion-fallback's detectRepo)
+  // by emitting the bare value rather than the JSON envelope.
+  if (args.includes('-q') && args.includes('.nameWithOwner')) {
+    process.stdout.write('test/repo\n');
+    process.exit(0);
+  }
   process.stdout.write(JSON.stringify({ nameWithOwner: 'test/repo' }) + '\n');
   process.exit(0);
 }

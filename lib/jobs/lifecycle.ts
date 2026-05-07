@@ -19,6 +19,7 @@ import { hasFreshLgtm, hasLocalCommitsAhead } from '@/lib/pipeline/release-state
 import {
   getFixPushAttemptCap,
   getMaxStepIterations,
+  getReviewFixMaxIterations,
   getStepWindowSeconds,
 } from '@/lib/pipeline/recovery-budget';
 import {
@@ -60,23 +61,21 @@ function reviewSourceType(job: Pick<JobData, 'contextMeta'>): string | null {
 
 // Cap runaway review→fix→review loops when auto-push is on. The shared helper
 // keeps lifecycle enforcement, stats snapshots, and docs on the same contract.
-const MAX_STEP_ITERATIONS = getMaxStepIterations();
-const STEP_WINDOW_SECONDS = getStepWindowSeconds();
-// fix-ci retries — live-read from settings so the user can tune this in the UI
-// without restarting the server. Only crash-fast failures are retried so real
-// errors still surface.
-async function getFixCiRetryConfig(): Promise<{ maxRetries: number; windowSeconds: number; fastCrashMs: number }> {
-  try {
-    const { getSettings } = await import('@/lib/shared/config');
-    const s = getSettings();
-    return {
-      maxRetries: s.fix_ci_max_retries,
-      windowSeconds: s.fix_ci_retry_window_seconds,
-      fastCrashMs: s.fix_ci_fast_crash_ms,
-    };
-  } catch {
-    return { maxRetries: 2, windowSeconds: 120, fastCrashMs: 5000 };
-  }
+// Read live each time so the user can tune `review_fix_max_iterations` in
+// Settings → Pipeline without restarting the server.
+function maxStepIterations(): number { return getMaxStepIterations(); }
+function reviewFixMaxIterations(): number { return getReviewFixMaxIterations(); }
+function stepWindowSeconds(): number { return getStepWindowSeconds(); }
+// fix-ci fast-crash auto-retry constants. Only crash-fast failures are retried
+// so real errors still surface. These were once user-tunable settings; the
+// values were never meaningful to operators and have been folded back into
+// hardcoded defaults to keep the Settings UI focused on the cap that matters
+// (review_fix_max_iterations).
+const FIX_CI_MAX_RETRIES = 2;
+const FIX_CI_RETRY_WINDOW_SECONDS = 120;
+const FIX_CI_FAST_CRASH_MS = 5000;
+function getFixCiRetryConfig(): { maxRetries: number; windowSeconds: number; fastCrashMs: number } {
+  return { maxRetries: FIX_CI_MAX_RETRIES, windowSeconds: FIX_CI_RETRY_WINDOW_SECONDS, fastCrashMs: FIX_CI_FAST_CRASH_MS };
 }
 
 function recentFixCiCount(projectName: string, windowSeconds: number): number {
@@ -110,7 +109,7 @@ function persistReleaseStopReason(release: JobData, stopReason: string): void {
 }
 
 function recentFixPushCount(projectName: string): number {
-  const cutoff = Date.now() / 1000 - STEP_WINDOW_SECONDS;
+  const cutoff = Date.now() / 1000 - stepWindowSeconds();
   return listJobs().filter(
     (j) => j.project === projectName && j.kind === 'fix-push' && j.startedAt >= cutoff
   ).length;
@@ -131,7 +130,7 @@ function recentStepCount(projectName: string, kind: string, currentJob?: JobData
   if (currentJob?.releaseId) {
     return all.filter((j) => j.releaseId === currentJob.releaseId).length;
   }
-  const cutoff = Date.now() / 1000 - STEP_WINDOW_SECONDS;
+  const cutoff = Date.now() / 1000 - stepWindowSeconds();
   return all.filter((j) => j.startedAt >= cutoff).length;
 }
 
@@ -170,6 +169,52 @@ function pipelineExitCodeForStep(job: JobData): number {
 
 function noteReleaseStop(reason: string): void {
   console.log(`[release] ${reason}`);
+}
+
+// Find the most recent completed review job in the same release window so the
+// review-cap fallback can file an issue with that review's findings — not the
+// fix job that triggered the cap check.
+function findLatestReviewForRelease(currentJob: JobData): JobData | null {
+  const releaseId = currentJob.releaseId;
+  const project = currentJob.project;
+  const reviews = listJobs()
+    .filter((j) => j.project === project && j.kind === 'review' && (releaseId ? j.releaseId === releaseId : true))
+    .sort((a, b) => b.startedAt - a.startedAt);
+  return reviews[0] ?? null;
+}
+
+// Try the new "ship-anyway + file issue" path. On success, chain to a commit
+// step. On failure, return false so the caller falls through to the legacy
+// abort. The notification event is preserved either way so operators still
+// see fix_loop_exhausted in their feed.
+async function tryReviewExhaustionFallback(
+  reviewJob: JobData,
+  reason: 'review-cap' | 'review-stuck' | 'fix-contradicts-review',
+): Promise<{ chainedNext: boolean; releaseStopReason: string | null; forcedReleaseExitCode: number | null }> {
+  try {
+    const { fileReviewExhaustionIssue } = await import('@/lib/pipeline/review-exhaustion-fallback');
+    const fb = await fileReviewExhaustionIssue(reviewJob, reason);
+    if (!fb.ok) {
+      console.log(`[release] exhaustion fallback could not file issue for ${reviewJob.project}: ${fb.error}`);
+      return { chainedNext: false, releaseStopReason: null, forcedReleaseExitCode: null };
+    }
+    console.log(`[release] review exhaustion (${reason}) → filed issue #${fb.issueNumber} ${fb.issueUrl}; chaining to commit`);
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
+    const r = await startProjectCommit(reviewJob.project);
+    if (r.ok) {
+      return { chainedNext: true, releaseStopReason: null, forcedReleaseExitCode: null };
+    }
+    const stop = `commit failed after exhaustion fallback for ${reviewJob.project}: ${r.detail}`;
+    noteReleaseStop(stop);
+    return { chainedNext: false, releaseStopReason: stop, forcedReleaseExitCode: 1 };
+  } catch (e) {
+    console.log(`[release] exhaustion fallback errored for ${reviewJob.project}:`, e);
+    return { chainedNext: false, releaseStopReason: null, forcedReleaseExitCode: null };
+  }
+}
+
+function isDoNotShipReview(job: JobData): boolean {
+  return job.kind === 'review' && getVerdict(job) === 'DO NOT SHIP';
 }
 
 // Decide whether a finished job should be auto-marked "seen" so the
@@ -542,8 +587,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
             console.log(`[release] skipping mark-dod for ${job.project} (pr_workflow_enabled=${prWorkflow}, hasIssueContext=${hasIssueContext})`);
           }
           const commitCount = recentStepCount(job.project, 'commit', job);
-          if (commitCount >= MAX_STEP_ITERATIONS) {
-            releaseStopReason = `commit cap reached for ${job.project} (${commitCount}/${MAX_STEP_ITERATIONS}) — commits keep cycling, stopping`;
+          if (commitCount >= maxStepIterations()) {
+            releaseStopReason = `commit cap reached for ${job.project} (${commitCount}/${maxStepIterations()}) — commits keep cycling, stopping`;
             noteReleaseStop(releaseStopReason);
             notificationEvent = 'fix_loop_exhausted';
             forcedReleaseExitCode = 1;
@@ -574,15 +619,45 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           const contradiction = fixContradictsReview(job);
           const stuck = reviewIsStuck(job);
           if (contradiction.stuck) {
-            releaseStopReason = `fix claimed ${contradiction.ids.join(', ')} fixed but review still flags them — stopping`;
-            noteReleaseStop(releaseStopReason);
-            notificationEvent = 'fix_loop_exhausted';
-            forcedReleaseExitCode = 1;
+            const legacyStop = `fix claimed ${contradiction.ids.join(', ')} fixed but review still flags them — stopping`;
+            if (verdict === 'DO NOT SHIP') {
+              noteReleaseStop(legacyStop);
+              releaseStopReason = legacyStop;
+              forcedReleaseExitCode = 1;
+            } else {
+              notificationEvent = 'fix_loop_exhausted';
+              const fb = await tryReviewExhaustionFallback(job, 'fix-contradicts-review');
+              if (fb.chainedNext) {
+                chainedNext = true;
+              } else if (fb.releaseStopReason) {
+                releaseStopReason = fb.releaseStopReason;
+                forcedReleaseExitCode = fb.forcedReleaseExitCode ?? 1;
+              } else {
+                releaseStopReason = legacyStop;
+                noteReleaseStop(releaseStopReason);
+                forcedReleaseExitCode = 1;
+              }
+            }
           } else if (stuck) {
-            releaseStopReason = `review findings unchanged from previous iteration for ${job.project} — fix not converging, stopping`;
-            noteReleaseStop(releaseStopReason);
-            notificationEvent = 'fix_loop_exhausted';
-            forcedReleaseExitCode = 1;
+            const legacyStop = `review findings unchanged from previous iteration for ${job.project} — fix not converging, stopping`;
+            if (verdict === 'DO NOT SHIP') {
+              noteReleaseStop(legacyStop);
+              releaseStopReason = legacyStop;
+              forcedReleaseExitCode = 1;
+            } else {
+              notificationEvent = 'fix_loop_exhausted';
+              const fb = await tryReviewExhaustionFallback(job, 'review-stuck');
+              if (fb.chainedNext) {
+                chainedNext = true;
+              } else if (fb.releaseStopReason) {
+                releaseStopReason = fb.releaseStopReason;
+                forcedReleaseExitCode = fb.forcedReleaseExitCode ?? 1;
+              } else {
+                releaseStopReason = legacyStop;
+                noteReleaseStop(releaseStopReason);
+                forcedReleaseExitCode = 1;
+              }
+            }
           } else {
             const { startFixFromJob } = await import('@/lib/pipeline/start-fix');
             const r = await startFixFromJob(job.id);
@@ -625,8 +700,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           // round), not fixes; the trailing fix lands but the next test is
           // skipped once the budget is spent.
           const testCount = recentStepCount(job.project, 'test', job);
-          if (testCount >= MAX_STEP_ITERATIONS) {
-            releaseStopReason = `test cap reached for ${job.project} (${testCount}/${MAX_STEP_ITERATIONS}) — tests still need verification`;
+          if (testCount >= maxStepIterations()) {
+            releaseStopReason = `test cap reached for ${job.project} (${testCount}/${maxStepIterations()}) — tests still need verification`;
             noteReleaseStop(releaseStopReason);
             notificationEvent = 'fix_loop_exhausted';
             forcedReleaseExitCode = 1;
@@ -649,11 +724,28 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           // and `fixContradictsReview` only catch identical-finding repeats.
           // Count completed reviews; bail before starting review #(MAX+1).
           const reviewCount = recentStepCount(job.project, 'review', job);
-          if (reviewCount >= MAX_STEP_ITERATIONS) {
-            releaseStopReason = `review cap reached for ${job.project} (${reviewCount}/${MAX_STEP_ITERATIONS}) — review keeps surfacing new findings, stopping`;
-            noteReleaseStop(releaseStopReason);
-            notificationEvent = 'fix_loop_exhausted';
-            forcedReleaseExitCode = 1;
+          if (reviewCount >= reviewFixMaxIterations()) {
+            const legacyStop = `review cap reached for ${job.project} (${reviewCount}/${reviewFixMaxIterations()}) — review keeps surfacing new findings, stopping`;
+            const reviewToCite = findLatestReviewForRelease(job) ?? job;
+            if (isDoNotShipReview(reviewToCite)) {
+              notificationEvent = 'review_do_not_ship';
+              releaseStopReason = legacyStop;
+              noteReleaseStop(releaseStopReason);
+              forcedReleaseExitCode = 1;
+            } else {
+              notificationEvent = 'fix_loop_exhausted';
+              const fb = await tryReviewExhaustionFallback(reviewToCite, 'review-cap');
+              if (fb.chainedNext) {
+                chainedNext = true;
+              } else if (fb.releaseStopReason) {
+                releaseStopReason = fb.releaseStopReason;
+                forcedReleaseExitCode = fb.forcedReleaseExitCode ?? 1;
+              } else {
+                releaseStopReason = legacyStop;
+                noteReleaseStop(releaseStopReason);
+                forcedReleaseExitCode = 1;
+              }
+            }
           } else {
             const { startProjectReview } = await import('@/lib/pipeline/start-review');
             const r = await startProjectReview(job.project);
@@ -690,8 +782,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           } catch {}
         }
         const pushCount = recentStepCount(job.project, 'push', job);
-        if (pushCount >= MAX_STEP_ITERATIONS) {
-          releaseStopReason = `push cap reached for ${job.project} (${pushCount}/${MAX_STEP_ITERATIONS}) — pushes keep cycling, stopping`;
+        if (pushCount >= maxStepIterations()) {
+          releaseStopReason = `push cap reached for ${job.project} (${pushCount}/${maxStepIterations()}) — pushes keep cycling, stopping`;
           noteReleaseStop(releaseStopReason);
           notificationEvent = 'fix_loop_exhausted';
           forcedReleaseExitCode = 1;
@@ -741,8 +833,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           const reviewDisabled = !!getProjectTestConfig(job.project)?.reviewDisabled;
           if (freshLgtm) {
             const pushCount = recentStepCount(job.project, 'push', job);
-            if (pushCount >= MAX_STEP_ITERATIONS) {
-              releaseStopReason = `push cap reached for ${job.project} (${pushCount}/${MAX_STEP_ITERATIONS}) — pushes keep cycling, stopping`;
+            if (pushCount >= maxStepIterations()) {
+              releaseStopReason = `push cap reached for ${job.project} (${pushCount}/${maxStepIterations()}) — pushes keep cycling, stopping`;
               noteReleaseStop(releaseStopReason);
               notificationEvent = 'fix_loop_exhausted';
               forcedReleaseExitCode = 1;
@@ -760,8 +852,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
             }
           } else if (reviewDisabled && hasUncommittedChanges) {
             const commitCount = recentStepCount(job.project, 'commit', job);
-            if (commitCount >= MAX_STEP_ITERATIONS) {
-              releaseStopReason = `commit cap reached for ${job.project} (${commitCount}/${MAX_STEP_ITERATIONS}) — commits keep cycling, stopping`;
+            if (commitCount >= maxStepIterations()) {
+              releaseStopReason = `commit cap reached for ${job.project} (${commitCount}/${maxStepIterations()}) — commits keep cycling, stopping`;
               noteReleaseStop(releaseStopReason);
               notificationEvent = 'fix_loop_exhausted';
               forcedReleaseExitCode = 1;
@@ -1023,7 +1115,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   // we haven't exhausted retries, kick off another attempt so the user sees
   // a spinner instead of a red exit -1.
   if (job.kind === 'fix-ci' && job.exitCode !== null && job.exitCode !== 0) {
-    const { maxRetries, windowSeconds, fastCrashMs } = await getFixCiRetryConfig();
+    const { maxRetries, windowSeconds, fastCrashMs } = getFixCiRetryConfig();
     if (maxRetries <= 0) return; // retries disabled via settings
     const durationMs = (job.finishedAt ?? 0) * 1000 - (job.startedAt ?? 0) * 1000;
     const crashedFast = durationMs > 0 && durationMs < fastCrashMs;

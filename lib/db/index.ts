@@ -290,6 +290,13 @@ try {
   sqlite.exec('ALTER TABLE agents ADD COLUMN provider TEXT');
 } catch {}
 
+// Migrate: remove deprecated fix-ci retry settings.
+// These old keys controlled fast-crash auto-restarts of fix-ci jobs; they do
+// not map onto the new review-fix iteration cap and must not be repurposed.
+try {
+  sqlite.prepare("DELETE FROM settings WHERE key IN ('fix_ci_max_retries', 'fix_ci_retry_window_seconds', 'fix_ci_fast_crash_ms')").run();
+} catch {}
+
 // Project/agent recommendations generated from completed runs.
 sqlite.exec(`
   CREATE TABLE IF NOT EXISTS recommendations (

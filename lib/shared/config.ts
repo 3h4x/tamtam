@@ -49,9 +49,7 @@ export interface TamTamConfig {
   commit_style: string;
   review_verdict_rules: string;
   jobs_paused: boolean;
-  fix_ci_max_retries: number;
-  fix_ci_retry_window_seconds: number;
-  fix_ci_fast_crash_ms: number;
+  review_fix_max_iterations: number;
   log_retention_count: number;
   log_retention_days: number;
   job_row_retention_days: number;
@@ -118,9 +116,7 @@ const DEFAULTS: TamTamConfig = {
 - Prefer LGTM over NEEDS ATTENTION when in doubt. Do not list every stylistic opinion. Aim for fewer than 3 findings — if you have more, the review has drifted into nitpicking.
 - Keep LGTM responses short: one sentence confirmation is enough.`,
   jobs_paused: false,
-  fix_ci_max_retries: 2,
-  fix_ci_retry_window_seconds: 120,
-  fix_ci_fast_crash_ms: 5000,
+  review_fix_max_iterations: 3,
   log_retention_count: 200,
   log_retention_days: 30,
   job_row_retention_days: 180,
@@ -263,9 +259,7 @@ export function getSettings(): TamTamConfig {
     commit_style: map.commit_style ?? DEFAULTS.commit_style,
     review_verdict_rules: map.review_verdict_rules ?? DEFAULTS.review_verdict_rules,
     jobs_paused: map.jobs_paused === 'true',
-    fix_ci_max_retries: parseIntOr(map.fix_ci_max_retries, DEFAULTS.fix_ci_max_retries),
-    fix_ci_retry_window_seconds: parseIntOr(map.fix_ci_retry_window_seconds, DEFAULTS.fix_ci_retry_window_seconds),
-    fix_ci_fast_crash_ms: parseIntOr(map.fix_ci_fast_crash_ms, DEFAULTS.fix_ci_fast_crash_ms),
+    review_fix_max_iterations: parsePositiveIntOr(map.review_fix_max_iterations, DEFAULTS.review_fix_max_iterations),
     log_retention_count: parseIntOr(map.log_retention_count, DEFAULTS.log_retention_count),
     log_retention_days: parseIntOr(map.log_retention_days, DEFAULTS.log_retention_days),
     job_row_retention_days: parseIntOr(map.job_row_retention_days, DEFAULTS.job_row_retention_days),
@@ -315,6 +309,12 @@ function parseIntOr(v: string | undefined, fallback: number): number {
   if (v === undefined || v === '') return fallback;
   const n = parseInt(v, 10);
   return isNaN(n) ? fallback : n;
+}
+
+function parsePositiveIntOr(v: string | undefined, fallback: number): number {
+  if (v === undefined || v === '') return fallback;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
 function parseJsonObject(v: string | undefined): Record<string, string> {

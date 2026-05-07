@@ -79,6 +79,16 @@ describe('createGenericPR', () => {
     const result = await createGenericPR('/repo', log);
     expect(result).toBeNull();
   });
+
+  it('returns null when gh pr create returns no shell result', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, 'feat/bugfix\n'))
+      .mockResolvedValueOnce(resp(1, ''))
+      .mockResolvedValueOnce(undefined);
+
+    const result = await createGenericPR('/repo', log);
+    expect(result).toBeNull();
+  });
 });
 
 describe('createIssuePR', () => {
@@ -196,6 +206,16 @@ describe('createIssuePR', () => {
       .mockResolvedValueOnce(resp(0, 'fix/issue-42-fix-login-bug\n'))
       .mockResolvedValueOnce(resp(0, '[]'))
       .mockResolvedValueOnce(resp(1, '', 'creation failed'));
+
+    const result = await createIssuePR('/repo', log, issue);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when branch push returns no shell result', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, 'main\n'))
+      .mockResolvedValueOnce(resp(0, ''))
+      .mockResolvedValueOnce(undefined);
 
     const result = await createIssuePR('/repo', log, issue);
     expect(result).toBeNull();
