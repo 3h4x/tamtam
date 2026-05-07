@@ -48,6 +48,16 @@ async function getProjectPipelineConfig(projectName: string): Promise<{ autoComm
   }
 }
 
+function reviewSourceType(job: Pick<JobData, 'contextMeta'>): string | null {
+  if (!job.contextMeta) return null;
+  try {
+    const meta = JSON.parse(job.contextMeta) as { sourceType?: unknown };
+    return typeof meta.sourceType === 'string' ? meta.sourceType : null;
+  } catch {
+    return null;
+  }
+}
+
 // Cap runaway review→fix→review loops when auto-push is on. The shared helper
 // keeps lifecycle enforcement, stats snapshots, and docs on the same contract.
 const MAX_STEP_ITERATIONS = getMaxStepIterations();
@@ -441,7 +451,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
       try {
         const { resolveProjectPath } = await import('@/lib/shared/project-data');
         const projPath = resolveProjectPath(job.project);
-        if (projPath) {
+        if (projPath && reviewSourceType(job) !== 'pr_review') {
           await markReviewed(job.project, projPath);
         }
       } catch {}
@@ -482,11 +492,12 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         if (verdict === 'LGTM') {
           // Pin the "last LGTM'd commit" as a git ref so the next review can
           // narrow its scope from `@{u}..HEAD` to `<ref>..HEAD`. Skipped when
-          // incremental_review_enabled is off, on detached HEAD (no branch), or
-          // when the ref write fails. Best-effort: failures don't affect the release.
+          // incremental_review_enabled is off, on detached HEAD (no branch), on
+          // PR-diff reviews (which must not affect local review scope), or when
+          // the ref write fails. Best-effort: failures don't affect the release.
           try {
             const { getSettings: getSettingsForRef } = await import('@/lib/shared/config');
-            if (getSettingsForRef().incremental_review_enabled) {
+            if (getSettingsForRef().incremental_review_enabled && reviewSourceType(job) !== 'pr_review') {
               const { resolveProjectPath } = await import('@/lib/shared/project-data');
               const projPath = resolveProjectPath(job.project);
               if (projPath) {

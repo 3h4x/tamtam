@@ -81,8 +81,8 @@ describe('startProjectReview', () => {
     }));
     vi.doMock('fs', () => ({
       existsSync: vi.fn().mockReturnValue(false),
+      lstatSync: vi.fn(),
       readFileSync: vi.fn(),
-      statSync: vi.fn(),
       mkdirSync: vi.fn(),
       appendFileSync: vi.fn(),
     }));
@@ -118,7 +118,7 @@ describe('startProjectReview', () => {
       isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
     }));
     vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/code-reviewer.md' }));
-    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), statSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
+    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), lstatSync: vi.fn(), readFileSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
     const { startProjectReview: fn } = await import('@/lib/pipeline/start-review');
     const r = await fn('proj');
     expect(r.ok).toBe(false);
@@ -153,7 +153,7 @@ describe('startProjectReview', () => {
       isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
     }));
     vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/path' }));
-    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), statSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
+    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), lstatSync: vi.fn(), readFileSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
 
     const { startProjectReview: fn } = await import('@/lib/pipeline/start-review');
     const r = await fn('missing');
@@ -256,6 +256,116 @@ describe('startProjectReview', () => {
     expect(prompt).toContain('Working-tree tracked-file diff (vs HEAD)');
   });
 
+  it('omits untracked symlink contents from the review prompt', async () => {
+    vi.resetModules();
+    const lstatSyncMock = vi.fn().mockReturnValue({ isFile: () => false });
+    const readFileSyncMock = vi.fn().mockReturnValue('');
+    execMock = vi.fn()
+      .mockResolvedValueOnce(resp(0, '?? secrets-link'))
+      .mockResolvedValueOnce(resp(0, ''))
+      .mockResolvedValueOnce(resp(0, ''));
+
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      getProjectTestConfig: () => ({}),
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: createJobMock, updateJob: updateJobMock,
+      listJobs: vi.fn().mockReturnValue([]), readLog: vi.fn().mockReturnValue(''),
+      readParsedLog: vi.fn().mockReturnValue(''), probeJobStatus: vi.fn().mockResolvedValue('done'),
+    }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: () => ({ review_verdict_rules: '' }),
+      withBasePrompt: (s: string) => s,
+      getPermissionModeFlag: () => '--dangerously-skip-permissions',
+      getPipelineModel: () => 'sonnet',
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/code-reviewer.md' }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
+    }));
+    vi.doMock('fs', () => ({
+      existsSync: vi.fn((path: string) => path === '/path/to/proj/secrets-link'),
+      lstatSync: lstatSyncMock,
+      readFileSync: readFileSyncMock,
+      mkdirSync: vi.fn(),
+      appendFileSync: vi.fn(),
+    }));
+
+    const { startProjectReview: fn } = await import('@/lib/pipeline/start-review');
+    const r = await fn('proj');
+
+    expect(r.ok).toBe(true);
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('[untracked file omitted: binary, missing, or unreadable]');
+    expect(readFileSyncMock).not.toHaveBeenCalledWith('/path/to/proj/secrets-link', 'utf-8');
+  });
+
+  it('omits non-regular untracked files from the review prompt', async () => {
+    vi.resetModules();
+    const lstatSyncMock = vi.fn().mockReturnValue({ isFile: () => false });
+    const readFileSyncMock = vi.fn().mockReturnValue('');
+    execMock = vi.fn()
+      .mockResolvedValueOnce(resp(0, '?? review.sock'))
+      .mockResolvedValueOnce(resp(0, ''))
+      .mockResolvedValueOnce(resp(0, ''));
+
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      getProjectTestConfig: () => ({}),
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: createJobMock, updateJob: updateJobMock,
+      listJobs: vi.fn().mockReturnValue([]), readLog: vi.fn().mockReturnValue(''),
+      readParsedLog: vi.fn().mockReturnValue(''), probeJobStatus: vi.fn().mockResolvedValue('done'),
+    }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: () => ({ review_verdict_rules: '' }),
+      withBasePrompt: (s: string) => s,
+      getPermissionModeFlag: () => '--dangerously-skip-permissions',
+      getPipelineModel: () => 'sonnet',
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/code-reviewer.md' }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
+    }));
+    vi.doMock('fs', () => ({
+      existsSync: vi.fn((path: string) => path === '/path/to/proj/review.sock'),
+      lstatSync: lstatSyncMock,
+      readFileSync: readFileSyncMock,
+      mkdirSync: vi.fn(),
+      appendFileSync: vi.fn(),
+    }));
+
+    const { startProjectReview: fn } = await import('@/lib/pipeline/start-review');
+    const r = await fn('proj');
+
+    expect(r.ok).toBe(true);
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('[untracked file omitted: binary, missing, or unreadable]');
+    expect(readFileSyncMock).not.toHaveBeenCalledWith('/path/to/proj/review.sock', 'utf-8');
+  });
+
   it('returns 400 when only .tamtam changes remain', async () => {
     execMock
       .mockResolvedValueOnce(resp(0, ' M .tamtam/agents/improve.md'))
@@ -298,6 +408,71 @@ describe('startProjectReview', () => {
     expect(prompt).toContain('git diff @{u}..HEAD');
   });
 
+  it('does not narrow local-commit review scope based on a prior PR review job', async () => {
+    vi.resetModules();
+    execMock = vi.fn()
+      .mockResolvedValueOnce(resp(0, ''))      // git status → clean
+      .mockResolvedValueOnce(resp(0, '2\n'))   // git rev-list @{u}..HEAD → ahead
+      .mockResolvedValueOnce(resp(0, 'main\n')) // git branch --show-current
+      .mockResolvedValueOnce(resp(1, '', '')); // git rev-parse reviewed ref → missing
+
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      getProjectTestConfig: () => ({}),
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: createJobMock,
+      updateJob: updateJobMock,
+      listJobs: vi.fn().mockReturnValue([
+        makeJob({
+          id: 'review-pr',
+          finishedAt: Date.now() / 1000,
+          exitCode: 0,
+          contextMeta: JSON.stringify({ sourceType: 'pr_review', prNumber: 7 }),
+        }),
+      ]),
+      readLog: vi.fn().mockReturnValue(''),
+      readParsedLog: vi.fn().mockReturnValue(''),
+      probeJobStatus: vi.fn().mockResolvedValue('done'),
+    }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: () => ({ review_verdict_rules: '', incremental_review_enabled: true }),
+      withBasePrompt: (s: string) => s,
+      getPermissionModeFlag: () => '--dangerously-skip-permissions',
+      getPipelineModel: () => 'sonnet',
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/code-reviewer.md' }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
+    }));
+    vi.doMock('fs', () => ({
+      existsSync: vi.fn().mockReturnValue(false),
+      lstatSync: vi.fn(),
+      readFileSync: vi.fn(),
+      mkdirSync: vi.fn(),
+      appendFileSync: vi.fn(),
+    }));
+
+    const { startProjectReview: fn } = await import('@/lib/pipeline/start-review');
+    const r = await fn('proj');
+
+    expect(r.ok).toBe(true);
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('2 local commits not yet pushed');
+    expect(prompt).toContain('git diff @{u}..HEAD');
+    expect(prompt).not.toContain('already approved');
+  });
+
   it('returns 400 when HEAD is exactly the reviewed ref (narrowCount=0) — no new commits to review', async () => {
     vi.resetModules();
     const sha = 'abc1234abc1234abc1234abc1234abc1234abc1234';
@@ -338,7 +513,7 @@ describe('startProjectReview', () => {
     vi.doMock('@/lib/usage/resolve-provider', () => ({
       checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
     }));
-    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), statSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
+    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), lstatSync: vi.fn(), readFileSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
 
     const { startProjectReview: fn } = await import('@/lib/pipeline/start-review');
     const r = await fn('proj');
@@ -390,7 +565,7 @@ describe('startProjectReview', () => {
     vi.doMock('@/lib/usage/resolve-provider', () => ({
       checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
     }));
-    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), readFileSync: vi.fn(), statSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
+    vi.doMock('fs', () => ({ existsSync: vi.fn().mockReturnValue(false), lstatSync: vi.fn(), readFileSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
 
     const { startProjectReview: fn } = await import('@/lib/pipeline/start-review');
     const r = await fn('proj');

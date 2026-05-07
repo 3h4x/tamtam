@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from 'fs';
+import { existsSync, lstatSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { getImproveConfig, getProjectTestConfig, getProjectPipelinePrompts } from '@/lib/scheduling/scheduling';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
@@ -115,7 +115,7 @@ function readUntrackedFileForPrompt(projPath: string, relPath: string): string |
   const fullPath = resolve(rootPath, relPath);
   if (!fullPath.startsWith(rootPath + '/') || !existsSync(fullPath)) return null;
   try {
-    const stat = statSync(/*turbopackIgnore: true*/ fullPath);
+    const stat = lstatSync(/*turbopackIgnore: true*/ fullPath);
     if (!stat.isFile()) return null;
     const body = readFileSync(/*turbopackIgnore: true*/ fullPath, 'utf-8');
     return trimForPrompt(body, REVIEW_UNTRACKED_FILE_MAX_CHARS);

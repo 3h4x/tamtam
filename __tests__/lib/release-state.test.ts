@@ -60,6 +60,26 @@ describe('release-state', () => {
     expect(isReviewedMock).toHaveBeenCalledTimes(1)
   })
 
+  it('ignores PR review jobs when looking for a fresh local LGTM', async () => {
+    listJobsMock.mockReturnValue([
+      {
+        id: 'pr-review',
+        project: 'proj',
+        kind: 'review',
+        finishedAt: 20,
+        exitCode: 0,
+        contextMeta: JSON.stringify({ sourceType: 'pr_review', prNumber: 7 }),
+      },
+      { id: 'local-review', project: 'proj', kind: 'review', finishedAt: 10, exitCode: 0 },
+    ])
+    getVerdictMock.mockImplementation((job: { id: string }) => job.id === 'local-review' ? 'LGTM' : 'LGTM')
+    isReviewedMock.mockResolvedValue(true)
+
+    await expect(hasFreshLgtm('proj', '/repo/proj')).resolves.toBe(true)
+    expect(getVerdictMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'local-review' }))
+    expect(getVerdictMock).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'pr-review' }))
+  })
+
   it('fails open to false when review lookup throws', async () => {
     listJobsMock.mockImplementation(() => {
       throw new Error('boom')

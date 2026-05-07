@@ -1230,7 +1230,7 @@ describe('setReviewedRef incremental_review_enabled guard', () => {
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
 
-  function makeReviewJob(id: string, logPath: string): JobData {
+  function makeReviewJob(id: string, logPath: string, overrides: Partial<JobData> = {}): JobData {
     const now = Date.now() / 1000;
     return {
       id, project: 'proj', kind: 'review', prompt: null, pid: 0, logPath,
@@ -1238,6 +1238,7 @@ describe('setReviewedRef incremental_review_enabled guard', () => {
       durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
       releaseId: 'rel-inc', provider: null,
+      ...overrides,
     };
   }
 
@@ -1308,6 +1309,23 @@ describe('setReviewedRef incremental_review_enabled guard', () => {
     await markDoneFn(makeReviewJob('rev-on', logPath), 0);
 
     expect(setReviewedRefMock).toHaveBeenCalledWith('/path/to/proj', 'main');
+  });
+
+  it('does NOT write reviewed ref for LGTM PR reviews', async () => {
+    setupMocks(true);
+    const logPath = join(tempDir, 'lgtm-pr.log');
+    writeFileSync(logPath, 'Findings: none\nVerdict: LGTM\n');
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+    await markDoneFn(
+      makeReviewJob('rev-pr', logPath, {
+        contextMeta: JSON.stringify({ sourceType: 'pr_review', prNumber: 7 }),
+      }),
+      0
+    );
+
+    expect(setReviewedRefMock).not.toHaveBeenCalled();
   });
 
   it('does NOT write reviewed ref for non-LGTM verdicts', async () => {
@@ -1436,7 +1454,7 @@ describe('review completion preserves the git index', () => {
       0
     );
 
-    expect(markReviewedMock).toHaveBeenCalledWith('proj', '/path/to/proj');
+    expect(markReviewedMock).not.toHaveBeenCalled();
     expect(execMock.mock.calls.some((call) => call[0] === 'git' && call[1][2] === 'add')).toBe(false);
   });
 });
