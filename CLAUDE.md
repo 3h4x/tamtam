@@ -56,7 +56,7 @@ TamTam runs in **production mode** (`next start`) under PM2 — no HMR. After an
 - `app/` — Next.js pages and API route handlers
 - `components/` — React client components; large pages have a co-located subfolder (e.g. `components/monitoring/`, `components/settings/`, `components/project-detail/`, `components/project-runs/`, `components/terminal/`)
 - `hooks/` — Custom React hooks
-- `lib/` — Server-side business logic, organised into domain folders: `pipeline/`, `scheduling/`, `git/`, `jobs/` (`job-storage` compatibility barrel), `terminal/`, `agents/`, `skills/`, `shared/`, `usage/`, `db/` (`index.ts` domain barrel), `github/`. `lib/client-api.ts` is the only top-level barrel.
+- `lib/` — Business logic and client helpers, organised into domain folders: `pipeline/`, `scheduling/`, `git/`, `jobs/` (`job-storage` compatibility barrel), `terminal/`, `agents/`, `skills/`, `recommendations/`, `shared/`, `usage/`, `db/` (`index.ts` domain barrel), `github/`, `client/`. `lib/client-api.ts` is the only top-level barrel.
 - `scripts/` — server startup, job runners, CLI shims (`pm2-start.sh`, `job-runner.js`, `claude-shim.js`, `gemini-shim.js`, `lmstudio-shim.js`, `codex-shim.js`, `shim-utils.js`)
 - `skills/` — claude-skills submodule
 - `data/` — SQLite database (gitignored)
