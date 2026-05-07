@@ -829,10 +829,12 @@ describe('startProjectPush — push result tracking', () => {
     }
     const prCreateCall = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'gh' && args.includes('pr') && args.includes('create'));
     expect(prCreateCall).toBeTruthy();
+    // Even with auto-merge off, do NOT switch back to main: the user keeps
+    // iterating on the issue branch until the PR is merged.
     const checkoutMain = (execMock.mock.calls as [string, string[]][]).find(
       ([cmd, args]) => cmd === 'git' && args.includes('checkout') && args.includes('main'),
     );
-    expect(checkoutMain).toBeTruthy();
+    expect(checkoutMain).toBeUndefined();
   });
 
   it('returns ok with plain "pushed" message when no issue context exists', async () => {
@@ -952,10 +954,11 @@ describe('startProjectPush — push result tracking', () => {
     }
     const prCreateCall = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'gh' && args.includes('pr') && args.includes('create'));
     expect(prCreateCall).toBeTruthy();
+    // Stay on the feature branch — auto-merge off does NOT mean switch back.
     const checkoutMain = (execMock.mock.calls as [string, string[]][]).find(
       ([cmd, args]) => cmd === 'git' && args.includes('checkout') && args.includes('main'),
     );
-    expect(checkoutMain).toBeTruthy();
+    expect(checkoutMain).toBeUndefined();
   });
 
   it('returns existing PR url without creating a new one when prWorkflowEnabled and PR already exists', async () => {
@@ -1009,10 +1012,11 @@ describe('startProjectPush — push result tracking', () => {
       expect(r.message).toContain(existingUrl);
       expect(r.prNumber).toBe(7);
     }
+    // Must stay on the feature branch even when reusing an existing PR.
     const checkoutMain = (execMock.mock.calls as [string, string[]][]).find(
       ([cmd, args]) => cmd === 'git' && args.includes('checkout') && args.includes('main'),
     );
-    expect(checkoutMain).toBeTruthy();
+    expect(checkoutMain).toBeUndefined();
     // Must NOT call gh pr create since one already exists
     const prCreateCall = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'gh' && args.includes('pr') && args.includes('create'));
     expect(prCreateCall).toBeUndefined();

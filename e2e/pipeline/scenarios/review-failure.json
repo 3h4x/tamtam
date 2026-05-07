@@ -1,0 +1,10 @@
+{
+  "description": "Review failure: Claude emits DO NOT SHIP verdict so the pipeline stops cleanly without entering a fix loop.",
+  "steps": [
+    {
+      "label": "review",
+      "sleep_ms": 3000,
+      "text": "This code has critical security vulnerabilities that must not be merged.\n\nVerdict: DO NOT SHIP"
+    }
+  ]
+}

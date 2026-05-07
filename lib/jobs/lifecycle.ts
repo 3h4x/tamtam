@@ -956,13 +956,24 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         // PR exists but no auto-merge (covers both PR Workflow and Direct Branch
         // issue-linked pushes that create a PR): run DoD now. The auto-merge path
         // defers this to post-merge in launchPrWait.
+        //
+        // DoD verification reads the *issue* body's `- [ ]` checklist when the
+        // push is issue-linked — the PR body usually doesn't carry the
+        // acceptance criteria. Fall back to the PR body only when there is no
+        // linked issue (a generic-PR feature branch).
         const meta = parsePrContextMeta(job.contextMeta);
         if (meta) {
           try {
             const { startMarkDod } = await import('@/lib/pipeline/start-mark-dod');
-            const md = await startMarkDod(job.project, { prNumber: meta.number, repo: meta.repo });
+            const dodTarget = job.ghIssueNumber && job.ghIssueRepo
+              ? { issueNumber: job.ghIssueNumber, repo: job.ghIssueRepo }
+              : { prNumber: meta.number, repo: meta.repo };
+            const md = await startMarkDod(job.project, dodTarget);
             if (md.ok) {
-              console.log(`[push→dod] PR #${meta.number} DoD: ${md.verified}/${md.total} verified${md.changed ? ' (PR updated)' : ''}`);
+              const targetLabel = 'issueNumber' in dodTarget
+                ? `issue #${dodTarget.issueNumber}`
+                : `PR #${dodTarget.prNumber}`;
+              console.log(`[push→dod] ${targetLabel} DoD: ${md.verified}/${md.total} verified${md.changed ? ' (updated)' : ''}`);
             }
           } catch (e) {
             console.log(`[push→dod] mark-dod error for ${job.project}:`, e);
