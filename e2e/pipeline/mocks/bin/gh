@@ -70,6 +70,18 @@ if (sub === 'issue') {
   process.exit(0);
 }
 
+if (sub === 'label') {
+  const action = cmdArgs[1] ?? '';
+  if (action === 'list') {
+    process.stdout.write(JSON.stringify([
+      { name: 'tamtam' },
+      { name: 'review-followup' },
+      { name: 'priority-medium' },
+    ]) + '\n');
+    process.exit(0);
+  }
+}
+
 if (sub === 'repo') {
   // Honor `-q .nameWithOwner` (used by review-exhaustion-fallback's detectRepo)
   // by emitting the bare value rather than the JSON envelope.

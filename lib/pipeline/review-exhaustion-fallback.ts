@@ -91,6 +91,24 @@ async function detectRepo(projPath: string): Promise<string | null> {
   return owner || null;
 }
 
+async function detectRepoLabels(projPath: string, repo: string): Promise<Set<string> | null> {
+  const raw = await exec('gh', ['-R', repo, 'label', 'list', '--limit', '1000', '--json', 'name'], {
+    cwd: projPath,
+    timeout: 10000,
+  });
+  const r = normalizeExecResult(raw);
+  if (r.exitCode !== 0) return null;
+  try {
+    const parsed = JSON.parse(r.stdout.trim()) as Array<{ name?: unknown }>;
+    const labels = parsed
+      .map((entry) => (typeof entry?.name === 'string' ? entry.name : ''))
+      .filter((name): name is string => name.length > 0);
+    return new Set(labels);
+  } catch {
+    return null;
+  }
+}
+
 export async function fileReviewExhaustionIssue(
   reviewJob: JobData,
   reason: ExhaustionReason,
@@ -100,6 +118,7 @@ export async function fileReviewExhaustionIssue(
 
   const repo = await detectRepo(projPath);
   if (!repo) return { ok: false, error: 'could not resolve GitHub repo for project' };
+  const repoLabels = await detectRepoLabels(projPath, repo);
 
   const logText = readLog(reviewJob, 100_000);
   const findingIds = extractFindingIds(logText);
@@ -109,8 +128,9 @@ export async function fileReviewExhaustionIssue(
   const title = `chore(review): finish review findings from release ${releaseHandle}`;
   const body = buildIssueBody({ reason, reviewJob, findingIds, reviewTail });
 
+  const labels = repoLabels ? ISSUE_LABELS.filter((label) => repoLabels.has(label)) : ISSUE_LABELS;
   const labelArgs: string[] = [];
-  for (const l of ISSUE_LABELS) {
+  for (const l of labels) {
     labelArgs.push('--label', l);
   }
 
