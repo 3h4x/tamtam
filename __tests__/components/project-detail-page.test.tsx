@@ -19,6 +19,7 @@ const {
   fetchCustomActionsMock,
   saveCustomActionsMock,
   runCustomActionMock,
+  pullProjectMock,
   fetchBehindMock,
   fetchIssuesAndPRsMock,
   fetchBranchMock,
@@ -42,6 +43,7 @@ const {
   fetchCustomActionsMock: vi.fn(),
   saveCustomActionsMock: vi.fn(),
   runCustomActionMock: vi.fn(),
+  pullProjectMock: vi.fn(),
   fetchBehindMock: vi.fn(),
   fetchIssuesAndPRsMock: vi.fn(),
   fetchBranchMock: vi.fn(),
@@ -71,7 +73,7 @@ vi.mock('@/lib/client-api', () => ({
   fetchCustomActions: fetchCustomActionsMock,
   runCustomAction: runCustomActionMock,
   saveCustomActions: saveCustomActionsMock,
-  pullProject: vi.fn(),
+  pullProject: pullProjectMock,
   fetchBehind: fetchBehindMock,
   PullDivergedError: class PullDivergedError extends Error {},
   testProject: vi.fn(),
@@ -253,6 +255,7 @@ describe('ProjectDetailPage', () => {
     fetchCustomActionsMock.mockReset()
     saveCustomActionsMock.mockReset()
     runCustomActionMock.mockReset()
+    pullProjectMock.mockReset()
     fetchBehindMock.mockReset()
     fetchIssuesAndPRsMock.mockReset()
     fetchBranchMock.mockReset()
@@ -297,6 +300,19 @@ describe('ProjectDetailPage', () => {
       })
       expect(container.querySelector('[data-testid="terminal-tab"]')?.textContent).toBe('sess-42')
     })
+
+    unmount()
+  })
+
+  it('does not auto-pull on mount even when the branch is behind', async () => {
+    fetchBehindMock.mockResolvedValue({ behind: 3 })
+
+    const { unmount } = renderPage()
+
+    await vi.waitFor(() => {
+      expect(fetchBehindMock).toHaveBeenCalledWith('acme/widgets')
+    })
+    expect(pullProjectMock).not.toHaveBeenCalled()
 
     unmount()
   })

@@ -224,20 +224,22 @@ export function ProjectActions({
           {runningActions.has(action.name) ? `${action.name}…` : action.name}
         </button>
       ))}
-      {(unpushed ?? 0) > 0 && totalChanges === 0 && (
-        <Button
-          variant="warning"
-          onClick={onPush}
-          disabled={pushBlocked}
-          title={
-            jobsPaused
-              ? 'Jobs are paused globally. Resume jobs to start a push.'
-              : `Push ${unpushed} commit${unpushed !== 1 ? 's' : ''} to origin`
-          }
-        >
-          {pushing ? 'Pushing…' : `Push (${unpushed})`}
-        </Button>
-      )}
+      <Button
+        variant={(unpushed ?? 0) > 0 && totalChanges === 0 ? 'warning' : 'secondary'}
+        onClick={onPush}
+        disabled={pushBlocked || (unpushed ?? 0) === 0 || totalChanges > 0}
+        title={
+          jobsPaused
+            ? 'Jobs are paused globally. Resume jobs to start a push.'
+            : totalChanges > 0
+              ? `Commit your ${totalChanges} local change${totalChanges !== 1 ? 's' : ''} first (use 🚀 Release)`
+              : (unpushed ?? 0) === 0
+                ? 'Nothing to push'
+                : `Push ${unpushed} commit${unpushed !== 1 ? 's' : ''} to origin`
+        }
+      >
+        {pushing ? 'Pushing…' : (unpushed ?? 0) > 0 ? `Push (${unpushed})` : 'Push'}
+      </Button>
       {pullDiverged ? (
         <span className="inline-flex items-center gap-1.5 pl-2 pr-1 py-0.5 rounded-md bg-status-error/10 border border-status-error/40">
           <span className="text-xs text-status-error font-medium">Diverged:</span>

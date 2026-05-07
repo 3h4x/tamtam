@@ -339,7 +339,7 @@ describe('POST /api/projects/by-project/[projectName]/changes', () => {
   beforeEach(async () => {
     vi.resetModules();
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
-    execMock = vi.fn().mockResolvedValue(makeExecResult({ stdout: 'Already up to date.' }));
+    execMock = vi.fn().mockResolvedValue(makeExecResult({ stdout: '' }));
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     const mod = await import('@/app/api/projects/by-project/[projectName]/changes/route');
@@ -356,16 +356,23 @@ describe('POST /api/projects/by-project/[projectName]/changes', () => {
   });
 
   it('runs git pull --ff-only by default', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'Already up to date.' }));
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes', { method: 'POST', body: '{}' });
     const res = await POST(req, { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('ok');
     expect(data.output).toBe('Already up to date.');
+    expect(execMock).toHaveBeenNthCalledWith(1, 'git', ['-C', '/path/to/proj', 'status', '--porcelain'], { timeout: 5000 });
     expect(execMock).toHaveBeenCalledWith('git', ['-C', '/path/to/proj', 'pull', '--ff-only'], { timeout: 30000 });
   });
 
   it('runs git pull --no-ff when strategy is merge', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'Already up to date.' }));
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes', {
       method: 'POST',
       body: JSON.stringify({ strategy: 'merge' }),
@@ -376,6 +383,9 @@ describe('POST /api/projects/by-project/[projectName]/changes', () => {
   });
 
   it('runs git pull --rebase when strategy is rebase', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'Already up to date.' }));
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes', {
       method: 'POST',
       body: JSON.stringify({ strategy: 'rebase' }),
@@ -386,7 +396,9 @@ describe('POST /api/projects/by-project/[projectName]/changes', () => {
   });
 
   it('returns 409 with diverged flag when branches cannot fast-forward', async () => {
-    execMock.mockResolvedValue(makeExecResult({ exitCode: 1, stderr: 'Not possible to fast-forward, aborting.' }));
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'Not possible to fast-forward, aborting.' }));
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes', { method: 'POST', body: '{}' });
     const res = await POST(req, { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(409);
@@ -395,14 +407,18 @@ describe('POST /api/projects/by-project/[projectName]/changes', () => {
   });
 
   it('returns 409 when stderr contains "diverged"', async () => {
-    execMock.mockResolvedValue(makeExecResult({ exitCode: 1, stderr: 'Your branch and origin/main have diverged.' }));
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'Your branch and origin/main have diverged.' }));
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes', { method: 'POST', body: '{}' });
     const res = await POST(req, { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(409);
   });
 
   it('returns 422 for non-diverged pull failure', async () => {
-    execMock.mockResolvedValue(makeExecResult({ exitCode: 1, stderr: 'Connection refused to remote.' }));
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'Connection refused to remote.' }));
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes', { method: 'POST', body: '{}' });
     const res = await POST(req, { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(422);
@@ -411,16 +427,42 @@ describe('POST /api/projects/by-project/[projectName]/changes', () => {
   });
 
   it('strips hint: lines from error before returning 422', async () => {
-    execMock.mockResolvedValue(makeExecResult({
-      exitCode: 1,
-      stderr: 'error: failed to push some refs\nhint: Updates were rejected\nhint: because the tip is behind',
-    }));
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
+      .mockResolvedValueOnce(makeExecResult({
+        exitCode: 1,
+        stderr: 'error: failed to push some refs\nhint: Updates were rejected\nhint: because the tip is behind',
+      }));
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes', { method: 'POST', body: '{}' });
     const res = await POST(req, { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(422);
     const data = await res.json();
     expect(data.detail).toBe('error: failed to push some refs');
     expect(data.detail).not.toContain('hint:');
+  });
+
+  it('returns 409 before pulling when the working tree has tracked changes', async () => {
+    execMock.mockResolvedValueOnce(makeExecResult({ stdout: ' M src/app.ts\n' }));
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes', { method: 'POST', body: '{}' });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.detail).toContain('Working tree has local changes');
+    expect(execMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns 409 before pulling when the working tree has untracked files', async () => {
+    execMock.mockResolvedValueOnce(makeExecResult({ stdout: '?? notes.txt\n' }));
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes', { method: 'POST', body: '{}' });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.detail).toContain('Working tree has local changes');
+    expect(execMock).toHaveBeenCalledTimes(1);
   });
 });
 
