@@ -62,4 +62,68 @@ describe('db bootstrap migrations', () => {
     expect(rows).toEqual([{ key: 'review_fix_max_iterations', value: '6' }]);
     expect(getSettings().review_fix_max_iterations).toBe(6);
   });
+
+  it('creates queued_agent_runs and recommendations tables during runtime bootstrap', async () => {
+    const dbPath = createDbWithSettings([]);
+    process.env.TAMTAM_DB_PATH = dbPath;
+
+    await import('@/lib/db');
+
+    const sqlite = new Database(dbPath, { readonly: true });
+    const queuedAgentRuns = sqlite.prepare(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name = 'queued_agent_runs'
+    `).get() as { name: string } | undefined;
+    const recommendations = sqlite.prepare(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name = 'recommendations'
+    `).get() as { name: string } | undefined;
+    const queuedIndex = sqlite.prepare(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'index' AND name = 'queued_agent_runs_project_agent'
+    `).get() as { name: string } | undefined;
+    sqlite.close();
+
+    expect(queuedAgentRuns?.name).toBe('queued_agent_runs');
+    expect(recommendations?.name).toBe('recommendations');
+    expect(queuedIndex?.name).toBe('queued_agent_runs_project_agent');
+  });
+
+  it('backfills doc_paths and provider columns onto legacy agents tables', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tamtam-db-bootstrap-'));
+    const dbPath = join(dir, 'tamtam.db');
+    const sqlite = new Database(dbPath);
+    sqlite.exec(`
+      CREATE TABLE settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      CREATE TABLE agents (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        project TEXT NOT NULL,
+        skill_ids TEXT NOT NULL DEFAULT '[]',
+        model TEXT NOT NULL DEFAULT 'normal',
+        prompt TEXT NOT NULL DEFAULT '',
+        schedule TEXT,
+        runner TEXT NOT NULL DEFAULT 'pm2',
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1
+      );
+    `);
+    sqlite.close();
+    process.env.TAMTAM_DB_PATH = dbPath;
+
+    await import('@/lib/db');
+
+    const migrated = new Database(dbPath, { readonly: true });
+    const columns = migrated.prepare('PRAGMA table_info(agents)').all() as Array<{ name: string }>;
+    migrated.close();
+
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(['doc_paths', 'provider']));
+  });
 });
