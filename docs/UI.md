@@ -126,6 +126,13 @@ Use these reusable classes when Tailwind utilities would produce repetition:
 - `.focus-ring` — consistent ring for inputs
 - `.terminal-markdown` — markdown rendering inside the terminal pane (dark-only)
 
+**Toolbar atoms** (terminal panel header bar; all chips/groups align to a 24px row, inner tabs 20px):
+- `.toolbar-btn` — bordered chip for standalone toggles (e.g. NEW, RECENT, thinking, trace); 24px tall, mono font
+- `.toolbar-group` — grouped control container (e.g. ATTACH, MODEL); wraps `.toolbar-label` + one or more `.toolbar-tab` children
+- `.toolbar-label` — uppercase eyebrow label inside a group or standalone before buttons; 10px, letter-spaced
+- `.toolbar-tab` — inner selectable tab inside a `.toolbar-group`; 20px tall, no border, transparent background
+- `.toolbar-pill` — selected-item capsule (e.g. active skill/doc name); 20px tall, accent-tinted border + fill, max-width 180px
+
 Cards, tables, pills, toasts, status dots — compose with Tailwind utilities directly using the tokens above. See `docs/ui-preview/*.html` for canonical recipes.
 
 ---

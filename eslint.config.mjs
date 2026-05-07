@@ -1,6 +1,7 @@
 import js from "@eslint/js";
 import tsPlugin from "@typescript-eslint/eslint-plugin";
 import tsParser from "@typescript-eslint/parser";
+import { rules as uiSystemRules } from "./eslint-rules/ui-system.mjs";
 
 export default [
   js.configs.recommended,
@@ -14,6 +15,7 @@ export default [
     },
     plugins: {
       "@typescript-eslint": tsPlugin,
+      "ui-system": { rules: uiSystemRules },
     },
     rules: {
       "no-unused-vars": "off",
@@ -22,6 +24,10 @@ export default [
       "no-undef": "off",
       "no-empty": "off",
       "no-useless-assignment": "off",
+      // UI design system enforcement (docs/UI.md)
+      "ui-system/no-icon-library": "error",
+      "ui-system/no-hardcoded-color-style": "warn",
+      "ui-system/no-font-family-override": "warn",
     },
   },
   {
