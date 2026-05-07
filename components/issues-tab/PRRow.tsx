@@ -154,14 +154,14 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
 
   return (
     <div className={`border-b border-border last:border-b-0 transition-opacity ${merged ? 'opacity-50' : ''}`}>
-      <div className="px-3 py-2.5 grid grid-cols-[16px_minmax(0,1fr)] xl:grid-cols-[16px_minmax(0,1fr)_auto] items-start gap-2.5 hover:bg-bg-tertiary/50 transition-colors">
+      <div className="grid grid-cols-[16px_minmax(0,1fr)] items-start gap-2.5 px-3 py-2.5 hover:bg-bg-tertiary/50 xl:grid-cols-[16px_minmax(0,1fr)_auto] transition-colors">
         <span className={`mt-0.5 shrink-0 ${pr.isDraft ? 'text-text-tertiary' : 'text-status-success'}`} title={pr.isDraft ? 'Draft PR' : 'Open PR'}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
             <path d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
           </svg>
         </span>
-        <div className="min-w-0 space-y-1.5">
-          <div className="flex items-start gap-2 min-w-0">
+        <div className="min-w-0 space-y-2">
+          <div className="flex min-w-0 items-start gap-2">
             <button
               className="min-w-0 flex-1 text-sm text-text-primary font-medium hover:text-accent text-left cursor-pointer leading-5"
               onClick={() => setExpanded((v) => !v)}
@@ -183,17 +183,12 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
               </span>
             )}
           </div>
-          <div className="flex items-center gap-x-2 gap-y-1 flex-wrap text-xs text-text-tertiary tabular-nums">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-tertiary tabular-nums">
             <span className="text-text-tertiary">by <span className="text-text-secondary">{pr.author?.login}</span></span>
             <span title={pr.createdAt}>{formatAgo(new Date(pr.createdAt).getTime() / 1000)}</span>
-            <code className="font-mono bg-bg-tertiary px-1.5 py-0.5 rounded text-[10px] text-text-secondary max-w-[260px] truncate" title={`${pr.headRefName} → ${pr.baseRefName}`}>
+            <code className="max-w-[280px] truncate rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-[10px] text-text-secondary" title={`${pr.headRefName} → ${pr.baseRefName}`}>
               {pr.headRefName} → {pr.baseRefName}
             </code>
-            {pr.labels.length > 0 && (
-              <span className="min-w-0 flex-1 basis-full lg:basis-auto lg:flex-none">
-                <Labels labels={pr.labels} limit={4} />
-              </span>
-            )}
             {reviewLabel && (
               <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${
                 pr.reviewDecision === 'APPROVED' ? 'bg-status-success/10 text-status-success border-status-success/30'
@@ -201,39 +196,44 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
                 : 'bg-bg-tertiary text-text-secondary border-border'
               }`}>{reviewLabel}</span>
             )}
-            {gates && (
-              <>
-                <GateBadge label="tests" state={gates.tests} title={`TamTam tests: ${gates.tests}`} />
-                <GateBadge label="review" state={gates.review} title={`AI review verdict: ${gates.review === 'pass' ? 'LGTM' : gates.review === 'warn' ? 'NEEDS ATTENTION' : gates.review === 'fail' ? 'DO NOT SHIP / failed' : 'not run'}`} />
-                <GateBadge
-                  label={gates.dodSummary ?? 'DoD'}
-                  state={gates.dod}
-                  title={
-                    gates.dod === 'none'
-                      ? 'No acceptance criteria found in PR body'
-                      : `Click to verify acceptance criteria${gates.issueNumber ? ` for #${gates.issueNumber}` : ''} (${gates.dodSummary ?? gates.dod})`
-                  }
-                  onClick={gates.dod === 'none' ? undefined : runDod}
-                  busy={dodRunning}
-                />
-              </>
-            )}
-            {ciRollup && ciBadgeClass && (
-              <button
-                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium border cursor-pointer transition-colors hover:opacity-80 ${ciBadgeClass}`}
-                onClick={e => { e.stopPropagation(); setChecksExpanded(v => !v) }}
-                title={checksExpanded ? 'Hide checks' : 'Show checks'}
-              >
-                <CheckIcon conclusion={ciRollup === 'SUCCESS' ? 'SUCCESS' : ciRollup === 'FAILURE' ? 'FAILURE' : null} status={ciRollup === 'PENDING' ? 'PENDING' : 'COMPLETED'} />
-                {passCount}/{checks.length} checks
-                <svg width="8" height="8" viewBox="0 0 16 16" fill="currentColor" className={`transition-transform ${checksExpanded ? 'rotate-180' : ''}`}>
-                  <path d="M4.427 7.427l3.396 3.396a.25.25 0 00.354 0l3.396-3.396A.25.25 0 0011.396 7H4.604a.25.25 0 00-.177.427z"/>
-                </svg>
-              </button>
-            )}
           </div>
+          {(pr.labels.length > 0 || gates || (ciRollup && ciBadgeClass)) && (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-text-tertiary">
+              {pr.labels.length > 0 && <Labels labels={pr.labels} limit={4} />}
+              {gates && (
+                <>
+                  <GateBadge label="tests" state={gates.tests} title={`TamTam tests: ${gates.tests}`} />
+                  <GateBadge label="review" state={gates.review} title={`AI review verdict: ${gates.review === 'pass' ? 'LGTM' : gates.review === 'warn' ? 'NEEDS ATTENTION' : gates.review === 'fail' ? 'DO NOT SHIP / failed' : 'not run'}`} />
+                  <GateBadge
+                    label={gates.dodSummary ?? 'DoD'}
+                    state={gates.dod}
+                    title={
+                      gates.dod === 'none'
+                        ? 'No acceptance criteria found in PR body'
+                        : `Click to verify acceptance criteria${gates.issueNumber ? ` for #${gates.issueNumber}` : ''} (${gates.dodSummary ?? gates.dod})`
+                    }
+                    onClick={gates.dod === 'none' ? undefined : runDod}
+                    busy={dodRunning}
+                  />
+                </>
+              )}
+              {ciRollup && ciBadgeClass && (
+                <button
+                  className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium cursor-pointer transition-colors hover:opacity-80 ${ciBadgeClass}`}
+                  onClick={e => { e.stopPropagation(); setChecksExpanded(v => !v) }}
+                  title={checksExpanded ? 'Hide checks' : 'Show checks'}
+                >
+                  <CheckIcon conclusion={ciRollup === 'SUCCESS' ? 'SUCCESS' : ciRollup === 'FAILURE' ? 'FAILURE' : null} status={ciRollup === 'PENDING' ? 'PENDING' : 'COMPLETED'} />
+                  {passCount}/{checks.length} checks
+                  <svg width="8" height="8" viewBox="0 0 16 16" fill="currentColor" className={`transition-transform ${checksExpanded ? 'rotate-180' : ''}`}>
+                    <path d="M4.427 7.427l3.396 3.396a.25.25 0 00.354 0l3.396-3.396A.25.25 0 0011.396 7H4.604a.25.25 0 00-.177.427z"/>
+                  </svg>
+                </button>
+              )}
+            </div>
+          )}
           {checksExpanded && checks.length > 0 && (
-            <div className="mt-1.5 flex flex-col gap-0.5 ml-0">
+            <div className="ml-0 mt-1 flex flex-col gap-0.5">
               {checks.map((c, i) => {
                 const ok = c.conclusion === 'SUCCESS' || c.conclusion === 'NEUTRAL' || c.conclusion === 'SKIPPED'
                 const pending = c.status !== 'COMPLETED'
@@ -270,10 +270,10 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
             <div className="mt-1 text-xs text-status-error">DoD: {dodError}</div>
           )}
         </div>
-        <div className="col-start-2 xl:col-start-auto flex items-center justify-start xl:justify-end gap-1.5 shrink-0 xl:max-w-[420px] flex-wrap">
+        <div className="col-start-2 flex flex-wrap items-center justify-start gap-1.5 border-t border-border/60 pt-2 xl:col-start-auto xl:max-w-[420px] xl:justify-end xl:border-t-0 xl:pt-0 shrink-0">
           {!merged && needsApproval && (
             <button
-              className="px-2 py-1 text-xs border border-accent/50 rounded-md bg-accent/10 text-accent hover:bg-accent/20 cursor-pointer disabled:opacity-50 inline-flex items-center gap-1.5"
+              className="inline-flex items-center gap-1.5 rounded-md border border-accent/50 bg-accent/10 px-2 py-1 text-[11px] text-accent hover:bg-accent/20 cursor-pointer disabled:opacity-50"
               onClick={doApprove}
               disabled={approving}
               title="Submit an APPROVE review (required by branch protection before merge)"
@@ -303,7 +303,7 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
                   ))}
                 </div>
                 <button
-                  className="px-2 py-1 text-xs bg-status-success text-white rounded-md hover:opacity-90 cursor-pointer disabled:opacity-50 font-medium inline-flex items-center gap-1.5"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-status-success px-2 py-1 text-[11px] font-medium text-white hover:opacity-90 cursor-pointer disabled:opacity-50"
                   onClick={doMerge}
                   disabled={merging}
                 >
@@ -311,7 +311,7 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
                   Confirm
                 </button>
                 <button
-                  className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-secondary hover:bg-bg-tertiary cursor-pointer"
+                  className="rounded-md border border-border bg-bg-secondary px-2 py-1 text-[11px] text-text-secondary hover:bg-bg-tertiary cursor-pointer"
                   onClick={() => setMergeConfirm(false)}
                   disabled={merging}
                 >
@@ -320,7 +320,7 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
               </div>
             ) : (
               <button
-                className="px-2 py-1 text-xs border border-status-success/50 rounded-md bg-status-success/10 text-status-success hover:bg-status-success/20 cursor-pointer"
+                className="rounded-md border border-status-success/50 bg-status-success/10 px-2 py-1 text-[11px] text-status-success hover:bg-status-success/20 cursor-pointer"
                 onClick={() => setMergeConfirm(true)}
                 title="Merge this PR"
               >
@@ -330,7 +330,7 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
           )}
           {!merged && (
             <button
-              className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 inline-flex items-center gap-1.5"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-bg-secondary px-2 py-1 text-[11px] text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50"
               onClick={doReview}
               disabled={reviewing}
               title="AI code review of this PR's diff"
@@ -340,7 +340,7 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
             </button>
           )}
           <button
-            className="p-1.5 text-text-secondary hover:text-text-primary border border-border rounded-md bg-bg-secondary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 flex items-center justify-center"
+            className="flex items-center justify-center rounded-md border border-border bg-bg-secondary p-1.5 text-text-secondary hover:bg-bg-tertiary hover:text-text-primary cursor-pointer disabled:opacity-50"
             onClick={openInTerminal}
             disabled={switchingBranch}
             title={`Open in Terminal (switches to ${pr.headRefName})`}
@@ -358,7 +358,7 @@ export function PRRow({ pr, projectName, onMerged }: { pr: GhPullRequest; projec
             href={pr.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="p-1.5 text-text-tertiary hover:text-text-primary border border-border rounded-md bg-bg-secondary hover:bg-bg-tertiary flex items-center justify-center"
+            className="flex items-center justify-center rounded-md border border-border bg-bg-secondary p-1.5 text-text-tertiary hover:bg-bg-tertiary hover:text-text-primary"
             title="Open pull request on GitHub"
             aria-label="Open on GitHub"
           >

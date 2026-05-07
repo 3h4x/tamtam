@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import type { JobData } from '@/lib/jobs/job-storage';
+import type { CliProvider } from '@/lib/usage/cli-providers';
+import type { QuotaSnapshot } from '@/lib/usage/quota-types';
+
+const CI_URL = 'https://github.com/owner/repo/actions/runs/12345';
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
   return {
@@ -29,8 +33,6 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
   let execMock: ReturnType<typeof vi.fn>;
   let dbGetMock: ReturnType<typeof vi.fn>;
   let checkCliStartGateMock: ReturnType<typeof vi.fn>;
-
-  const CI_URL = 'https://github.com/owner/repo/actions/runs/12345';
 
   beforeEach(async () => {
     vi.resetModules();
@@ -185,5 +187,104 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
     const savedJob = updateJobMock.mock.calls[0][0];
     expect(savedJob.exitCode).toBe(-1);
     expect(savedJob.finishedAt).not.toBeNull();
+  });
+});
+
+describe('POST /api/projects/by-project/[projectName]/fix-ci weekly model scoring', () => {
+  let POST: any;
+  let startJobMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.doUnmock('@/lib/usage/resolve-provider');
+
+    const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+      ['claude', {
+        provider: 'claude',
+        fiveHour: { utilization: 24, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 20, resetsAt: null, msUntilReset: null },
+        sevenDaySonnet: { utilization: 100, resetsAt: null, msUntilReset: null },
+        sevenDayOpus: null,
+        fetchedAt: 0,
+        stale: false,
+      }],
+      ['codex', {
+        provider: 'codex',
+        fiveHour: { utilization: 30, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 50, resetsAt: null, msUntilReset: null },
+        fetchedAt: 0,
+        stale: false,
+      }],
+    ]);
+
+    startJobMock = vi.fn().mockResolvedValue(42);
+
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/project'),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: vi.fn().mockReturnValue({
+        claudeBin: 'claude',
+        logDir: '/tmp/tamtam-logs',
+        projects: {},
+      }),
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: vi.fn().mockImplementation(() => makeJob()),
+      updateJob: vi.fn(),
+      listJobs: vi.fn().mockReturnValue([]),
+      probeJobStatus: vi.fn().mockResolvedValue('done'),
+    }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/shared/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: 'Build failed\nError: test suite failed', stderr: '' }),
+    }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getPermissionModeFlag: vi.fn().mockReturnValue(''),
+      getSettings: vi.fn().mockReturnValue({
+        cli_enabled_providers: ['claude', 'codex'],
+        claude_provider: 'claude',
+        budget_block_at_pct: 95,
+        budget_block_runs_enabled: true,
+        default_model: 'normal',
+        cli_bin_claude: '',
+        cli_bin_codex: '',
+        cli_bin_gemini: '',
+        cli_bin_lmstudio: '',
+      }),
+    }));
+    vi.doMock('@/lib/shared/job-control', () => ({
+      jobsPausedResult: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/usage/quota', () => ({
+      getQuotaSnapshots: vi.fn().mockResolvedValue(snapshots),
+    }));
+    vi.doMock('@/lib/db', () => ({
+      db: {
+        select: vi.fn().mockReturnValue({
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({ get: vi.fn().mockReturnValue({ project: 'proj1', ciFailedUrl: CI_URL }) }),
+          }),
+        }),
+      },
+      schema: { ghStatus: {} },
+    }));
+
+    const mod = await import('@/app/api/projects/by-project/[projectName]/fix-ci/route');
+    POST = mod.POST;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('ignores an unrelated Claude weekly sub-window when the root path has not picked a tier yet', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/fix-ci', { method: 'POST' });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    expect(res.status).toBe(200);
+    expect(startJobMock).toHaveBeenCalledOnce();
+    const [, cmd] = startJobMock.mock.calls[0];
+    expect(cmd).toContain('/scripts/claude-shim.js');
   });
 });

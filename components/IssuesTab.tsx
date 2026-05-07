@@ -65,29 +65,34 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
 
   if (loading) {
     return (
-      <div className="mt-2">
-        <div className="bg-bg-secondary border border-border rounded-md px-3 py-1.5 mb-2">
-          <div className="flex items-center gap-3">
-            <div className="skeleton h-3.5 w-32" />
-            <div className="skeleton h-3.5 w-12" />
-            <div className="skeleton h-3.5 w-12" />
+      <div className="mt-2 space-y-3">
+        <div className="rounded-md border border-border bg-bg-secondary px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="skeleton h-4 w-28" />
+            <div className="skeleton h-5 w-14 rounded-full" />
+            <div className="skeleton h-5 w-[4.5rem] rounded-full" />
+            <div className="ml-auto skeleton h-7 w-20 rounded-md" />
           </div>
         </div>
-        <div className="border border-border rounded-md overflow-hidden">
+        <div className="overflow-hidden rounded-md border border-border bg-bg-secondary">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="px-3 py-1.5 flex items-start gap-2.5 border-b border-border last:border-0" style={{ opacity: 1 - i * 0.18 }}>
+            <div key={i} className="grid grid-cols-[16px_minmax(0,1fr)_auto] items-start gap-2.5 border-b border-border px-3 py-2.5 last:border-0" style={{ opacity: 1 - i * 0.16 }}>
               <div className="skeleton h-4 w-4 rounded-full mt-0.5 shrink-0" />
-              <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-                <div className="skeleton h-3.5 w-3/5" />
-                <div className="flex items-center gap-2">
-                  <div className="skeleton h-3 w-20" />
-                  <div className="skeleton h-3 w-14" />
-                  <div className="skeleton h-3 w-10" />
+              <div className="min-w-0 space-y-2">
+                <div className="flex items-start gap-2">
+                  <div className="skeleton h-4 w-3/5" />
+                  <div className="skeleton h-5 w-12 rounded-full shrink-0" />
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="skeleton h-3 w-16" />
+                  <div className="skeleton h-3 w-12" />
+                  <div className="skeleton h-4 w-28 rounded" />
+                  <div className="skeleton h-5 w-12 rounded-full" />
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <div className="skeleton h-6 w-16 rounded-md" />
-                <div className="skeleton h-6 w-16 rounded-md" />
+              <div className="flex items-center gap-1.5 pl-2 shrink-0">
+                <div className="skeleton h-7 w-16 rounded-md" />
+                <div className="skeleton h-7 w-7 rounded-md" />
               </div>
             </div>
           ))}
@@ -108,40 +113,48 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
 
   return (
     <div className="mt-2 space-y-3">
-      <div className="bg-bg-secondary border border-border rounded-md px-3 py-2 flex items-center gap-2 flex-wrap">
-        {repo && (
-          <span className="text-xs text-text-secondary font-mono">{repo}</span>
-        )}
-        <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-2 py-0.5 text-[11px] font-medium text-text-secondary tabular-nums">
-          <span className="mr-1 text-text-primary">{prs.length}</span>
-          {' '}PR{prs.length === 1 ? '' : 's'}
-        </span>
-        <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-2 py-0.5 text-[11px] font-medium text-text-secondary tabular-nums">
-          <span className="mr-1 text-text-primary">{issues.length}</span>
-          {' '}issue{issues.length === 1 ? '' : 's'}
-        </span>
-        {fromCache && cachedAt && (
-          <span className="text-xs text-text-tertiary inline-flex items-center gap-1" title={new Date(cachedAt * 1000).toLocaleString()}>
-            <span className="w-1 h-1 rounded-full bg-text-tertiary/60"/>
-            cached {formatAgo(cachedAt)}
-          </span>
-        )}
-        {ghError && (
-          <span className="text-xs text-status-warning">⚠ {ghError}</span>
-        )}
-        <button
-          className="ml-auto px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-60"
-          onClick={() => load('refresh')}
-          disabled={refreshing}
-          title="Force refresh from GitHub"
-        >
-          {refreshing ? (
-            <span className="inline-flex items-center gap-1.5">
-              <span className="inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
-              <span>Refreshing…</span>
-            </span>
-          ) : 'Refresh'}
-        </button>
+      <div className="rounded-md border border-border bg-bg-secondary px-3 py-2">
+        <div className="flex flex-wrap items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              {repo && (
+                <span className="min-w-0 truncate text-xs font-mono text-text-secondary">{repo}</span>
+              )}
+              <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-2 py-0.5 text-[11px] font-medium text-text-secondary tabular-nums">
+                <span className="mr-1 text-text-primary">{prs.length}</span>
+                {' '}PR{prs.length === 1 ? '' : 's'}
+              </span>
+              <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-2 py-0.5 text-[11px] font-medium text-text-secondary tabular-nums">
+                <span className="mr-1 text-text-primary">{issues.length}</span>
+                {' '}issue{issues.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-tertiary">
+              {fromCache && cachedAt && (
+                <span className="inline-flex items-center gap-1" title={new Date(cachedAt * 1000).toLocaleString()}>
+                  <span className="h-1 w-1 rounded-full bg-text-tertiary/60" />
+                  cached {formatAgo(cachedAt)}
+                </span>
+              )}
+              {ghError && (
+                <span className="text-status-warning">⚠ {ghError}</span>
+              )}
+            </div>
+          </div>
+          <button
+            className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border bg-bg-secondary px-2.5 py-1.5 text-xs text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-60"
+            onClick={() => load('refresh')}
+            disabled={refreshing}
+            title="Force refresh from GitHub"
+          >
+            {refreshing ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
+                <span>Refreshing…</span>
+              </span>
+            ) : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {prs.length > 0 && (
@@ -178,12 +191,12 @@ export function IssuesTab({ projectName, onCountChange }: IssuesTabProps) {
       )}
 
       {prs.length === 0 && issues.length === 0 && !ghError && (
-        <div className="border border-dashed border-border rounded-md p-8 text-center">
-          <div className="text-3xl text-text-tertiary mb-2 leading-none">✓</div>
-          <p className="text-sm text-text-secondary font-medium">Inbox zero</p>
-          <p className="text-xs text-text-tertiary mt-1">No open PRs or issues for this project.</p>
+        <div className="rounded-md border border-dashed border-border bg-bg-secondary px-6 py-8 text-center">
+          <div className="mb-2 text-3xl leading-none text-text-tertiary">✓</div>
+          <p className="text-sm font-medium text-text-secondary">Inbox zero</p>
+          <p className="mt-1 text-xs text-text-tertiary">GitHub shows no open PRs or issues for this project.</p>
           {repo && (
-            <p className="text-xs text-text-tertiary mt-3">
+            <p className="mt-3 text-xs text-text-tertiary">
               <a
                 href={`https://github.com/${repo}`}
                 target="_blank"

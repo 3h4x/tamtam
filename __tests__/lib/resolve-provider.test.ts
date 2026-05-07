@@ -69,6 +69,36 @@ describe('resolveProviderForRun', () => {
     expect(result.provider).toBe('codex');
   });
 
+  it('picks a healthy alternate provider when the default is weekly-limited and no preference is pinned', async () => {
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['claude', { fiveHour: { utilization: 0 }, sevenDay: { utilization: 99 }, sevenDaySonnet: { utilization: 100 } }],
+      ['codex', { fiveHour: { utilization: 0 }, sevenDay: { utilization: 25 } }],
+    ]));
+    const { resolveProviderForRun } = await import('@/lib/usage/resolve-provider');
+    const result = await resolveProviderForRun();
+    expect(result.provider).toBe('codex');
+  });
+
+  it('uses only the requested Claude tier when consulting model-specific weekly windows', async () => {
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['claude', { fiveHour: { utilization: 24 }, sevenDay: { utilization: 20 }, sevenDaySonnet: { utilization: 100 } }],
+      ['codex', { fiveHour: { utilization: 30 }, sevenDay: { utilization: 50 } }],
+    ]));
+    const { resolveProviderForRun } = await import('@/lib/usage/resolve-provider');
+    const result = await resolveProviderForRun({ requestedModel: 'fast' });
+    expect(result.provider).toBe('claude');
+  });
+
+  it('ignores model-specific Claude weekly windows when the caller does not know the tier yet', async () => {
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['claude', { fiveHour: { utilization: 24 }, sevenDay: { utilization: 20 }, sevenDaySonnet: { utilization: 100 } }],
+      ['codex', { fiveHour: { utilization: 30 }, sevenDay: { utilization: 50 } }],
+    ]));
+    const { resolveProviderForRun } = await import('@/lib/usage/resolve-provider');
+    const result = await resolveProviderForRun();
+    expect(result.provider).toBe('claude');
+  });
+
   it('skips an explicit `preferred` that is not enabled and falls back to the picker', async () => {
     getSettingsMock.mockReturnValue({
       cli_enabled_providers: ['codex'],
@@ -110,7 +140,7 @@ describe('resolveProviderForRun', () => {
     expect(result.reason).toBe('all_blocked');
   });
 
-  it('keeps a preferred provider when only its 7d burn is hot but 5h is healthy', async () => {
+  it('keeps a preferred provider when only its 7d burn is over threshold', async () => {
     const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
     const fourDaysMs = 4 * 24 * 60 * 60 * 1000;
     getSettingsMock.mockReturnValue({
@@ -120,9 +150,7 @@ describe('resolveProviderForRun', () => {
       budget_block_runs_enabled: true,
     });
     getQuotaSnapshotsMock.mockResolvedValue(new Map([
-      // claude: 5h low but weekly burn is hot. Manual/root gating should
-      // still accept it because weekly burn is scheduled-only.
-      ['claude', { fiveHour: { utilization: 24 }, sevenDay: { utilization: 71, msUntilReset: threeDaysMs } }],
+      ['claude', { fiveHour: { utilization: 24 }, sevenDay: { utilization: 99, msUntilReset: threeDaysMs } }],
       ['codex', { fiveHour: { utilization: 35 }, sevenDay: { utilization: 34, msUntilReset: fourDaysMs } }],
     ]));
     const { resolveProviderForRun } = await import('@/lib/usage/resolve-provider');
@@ -155,7 +183,7 @@ describe('resolveProviderForRun', () => {
       budget_block_runs_enabled: true,
     });
     getQuotaSnapshotsMock.mockResolvedValue(new Map([
-      ['claude', { fiveHour: { utilization: 24 }, sevenDay: { utilization: 71, msUntilReset: threeDaysMs } }],
+      ['claude', { fiveHour: { utilization: 24 }, sevenDay: { utilization: 99, msUntilReset: threeDaysMs } }],
     ]));
     const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
     const result = await checkCliStartGate('start a release');

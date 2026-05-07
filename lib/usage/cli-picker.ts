@@ -1,11 +1,13 @@
 import type { QuotaSnapshot } from '@/lib/usage/quota-types';
 import type { CliProvider } from '@/lib/usage/cli-providers';
+import type { ModelTier } from '@/lib/agents/model-aliases';
 
 export interface PickCliOptions {
   enabled: CliProvider[];
   snapshots: Map<CliProvider, QuotaSnapshot | null>;
   budgetBlockAtPct: number;
   blockEnabled: boolean;
+  requestedModel?: ModelTier | null;
 }
 
 export interface PickCliResult {
@@ -20,16 +22,12 @@ function finiteOrZero(n: number | null | undefined): number {
 }
 
 /**
- * Compute the worst-case utilization (%) for a single provider snapshot.
- * Considers the hard-gate signals shared by all manual/root entrypoints:
- *   - 5h rolling window utilization (hard short-term gate)
- *   - credits/extra utilization (when the provider exposes a credits pool)
- *
- * Providers without a snapshot (gemini, lmstudio, fetcher errors) report 0
- * so they always look fully available — the picker treats them as fallback
- * options that are never blocked by the gate.
+ * Compute the hard-gate utilization (%) for a single provider snapshot.
+ * This is the only signal that can 429 a manual/root start:
+ *   - 5h rolling window utilization
+ *   - credits/extra utilization, when the provider exposes a credits pool
  */
-export function effectiveUtilizationFor(snapshot: QuotaSnapshot | null): number {
+export function hardGateUtilizationFor(snapshot: QuotaSnapshot | null): number {
   if (!snapshot) return 0;
   const fiveHour = finiteOrZero(snapshot.fiveHour?.utilization);
   const credits = finiteOrZero(snapshot.extra?.utilization);
@@ -37,13 +35,41 @@ export function effectiveUtilizationFor(snapshot: QuotaSnapshot | null): number 
 }
 
 /**
- * Pick the enabled CLI with the most remaining quota headroom. Skips any
- * provider whose snapshot already exceeds the budget block threshold when
- * the gate is enabled. Tie-breaks by the order of `enabled`. Returns null
- * if every enabled provider is blocked.
+ * Compute the advisory utilization (%) for provider preference.
+ * Considers the broader quota signals exposed by the CLIs:
+ *   - 5h rolling window utilization
+ *   - 7d rolling window utilization
+ *   - provider-specific model weekly windows, when available
+ *   - credits/extra utilization, when the provider exposes a credits pool
+ *
+ * Providers without a snapshot (gemini, lmstudio, fetcher errors) report 0
+ * so they always look fully available — the picker treats them as fallback
+ * options that are never blocked by the gate.
+ */
+export function effectiveUtilizationFor(
+  snapshot: QuotaSnapshot | null,
+  requestedModel?: ModelTier | null,
+): number {
+  if (!snapshot) return 0;
+  const fiveHour = hardGateUtilizationFor(snapshot);
+  const sevenDay = finiteOrZero(snapshot.sevenDay?.utilization);
+  const modelWeekly =
+    requestedModel === 'normal'
+      ? finiteOrZero(snapshot.sevenDaySonnet?.utilization)
+      : requestedModel === 'smart'
+        ? finiteOrZero(snapshot.sevenDayOpus?.utilization)
+        : 0;
+  return Math.max(fiveHour, sevenDay, modelWeekly);
+}
+
+/**
+ * Pick the enabled CLI with the most remaining quota headroom. Only the
+ * hard-gate utilization can block a manual/root start; weekly windows still
+ * influence preference among otherwise healthy providers. Tie-breaks by the
+ * order of `enabled`. Returns null if every enabled provider is blocked.
  */
 export function pickCliProvider(opts: PickCliOptions): PickCliResult {
-  const { enabled, snapshots, budgetBlockAtPct, blockEnabled } = opts;
+  const { enabled, snapshots, budgetBlockAtPct, blockEnabled, requestedModel } = opts;
   if (enabled.length === 0) {
     return { provider: null, reason: 'no_enabled_providers' };
   }
@@ -52,8 +78,9 @@ export function pickCliProvider(opts: PickCliOptions): PickCliResult {
   let bestUtilization = 0;
   for (const provider of enabled) {
     const snapshot = snapshots.get(provider) ?? null;
-    const utilization = effectiveUtilizationFor(snapshot);
-    if (blockEnabled && utilization >= budgetBlockAtPct) continue;
+    const hardGateUtilization = hardGateUtilizationFor(snapshot);
+    if (blockEnabled && hardGateUtilization >= budgetBlockAtPct) continue;
+    const utilization = effectiveUtilizationFor(snapshot, requestedModel);
     const headroom = 100 - utilization;
     if (headroom > bestHeadroom) {
       bestProvider = provider;

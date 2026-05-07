@@ -14,7 +14,7 @@ Implications:
 - If `budget_block_runs_enabled` is off, the chooser still selects a provider but does not block on quota.
 - If exactly one CLI is enabled and it is over `budget_block_at_pct`, the start is rejected with HTTP 429.
 - If multiple CLIs are enabled, TamTam skips blocked providers and proceeds with the enabled provider that has the most remaining headroom.
-- The shared start gate only considers the hard 5-hour window (and provider credits where available). The 7-day burn-rate throttle is enforced separately for scheduled agent fires inside the internal scheduler, not for manual buttons or root pipeline starts.
+- The shared start gate scores provider headroom using hard limit windows exposed by the CLI: 5-hour usage, 7-day usage, model-specific weekly windows where available, and provider credits. Scheduled agents also have a separate burn-rate throttle inside the internal scheduler.
 - Release/test/push entrypoints no longer rely on the legacy active-provider snapshot, so a full Claude window does not block a release when another enabled CLI is healthy.
 - Once a release starts, the chosen provider is stamped onto the release/test/push jobs so downstream review/fix/commit steps inherit the same provider instead of repicking mid-pipeline.
 
@@ -99,6 +99,12 @@ REVIEW
   │   ├─ DO NOT SHIP       → start FIX → re-run REVIEW (capped at 3 reviews per release)
   │   └─ No verdict found  → finalize release (exit 1)
   └─ exit ≠0 → completion hook → finalize release (exit 1)
+
+Review prompts explicitly tell the reviewer that the pipeline owns test
+execution. The reviewer should not run tests, audit which package test commands
+are included, or cite passing/failing/skipped/partial suites as findings. Tests
+are only review material when the code diff itself creates a concrete missing
+coverage risk.
 
 When a release enters a follow-up review after a fix, TamTam feeds the review job the
 parsed output from earlier review/fix steps in the same release. Repeated structured

@@ -1,8 +1,9 @@
 import { getJob } from '@/lib/jobs/storage';
+import type { ModelTier } from '@/lib/agents/model-aliases';
 import { jobsPausedResult } from '@/lib/shared/job-control';
 import { getSettings } from '@/lib/shared/config';
 import { getQuotaSnapshots } from '@/lib/usage/quota';
-import { pickCliProvider, effectiveUtilizationFor, type PickCliResult } from '@/lib/usage/cli-picker';
+import { pickCliProvider, hardGateUtilizationFor, type PickCliResult } from '@/lib/usage/cli-picker';
 import { isCliProvider, type CliProvider } from '@/lib/usage/cli-providers';
 
 export interface ResolveProviderOptions {
@@ -10,6 +11,8 @@ export interface ResolveProviderOptions {
   parentJobId?: string | null;
   /** Agent's stored preference, or explicit override from a route handler. */
   preferred?: string | null;
+  /** Semantic model tier for this launch, when known up front. */
+  requestedModel?: ModelTier | null;
   /** Skip quota fetch + picker; useful in tests. */
   fallback?: CliProvider;
 }
@@ -75,7 +78,7 @@ export async function resolveProviderForRun(
 
   const snapshots = await getQuotaSnapshots(enabled);
   if (preferred) {
-    const preferredUtilization = effectiveUtilizationFor(snapshots.get(preferred) ?? null);
+    const preferredUtilization = hardGateUtilizationFor(snapshots.get(preferred) ?? null);
     if (preferredUtilization < (settings.budget_block_at_pct ?? 95)) {
       return { provider: preferred, utilization: preferredUtilization };
     }
@@ -85,6 +88,7 @@ export async function resolveProviderForRun(
     snapshots,
     budgetBlockAtPct: settings.budget_block_at_pct ?? 95,
     blockEnabled: !!settings.budget_block_runs_enabled,
+    requestedModel: opts.requestedModel ?? null,
   });
 }
 
