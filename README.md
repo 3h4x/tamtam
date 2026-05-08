@@ -13,7 +13,7 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 | Feature | Details |
 |---|---|
 | **Multi-project overview** | All your git repos at a glance — uncommitted changes, CI status, last run |
-| **Skill composition** | DB-backed skills + file-based skills from the `claude-skills` submodule. Mix and match into agents |
+| **Skill composition** | DB-backed skills + file-based skills from `skills/docs/skills/` and `data/skills/`. Mix and match into agents |
 | **Real-time streaming** | Token-by-token output via SSE. Watch Claude think as it works |
 | **Interactive terminal** | Full Claude runner per project — model tier selector (Fast / Normal / Smart), skill picker, persistent sessions across reconnects |
 | **Smart push** | AI-generated commit messages, diff preview, one-click push |
@@ -67,7 +67,7 @@ Bare `/settings` redirects to `/settings/general`, and legacy `/jobs` redirects 
 |---|---|
 | Workspace path | `/settings/general` |
 | GitHub owner and board sync | `/settings/general` |
-| CLI provider routing, binaries, and model tiers | `/settings/cli` |
+| CLI provider routing, binaries, model tiers, and subscription budget controls | `/settings/cli` |
 | Global base prompt | `/settings/cli` |
 | Pipeline behavior, commit/review rules, and model overrides | `/settings/pipeline` |
 | Project enablement | `/settings/projects` |

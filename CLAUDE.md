@@ -94,7 +94,7 @@ TamTam runs in **production mode** (`next start`) under PM2 — no HMR. After an
 - `/runs` — All runs across projects (`/jobs` redirects here)
 - `/logs` — Log viewer
 - `/skills` — Skill editor (CRUD for DB-backed skills)
-- `/settings` → `/settings/general`; `/settings/[tab]` — `general`, `cli`, `pipeline`, `notifications`, `projects`, `templates`, `database`
+- `/settings` → `/settings/general`; `/settings/[tab]` — `general`, `cli` (provider routing, binaries, model tiers, budget controls), `pipeline`, `notifications`, `projects`, `templates`, `database`
 
 ## API Routes
 
