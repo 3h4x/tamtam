@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLock, releaseLock } from '@/lib/pipeline/pipeline-lock';
 import { getJob, listJobs, updateJob } from '@/lib/jobs/job-storage';
+import { finalizeAbortedRelease } from '@/lib/jobs/lifecycle';
+import {
+  requestJobCancellation,
+  SAFE_PID_FLOOR,
+  shouldSignalJobPid,
+} from '@/lib/jobs/cancellation';
 import { exec } from '@/lib/shared/shell';
 
 export async function POST(
@@ -28,18 +34,6 @@ export async function POST(
 
   const now = Date.now() / 1000;
 
-  // Mark the release job as aborted so completion hooks short-circuit
-  releaseJob.abortedAt = now;
-  releaseJob.finishedAt = now;
-  releaseJob.exitCode = -3;
-  updateJob(releaseJob);
-  if (releaseJob.logPath) {
-    try {
-      const { appendFileSync } = await import('fs');
-      appendFileSync(releaseJob.logPath, `\n# release aborted by user — ${new Date().toISOString()}\n`);
-    } catch {}
-  }
-
   // Find and kill the currently-running pipeline step job for this release.
   // Exclude the trigger job (the agent/run that spawned this release): it's
   // paired to the release for traceability, not orchestrated by it. It may
@@ -51,6 +45,17 @@ export async function POST(
       && j.id !== releaseJob.parentJobId
   );
 
+  // Mark the release as aborting before we wait so late completion hooks do
+  // not chain to the next step while the current inline child is unwinding.
+  releaseJob.abortedAt = now;
+  updateJob(releaseJob);
+  if (releaseJob.logPath) {
+    try {
+      const { appendFileSync } = await import('fs');
+      appendFileSync(releaseJob.logPath, `\n# release aborted by user — ${new Date().toISOString()}\n`);
+    } catch {}
+  }
+
   if (runningStep) {
     // Try pm2 stop first
     try {
@@ -58,41 +63,52 @@ export async function POST(
       await exec('pm2', ['delete', runningStep.id, '--silent'], { timeout: 5000 });
     } catch {}
 
-    // Kill by PID as fallback
-    if (runningStep.pid > 0) {
+    if (runningStep.kind === 'push' || runningStep.kind === 'commit') {
+      runningStep.cancelRequestedExitCode = -3;
+      const cancelled = await requestJobCancellation(runningStep.id, 20_000);
+      if (!cancelled && runningStep.finishedAt === null) {
+        return NextResponse.json({
+          status: 'abort_pending',
+          detail: `Timed out waiting for ${runningStep.kind} to stop cleanly`,
+          release_id: releaseJob.id,
+          killed_job_id: null,
+        }, { status: 409 });
+      }
+    } else if (shouldSignalJobPid(runningStep)) {
       try { process.kill(runningStep.pid, 'SIGTERM'); } catch {}
       setTimeout(() => {
         try { process.kill(runningStep.pid, 'SIGKILL'); } catch {}
       }, 2000);
+    } else if (runningStep.pid > 0 && runningStep.pid <= SAFE_PID_FLOOR) {
+      console.warn(
+        `[release-abort] refusing to signal suspicious pid=${runningStep.pid} for ${runningStep.id} (${runningStep.kind})`,
+      );
     }
 
-    runningStep.abortedAt = now;
-    runningStep.finishedAt = now;
-    runningStep.exitCode = -3;
-    updateJob(runningStep);
+    if (runningStep.finishedAt === null) {
+      runningStep.abortedAt = now;
+      runningStep.finishedAt = now;
+      runningStep.exitCode = -3;
+      updateJob(runningStep);
+    }
   }
 
-  // Stop the release's bash monitor if it's still running.
-  try {
-    await exec('pm2', ['stop', releaseJob.id, '--silent'], { timeout: 5000 });
-    await exec('pm2', ['delete', releaseJob.id, '--silent'], { timeout: 5000 });
-  } catch { /* may not be in PM2 */ }
+  const releaseAlreadyFinalized = releaseJob.finishedAt !== null;
+  await finalizeAbortedRelease(releaseJob);
 
-  // Release the pipeline lock if one was held.
-  if (lock) releaseLock(projectName, lock.lockedByJobId);
-
-  // Fire-and-forget notification
-  try {
-    const { notify } = await import('@/lib/shared/notifications');
-    await notify({
-      event: 'release_aborted',
-      project: projectName,
-      job_id: releaseJob.id,
-      status: 'failed',
-      log_url: `${process.env.TAMTAM_BASE_URL || 'http://localhost:1337'}/project/${encodeURIComponent(projectName)}/history`,
-      timestamp: Date.now(),
-    });
-  } catch {}
+  if (!releaseAlreadyFinalized) {
+    try {
+      const { notify } = await import('@/lib/shared/notifications');
+      await notify({
+        event: 'release_aborted',
+        project: projectName,
+        job_id: releaseJob.id,
+        status: 'failed',
+        log_url: `${process.env.TAMTAM_BASE_URL || 'http://localhost:1337'}/project/${encodeURIComponent(projectName)}/history`,
+        timestamp: Date.now(),
+      });
+    } catch {}
+  }
 
   return NextResponse.json({
     status: 'aborted',

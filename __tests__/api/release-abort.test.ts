@@ -37,6 +37,10 @@ describe('POST /api/projects/by-project/{projectName}/release/abort', () => {
   let listJobsMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
+  let requestJobCancellationMock: ReturnType<typeof vi.fn>;
+  let processKillSpy: ReturnType<typeof vi.spyOn>;
+  let finalizeAbortedReleaseMock: ReturnType<typeof vi.fn>;
+  let notifyMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -47,6 +51,10 @@ describe('POST /api/projects/by-project/{projectName}/release/abort', () => {
     listJobsMock = vi.fn().mockReturnValue([]);
     updateJobMock = vi.fn();
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+    requestJobCancellationMock = vi.fn().mockResolvedValue(true);
+    processKillSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    finalizeAbortedReleaseMock = vi.fn().mockResolvedValue(undefined);
+    notifyMock = vi.fn().mockResolvedValue(undefined);
 
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: getLockMock,
@@ -58,13 +66,22 @@ describe('POST /api/projects/by-project/{projectName}/release/abort', () => {
       updateJob: updateJobMock,
     }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/shared/notifications', () => ({ notify: vi.fn().mockResolvedValue(undefined) }));
+    vi.doMock('@/lib/jobs/cancellation', () => ({
+      requestJobCancellation: requestJobCancellationMock,
+      SAFE_PID_FLOOR: 100,
+      shouldSignalJobPid: (job: { pid: number; kind: string }) => job.pid > 100 && job.kind !== 'push' && job.kind !== 'commit',
+    }));
+    vi.doMock('@/lib/jobs/lifecycle', () => ({
+      finalizeAbortedRelease: finalizeAbortedReleaseMock,
+    }));
+    vi.doMock('@/lib/shared/notifications', () => ({ notify: notifyMock }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/release/abort/route');
     POST = mod.POST;
   });
 
   afterEach(() => {
+    processKillSpy.mockRestore();
     vi.resetModules();
   });
 
@@ -108,12 +125,10 @@ describe('POST /api/projects/by-project/{projectName}/release/abort', () => {
 
     // Release job should be marked aborted
     expect(releaseJob.abortedAt).not.toBeNull();
-    expect(releaseJob.finishedAt).not.toBeNull();
-    expect(releaseJob.exitCode).toBe(-3);
     expect(updateJobMock).toHaveBeenCalledWith(releaseJob);
+    expect(finalizeAbortedReleaseMock).toHaveBeenCalledWith(releaseJob);
 
-    // Lock released
-    expect(releaseLockMock).toHaveBeenCalledWith('proj1', 'release-1');
+    expect(releaseLockMock).not.toHaveBeenCalled();
   });
 
   it('kills the running step job and marks it aborted', async () => {
@@ -139,13 +154,13 @@ describe('POST /api/projects/by-project/{projectName}/release/abort', () => {
     expect(stepJob.finishedAt).not.toBeNull();
     expect(stepJob.exitCode).toBe(-3);
     expect(updateJobMock).toHaveBeenCalledWith(stepJob);
+    expect(finalizeAbortedReleaseMock).toHaveBeenCalledWith(releaseJob);
 
     // pm2 stop/delete attempted on the step job
     expect(execMock).toHaveBeenCalledWith('pm2', ['stop', 'review-1', '--silent'], expect.any(Object));
     expect(execMock).toHaveBeenCalledWith('pm2', ['delete', 'review-1', '--silent'], expect.any(Object));
 
-    // Lock released
-    expect(releaseLockMock).toHaveBeenCalledWith('proj1', 'release-1');
+    expect(releaseLockMock).not.toHaveBeenCalled();
   });
 
   it('does not kill an already-finished step job', async () => {
@@ -173,6 +188,78 @@ describe('POST /api/projects/by-project/{projectName}/release/abort', () => {
       Array.isArray(c[1]) && (c[1] as string[]).includes('push-1')
     );
     expect(stepCalls).toHaveLength(0);
+  });
+
+  it('does not signal an inline push step that reuses the server pid', async () => {
+    getLockMock.mockReturnValue(makeLock());
+    const releaseJob = makeJob();
+    const stepJob = makeJob({
+      id: 'push-1',
+      kind: 'push',
+      pid: 999,
+      releaseId: 'release-1',
+      finishedAt: null,
+    });
+    getJobMock.mockReturnValue(releaseJob);
+    listJobsMock.mockReturnValue([releaseJob, stepJob]);
+
+    const res = await POST(req(), { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.status).toBe('aborted');
+    expect(data.killed_job_id).toBe('push-1');
+    expect(requestJobCancellationMock).toHaveBeenCalledWith('push-1', 20_000);
+    expect(processKillSpy).not.toHaveBeenCalled();
+    expect(updateJobMock).toHaveBeenCalledWith(stepJob);
+  });
+
+  it('does not emit a duplicate abort notification when inline cancellation already finalized the release', async () => {
+    getLockMock.mockReturnValue(makeLock());
+    const releaseJob = makeJob();
+    const stepJob = makeJob({
+      id: 'push-1',
+      kind: 'push',
+      pid: 999,
+      releaseId: 'release-1',
+      finishedAt: null,
+    });
+    getJobMock.mockReturnValue(releaseJob);
+    listJobsMock.mockReturnValue([releaseJob, stepJob]);
+    requestJobCancellationMock.mockImplementation(async () => {
+      releaseJob.finishedAt = 1234;
+      releaseJob.exitCode = -3;
+      stepJob.finishedAt = 1234;
+      stepJob.exitCode = -3;
+      return true;
+    });
+
+    const res = await POST(req(), { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    expect(res.status).toBe(200);
+    expect(finalizeAbortedReleaseMock).toHaveBeenCalledWith(releaseJob);
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 when inline cancellation does not finish cleanly', async () => {
+    getLockMock.mockReturnValue(makeLock());
+    const releaseJob = makeJob();
+    const stepJob = makeJob({
+      id: 'commit-1',
+      kind: 'commit',
+      pid: 999,
+      releaseId: 'release-1',
+      finishedAt: null,
+    });
+    getJobMock.mockReturnValue(releaseJob);
+    listJobsMock.mockReturnValue([releaseJob, stepJob]);
+    requestJobCancellationMock.mockResolvedValue(false);
+
+    const res = await POST(req(), { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.status).toBe('abort_pending');
+    expect(stepJob.finishedAt).toBeNull();
+    expect(processKillSpy).not.toHaveBeenCalled();
+    expect(finalizeAbortedReleaseMock).not.toHaveBeenCalled();
   });
 
   it('does not kill the triggering parent job (releaseJob.parentJobId)', async () => {
@@ -219,7 +306,7 @@ describe('POST /api/projects/by-project/{projectName}/release/abort', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('aborted');
-    expect(releaseLockMock).toHaveBeenCalledWith('proj1', 'release-1');
+    expect(finalizeAbortedReleaseMock).toHaveBeenCalledWith(releaseJob);
   });
 
   it('aborts an orphan release (no lock, but unfinished release row exists)', async () => {
@@ -233,15 +320,10 @@ describe('POST /api/projects/by-project/{projectName}/release/abort', () => {
     const data = await res.json();
     expect(data.status).toBe('aborted');
     expect(data.release_id).toBe('orphan-1');
-    expect(orphanRelease.abortedAt).not.toBeNull();
-    expect(orphanRelease.finishedAt).not.toBeNull();
-    expect(orphanRelease.exitCode).toBe(-3);
     expect(updateJobMock).toHaveBeenCalledWith(orphanRelease);
+    expect(finalizeAbortedReleaseMock).toHaveBeenCalledWith(orphanRelease);
     // Lock not held, so releaseLock must not be called
     expect(releaseLockMock).not.toHaveBeenCalled();
-    // PM2 stop/delete attempted on the orphan release process itself
-    expect(execMock).toHaveBeenCalledWith('pm2', ['stop', 'orphan-1', '--silent'], expect.any(Object));
-    expect(execMock).toHaveBeenCalledWith('pm2', ['delete', 'orphan-1', '--silent'], expect.any(Object));
   });
 
   it('returns no_pipeline when no lock and no orphan release exists', async () => {
@@ -281,7 +363,6 @@ describe('POST /api/projects/by-project/{projectName}/release/abort', () => {
 
     await POST(req(), { params: Promise.resolve({ projectName: 'proj1' }) });
 
-    expect(execMock).toHaveBeenCalledWith('pm2', ['stop', 'release-1', '--silent'], expect.any(Object));
-    expect(execMock).toHaveBeenCalledWith('pm2', ['delete', 'release-1', '--silent'], expect.any(Object));
+    expect(finalizeAbortedReleaseMock).toHaveBeenCalledWith(releaseJob);
   });
 });

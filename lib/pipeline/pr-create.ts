@@ -14,30 +14,31 @@ function normalizeExecResult(result: ExecLikeResult) {
 export async function createGenericPR(
   projPath: string,
   log: (s: string) => void,
+  signal?: AbortSignal,
 ): Promise<{ prUrl: string; prRepo: string } | false | null> {
-  const branchR = normalizeExecResult(await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 }));
+  const branchR = normalizeExecResult(await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000, signal }));
   const currentBranch = branchR.stdout.trim();
-  const mainBranch = await detectMainBranch(projPath);
+  const mainBranch = await detectMainBranch(projPath, signal);
 
   if (!currentBranch || currentBranch === mainBranch) {
     log(`\n# PR Workflow: on default branch — skipping PR creation\n`);
     return false;
   }
 
-  const existingR = normalizeExecResult(await exec('gh', ['pr', 'view', '--json', 'url'], { cwd: projPath, timeout: 10000 }));
+  const existingR = normalizeExecResult(await exec('gh', ['pr', 'view', '--json', 'url'], { cwd: projPath, timeout: 10000, signal }));
   if (existingR.exitCode === 0 && existingR.stdout.trim()) {
     try {
       const existing = JSON.parse(existingR.stdout.trim()) as { url?: string };
       if (existing.url) {
         log(`\n# PR already exists: ${existing.url}\n`);
-        const repoR = normalizeExecResult(await exec('gh', ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], { cwd: projPath, timeout: 10000 }));
+        const repoR = normalizeExecResult(await exec('gh', ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], { cwd: projPath, timeout: 10000, signal }));
         return { prUrl: existing.url, prRepo: repoR.stdout.trim() };
       }
     } catch {}
   }
 
   log(`\n# PR Workflow — creating PR for branch ${currentBranch}\n`);
-  const prR = normalizeExecResult(await exec('gh', ['pr', 'create', '--fill', '--base', mainBranch], { cwd: projPath, timeout: 30000 }));
+  const prR = normalizeExecResult(await exec('gh', ['pr', 'create', '--fill', '--base', mainBranch], { cwd: projPath, timeout: 30000, signal }));
   if (prR.stdout) log(prR.stdout);
   if (prR.stderr) log(prR.stderr);
   if (prR.exitCode !== 0) {
@@ -48,7 +49,7 @@ export async function createGenericPR(
   const prUrl = prR.stdout.trim().split('\n').find(l => l.startsWith('https://')) ?? prR.stdout.trim();
   if (!prUrl) return null;
 
-  const repoR = normalizeExecResult(await exec('gh', ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], { cwd: projPath, timeout: 10000 }));
+  const repoR = normalizeExecResult(await exec('gh', ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], { cwd: projPath, timeout: 10000, signal }));
   log(`\n# PR created: ${prUrl}\n`);
   return { prUrl, prRepo: repoR.stdout.trim() };
 }
@@ -57,10 +58,11 @@ export async function createIssuePR(
   projPath: string,
   log: (s: string) => void,
   issue: { number: number; repo: string; title: string },
+  signal?: AbortSignal,
 ): Promise<string | null> {
-  const branchR = normalizeExecResult(await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 }));
+  const branchR = normalizeExecResult(await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000, signal }));
   const currentBranch = branchR.stdout.trim();
-  const mainBranch = await detectMainBranch(projPath);
+  const mainBranch = await detectMainBranch(projPath, signal);
 
   let effectiveBranch = currentBranch;
 
@@ -71,11 +73,15 @@ export async function createIssuePR(
 
     log(`\n# creating branch ${featureBranch} for issue #${issue.number}\n`);
 
-    const createR = normalizeExecResult(await exec('git', ['-C', projPath, 'branch', featureBranch], { timeout: 5000 }));
+    const createR = normalizeExecResult(await exec('git', ['-C', projPath, 'branch', featureBranch], { timeout: 5000, signal }));
     if (createR.stdout) log(createR.stdout);
     if (createR.stderr) log(createR.stderr);
 
-    const pushR = normalizeExecResult(await exec('git', ['-C', projPath, 'push', '-u', 'origin', featureBranch], { timeout: 30000 }));
+    const pushR = normalizeExecResult(await exec(
+      'git',
+      ['-C', projPath, 'push', '-u', 'origin', featureBranch],
+      { timeout: 30000, signal, abortProcessTree: true },
+    ));
     if (pushR.stdout) log(pushR.stdout);
     if (pushR.stderr) log(pushR.stderr);
     if (pushR.exitCode !== 0) {
@@ -86,7 +92,7 @@ export async function createIssuePR(
 
   const existingR = normalizeExecResult(await exec(
     'gh', ['pr', 'list', '--head', effectiveBranch, '--state', 'open', '--json', 'url', '--limit', '1'],
-    { cwd: projPath, timeout: 10000 },
+    { cwd: projPath, timeout: 10000, signal },
   ));
   if (existingR.exitCode === 0 && existingR.stdout.trim()) {
     try {
@@ -110,7 +116,7 @@ export async function createIssuePR(
     '--body', prBody,
     '--base', mainBranch,
   ];
-  const prR = normalizeExecResult(await exec('gh', prArgs, { cwd: projPath, timeout: 30000 }));
+  const prR = normalizeExecResult(await exec('gh', prArgs, { cwd: projPath, timeout: 30000, signal }));
   if (prR.stdout) log(prR.stdout);
   if (prR.stderr) log(prR.stderr);
 

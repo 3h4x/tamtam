@@ -31,4 +31,5 @@ export interface JobData {
   workSummary?: string | null;
   modifiedFiles?: string | null;
   provider?: string | null;
+  cancelRequestedExitCode?: number | null;
 }

@@ -171,6 +171,22 @@ function noteReleaseStop(reason: string): void {
   console.log(`[release] ${reason}`);
 }
 
+async function notifyReleaseAborted(release: JobData): Promise<void> {
+  try {
+    const { notify } = await import('@/lib/shared/notifications');
+    await notify({
+      event: 'release_aborted',
+      project: release.project,
+      job_id: release.id,
+      status: 'failed',
+      log_url: `${process.env.TAMTAM_BASE_URL || 'http://localhost:1337'}/project/${encodeURIComponent(release.project)}/history`,
+      timestamp: Date.now(),
+    });
+  } catch (e) {
+    console.error(`[notifications] failed to send notification for release_aborted:`, e);
+  }
+}
+
 // Find the most recent completed review job in the same release window so the
 // review-cap fallback can file an issue with that review's findings — not the
 // fix job that triggered the cap check.
@@ -417,6 +433,16 @@ export async function reconcileStaleRelease(job: JobData): Promise<void> {
     /* DB error → fall through; better to potentially over-finalize than to
        leave the release "running" forever if the DB is unreachable. */
   }
+  if (release.abortedAt != null) {
+    try {
+      await finalizeAbortedRelease(release);
+      await notifyReleaseAborted(release);
+      console.log(`[release] reconciled aborted release ${release.id} (${job.project})`);
+    } catch (e) {
+      console.log(`[release] aborted-release reconciler failed for ${release.id}:`, e);
+    }
+    return;
+  }
   const worstExit = chain.reduce((acc, c) => Math.max(acc, pipelineExitCodeForStep(c)), 0);
   try {
     await finalizeReleaseJob(release, worstExit);
@@ -439,6 +465,14 @@ async function finalizeReleaseJob(release: JobData, exitCode: number): Promise<v
     const { releaseLock } = await import('@/lib/pipeline/pipeline-lock');
     releaseLock(release.project, release.id);
   } catch {}
+}
+
+export async function finalizeAbortedRelease(release: JobData): Promise<void> {
+  if (release.abortedAt == null) {
+    release.abortedAt = Date.now() / 1000;
+    updateJob(release);
+  }
+  await finalizeReleaseJob(release, -3);
 }
 
 export async function runCompletionHooks(job: JobData): Promise<void> {
@@ -466,6 +500,10 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     const releaseForAbortCheck = getJob(job.releaseId);
     if (releaseForAbortCheck?.abortedAt) {
       console.log(`[release] job ${job.id} (${job.kind}) completed after abort — not chaining`);
+      if (job.finishedAt !== null && releaseForAbortCheck.finishedAt === null) {
+        await finalizeAbortedRelease(releaseForAbortCheck);
+        await notifyReleaseAborted(releaseForAbortCheck);
+      }
       return;
     }
   }
@@ -1149,7 +1187,11 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
       }
       // Emit release success/fail notification before finalizing
       if (!notificationEvent) {
-        notificationEvent = exitCode === 0 ? 'release_success' : 'release_fail';
+        notificationEvent = release.abortedAt != null
+          ? 'release_aborted'
+          : exitCode === 0
+            ? 'release_success'
+            : 'release_fail';
       }
       await finalizeReleaseJob(release, exitCode);
     } else {

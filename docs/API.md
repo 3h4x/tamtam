@@ -41,7 +41,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 - `create-pr` — Push current branch + create GitHub PR (POST → `{ url }`). Accepts optional JSON body `{ force?: boolean }`; `force: true` retries with `git push --no-verify` to skip the local pre-push hook after an explicit user confirmation flow. Refuses on the default branch. Returns `409 { detail, hookFailure: 'pre-push-tests'|'pre-push-other', retryable: true }` when a retryable pre-push-hook failure blocks the initial push; non-hook push failures remain `500`.
 - `release` — Trigger release pipeline (POST)
 - `release/[releaseId]` — Release detail: meta-job + ordered pipeline step jobs with verdicts and log excerpts (GET)
-- `release/abort` — Abort active release: marks release job aborted, kills running step, releases lock (POST)
+- `release/abort` — Abort active release (POST). On the fast path it marks the release aborted, stops the running step, finalizes the release, and releases the lock. If the active inline `commit`/`push` step acknowledges cancellation but does not unwind within 20s, it returns `409 { status: 'abort_pending', detail, release_id, killed_job_id: null }`; the late step completion then finalizes the release as aborted, stops the monitor, and releases the lock without requiring a second abort request.
 - `issues` — GitHub PRs and issues (GET, with `?refresh=1` to bypass cache); POST merges or approves a PR and switches working copy to default after merge
 - `issue-branch` — Create or checkout `fix/issue-<n>-<slug>` before Claude edits (POST)
 - `continue-issue` — Build a "Continue work" payload for an issue (GET: `?issue_number=N`); returns `{ sessionId, provider, prompt, unverifiedCount, hasContext }`
@@ -58,7 +58,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 ## Jobs / Runs
 
 - `/api/jobs` — All runs across projects (GET)
-- `/api/jobs/[jobId]` — Job detail (GET, DELETE). `GET` returns parsed log text for normal jobs, but returns the raw aggregated `log` for `release` jobs because release logs mix plain shell output with NDJSON child streams
+- `/api/jobs/[jobId]` — Job detail (GET, DELETE). `GET` returns parsed log text for normal jobs, but returns the raw aggregated `log` for `release` jobs because release logs mix plain shell output with NDJSON child streams. `DELETE` cooperatively cancels inline `commit`/`push` jobs; if they do not stop cleanly within 20s it returns `409 { detail }` instead of force-killing the server PID.
 - `/api/jobs/[jobId]/logs` — Job log content (GET)
 - `/api/jobs/[jobId]/board-sync` — Manually sync a finished root job to the GitHub project board (POST); rejects running jobs, requires board sync configured, surfaces GitHub failures instead of swallowing them
 - `/api/jobs/[jobId]/rerun` — Re-run a job (POST). Returns `409 { detail, blocking_job_id }` when another job is already running for the project

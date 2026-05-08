@@ -25,6 +25,7 @@ const PROJECTS = [
   'runs-failure-dns',
   'runs-abort-cancel',
   'strip-full-live',
+  'strip-abort-commit',
   'start-detect-runs',
   'start-detect-terminal',
   'start-detect-run-idle',

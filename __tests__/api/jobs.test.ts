@@ -392,6 +392,7 @@ describe('DELETE /api/jobs/[jobId]', () => {
   let getJobMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
+  let requestJobCancellationMock: ReturnType<typeof vi.fn>;
   let killSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
@@ -401,6 +402,7 @@ describe('DELETE /api/jobs/[jobId]', () => {
     getJobMock = vi.fn().mockReturnValue(null);
     updateJobMock = vi.fn();
     execMock = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
+    requestJobCancellationMock = vi.fn().mockResolvedValue(true);
 
     vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
@@ -409,6 +411,11 @@ describe('DELETE /api/jobs/[jobId]', () => {
 
     vi.doMock('@/lib/shared/shell', () => ({
       exec: execMock,
+    }));
+    vi.doMock('@/lib/jobs/cancellation', () => ({
+      requestJobCancellation: requestJobCancellationMock,
+      SAFE_PID_FLOOR: 100,
+      shouldSignalJobPid: (job: { pid: number; kind: string }) => job.pid > 100 && job.kind !== 'push' && job.kind !== 'commit',
     }));
 
     killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
@@ -472,6 +479,33 @@ describe('DELETE /api/jobs/[jobId]', () => {
     await DELETE(req, { params: Promise.resolve({ jobId: 'pid-job' }) });
 
     expect(killSpy).toHaveBeenCalledWith(5678, 'SIGTERM');
+  });
+
+  it('uses cooperative cancellation for inline push jobs', async () => {
+    const job = makeJob({ id: 'inline-push', kind: 'push', pid: 999, finishedAt: null });
+    getJobMock.mockReturnValue(job);
+
+    const req = new NextRequest('http://localhost/api/jobs/inline-push', { method: 'DELETE' });
+    const res = await DELETE(req, { params: Promise.resolve({ jobId: 'inline-push' }) });
+
+    expect(res.status).toBe(200);
+    expect(requestJobCancellationMock).toHaveBeenCalledWith('inline-push', 20_000);
+    expect(killSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 when inline cancellation times out', async () => {
+    const job = makeJob({ id: 'inline-commit', kind: 'commit', pid: 999, finishedAt: null });
+    getJobMock.mockReturnValue(job);
+    requestJobCancellationMock.mockResolvedValue(false);
+
+    const req = new NextRequest('http://localhost/api/jobs/inline-commit', { method: 'DELETE' });
+    const res = await DELETE(req, { params: Promise.resolve({ jobId: 'inline-commit' }) });
+
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.detail).toContain('stop cleanly');
+    expect(job.finishedAt).toBeNull();
+    expect(killSpy).not.toHaveBeenCalled();
   });
 
   it('sends SIGKILL after 2s timeout', async () => {

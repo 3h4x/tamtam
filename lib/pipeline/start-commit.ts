@@ -9,6 +9,12 @@ import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { currentParent } from '@/lib/jobs/parent-context';
 import { buildDiffContext } from '@/lib/git/diff-context';
 import { createJob, markDone, updateJob, listJobs, findActiveReleaseJob } from '@/lib/jobs/job-storage';
+import {
+  finishJobCancellation,
+  JobCancelledError,
+  registerJobCancellation,
+  throwIfJobCancelled,
+} from '@/lib/jobs/cancellation';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import {
   findReleaseScopedIssueContext,
@@ -25,10 +31,15 @@ const CONV_RE = /^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)
 // Generic fallback phrases the model produces when it lacks real diff context.
 const GENERIC_RE = /^chore:\s*(automated?\s*update|update|changes?)$/i;
 
-export async function generateCommitMessage(projPath: string, projectName: string, providerOverride?: string): Promise<string> {
+export async function generateCommitMessage(
+  projPath: string,
+  projectName: string,
+  providerOverride?: string,
+  signal?: AbortSignal,
+): Promise<string> {
   const [statR, diffR] = await Promise.all([
-    exec('git', ['-C', projPath, 'diff', '--cached', '--stat', '--no-color'], { timeout: 10000 }),
-    exec('git', ['-C', projPath, 'diff', '--cached', '--no-color'], { timeout: 10000 }),
+    exec('git', ['-C', projPath, 'diff', '--cached', '--stat', '--no-color'], { timeout: 10000, signal }),
+    exec('git', ['-C', projPath, 'diff', '--cached', '--no-color'], { timeout: 10000, signal }),
   ]);
 
   const { context } = buildDiffContext(statR.stdout, diffR.stdout);
@@ -89,7 +100,7 @@ Return ONLY the title — nothing else.${extra}`;
     );
   };
 
-  const r1 = await exec(claudeBin, claudeArgs(buildPrompt()), { cwd: projPath, timeout: 30000, env: cliEnv });
+  const r1 = await exec(claudeBin, claudeArgs(buildPrompt()), { cwd: projPath, timeout: 30000, env: cliEnv, signal });
   const msg1 = parse(r1.stdout);
 
   // If the first attempt returns a generic placeholder, retry once with an explicit nudge.
@@ -97,7 +108,7 @@ Return ONLY the title — nothing else.${extra}`;
     const r2 = await exec(
       claudeBin,
       claudeArgs(buildPrompt('\n\nIMPORTANT: Be specific about what actually changed in the diff above. Do not use generic descriptions like "automated update".')),
-      { cwd: projPath, timeout: 30000, env: cliEnv },
+      { cwd: projPath, timeout: 30000, env: cliEnv, signal },
     );
     const msg2 = parse(r2.stdout);
     if (msg2 && !GENERIC_RE.test(msg2)) return msg2;
@@ -206,14 +217,14 @@ export async function findIssueContext(
   return null;
 }
 
-export async function detectMainBranch(projPath: string): Promise<string> {
-  const r = await exec('git', ['-C', projPath, 'symbolic-ref', 'refs/remotes/origin/HEAD'], { timeout: 5000 });
+export async function detectMainBranch(projPath: string, signal?: AbortSignal): Promise<string> {
+  const r = await exec('git', ['-C', projPath, 'symbolic-ref', 'refs/remotes/origin/HEAD'], { timeout: 5000, signal });
   if (r.exitCode === 0) {
     const match = r.stdout.trim().match(/refs\/remotes\/origin\/(.+)/);
     if (match) return match[1];
   }
   // Fallback: check if 'main' or 'master' exists
-  const mainR = await exec('git', ['-C', projPath, 'rev-parse', '--verify', 'main'], { timeout: 3000 });
+  const mainR = await exec('git', ['-C', projPath, 'rev-parse', '--verify', 'main'], { timeout: 3000, signal });
   return mainR.exitCode === 0 ? 'main' : 'master';
 }
 
@@ -223,7 +234,24 @@ async function runCommit(
   log: (s: string) => void,
   issueCtx?: { number: number; repo: string; title: string } | null,
   provider?: string,
+  job?: { id: string; abortedAt?: number | null; cancelRequestedExitCode?: number | null },
+  signal?: AbortSignal,
 ): Promise<CommitResult> {
+  const execStep = async (
+    cmd: string,
+    args: string[],
+    options?: Parameters<typeof exec>[2],
+  ) => {
+    if (job) throwIfJobCancelled(job, signal);
+    const result = await exec(cmd, args, {
+      ...options,
+      signal,
+      abortProcessTree: cmd === 'git' ? true : options?.abortProcessTree,
+    });
+    if (job) throwIfJobCancelled(job, signal);
+    return result;
+  };
+
   // If we have issue context and are currently on the default branch, switch
   // to a feature branch BEFORE committing. Otherwise the commit lands on main,
   // the subsequent PR attempt produces an empty diff, and GH rejects it.
@@ -238,9 +266,9 @@ async function runCommit(
   })();
 
   if (needsBranch) {
-    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+    const branchR = await execStep('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
     const currentBranch = branchR.stdout.trim();
-    const mainBranch = await detectMainBranch(projPath);
+    const mainBranch = await detectMainBranch(projPath, signal);
     if (!currentBranch || currentBranch === mainBranch) {
       const featureBranch = issueCtx
         ? issueBranchName(issueCtx)
@@ -250,7 +278,7 @@ async function runCommit(
             return `feat/release-${d}`;
           })();
       log(`\n# on ${currentBranch || '(detached)'} — switching to ${featureBranch} before commit\n`);
-      const coR = await exec('git', ['-C', projPath, 'checkout', '-b', featureBranch], { timeout: 10000 });
+      const coR = await execStep('git', ['-C', projPath, 'checkout', '-b', featureBranch], { timeout: 10000 });
       if (coR.stdout) log(coR.stdout);
       if (coR.stderr) log(coR.stderr);
       if (coR.exitCode !== 0) {
@@ -258,7 +286,7 @@ async function runCommit(
         // default branch (zombie branch — PR merged, remote ref deleted, but
         // local ref still lingers), blow it away and create a fresh one.
         // Otherwise, try to reuse it by plain checkout.
-        const mergedR = await exec(
+        const mergedR = await execStep(
           'git', ['-C', projPath, 'branch', '--merged', mainBranch],
           { timeout: 5000 },
         );
@@ -268,8 +296,8 @@ async function runCommit(
           .filter(Boolean);
         if (mergedBranches.includes(featureBranch)) {
           log(`# ${featureBranch} is already merged into ${mainBranch} — deleting zombie ref and recreating\n`);
-          await exec('git', ['-C', projPath, 'branch', '-D', featureBranch], { timeout: 5000 });
-          const retryR = await exec('git', ['-C', projPath, 'checkout', '-b', featureBranch], { timeout: 10000 });
+          await execStep('git', ['-C', projPath, 'branch', '-D', featureBranch], { timeout: 5000 });
+          const retryR = await execStep('git', ['-C', projPath, 'checkout', '-b', featureBranch], { timeout: 10000 });
           if (retryR.stdout) log(retryR.stdout);
           if (retryR.stderr) log(retryR.stderr);
           if (retryR.exitCode !== 0) {
@@ -296,28 +324,28 @@ async function runCommit(
   // Stage all changes including new (untracked) files. .gitignore is expected
   // to exclude secrets — auto-push trusts it.
   log(`\n$ git add -A\n`);
-  const addR = await exec('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
+  const addR = await execStep('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
   if (addR.stdout) log(addR.stdout);
   if (addR.stderr) log(addR.stderr);
-  const statusR = await exec('git', ['-C', projPath, 'diff', '--cached', '--name-status'], { timeout: 10000 });
+  const statusR = await execStep('git', ['-C', projPath, 'diff', '--cached', '--name-status'], { timeout: 10000 });
   log(`\n$ git diff --cached --name-status\n${statusR.stdout}`);
   const hasStaged = !!statusR.stdout.trim();
 
   if (hasStaged) {
     log(`\n# generating commit message via Claude...\n`);
-    const message = await generateCommitMessage(projPath, projectName, provider);
+    const message = await generateCommitMessage(projPath, projectName, provider, signal);
     log(`# commit message: ${message}\n\n$ git commit -m "${message}"\n`);
-    let commitR = await exec('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 });
+    let commitR = await execStep('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 });
     if (commitR.stdout) log(commitR.stdout);
     if (commitR.stderr) log(commitR.stderr);
     // Pre-commit hook may have modified files, causing the commit to abort.
     // Stage the hook's changes and retry once so the hook's work is included.
     if (commitR.exitCode !== 0 && !commitR.stdout.includes('nothing to commit')) {
-      const hookChangesR = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
+      const hookChangesR = await execStep('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
       if (hookChangesR.stdout.trim()) {
         log(`\n# pre-commit hook modified files — staging and retrying commit\n`);
-        await exec('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
-        commitR = await exec('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 });
+        await execStep('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
+        commitR = await execStep('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 });
         if (commitR.stdout) log(commitR.stdout);
         if (commitR.stderr) log(commitR.stderr);
       }
@@ -326,10 +354,10 @@ async function runCommit(
       const detail = (commitR.stderr.trim() || commitR.stdout.trim() || `git commit exited ${commitR.exitCode}`).slice(0, 2000);
       return { ok: false, status: 500, detail: `Commit failed: ${detail}` };
     }
-    const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
+    const shaR = await execStep('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
     return { ok: true, commitSha: shaR.exitCode === 0 ? shaR.stdout.trim() : '', message: 'committed' };
   } else {
-    const aheadR = await exec('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
+    const aheadR = await execStep('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
     log(`\n$ git rev-list --count @{u}..HEAD\n${aheadR.stdout}`);
     const ahead = parseInt(aheadR.stdout.trim(), 10);
     if (!aheadR.stdout.trim() || aheadR.exitCode !== 0 || isNaN(ahead) || ahead === 0) {
@@ -383,6 +411,7 @@ export async function startProjectCommit(
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
   updateJob(job);
+  const signal = registerJobCancellation(job.id);
 
   // Acquire pipeline lock — skip under parent release lock.
   if (!underRelease) {
@@ -398,20 +427,29 @@ export async function startProjectCommit(
   };
   append(`# commit start — ${new Date().toISOString()}\n# repo: ${projPath}\n`);
 
-  const result = await runCommit(projectName, projPath, append, earlyIssueCtx, provider);
   try {
-    setProjectPushResult(projectName, result.ok ? null : result.detail);
-  } catch {}
-  if (result.ok) {
-    clearProjectDataCache();
-    append(`\n# commit ok — ${'commitSha' in result && result.commitSha ? result.commitSha : 'no-op'}\n${result.message}\n`);
-  } else {
-    append(`\n# commit failed (${result.status})\n${result.detail}\n`);
-  }
+    const result = await runCommit(projectName, projPath, append, earlyIssueCtx, provider, job, signal);
+    try {
+      setProjectPushResult(projectName, result.ok ? null : result.detail);
+    } catch {}
+    if (result.ok) {
+      clearProjectDataCache();
+      append(`\n# commit ok — ${'commitSha' in result && result.commitSha ? result.commitSha : 'no-op'}\n${result.message}\n`);
+    } else {
+      append(`\n# commit failed (${result.status})\n${result.detail}\n`);
+    }
 
-  await markDone(job, result.ok ? 0 : 1);
-  // Surface the job id so callers (e.g. the "Push to PR" route) can navigate
-  // the user to the commit terminal without re-querying.
-  if (result.ok) return { ...result, jobId: job.id };
-  return result;
+    await markDone(job, result.ok ? 0 : 1);
+    if (result.ok) return { ...result, jobId: job.id };
+    return result;
+  } catch (error) {
+    if (!(error instanceof JobCancelledError)) throw error;
+    append('\n# commit cancelled\n');
+    const exitCode = job.cancelRequestedExitCode ?? -3;
+    if (exitCode === -3 && job.abortedAt == null) job.abortedAt = Date.now() / 1000;
+    await markDone(job, exitCode);
+    return { ok: false, status: 499, detail: 'commit cancelled' };
+  } finally {
+    finishJobCancellation(job.id);
+  }
 }

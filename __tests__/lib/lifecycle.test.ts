@@ -338,6 +338,136 @@ describe('reconcileStaleRelease', () => {
   });
 });
 
+describe('runCompletionHooks abort cleanup', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let releaseLockMock: ReturnType<typeof vi.fn>;
+  let deleteJobMock: ReturnType<typeof vi.fn>;
+  let notifyMock: ReturnType<typeof vi.fn>;
+
+  function makeJob(kind: string, overrides: Partial<JobData> = {}): JobData {
+    const now = Date.now() / 1000;
+    return {
+      id: `${kind}-job`,
+      project: 'proj',
+      kind,
+      prompt: null,
+      pid: 0,
+      logPath: null,
+      startedAt: now,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    releaseLockMock = vi.fn();
+    deleteJobMock = vi.fn().mockResolvedValue(undefined);
+    notifyMock = vi.fn().mockResolvedValue(undefined);
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      deleteJob: deleteJobMock,
+      getJobStatus: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/git/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({
+        autoPushEnabled: false,
+        autoCommitEnabled: false,
+        releaseAfterRun: false,
+        prWorkflowEnabled: false,
+      }),
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      releaseLock: releaseLockMock,
+      getLock: vi.fn().mockReturnValue(null),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/jobs/retention', () => ({
+      pruneProjectLogs: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/notifications', () => ({
+      notify: notifyMock,
+    }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: vi.fn().mockReturnValue({
+        fix_ci_max_retries: 0,
+        fix_ci_retry_window_seconds: 120,
+        fix_ci_fast_crash_ms: 5000,
+      }),
+    }));
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('finalizes an aborted release after the inline step finishes late', async () => {
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({
+        id: 'release-timeout',
+        project: 'proj',
+        kind: 'release',
+        startedAt: now - 60,
+        abortedAt: now - 10,
+      }) as any,
+      makeJobRow({
+        id: 'commit-timeout',
+        project: 'proj',
+        kind: 'commit',
+        releaseId: 'release-timeout',
+        startedAt: now - 30,
+        finishedAt: now - 1,
+        exitCode: -3,
+      }) as any,
+    ]).run();
+
+    const { runCompletionHooks } = await import('@/lib/jobs/job-storage');
+
+    await runCompletionHooks(
+      makeJob('commit', {
+        id: 'commit-timeout',
+        project: 'proj',
+        releaseId: 'release-timeout',
+        finishedAt: now - 1,
+        exitCode: -3,
+      }),
+    );
+
+    const row = testDb.db.select().from(schema.jobs).where(eq(schema.jobs.id, 'release-timeout')).get();
+    expect(row?.finishedAt).not.toBeNull();
+    expect(row?.exitCode).toBe(-3);
+    expect(row?.abortedAt).not.toBeNull();
+    expect(releaseLockMock).toHaveBeenCalledWith('proj', 'release-timeout');
+    expect(deleteJobMock).toHaveBeenCalledTimes(1);
+    expect(deleteJobMock).toHaveBeenCalledWith('release-timeout');
+    expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'release_aborted',
+      project: 'proj',
+      job_id: 'release-timeout',
+    }));
+  });
+});
+
 // ─── reviewIsStuck convergence guard (tested through markDone) ───────────────
 
 describe('reviewIsStuck convergence guard', () => {

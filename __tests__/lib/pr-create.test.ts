@@ -168,6 +168,7 @@ describe('createIssuePR', () => {
   });
 
   it('creates a feature branch and pushes when on default branch', async () => {
+    const controller = new AbortController();
     execMock
       .mockResolvedValueOnce(resp(0, 'main\n'))               // git branch --show-current → default
       .mockResolvedValueOnce(resp(0, ''))                     // git branch <feature>
@@ -175,13 +176,18 @@ describe('createIssuePR', () => {
       .mockResolvedValueOnce(resp(0, '[]'))                   // gh pr list → no existing PR
       .mockResolvedValueOnce(resp(0, 'https://github.com/org/repo/pull/7\n')); // gh pr create
 
-    const result = await createIssuePR('/repo', log, issue);
+    const result = await createIssuePR('/repo', log, issue, controller.signal);
     expect(result).toBe('https://github.com/org/repo/pull/7');
 
     const branchPushCall = execMock.mock.calls.find(
       (c: any[]) => c[0] === 'git' && c[1]?.includes('push')
     );
     expect(branchPushCall).toBeTruthy();
+    expect(branchPushCall?.[2]).toMatchObject({
+      timeout: 30000,
+      signal: controller.signal,
+      abortProcessTree: true,
+    });
 
     const prListCall = execMock.mock.calls.find(
       (c: any[]) => c[0] === 'gh' && c[1]?.includes('list')
