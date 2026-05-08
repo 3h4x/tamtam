@@ -139,7 +139,7 @@ All three are read live on each job (not cached), so changing them takes effect 
 
 | Key | Type | Default | Effect |
 |-----|------|---------|--------|
-| `review_fix_max_iterations` | number | `3` | Cap on **NEEDS ATTENTION** review→fix verification rounds per release. It applies only to the review-side recovery loop. When the cap (or stuck-findings / fix-contradicts-review) trips, TamTam files a follow-up GitHub issue with the unresolved Finding IDs, tries to apply the canonical labels `tamtam` `review-followup` `priority-medium`, and skips any missing repo labels, then continues to commit + push so the partial work ships. **DO NOT SHIP** reviews are not downgraded by this setting; they still stop the release before commit/push. Test/commit/push safety caps still come from the shared env guard (`TAMTAM_MAX_STEP_ITERATIONS`). |
+| `review_fix_max_iterations` | number | `3` | Cap on **NEEDS ATTENTION** review→fix verification rounds per release. It applies only to the review-side recovery loop. When the cap (or stuck-findings / fix-contradicts-review) trips, TamTam files a follow-up GitHub issue with the structured unresolved findings, tries to apply the canonical labels `tamtam` `review-followup` `priority-medium`, and skips any missing repo labels, then continues to commit + push so the partial work ships. If the review did not emit structured Finding blocks, the issue includes a quoted prose excerpt instead. **DO NOT SHIP** reviews are not downgraded by this setting; they still stop the release before commit/push. Test/commit/push safety caps still come from the shared env guard (`TAMTAM_MAX_STEP_ITERATIONS`). |
 
 ### Worktree & Review Gates
 

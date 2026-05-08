@@ -64,6 +64,109 @@ export function findingsIdentity(text: string): string | null {
   return ids.join('|');
 }
 
+export type FindingSeverity = 'low' | 'medium' | 'high' | 'critical';
+
+export interface ParsedFinding {
+  id: string;
+  severity: FindingSeverity | null;
+  rootCause: string | null;
+  affectedPaths: string | null;
+  requiredFix: string | null;
+  requiredTests: string | null;
+}
+
+const findingFieldKeys = [
+  'severity',
+  'root cause',
+  'affected paths',
+  'documentation',
+  'required fix',
+  'required tests',
+  'verification',
+] as const;
+
+// Walk a parsed (text-only) review log and pull out structured Finding blocks
+// matching the REVIEW_OUTPUT_CONTRACT shape. Returns the de-duplicated list in
+// the order they first appear; later restatements of the same Finding ID
+// (common when reviews loop) are merged keeping the first non-empty value
+// for each field.
+export function parseFindings(text: string): ParsedFinding[] {
+  const lines = text.split(/\r?\n/);
+  const findings = new Map<string, ParsedFinding>();
+  const order: string[] = [];
+  const idRe = /^\s*[-*]?\s*Finding ID:\s*([a-z0-9][a-z0-9._/-]*)\s*$/i;
+  const fieldRe = /^\s*([A-Za-z][A-Za-z ]+):\s*(.*)$/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(idRe);
+    if (!m) continue;
+    const id = m[1].toLowerCase();
+    const fields: Record<string, string> = {};
+    let lastKey: string | null = null;
+
+    // Read fields until the next Finding ID, an empty section break, or the
+    // verdict line. Continuation lines (indented further than the field
+    // marker) append to the previous field — matches the contract's
+    // multi-line "Root cause" / "Required fix" usage.
+    for (let j = i + 1; j < lines.length; j++) {
+      if (idRe.test(lines[j])) break;
+      if (/^\s*Verdict\s*:/i.test(lines[j])) break;
+      if (/^\s*Findings\s*:/i.test(lines[j])) break;
+      const fm = lines[j].match(fieldRe);
+      if (fm) {
+        const key = fm[1].trim().toLowerCase();
+        if ((findingFieldKeys as readonly string[]).includes(key)) {
+          fields[key] = fm[2].trim();
+          lastKey = key;
+          continue;
+        }
+        // Unknown field name with a colon — could be a wrapped "files:line: ..."
+        // continuation. Append to the previous field if any.
+        if (lastKey) fields[lastKey] = `${fields[lastKey]} ${lines[j].trim()}`.trim();
+        continue;
+      }
+      const trimmed = lines[j].trim();
+      if (!trimmed) {
+        // Blank line: end the current finding only if we've already collected
+        // at least one field; otherwise tolerate it (contract examples have
+        // blanks between findings).
+        if (lastKey) break;
+        continue;
+      }
+      if (lastKey) fields[lastKey] = `${fields[lastKey]} ${trimmed}`.trim();
+    }
+
+    const severity = (fields['severity'] || '').toLowerCase();
+    const finding: ParsedFinding = {
+      id,
+      severity: (['low', 'medium', 'high', 'critical'] as const).includes(severity as FindingSeverity)
+        ? (severity as FindingSeverity)
+        : null,
+      rootCause: fields['root cause'] || null,
+      affectedPaths: fields['affected paths'] || null,
+      requiredFix: fields['required fix'] || null,
+      requiredTests: fields['required tests'] || null,
+    };
+    if (!findings.has(id)) {
+      findings.set(id, finding);
+      order.push(id);
+    } else {
+      // Merge: keep first non-empty value per field.
+      const existing = findings.get(id)!;
+      const merged: ParsedFinding = {
+        id,
+        severity: existing.severity ?? finding.severity,
+        rootCause: existing.rootCause ?? finding.rootCause,
+        affectedPaths: existing.affectedPaths ?? finding.affectedPaths,
+        requiredFix: existing.requiredFix ?? finding.requiredFix,
+        requiredTests: existing.requiredTests ?? finding.requiredTests,
+      };
+      findings.set(id, merged);
+    }
+  }
+  return order.map((id) => findings.get(id)!);
+}
+
 export type FixClaim = { id: string; status: 'fixed' | 'not fixed' };
 
 // Parse the Fix checklist emitted by fix jobs (per FIX_OUTPUT_CONTRACT). For

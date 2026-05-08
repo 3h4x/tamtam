@@ -3,6 +3,7 @@ import {
   extractFindingIds,
   extractFixClaims,
   findingsIdentity,
+  parseFindings,
   stripFinalVerdict,
 } from '@/lib/pipeline/review-contract'
 
@@ -94,5 +95,34 @@ describe('review-contract helpers', () => {
       '- Finding ID: b-item',
       '- Finding ID: a-item',
     ].join('\n'))).toBe('a-item|b-item')
+  })
+
+  it('parses full contract findings without folding ignored contract fields into adjacent fields', () => {
+    const text = [
+      'Findings:',
+      '- Finding ID: contract-fields-parsed-as-continuations',
+      '  Severity: medium',
+      '  Root cause: contract labels are treated as prose',
+      '    across multiple continuation lines',
+      '  Affected paths: lib/pipeline/review-contract.ts',
+      '  Documentation: not required; implementation-only parser behavior',
+      '  Required fix: parse every contract label deliberately',
+      '    while preserving wrapped details',
+      '  Required tests: parser coverage for full contract findings',
+      '  Verification: pnpm test __tests__/lib/review-contract.test.ts',
+      '',
+      'Verdict: NEEDS ATTENTION',
+    ].join('\n')
+
+    expect(parseFindings(text)).toEqual([
+      {
+        id: 'contract-fields-parsed-as-continuations',
+        severity: 'medium',
+        rootCause: 'contract labels are treated as prose across multiple continuation lines',
+        affectedPaths: 'lib/pipeline/review-contract.ts',
+        requiredFix: 'parse every contract label deliberately while preserving wrapped details',
+        requiredTests: 'parser coverage for full contract findings',
+      },
+    ])
   })
 })

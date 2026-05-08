@@ -1,7 +1,7 @@
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { exec } from '@/lib/shared/shell';
-import { readLog } from '@/lib/jobs/verdict';
-import { extractFindingIds } from '@/lib/pipeline/review-contract';
+import { readParsedLog } from '@/lib/jobs/verdict';
+import { parseFindings, type ParsedFinding, stripFinalVerdict } from '@/lib/pipeline/review-contract';
 import type { JobData } from '@/lib/jobs/types';
 
 export type ExhaustionReason = 'review-cap' | 'review-stuck' | 'fix-contradicts-review';
@@ -11,7 +11,10 @@ export type ExhaustionIssueResult =
   | { ok: false; error: string };
 
 const ISSUE_LABELS = ['tamtam', 'review-followup', 'priority-medium'];
-const REVIEW_TAIL_BYTES = 3000;
+// Cap any free-form excerpt we keep in the issue body. Stream-json telemetry
+// is parsed out before this is applied — the cap exists only to bound a
+// pathological reviewer that ignored the structured contract.
+const PROSE_FALLBACK_BYTES = 1200;
 
 type ExecLikeResult = Partial<{ stdout: string; stderr: string; exitCode: number }> | null | undefined;
 
@@ -29,42 +32,43 @@ function shortReleaseId(releaseId: string | null | undefined): string {
   return tail.slice(-8);
 }
 
+function renderFinding(f: ParsedFinding): string {
+  const sev = f.severity ? ` _(severity: ${f.severity})_` : '';
+  const rows: string[] = [`### \`${f.id}\`${sev}`];
+  if (f.rootCause) rows.push(``, `**Root cause** — ${f.rootCause}`);
+  if (f.affectedPaths) rows.push(``, `**Affected paths** — ${f.affectedPaths}`);
+  if (f.requiredFix) rows.push(``, `**Required fix** — ${f.requiredFix}`);
+  if (f.requiredTests) rows.push(``, `**Required tests** — ${f.requiredTests}`);
+  return rows.join('\n');
+}
+
 function buildIssueBody(opts: {
   reason: ExhaustionReason;
   reviewJob: JobData;
-  findingIds: string[];
-  reviewTail: string;
+  findings: ParsedFinding[];
+  proseFallback: string;
 }): string {
-  const { reason, reviewJob, findingIds, reviewTail } = opts;
-  const findingsList = findingIds.length
-    ? findingIds.map((id) => `- \`${id}\``).join('\n')
-    : '- _(no Finding IDs were extracted from the review log; see the excerpt below for the raw findings)_';
+  const { reason, reviewJob, findings, proseFallback } = opts;
   const releaseHandle = shortReleaseId(reviewJob.releaseId ?? null);
+  const findingCount = findings.length;
+  const findingsBlock = findingCount > 0
+    ? findings.map(renderFinding).join('\n\n')
+    : `_The reviewer did not produce structured Finding blocks. Raw note from the review:_\n\n${proseFallback ? '> ' + proseFallback.split('\n').filter(Boolean).join('\n> ') : '_(empty)_'}`;
+  const ids = findings.map((f) => `\`${f.id}\``).join(', ') || '_none extracted_';
   return [
     `## Problem`,
     ``,
     `Release \`${releaseHandle}\` stopped before reaching LGTM: ${reasonHumanLabel(reason)}.`,
-    `${findingIds.length} unresolved finding${findingIds.length === 1 ? '' : 's'} from review job \`${reviewJob.id}\` need follow-up. Check the release log for whether the partial work was ultimately committed or pushed after this fallback fired.`,
+    `${findingCount} unresolved finding${findingCount === 1 ? '' : 's'} carried over from TamTam review job \`${reviewJob.id}\`.`,
     ``,
     `## Approach`,
     ``,
-    `Address each unresolved finding below, then run a fresh review:`,
-    ``,
-    findingsList,
+    findingsBlock,
     ``,
     `## Acceptance criteria`,
     ``,
-    `- A new review on this branch returns \`Verdict: LGTM\``,
-    `- None of the Finding IDs above appear in the new review log`,
-    ``,
-    `<details>`,
-    `<summary>Original review excerpt</summary>`,
-    ``,
-    '```',
-    reviewTail.trim(),
-    '```',
-    ``,
-    `</details>`,
+    `- Each finding above is addressed in the implementation and covered by tests.`,
+    `- A fresh review on this branch returns \`Verdict: LGTM\` with none of the Finding IDs above (${ids}) re-flagged.`,
   ].join('\n');
 }
 
@@ -120,13 +124,22 @@ export async function fileReviewExhaustionIssue(
   if (!repo) return { ok: false, error: 'could not resolve GitHub repo for project' };
   const repoLabels = await detectRepoLabels(projPath, repo);
 
-  const logText = readLog(reviewJob, 100_000);
-  const findingIds = extractFindingIds(logText);
-  const reviewTail = logText.slice(-REVIEW_TAIL_BYTES);
+  // Use the parsed (text-only) log so Finding IDs aren't trapped inside
+  // stream-json string escapes. The raw log mixes the agent shim's
+  // `[tamtam] launching:` lines and `{"type":"stream_event",...}` JSON, none
+  // of which belongs in a public GitHub issue.
+  const parsedLog = readParsedLog(reviewJob, 100_000);
+  const findings = parseFindings(parsedLog);
+  const proseOnly = stripFinalVerdict(parsedLog).trim();
+  const proseFallback = proseOnly.length > PROSE_FALLBACK_BYTES
+    ? `${proseOnly.slice(-PROSE_FALLBACK_BYTES).trim()} …`
+    : proseOnly;
 
   const releaseHandle = shortReleaseId(reviewJob.releaseId ?? null);
-  const title = `chore(review): finish review findings from release ${releaseHandle}`;
-  const body = buildIssueBody({ reason, reviewJob, findingIds, reviewTail });
+  const title = findings.length > 0
+    ? `chore(review): ${findings.length} unresolved finding${findings.length === 1 ? '' : 's'} from release ${releaseHandle}`
+    : `chore(review): unresolved review from release ${releaseHandle}`;
+  const body = buildIssueBody({ reason, reviewJob, findings, proseFallback });
 
   const labels = repoLabels ? ISSUE_LABELS.filter((label) => repoLabels.has(label)) : ISSUE_LABELS;
   const labelArgs: string[] = [];
