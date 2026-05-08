@@ -104,6 +104,7 @@ See `docs/API.md` for the full route reference. New routes must be documented th
 - **All new API routes must have vitest tests** in `__tests__/api/`; lib logic tests go in `__tests__/lib/` or alongside the file.
 - **Do not mock the database** — use an in-memory `better-sqlite3` instance with the real Drizzle schema. Mock only external side-effects: `lib/shared/shell.ts` `exec`, PM2, Claude CLI spawning.
 - Run `pnpm test` after every non-trivial code change. All tests must pass before committing.
+- **Use the package scripts, not raw Vitest**: run `pnpm test` / `pnpm test:watch` instead of `vitest` directly so `scripts/ensure-better-sqlite3.js` runs first and verifies the native SQLite binding before the suite starts.
 - Test naming: `__tests__/api/<route-name>.test.ts` mirroring `app/api/<route-name>/route.ts`.
 - **`createTestDb()` pattern**: each test file defines its own local `createTestDb()` opening `new Database(':memory:')` with `pragma journal_mode = WAL` and creates only the tables that test needs via raw SQL. No shared helper — copy from the nearest similar test. Never import the real DB connection in tests.
 - **Match the nearby test style**: this repo already mixes one-route-per-file tests with broader coverage files for closely related endpoints/components. Extend the nearest existing test when it already owns that behavior; do not introduce a new shared test utility layer just to avoid a little duplication.
@@ -220,6 +221,7 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 - **Runtime versions**: Next.js 16, React 19, TypeScript 6 (strict), Tailwind CSS v4, pnpm 10. Do not use APIs requiring a higher version than what's pinned in `package.json`.
 - **Path imports**: always use the `@/` alias, never relative `../../`.
 - **File naming**: kebab-case (`start-fix.ts`); PascalCase only for React component files (`AgentsTab.tsx`).
+- **Symbol naming**: functions, variables, and hooks use `camelCase`; React components, TypeScript interfaces/types, and other constructors use `PascalCase`; keep `snake_case` only when matching persisted settings keys, DB columns, or external API payloads already defined that way.
 - **Components**: PascalCase, one per file, `.tsx`. No class components.
 - **Barrel files**: do not create new barrels or new `index.ts` re-export files. Existing exceptions are `lib/client-api.ts` (top-level client barrel), `lib/jobs/job-storage.ts` (compatibility barrel), and `lib/db/index.ts` (domain-local barrel); otherwise import directly from the module.
 - **TypeScript**: strict mode is on. Avoid `any`. Never use `// @ts-ignore` — fix the type.
@@ -239,6 +241,7 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 - **Audit after changes**: run `pnpm audit` after any `pnpm add`/`pnpm remove`; fix or document high-severity findings before committing.
 1. Use `pnpm` for all manifest and lockfile changes. Do not run `npm install`, `yarn add`, or any other package-manager command that can desync `pnpm-lock.yaml`.
 2. Before proposing a new package, inspect the npm registry entry for maintainer continuity and release history, not just download count. Treat sudden ownership flips, very recent first publishes, or thin version history as a blocker unless the user explicitly accepts that risk.
+3. Treat version bumps and lockfile refreshes as dependency changes too: after `pnpm up`, `pnpm update`, `pnpm dedupe`, or any manual `pnpm-lock.yaml` refresh, run `pnpm audit` and review newly introduced install/build scripts before committing.
 
 ## Commit & Branch Rules
 - **Conventional commits**: `type(scope): message` — observed types: `feat`, `fix`, `test`, `docs`, `refactor`, `perf`, `chore`. Subject under 72 chars.
