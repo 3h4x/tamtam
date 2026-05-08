@@ -1,15 +1,14 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { fetchRecommendations, updateRecommendation, applyRecommendation } from '@/lib/client-api'
+import { fetchAllOpenRecommendations, updateRecommendation, applyRecommendation } from '@/lib/client-api'
 import type { Recommendation } from '@/lib/client-api'
 import { RecommendationCard } from '@/components/recommendations/RecommendationCard'
 
-interface RecommendationsTabProps {
-  projectName: string
-}
-
-export function RecommendationsTab({ projectName }: RecommendationsTabProps) {
+// Cross-project Recommendations page. Lists every open recommendation grouped
+// by project, with the same Accept/dismiss buttons used inside each project's
+// Recommendations tab. Hidden when no opens exist.
+export function GlobalRecommendationsPage() {
   const [items, setItems] = useState<Recommendation[]>([])
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState<string | null>(null)
@@ -20,14 +19,14 @@ export function RecommendationsTab({ projectName }: RecommendationsTabProps) {
 
   const load = async () => {
     setLoadError(null)
-    const data = await fetchRecommendations(projectName)
+    const data = await fetchAllOpenRecommendations()
     setItems(data.recommendations)
     setLoading(false)
   }
 
   useEffect(() => {
     let active = true
-    fetchRecommendations(projectName)
+    fetchAllOpenRecommendations()
       .then((data) => {
         if (!active) return
         setItems(data.recommendations)
@@ -39,16 +38,23 @@ export function RecommendationsTab({ projectName }: RecommendationsTabProps) {
       })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [projectName])
+  }, [])
 
-  const openItems = useMemo(() => items.filter((item) => item.status === 'open'), [items])
-  const closedItems = useMemo(() => items.filter((item) => item.status !== 'open'), [items])
+  const grouped = useMemo(() => {
+    const m = new Map<string, Recommendation[]>()
+    for (const item of items) {
+      const arr = m.get(item.project) ?? []
+      arr.push(item)
+      m.set(item.project, arr)
+    }
+    return Array.from(m.entries()).sort((a, b) => b[1].length - a[1].length)
+  }, [items])
 
   const dismiss = async (item: Recommendation) => {
     setUpdating(item.id)
     setErrors((prev) => { const { [item.id]: _, ...rest } = prev; void _; return rest })
     try {
-      await updateRecommendation(projectName, item.id, 'dismissed')
+      await updateRecommendation(item.project, item.id, 'dismissed')
       await load()
     } catch (err) {
       setErrors((prev) => ({ ...prev, [item.id]: err instanceof Error ? err.message : 'Failed to dismiss' }))
@@ -61,7 +67,7 @@ export function RecommendationsTab({ projectName }: RecommendationsTabProps) {
     setUpdating(item.id)
     setErrors((prev) => { const { [item.id]: _, ...rest } = prev; void _; return rest })
     try {
-      await applyRecommendation(projectName, item)
+      await applyRecommendation(item.project, item)
       await load()
     } catch (err) {
       setErrors((prev) => ({ ...prev, [item.id]: err instanceof Error ? err.message : 'Failed to apply recommendation' }))
@@ -72,41 +78,21 @@ export function RecommendationsTab({ projectName }: RecommendationsTabProps) {
 
   if (loading) {
     return (
-      <div className="space-y-4">
-        <div className="flex items-baseline justify-between gap-3">
-          <div>
-            <div className="skeleton h-5 w-36 rounded" />
-            <div className="skeleton h-3 w-56 rounded mt-2" />
-          </div>
-          <div className="skeleton h-3 w-12 rounded" />
-        </div>
-        <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="border-b border-border last:border-b-0 p-3 flex items-start justify-between gap-3" style={{ opacity: 1 - i * 0.25 }}>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="skeleton h-4 w-16 rounded" />
-                  <div className="skeleton h-3 w-24 rounded" />
-                </div>
-                <div className="skeleton h-3.5 w-3/5 rounded mt-2" />
-                <div className="skeleton h-3 w-4/5 rounded mt-1.5" />
-              </div>
-              <div className="skeleton h-6 w-14 rounded shrink-0" />
-            </div>
-          ))}
-        </div>
+      <div className="px-4 py-6 max-w-5xl mx-auto">
+        <div className="skeleton h-6 w-48 rounded" />
+        <div className="skeleton h-3 w-64 rounded mt-2" />
       </div>
     )
   }
 
   return (
-    <div className="space-y-4">
+    <div className="px-4 py-6 max-w-5xl mx-auto space-y-6">
       <div className="flex items-baseline justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-text-primary">Recommendations</h2>
-          <p className="text-xs text-text-tertiary mt-1">Agent and scheduler suggestions for this project.</p>
+          <h1 className="text-xl font-semibold text-text-primary">Recommendations</h1>
+          <p className="text-xs text-text-tertiary mt-1">Open agent and scheduler suggestions across every project.</p>
         </div>
-        <div className="text-xs font-mono text-text-tertiary tabular-nums">{openItems.length} open</div>
+        <div className="text-xs font-mono text-text-tertiary tabular-nums">{items.length} open</div>
       </div>
 
       {loadError && (
@@ -129,30 +115,33 @@ export function RecommendationsTab({ projectName }: RecommendationsTabProps) {
         </div>
       )}
 
-      {!loadError && openItems.length === 0 ? (
+      {!loadError && grouped.length === 0 ? (
         <div className="rounded-lg border border-border bg-bg-secondary p-4 text-sm text-text-tertiary">
-          No open recommendations
+          No open recommendations across any project.
         </div>
       ) : !loadError ? (
-        <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
-          {openItems.map((item) => (
-            <RecommendationCard
-              key={item.id}
-              item={item}
-              busy={updating === item.id}
-              errorMessage={errors[item.id] ?? null}
-              onAccept={() => accept(item)}
-              onDismiss={() => dismiss(item)}
-            />
-          ))}
-        </div>
+        grouped.map(([project, projectItems]) => (
+          <section key={project}>
+            <h2 className="text-sm font-semibold text-text-primary mb-2 flex items-center gap-2">
+              <span>{project}</span>
+              <span className="text-xs font-mono text-text-tertiary">{projectItems.length}</span>
+            </h2>
+            <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
+              {projectItems.map((item) => (
+                <RecommendationCard
+                  key={item.id}
+                  item={item}
+                  busy={updating === item.id}
+                  errorMessage={errors[item.id] ?? null}
+                  onAccept={() => accept(item)}
+                  onDismiss={() => dismiss(item)}
+                  showProjectLink
+                />
+              ))}
+            </div>
+          </section>
+        ))
       ) : null}
-
-      {closedItems.length > 0 && (
-        <div className="text-xs text-text-tertiary">
-          {closedItems.length} dismissed recommendation{closedItems.length === 1 ? '' : 's'}
-        </div>
-      )}
     </div>
   )
 }

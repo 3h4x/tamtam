@@ -147,22 +147,28 @@ describe('project client helper fallbacks', () => {
     const {
       createProjectPR,
       fetchRecommendations,
+      fetchRecommendationsSummary,
+      fetchAllOpenRecommendations,
       fetchBehind,
       fetchCustomActions,
       runMarkDod,
       runCustomAction,
       saveCustomActions,
       updateRecommendation,
+      applyRecommendation,
     } = await import('@/lib/client-api');
     return {
       createProjectPR,
       fetchRecommendations,
+      fetchRecommendationsSummary,
+      fetchAllOpenRecommendations,
       fetchBehind,
       fetchCustomActions,
       runMarkDod,
       runCustomAction,
       saveCustomActions,
       updateRecommendation,
+      applyRecommendation,
     };
   }
 
@@ -276,6 +282,103 @@ describe('project client helper fallbacks', () => {
 
     stubFetch(false, { detail: 'invalid recommendation status' }, 400, 'Bad Request');
     await expect(updateRecommendation('proj', 'rec-1', 'dismissed')).rejects.toThrow('invalid recommendation status');
+  });
+
+  it('fetchRecommendationsSummary and fetchAllOpenRecommendations hit the global recommendations endpoints', async () => {
+    const fetchMock = stubFetch(true, { openCount: 2, byProject: { alpha: 2 } });
+    const { fetchRecommendationsSummary } = await getClientApi();
+
+    await expect(fetchRecommendationsSummary()).resolves.toEqual({ openCount: 2, byProject: { alpha: 2 } });
+    expect((fetchMock.mock.calls[0] as [string])[0]).toBe('/api/recommendations/summary');
+
+    stubFetch(true, {
+      recommendations: [{ id: 'rec-1', project: 'alpha', status: 'open' }],
+    });
+    const { fetchAllOpenRecommendations } = await getClientApi();
+
+    await expect(fetchAllOpenRecommendations()).resolves.toEqual({
+      recommendations: [{ id: 'rec-1', project: 'alpha', status: 'open' }],
+    });
+    expect((vi.mocked(globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string])[0]).toBe('/api/recommendations');
+  });
+
+  it('applyRecommendation calls the dedicated server apply endpoint', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          json: async () => ({ recommendation: { id: 'rec-1', status: 'applied' } }),
+        }),
+    );
+    const { applyRecommendation } = await getClientApi();
+
+    await expect(
+      applyRecommendation('owner/repo', {
+        id: 'rec-1',
+        project: 'owner/repo',
+        source_kind: 'agent:tests',
+        source_id: null,
+        agent_id: 'agent-1',
+        agent_name: 'tests',
+        type: 'agent_schedule_backoff',
+        title: 'Back off',
+        detail: 'No work.',
+        status: 'open',
+        payload: { recommendedSchedule: '8h' },
+        created_at: 10,
+        updated_at: 20,
+      }),
+    ).resolves.toEqual({ recommendation: { id: 'rec-1', status: 'applied' } });
+
+    const fetchMock = vi.mocked(globalThis.fetch as ReturnType<typeof vi.fn>);
+    expect(fetchMock.mock.calls).toHaveLength(1);
+    expect((fetchMock.mock.calls[0] as [string])[0]).toBe('/api/projects/by-project/owner%2Frepo/recommendations/apply');
+    expect(JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string)).toEqual({ id: 'rec-1' });
+  });
+
+  it('applyRecommendation surfaces recommendation validation and server apply failures', async () => {
+    const { applyRecommendation } = await getClientApi();
+
+    await expect(
+      applyRecommendation('proj', {
+        id: 'rec-1',
+        project: 'proj',
+        source_kind: 'agent:tests',
+        source_id: null,
+        agent_id: null,
+        agent_name: 'tests',
+        type: 'agent_schedule_backoff',
+        title: 'Back off',
+        detail: 'No work.',
+        status: 'open',
+        payload: { recommendedSchedule: '8h' },
+        created_at: 10,
+        updated_at: 20,
+      }),
+    ).rejects.toThrow('Recommendation is missing agent_id');
+
+    stubFetch(false, { detail: 'agent locked' }, 409, 'Conflict');
+
+    await expect(
+      applyRecommendation('proj', {
+        id: 'rec-2',
+        project: 'proj',
+        source_kind: 'agent:tests',
+        source_id: null,
+        agent_id: 'agent-2',
+        agent_name: 'tests',
+        type: 'agent_schedule_backoff',
+        title: 'Back off',
+        detail: 'No work.',
+        status: 'open',
+        payload: { recommendedSchedule: '8h' },
+        created_at: 10,
+        updated_at: 20,
+      }),
+    ).rejects.toThrow('agent locked');
   });
 });
 

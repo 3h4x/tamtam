@@ -477,7 +477,11 @@ export async function fetchRecommendations(projectName: string): Promise<{ recom
   return response.json()
 }
 
-export async function updateRecommendation(projectName: string, recommendationId: string, status: Recommendation['status']): Promise<{ recommendation: Recommendation }> {
+export async function updateRecommendation(
+  projectName: string,
+  recommendationId: string,
+  status: Extract<Recommendation['status'], 'open' | 'dismissed'>,
+): Promise<{ recommendation: Recommendation }> {
   const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/recommendations`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -486,6 +490,65 @@ export async function updateRecommendation(projectName: string, recommendationId
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
     throw new Error(data.detail || `Failed to update recommendation: ${response.statusText}`)
+  }
+  return response.json()
+}
+
+export interface RecommendationsSummary {
+  openCount: number
+  byProject: Record<string, number>
+}
+
+export async function fetchRecommendationsSummary(): Promise<RecommendationsSummary> {
+  const response = await fetch(`/api/recommendations/summary`)
+  if (!response.ok) throw new Error(`Failed to fetch recommendations summary: ${response.statusText}`)
+  return response.json()
+}
+
+export async function fetchAllOpenRecommendations(): Promise<{ recommendations: Recommendation[] }> {
+  const response = await fetch(`/api/recommendations`)
+  if (!response.ok) throw new Error(`Failed to fetch recommendations: ${response.statusText}`)
+  return response.json()
+}
+
+// Auto-apply whitelist — only types whose payload is unambiguous and whose
+// effect is reversible should be auto-applicable. Anything else stays
+// dismiss-only until the recommendation type is explicitly designed.
+export const AUTO_APPLICABLE_RECOMMENDATION_TYPES = new Set([
+  'agent_schedule_backoff',
+])
+
+/**
+ * Apply a recommendation by performing the underlying mutation it suggests
+ * on the server and only then marking the recommendation as `applied`.
+ * Today only `agent_schedule_backoff` is supported.
+ *
+ * Returns the updated recommendation row on success. The route owns the
+ * validation + rollback behavior so callers don't need to orchestrate
+ * multiple writes from the client.
+ */
+export async function applyRecommendation(
+  projectName: string,
+  rec: Recommendation,
+): Promise<{ recommendation: Recommendation }> {
+  if (!AUTO_APPLICABLE_RECOMMENDATION_TYPES.has(rec.type)) {
+    throw new Error(`Recommendation type "${rec.type}" is not auto-applicable`)
+  }
+  if (rec.type === 'agent_schedule_backoff') {
+    if (!rec.agent_id) throw new Error('Recommendation is missing agent_id — cannot apply')
+    const recommended = rec.payload?.recommendedSchedule
+    if (typeof recommended !== 'string' || !recommended) {
+      throw new Error('Recommendation payload is missing recommendedSchedule')
+    }
+  }
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/recommendations/apply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: rec.id }),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || `Failed to apply recommendation: ${response.statusText}`)
   }
   return response.json()
 }
