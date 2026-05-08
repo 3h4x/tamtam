@@ -76,16 +76,26 @@ test.describe('Review-cap exhaustion → file issue + ship anyway', () => {
     // Sanity: title + labels match the canonical TamTam contract.
     const args = issueCreateCall!.args;
     const titleIdx = args.indexOf('--title');
-    expect(args[titleIdx + 1]).toMatch(/finish review findings from release/);
+    expect(args[titleIdx + 1]).toMatch(/unresolved finding(s)? from release|unresolved review from release/);
     const labels = args.reduce<string[]>(
       (acc, v, i) => (args[i - 1] === '--label' ? [...acc, v] : acc),
       [],
     );
     expect(labels).toEqual(expect.arrayContaining(['tamtam', 'review-followup', 'priority-medium']));
 
-    // Body should reference the unresolved Finding ID surfaced in every review.
+    // Body should reference the unresolved Finding ID surfaced in every review,
+    // expose the structured fields the reviewer emitted (severity, root cause,
+    // required fix), and contain none of the stream-json telemetry that the
+    // raw log carries — that's the user-facing tightening.
     const bodyIdx = args.indexOf('--body');
-    expect(args[bodyIdx + 1]).toContain('persistent-null-check');
+    const body = args[bodyIdx + 1];
+    expect(body).toContain('persistent-null-check');
+    expect(body).toContain('severity: medium');
+    expect(body).toContain('handler still missing null guard');
+    expect(body).toContain('add a guard');
+    expect(body).not.toContain('stream_event');
+    expect(body).not.toContain('content_block_delta');
+    expect(body).not.toContain('[tamtam] launching');
 
     // git push must have been invoked — the partial work shipped.
     const pushCall = calls.find((c) => !c.cmd && c.args.includes('push'));
