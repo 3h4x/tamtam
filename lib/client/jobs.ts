@@ -5,7 +5,7 @@ const JOBS_BASE = '/api/jobs'
 export async function fetchJobs(
   project?: string,
   opts: { limit?: number } = {},
-): Promise<{ jobs: JobInfo[]; pendingReleaseProjects?: string[] }> {
+): Promise<{ jobs: JobInfo[]; total?: number; pendingReleaseProjects?: string[] }> {
   const params = new URLSearchParams()
   if (project) params.set('project', project)
   if (typeof opts.limit === 'number') params.set('limit', String(opts.limit))

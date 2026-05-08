@@ -404,6 +404,23 @@ export async function registerNode(): Promise<void> {
   setInterval(runProbeSweep, probeIntervalMs);
   setInterval(drainStaleQueuedAgentRuns, probeIntervalMs);
 
+  // Reconcile orphaned recovery flags. drainPendingRelease clears its flag
+  // and only re-stamps it on retryable failures, so any pending_release row
+  // with no real reason to wait (no lock holding, no pause, nothing to ship)
+  // is dropped on the next tick. Same for queued agent runs whose project is
+  // unlocked. This is the safety net behind the lifecycle/pipeline-lock
+  // hooks: if a hook ever fails to fire (server crash mid-write, code bug),
+  // the next reconcile loop heals the state without manual intervention.
+  const reconcileRecovery = async () => {
+    try {
+      const { drainAllRecoveryWork } = await import('@/lib/pipeline/recovery-drain');
+      await drainAllRecoveryWork('[reconcile]');
+    } catch (err) {
+      console.error('[reconcile] recovery sweep failed:', err);
+    }
+  };
+  setInterval(reconcileRecovery, probeIntervalMs);
+
   // Quota drain ticker: every 60s, refresh the cached subscription quota and,
   // if we're below the block threshold, drain any releases or DB-queued agent
   // fires that were deferred while the 5h window was full.

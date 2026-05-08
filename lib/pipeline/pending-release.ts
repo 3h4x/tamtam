@@ -68,7 +68,7 @@ export function listPendingReleaseProjects(): string[] {
   }
 }
 
-function shouldKeepPendingRelease(result: { ok: boolean; status?: number; detail?: string; retryable?: boolean }): boolean {
+export function shouldKeepPendingRelease(result: { ok: boolean; status?: number; detail?: string; retryable?: boolean }): boolean {
   if (result.ok) return false;
   if (result.retryable) return true;
   if (result.status === 429) return true;

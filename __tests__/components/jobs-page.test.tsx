@@ -6,8 +6,9 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { JobsPage } from '@/components/JobsPage'
 
-const { fetchJobsMock, pushMock } = vi.hoisted(() => ({
+const { fetchJobsMock, fetchProjectsMock, pushMock } = vi.hoisted(() => ({
   fetchJobsMock: vi.fn(),
+  fetchProjectsMock: vi.fn(),
   pushMock: vi.fn(),
 }))
 
@@ -18,6 +19,7 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('@/lib/client-api', () => ({
   fetchJobs: fetchJobsMock,
+  fetchProjects: fetchProjectsMock,
 }))
 
 vi.mock('@/lib/shared/format', () => ({
@@ -45,6 +47,7 @@ function renderJobsPage() {
 describe('JobsPage', () => {
   beforeEach(() => {
     fetchJobsMock.mockReset()
+    fetchProjectsMock.mockReset()
     pushMock.mockReset()
     fetchJobsMock.mockResolvedValue({
       jobs: [{
@@ -64,7 +67,13 @@ describe('JobsPage', () => {
         provider: 'claude',
         work_summary: 'Reviewing the current diff.',
       }],
+      total: 1,
       pendingReleaseProjects: [],
+    })
+    fetchProjectsMock.mockResolvedValue({
+      tasks: [{ id: 'acme/widgets' }],
+      priorities: [],
+      issueCounts: {},
     })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -81,7 +90,7 @@ describe('JobsPage', () => {
     const { container, unmount } = renderJobsPage()
 
     await vi.waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 50 })
+      expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 200 })
       expect(container.textContent).toContain('startedago:100')
     })
 
@@ -96,7 +105,7 @@ describe('JobsPage', () => {
     const { container, unmount } = renderJobsPage()
 
     await vi.waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 50 })
+      expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 200 })
       expect(container.textContent).toContain('running 1')
     })
 
@@ -112,6 +121,36 @@ describe('JobsPage', () => {
     expect(runningButton.className).toContain('text-status-info')
     expect(runningButton.className).not.toContain('text-status-warning')
     expect(runningBadge.className).toContain('text-status-info')
+  })
+
+  it('uses the bounded jobs page and displays the full server total', async () => {
+    fetchJobsMock.mockResolvedValue({
+      jobs: [{
+        id: 'job-1',
+        project: 'acme/widgets',
+        kind: 'review',
+        prompt: null,
+        pid: 123,
+        log_path: '/tmp/job-1.log',
+        status: 'done',
+        exit_code: 0,
+        started_at: 100,
+        finished_at: 110,
+        seen: true,
+      }],
+      total: 500,
+      pendingReleaseProjects: [],
+    })
+
+    const { container, unmount } = renderJobsPage()
+
+    await vi.waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 200 })
+      expect(container.textContent).toContain('500 total runs')
+      expect(container.textContent).toContain('1 loaded')
+    })
+
+    unmount()
   })
 
   it('counts aborted jobs as failed and excludes them from done', async () => {
@@ -144,13 +183,14 @@ describe('JobsPage', () => {
           seen: true,
         },
       ],
+      total: 2,
       pendingReleaseProjects: [],
     })
 
     const { container, unmount } = renderJobsPage()
 
     await vi.waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 50 })
+      expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 200 })
       expect(container.textContent).toContain('done 1')
       expect(container.textContent).toContain('failed 1')
     })

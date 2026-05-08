@@ -242,12 +242,14 @@ When a release trigger arrives while the project pipeline lock is held or jobs
 are paused globally, TamTam stores `pending_release:<project>=1` in the
 `settings` table instead of dropping the request.
 
-That queued release is retried from three places:
+That queued release is retried from four places:
 
 1. `releaseLock()` after the active pipeline finishes
 2. `syncJobsPauseState(false)` when the user resumes jobs
 3. server boot or stale-lock self-heal, if a queued project is found with no
    active pipeline lock
+4. the periodic recovery reconcile ticker, which drains pending releases before
+   replaying queued agent work for the same project
 
 Retry semantics matter: a drain attempt only consumes the queue when the
 release actually starts or reaches a terminal no-op such as "nothing to

@@ -114,4 +114,34 @@ describe('pending-release queue', () => {
     await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
     expect(getPendingRelease('proj')).toBe(true);
   });
+
+  describe('shouldKeepPendingRelease', () => {
+    let shouldKeepPendingRelease: typeof import('@/lib/pipeline/pending-release').shouldKeepPendingRelease;
+    beforeEach(async () => {
+      const mod = await import('@/lib/pipeline/pending-release');
+      shouldKeepPendingRelease = mod.shouldKeepPendingRelease;
+    });
+
+    it('drops the flag for "Nothing to release"', () => {
+      expect(shouldKeepPendingRelease({ ok: false, status: 400, detail: 'Nothing to release — no changes' })).toBe(false);
+    });
+    it('drops the flag for project-not-found', () => {
+      expect(shouldKeepPendingRelease({ ok: false, status: 404, detail: 'project not found' })).toBe(false);
+    });
+    it('keeps the flag for budget block (429)', () => {
+      expect(shouldKeepPendingRelease({ ok: false, status: 429, detail: 'budget' })).toBe(true);
+    });
+    it('keeps the flag for retryable startup failures', () => {
+      expect(shouldKeepPendingRelease({ ok: false, status: 500, retryable: true, detail: 'pm2 down' })).toBe(true);
+    });
+    it('keeps the flag for "Pipeline already running" (409)', () => {
+      expect(shouldKeepPendingRelease({ ok: false, status: 409, detail: 'Pipeline already running for proj' })).toBe(true);
+    });
+    it('drops the flag for unrelated 409s', () => {
+      expect(shouldKeepPendingRelease({ ok: false, status: 409, detail: 'something else' })).toBe(false);
+    });
+    it('drops the flag on success', () => {
+      expect(shouldKeepPendingRelease({ ok: true })).toBe(false);
+    });
+  });
 });

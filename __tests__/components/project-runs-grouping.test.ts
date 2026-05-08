@@ -22,9 +22,11 @@ function makeEntry(partial: {
   finishedAt?: number | null;
   status?: 'running' | 'done';
   exitCode?: number | null;
+  project?: string;
 }): AnyEntry {
   return {
     key: `job:${partial.id}`,
+    project: partial.project ?? 'proj',
     kind: partial.kind,
     bucket: partial.kind === 'release' ? 'release' : (partial.kind as string),
     title: partial.kind,
@@ -112,6 +114,19 @@ describe('groupReleaseChildren', () => {
     expect(oldRel.children!.map((c) => c.navJobId)).not.toContain('c');
   });
 
+  it('does not fold pipeline jobs into a release from another project', () => {
+    const entries = [
+      makeEntry({ id: 'rel-a', project: 'a', kind: 'release', startedAt: 100, finishedAt: 200 }),
+      makeEntry({ id: 'test-b', project: 'b', kind: 'test', startedAt: 120, finishedAt: 130 }),
+    ];
+    const out = groupReleaseChildren(entries);
+    expect(out).toHaveLength(2);
+    const rel = out.find((e) => e.navJobId === 'rel-a')!;
+    const test = out.find((e) => e.navJobId === 'test-b')!;
+    expect(rel.children).toEqual([]);
+    expect(test.kind).toBe('test');
+  });
+
   it('clusters orphaned pipeline steps even when there are no release entries', () => {
     // Previously this was a no-op; now nearby pipeline steps get clustered.
     const entries = [
@@ -149,6 +164,19 @@ describe('groupReleaseChildren', () => {
     expect(out[0].title).toBe('Pipeline steps');
     expect(out[0].children).toHaveLength(3);
     expect(out[0].children!.map((c) => c.kind)).toEqual(['test', 'review', 'push']);
+  });
+
+  it('clusters orphaned pipeline steps separately per project', () => {
+    const entries = [
+      makeEntry({ id: 'a-t', project: 'a', kind: 'test', startedAt: 1000, finishedAt: 1005 }),
+      makeEntry({ id: 'a-r', project: 'a', kind: 'review', startedAt: 1010, finishedAt: 1020 }),
+      makeEntry({ id: 'b-t', project: 'b', kind: 'test', startedAt: 1000, finishedAt: 1005 }),
+      makeEntry({ id: 'b-r', project: 'b', kind: 'review', startedAt: 1010, finishedAt: 1020 }),
+    ];
+    const out = groupReleaseChildren(entries);
+    expect(out).toHaveLength(2);
+    expect(out.map((e) => e.project).sort()).toEqual(['a', 'b']);
+    expect(out.every((e) => e.children?.length === 2)).toBe(true);
   });
 
   it('clustered chain that recovers from a failed step reports green (terminal step exit 0)', () => {

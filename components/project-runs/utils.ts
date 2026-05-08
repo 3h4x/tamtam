@@ -167,6 +167,7 @@ export const PIPELINE_CHILD_KINDS = new Set(['test', 'review', 'fix', 'commit', 
 // release's time window.
 export interface Entry {
   key: string
+  project: string
   kind: string
   bucket: KindBucket
   title: string
@@ -393,7 +394,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
     const isConversational = bucket === 'run' || bucket === 'agent'
     const canSessionMerge = !!j.session_id && j.kind !== 'release'
     const sessionKey = canSessionMerge
-      ? (isConversational ? `${j.session_id}:conversation` : `${j.session_id}:${j.kind}`)
+      ? (isConversational ? `${j.project}:${j.session_id}:conversation` : `${j.project}:${j.session_id}:${j.kind}`)
       : ''
     if (canSessionMerge) {
       const existing = sessionGroup.get(sessionKey)
@@ -423,8 +424,9 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       // (review → fix via --resume) need distinct keys per kind so they
       // don't collide on the same entry.
       key: j.session_id
-        ? (isConversational ? `sess:${j.session_id}` : `sess:${j.session_id}:${j.kind}`)
+        ? (isConversational ? `sess:${j.project}:${j.session_id}` : `sess:${j.project}:${j.session_id}:${j.kind}`)
         : `job:${j.id}`,
+      project: j.project,
       kind: j.kind,
       bucket,
       title: titleForJob(j, bucket),
@@ -534,7 +536,7 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
     let best: Entry | null = null
     for (const r of sortedReleases) {
       const end = r.finishedAt ?? Number.POSITIVE_INFINITY
-      if (r.startedAt <= child.startedAt && child.startedAt <= end) best = r
+      if (r.project === child.project && r.startedAt <= child.startedAt && child.startedAt <= end) best = r
     }
     return best
   }
@@ -624,17 +626,27 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
   const clustered: Entry[] = []
 
   if (pipelineOrphans.length > 0) {
-    const sortedOrphans = [...pipelineOrphans].sort((a, b) => a.startedAt - b.startedAt)
-    const clusters: Entry[][] = [[sortedOrphans[0]]]
-    for (let i = 1; i < sortedOrphans.length; i++) {
-      const prev = sortedOrphans[i - 1]
-      const curr = sortedOrphans[i]
-      const gap = curr.startedAt - (prev.finishedAt ?? prev.startedAt)
-      if (gap <= CLUSTER_GAP) {
-        clusters[clusters.length - 1].push(curr)
-      } else {
-        clusters.push([curr])
+    const orphansByProject = new Map<string, Entry[]>()
+    for (const orphan of pipelineOrphans) {
+      const arr = orphansByProject.get(orphan.project) ?? []
+      arr.push(orphan)
+      orphansByProject.set(orphan.project, arr)
+    }
+    const clusters: Entry[][] = []
+    for (const projectOrphans of orphansByProject.values()) {
+      const sortedOrphans = [...projectOrphans].sort((a, b) => a.startedAt - b.startedAt)
+      const projectClusters: Entry[][] = [[sortedOrphans[0]]]
+      for (let i = 1; i < sortedOrphans.length; i++) {
+        const prev = sortedOrphans[i - 1]
+        const curr = sortedOrphans[i]
+        const gap = curr.startedAt - (prev.finishedAt ?? prev.startedAt)
+        if (gap <= CLUSTER_GAP) {
+          projectClusters[projectClusters.length - 1].push(curr)
+        } else {
+          projectClusters.push([curr])
+        }
       }
+      clusters.push(...projectClusters)
     }
     for (const cluster of clusters) {
       if (cluster.length < 2) {
@@ -648,7 +660,8 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
         // still needs follow-up work before it can read green.
         const attention = finished ? virtualGroupAttentionState(cluster) : null
         const vgroup: Entry = {
-          key: `vgroup:${cluster[0].startedAt}`,
+          key: `vgroup:${cluster[0].project}:${cluster[0].startedAt}`,
+          project: cluster[0].project,
           kind: 'release',
           bucket: 'release',
           title: 'Pipeline steps',

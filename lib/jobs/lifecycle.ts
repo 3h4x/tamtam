@@ -1291,13 +1291,18 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
             console.log(`[release-after-run] triggered release ${r.jobId} for ${job.project} after run ${job.id}`);
           }
         } else {
-          // Don't drop on the floor: queue a pending release and let the
-          // pipeline-lock release hook (or `Resume jobs`) drain it. Covers
-          // the "agent finishes while another release is mid-flight" race
-          // and "jobs paused" race uniformly.
-          const { setPendingRelease } = await import('@/lib/pipeline/pending-release');
-          setPendingRelease(job.project);
-          console.log(`[release-after-run] queued for ${job.project} (will drain when pipeline lock releases): ${r.detail}`);
+          // Only queue a pending-release flag for failures that actually need
+          // to wait for something (lock conflict, jobs paused, budget block,
+          // explicit retryable). Non-retryable failures like "Nothing to
+          // release" or "project not found" must not stamp the flag — there
+          // is no future event that will drain them, so the banner sticks.
+          const { shouldKeepPendingRelease, setPendingRelease } = await import('@/lib/pipeline/pending-release');
+          if (shouldKeepPendingRelease(r)) {
+            setPendingRelease(job.project);
+            console.log(`[release-after-run] queued for ${job.project} (will drain when pipeline lock releases): ${r.detail}`);
+          } else {
+            console.log(`[release-after-run] no release for ${job.project}: ${r.detail}`);
+          }
         }
       }
     } catch (e) {
