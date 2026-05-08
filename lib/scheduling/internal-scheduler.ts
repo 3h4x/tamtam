@@ -125,7 +125,14 @@ export function computeNextFire(schedule: string, agentId: string, fromMs: numbe
   let periodMs = 0;
   let useHourGrid = false;
 
-  if (s.endsWith('h')) {
+  if (s.endsWith('d')) {
+    const days = parseInt(s, 10);
+    if (!days || days < 1) return fromMs + 86400_000;
+    periodMs = days * 86400_000;
+    // Periods > 24h skip the hour-grid (no stable per-day phase) — they fire
+    // on the next period boundary from now.
+    useHourGrid = false;
+  } else if (s.endsWith('h')) {
     const hours = parseInt(s, 10);
     if (!hours || hours < 1) return fromMs + 3600_000;
     periodMs = hours * 3600_000;

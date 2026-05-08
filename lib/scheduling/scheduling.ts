@@ -18,6 +18,7 @@ const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export function parseFrequency(freqStr: string): number {
   const s = String(freqStr).trim();
+  if (s.endsWith('d')) return parseInt(s.slice(0, -1), 10) * 24 * 60;
   if (s.endsWith('h')) return parseInt(s.slice(0, -1), 10) * 60;
   if (s.endsWith('m')) return parseInt(s.slice(0, -1), 10);
   return parseInt(s, 10);

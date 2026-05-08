@@ -1,6 +1,5 @@
 ---
-model: opus
-schedule: 24h
+model: smart
 skillIds: ["agent-cto"]
 ---
 

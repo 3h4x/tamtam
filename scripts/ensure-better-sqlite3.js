@@ -5,6 +5,12 @@ const { join } = require('path');
 const { spawnSync } = require('child_process');
 
 const STAMP_PREFIX = 'better-sqlite3-';
+const PROBE_SCRIPT = `
+const Database = require('better-sqlite3');
+const db = new Database(':memory:');
+db.prepare('select 1 as ok').get();
+db.close();
+`;
 
 function readPackageVersion() {
   return require('better-sqlite3/package.json').version;
@@ -18,17 +24,21 @@ function readState(cwd = process.cwd()) {
   return { abi, cwd, stampDir, stampPath, version };
 }
 
-function probeBetterSqlite3() {
-  try {
-    delete require.cache[require.resolve('better-sqlite3')];
-    const Database = require('better-sqlite3');
-    const db = new Database(':memory:');
-    db.prepare('select 1 as ok').get();
-    db.close();
-    return null;
-  } catch (error) {
-    return error;
-  }
+function probeBetterSqlite3(cwd = process.cwd(), spawn = spawnSync) {
+  const result = spawn(process.execPath, ['-e', PROBE_SCRIPT], {
+    cwd,
+    env: process.env,
+    encoding: 'utf8',
+  });
+  if (result.status === 0) return null;
+
+  const detail = result.signal
+    ? `signal ${result.signal}`
+    : `exit code ${result.status ?? 'unknown'}`;
+  const extra = [result.stderr, result.stdout]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .find(Boolean);
+  return new Error(`better-sqlite3 probe failed with ${detail}${extra ? `: ${extra}` : ''}`);
 }
 
 function pruneStaleStamps(state) {
@@ -70,7 +80,7 @@ function ensureBetterSqlite3ForCurrentNode(options = {}) {
   const state = readState(options.cwd);
   const spawn = options.spawn || spawnSync;
   const stampExists = options.stampExists || existsSync;
-  const probe = options.probe || probeBetterSqlite3;
+  const probe = options.probe || (() => probeBetterSqlite3(state.cwd, spawn));
   const write = options.writeStamp || writeStamp;
   const currentStampExists = stampExists(state.stampPath);
   const probeError = probe();

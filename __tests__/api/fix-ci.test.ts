@@ -197,6 +197,7 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
     const ghCall = execMock.mock.calls.find((c: any[]) => c[0] === 'gh');
     expect(ghCall).toBeDefined();
     expect(ghCall![1]).toContain('12345');
+    expect(ghCall![1]).toContain('owner/repo');
     expect(ghCall![1]).toContain('--log-failed');
   });
 

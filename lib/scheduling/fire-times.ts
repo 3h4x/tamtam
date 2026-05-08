@@ -7,7 +7,16 @@ export function stableHash(str: string, mod: number): number {
 export function nextFireDisplay(schedule: string, agentId: string): string {
   const s = schedule.trim();
   let periodHours = 0;
-  if (s.endsWith('h')) {
+  if (s.endsWith('d')) {
+    const days = parseInt(s);
+    if (!days || days < 1) return '';
+    // Periods >= 1 day: just say "next in Nd" — we don't compute a stable
+    // hour-of-day phase for multi-day intervals.
+    const candidateMs = Date.now() + days * 86400000;
+    const diffMin = Math.round((candidateMs - Date.now()) / 60000);
+    const diffHours = Math.floor(diffMin / 60);
+    return `next in ${Math.floor(diffHours / 24)}d ${diffHours % 24}h`;
+  } else if (s.endsWith('h')) {
     periodHours = parseInt(s);
   } else if (s.endsWith('m')) {
     const mins = parseInt(s);

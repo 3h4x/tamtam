@@ -17,6 +17,13 @@ describe('agent-schedule', () => {
       });
     });
 
+    it('accepts day-suffix schedules (3d, 7d, 30d)', () => {
+      for (const sched of ['3d', '7d', '30d']) {
+        expect(parseOptionalAgentScheduleInput(sched)).toEqual({ schedule: sched, error: null });
+      }
+      expect(parseOptionalAgentScheduleInput(' 7D ')).toEqual({ schedule: '7d', error: null });
+    });
+
     it('treats nullish and blank values as no schedule', () => {
       expect(parseOptionalAgentScheduleInput(null)).toEqual({
         schedule: null,

@@ -9,7 +9,7 @@ import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, normalizeModelInput } fr
 
 const MODELS = [...MODEL_TIERS]
 const RUNNERS = ['pm2', 'launchctl']
-const SCHEDULES = ['', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h']
+const SCHEDULES = ['', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h', '3d', '7d', '30d']
 
 export function AgentModal({
   agent,
