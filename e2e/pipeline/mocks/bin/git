@@ -46,11 +46,29 @@ function readTimings() {
   }
 }
 
+function readFailures() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(projectShimDir, 'git-failures.json'), 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
 function maybeSleep(subcommand) {
   const ms = Number(readTimings()?.[subcommand] ?? 0);
   if (Number.isFinite(ms) && ms > 0) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
   }
+}
+
+function maybeFail(subcommand) {
+  const failure = readFailures()?.[subcommand];
+  if (!failure) return false;
+  maybeSleep(subcommand);
+  if (typeof failure.stdout === 'string' && failure.stdout.length > 0) out(failure.stdout);
+  if (typeof failure.stderr === 'string' && failure.stderr.length > 0) process.stderr.write(failure.stderr);
+  exit(Number.isFinite(failure.exitCode) ? failure.exitCode : 1);
+  return true;
 }
 
 function writeState(s) {
@@ -115,11 +133,13 @@ if (sub === 'rev-list' && cmd.includes('--count')) {
 
 if (sub === 'add') {
   // Record staging — state stays as-is (committed=false)
+  if (maybeFail('add')) {}
   maybeSleep('add');
   exit(0);
 }
 
 if (sub === 'commit') {
+  if (maybeFail('commit')) {}
   maybeSleep('commit');
   const st = readState();
   st.committed = true;
@@ -128,6 +148,7 @@ if (sub === 'commit') {
 }
 
 if (sub === 'push') {
+  if (maybeFail('push')) {}
   maybeSleep('push');
   const st = readState();
   st.pushed = true;
