@@ -14,6 +14,7 @@ vi.mock('@/lib/shared/format', () => ({
 function makeEntry(overrides: Partial<Entry> = {}): Entry {
   return {
     key: 'job:1',
+    project: 'acme/widgets',
     kind: 'review',
     bucket: 'review',
     title: 'Code review',

@@ -152,6 +152,7 @@ function makeEntry(partial: {
 }): Entry {
   return {
     key: `job:${partial.kind}`,
+    project: 'proj',
     kind: partial.kind,
     bucket: partial.kind as Entry['bucket'],
     title: partial.kind,
@@ -292,6 +293,7 @@ function makeReleaseEntry(
 ): Entry {
   return {
     key: `job:${id}`,
+    project: 'proj',
     kind: 'release',
     bucket: 'release',
     title: 'Release pipeline',
@@ -325,6 +327,7 @@ function makeReleaseEntry(
 function makeStepEntry(id: string, kind: string, startedAt: number, parentJobId: string | null = null, exitCode = 0): Entry {
   return {
     key: `job:${id}`,
+    project: 'proj',
     kind,
     bucket: kind as Entry['bucket'],
     title: kind,

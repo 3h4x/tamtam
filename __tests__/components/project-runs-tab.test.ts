@@ -34,7 +34,7 @@ describe('buildEntries session grouping', () => {
     const entries = buildEntries(jobs)
     expect(entries).toHaveLength(1)
     expect(entries[0].turns).toBe(3)
-    expect(entries[0].key).toBe('sess:S1')
+    expect(entries[0].key).toBe('sess:p:S1')
     expect(entries[0].navJobId).toBe('c')
     expect(entries[0].navSessionId).toBe('S1')
   })
@@ -68,7 +68,7 @@ describe('buildEntries session grouping', () => {
     ]
     const entries = buildEntries(jobs)
     expect(entries).toHaveLength(2)
-    expect(entries.map(e => e.key).sort()).toEqual(['sess:S1', 'sess:S2'])
+    expect(entries.map(e => e.key).sort()).toEqual(['sess:p:S1', 'sess:p:S2'])
   })
 
   it('sums token totals and tracks last activity time across a session', () => {
@@ -113,7 +113,7 @@ describe('buildEntries session grouping', () => {
       job({ id: 'mid', kind: 'run', started_at: 300, session_id: 'A' }),
     ]
     const entries = buildEntries(jobs)
-    expect(entries.map(e => e.key)).toEqual(['sess:B', 'sess:A'])
+    expect(entries.map(e => e.key)).toEqual(['sess:p:B', 'sess:p:A'])
   })
 
   it('keeps review and fix as separate entries even when they share a session_id (--resume)', () => {

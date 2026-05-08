@@ -59,6 +59,7 @@ describe('GET /api/jobs', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.jobs).toEqual([]);
+    expect(data.total).toBe(0);
   });
 
   it('returns all jobs', async () => {
@@ -70,6 +71,7 @@ describe('GET /api/jobs', () => {
     const res = await GET(req);
     const data = await res.json();
     expect(data.jobs).toHaveLength(2);
+    expect(data.total).toBe(2);
     expect(data.jobs[0].id).toBe('job-1');
     expect(data.jobs[1].id).toBe('job-2');
   });
@@ -83,6 +85,7 @@ describe('GET /api/jobs', () => {
     const res = await GET(req);
     const data = await res.json();
     expect(data.jobs).toHaveLength(1);
+    expect(data.total).toBe(1);
     expect(data.jobs[0].id).toBe('job-1');
   });
 
@@ -128,6 +131,7 @@ describe('GET /api/jobs', () => {
     const res = await GET(req);
     const data = await res.json();
     expect(data.jobs).toHaveLength(3);
+    expect(data.total).toBe(5);
   });
 
   it('limit applies to newest jobs — oldest are dropped', async () => {
@@ -161,7 +165,9 @@ describe('GET /api/jobs', () => {
     listJobsMock.mockReturnValue(jobs);
 
     const req = new NextRequest('http://localhost/api/jobs?limit=2');
-    await GET(req);
+    const res = await GET(req);
+    const data = await res.json();
+    expect(data.total).toBe(5);
     expect(probeJobStatusMock).toHaveBeenCalledTimes(2);
   });
 });

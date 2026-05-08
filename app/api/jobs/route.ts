@@ -13,6 +13,7 @@ export async function GET(request: NextRequest) {
 
   // Sort newest-first before limiting so the limit cuts the oldest entries.
   jobs.sort((a, b) => b.startedAt - a.startedAt);
+  const total = jobs.length;
 
   // Default limit keeps the response lean; callers can pass limit=0 for all.
   const limit = limitParam !== null ? parseInt(limitParam, 10) : 200;
@@ -28,6 +29,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     jobs: jobs.map(jobToDict),
+    total,
     pendingReleaseProjects: project ? pendingProjects.filter(p => p === project) : pendingProjects,
   });
 }
