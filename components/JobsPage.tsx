@@ -186,9 +186,9 @@ export function JobsPage() {
         // If the server returned fewer than we asked for, there's nothing
         // more to load. Otherwise assume more pages might exist.
         setHasMore(sorted.length >= pageLimit)
-        // Poll faster while jobs are actively running, back off when idle.
-        const hasRunning = sorted.some(j => j.status === 'running')
-        timeoutId = setTimeout(poll, hasRunning ? 5000 : 15000)
+        // Keep the Runs page responsive enough to catch short release/test
+        // jobs that can start and finish between slower idle polls.
+        timeoutId = setTimeout(poll, 5000)
       } catch {
         if (active) timeoutId = setTimeout(poll, 15000)
       }

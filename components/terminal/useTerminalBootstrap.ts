@@ -42,6 +42,7 @@ export function useTerminalBootstrap({
 }: BootstrapParams) {
   const router = useRouter()
   const [currentReleaseId, setCurrentReleaseId] = useState<string | null>(null)
+  const attachedExternalJobRef = useRef<string | null>(null)
 
   // Preload sessions on fresh terminal landing (no session/job param)
   useEffect(() => {
@@ -289,6 +290,46 @@ export function useTerminalBootstrap({
     }
     loadJob()
   }, [jobParam, initialSessionId, projectName])
+
+  // Fresh terminal landing pages should attach to newly-started release jobs
+  // so the operator sees the live pipeline without manually refreshing.
+  // Do not hijack the interactive terminal for unrelated `run` / `agent:*`
+  // jobs that started elsewhere.
+  useEffect(() => {
+    if (initialSessionId || jobParam) return
+    let cancelled = false
+
+    const poll = async () => {
+      const cur = terminalStore.get(projectName)
+      if (
+        cur.streaming ||
+        cur.currentJobId ||
+        cur.history.length > 0 ||
+        cur.pendingAutoSubmit
+      ) return
+      try {
+        const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
+        if (!res.ok) return
+        const data = await res.json()
+        const runningJobs: JobDict[] = (data.jobs ?? [])
+          .filter((job: JobDict) => job.status === 'running')
+          .sort((a: JobDict, b: JobDict) => b.started_at - a.started_at)
+        const target = runningJobs.find((job: JobDict) => job.kind === 'release')
+        if (!target || attachedExternalJobRef.current === target.id) return
+        attachedExternalJobRef.current = target.id
+        router.replace(`/project/${projectName}/terminal?job=${encodeURIComponent(target.id)}`)
+      } catch {}
+    }
+
+    poll()
+    const id = setInterval(() => {
+      if (!cancelled) void poll()
+    }, 1000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [initialSessionId, jobParam, projectName, router])
 
   return { currentReleaseId }
 }
