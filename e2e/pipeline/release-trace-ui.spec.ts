@@ -21,6 +21,16 @@ interface MockStep {
   log_excerpt: string;
 }
 
+interface MockTrigger {
+  job_id: string;
+  kind: string;
+  label: string;
+  prompt: string | null;
+  started_at: number;
+  finished_at: number | null;
+  exit_code: number | null;
+}
+
 interface MockTrace {
   release_id: string;
   project: string;
@@ -29,7 +39,7 @@ interface MockTrace {
   started_at: number;
   finished_at: number | null;
   exit_code: number | null;
-  trigger: null;
+  trigger: MockTrigger | null;
   steps: MockStep[];
 }
 
@@ -338,6 +348,104 @@ test('clicking a step row expands and shows its log excerpt', async ({ page }) =
   // Clicking again collapses it
   await page.getByRole('button').filter({ hasText: 'push' }).first().click();
   await expect(page.getByText(EXCERPT)).not.toBeVisible();
+});
+
+test('release trace shows the trigger job link with a truncated prompt preview', async ({
+  page,
+}) => {
+  const longPrompt = 'Investigate release readiness and summarize the blocking issues before auto-push runs again. '.repeat(2);
+  const trace = {
+    ...makeTrace({
+      status: 'done',
+      exit_code: 0,
+      finished_at: now() - 5,
+      steps: [
+        makeStep({
+          job_id: 'step-review-triggered',
+          kind: 'review',
+          status: 'done',
+          exit_code: 0,
+          started_at: now() - 30,
+          finished_at: now() - 5,
+          verdict: 'LGTM',
+        }),
+      ],
+    }),
+    trigger: {
+      job_id: 'parent-run-123',
+      kind: 'run',
+      label: 'terminal run',
+      prompt: longPrompt,
+      started_at: now() - 120,
+      finished_at: now() - 60,
+      exit_code: 0,
+    },
+  };
+
+  await stubShellRoutes(page);
+  await stubSettings(page);
+  await stubTrace(page, trace);
+
+  await page.goto(`/project/${PROJECT}/release/${RELEASE_ID}`);
+
+  const triggerLink = page.getByRole('link', { name: /terminal run/i });
+  await expect(triggerLink).toBeVisible({ timeout: 8_000 });
+  await expect(triggerLink).toHaveAttribute(
+    'href',
+    `/project/${PROJECT}/terminal?job=parent-run-123`,
+  );
+  const triggerMeta = page.getByText(/triggered by/i).locator('..');
+  await expect(triggerMeta).toBeVisible();
+  await expect(triggerMeta).toContainText('Investigate release readiness');
+  await expect(triggerMeta).toContainText('…');
+  await expect(triggerMeta).not.toContainText('auto-push runs again.');
+});
+
+test('release trace step rows link each step to its terminal job log', async ({ page }) => {
+  const trace = makeTrace({
+    status: 'running',
+    exit_code: null,
+    finished_at: null,
+    steps: [
+      makeStep({
+        job_id: 'step-review-log',
+        kind: 'review',
+        status: 'running',
+        exit_code: null,
+        started_at: now() - 20,
+        finished_at: null,
+      }),
+      makeStep({
+        job_id: 'step-fix-log',
+        kind: 'fix',
+        status: 'done',
+        exit_code: 0,
+        started_at: now() - 40,
+        finished_at: now() - 25,
+        log_excerpt: 'Applied fix successfully.',
+      }),
+    ],
+  });
+
+  await stubShellRoutes(page);
+  await stubSettings(page);
+  await stubTrace(page, trace);
+
+  await page.goto(`/project/${PROJECT}/release/${RELEASE_ID}`);
+
+  const reviewRow = page.getByRole('button').filter({ hasText: 'review' }).first();
+  const fixRow = page.getByRole('button').filter({ hasText: 'fix' }).first();
+  await expect(reviewRow).toBeVisible({ timeout: 8_000 });
+  await expect(fixRow).toBeVisible({ timeout: 8_000 });
+
+  await expect(reviewRow.getByRole('link', { name: /full log/i })).toHaveAttribute(
+    'href',
+    `/project/${PROJECT}/terminal?job=step-review-log`,
+  );
+  await expect(fixRow.getByRole('link', { name: /full log/i })).toHaveAttribute(
+    'href',
+    `/project/${PROJECT}/terminal?job=step-fix-log`,
+  );
 });
 
 // ─── Test 7: 404 shows error state ───────────────────────────────────────────
