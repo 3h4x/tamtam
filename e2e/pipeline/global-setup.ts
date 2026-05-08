@@ -15,6 +15,8 @@ const PROJECTS = [
   'abort',
   'paused',
   'ui-live',
+  'runs-live',
+  'strip-live',
   'history-live-done',
   'history-live-abort',
   'codex-shim',
