@@ -22,6 +22,8 @@ const PROJECTS = [
   'codex-shim',
   'review-cap-exhaustion',
   'review-failure',
+  'runs-failure-dns',
+  'runs-abort-cancel',
 ];
 
 export default async function globalSetup(): Promise<void> {
