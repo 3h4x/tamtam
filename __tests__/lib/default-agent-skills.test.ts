@@ -59,7 +59,12 @@ describe('seedDefaultSkills', () => {
     expect(skill!.description).toContain('CLAUDE.md');
     expect(skill!.content).toContain('CLAUDE.md');
     expect(skill!.content).toContain('package.json');
-    expect(skill!.content).toContain('git log');
+    // Skill prompts must NOT instruct the model to run git — TamTam owns
+    // version control via the release pipeline.
+    expect(skill!.content).not.toContain('git log');
+    expect(skill!.content).not.toContain('git checkout');
+    expect(skill!.content).not.toContain('git commit');
+    expect(skill!.content).toContain("Don't run `git` commands");
   });
 
   it('inserts agent-cto with correct fields', () => {
@@ -86,7 +91,8 @@ describe('seedDefaultSkills', () => {
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:security-review');
     expect(skill!.description).toContain('OWASP');
-    expect(skill!.content).toContain('git diff HEAD');
+    expect(skill!.content).toContain('uncommitted changes');
+    expect(skill!.content).not.toContain('git diff');
     expect(skill!.content).toContain('CLEAN | FINDINGS');
   });
 
@@ -106,7 +112,9 @@ describe('seedDefaultSkills', () => {
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:blog');
     expect(skill!.description).toContain('blog');
-    expect(skill!.content).toContain('git log');
+    expect(skill!.content).toContain('recent file changes');
+    expect(skill!.content).not.toContain('git log');
+    expect(skill!.content).toContain("Don't run `git` commands");
     expect(skill!.content).toContain('blog/');
   });
 
@@ -145,7 +153,9 @@ describe('seedDefaultSkills', () => {
     const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-tests');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:tests');
-    expect(skill!.content).toContain('git log');
+    expect(skill!.content).not.toContain('git log');
+    expect(skill!.content).toContain("Don't run `git` commands");
+    expect(skill!.content).toContain('vi.useFakeTimers()');
     expect(skill!.content).toContain('test');
   });
 
@@ -165,7 +175,24 @@ describe('seedDefaultSkills', () => {
     expect(skill!.name).toBe('agent:readme-sync');
     expect(skill!.description).toContain('README');
     expect(skill!.content).toContain('README');
-    expect(skill!.content).toContain('git log');
+    expect(skill!.content).not.toContain('git log');
+    expect(skill!.content).toContain('project manifest');
+    expect(skill!.content).toContain("Don't run `git` commands");
+  });
+
+  it('no default skill content tells the model to run git', () => {
+    seedFn();
+    const skills = testDb.db.select().from(schema.skills).all();
+    const violators: string[] = [];
+    for (const skill of skills) {
+      // Skip user-added rows from earlier tests — only enforce on default skills.
+      if (!skill.id.startsWith('agent-')) continue;
+      const c = skill.content || '';
+      if (/\bgit (log|diff|checkout|commit|push|pull|status|branch|stash|rebase|merge|reset|tag)\b/.test(c)) {
+        violators.push(`${skill.id}: ${c.match(/\bgit \w+\b/)?.[0]}`);
+      }
+    }
+    expect(violators).toEqual([]);
   });
 
   it('does not insert skills on second call (seeded guard)', () => {

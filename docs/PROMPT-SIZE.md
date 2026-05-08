@@ -30,7 +30,7 @@ For **pipeline jobs** (review/fix/commit/dod/push), each `lib/pipeline/start-*.t
 
 ## Identified bloat sources
 
-1. **`lib/agents/default-agent-skills.ts`** — 13 built-in skill bodies were 22 KB total before issue #64. Long "## Gotchas" sections re-stated Claude's defaults. Trimmed to 8 KB (~63% reduction). New users get the trimmed versions; existing DB rows keep their content (edit via `/skills` to refresh).
+1. **`lib/agents/default-agent-skills.ts`** — 13 built-in skill bodies were 22 KB total before issue #64. Long "## Gotchas" sections re-stated Claude's defaults. Trimmed to 8 KB (~63% reduction). New users get the trimmed versions immediately; existing seeded DB rows also refresh automatically on boot when their stored content still matches a known shipped default hash. User-customized skill bodies are preserved.
 2. **`base_prompt` setting** — already short (one paragraph). Don't grow it; per-task guidance belongs in skills.
 3. **Project `CLAUDE.md`** — out of TamTam's control, but it's auto-loaded by the Claude CLI on every run. If a project's CLAUDE.md is huge, agent runs in that project will have huge cache reads regardless of TamTam's prompt.
 

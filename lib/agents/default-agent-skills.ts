@@ -18,14 +18,14 @@ const DEFAULT_AGENT_SKILLS: DefaultSkill[] = [
     id: 'agent-cto',
     name: 'agent:cto',
     description: 'Strategic next-step issues from project state.',
-    content: `You are the CTO. Read CLAUDE.md, \`git log --oneline -30\`, and \`gh issue list --limit 20 --state open\`.
-Pick 2–3 highest-leverage gaps and create issues with \`gh issue create\` — title states the outcome, body has problem → approach → acceptance criteria, labels include type + priority. Skip duplicates and in-progress work. Solo project: no team-coordination assumptions.`,
+    content: `You are the CTO. Read CLAUDE.md and skim the codebase. List existing GitHub issues with \`gh issue list --limit 20 --state open\` so you don't duplicate.
+Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — title states the outcome, body has problem → approach → acceptance criteria, labels include type + priority. Skip duplicates and in-progress work. Solo project: no team-coordination assumptions. Don't run \`git\` commands or branch/commit/push — TamTam's release pipeline owns version control.`,
   },
   {
     id: 'agent-security-review',
     name: 'agent:security-review',
     description: 'OWASP review of the uncommitted diff.',
-    content: `Run \`git diff HEAD\` and review the delta only. Check: hardcoded secrets (\`ghp_\`, \`sk-\`, \`AKIA\`…), shell/SQL injection, XSS (\`innerHTML\`, \`dangerouslySetInnerHTML\`), missing authz on routes that accept an ID, exposed admin endpoints, new dependency CVEs (run \`npm/pnpm/pip-audit/cargo audit\`).
+    content: `Review the uncommitted changes only. Check: hardcoded secrets (\`ghp_\`, \`sk-\`, \`AKIA\`…), shell/SQL injection, XSS (\`innerHTML\`, \`dangerouslySetInnerHTML\`), missing authz on routes that accept an ID, exposed admin endpoints, new dependency CVEs (run \`npm/pnpm/pip-audit/cargo audit\`). Don't run \`git\` commands — TamTam already exposes the working-tree diff to the review pipeline.
 
 Output:
 \`\`\`
@@ -54,8 +54,8 @@ Dev-only CVEs are lower priority. Note breaking changes on major bumps.`,
   {
     id: 'agent-blog',
     name: 'agent:blog',
-    description: 'Daily dev blog post from recent commits.',
-    content: `Run \`git log --since=yesterday --oneline\` (fall back to \`-10\`). Write under 400 words focused on user impact, not file names. Save to \`blog/YYYY-MM-DD.md\`. Match existing post style if any.`,
+    description: 'Daily dev blog post from recent activity.',
+    content: `Summarise the project's recent activity (skim README, CLAUDE.md, recent file changes, open PRs/issues). Write under 400 words focused on user impact, not file names. Save to \`blog/YYYY-MM-DD.md\`. Match existing post style if any. Don't run \`git\` commands — TamTam's release pipeline handles version control.`,
   },
   {
     id: 'agent-ci-monitor',
@@ -67,7 +67,7 @@ Dev-only CVEs are lower priority. Note breaking changes on major bumps.`,
     id: 'agent-release-ready',
     name: 'agent:release-ready',
     description: 'Pre-flight check before shipping.',
-    content: `Read CLAUDE.md / package.json for commands. Run tests, type-check, lint. Check \`git status\` and \`git log origin/HEAD..HEAD --oneline\`. Scan diff for TODO/FIXME/HACK.
+    content: `Read CLAUDE.md / package.json for commands. Run tests, type-check, lint. Inspect the uncommitted changes for TODO/FIXME/HACK and other release-blockers.
 
 \`\`\`
 ## Release Readiness
@@ -75,7 +75,7 @@ Dev-only CVEs are lower priority. Note breaking changes on major bumps.`,
 | Check | Result |
 **Blockers:** (only if NOT READY)
 \`\`\`
-Try \`origin/master\` if \`origin/main\` is missing.`,
+Don't run \`git\` commands — TamTam's release pipeline handles version control.`,
   },
   {
     id: 'agent-gha-audit',
@@ -87,13 +87,13 @@ Try \`origin/master\` if \`origin/main\` is missing.`,
     id: 'agent-readme-sync',
     name: 'agent:readme-sync',
     description: 'Keep README.md and CLAUDE.md accurate.',
-    content: `Read README, CLAUDE.md, the project manifest, top-level dirs, \`git log --oneline -20\`. Update outdated/missing setup, commands, env vars, file layout. Verify every command against actual scripts. Minimum changes; preserve existing tone. Don't remove still-accurate sections.`,
+    content: `Read README, CLAUDE.md, the project manifest, and top-level dirs. Update outdated/missing setup, commands, env vars, file layout. Verify every command against actual scripts. Minimum changes; preserve existing tone. Don't remove still-accurate sections. Don't run \`git\` commands — TamTam's release pipeline handles version control.`,
   },
   {
     id: 'agent-tests',
     name: 'agent:tests',
     description: 'Add tests for recently changed code.',
-    content: `\`git log --name-only --since="7 days ago" --pretty=format:\` to find changes. Read existing tests first to match structure and mocking conventions exactly. Pick 1–3 highest-value gaps (API routes, business logic > glue). Cover golden path + 1–2 edge cases per export. Run the test command; fix failures. Don't test trivial code or skip failing tests.
+    content: `Identify recently changed files (browse the source, ignore vendored/build dirs). Read existing tests first to match structure and mocking conventions exactly. Pick 1–3 highest-value gaps (API routes, business logic > glue). Cover golden path + 1–2 edge cases per export. Run the test command; fix failures. Don't test trivial code or skip failing tests. Don't run \`git\` commands — TamTam's release pipeline handles version control.
 
 NO WALL-CLOCK WAITS. If the code under test uses debouncing, setTimeout, setInterval, requestAnimationFrame, or any timer: install fake timers (\`vi.useFakeTimers()\` / \`jest.useFakeTimers()\`) in beforeEach and \`vi.useRealTimers()\` in afterEach. Drive time forward with \`vi.advanceTimersByTime(ms)\` / \`vi.runAllTimers()\`. Never \`await new Promise(r => setTimeout(r, N))\` to "wait for the debounce" — that's real wall-clock time and will torch CI minutes.
 
@@ -108,11 +108,11 @@ BUDGET. A new unit test should finish in <500ms. After writing one, run \`pnpm v
     content: `TamTam API at http://localhost:1337 (local-only).
 1. Project name from package.json or CLAUDE.md heading.
 2. \`curl -s "http://localhost:1337/api/agents?project=<name>"\`
-3. Read CLAUDE.md and \`git log --oneline -20\`.
+3. Read CLAUDE.md and skim the codebase for current patterns.
 4. For each agent, decide if its prompt reflects current patterns. If yes, skip.
 5. \`curl -X PATCH http://localhost:1337/api/agents/by-name -H 'Content-Type: application/json' -d '{"project":"<n>","name":"<a>","prompt":"<improved>"}'\`
 
-Only patch \`prompt\`. Shorter is better. Don't restate the skill.`,
+Only patch \`prompt\`. Shorter is better. Don't restate the skill. Don't run \`git\` commands — TamTam's release pipeline handles version control.`,
   },
   {
     id: 'agent-manage-agents',
@@ -120,7 +120,7 @@ Only patch \`prompt\`. Shorter is better. Don't restate the skill.`,
     description: 'CRUD agents in TamTam to match project needs.',
     content: `TamTam API at http://localhost:1337 (local-only).
 
-Gather: CLAUDE.md, \`git log --oneline -20\`, project name (jq package.json / pyproject.toml / dir name).
+Gather: CLAUDE.md, project name (jq package.json / pyproject.toml / dir name), and current activity by skimming the codebase.
 Fetch: \`curl -s "http://localhost:1337/api/agents?project=<name>"\` — fields: id, name, prompt, skillIds, model, schedule, runner, enabled.
 
 Decide changes: missing test agent? stale agents referencing dead paths? duplicate purpose? missing schedule? Don't create for hypothetical needs.
@@ -129,13 +129,13 @@ Create: \`POST /api/agents\` with \`{project, name, prompt, skillIds: [], model,
 Update: \`PATCH /api/agents/by-name\` (\`prompt\` only unless asked).
 Delete: \`DELETE /api/agents/<id>\` only when stale/broken.
 
-Report: created, updated, deleted, no-change. Filter strictly by this project. Keep prompts 3–8 sentences.`,
+Report: created, updated, deleted, no-change. Filter strictly by this project. Keep prompts 3–8 sentences. Don't run \`git\` commands — TamTam's release pipeline handles version control.`,
   },
   {
     id: 'agent-docs-claude',
     name: 'agent:docs-claude',
     description: 'Fill gaps in CLAUDE.md.',
-    content: `Read CLAUDE.md (create if absent), package.json, README, top-level dirs, \`git log --oneline -20\`. If a \`docs/\` directory exists, read the first 30 lines of each \`*.md\` file there to extract its topic and "When to read this" guidance; then add or update a \`## Docs Reference\` table in CLAUDE.md with columns File | Topic | Load when — one row per doc file. Add concise rule sections only for missing categories: dependency security, coding conventions, testing rules, architecture/banned patterns, scope/safety. Rules are short imperatives, project-specific. Verify every command against actual scripts. Don't rewrite existing content. Commit on the **current** branch with message \`docs: fill CLAUDE.md gaps\` — do NOT \`git checkout -b\` a feature branch, do NOT push, do NOT open a PR. TamTam's release pipeline owns branch/PR strategy.`,
+    content: `Read CLAUDE.md (create if absent), package.json, README, and top-level dirs. If a \`docs/\` directory exists, read the first 30 lines of each \`*.md\` file there to extract its topic and "When to read this" guidance; then add or update a \`## Docs Reference\` table in CLAUDE.md with columns File | Topic | Load when — one row per doc file. Add concise rule sections only for missing categories: dependency security, coding conventions, testing rules, architecture/banned patterns, scope/safety. Rules are short imperatives, project-specific. Verify every command against actual scripts. Don't rewrite existing content. Don't run \`git\` commands — TamTam's release pipeline handles version control (committing, branching, pushing, PR creation).`,
   },
   {
     id: 'agent-review-tuner',
@@ -178,18 +178,21 @@ Do NOT PATCH any settings. Surface proposals only — the user applies them in t
 // version — this lets us actually shrink prompts on running installs (issue
 // #64), while still preserving any user customisation.
 const KNOWN_DEFAULT_CONTENT_HASHES: Record<string, string[]> = {
-  'agent-cto': ['a13c143efc007ea5'],
-  'agent-security-review': ['ca362666deba8013'],
+  'agent-cto': ['a13c143efc007ea5', '1c4a08f78ed7b75c'],
+  'agent-security-review': ['ca362666deba8013', 'a9813f37584e7812'],
   'agent-dependency-check': ['7a470f6f6b45a900'],
-  'agent-blog': ['b020ce4f0b6c4d7a'],
+  'agent-blog': ['b020ce4f0b6c4d7a', '28c8aeb8eccdfd92'],
   'agent-ci-monitor': ['4ca89e530c8eaf95'],
-  'agent-release-ready': ['4677689a0e0667df'],
+  'agent-release-ready': ['4677689a0e0667df', 'a0ea7848cdb1310d'],
   'agent-gha-audit': ['f8250345bd7da948'],
-  'agent-readme-sync': ['28e3cb210b152a02'],
-  'agent-tests': ['fb8477be3f13e216'],
-  'agent-self-improve': ['a5a48f854a97f7b3'],
-  'agent-manage-agents': ['6afb7cebf46efee8'],
-  'agent-docs-claude': ['53267ca2a0043218', 'c2a96b81a863ae7f'],
+  'agent-readme-sync': ['28e3cb210b152a02', '4494288241d143e8'],
+  'agent-tests': ['fb8477be3f13e216', '739215b8306af83a'],
+  'agent-self-improve': ['a5a48f854a97f7b3', 'b4f077bfe18ed1bb'],
+  'agent-manage-agents': ['6afb7cebf46efee8', '9e7d0fc34508977f'],
+  // 'c2a96b81a863ae7f' = pre-2026-05 default, '53267ca2a0043218' = older still,
+  // 'f1c4d1702a613fdc' = the short-lived "stay on current branch" wording.
+  // All three should refresh to the new git-free version on next boot.
+  'agent-docs-claude': ['53267ca2a0043218', 'c2a96b81a863ae7f', 'f1c4d1702a613fdc'],
   'agent-senior-fullstack': ['ab7344ee6a0a7a21'],
 };
 
