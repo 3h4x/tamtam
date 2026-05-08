@@ -512,3 +512,115 @@ test('header pause toggle updates Release and PR Review without reloading', asyn
   await expect(reviewBtn).not.toHaveAttribute('title', /jobs are paused globally/i);
   await expect(dodBtn).not.toHaveAttribute('title', /jobs are paused globally/i);
 });
+
+// ---------------------------------------------------------------------------
+// Test 7: isPipelineRunning → button pre-disabled with "Releasing…" label
+// Covers the isPipelineBusy() path: when a pipeline-kind job is actively
+// running, the Release button must be disabled before the user clicks it.
+// This is distinct from the jobsPaused (title: "Jobs are paused") and
+// nothingToRelease (no changes) cases already tested above.
+// ---------------------------------------------------------------------------
+test('Release button shows "Releasing…" and is pre-disabled when a pipeline job is actively running', async ({
+  page,
+}) => {
+  const ts = Math.floor(Date.now() / 1000);
+
+  await stubCommonRoutes(page);
+  // Override /api/jobs to return a running review job so isPipelineBusy() returns true.
+  // Playwright matches later-registered handlers first, so this wins over the helper's stub.
+  await page.route(
+    (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+    (route: Route) =>
+      route.fulfill({
+        json: {
+          jobs: [
+            {
+              id: 'running-review-busy',
+              project: PROJECT,
+              kind: 'review',
+              status: 'running',
+              exit_code: null,
+              started_at: ts - 30,
+              finished_at: null,
+              pid: 0,
+              log_path: '',
+              seen: true,
+            },
+          ],
+          pendingReleaseProjects: [],
+        },
+      }),
+  );
+
+  await page.goto(`/project/${PROJECT}/issues`);
+
+  // busy=true → button text changes to "Releasing…" and becomes disabled.
+  // Note: button is NOT disabled because of jobsPaused — the title should say
+  // "Release pipeline already running", not "Jobs are paused globally".
+  const releaseBtn = page.getByRole('button', { name: /releasing/i });
+  await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
+  await expect(releaseBtn).toBeDisabled();
+  await expect(releaseBtn).toHaveAttribute('title', /release pipeline already running/i);
+  await expect(releaseBtn).not.toHaveAttribute('title', /jobs are paused globally/i);
+});
+
+// ---------------------------------------------------------------------------
+// Test 8: Release button re-enables via poll when running job finishes
+// The ProjectDetailPage polls /api/jobs every 10 s. When the running pipeline
+// job finishes, the next poll must flip isPipelineRunning → false and restore
+// the Release button to its enabled "🚀 Release" state without a page reload.
+// ---------------------------------------------------------------------------
+test('Release button re-enables without page reload when the running pipeline job finishes', async ({
+  page,
+}) => {
+  const ts = Math.floor(Date.now() / 1000);
+  let jobRunning = true;
+
+  await stubCommonRoutes(page);
+  // Dynamic /api/jobs override: returns a running job initially, then an empty list.
+  // Playwright matches later-registered handlers first, so this wins over the helper's stub.
+  await page.route(
+    (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+    (route: Route) =>
+      route.fulfill({
+        json: {
+          jobs: jobRunning
+            ? [
+                {
+                  id: 'running-review-transition',
+                  project: PROJECT,
+                  kind: 'review',
+                  status: 'running',
+                  exit_code: null,
+                  started_at: ts - 30,
+                  finished_at: null,
+                  pid: 0,
+                  log_path: '',
+                  seen: true,
+                },
+              ]
+            : [],
+          pendingReleaseProjects: [],
+        },
+      }),
+  );
+
+  await page.goto(`/project/${PROJECT}/issues`);
+
+  // Phase 1: pipeline is busy → button shows "Releasing…" and is disabled.
+  // Note: "Releasing…" does NOT match /release/i ("releas" matches but the 7th
+  // char is 'i' not 'e'), so we match with /releasing/i for the busy state.
+  const busyBtn = page.getByRole('button', { name: /releasing/i });
+  await expect(busyBtn).toBeVisible({ timeout: 8_000 });
+  await expect(busyBtn).toBeDisabled();
+
+  // Flip the mock so the next 10 s poll returns no running jobs.
+  jobRunning = false;
+
+  // Phase 2: within 15 s the poll fires, isPipelineRunning flips to false,
+  // and the Release button re-enables (text changes to "🚀 Release") — no page.reload().
+  const idleBtn = page.getByRole('button', { name: '🚀 Release' });
+  await expect(idleBtn).toBeVisible({ timeout: 15_000 });
+  await expect(idleBtn).toBeEnabled();
+  await expect(busyBtn).not.toBeVisible();
+});
