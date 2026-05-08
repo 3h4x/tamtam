@@ -14,7 +14,7 @@ export interface AgentTemplateRecord {
 }
 
 const TEMPLATE_MODELS = [...MODEL_TIERS]
-const TEMPLATE_SCHEDULES = ['', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h']
+const TEMPLATE_SCHEDULES = ['', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h', '3d', '7d', '30d']
 const TEMPLATE_RUNNERS = ['pm2', 'launchctl']
 
 const EMPTY_TEMPLATE: AgentTemplateRecord = { name: '', description: '', model: 'normal', schedule: '24h', runner: 'pm2', prompt: '' }

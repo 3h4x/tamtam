@@ -33,13 +33,18 @@ describe('scripts/ensure-better-sqlite3.js', () => {
     const mod = await import('@/scripts/ensure-better-sqlite3');
     const cwd = makeTempDir();
     const state = mod.readState(cwd);
-    const spawn = vi.fn(() => ({ status: 0 }));
+    const spawn = vi.fn(() => ({ status: 0, signal: null, stdout: '', stderr: '' }));
 
     mod.writeStamp(state);
     const result = mod.ensureBetterSqlite3ForCurrentNode({ cwd, spawn });
 
     expect(result).toEqual({ rebuilt: false, stampPath: state.stampPath });
-    expect(spawn).not.toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledWith(
+      process.execPath,
+      ['-e', expect.stringContaining('require(\'better-sqlite3\')')],
+      expect.objectContaining({ cwd, encoding: 'utf8' }),
+    );
   });
 
   it('rebuilds again when probing fails, and prunes stale ABI stamps', async () => {
@@ -59,5 +64,32 @@ describe('scripts/ensure-better-sqlite3.js', () => {
     expect(result).toEqual({ rebuilt: true, stampPath: state.stampPath });
     expect(spawn).toHaveBeenCalledTimes(1);
     expect(readdirSync(state.stampDir)).toEqual([basename(state.stampPath)]);
+  });
+
+  it('treats a probe subprocess crash as a rebuildable error instead of crashing the parent process', async () => {
+    const mod = await import('@/scripts/ensure-better-sqlite3');
+    const cwd = makeTempDir();
+    const state = mod.readState(cwd);
+    const spawn = vi.fn()
+      .mockReturnValueOnce({ status: null, signal: 'SIGSEGV', stdout: '', stderr: '' })
+      .mockReturnValueOnce({ status: 0 })
+      .mockReturnValueOnce({ status: 0, signal: null, stdout: '', stderr: '' });
+
+    mod.writeStamp(state);
+    const result = mod.ensureBetterSqlite3ForCurrentNode({ cwd, spawn });
+
+    expect(result).toEqual({ rebuilt: true, stampPath: state.stampPath });
+    expect(spawn).toHaveBeenNthCalledWith(
+      1,
+      process.execPath,
+      ['-e', expect.stringContaining('require(\'better-sqlite3\')')],
+      expect.objectContaining({ cwd, encoding: 'utf8' }),
+    );
+    expect(spawn).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      ['rebuild', 'better-sqlite3'],
+      expect.objectContaining({ cwd }),
+    );
   });
 });

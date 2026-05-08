@@ -1,6 +1,9 @@
-const AGENT_SCHEDULE_RE = /^[1-9]\d*[mh]$/i;
+// Accept minutes (`Nm`), hours (`Nh`), and days (`Nd`). `d` was added so the
+// UI can offer 3d / 7d / 30d intervals for low-frequency audit-style agents
+// without forcing the operator to compute `72h`/`168h`/`720h` by hand.
+const AGENT_SCHEDULE_RE = /^[1-9]\d*[mhd]$/i;
 
-const AGENT_SCHEDULE_EXAMPLE = 'use 15m, 1h, 4h, or 24h';
+const AGENT_SCHEDULE_EXAMPLE = 'use 15m, 1h, 4h, 24h, or 7d';
 
 export function parseOptionalAgentScheduleInput(
   input: unknown

@@ -11,6 +11,7 @@ import { resolveCliBin, resolveCliDefaultModel, resolveCliEnv } from '@/lib/shar
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { isCliProvider } from '@/lib/usage/cli-providers';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
+import { extractGithubRepoFromUrl, resolveGithubRepo } from '@/lib/shared/gh-status';
 
 export async function POST(
   request: NextRequest,
@@ -44,7 +45,6 @@ export async function POST(
 
   const { projects, logDir } = getImproveConfig();
   const settings = getSettings();
-  const { github_owner: dbGithubOwner } = settings;
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
   const preferredProviderHeader = request.headers.get('x-tamtam-provider-preferred');
@@ -57,15 +57,6 @@ export async function POST(
   const cliEnv = resolveCliEnv(provider, settings);
   const defaultModel = resolveCliDefaultModel(provider, settings);
 
-  const owner = process.env.GITHUB_OWNER || dbGithubOwner || projectName;
-  let repo = `${owner}/${projectName}`;
-  for (const cfg of Object.values(projects)) {
-    if (cfg.project === projectName && cfg.github) {
-      repo = cfg.github;
-      break;
-    }
-  }
-
   // Get CI failure URL from DB
   const { db, schema } = await import('@/lib/db');
   const { eq } = await import('drizzle-orm');
@@ -77,6 +68,9 @@ export async function POST(
 
   const runIdMatch = ciFailedUrl.match(/\/runs\/(\d+)/);
   const runId = runIdMatch?.[1];
+  const projectCfg = Object.values(projects).find((cfg) => cfg.project === projectName);
+  const repo = extractGithubRepoFromUrl(ciFailedUrl)
+    ?? await resolveGithubRepo(projectName, { github: projectCfg?.github ?? null, path: projPath });
 
   let ciLogs = '';
   if (runId) {

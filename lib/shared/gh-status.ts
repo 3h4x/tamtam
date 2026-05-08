@@ -94,7 +94,12 @@ export function invalidateProject(project: string): void {
   setEntry(project, entry);
 }
 
-async function ghRepo(
+export function extractGithubRepoFromUrl(url: string): string | null {
+  const match = url.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)(?:\/|$)/i);
+  return match?.[1] ?? null;
+}
+
+export async function resolveGithubRepo(
   projName: string,
   cfg: { github?: string | null; path?: string }
 ): Promise<string> {
@@ -289,7 +294,7 @@ export async function ghStatusLookup(
     const projName = cfg.project;
     if (!(projName in unique)) {
       unique[projName] = {
-        repo: await ghRepo(projName, cfg),
+        repo: await resolveGithubRepo(projName, cfg),
         path: cfg.path ?? '',
       };
     }
