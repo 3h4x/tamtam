@@ -164,6 +164,26 @@ export async function waitForJobCompletion(
   return null;
 }
 
+/**
+ * Polls a specific job ID until it is running (finished_at == null), or times out.
+ */
+export async function waitForJobByIdRunning(
+  request: APIRequestContext,
+  jobId: string,
+  timeoutMs = 30_000,
+): Promise<Record<string, unknown> | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const resp = await request.get(`/api/jobs/${encodeURIComponent(jobId)}`);
+    if (resp.ok()) {
+      const job = await resp.json() as Record<string, unknown>;
+      if (job['finished_at'] == null) return job;
+    }
+    await new Promise(r => setTimeout(r, 300));
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Assertion helpers
 // ---------------------------------------------------------------------------

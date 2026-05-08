@@ -8,6 +8,7 @@ import {
   writeGitTiming,
   waitForPipelineCompletion,
   waitForJobCompletion,
+  waitForJobByIdRunning,
 } from './helpers';
 
 const START_SCENARIO = JSON.parse(
@@ -111,9 +112,12 @@ test.describe('Real idle-page job start detection', () => {
     const runBody = await runResp.json() as { job_id: string };
     expect(runBody.job_id, 'run job_id in response').toBeTruthy();
 
-    await page.waitForTimeout(3_000);
+    const runningRun = await waitForJobByIdRunning(request, runBody.job_id, 20_000);
+    expect(runningRun, 'terminal run should actually be running').not.toBeNull();
+
     await expect(page).toHaveURL(`/project/${TERMINAL_RUN_PROJECT}/terminal`);
     await expect(page.getByText('live run')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'new' })).toBeVisible();
 
     const runJob = await waitForJobCompletion(request, runBody.job_id, 60_000);
     expect(runJob?.['exit_code'], 'run exit code').toBe(0);
@@ -160,9 +164,12 @@ test.describe('Real idle-page job start detection', () => {
     const runAgentBody = await runAgentResp.json() as { job_id: string };
     expect(runAgentBody.job_id, 'agent run job_id in response').toBeTruthy();
 
-    await page.waitForTimeout(3_000);
+    const runningAgent = await waitForJobByIdRunning(request, runAgentBody.job_id, 20_000);
+    expect(runningAgent, 'agent run should actually be running').not.toBeNull();
+
     await expect(page).toHaveURL(`/project/${TERMINAL_AGENT_PROJECT}/terminal`);
     await expect(page.getByText('live run')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'new' })).toBeVisible();
 
     const runJob = await waitForJobCompletion(request, runAgentBody.job_id, 60_000);
     expect(runJob?.['exit_code'], 'agent run exit code').toBe(0);
