@@ -1,0 +1,14 @@
+{
+  "description": "Longer UI live transition: review sleeps 20 s so concurrent runs stay visibly active while another pipeline finishes.",
+  "steps": [
+    {
+      "label": "review",
+      "sleep_ms": 20000,
+      "text": "Implementation looks clean.\n\nVerdict: LGTM"
+    },
+    {
+      "label": "commit-message",
+      "text": "feat: long ui live transition test commit"
+    }
+  ]
+}
