@@ -124,7 +124,7 @@ API routes are covered by vitest tests in `__tests__/api/`, often with combined 
 
 - Most CLI calls (git, gh, pm2, launchctl) go through `lib/shared/shell.ts`; a few specialized helpers use direct `child_process` spawning when they need tighter process control.
 - `lib/shared/project-data.ts` assembles project state with a 10s TTL cache
-- `instrumentation-node.ts` handles boot-time recovery, the 30s probe sweep, and nightly retention cleanup after startup
+- `instrumentation-node.ts` handles boot-time recovery, the 30s probe sweep, the 30s queued-agent recovery sweep, the 60s budget-recovery drain ticker, and nightly retention cleanup after startup
 - Project detail tabs live at `/project/[name]` and `/project/[name]/[tab]`
 - Streaming uses `claude --output-format stream-json` → PM2 log file → `fs.watch` → NDJSON parser → SSE
 - See `docs/STREAMING.md` for the full terminal streaming architecture
