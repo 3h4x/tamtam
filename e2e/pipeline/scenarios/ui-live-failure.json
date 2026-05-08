@@ -1,0 +1,34 @@
+{
+  "description": "Longer UI live failure: initial review sleeps 10 s so concurrent runs stay visibly active, then follow-up fix/review attempts complete quickly before the 20 s success run.",
+  "steps": [
+    {
+      "label": "review",
+      "sleep_ms": 10000,
+      "text": "This code has critical security vulnerabilities that must not be merged.\n\nVerdict: DO NOT SHIP"
+    },
+    {
+      "label": "fix",
+      "text": "Attempted remediation, but the critical issue remains."
+    },
+    {
+      "label": "review",
+      "text": "The critical security vulnerability is still present.\n\nVerdict: DO NOT SHIP"
+    },
+    {
+      "label": "fix",
+      "text": "Second remediation attempt did not resolve the issue."
+    },
+    {
+      "label": "review",
+      "text": "The implementation still must not ship.\n\nVerdict: DO NOT SHIP"
+    },
+    {
+      "label": "fix",
+      "text": "Final remediation attempt applied."
+    },
+    {
+      "label": "review",
+      "text": "The final verification still fails.\n\nVerdict: DO NOT SHIP"
+    }
+  ]
+}
