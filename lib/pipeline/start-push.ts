@@ -334,14 +334,21 @@ export function launchProjectPush(
 // Push-only: just push existing commits, with the same set-upstream fallback
 // used by the release pipeline. Shared by runPush(pushOnly) and the
 // Create-PR endpoint so both get the same resilience semantics.
+export type PushHookFailure = 'pre-push-tests' | 'pre-push-other' | null;
+
 export async function pushCurrentBranch(
   projPath: string,
   log: (s: string) => void = () => {},
-): Promise<{ ok: true; commitSha: string } | { ok: false; detail: string }> {
+  options: { noVerify?: boolean } = {},
+): Promise<
+  | { ok: true; commitSha: string }
+  | { ok: false; detail: string; hookFailure: PushHookFailure }
+> {
   const PUSH_TIMEOUT = 25 * 60 * 1000;
+  const baseArgs = options.noVerify ? ['--no-verify'] : [];
   const tryPush = async (extraArgs: string[] = []) => {
-    const args = ['-C', projPath, 'push', ...extraArgs];
-    log(`\n$ git push${extraArgs.length ? ' ' + extraArgs.join(' ') : ''}\n`);
+    const args = ['-C', projPath, 'push', ...baseArgs, ...extraArgs];
+    log(`\n$ git push${args.slice(2).length ? ' ' + args.slice(2).join(' ') : ''}\n`);
     const r = await exec('git', args, { timeout: PUSH_TIMEOUT, killProcessGroup: true });
     if (r.stdout) log(r.stdout);
     if (r.stderr) log(r.stderr);
@@ -355,7 +362,21 @@ export async function pushCurrentBranch(
   }
   if (pushR.exitCode !== 0) {
     const detail = (pushR.stderr.trim() || pushR.stdout.trim() || `git push exited ${pushR.exitCode}`).slice(0, 2000);
-    return { ok: false, detail: `Push failed: ${detail}` };
+    // The pre-push hook is the most common blocker for the manual "Create PR"
+    // button — surface that explicitly so the route can offer a force retry.
+    const lower = detail.toLowerCase();
+    const looksLikeHook =
+      lower.includes('pre-push') ||
+      lower.includes('failed tests') ||
+      lower.includes('lint') ||
+      lower.includes('eslint') ||
+      lower.includes('typecheck') ||
+      lower.includes('tsc');
+    const isTestFailure = lower.includes('failed tests') || lower.includes('assertionerror') || /\bfail\b.*\.test\./i.test(detail);
+    const hookFailure: PushHookFailure = looksLikeHook
+      ? (isTestFailure ? 'pre-push-tests' : 'pre-push-other')
+      : null;
+    return { ok: false, detail: `Push failed: ${detail}`, hookFailure };
   }
   const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
   return { ok: true, commitSha: shaR.exitCode === 0 ? shaR.stdout.trim() : '' };

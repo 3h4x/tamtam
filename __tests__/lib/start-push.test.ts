@@ -1793,6 +1793,58 @@ describe('pushCurrentBranch', () => {
       if (cmd === 'git') expect(args).toContain('/my/custom/path');
     }
   });
+
+  it('forwards --no-verify to git push when noVerify is set', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0))
+      .mockResolvedValueOnce(resp(0, 'sha\n'));
+
+    await pushCurrentBranch('/repo', undefined, { noVerify: true });
+    const pushCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'git' && args.includes('push'),
+    );
+    expect(pushCall).toBeTruthy();
+    expect(pushCall![1]).toContain('--no-verify');
+  });
+
+  it('does not pass --no-verify by default', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0))
+      .mockResolvedValueOnce(resp(0, 'sha\n'));
+
+    await pushCurrentBranch('/repo');
+    const pushCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'git' && args.includes('push'),
+    );
+    expect(pushCall![1]).not.toContain('--no-verify');
+  });
+
+  it('classifies pre-push hook test failures as hookFailure: pre-push-tests', async () => {
+    execMock.mockResolvedValueOnce(resp(1, '', '✗ FAIL middleware.utils.test.ts > isAdminRole\n  AssertionError: expected false to be true\n  Failed Tests 1\n'));
+
+    const result = await pushCurrentBranch('/repo');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.hookFailure).toBe('pre-push-tests');
+      expect(result.detail).toContain('Failed Tests');
+    }
+  });
+
+  it('classifies non-test pre-push hook failures (lint/typecheck) as hookFailure: pre-push-other', async () => {
+    execMock.mockResolvedValueOnce(resp(1, '', 'eslint: 12 errors\n7:5  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n'));
+
+    const result = await pushCurrentBranch('/repo');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.hookFailure).toBe('pre-push-other');
+  });
+
+  it('returns hookFailure: null for non-hook failures (auth, network, non-fast-forward)', async () => {
+    execMock.mockResolvedValueOnce(resp(128, '', 'fatal: Authentication failed for github.com'));
+
+    const result = await pushCurrentBranch('/repo');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.hookFailure).toBe(null);
+  });
 });
 
 describe('validateReleaseLinkedCommitRetry', () => {

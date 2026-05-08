@@ -169,12 +169,67 @@ describe('fetchProjectData — unpushed field', () => {
     vi.resetModules();
   });
 
-  it('returns unpushed=0 when no upstream or clean', async () => {
+  it('returns unpushed=0 when no upstream and no remote ref and no default ref', async () => {
+    // Every git call fails — branch genuinely has nothing to compare against.
     execMock.mockResolvedValue({ exitCode: 1, stdout: '', stderr: 'no upstream' });
     const { fetchProjectData } = await import('@/lib/shared/project-data');
     const result = await fetchProjectData();
     const proj = result.projects['myproj']?.[0];
     expect(proj?.unpushed).toBe(0);
+  });
+
+  it('falls back to origin/<branch>..HEAD when @{u} has no upstream configured', async () => {
+    // Simulates: branch has 2 local commits, remote ref `origin/feature-x`
+    // exists but the local branch isn't tracking it (e.g. after a force-push
+    // without --set-upstream). Without the fallback, unpushed silently reads
+    // 0 and the Push button disables.
+    execMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('rev-list') && args.includes('@{u}..HEAD')) {
+        return Promise.resolve({ exitCode: 128, stdout: '', stderr: 'fatal: no upstream configured for branch' });
+      }
+      if (args.includes('branch') && args.includes('--show-current')) {
+        return Promise.resolve({ exitCode: 0, stdout: 'feature-x\n', stderr: '' });
+      }
+      if (args.includes('rev-parse') && args.includes('--verify') && args.includes('refs/remotes/origin/feature-x')) {
+        return Promise.resolve({ exitCode: 0, stdout: 'abc1234\n', stderr: '' });
+      }
+      if (args.includes('rev-list') && args.includes('refs/remotes/origin/feature-x..HEAD')) {
+        return Promise.resolve({ exitCode: 0, stdout: '2\n', stderr: '' });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+    const { fetchProjectData } = await import('@/lib/shared/project-data');
+    const result = await fetchProjectData();
+    const proj = result.projects['myproj']?.[0];
+    expect(proj?.unpushed).toBe(2);
+  });
+
+  it('falls back to <defaultRef>..HEAD when no upstream and no remote ref for the branch', async () => {
+    // Brand-new local branch with no remote yet — should still surface a
+    // count so the user can publish via the Push button (which uses
+    // --set-upstream on first push).
+    execMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('rev-list') && args.includes('@{u}..HEAD')) {
+        return Promise.resolve({ exitCode: 128, stdout: '', stderr: 'fatal: no upstream' });
+      }
+      if (args.includes('branch') && args.includes('--show-current')) {
+        return Promise.resolve({ exitCode: 0, stdout: 'brand-new-branch\n', stderr: '' });
+      }
+      if (args.includes('rev-parse') && args.includes('refs/remotes/origin/brand-new-branch')) {
+        return Promise.resolve({ exitCode: 128, stdout: '', stderr: 'unknown ref' });
+      }
+      if (args.includes('symbolic-ref') && args.includes('refs/remotes/origin/HEAD')) {
+        return Promise.resolve({ exitCode: 0, stdout: 'origin/main\n', stderr: '' });
+      }
+      if (args.includes('rev-list') && args.includes('origin/main..HEAD')) {
+        return Promise.resolve({ exitCode: 0, stdout: '5\n', stderr: '' });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+    const { fetchProjectData } = await import('@/lib/shared/project-data');
+    const result = await fetchProjectData();
+    const proj = result.projects['myproj']?.[0];
+    expect(proj?.unpushed).toBe(5);
   });
 
   it('returns unpushed count from git rev-list', async () => {

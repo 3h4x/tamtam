@@ -29,6 +29,8 @@ const PROJECTS = [
   'start-detect-terminal',
   'start-detect-run-idle',
   'start-detect-agent-idle',
+  'queued-release-history',
+  'queued-release-terminal',
 ];
 
 export default async function globalSetup(): Promise<void> {

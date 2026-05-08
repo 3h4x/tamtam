@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject, fetchIssuesAndPRs, pushProject, fetchBranch, createProjectPR } from '@/lib/client-api'
+import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject, fetchIssuesAndPRs, pushProject, fetchBranch, createProjectPR, CreatePRPrePushHookError } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
 import { getAggregateCi } from '@/lib/shared/statusConstants'
@@ -379,19 +379,44 @@ export function ProjectDetailPage({
     }
   }
 
+  const runCreatePr = async (opts: { force?: boolean } = {}) => {
+    const result = await createProjectPR(name!, opts)
+    toast(result.url ? `Pull request created: ${result.url}` : 'Pull request created', 'success')
+    fetchIssuesAndPRs(name!, true).then((data) => {
+      setIssueCount({ prs: data.prs.length, issues: data.issues.length })
+      setOpenPrBranches(data.prs.map(pr => pr.headRefName))
+      setOpenPrByBranch(Object.fromEntries(data.prs.map(pr => [pr.headRefName, pr.number])))
+    }).catch(() => {})
+  }
+
   const handleCreatePr = async () => {
     if (!name || creatingPr) return
     setCreatingPr(true)
     try {
-      const result = await createProjectPR(name)
-      toast(result.url ? `Pull request created: ${result.url}` : 'Pull request created', 'success')
-      fetchIssuesAndPRs(name, true).then((data) => {
-        setIssueCount({ prs: data.prs.length, issues: data.issues.length })
-        setOpenPrBranches(data.prs.map(pr => pr.headRefName))
-        setOpenPrByBranch(Object.fromEntries(data.prs.map(pr => [pr.headRefName, pr.number])))
-      }).catch(() => {})
+      await runCreatePr()
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to create PR', 'error')
+      // Pre-push hook blocked the push (e.g. repo's local tests/lint failed).
+      // Offer the user a one-click force-create that pushes with --no-verify.
+      if (err instanceof CreatePRPrePushHookError) {
+        const detail = err.message.length > 800 ? err.message.slice(0, 800) + '\n\n…(truncated)' : err.message
+        const summary = err.hookFailure === 'pre-push-tests'
+          ? "The repo's pre-push tests failed."
+          : 'The repo\'s pre-push hook (lint/typecheck) failed.'
+        const confirmed = typeof window !== 'undefined' && window.confirm(
+          `${summary}\n\n${detail}\n\nForce-create the PR anyway? (pushes with --no-verify, skipping the hook).`,
+        )
+        if (confirmed) {
+          try {
+            await runCreatePr({ force: true })
+          } catch (forceErr) {
+            toast(forceErr instanceof Error ? forceErr.message : 'Failed to force-create PR', 'error')
+          }
+        } else {
+          toast('PR creation cancelled — fix the failing tests/lint, or click Create PR again to force.', 'info')
+        }
+      } else {
+        toast(err instanceof Error ? err.message : 'Failed to create PR', 'error')
+      }
     } finally {
       setCreatingPr(false)
     }
@@ -490,7 +515,14 @@ export function ProjectDetailPage({
 
   return (
     <div className="px-0 py-1">
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+      {/* Header is split into two stacked rows: project identity on top, the
+          action toolbar on its own row below. Previous layout used
+          `justify-between flex-wrap` which made the toolbar bounce between
+          row 1 (right side) and row 2 (left, wrapped) depending on how long
+          the branch chip was — so the toolbar shifted between tabs whose
+          branch state differed. Stacking gives a single, predictable
+          left-aligned toolbar regardless of branch length or active tab. */}
+      <div className="mb-4 flex flex-col gap-3">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
           <h2 className="text-xl font-semibold text-text-primary" data-private>{project.project}</h2>
           {currentBranch && (() => {
@@ -547,7 +579,7 @@ export function ProjectDetailPage({
             </a>
           )}
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           <ProjectActions
             projectName={name}
             totalChanges={project.totalChanges}

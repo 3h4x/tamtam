@@ -5,7 +5,7 @@ import { detectMainBranch } from '@/lib/pipeline/start-commit';
 import { pushCurrentBranch } from '@/lib/pipeline/start-push';
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ projectName: string }> }
 ) {
   const { projectName } = await params;
@@ -13,6 +13,18 @@ export async function POST(
   if (!projPath) {
     return NextResponse.json({ detail: 'Project not found' }, { status: 404 });
   }
+
+  // Optional `{ force: true }` body — the user opted in to skipping the
+  // pre-push hook (e.g. when a flaky/broken local test would otherwise block
+  // them from filing a PR). Translates to `git push --no-verify`.
+  let forcePush = false;
+  try {
+    const text = await request.text();
+    if (text) {
+      const body = JSON.parse(text) as { force?: boolean };
+      forcePush = !!body.force;
+    }
+  } catch { /* no body or invalid JSON — default to verifying */ }
 
   // Refuse to create a PR from the default branch — gh would reject it, but
   // fail fast with a clean error rather than pushing first.
@@ -28,8 +40,18 @@ export async function POST(
 
   // Push current branch via the shared release-pipeline helper so upstream
   // fallback and error formatting behave consistently with the rest of the app.
-  const pushR = await pushCurrentBranch(projPath);
+  const pushR = await pushCurrentBranch(projPath, undefined, { noVerify: forcePush });
   if (!pushR.ok) {
+    // When the pre-push hook blocked the push, surface a structured payload so
+    // the client can offer the user a "Force-create (skip pre-push hook)"
+    // retry. Other failures (auth, network, non-fast-forward) remain plain
+    // 500s — those need real intervention.
+    if (pushR.hookFailure) {
+      return NextResponse.json(
+        { detail: pushR.detail, hookFailure: pushR.hookFailure, retryable: true },
+        { status: 409 },
+      );
+    }
     return NextResponse.json({ detail: pushR.detail }, { status: 500 });
   }
 

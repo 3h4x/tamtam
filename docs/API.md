@@ -38,7 +38,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 - `changes/diff` — Full git diff content (GET)
 - `checkout-default` — Switch to default branch; refuses if uncommitted changes (POST → `{ status: 'switched'|'already-on-branch', branch }`)
 - `push` — Push changes to git (POST). Accepts optional JSON body `{ commit?: boolean, release_id?: string }`: `commit: true` runs the commit step first; `release_id` keeps manual push retries linked to the active release chain, and with `commit: true` it also allows the History "Retry commit" flow to re-run the failed commit for the latest finished release on that project
-- `create-pr` — Push current branch + create GitHub PR (POST → `{ url }`); refuses on default branch
+- `create-pr` — Push current branch + create GitHub PR (POST → `{ url }`). Accepts optional JSON body `{ force?: boolean }`; `force: true` retries with `git push --no-verify` to skip the local pre-push hook after an explicit user confirmation flow. Refuses on the default branch. Returns `409 { detail, hookFailure: 'pre-push-tests'|'pre-push-other', retryable: true }` when a retryable pre-push-hook failure blocks the initial push; non-hook push failures remain `500`.
 - `release` — Trigger release pipeline (POST)
 - `release/[releaseId]` — Release detail: meta-job + ordered pipeline step jobs with verdicts and log excerpts (GET)
 - `release/abort` — Abort active release: marks release job aborted, kills running step, releases lock (POST)
