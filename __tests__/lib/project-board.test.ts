@@ -353,6 +353,42 @@ describe('project board integration', () => {
     expect(ghCalls).toBe(ghCallsAfterFirst);
   });
 
+  it('throws a clear error when manual sync is required but board sync is disabled', async () => {
+    const job = makeJob({ id: 'disabled-sync-job', kind: 'run' });
+
+    mockGetSettings = () => ({ ...DISABLED_SETTINGS });
+
+    const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
+    await expect(syncJobToProjectBoard(job, 'manual', { requireConfigured: true })).rejects.toThrow(
+      'GitHub board sync is disabled.',
+    );
+  });
+
+  it('throws a clear error when board sync is enabled without a GitHub owner', async () => {
+    const job = makeJob({ id: 'missing-owner-job', kind: 'run' });
+
+    mockGetSettings = () => ({
+      ...ENABLED_SETTINGS,
+      github_owner: '',
+      github_board_project_owner: '',
+    });
+
+    const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
+    await expect(syncJobToProjectBoard(job, 'manual', { requireConfigured: true })).rejects.toThrow(
+      'GitHub board sync requires a GitHub owner.',
+    );
+  });
+
+  it('no-ops when board sync is unavailable and configuration is not required', async () => {
+    const job = makeJob({ id: 'optional-sync-job', kind: 'run' });
+
+    mockGetSettings = () => ({ ...DISABLED_SETTINGS });
+
+    const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
+    await expect(syncJobToProjectBoard(job, 'manual')).resolves.toBeUndefined();
+    expect(execMock).not.toHaveBeenCalled();
+  });
+
   it('refuses to pass --prefixed strings as gh title/body args', async () => {
     const job = makeJob({
       id: 'run-inj',
