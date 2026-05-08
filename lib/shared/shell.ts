@@ -54,20 +54,16 @@ export function exec(
   // (git → hook → check.ts → vitest workers) on timeout or parent exit.
   if (options?.killProcessGroup) {
     return new Promise((resolve) => {
-      const child = spawn(cmd, args, {
-        cwd: options?.cwd,
-        env: mergedEnv,
-        detached: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-
       let stdout = '';
       let stderr = '';
       let settled = false;
       const timeoutMs = options?.timeout ?? 15000;
+      let killTimer: ReturnType<typeof setTimeout> | null = null;
+
+      let child: ReturnType<typeof spawn> | null = null;
 
       const killGroup = (sig: NodeJS.Signals) => {
-        if (child.pid) {
+        if (child?.pid) {
           try { process.kill(-child.pid, sig); } catch {}
         }
       };
@@ -75,11 +71,24 @@ export function exec(
       const settle = (exitCode: number) => {
         if (settled) return;
         settled = true;
-        clearTimeout(killTimer);
+        if (killTimer) clearTimeout(killTimer);
         resolve({ stdout, stderr, exitCode });
       };
 
-      const killTimer = setTimeout(() => {
+      try {
+        child = spawn(cmd, args, {
+          cwd: options?.cwd,
+          env: mergedEnv,
+          detached: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+      } catch (error) {
+        stderr = error instanceof Error ? error.message : String(error);
+        settle(1);
+        return;
+      }
+
+      killTimer = setTimeout(() => {
         killGroup('SIGTERM');
         // Escalate to SIGKILL if SIGTERM doesn't land (e.g. process ignores it)
         setTimeout(() => killGroup('SIGKILL'), 5000);
@@ -89,7 +98,10 @@ export function exec(
       child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
       child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
       child.on('close', (code) => settle(code ?? 1));
-      child.on('error', () => settle(1));
+      child.on('error', (error) => {
+        stderr = stderr || (error instanceof Error ? error.message : String(error));
+        settle(1);
+      });
 
       // Don't keep the Node event loop alive just for this child
       child.unref();
@@ -104,12 +116,20 @@ export function exec(
       maxBuffer: 10 * 1024 * 1024,
     };
 
-    execFile(cmd, args, opts, (error, stdout, stderr) => {
-      resolve({
-        stdout: (stdout ?? '').toString(),
-        stderr: (stderr ?? '').toString(),
-        exitCode: error ? (Number((error as NodeJS.ErrnoException).code) || 1) : 0,
+    try {
+      execFile(cmd, args, opts, (error, stdout, stderr) => {
+        resolve({
+          stdout: (stdout ?? '').toString(),
+          stderr: (stderr ?? '').toString(),
+          exitCode: error ? (Number((error as NodeJS.ErrnoException).code) || 1) : 0,
+        });
       });
-    });
+    } catch (error) {
+      resolve({
+        stdout: '',
+        stderr: error instanceof Error ? error.message : String(error),
+        exitCode: 1,
+      });
+    }
   });
 }
