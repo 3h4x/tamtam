@@ -1,4 +1,3 @@
-// tamtam
 'use client'
 
 import { useProjects } from '@/components/ProjectsProvider'
