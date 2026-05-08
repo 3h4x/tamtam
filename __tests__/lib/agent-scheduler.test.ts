@@ -136,6 +136,16 @@ describe('agent-scheduler', () => {
       expect(content).toContain('<integer>1800</integer>'); // 30m = 1800s
     });
 
+    it('writes day-based schedules as day-length intervals, not raw seconds', async () => {
+      await installAgentSchedule('agent-days', '3d', 'prompt', 'launchctl');
+      const laAgentsDir = join(tempDir, 'Library', 'LaunchAgents');
+      const plistPath = join(laAgentsDir, 'com.test.agent.agent-days.plist');
+      expect(existsSync(plistPath)).toBe(true);
+      const content = readFileSync(plistPath, 'utf-8');
+      expect(content).toContain('<integer>259200</integer>'); // 3d = 259200s
+      expect(content).not.toContain('<integer>3</integer>');
+    });
+
     it('does not touch the internal scheduler for launchctl runner', async () => {
       await installAgentSchedule('agent-lc', '1h', 'prompt', 'launchctl');
       expect(upsertAgentScheduleMock).not.toHaveBeenCalled();

@@ -255,7 +255,7 @@ const isValid = timingSafeEqual(Buffer.from(expected), Buffer.from(req.headers['
   name: string         // template identifier
   description: string
   model: string        // 'fast' | 'normal' | 'smart' (legacy 'haiku' | 'sonnet' | 'opus' still accepted)
-  schedule: string     // '' (manual) | '15m' | '30m' | '1h' | '2h' | '4h' | '8h' | '12h' | '24h'
+  schedule: string     // '' (manual) | '15m' | '30m' | '1h' | '2h' | '4h' | '8h' | '12h' | '24h' | '3d' | '7d' | '30d'
   runner: string       // 'pm2' | 'launchctl'
   prompt: string
   skillIds?: string[]
