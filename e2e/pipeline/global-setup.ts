@@ -24,6 +24,7 @@ const PROJECTS = [
   'review-failure',
   'runs-failure-dns',
   'runs-abort-cancel',
+  'strip-full-live',
 ];
 
 export default async function globalSetup(): Promise<void> {

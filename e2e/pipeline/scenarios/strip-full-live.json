@@ -1,0 +1,25 @@
+{
+  "description": "Full live strip pipeline with test, fix loop, commit, and push delays so the terminal strip can observe each step.",
+  "steps": [
+    {
+      "label": "review-1",
+      "sleep_ms": 6500,
+      "text": "The implementation still needs a null guard before the main execution path.\n\nVerdict: NEEDS ATTENTION"
+    },
+    {
+      "label": "fix",
+      "sleep_ms": 6500,
+      "text": "Added the missing guard and tightened the error handling path."
+    },
+    {
+      "label": "review-2",
+      "sleep_ms": 6500,
+      "text": "The missing guard is in place and the fix addresses the review findings.\n\nVerdict: LGTM"
+    },
+    {
+      "label": "commit-message",
+      "sleep_ms": 6500,
+      "text": "fix: add null guard before main execution path"
+    }
+  ]
+}
