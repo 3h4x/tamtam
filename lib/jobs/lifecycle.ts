@@ -696,8 +696,32 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         // re-test entirely and merge code that hadn't been verified.
         const parent = job.parentJobId ? getJob(job.parentJobId) : null;
         const fromTestFailure = parent?.kind === 'test' && parent.exitCode !== null && parent.exitCode !== 0;
+        const fromCommitFailure = parent?.kind === 'commit' && parent.exitCode !== null && parent.exitCode !== 0;
 
-        if (fromTestFailure) {
+        if (fromCommitFailure) {
+          // Symmetric to fromTestFailure: re-run the commit step that failed
+          // (e.g. pre-commit hook caught a regression introduced by the
+          // prior fix). Cap on number of commits so a stubbornly-failing
+          // hook can't churn commit→fix→commit forever.
+          const commitCount = recentStepCount(job.project, 'commit', job);
+          if (commitCount >= maxStepIterations()) {
+            releaseStopReason = `commit cap reached for ${job.project} (${commitCount}/${maxStepIterations()}) — commit keeps failing, stopping`;
+            noteReleaseStop(releaseStopReason);
+            notificationEvent = 'fix_loop_exhausted';
+            forcedReleaseExitCode = 1;
+          } else {
+            const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
+            const r = await startProjectCommit(job.project);
+            if (r.ok) {
+              console.log(`[fix→commit] re-running commit after fix ${job.id} (commit #${commitCount + 1})`);
+              chainedNext = true;
+            } else {
+              releaseStopReason = `skipped re-commit for ${job.project}: ${r.detail}`;
+              noteReleaseStop(releaseStopReason);
+              forcedReleaseExitCode = 1;
+            }
+          }
+        } else if (fromTestFailure) {
           // Cap on number of test runs — a persistently-broken test can't
           // churn test→fix→test→fix forever. Counts tests (the verification
           // round), not fixes; the trailing fix lands but the next test is
@@ -765,6 +789,37 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
       }
     } catch (e) {
       console.log(`[fix→review] error starting auto-review for ${job.project}:`, e);
+    }
+  }
+
+  // Symmetric to test-fail and review NEEDS-ATTENTION: a failed commit
+  // must trigger a fix that re-attempts the commit, capped on the
+  // verification side (commit) by TAMTAM_MAX_STEP_ITERATIONS. Without this
+  // path a commit that exits ≠0 (e.g. pre-commit hook caught a lint
+  // regression introduced by the prior fix) terminates the release with
+  // no recovery attempt. See PIPELINE.md "Auto-fix policy".
+  if (job.kind === 'commit' && job.exitCode !== null && job.exitCode !== 0) {
+    try {
+      const { autoCommitEnabled, autoPushEnabled } = await getProjectPipelineConfig(job.project);
+      const inRelease = !!findLinkedActiveReleaseJob(job);
+      if (inRelease || autoPushEnabled || autoCommitEnabled) {
+        const { startFixFromJob } = await import('@/lib/pipeline/start-fix');
+        const r = await startFixFromJob(job.id);
+        if (r.ok) {
+          console.log(`[release] commit failed → started fix ${r.jobId}`);
+          chainedNext = true;
+        } else {
+          releaseStopReason = `commit→fix skipped for ${job.project}: ${r.detail}`;
+          noteReleaseStop(releaseStopReason);
+          forcedReleaseExitCode = 1;
+        }
+      }
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      releaseStopReason = `commit→fix hook errored for ${job.project}: ${detail}`;
+      noteReleaseStop(releaseStopReason);
+      forcedReleaseExitCode = 1;
+      console.log(`[release] commit-fail hook error for ${job.project}:`, e);
     }
   }
 
@@ -934,6 +989,19 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         }
       }
     } catch (e) {
+      // Without forcing an exit code here, the release stays in `running`
+      // forever: the finalize block at the bottom of this function uses
+      // `pipelineExitCodeForStep(job)` which is 1 for a failed test, but
+      // any throw between finding the release and starting the fix (e.g.
+      // dynamic-import failure, transient DB error) would skip both the
+      // ok/!ok branches above and leave `forcedReleaseExitCode` null —
+      // historically harmless except that we then *also* lose the ability
+      // to surface the cause to operators. Pin the exit code + stop
+      // reason so the release lands on disk as a failure no matter what.
+      const detail = e instanceof Error ? e.message : String(e);
+      releaseStopReason = `test→fix hook errored for ${job.project}: ${detail}`;
+      noteReleaseStop(releaseStopReason);
+      forcedReleaseExitCode = 1;
       console.log(`[release] test-fail hook error for ${job.project}:`, e);
     }
   }
@@ -1327,7 +1395,23 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
   try {
     db.delete(schema.ghIssuesCache).where(eq(schema.ghIssuesCache.project, job.project)).run();
   } catch {}
-  await runCompletionHooks(job);
+  // Wrap completion hooks so a thrown handler can't strand the release
+  // meta-job in `running`. Without this, an error inside e.g. the test→fix
+  // hook (dynamic import failure, helper crash) would propagate up to the
+  // PM2 onExit caller, skip the finalize block below, and leave the
+  // release pipeline lock held with no child running. The
+  // reconcileStaleRelease call after the catch is the safety net that
+  // walks the chain and finalizes the release with the worst child exit.
+  try {
+    await runCompletionHooks(job);
+  } catch (hookErr) {
+    console.error(`[markDone] completion hooks threw for ${job.id}:`, hookErr);
+    try {
+      await reconcileStaleRelease(job);
+    } catch (reconcileErr) {
+      console.error(`[markDone] reconcileStaleRelease also failed for ${job.id}:`, reconcileErr);
+    }
+  }
   // Clean up PM2 process now that it's saved to DB
   try {
     const { deleteJob } = await import('@/lib/jobs/pm2-jobs');

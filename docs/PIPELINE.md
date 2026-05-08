@@ -2,6 +2,48 @@
 
 The pipeline is a quality-gated sequence driven by Claude. The exact steps depend on the **workflow mode** configured per project.
 
+## Auto-fix policy (requirements)
+
+TamTam's release pipeline owns end-to-end recovery: when any pipeline step
+fails, the same release should attempt to fix the failure automatically
+before declaring the release dead. This is the contract:
+
+| Step that failed | Recovery step | Re-verification | Cap                                  |
+|------------------|---------------|-----------------|--------------------------------------|
+| `test` exit ≠ 0  | `fix` (sees test log) | re-run `test` | `TAMTAM_MAX_STEP_ITERATIONS` (default 3) |
+| `review` not LGTM | `fix` (sees review findings) | re-run `review` | `review_fix_max_iterations` |
+| `commit` exit ≠ 0 | `fix` (sees commit log) | re-run `commit` | `TAMTAM_MAX_STEP_ITERATIONS` |
+| `push` exit ≠ 0  | `fix-push` for hook nits, `fix` for tests | re-run `push` | `MAX_FIX_PUSH_ATTEMPTS=2` for fix-push; `TAMTAM_MAX_STEP_ITERATIONS` for test-driven push recovery |
+
+Rules that hold for every recovery loop:
+
+- **Fixes are unbounded.** The cap lives on the verification side: bail
+  before launching the *(MAX+1)*-th `test` / `review` / `commit` / `push`,
+  not before launching another `fix`. This guarantees that the trailing
+  fix always lands; what we lose is *one* round of verification.
+- **A hook that errors mid-flight must NOT leave the release in `running`.**
+  Failure paths set `forcedReleaseExitCode = 1` where needed so the release
+  finalizes as failed, and `markDone` additionally wraps
+  `runCompletionHooks` in a try/catch and runs `reconcileStaleRelease` as a
+  belt-and-braces safety net for any throw inside the hook chain.
+- **Recovery never silently skips a verification step.** When a recovery
+  fix succeeds, the next call MUST be the verification step that
+  originally failed (re-test after test-fail, re-review after
+  needs-attention, re-commit after commit-fail, re-push after push-fail).
+- **Review and non-review loops use different caps.**
+  `review_fix_max_iterations` governs only the review→fix verification
+  budget. Test/commit/push verification rounds use the shared
+  `TAMTAM_MAX_STEP_ITERATIONS` env guard; `fix-push` has its own hard cap
+  (`MAX_FIX_PUSH_ATTEMPTS=2`). When the cap trips on review-side
+  exhaustion, file a follow-up GitHub issue with the unresolved findings
+  (see `lib/pipeline/review-exhaustion-fallback.ts`) and chain to commit +
+  push so partial work still ships. Test/commit/push caps still abort.
+
+Implementation lives in `lib/jobs/lifecycle.ts` `runCompletionHooks`. Any
+new pipeline step kind added to `PIPELINE_STEP_KINDS` must wire its
+failure path into one of these recovery loops or document why it is
+exempt.
+
 ## Budget Gate
 
 Before any run/release path starts work, TamTam performs one shared async gate:
