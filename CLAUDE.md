@@ -82,6 +82,7 @@ TamTam runs in **production mode** (`next start`) under PM2 — no HMR. After an
 
 ## Pages
 - `/` — Projects list with status, changes, CI
+- `/jobs` — Legacy runs redirect to `/runs`
 - `/project/[name]` — Project overview; `/project/[name]/[tab]` — tabs (`overview`, `config`, `history`, `terminal`, `changes`, `issues`, `docs`, `recommendations`)
 - `/project/[name]/terminal/[sessionId]` — Interactive Claude runner with model tier selector (fast/normal/smart; legacy haiku/sonnet/opus aliases still accepted), skill picker, real-time SSE streaming. See `docs/STREAMING.md`.
 - `/project/[name]/task/[task]` — Task detail
