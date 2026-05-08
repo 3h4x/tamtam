@@ -422,7 +422,9 @@ export function PipelineStrip({
     : pushJob && pushJob.exit_code !== 0 ? 'failed'
     : effectivePushError && !pushErrorIsCommit ? 'failed'
     : !hasChanges && !unpushedBool ? 'done' : 'pending'
-  const pushHint = pushState === 'failed'
+  const pushHint = pushRunning
+    ? 'push in progress — click to open terminal'
+    : pushState === 'failed'
     ? (effectivePushError ?? `push failed${pushJob?.exit_code != null ? ` (exit ${pushJob.exit_code})` : ''}`)
     : pushState === 'done'
       ? 'nothing to push'

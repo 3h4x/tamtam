@@ -150,6 +150,316 @@ async function mockScenario(
 const now = () => Math.floor(Date.now() / 1000);
 
 test.describe('PipelineStrip visibility', () => {
+  test('pipeline strip reflects test → review → fix → commit → push transitions and disappears once the release finishes', async ({ page }) => {
+    const releaseId = 'strip-live-release'
+    const phaseJobs = {
+      test: [
+        makeJob({
+          id: releaseId,
+          kind: 'release',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 60,
+          finished_at: null,
+        }),
+        makeJob({
+          id: 'strip-step-test',
+          kind: 'test',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 50,
+          finished_at: null,
+          session_id: 'sess-strip-test',
+          release_id: releaseId,
+        }),
+      ],
+      review: [
+        makeJob({
+          id: releaseId,
+          kind: 'release',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 60,
+          finished_at: null,
+        }),
+        makeJob({
+          id: 'strip-step-test',
+          kind: 'test',
+          status: 'done',
+          exit_code: 0,
+          started_at: now() - 50,
+          finished_at: now() - 40,
+          release_id: releaseId,
+        }),
+        makeJob({
+          id: 'strip-step-review-1',
+          kind: 'review',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 30,
+          finished_at: null,
+          session_id: 'sess-strip-review-1',
+          release_id: releaseId,
+        }),
+      ],
+      fix: [
+        makeJob({
+          id: releaseId,
+          kind: 'release',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 60,
+          finished_at: null,
+        }),
+        makeJob({
+          id: 'strip-step-test',
+          kind: 'test',
+          status: 'done',
+          exit_code: 0,
+          started_at: now() - 50,
+          finished_at: now() - 40,
+          release_id: releaseId,
+        }),
+        makeJob({
+          id: 'strip-step-review-1',
+          kind: 'review',
+          status: 'done',
+          exit_code: 0,
+          started_at: now() - 30,
+          finished_at: now() - 20,
+          verdict: 'NEEDS ATTENTION',
+          session_id: 'sess-strip-review-1',
+          release_id: releaseId,
+        }),
+        makeJob({
+          id: 'strip-step-fix',
+          kind: 'fix',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 10,
+          finished_at: null,
+          session_id: 'sess-strip-fix',
+          release_id: releaseId,
+        }),
+      ],
+      commit: [
+        makeJob({
+          id: releaseId,
+          kind: 'release',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 60,
+          finished_at: null,
+        }),
+        makeJob({
+          id: 'strip-step-test',
+          kind: 'test',
+          status: 'done',
+          exit_code: 0,
+          started_at: now() - 50,
+          finished_at: now() - 40,
+          release_id: releaseId,
+        }),
+        makeJob({
+          id: 'strip-step-fix',
+          kind: 'fix',
+          status: 'done',
+          exit_code: 0,
+          started_at: now() - 25,
+          finished_at: now() - 15,
+          session_id: 'sess-strip-fix',
+          release_id: releaseId,
+        }),
+        makeJob({
+          id: 'strip-step-review-2',
+          kind: 'review',
+          status: 'done',
+          exit_code: 0,
+          started_at: now() - 14,
+          finished_at: now() - 12,
+          verdict: 'LGTM',
+          session_id: 'sess-strip-review-2',
+          release_id: releaseId,
+        }),
+        makeJob({
+          id: 'strip-step-commit',
+          kind: 'commit',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 5,
+          finished_at: null,
+          release_id: releaseId,
+        }),
+      ],
+      push: [
+        makeJob({
+          id: releaseId,
+          kind: 'release',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 60,
+          finished_at: null,
+        }),
+        makeJob({
+          id: 'strip-step-test',
+          kind: 'test',
+          status: 'done',
+          exit_code: 0,
+          started_at: now() - 50,
+          finished_at: now() - 40,
+          release_id: releaseId,
+        }),
+        makeJob({
+          id: 'strip-step-fix',
+          kind: 'fix',
+          status: 'done',
+          exit_code: 0,
+          started_at: now() - 25,
+          finished_at: now() - 15,
+          session_id: 'sess-strip-fix',
+          release_id: releaseId,
+        }),
+        makeJob({
+          id: 'strip-step-review-2',
+          kind: 'review',
+          status: 'done',
+          exit_code: 0,
+          started_at: now() - 14,
+          finished_at: now() - 12,
+          verdict: 'LGTM',
+          session_id: 'sess-strip-review-2',
+          release_id: releaseId,
+        }),
+        makeJob({
+          id: 'strip-step-commit',
+          kind: 'commit',
+          status: 'done',
+          exit_code: 0,
+          started_at: now() - 11,
+          finished_at: now() - 7,
+          release_id: releaseId,
+        }),
+        makeJob({
+          id: 'strip-step-push',
+          kind: 'push',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 6,
+          finished_at: null,
+          session_id: 'sess-strip-push',
+          release_id: releaseId,
+        }),
+      ],
+      done: [
+        makeJob({
+          id: releaseId,
+          kind: 'release',
+          status: 'done',
+          exit_code: 0,
+          started_at: now() - 60,
+          finished_at: now() - 1,
+        }),
+        makeJob({
+          id: 'strip-step-test',
+          kind: 'test',
+          status: 'done',
+          exit_code: 0,
+          started_at: now() - 50,
+          finished_at: now() - 40,
+          release_id: releaseId,
+        }),
+        makeJob({
+          id: 'strip-step-fix',
+          kind: 'fix',
+          status: 'done',
+          exit_code: 0,
+          started_at: now() - 25,
+          finished_at: now() - 15,
+          session_id: 'sess-strip-fix',
+          release_id: releaseId,
+        }),
+        makeJob({
+          id: 'strip-step-review-2',
+          kind: 'review',
+          status: 'done',
+          exit_code: 0,
+          started_at: now() - 14,
+          finished_at: now() - 12,
+          verdict: 'LGTM',
+          session_id: 'sess-strip-review-2',
+          release_id: releaseId,
+        }),
+        makeJob({
+          id: 'strip-step-commit',
+          kind: 'commit',
+          status: 'done',
+          exit_code: 0,
+          started_at: now() - 11,
+          finished_at: now() - 7,
+          release_id: releaseId,
+        }),
+        makeJob({
+          id: 'strip-step-push',
+          kind: 'push',
+          status: 'done',
+          exit_code: 0,
+          started_at: now() - 6,
+          finished_at: now() - 2,
+          session_id: 'sess-strip-push',
+          release_id: releaseId,
+        }),
+      ],
+    } satisfies Record<string, MockJob[]>;
+
+    let phase: keyof typeof phaseJobs = 'test';
+
+    await mockScenario(page, [], { jobs_paused: 'false' });
+    await page.unroute(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+    );
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        route.fulfill({ json: { jobs: phaseJobs[phase], pendingReleaseProjects: [] } });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/terminal`);
+
+    await expect(page.getByLabel(/pipeline summary: test running/i)).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByTitle('tests running — click to open terminal')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible();
+
+    phase = 'review';
+    await page.reload();
+    await expect(page.getByLabel(/pipeline summary: review running/i)).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByTitle(/tests passed/i).first()).toBeVisible();
+    await expect(page.getByTitle('review in progress — click to open terminal')).toBeVisible();
+
+    phase = 'fix';
+    await page.reload();
+    await expect(page.getByLabel(/pipeline summary: fix running/i)).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByTitle(/verdict: NEEDS ATTENTION/i)).toBeVisible();
+    await expect(page.getByTitle('fix in progress — click to open terminal')).toBeVisible();
+
+    phase = 'commit';
+    await page.reload();
+    await expect(page.getByLabel(/pipeline summary: commit running/i)).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByTitle(/LGTM/i).first()).toBeVisible();
+    await expect(page.getByTitle('commit in progress — click to open terminal')).toBeVisible();
+
+    phase = 'push';
+    await page.reload();
+    await expect(page.getByLabel(/pipeline summary: push running/i)).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByTitle('push in progress — click to open terminal')).toBeVisible();
+    await expect(page.getByTitle('View unified release trace')).toBeVisible();
+
+    phase = 'done';
+    await page.reload();
+    await expect(page.getByLabel(/pipeline summary:/i)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0);
+  });
+
   // ---------------------------------------------------------------------------
   // Strip visible when review is running
   // ---------------------------------------------------------------------------
