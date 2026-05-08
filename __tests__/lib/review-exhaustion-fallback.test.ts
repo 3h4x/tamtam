@@ -75,7 +75,7 @@ describe('fileReviewExhaustionIssue', () => {
     vi.doMock('@/lib/jobs/verdict', () => ({
       readLog: vi.fn().mockReturnValue(REVIEW_LOG),
       getVerdict: vi.fn(),
-      readParsedLog: vi.fn(),
+      readParsedLog: vi.fn().mockReturnValue(REVIEW_LOG),
     }));
   });
 
@@ -99,17 +99,21 @@ describe('fileReviewExhaustionIssue', () => {
     expect(args).toContain('-R');
     expect(args).toContain('owner/repo');
     const titleIdx = args.indexOf('--title');
-    expect(args[titleIdx + 1]).toMatch(/finish review findings from release/);
+    expect(args[titleIdx + 1]).toMatch(/3 unresolved findings from release/);
     const bodyIdx = args.indexOf('--body');
     const body = args[bodyIdx + 1];
     expect(body).toContain('missing-error-handling');
     expect(body).toContain('stale-cache');
     expect(body).toContain('hardcoded-secret');
-    expect(body).not.toContain('was committed and pushed');
-    expect(body).toContain('Check the release log for whether the partial work was ultimately committed or pushed');
+    // Structured rendering: severities and root causes appear; raw stream-json never does.
+    expect(body).toContain('severity: medium');
+    expect(body).toContain("API route doesn't handle DB timeout");
     expect(body).toContain('## Problem');
     expect(body).toContain('## Approach');
     expect(body).toContain('## Acceptance criteria');
+    expect(body).not.toContain('stream_event');
+    expect(body).not.toContain('content_block_delta');
+    expect(body).not.toContain('[tamtam] launching');
     // labels must include the three canonical tags
     const labels = args.reduce<string[]>((acc, v, i) => (args[i - 1] === '--label' ? [...acc, v] : acc), []);
     expect(labels).toEqual(expect.arrayContaining(['tamtam', 'review-followup', 'priority-medium']));
@@ -154,11 +158,11 @@ describe('fileReviewExhaustionIssue', () => {
     expect(r.ok).toBe(false);
   });
 
-  it('still files an issue with empty Finding IDs section when reviewer emitted no Finding IDs', async () => {
+  it('falls back to a quoted prose excerpt when reviewer emitted no structured Finding blocks', async () => {
     vi.doMock('@/lib/jobs/verdict', () => ({
-      readLog: vi.fn().mockReturnValue('General concerns, but no structured findings.\n\nVerdict: NEEDS ATTENTION'),
+      readLog: vi.fn(),
       getVerdict: vi.fn(),
-      readParsedLog: vi.fn(),
+      readParsedLog: vi.fn().mockReturnValue('General concerns about secret handling, but no structured findings emitted.\n\nVerdict: NEEDS ATTENTION'),
     }));
     execMock
       .mockImplementationOnce(() => resp(0, 'owner/repo'))
@@ -169,6 +173,17 @@ describe('fileReviewExhaustionIssue', () => {
     const r = await fileReviewExhaustionIssue(makeReviewJob(), 'review-cap');
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.issueNumber).toBe(7);
+    const createCall = (execMock.mock.calls as [string, string[]][]).find(([cmd, a]) => cmd === 'gh' && a.includes('issue') && a.includes('create'));
+    const args = createCall![1];
+    const titleIdx = args.indexOf('--title');
+    // Empty-findings title flips to the generic "unresolved review" form.
+    expect(args[titleIdx + 1]).toMatch(/unresolved review from release/);
+    const body = args[args.indexOf('--body') + 1];
+    expect(body).toContain('General concerns about secret handling');
+    // Verdict line is stripped from the prose fallback.
+    expect(body).not.toContain('Verdict: NEEDS ATTENTION');
+    // Still no stream-json telemetry leaks through.
+    expect(body).not.toContain('stream_event');
   });
 
   it('skips missing labels and still files the follow-up issue', async () => {
