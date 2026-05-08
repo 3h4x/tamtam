@@ -48,6 +48,31 @@ function renderCliTab(settings: CliTabSettings) {
   }
 }
 
+function getCheckboxByLabel(container: HTMLElement, labelText: string): HTMLInputElement {
+  const label = Array.from(container.querySelectorAll('label')).find(
+    (node) => node.textContent?.includes(labelText),
+  )
+  const input = label?.querySelector('input')
+  if (!(input instanceof HTMLInputElement)) throw new Error(`Checkbox not found: ${labelText}`)
+  return input
+}
+
+function getInputByLabel(container: HTMLElement, labelText: string): HTMLInputElement {
+  const label = Array.from(container.querySelectorAll('label')).find(
+    (node) => node.textContent?.trim() === labelText,
+  )
+  const wrapper = label?.parentElement
+  const input = wrapper?.querySelector('input')
+  if (!(input instanceof HTMLInputElement)) throw new Error(`Input not found: ${labelText}`)
+  return input
+}
+
+function setInputValue(input: HTMLInputElement, value: string) {
+  const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+  valueSetter?.call(input, value)
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
 describe('CliTab', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -85,6 +110,60 @@ describe('CliTab', () => {
 
     expect(onChange).toHaveBeenCalledWith('cli_enabled_providers', 'claude,lmstudio,codex')
     expect(onChange).toHaveBeenCalledWith('cli_default_model_claude', 'normal')
+
+    unmount()
+  })
+
+  it('keeps the last enabled CLI locked and emits provider enablement changes', () => {
+    const { container, onChange, unmount } = renderCliTab(makeSettings({
+      cli_enabled_providers: 'claude',
+    }))
+
+    const claude = getCheckboxByLabel(container, 'Claude')
+    const codex = getCheckboxByLabel(container, 'Codex')
+
+    expect(claude.disabled).toBe(true)
+    expect(codex.disabled).toBe(false)
+
+    codex.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(onChange).toHaveBeenCalledWith('cli_enabled_providers', 'claude,codex')
+
+    unmount()
+  })
+
+  it('disables the block threshold when the budget gate is off and emits gate changes', () => {
+    const { container, onChange, unmount } = renderCliTab(makeSettings({
+      budget_block_runs_enabled: 'false',
+    }))
+
+    const blockToggle = getCheckboxByLabel(container, 'Skip CLIs over budget')
+    const blockThreshold = getInputByLabel(container, 'Block threshold (%)')
+
+    expect(blockThreshold.disabled).toBe(true)
+
+    blockToggle.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(onChange).toHaveBeenCalledWith('budget_block_runs_enabled', 'true')
+
+    unmount()
+  })
+
+  it('clamps edited budget percentages while threshold inputs are reachable', () => {
+    const { container, onChange, unmount } = renderCliTab(makeSettings({
+      budget_block_runs_enabled: 'true',
+    }))
+
+    const blockThreshold = getInputByLabel(container, 'Block threshold (%)')
+    const warnThreshold = getInputByLabel(container, 'Warn threshold (%)')
+
+    expect(blockThreshold.disabled).toBe(false)
+
+    setInputValue(blockThreshold, '150')
+    setInputValue(warnThreshold, '-4')
+
+    expect(onChange).toHaveBeenCalledWith('budget_block_at_pct', '100')
+    expect(onChange).toHaveBeenCalledWith('budget_warn_at_pct', '0')
 
     unmount()
   })
