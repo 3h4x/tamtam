@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { terminalStore, type TermEntry, type SkillItem, type DocItem } from '@/lib/terminal/terminal-session-store'
+import {
+  terminalExitEntry,
+  terminalStore,
+  type TermEntry,
+  type SkillItem,
+  type DocItem,
+} from '@/lib/terminal/terminal-session-store'
 import { isClaudeJobKind } from '../TerminalTab'
 
 interface JobDict {
@@ -172,8 +178,14 @@ export function useTerminalBootstrap({
           if (prompt) entries.push({ role: 'user', text: prompt })
           const jobEntry = logData[i]
           const exitCode = typeof jobEntry?.exit_code === 'number' ? jobEntry.exit_code : m.exit_code
+          const exitEntry = exitCode !== null && exitCode !== undefined
+            ? terminalExitEntry(exitCode)
+            : null
           if (jobEntry?.log) {
-            if (exitCode !== null && exitCode !== undefined && exitCode !== 0) {
+            if (exitEntry?.text === 'cancelled') {
+              entries.push({ role: 'assistant', text: jobEntry.log })
+              entries.push(exitEntry)
+            } else if (exitCode !== null && exitCode !== undefined && exitCode !== 0) {
               entries.push({ role: 'error', text: 'claude run failed' })
               entries.push({ role: 'error', text: jobEntry.log })
             } else {
@@ -181,8 +193,11 @@ export function useTerminalBootstrap({
             }
           } else if (jobEntry?.log_pruned) {
             entries.push({ role: 'status', text: 'Log file deleted by retention policy' })
-          } else if (exitCode !== null && exitCode !== undefined && exitCode !== 0) {
-            entries.push({ role: 'error', text: `exit ${exitCode}` })
+            if (exitEntry) {
+              entries.push(exitEntry)
+            }
+          } else if (exitEntry && exitCode !== 0) {
+            entries.push(exitEntry)
           }
         })
 
@@ -278,8 +293,7 @@ export function useTerminalBootstrap({
           entries.push({ role: 'status', text: 'Log file deleted by retention policy' })
           const exitCode = data.exit_code
           if (exitCode !== undefined && exitCode !== null) {
-            const ok = exitCode === 0
-            entries.push({ role: ok ? 'status' : 'error', text: ok ? 'exit 0 — ok' : `exit ${exitCode}` })
+            entries.push(terminalExitEntry(exitCode))
           }
           terminalStore.update(projectName, () => ({ history: entries }))
         } else {

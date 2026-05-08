@@ -55,6 +55,36 @@ function BootstrapHarness() {
   return null
 }
 
+function JobBootstrapHarness({ jobParam }: { jobParam: string }) {
+  useTerminalBootstrap({
+    projectName: 'proj',
+    initialSessionId: undefined,
+    jobParam,
+    promptParam: null,
+    issueNumberParam: null,
+    issueTitleParam: null,
+    resumeSessionIdParam: null,
+    resumeProviderParam: null,
+    onLoadSessions: vi.fn(),
+  })
+  return null
+}
+
+function SessionBootstrapHarness({ sessionId }: { sessionId: string }) {
+  useTerminalBootstrap({
+    projectName: 'proj',
+    initialSessionId: sessionId,
+    jobParam: null,
+    promptParam: null,
+    issueNumberParam: null,
+    issueTitleParam: null,
+    resumeSessionIdParam: null,
+    resumeProviderParam: null,
+    onLoadSessions: vi.fn(),
+  })
+  return null
+}
+
 function SubmitHarness({ onReady }: { onReady: (submit: (text?: string) => Promise<void>) => void }) {
   const { handleSubmit } = useHandleSubmit({
     projectName: 'proj',
@@ -167,5 +197,194 @@ describe('pending continue-issue resume provider', () => {
 
     expect(terminalStore.get('proj').pendingAutoSubmit).toBeNull()
     unmount()
+  })
+
+  it('renders cancelled for pruned aborted jobs loaded via job param', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/jobs/release-1') {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'release-1',
+            kind: 'release',
+            release_id: 'rel-1',
+            session_id: null,
+            started_at: 1_700_000_000,
+            exit_code: -3,
+            user_prompt: null,
+            prompt: null,
+            context_meta: null,
+            provider: null,
+            log_pruned: true,
+          }),
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+
+    const { unmount } = renderElement(<JobBootstrapHarness jobParam="release-1" />)
+
+    await vi.waitFor(() => {
+      const history = terminalStore.get('proj').history
+      expect(history.some((entry) => entry.text === 'Log file deleted by retention policy')).toBe(true)
+      expect(history.some((entry) => entry.text === 'cancelled')).toBe(true)
+      expect(history.some((entry) => entry.text === 'exit -3')).toBe(false)
+    })
+
+    expect(startStreamMock).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('renders cancelled for restored sessions with retained cancelled logs', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/jobs?project=proj') {
+        return {
+          ok: true,
+          json: async () => ({
+            jobs: [{
+              id: 'review-1',
+              kind: 'review',
+              status: 'done',
+              session_id: 'sess-cancelled',
+              started_at: 1_700_000_000,
+              finished_at: 1_700_000_100,
+              exit_code: -2,
+              user_prompt: 'review this',
+              prompt: null,
+              context_meta: null,
+              provider: 'claude',
+            }],
+          }),
+        }
+      }
+      if (url === '/api/jobs/review-1') {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'review-1',
+            exit_code: -2,
+            log: 'partial assistant output',
+            log_pruned: false,
+          }),
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+
+    const { unmount } = renderElement(<SessionBootstrapHarness sessionId="sess-cancelled" />)
+
+    await vi.waitFor(() => {
+      const history = terminalStore.get('proj').history
+      expect(history.some((entry) => entry.text === 'partial assistant output')).toBe(true)
+      expect(history.some((entry) => entry.text === 'cancelled')).toBe(true)
+      expect(history.some((entry) => entry.text === 'claude run failed')).toBe(false)
+      expect(history.some((entry) => entry.text === 'exit -2')).toBe(false)
+    })
+
+    expect(startStreamMock).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('renders cancelled after job-param redirect to a cancelled session restore', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/jobs/review-redirect') {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'review-redirect',
+            kind: 'review',
+            session_id: 'sess-redirect',
+            started_at: 1_700_000_000,
+            exit_code: -3,
+            user_prompt: null,
+            prompt: null,
+            context_meta: null,
+            provider: 'claude',
+          }),
+        }
+      }
+      if (url === '/api/jobs?project=proj') {
+        return {
+          ok: true,
+          json: async () => ({
+            jobs: [{
+              id: 'review-redirect',
+              kind: 'review',
+              status: 'done',
+              session_id: 'sess-redirect',
+              started_at: 1_700_000_000,
+              finished_at: 1_700_000_100,
+              exit_code: -3,
+              user_prompt: 'resume review',
+              prompt: null,
+              context_meta: null,
+              provider: 'claude',
+            }],
+          }),
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+
+    const redirected = renderElement(<JobBootstrapHarness jobParam="review-redirect" />)
+
+    await vi.waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/project/proj/terminal/sess-redirect')
+    })
+
+    redirected.unmount()
+
+    const fetchMock = vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/jobs?project=proj') {
+        return {
+          ok: true,
+          json: async () => ({
+            jobs: [{
+              id: 'review-redirect',
+              kind: 'review',
+              status: 'done',
+              session_id: 'sess-redirect',
+              started_at: 1_700_000_000,
+              finished_at: 1_700_000_100,
+              exit_code: -3,
+              user_prompt: 'resume review',
+              prompt: null,
+              context_meta: null,
+              provider: 'claude',
+            }],
+          }),
+        }
+      }
+      if (url === '/api/jobs/review-redirect') {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'review-redirect',
+            exit_code: -3,
+            log: 'review log before cancellation',
+            log_pruned: false,
+          }),
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+    void fetchMock
+
+    const restored = renderElement(<SessionBootstrapHarness sessionId="sess-redirect" />)
+
+    await vi.waitFor(() => {
+      const history = terminalStore.get('proj').history
+      expect(history.some((entry) => entry.text === 'review log before cancellation')).toBe(true)
+      expect(history.some((entry) => entry.text === 'cancelled')).toBe(true)
+      expect(history.some((entry) => entry.text === 'claude run failed')).toBe(false)
+      expect(history.some((entry) => entry.text === 'exit -3')).toBe(false)
+    })
+
+    expect(startStreamMock).not.toHaveBeenCalled()
+    restored.unmount()
   })
 })
