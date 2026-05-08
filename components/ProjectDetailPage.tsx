@@ -102,7 +102,7 @@ export function ProjectDetailPage({
       } catch { if (active) setJobsLoaded(true) }
     }
     poll()
-    const interval = setInterval(poll, 10000)
+    const interval = setInterval(poll, 5000)
     return () => { active = false; clearInterval(interval) }
   }, [name])
 

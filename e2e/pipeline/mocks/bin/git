@@ -38,6 +38,21 @@ function readState() {
   }
 }
 
+function readTimings() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(projectShimDir, 'timing.json'), 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function maybeSleep(subcommand) {
+  const ms = Number(readTimings()?.[subcommand] ?? 0);
+  if (Number.isFinite(ms) && ms > 0) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  }
+}
+
 function writeState(s) {
   try {
     fs.mkdirSync(projectShimDir, { recursive: true });
@@ -100,10 +115,12 @@ if (sub === 'rev-list' && cmd.includes('--count')) {
 
 if (sub === 'add') {
   // Record staging — state stays as-is (committed=false)
+  maybeSleep('add');
   exit(0);
 }
 
 if (sub === 'commit') {
+  maybeSleep('commit');
   const st = readState();
   st.committed = true;
   writeState(st);
@@ -111,6 +128,7 @@ if (sub === 'commit') {
 }
 
 if (sub === 'push') {
+  maybeSleep('push');
   const st = readState();
   st.pushed = true;
   writeState(st);
