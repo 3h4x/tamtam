@@ -28,6 +28,7 @@ export function resetShimState(project: string): void {
   writeFileSync(join(dir, 'git-calls.jsonl'), '');
   writeFileSync(join(dir, 'counter'), '0');
   writeFileSync(join(dir, 'timing.json'), JSON.stringify({}));
+  writeFileSync(join(dir, 'git-failures.json'), JSON.stringify({}));
 }
 
 export function writeGitTiming(
@@ -37,6 +38,15 @@ export function writeGitTiming(
   const dir = join(SHIM_DIR, project);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'timing.json'), JSON.stringify(timings));
+}
+
+export function writeGitFailures(
+  project: string,
+  failures: Partial<Record<'add' | 'commit' | 'push', { exitCode?: number; stderr?: string; stdout?: string }>>,
+): void {
+  const dir = join(SHIM_DIR, project);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'git-failures.json'), JSON.stringify(failures));
 }
 
 // ---------------------------------------------------------------------------

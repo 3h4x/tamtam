@@ -36,6 +36,7 @@ const PROJECTS = [
   'queued-release-history',
   'queued-release-terminal',
   'strip-test-fail-live',
+  'push-failure-live',
 ];
 
 export default async function globalSetup(): Promise<void> {
@@ -59,6 +60,7 @@ export default async function globalSetup(): Promise<void> {
     );
     writeFileSync(join(SHIM_DIR, project, 'git-calls.jsonl'), '');
     writeFileSync(join(SHIM_DIR, project, 'counter'), '0');
+    writeFileSync(join(SHIM_DIR, project, 'git-failures.json'), JSON.stringify({}));
   }
 
   // Make shim binaries executable (they may have lost the bit after clone).
