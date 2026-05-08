@@ -1,4 +1,3 @@
-// tamtam
 'use client'
 
 import { SkillsPage } from '@/components/SkillsPage'

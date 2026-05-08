@@ -1,4 +1,3 @@
-// tamtam
 'use client'
 
 import { GlobalRecommendationsPage } from '@/components/GlobalRecommendationsPage'
