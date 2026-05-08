@@ -123,10 +123,58 @@ async function assembleProject(
   const projName = cfg.project;
   const reviewed = changes > 0 ? await isReviewed(projName, cfg.path) : null;
 
-  const unpushedR = await exec('git', ['-C', cfg.path, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
-  const unpushed = (unpushedR.exitCode === 0 && unpushedR.stdout.trim())
-    ? (parseInt(unpushedR.stdout.trim(), 10) || 0)
-    : 0;
+  // Count commits not yet pushed. Primary source: `@{u}..HEAD` (commits the
+  // local branch has that the upstream doesn't). When the branch has no
+  // upstream configured (`fatal: no upstream configured`) the rev-list call
+  // exits non-zero — fall back to comparing against `origin/<branch>` if it
+  // exists, then against the default branch as a last resort. Without these
+  // fallbacks the Push button silently disables on a branch that genuinely
+  // has unpushed commits but is missing tracking config (e.g. after a
+  // force-push that didn't set --set-upstream).
+  const unpushed = await (async () => {
+    const upstreamR = await exec('git', ['-C', cfg.path, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
+    if (upstreamR.exitCode === 0 && upstreamR.stdout.trim()) {
+      return parseInt(upstreamR.stdout.trim(), 10) || 0;
+    }
+    // Need the current branch name for the remote-ref fallback.
+    const branchR = await exec('git', ['-C', cfg.path, 'branch', '--show-current'], { timeout: 5000 });
+    const currentBranch = branchR.stdout.trim();
+    if (currentBranch) {
+      // Does origin/<currentBranch> exist locally? If so, count against it.
+      const remoteR = await exec(
+        'git',
+        ['-C', cfg.path, 'rev-parse', '--verify', `refs/remotes/origin/${currentBranch}`],
+        { timeout: 5000 },
+      );
+      if (remoteR.exitCode === 0) {
+        const aheadR = await exec(
+          'git',
+          ['-C', cfg.path, 'rev-list', '--count', `refs/remotes/origin/${currentBranch}..HEAD`],
+          { timeout: 5000 },
+        );
+        if (aheadR.exitCode === 0 && aheadR.stdout.trim()) {
+          return parseInt(aheadR.stdout.trim(), 10) || 0;
+        }
+      }
+    }
+    // No upstream and no matching remote ref — treat commits ahead of the
+    // default branch as unpushed so the user at least sees a count and an
+    // enabled Push button. `pushCurrentBranch` already retries with
+    // `--set-upstream` when needed, so a click here will publish the branch.
+    const defaultR = await exec('git', ['-C', cfg.path, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { timeout: 5000 });
+    const defaultRef = defaultR.exitCode === 0 ? defaultR.stdout.trim() : '';
+    if (defaultRef) {
+      const fallbackR = await exec(
+        'git',
+        ['-C', cfg.path, 'rev-list', '--count', `${defaultRef}..HEAD`],
+        { timeout: 5000 },
+      );
+      if (fallbackR.exitCode === 0 && fallbackR.stdout.trim()) {
+        return parseInt(fallbackR.stdout.trim(), 10) || 0;
+      }
+    }
+    return 0;
+  })();
 
   const run = lastRuns[schedId];
   let lastRun: string | null = null;

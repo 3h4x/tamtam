@@ -317,10 +317,33 @@ export async function fetchBranch(projectName: string): Promise<{ branch: string
   return response.json()
 }
 
-export async function createProjectPR(projectName: string): Promise<{ url: string | null }> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/create-pr`, { method: 'POST' })
+// Custom error for pre-push hook failures so the UI can offer a force-retry.
+export class CreatePRPrePushHookError extends Error {
+  hookFailure: 'pre-push-tests' | 'pre-push-other'
+  constructor(detail: string, hookFailure: 'pre-push-tests' | 'pre-push-other') {
+    super(detail)
+    this.name = 'CreatePRPrePushHookError'
+    this.hookFailure = hookFailure
+  }
+}
+
+export async function createProjectPR(
+  projectName: string,
+  opts: { force?: boolean } = {},
+): Promise<{ url: string | null }> {
+  const init: RequestInit = { method: 'POST' }
+  if (opts.force) {
+    init.headers = { 'Content-Type': 'application/json' }
+    init.body = JSON.stringify({ force: true })
+  }
+  const response = await fetch(`${API_BASE}/by-project/${projectName}/create-pr`, init)
   const data = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(data.detail || 'Failed to create PR')
+  if (!response.ok) {
+    if (response.status === 409 && data?.hookFailure) {
+      throw new CreatePRPrePushHookError(data.detail || 'Pre-push hook blocked the push', data.hookFailure)
+    }
+    throw new Error(data.detail || 'Failed to create PR')
+  }
   return data
 }
 

@@ -82,14 +82,52 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
     expect(data.detail).toContain('trunk');
   });
 
-  it('returns 500 when git push fails', async () => {
+  it('returns 500 when git push fails for non-hook reasons (auth, network)', async () => {
     execMock.mockResolvedValueOnce(makeExecResult({ stdout: 'feat/my-branch\n' }));
-    pushCurrentBranchMock.mockResolvedValue({ ok: false, detail: 'Push failed: auth denied' });
+    pushCurrentBranchMock.mockResolvedValue({ ok: false, detail: 'Push failed: auth denied', hookFailure: null });
     const res = await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(500);
     const data = await res.json();
     expect(data.detail).toContain('Push failed');
     expect(data.detail).toContain('auth denied');
+    // Non-hook failures are NOT retryable.
+    expect(data.retryable).toBeUndefined();
+    expect(data.hookFailure).toBeUndefined();
+  });
+
+  it('returns 409 with hookFailure: pre-push-tests when the repo pre-push hook tests fail', async () => {
+    execMock.mockResolvedValueOnce(makeExecResult({ stdout: 'fix/issue-363\n' }));
+    pushCurrentBranchMock.mockResolvedValue({
+      ok: false,
+      detail: 'Push failed: Failed Tests 1 — middleware.utils.test.ts',
+      hookFailure: 'pre-push-tests',
+    });
+    const res = await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.hookFailure).toBe('pre-push-tests');
+    expect(data.retryable).toBe(true);
+    expect(data.detail).toContain('Failed Tests');
+  });
+
+  it('forwards { force: true } body to pushCurrentBranch as noVerify so the hook is skipped', async () => {
+    execMock.mockResolvedValueOnce(makeExecResult({ stdout: 'fix/issue-363\n' }));
+    pushCurrentBranchMock.mockResolvedValue({ ok: true, commitSha: 'abc123' });
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/create-pr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force: true }),
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    // Third arg carries the noVerify option.
+    expect(pushCurrentBranchMock).toHaveBeenCalledWith('/path/to/project', undefined, { noVerify: true });
+  });
+
+  it('does not pass noVerify when the body is empty (default verify path)', async () => {
+    execMock.mockResolvedValueOnce(makeExecResult({ stdout: 'fix/issue-363\n' }));
+    pushCurrentBranchMock.mockResolvedValue({ ok: true, commitSha: 'abc123' });
+    await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(pushCurrentBranchMock).toHaveBeenCalledWith('/path/to/project', undefined, { noVerify: false });
   });
 
   // Dispatch mock keyed by command — the route makes many git/gh calls to
@@ -162,7 +200,7 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
       .mockResolvedValueOnce(makeExecResult({ stdout: 'https://github.com/o/r/pull/1\n' }));
     await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
 
-    expect(pushCurrentBranchMock).toHaveBeenCalledWith('/custom/repo');
+    expect(pushCurrentBranchMock).toHaveBeenCalledWith('/custom/repo', undefined, { noVerify: false });
   });
 });
 

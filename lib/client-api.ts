@@ -53,6 +53,7 @@ export {
   fetchBehind,
   fetchBranch,
   createProjectPR,
+  CreatePRPrePushHookError,
   runMarkDod,
   PullDivergedError,
   pullProject,
