@@ -6,6 +6,12 @@ import { exec } from '@/lib/shared/shell';
 import { getImproveConfig, setProjectPushResult } from '@/lib/scheduling/scheduling';
 import { currentParent } from '@/lib/jobs/parent-context';
 import { createJob, getJob, listJobs, markDone, updateJob } from '@/lib/jobs/job-storage';
+import {
+  finishJobCancellation,
+  JobCancelledError,
+  registerJobCancellation,
+  throwIfJobCancelled,
+} from '@/lib/jobs/cancellation';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { generateCommitMessage, findIssueContext, detectMainBranch } from './start-commit';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
@@ -192,6 +198,7 @@ export async function startProjectPush(
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
   updateJob(job);
+  const signal = registerJobCancellation(job.id);
 
   // Acquire pipeline lock — skip under parent release lock.
   if (!underRelease) {
@@ -207,25 +214,35 @@ export async function startProjectPush(
   };
   append(`# push start — ${new Date().toISOString()}\n# repo: ${projPath}\n`);
 
-  const result = await runPush(projectName, projPath, append, earlyIssueCtx, false, gate.provider);
   try {
-    setProjectPushResult(projectName, result.ok ? null : result.detail);
-  } catch {}
-  if (result.ok) {
-    invalidateProject(projectName);
-    clearProjectDataCache();
-    append(`\n# push ok — ${'commitSha' in result && result.commitSha ? result.commitSha : 'no-op'}\n${result.message}\n`);
-    // Stamp PR metadata on the job so the completion hook can start pr-wait.
-    if (result.prUrl) {
-      job.contextMeta = JSON.stringify({ prUrl: result.prUrl, prNumber: result.prNumber, prRepo: result.prRepo });
-      updateJob(job);
+    const result = await runPush(projectName, projPath, append, earlyIssueCtx, false, gate.provider, job, signal);
+    try {
+      setProjectPushResult(projectName, result.ok ? null : result.detail);
+    } catch {}
+    if (result.ok) {
+      invalidateProject(projectName);
+      clearProjectDataCache();
+      append(`\n# push ok — ${'commitSha' in result && result.commitSha ? result.commitSha : 'no-op'}\n${result.message}\n`);
+      if (result.prUrl) {
+        job.contextMeta = JSON.stringify({ prUrl: result.prUrl, prNumber: result.prNumber, prRepo: result.prRepo });
+        updateJob(job);
+      }
+    } else {
+      append(`\n# push failed (${result.status})\n${result.detail}\n`);
     }
-  } else {
-    append(`\n# push failed (${result.status})\n${result.detail}\n`);
-  }
 
-  await markDone(job, result.ok ? 0 : 1);
-  return result;
+    await markDone(job, result.ok ? 0 : 1);
+    return result;
+  } catch (error) {
+    if (!(error instanceof JobCancelledError)) throw error;
+    append('\n# push cancelled\n');
+    const exitCode = job.cancelRequestedExitCode ?? -3;
+    if (exitCode === -3 && job.abortedAt == null) job.abortedAt = Date.now() / 1000;
+    await markDone(job, exitCode);
+    return { ok: false, status: 499, detail: 'push cancelled' };
+  } finally {
+    finishJobCancellation(job.id);
+  }
 }
 
 // Fire-and-forget variant: creates the job synchronously, runs push in the
@@ -265,6 +282,7 @@ export function launchProjectPush(
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
   updateJob(job);
+  const signal = registerJobCancellation(job.id);
 
   const append = (s: string) => {
     try { appendFileSync(logPath, s); } catch {}
@@ -278,6 +296,7 @@ export function launchProjectPush(
       append(`\n# push blocked (${gate.status})\n${gate.detail}\n`);
       try { setProjectPushResult(projectName, gate.detail); } catch {}
       await markDone(job, 1);
+      finishJobCancellation(job.id);
       return;
     }
     job.provider = gate.provider;
@@ -295,38 +314,57 @@ export function launchProjectPush(
           append(`\n# push aborted — ${detail}\n`);
           try { setProjectPushResult(projectName, detail); } catch {}
           await markDone(job, 1);
+          finishJobCancellation(job.id);
           return;
         }
       } catch (e) {
         console.log(`[launch-push] failed to acquire pipeline lock for ${projectName}:`, e);
         append(`\n# push aborted — failed to acquire pipeline lock\n`);
         await markDone(job, 1);
+        finishJobCancellation(job.id);
         return;
       }
     }
 
-    const result = await runPush(
-      projectName,
-      projPath,
-      append,
-      releaseLinkedRetry ? undefined : null,
-      !releaseLinkedRetry,
-      gate.provider,
-    );
-    try { setProjectPushResult(projectName, result.ok ? null : result.detail); } catch {}
-    if (result.ok) {
-      invalidateProject(projectName);
-      clearProjectDataCache();
-      append(`\n# push ok — ${'commitSha' in result && result.commitSha ? result.commitSha : 'no-op'}\n${result.message}\n`);
-      if (result.prUrl) {
-        job.contextMeta = JSON.stringify({ prUrl: result.prUrl, prNumber: result.prNumber, prRepo: result.prRepo });
-        updateJob(job);
+    try {
+      const result = await runPush(
+        projectName,
+        projPath,
+        append,
+        releaseLinkedRetry ? undefined : null,
+        !releaseLinkedRetry,
+        gate.provider,
+        job,
+        signal,
+      );
+      try { setProjectPushResult(projectName, result.ok ? null : result.detail); } catch {}
+      if (result.ok) {
+        invalidateProject(projectName);
+        clearProjectDataCache();
+        append(`\n# push ok — ${'commitSha' in result && result.commitSha ? result.commitSha : 'no-op'}\n${result.message}\n`);
+        if (result.prUrl) {
+          job.contextMeta = JSON.stringify({ prUrl: result.prUrl, prNumber: result.prNumber, prRepo: result.prRepo });
+          updateJob(job);
+        }
+      } else {
+        append(`\n# push failed (${result.status})\n${result.detail}\n`);
       }
-    } else {
-      append(`\n# push failed (${result.status})\n${result.detail}\n`);
+      await markDone(job, result.ok ? 0 : 1);
+    } catch (error) {
+      if (!(error instanceof JobCancelledError)) throw error;
+      append('\n# push cancelled\n');
+      const exitCode = job.cancelRequestedExitCode ?? -3;
+      if (exitCode === -3 && job.abortedAt == null) job.abortedAt = Date.now() / 1000;
+      await markDone(job, exitCode);
+    } finally {
+      finishJobCancellation(job.id);
     }
-    await markDone(job, result.ok ? 0 : 1);
-  })();
+  })().catch(async (error) => {
+    console.error(`[push] background push failed for ${projectName}:`, error);
+    append(`\n# push launcher error\n${error instanceof Error ? error.message : String(error)}\n`);
+    await markDone(job, 1);
+    finishJobCancellation(job.id);
+  });
 
   return { jobId: job.id };
 }
@@ -340,6 +378,7 @@ export async function pushCurrentBranch(
   projPath: string,
   log: (s: string) => void = () => {},
   options: { noVerify?: boolean } = {},
+  signal?: AbortSignal,
 ): Promise<
   | { ok: true; commitSha: string }
   | { ok: false; detail: string; hookFailure: PushHookFailure }
@@ -349,14 +388,14 @@ export async function pushCurrentBranch(
   const tryPush = async (extraArgs: string[] = []) => {
     const args = ['-C', projPath, 'push', ...baseArgs, ...extraArgs];
     log(`\n$ git push${args.slice(2).length ? ' ' + args.slice(2).join(' ') : ''}\n`);
-    const r = await exec('git', args, { timeout: PUSH_TIMEOUT, killProcessGroup: true });
+    const r = await exec('git', args, { timeout: PUSH_TIMEOUT, killProcessGroup: true, signal });
     if (r.stdout) log(r.stdout);
     if (r.stderr) log(r.stderr);
     return r;
   };
   let pushR = await tryPush();
   if (pushR.exitCode !== 0 && (pushR.stderr.includes('no upstream') || pushR.stderr.includes('set-upstream'))) {
-    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000, signal });
     const branch = branchR.stdout.trim();
     if (branch) pushR = await tryPush(['-u', 'origin', branch]);
   }
@@ -378,7 +417,7 @@ export async function pushCurrentBranch(
       : null;
     return { ok: false, detail: `Push failed: ${detail}`, hookFailure };
   }
-  const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
+  const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000, signal });
   return { ok: true, commitSha: shaR.exitCode === 0 ? shaR.stdout.trim() : '' };
 }
 
@@ -390,10 +429,27 @@ async function runPush(
   issueCtx?: { number: number; repo: string; title: string } | null,
   pushOnly?: boolean,
   provider?: string,
+  job?: { id: string; abortedAt?: number | null; cancelRequestedExitCode?: number | null },
+  signal?: AbortSignal,
 ): Promise<PushResult> {
+  const execStep = async (
+    cmd: string,
+    args: string[],
+    options?: Parameters<typeof exec>[2],
+  ) => {
+    if (job) throwIfJobCancelled(job, signal);
+    const result = await exec(cmd, args, {
+      ...options,
+      signal,
+      abortProcessTree: cmd === 'git' ? true : options?.abortProcessTree,
+    });
+    if (job) throwIfJobCancelled(job, signal);
+    return result;
+  };
+
   // pushOnly: skip all staging/committing/PR logic — just push existing commits.
   if (pushOnly) {
-    const r = await pushCurrentBranch(projPath, log);
+    const r = await pushCurrentBranch(projPath, log, {}, signal);
     if (!r.ok) return { ok: false, status: 502, detail: r.detail };
     return { ok: true, commitSha: r.commitSha, message: 'pushed' };
   }
@@ -412,7 +468,7 @@ async function runPush(
   //                         retries with `--set-upstream` via the existing
   //                         fallback at lines ~245-249 when push fails with
   //                         "no upstream" / "set-upstream" stderr.
-  const aheadR = await exec('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
+  const aheadR = await execStep('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
   log(`\n$ git rev-list --count @{u}..HEAD\n${aheadR.stdout}`);
   const ahead = parseInt(aheadR.stdout.trim(), 10);
   const hasUpstream = aheadR.exitCode === 0;
@@ -421,7 +477,7 @@ async function runPush(
   }
   if (!hasUpstream) {
     // Guard against an empty HEAD (brand-new repo with no commits yet).
-    const hasCommitsR = await exec('git', ['-C', projPath, 'rev-list', '--count', 'HEAD'], { timeout: 5000 });
+    const hasCommitsR = await execStep('git', ['-C', projPath, 'rev-list', '--count', 'HEAD'], { timeout: 5000 });
     const hasCommits = hasCommitsR.exitCode === 0 && (parseInt(hasCommitsR.stdout.trim(), 10) || 0) > 0;
     if (!hasCommits) {
       return { ok: true, commitSha: '', message: 'No changes to push' };
@@ -437,19 +493,19 @@ async function runPush(
   const tryPush = async (extraArgs: string[] = []): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
     const args = ['-C', projPath, 'push', ...extraArgs];
     log(`\n$ git push${extraArgs.length ? ' ' + extraArgs.join(' ') : ''}\n`);
-    const r = await exec('git', args, { timeout: PUSH_TIMEOUT, killProcessGroup: true });
+    const r = await execStep('git', args, { timeout: PUSH_TIMEOUT, killProcessGroup: true });
     if (r.stdout) log(r.stdout);
     if (r.stderr) log(r.stderr);
     return r;
   };
 
   // Auto-rebase if behind remote to prevent non-fast-forward rejection
-  const branchStatusR = await exec('git', ['-C', projPath, 'status', '--porcelain=v2', '--branch'], { timeout: 5000 });
+  const branchStatusR = await execStep('git', ['-C', projPath, 'status', '--porcelain=v2', '--branch'], { timeout: 5000 });
   const abLine = branchStatusR.stdout.split('\n').find(l => l.startsWith('# branch.ab '));
   const behind = abLine ? parseInt(abLine.match(/-(\d+)/)?.[1] ?? '0', 10) : 0;
   if (behind > 0) {
     log(`\n# ${behind} commit(s) behind remote — rebasing before push\n`);
-    const rebaseR = await exec('git', ['-C', projPath, 'pull', '--rebase'], { timeout: PUSH_TIMEOUT, killProcessGroup: true });
+    const rebaseR = await execStep('git', ['-C', projPath, 'pull', '--rebase'], { timeout: PUSH_TIMEOUT, killProcessGroup: true });
     if (rebaseR.stdout) log(rebaseR.stdout);
     if (rebaseR.stderr) log(rebaseR.stderr);
     if (rebaseR.exitCode !== 0) {
@@ -463,7 +519,7 @@ async function runPush(
 
   // If no upstream branch is set, detect current branch and set it.
   if (pushR.exitCode !== 0 && (pushR.stderr.includes('no upstream') || pushR.stderr.includes('set-upstream'))) {
-    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+    const branchR = await execStep('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
     const branch = branchR.stdout.trim();
     if (branch) pushR = await tryPush(['-u', 'origin', branch]);
   }
@@ -472,7 +528,7 @@ async function runPush(
   // (stale tracking info — the pre-push behind-check missed it). Pull --rebase and retry.
   if (pushR.exitCode !== 0 && (pushR.stderr.includes('fetch first') || pushR.stderr.includes('Updates were rejected'))) {
     log(`\n# remote has new commits (stale tracking) — rebasing before retry\n`);
-    const rebaseR = await exec('git', ['-C', projPath, 'pull', '--rebase'], { timeout: PUSH_TIMEOUT, killProcessGroup: true });
+    const rebaseR = await execStep('git', ['-C', projPath, 'pull', '--rebase'], { timeout: PUSH_TIMEOUT, killProcessGroup: true });
     if (rebaseR.stdout) log(rebaseR.stdout);
     if (rebaseR.stderr) log(rebaseR.stderr);
     if (rebaseR.exitCode === 0) {
@@ -487,14 +543,14 @@ async function runPush(
   // Pre-push hook may have left new uncommitted changes on disk.
   // Stage and commit just those changes ("revisiting just new changes"), then retry once.
   if (pushR.exitCode !== 0) {
-    const hookChangesR = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
+    const hookChangesR = await execStep('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
     const hookHasChanges = !!hookChangesR.stdout.trim();
     if (hookHasChanges) {
       log(`\n# pre-push hook left new changes — committing delta\n`);
-      await exec('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
-      const fixMsg = await generateCommitMessage(projPath, projectName, provider);
+      await execStep('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
+      const fixMsg = await generateCommitMessage(projPath, projectName, provider, signal);
       log(`# fix commit message: ${fixMsg}\n\n$ git commit -m "${fixMsg}"\n`);
-      const fixCommitR = await exec('git', ['-C', projPath, 'commit', '-m', fixMsg], { timeout: 30000 });
+      const fixCommitR = await execStep('git', ['-C', projPath, 'commit', '-m', fixMsg], { timeout: 30000 });
       if (fixCommitR.stdout) log(fixCommitR.stdout);
       if (fixCommitR.stderr) log(fixCommitR.stderr);
       if (fixCommitR.exitCode === 0 || fixCommitR.stdout.includes('nothing to commit')) {
@@ -509,7 +565,7 @@ async function runPush(
     return { ok: false, status: 502, detail: `Push failed: ${detail}` };
   }
 
-  const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
+  const shaR = await execStep('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
   const commitSha = shaR.exitCode === 0 ? shaR.stdout.trim() : '';
 
   // PR creation rules:
@@ -526,7 +582,7 @@ async function runPush(
   const prWorkflowEnabled = !!pipelineConfig?.prWorkflowEnabled;
 
   if (issueCtx) {
-    const prUrl = await createIssuePR(projPath, log, issueCtx);
+    const prUrl = await createIssuePR(projPath, log, issueCtx, signal);
     // Stay on the issue branch until the PR merges, regardless of whether
     // auto-merge is enabled. The user iterates on the branch (more fixes,
     // more pushes); switching to main now strands them with conflicts. The
@@ -544,12 +600,12 @@ async function runPush(
   // Direct Branch mode on a fix/issue-* branch (no issue context): auto-return to
   // default branch after push so the next release targets the right branch.
   if (!prWorkflowEnabled) {
-    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+    const branchR = await execStep('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
     const currentBranch = branchR?.stdout?.trim() ?? '';
     if (currentBranch.startsWith('fix/issue-')) {
-      const mainBranch = await detectMainBranch(projPath);
+      const mainBranch = await detectMainBranch(projPath, signal);
       log(`\n# Direct Branch mode on issue branch — switching back to ${mainBranch}\n`);
-      const coR = await exec('git', ['-C', projPath, 'checkout', mainBranch], { timeout: 10000 });
+      const coR = await execStep('git', ['-C', projPath, 'checkout', mainBranch], { timeout: 10000 });
       if (coR.stdout) log(coR.stdout);
       if (coR.stderr) log(coR.stderr);
       clearProjectDataCache();
@@ -558,7 +614,7 @@ async function runPush(
 
   // PR Workflow without issue context: create a generic PR for the feature branch.
   if (prWorkflowEnabled) {
-    const prResult = await createGenericPR(projPath, log);
+    const prResult = await createGenericPR(projPath, log, signal);
     if (prResult) {
       const prNumber = parseInt(prResult.prUrl.split('/').pop() ?? '0', 10) || undefined;
       // Stay on the feature branch until the PR merges. start-pr-wait handles

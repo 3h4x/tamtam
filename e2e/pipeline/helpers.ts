@@ -41,6 +41,11 @@ export interface ShimCall {
   cmd?: string;
 }
 
+export interface ShimState {
+  committed: boolean;
+  pushed: boolean;
+}
+
 export function readShimCalls(project: string): ShimCall[] {
   const callsFile = join(SHIM_DIR, project, 'git-calls.jsonl');
   try {
@@ -50,6 +55,15 @@ export function readShimCalls(project: string): ShimCall[] {
       .map(line => JSON.parse(line) as ShimCall);
   } catch {
     return [];
+  }
+}
+
+export function readShimState(project: string): ShimState {
+  const stateFile = join(SHIM_DIR, project, 'git-state.json');
+  try {
+    return JSON.parse(readFileSync(stateFile, 'utf-8')) as ShimState;
+  } catch {
+    return { committed: false, pushed: false };
   }
 }
 

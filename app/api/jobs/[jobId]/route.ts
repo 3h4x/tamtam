@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getJob, jobToDict, readParsedLog, readLog, probeJobStatus, updateJob } from '@/lib/jobs/job-storage';
+import {
+  requestJobCancellation,
+  SAFE_PID_FLOOR,
+  shouldSignalJobPid,
+} from '@/lib/jobs/cancellation';
 import { exec } from '@/lib/shared/shell';
 
 export async function GET(
@@ -40,17 +45,29 @@ export async function DELETE(
     await exec('pm2', ['delete', jobId, '--silent'], { timeout: 5000 });
   } catch {}
 
-  // Kill by PID as fallback
-  if (job.pid > 0) {
+  if (job.kind === 'push' || job.kind === 'commit') {
+    job.cancelRequestedExitCode = -2;
+    const cancelled = await requestJobCancellation(job.id, 20_000);
+    if (!cancelled && job.finishedAt === null) {
+      return NextResponse.json(
+        { detail: `Timed out waiting for ${job.kind} to stop cleanly` },
+        { status: 409 },
+      );
+    }
+  } else if (shouldSignalJobPid(job)) {
     try { process.kill(job.pid, 'SIGTERM'); } catch {}
     setTimeout(() => {
       try { process.kill(job.pid, 'SIGKILL'); } catch {}
     }, 2000);
+  } else if (job.pid > 0 && job.pid <= SAFE_PID_FLOOR) {
+    console.warn(`[jobs] refusing to signal suspicious pid=${job.pid} for ${job.id} (${job.kind})`);
   }
 
-  job.exitCode = -2;
-  job.finishedAt = Date.now() / 1000;
-  updateJob(job);
+  if (job.finishedAt === null) {
+    job.exitCode = -2;
+    job.finishedAt = Date.now() / 1000;
+    updateJob(job);
+  }
 
   return NextResponse.json({ status: 'cancelled' });
 }

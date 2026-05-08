@@ -41,7 +41,14 @@ function cleanEnv(): Record<string, string> {
 export function exec(
   cmd: string,
   args: string[],
-  options?: { cwd?: string; timeout?: number; env?: Record<string, string>; killProcessGroup?: boolean }
+  options?: {
+    cwd?: string;
+    timeout?: number;
+    env?: Record<string, string>;
+    killProcessGroup?: boolean;
+    signal?: AbortSignal;
+    abortProcessTree?: boolean;
+  }
 ): Promise<ShellResult> {
   const mergedEnv = {
     ...cleanEnv(),
@@ -52,19 +59,32 @@ export function exec(
 
   // killProcessGroup=true: spawn detached so we can kill(-pid) the entire tree
   // (git → hook → check.ts → vitest workers) on timeout or parent exit.
-  if (options?.killProcessGroup) {
+  // abortProcessTree does the same for AbortSignal-driven commands whose
+  // direct child can spawn hooks/subprocesses that must not outlive the abort.
+  // Abort-aware commands also use spawn so an in-flight step can be cancelled.
+  if (options?.killProcessGroup || options?.signal || options?.abortProcessTree) {
     return new Promise((resolve) => {
       let stdout = '';
       let stderr = '';
       let settled = false;
       const timeoutMs = options?.timeout ?? 15000;
       let killTimer: ReturnType<typeof setTimeout> | null = null;
+      let killEscalationTimer: ReturnType<typeof setTimeout> | null = null;
 
       let child: ReturnType<typeof spawn> | null = null;
+      let aborted = false;
+
+      const killTree = !!options?.killProcessGroup || !!options?.abortProcessTree;
 
       const killGroup = (sig: NodeJS.Signals) => {
         if (child?.pid) {
-          try { process.kill(-child.pid, sig); } catch {}
+          try {
+            if (killTree) {
+              process.kill(-child.pid, sig);
+            } else {
+              process.kill(child.pid, sig);
+            }
+          } catch {}
         }
       };
 
@@ -72,14 +92,31 @@ export function exec(
         if (settled) return;
         settled = true;
         if (killTimer) clearTimeout(killTimer);
+        if (killEscalationTimer) clearTimeout(killEscalationTimer);
+        if (options?.signal && abortListener) {
+          options.signal.removeEventListener('abort', abortListener);
+        }
         resolve({ stdout, stderr, exitCode });
       };
+
+      const abortChild = () => {
+        if (aborted) return;
+        aborted = true;
+        killGroup('SIGTERM');
+        killEscalationTimer = setTimeout(() => killGroup('SIGKILL'), 5000);
+      };
+
+      const abortListener = options?.signal
+        ? () => {
+            abortChild();
+          }
+        : null;
 
       try {
         child = spawn(cmd, args, {
           cwd: options?.cwd,
           env: mergedEnv,
-          detached: true,
+          detached: killTree,
           stdio: ['ignore', 'pipe', 'pipe'],
         });
       } catch (error) {
@@ -89,22 +126,34 @@ export function exec(
       }
 
       killTimer = setTimeout(() => {
-        killGroup('SIGTERM');
-        // Escalate to SIGKILL if SIGTERM doesn't land (e.g. process ignores it)
-        setTimeout(() => killGroup('SIGKILL'), 5000);
+        abortChild();
         settle(1);
       }, timeoutMs);
 
+      if (options?.signal) {
+        if (options.signal.aborted) {
+          abortChild();
+        } else if (abortListener) {
+          options.signal.addEventListener('abort', abortListener, { once: true });
+        }
+      }
+
       child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
       child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
-      child.on('close', (code) => settle(code ?? 1));
+      child.on('close', (code, signal) => {
+        if (aborted || signal) {
+          settle(130);
+          return;
+        }
+        settle(code ?? 1);
+      });
       child.on('error', (error) => {
         stderr = stderr || (error instanceof Error ? error.message : String(error));
         settle(1);
       });
 
       // Don't keep the Node event loop alive just for this child
-      child.unref();
+      if (killTree) child.unref();
     });
   }
 

@@ -244,7 +244,15 @@ describe('startProjectPush — push result tracking', () => {
 
     const r = await startProjectPush('proj');
     expect(r.ok).toBe(true);
-    expect(generateCommitMessageMock).toHaveBeenCalledWith('/path/to/proj', 'proj', 'codex');
+    expect(generateCommitMessageMock).toHaveBeenCalledWith('/path/to/proj', 'proj', 'codex', expect.anything());
+    const hookFixCommitCall = execMock.mock.calls.find(
+      ([cmd, args]) => cmd === 'git' && Array.isArray(args) && args[0] === '-C' && args[2] === 'commit',
+    );
+    expect(hookFixCommitCall?.[2]).toMatchObject({
+      timeout: 30000,
+      abortProcessTree: true,
+      signal: expect.any(Object),
+    });
   });
 
   it('returns 404 when project path cannot be resolved', async () => {

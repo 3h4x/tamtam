@@ -33,10 +33,14 @@ describe('issueBranchName', () => {
 describe('startProjectCommit', () => {
   let setProjectPushResultMock: ReturnType<typeof vi.fn>;
   let checkCliStartGateMock: ReturnType<typeof vi.fn>;
+  let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
   let listJobsMock: ReturnType<typeof vi.fn>;
   let findActiveReleaseJobMock: ReturnType<typeof vi.fn>;
   let getJobMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
+  let createJobMock: ReturnType<typeof vi.fn>;
+  let markDoneMock: ReturnType<typeof vi.fn>;
+  let updateJobMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -46,10 +50,27 @@ describe('startProjectCommit', () => {
       status: 429,
       detail: 'All enabled CLI providers are over budget. Adjust block threshold or wait for the window to reset.',
     });
+    getProjectTestConfigMock = vi.fn().mockReturnValue(null);
     listJobsMock = vi.fn().mockReturnValue([]);
     findActiveReleaseJobMock = vi.fn().mockReturnValue(null);
     getJobMock = vi.fn().mockReturnValue(null);
     execMock = vi.fn();
+    createJobMock = vi.fn().mockImplementation((project: string, kind: string, pid: number, logPath: string) => ({
+      id: `${project}-${kind}-job`,
+      project,
+      kind,
+      pid,
+      logPath,
+      prompt: null,
+      startedAt: 0,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      contextMeta: null,
+      userPrompt: null,
+    }));
+    markDoneMock = vi.fn().mockResolvedValue(undefined);
+    updateJobMock = vi.fn();
 
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
@@ -61,6 +82,15 @@ describe('startProjectCommit', () => {
     vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ logDir: '/tmp' }),
       setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: getProjectTestConfigMock,
+    }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: () => ({ commit_style: '' }),
+      getPipelineModel: () => 'normal',
+    }));
+    vi.doMock('@/lib/shared/cli-bin', () => ({
+      resolveCliBin: vi.fn().mockReturnValue('codex'),
+      resolveCliEnv: vi.fn().mockReturnValue({}),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
@@ -71,9 +101,9 @@ describe('startProjectCommit', () => {
       checkCliStartGate: checkCliStartGateMock,
     }));
     vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: vi.fn(),
-      markDone: vi.fn(),
-      updateJob: vi.fn(),
+      createJob: createJobMock,
+      markDone: markDoneMock,
+      updateJob: updateJobMock,
       listJobs: listJobsMock,
       findActiveReleaseJob: findActiveReleaseJobMock,
       getJob: getJobMock,
@@ -106,6 +136,32 @@ describe('startProjectCommit', () => {
     const result = await startProjectCommit('proj', { parentJobId: 'release-456' });
     expect(result.ok).toBe(false);
     expect(checkCliStartGateMock).toHaveBeenCalledWith('start a commit', { parentJobId: 'release-456' });
+  });
+
+  it('runs git commit with process-tree cancellation enabled', async () => {
+    checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'codex' });
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // git add -A
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'M src/index.ts\n', stderr: '' }) // git diff --cached --name-status
+      .mockResolvedValueOnce({ exitCode: 0, stdout: ' src/index.ts | 1 +\n', stderr: '' }) // git diff --stat
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'diff --git a/src/index.ts b/src/index.ts\n', stderr: '' }) // git diff
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'feat: ship it\n', stderr: '' }) // codex
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '[main abc123] feat: ship it\n', stderr: '' }) // git commit
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'abc123\n', stderr: '' }); // git rev-parse
+
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
+    const result = await startProjectCommit('proj');
+
+    expect(result.ok).toBe(true);
+    const commitCall = execMock.mock.calls.find(
+      ([cmd, args]) => cmd === 'git' && Array.isArray(args) && args[0] === '-C' && args[2] === 'commit',
+    );
+    expect(commitCall?.[2]).toMatchObject({
+      timeout: 30000,
+      abortProcessTree: true,
+      signal: expect.any(Object),
+    });
+    expect(markDoneMock).toHaveBeenCalledWith(createJobMock.mock.results[0].value, 0);
   });
 
   it('findIssueContext recovers issue metadata from the active release trigger chain', async () => {
