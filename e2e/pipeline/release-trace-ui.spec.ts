@@ -159,6 +159,80 @@ test('release trace shows animated "running" badge while release is in progress'
   await expect(page.getByText('running…').first()).toBeVisible();
 });
 
+// ─── Test 2b: live poll running → success ───────────────────────────────────
+
+test('release trace polls from running to success without page reload', async ({
+  page,
+}) => {
+  let serveRunning = true;
+
+  await stubShellRoutes(page);
+  await stubSettings(page);
+  await page.route(
+    `**/api/projects/by-project/${PROJECT}/release/${RELEASE_ID}`,
+    (route: Route) => {
+      const trace = serveRunning
+        ? makeTrace({
+            status: 'running',
+            exit_code: null,
+            finished_at: null,
+            steps: [
+              makeStep({
+                job_id: 'step-review-live',
+                kind: 'review',
+                status: 'running',
+                exit_code: null,
+                started_at: now() - 20,
+                finished_at: null,
+              }),
+            ],
+          })
+        : makeTrace({
+            status: 'done',
+            exit_code: 0,
+            finished_at: now() - 1,
+            steps: [
+              makeStep({
+                job_id: 'step-review-live',
+                kind: 'review',
+                status: 'done',
+                exit_code: 0,
+                started_at: now() - 20,
+                finished_at: now() - 10,
+                verdict: 'LGTM',
+                log_excerpt: 'Verdict: LGTM',
+              }),
+              makeStep({
+                job_id: 'step-push-live',
+                kind: 'push',
+                status: 'done',
+                exit_code: 0,
+                started_at: now() - 9,
+                finished_at: now() - 1,
+                log_excerpt: 'git push origin master',
+              }),
+            ],
+          });
+      route.fulfill({ json: trace });
+    },
+  );
+
+  await page.goto(`/project/${PROJECT}/release/${RELEASE_ID}`);
+
+  await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
+  await expect(page.getByText('running…').first()).toBeVisible();
+  await expect(page.getByText('1 step').first()).toBeVisible();
+
+  serveRunning = false;
+
+  await expect(page.getByText('success').first()).toBeVisible({ timeout: 12_000 });
+  await expect(page.getByText('LGTM').first()).toBeVisible();
+  await expect(page.getByText('push').first()).toBeVisible();
+  await expect(page.getByText('2 steps').first()).toBeVisible();
+  await expect(page.getByText('running', { exact: true })).not.toBeVisible();
+  await expect(page.getByText('running…')).toHaveCount(0);
+});
+
 // ─── Test 3: cancelled badge ──────────────────────────────────────────────────
 
 test('release trace shows "cancelled" status badge for aborted releases', async ({
@@ -264,77 +338,6 @@ test('clicking a step row expands and shows its log excerpt', async ({ page }) =
   // Clicking again collapses it
   await page.getByRole('button').filter({ hasText: 'push' }).first().click();
   await expect(page.getByText(EXCERPT)).not.toBeVisible();
-});
-
-// ─── Test 6: live polling updates running → done ──────────────────────────────
-
-test('release trace live polling transitions header badge from "running" to "success" without reload', async ({
-  page,
-}) => {
-  let serveRunning = true;
-
-  await stubShellRoutes(page);
-  await stubSettings(page);
-
-  page.route(
-    `**/api/projects/by-project/${PROJECT}/release/${RELEASE_ID}`,
-    (route: Route) => {
-      if (serveRunning) {
-        route.fulfill({
-          json: makeTrace({
-            status: 'running',
-            exit_code: null,
-            finished_at: null,
-            steps: [
-              makeStep({
-                job_id: 'step-review-poll',
-                kind: 'review',
-                status: 'running',
-                exit_code: null,
-                started_at: now() - 10,
-                finished_at: null,
-                verdict: null,
-              }),
-            ],
-          }),
-        });
-      } else {
-        route.fulfill({
-          json: makeTrace({
-            status: 'done',
-            exit_code: 0,
-            finished_at: now(),
-            steps: [
-              makeStep({
-                job_id: 'step-review-poll',
-                kind: 'review',
-                status: 'done',
-                exit_code: 0,
-                started_at: now() - 30,
-                finished_at: now(),
-                verdict: 'LGTM',
-                duration_ms: 20_000,
-              }),
-            ],
-          }),
-        });
-      }
-    },
-  );
-
-  await page.goto(`/project/${PROJECT}/release/${RELEASE_ID}`);
-
-  // Phase 1: initial fetch returns running
-  await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
-
-  // Flip mock so next poll returns done
-  serveRunning = false;
-
-  // Phase 2: ReleaseTraceView polls every 4 s — allow 12 s for the UI to update
-  await expect(page.getByText('success').first()).toBeVisible({ timeout: 12_000 });
-  await expect(page.getByText('running', { exact: true })).not.toBeVisible();
-  // LGTM verdict badge should now appear
-  await expect(page.getByText('LGTM').first()).toBeVisible();
 });
 
 // ─── Test 7: 404 shows error state ───────────────────────────────────────────
