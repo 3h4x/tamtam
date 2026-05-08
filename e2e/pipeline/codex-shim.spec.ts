@@ -1,22 +1,31 @@
 import { test, expect } from '@playwright/test';
+import { existsSync, rmSync } from 'fs';
 import { join } from 'path';
-import { CLAUDE_SHIM } from './global-setup';
+import { CLAUDE_SHIM, WORKSPACE_DIR } from './global-setup';
 import {
   writeScenario,
   resetShimState,
   readShimCalls,
   enableProject,
   waitForPipelineCompletion,
+  waitForJobCompletion,
+  waitForJobRunning,
   assertGitCallOnce,
 } from './helpers';
 
 const PROJECT = 'codex-shim';
 const CODEX_SHIM = join(process.cwd(), 'scripts', 'codex-shim.js');
+const FIX_MARKER = '.tamtam-codex-marker';
 
 test.describe('Codex shim pipeline', () => {
   test.beforeAll(async ({ request }) => {
     writeScenario(PROJECT, [
-      { label: 'review', text: 'The implementation looks good.\n\nVerdict: LGTM' },
+      {
+        label: 'review',
+        sleep_ms: 5000,
+        write_files: [{ path: FIX_MARKER, content: 'codex wrote this after completion\n' }],
+        text: 'The implementation looks good.\n\nVerdict: LGTM',
+      },
       { label: 'commit-message', text: 'feat: add codex shim e2e coverage' },
     ]);
     resetShimState(PROJECT);
@@ -41,6 +50,8 @@ test.describe('Codex shim pipeline', () => {
   });
 
   test('release parses Codex item.completed review output and completes commit + push', async ({ request }) => {
+    rmSync(join(WORKSPACE_DIR, PROJECT, FIX_MARKER), { force: true });
+
     const releaseResp = await request.post(
       `/api/projects/by-project/${PROJECT}/release`,
     );
@@ -49,9 +60,30 @@ test.describe('Codex shim pipeline', () => {
       `release POST failed: ${await releaseResp.text()}`,
     ).toBe(200);
 
+    const runningReviewJob = await waitForJobRunning(request, PROJECT, 'review', 20_000);
+    expect(runningReviewJob, 'review job should be running before completion').not.toBeNull();
+    expect(
+      existsSync(join(WORKSPACE_DIR, PROJECT, FIX_MARKER)),
+      'Codex shim must not write scenario files until the step completes',
+    ).toBe(false);
+    const completedReviewJob = await waitForJobCompletion(
+      request,
+      String(runningReviewJob?.['id'] ?? ''),
+      20_000,
+    );
+    expect(completedReviewJob, 'review job should complete').not.toBeNull();
+    expect(
+      existsSync(join(WORKSPACE_DIR, PROJECT, FIX_MARKER)),
+      'Codex shim should write scenario files by the time TamTam marks the review done',
+    ).toBe(true);
+
     const result = await waitForPipelineCompletion(request, PROJECT, 90_000);
     expect(result.status, 'pipeline timed out').toBe('done');
     expect(result.releaseJob?.['exit_code'], 'release exit code').toBe(0);
+    expect(
+      existsSync(join(WORKSPACE_DIR, PROJECT, FIX_MARKER)),
+      'Codex shim should write scenario files after completion',
+    ).toBe(true);
 
     const jobsResp = await request.get(`/api/jobs?project=${PROJECT}`);
     expect(jobsResp.ok()).toBe(true);

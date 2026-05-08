@@ -59,6 +59,17 @@ try {
 
 const step = scenario.steps[counter] ?? scenario.steps[scenario.steps.length - 1] ?? { text: 'feat: fallback' };
 
+function applyFileWrites(fileWrites) {
+  if (!Array.isArray(fileWrites)) return;
+  for (const fileWrite of fileWrites) {
+    if (!fileWrite || typeof fileWrite.path !== 'string') continue;
+    const targetPath = path.join(process.cwd(), fileWrite.path);
+    const targetDir = path.dirname(targetPath);
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.writeFileSync(targetPath, String(fileWrite.content ?? ''));
+  }
+}
+
 // Write incremented counter before emitting output (atomic-ish: if the shim
 // crashes mid-output the counter is still advanced so the next call gets the
 // right step rather than replaying the same one forever).
@@ -72,6 +83,10 @@ try {
 if (step.sleep_ms && step.sleep_ms > 0) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, step.sleep_ms);
 }
+
+// TamTam treats the terminal result event as the completion boundary for
+// claude-backed jobs, so scenario side effects must land before we emit it.
+applyFileWrites(step.write_files);
 
 if (isStreamJson) {
   // Emit Claude-compatible NDJSON stream-json events

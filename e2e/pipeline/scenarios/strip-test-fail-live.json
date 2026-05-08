@@ -1,0 +1,26 @@
+{
+  "description": "Pipeline starts with a failing test, runs a fix, re-tests, then continues through review, commit, and push.",
+  "steps": [
+    {
+      "label": "fix-from-test",
+      "sleep_ms": 6500,
+      "write_files": [
+        {
+          "path": ".tamtam-fixed-by-shim",
+          "content": "fixed\n"
+        }
+      ],
+      "text": "Adjusted the failing code path so the test can pass on the next run."
+    },
+    {
+      "label": "review",
+      "sleep_ms": 6500,
+      "text": "The follow-up fix is in place and the project is ready to ship.\n\nVerdict: LGTM"
+    },
+    {
+      "label": "commit-message",
+      "sleep_ms": 6500,
+      "text": "fix: recover from initial test failure"
+    }
+  ]
+}
