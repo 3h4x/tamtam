@@ -7,14 +7,19 @@ import {
   enableProject,
   waitForJobRunning,
   waitForJobCompletion,
+  waitForPipelineCompletion,
 } from './helpers'
 
+const SUCCESS_SCENARIO = JSON.parse(
+  readFileSync(join(__dirname, 'scenarios', 'ui-live-transition.json'), 'utf-8'),
+)
 const ABORT_SCENARIO = JSON.parse(
   readFileSync(join(__dirname, 'scenarios', 'abort.json'), 'utf-8'),
 )
 
-const PAUSED_PROJECT = 'paused'
-const BUSY_PROJECT = 'abort'
+const PAUSED_PROJECT = 'release-controls-paused'
+const SUCCESS_PROJECT = 'release-controls-happy-path'
+const BUSY_PROJECT = 'release-controls-abort'
 
 test.describe('Real release controls lifecycle', () => {
   test.afterEach(async ({ request }) => {
@@ -83,6 +88,44 @@ test.describe('Real release controls lifecycle', () => {
     await expect(idleButton).toBeVisible({ timeout: 15_000 })
     await expect(idleButton).toBeEnabled()
     await expect(idleButton).not.toHaveAttribute('title', /release pipeline already running/i)
+    await expect(busyButton).not.toBeVisible()
+  })
+
+  test('release button resets to the Ship state after a successful live release without reload', async ({
+    page,
+    request,
+  }) => {
+    writeScenario(SUCCESS_PROJECT, SUCCESS_SCENARIO.steps)
+    resetShimState(SUCCESS_PROJECT)
+    await enableProject(request, SUCCESS_PROJECT, { testsDisabled: true })
+
+    const releaseResponse = await request.post(`/api/projects/by-project/${SUCCESS_PROJECT}/release`)
+    expect(
+      releaseResponse.status(),
+      `release POST failed: ${await releaseResponse.text()}`,
+    ).toBe(200)
+
+    const runningReview = await waitForJobRunning(request, SUCCESS_PROJECT, 'review', 20_000)
+    expect(runningReview, 'review job should be running').not.toBeNull()
+
+    await page.goto(`/project/${SUCCESS_PROJECT}`)
+
+    const busyButton = page.getByRole('button', { name: /releasing/i })
+    await expect(busyButton).toBeVisible({ timeout: 8_000 })
+    await expect(busyButton).toBeDisabled()
+    await expect(busyButton).toHaveAttribute('title', /release pipeline already running/i)
+
+    const result = await waitForPipelineCompletion(request, SUCCESS_PROJECT, 90_000)
+    expect(result.status, 'pipeline should complete').toBe('done')
+    expect(result.releaseJob?.['exit_code'], 'release exit code').toBe(0)
+
+    const idleButton = page.getByRole('button', { name: '🚢 Ship (LGTM)' })
+    await expect(idleButton).toBeVisible({ timeout: 15_000 })
+    await expect(idleButton).toBeEnabled()
+    await expect(idleButton).toHaveAttribute('title', /ship it/i)
+    await expect(page.getByRole('button', { name: /Review LGTM just now .* awaiting push/i })).toBeVisible({
+      timeout: 15_000,
+    })
     await expect(busyButton).not.toBeVisible()
   })
 })
