@@ -59,6 +59,7 @@ Verdict: NEEDS ATTENTION
 
 describe('fileReviewExhaustionIssue', () => {
   let execMock: ReturnType<typeof vi.fn>;
+  let parsedLog: string;
 
   function resp(exitCode: number, stdout = '', stderr = '') {
     return Promise.resolve({ exitCode, stdout, stderr });
@@ -66,6 +67,7 @@ describe('fileReviewExhaustionIssue', () => {
 
   beforeEach(() => {
     vi.resetModules();
+    parsedLog = REVIEW_LOG;
     execMock = vi.fn();
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/tamtam'),
@@ -75,7 +77,7 @@ describe('fileReviewExhaustionIssue', () => {
     vi.doMock('@/lib/jobs/verdict', () => ({
       readLog: vi.fn().mockReturnValue(REVIEW_LOG),
       getVerdict: vi.fn(),
-      readParsedLog: vi.fn().mockReturnValue(REVIEW_LOG),
+      readParsedLog: vi.fn(() => parsedLog),
     }));
   });
 
@@ -131,26 +133,16 @@ describe('fileReviewExhaustionIssue', () => {
   });
 
   it('scrubs invocation and permission details out of structured Finding fields', async () => {
-    vi.resetModules();
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue('/path/to/tamtam'),
-      clearProjectDataCache: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/jobs/verdict', () => ({
-      readLog: vi.fn(),
-      getVerdict: vi.fn(),
-      readParsedLog: vi.fn().mockReturnValue([
-        '- Finding ID: leaked-structured-field',
-        '  Severity: high',
-        '  Root cause: Handler accepts unsafe input while --permission-mode bypassPermissions was present.',
-        '  Affected paths: {"type":"stream_event","payload":{"text":"content_block_delta"}}',
-        '  Required fix: Preserve this safe remediation note and remove bypassPermissions details.',
-        '  Required tests: [tamtam] launching: /path/to/scripts/codex-shim.js --permission-mode bypassPermissions',
-        '',
-        'Verdict: NEEDS ATTENTION',
-      ].join('\n')),
-    }));
+    parsedLog = [
+      '- Finding ID: leaked-structured-field',
+      '  Severity: high',
+      '  Root cause: Handler accepts unsafe input while --permission-mode bypassPermissions was present.',
+      '  Affected paths: {"type":"stream_event","payload":{"text":"content_block_delta"}}',
+      '  Required fix: Preserve this safe remediation note and remove bypassPermissions details.',
+      '  Required tests: [tamtam] launching: /path/to/scripts/codex-shim.js --permission-mode bypassPermissions',
+      '',
+      'Verdict: NEEDS ATTENTION',
+    ].join('\n');
     execMock
       .mockImplementationOnce(() => resp(0, 'owner/repo'))
       .mockImplementationOnce(() => resp(0, JSON.stringify([{ name: 'tamtam' }, { name: 'review-followup' }, { name: 'priority-medium' }])))
@@ -213,17 +205,7 @@ describe('fileReviewExhaustionIssue', () => {
   });
 
   it('falls back to a quoted prose excerpt when reviewer emitted no structured Finding blocks', async () => {
-    vi.resetModules();
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue('/path/to/tamtam'),
-      clearProjectDataCache: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/jobs/verdict', () => ({
-      readLog: vi.fn(),
-      getVerdict: vi.fn(),
-      readParsedLog: vi.fn().mockReturnValue('General concerns about secret handling, but no structured findings emitted.\n\nVerdict: NEEDS ATTENTION'),
-    }));
+    parsedLog = 'General concerns about secret handling, but no structured findings emitted.\n\nVerdict: NEEDS ATTENTION';
     execMock
       .mockImplementationOnce(() => resp(0, 'owner/repo'))
       .mockImplementationOnce(() => resp(0, JSON.stringify([{ name: 'tamtam' }, { name: 'review-followup' }, { name: 'priority-medium' }])))
@@ -250,24 +232,14 @@ describe('fileReviewExhaustionIssue', () => {
     // A pathological reviewer log that survives parsing but contains shim
     // launch lines and dangerous permission flags. The scrubber must drop
     // those lines before they reach the issue body.
-    vi.resetModules();
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue('/path/to/tamtam'),
-      clearProjectDataCache: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/jobs/verdict', () => ({
-      readLog: vi.fn(),
-      getVerdict: vi.fn(),
-      readParsedLog: vi.fn().mockReturnValue([
-        '[tamtam] launching: /path/to/scripts/codex-shim.js --permission-mode bypassPermissions',
-        'Reviewer noted concerns about input sanitisation in the new handler.',
-        '--permission-mode bypassPermissions was passed to the shim.',
-        'No structured findings were emitted this iteration.',
-        '',
-        'Verdict: NEEDS ATTENTION',
-      ].join('\n')),
-    }));
+    parsedLog = [
+      '[tamtam] launching: /path/to/scripts/codex-shim.js --permission-mode bypassPermissions',
+      'Reviewer noted concerns about input sanitisation in the new handler.',
+      '--permission-mode bypassPermissions was passed to the shim.',
+      'No structured findings were emitted this iteration.',
+      '',
+      'Verdict: NEEDS ATTENTION',
+    ].join('\n');
     execMock
       .mockImplementationOnce(() => resp(0, 'owner/repo'))
       .mockImplementationOnce(() => resp(0, JSON.stringify([{ name: 'tamtam' }, { name: 'review-followup' }, { name: 'priority-medium' }])))

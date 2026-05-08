@@ -275,6 +275,76 @@ describe('project board integration', () => {
     expect(queryArg).toContain('"Blocked"');
   });
 
+  it('fails clearly when gh project create returns an unparseable payload', async () => {
+    execMock.mockImplementation(async (_cmd: string, args: string[]) => {
+      if (args[0] === 'project' && args[1] === 'list') {
+        return { exitCode: 0, stdout: JSON.stringify({ projects: [] }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'create') {
+        return { exitCode: 0, stdout: JSON.stringify({ project: null }), stderr: '' };
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const { ensureProjectBoard } = await import('@/lib/github/project-board');
+    await expect(ensureProjectBoard({ enabled: true, owner: 'octocat', title: 'TamTam' })).rejects.toThrow(
+      'Failed to parse gh project create response',
+    );
+  });
+
+  it('fails clearly when the built-in Status field is missing from the board', async () => {
+    execMock.mockImplementation(async (_cmd: string, args: string[]) => {
+      if (args[0] === 'project' && args[1] === 'list') {
+        return { exitCode: 0, stdout: JSON.stringify({ projects: [{ id: 'PVT_1', number: 7, title: 'TamTam' }] }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'field-list') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            fields: [{ id: 'F_PROJECT', name: 'Project' }],
+          }),
+          stderr: '',
+        };
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const { ensureProjectBoard } = await import('@/lib/github/project-board');
+    await expect(ensureProjectBoard({ enabled: true, owner: 'octocat', title: 'TamTam' })).rejects.toThrow(
+      'Built-in Status field not found on project',
+    );
+  });
+
+  it('fails clearly when the built-in Status field has no id and needs option upgrades', async () => {
+    execMock.mockImplementation(async (_cmd: string, args: string[]) => {
+      if (args[0] === 'project' && args[1] === 'list') {
+        return { exitCode: 0, stdout: JSON.stringify({ projects: [{ id: 'PVT_1', number: 7, title: 'TamTam' }] }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'field-list') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            fields: [{
+              name: 'Status',
+              options: [
+                { id: 'Q', name: 'Todo' },
+                { id: 'R', name: 'In Progress' },
+                { id: 'D', name: 'Done' },
+              ],
+            }],
+          }),
+          stderr: '',
+        };
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const { ensureProjectBoard } = await import('@/lib/github/project-board');
+    await expect(ensureProjectBoard({ enabled: true, owner: 'octocat', title: 'TamTam' })).rejects.toThrow(
+      'Built-in Status field has no ID',
+    );
+  });
+
   it('syncs pipeline child jobs onto the release root item and dedupes activities', async () => {
     const releaseJob = makeJob({
       id: 'release-1',
