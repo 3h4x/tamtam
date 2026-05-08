@@ -25,6 +25,10 @@ const PROJECTS = [
   'runs-failure-dns',
   'runs-abort-cancel',
   'strip-full-live',
+  'start-detect-runs',
+  'start-detect-terminal',
+  'start-detect-run-idle',
+  'start-detect-agent-idle',
 ];
 
 export default async function globalSetup(): Promise<void> {
