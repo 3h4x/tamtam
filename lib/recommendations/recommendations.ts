@@ -117,6 +117,46 @@ export function listRecommendations(project: string): RecommendationRow[] {
     .map(rowToDict);
 }
 
+export function getRecommendation(project: string, id: string): RecommendationRow | null {
+  const row = db.select().from(schema.recommendations)
+    .where(and(eq(schema.recommendations.project, project), eq(schema.recommendations.id, id)))
+    .get();
+  return row ? rowToDict(row) : null;
+}
+
+/**
+ * Summary of open recommendations across every project. Used by the global
+ * header chip + the cross-project recommendations page. Returns a sorted
+ * `byProject` map (descending count) so the heaviest projects surface first.
+ */
+export function summarizeOpenRecommendations(): { openCount: number; byProject: Record<string, number> } {
+  const rows = db
+    .select()
+    .from(schema.recommendations)
+    .where(eq(schema.recommendations.status, 'open'))
+    .all();
+  const byProject: Record<string, number> = {};
+  for (const row of rows) {
+    byProject[row.project] = (byProject[row.project] ?? 0) + 1;
+  }
+  return { openCount: rows.length, byProject };
+}
+
+/**
+ * List every open recommendation across all projects, newest-first. Powers
+ * the global `/recommendations` page so operators can triage from one
+ * location instead of project-hopping.
+ */
+export function listAllOpenRecommendations(): RecommendationRow[] {
+  return db
+    .select()
+    .from(schema.recommendations)
+    .where(eq(schema.recommendations.status, 'open'))
+    .orderBy(desc(schema.recommendations.updatedAt))
+    .all()
+    .map(rowToDict);
+}
+
 export function updateRecommendationStatus(project: string, id: string, status: RecommendationStatus): RecommendationRow | null {
   const now = Date.now() / 1000;
   db.update(schema.recommendations)
@@ -127,4 +167,25 @@ export function updateRecommendationStatus(project: string, id: string, status: 
     .where(and(eq(schema.recommendations.project, project), eq(schema.recommendations.id, id)))
     .get();
   return row ? rowToDict(row) : null;
+}
+
+export function updateRecommendationStatusIfCurrent(
+  project: string,
+  id: string,
+  currentStatus: RecommendationStatus,
+  nextStatus: RecommendationStatus,
+): RecommendationRow | null {
+  const now = Date.now() / 1000;
+  const result = db.update(schema.recommendations)
+    .set({ status: nextStatus, updatedAt: now })
+    .where(
+      and(
+        eq(schema.recommendations.project, project),
+        eq(schema.recommendations.id, id),
+        eq(schema.recommendations.status, currentStatus),
+      ),
+    )
+    .run();
+  if (!result.changes) return null;
+  return getRecommendation(project, id);
 }

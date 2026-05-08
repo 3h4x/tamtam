@@ -52,7 +52,8 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 - `behind` — Ahead/behind commit counts vs remote (GET)
 - `logs` — Project run log files (GET)
 - `docs` — Project documentation files (GET)
-- `recommendations` — GET; PATCH `{ id, status }` to update
+- `recommendations` — GET; PATCH `{ id, status }` to update non-terminal state (`open` or `dismissed`)
+- `recommendations/apply` — Apply an auto-applicable recommendation server-side (POST `{ id }`). Validates the recommendation is still `open`, performs the underlying mutation, then marks the row `applied`; returns `409 { detail }` when the recommendation is stale/non-open
 
 ## Jobs / Runs
 
@@ -66,6 +67,11 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 - `/api/jobs/notifications` — Unseen job notifications (GET)
 - `/api/jobs/notifications/mark-seen` — Mark all notifications seen (POST)
 - `/api/streaming/[jobId]` — SSE stream of parsed text deltas from NDJSON log (`?raw=1` for raw lines)
+
+## Cross-project recommendations
+
+- `/api/recommendations` — Read-only list of every `open` recommendation across all projects, newest first (GET)
+- `/api/recommendations/summary` — Read-only summary of all `open` recommendations (`{ openCount, byProject }`) for header/global UI polling (GET)
 
 ## Settings
 

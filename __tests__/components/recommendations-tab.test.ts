@@ -7,14 +7,17 @@ import { flushSync } from 'react-dom'
 import { RecommendationsTab } from '@/components/RecommendationsTab'
 import type { Recommendation } from '@/lib/client-api'
 
-const { fetchRecommendations, updateRecommendation } = vi.hoisted(() => ({
+const { fetchRecommendations, updateRecommendation, applyRecommendation } = vi.hoisted(() => ({
   fetchRecommendations: vi.fn(),
   updateRecommendation: vi.fn(),
+  applyRecommendation: vi.fn(),
 }))
 
 vi.mock('@/lib/client-api', () => ({
   fetchRecommendations,
   updateRecommendation,
+  applyRecommendation,
+  AUTO_APPLICABLE_RECOMMENDATION_TYPES: new Set(['agent_schedule_backoff']),
 }))
 
 function buildRecommendation(overrides: Partial<Recommendation> = {}): Recommendation {

@@ -59,6 +59,15 @@ describe('internal-scheduler', () => {
       expect(next).toBeGreaterThan(now);
       expect(next - now).toBeLessThanOrEqual(24 * 3600_000 + 60_000);
     });
+
+    it('handles day-suffix schedules (3d, 7d, 30d) by skipping the hour-grid', () => {
+      const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+      // Multi-day schedules don't get a stable hour-of-day phase — they fire
+      // exactly N days from now via the period-from-now fallback.
+      expect(computeNextFire('3d', 'agent-low-freq', now)).toBe(now + 3 * 86400_000);
+      expect(computeNextFire('7d', 'agent-weekly', now)).toBe(now + 7 * 86400_000);
+      expect(computeNextFire('30d', 'agent-monthly', now)).toBe(now + 30 * 86400_000);
+    });
   });
 
   describe('upsert / remove', () => {

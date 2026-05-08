@@ -65,8 +65,13 @@ export {
   runCustomAction,
   fetchProjectDocs,
   fetchRecommendations,
+  fetchRecommendationsSummary,
+  fetchAllOpenRecommendations,
   updateRecommendation,
+  applyRecommendation,
+  AUTO_APPLICABLE_RECOMMENDATION_TYPES,
 } from './client/projects'
+export type { RecommendationsSummary } from './client/projects'
 
 export {
   fetchJobs,

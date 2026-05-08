@@ -17,10 +17,10 @@ export async function PATCH(
   const body = await request.json();
   const id = typeof body.id === 'string' ? body.id : '';
   const status = typeof body.status === 'string' ? body.status : '';
-  if (!id || !['open', 'dismissed', 'applied'].includes(status)) {
-    return NextResponse.json({ detail: 'id and valid status are required' }, { status: 400 });
+  if (!id || !['open', 'dismissed'].includes(status)) {
+    return NextResponse.json({ detail: 'id and valid status (open or dismissed) are required' }, { status: 400 });
   }
-  const recommendation = updateRecommendationStatus(projectName, id, status as 'open' | 'dismissed' | 'applied');
+  const recommendation = updateRecommendationStatus(projectName, id, status as 'open' | 'dismissed');
   if (!recommendation) {
     return NextResponse.json({ detail: 'recommendation not found' }, { status: 404 });
   }
