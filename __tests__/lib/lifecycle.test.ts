@@ -961,6 +961,7 @@ describe('review_fix_max_iterations only caps review-side recovery', () => {
   let startProjectReviewMock: ReturnType<typeof vi.fn>;
   let fileReviewExhaustionIssueMock: ReturnType<typeof vi.fn>;
   let startProjectCommitMock: ReturnType<typeof vi.fn>;
+  let startFixFromJobMock: ReturnType<typeof vi.fn>;
   let notifyMock: ReturnType<typeof vi.fn>;
 
   function makeFixJob(id: string, overrides: Partial<JobData> = {}): JobData {
@@ -993,6 +994,7 @@ describe('review_fix_max_iterations only caps review-side recovery', () => {
     startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'review-next' });
     fileReviewExhaustionIssueMock = vi.fn().mockResolvedValue({ ok: true, issueNumber: 7, issueUrl: 'https://github.com/owner/repo/issues/7' });
     startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'commit ok', jobId: 'commit-auto' });
+    startFixFromJobMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-auto' });
     notifyMock = vi.fn().mockResolvedValue(undefined);
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
@@ -1028,9 +1030,13 @@ describe('review_fix_max_iterations only caps review-side recovery', () => {
     vi.doMock('@/lib/pipeline/start-commit', () => ({
       startProjectCommit: startProjectCommitMock,
     }));
+    vi.doMock('@/lib/pipeline/start-fix', () => ({
+      startFixFromJob: startFixFromJobMock,
+    }));
   });
 
   afterEach(() => {
+    delete process.env.TAMTAM_MAX_STEP_ITERATIONS;
     vi.resetModules();
   });
 
@@ -1097,6 +1103,99 @@ describe('review_fix_max_iterations only caps review-side recovery', () => {
     expect(releaseRow?.finishedAt).not.toBeNull();
     const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
     expect(notifyEvents).toContain('fix_loop_exhausted');
+  });
+
+  it('still starts a fix after a capped failed commit inside a release', async () => {
+    process.env.TAMTAM_MAX_STEP_ITERATIONS = '1';
+    const now = Date.now() / 1000;
+    const releaseId = 'release-commit-cap-fix';
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
+    ]).run();
+
+    const { markDone } = await import('@/lib/jobs/job-storage');
+    const commitJob: JobData = {
+      id: 'c1',
+      project: 'proj',
+      kind: 'commit',
+      prompt: null,
+      pid: 99999,
+      logPath: null,
+      startedAt: now - 30,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      releaseId,
+      parentJobId: releaseId,
+    };
+
+    await markDone(commitJob, 1);
+
+    expect(startFixFromJobMock).toHaveBeenCalledOnce();
+    expect(startFixFromJobMock).toHaveBeenCalledWith('c1');
+    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    expect(notifyEvents).not.toContain('fix_loop_exhausted');
+    delete process.env.TAMTAM_MAX_STEP_ITERATIONS;
+  });
+
+  it('suppresses the re-commit after the trailing fix when the commit cap is exhausted', async () => {
+    process.env.TAMTAM_MAX_STEP_ITERATIONS = '1';
+    const now = Date.now() / 1000;
+    const releaseId = 'release-commit-cap-stop';
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
+      makeJobRow({ id: 'c1', project: 'proj', kind: 'commit', releaseId, startedAt: now - 180, finishedAt: now - 160, exitCode: 1 }) as any,
+    ]).run();
+
+    const { markDone } = await import('@/lib/jobs/job-storage');
+    const fixJob = makeFixJob('f-commit-cap', { releaseId, parentJobId: 'c1', startedAt: now - 30 });
+
+    await markDone(fixJob, 0);
+
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
+    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    expect(notifyEvents).toContain('fix_loop_exhausted');
+    delete process.env.TAMTAM_MAX_STEP_ITERATIONS;
+  });
+
+  it('still starts a fix after a capped failed commit in standalone auto-push mode', async () => {
+    process.env.TAMTAM_MAX_STEP_ITERATIONS = '1';
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.jobs).values([
+      makeJobRow({ id: 'old-commit', project: 'proj', kind: 'commit', startedAt: now - 120, finishedAt: now - 110, exitCode: 1 }) as any,
+    ]).run();
+
+    const { markDone } = await import('@/lib/jobs/job-storage');
+    const commitJob: JobData = {
+      id: 'standalone-commit',
+      project: 'proj',
+      kind: 'commit',
+      prompt: null,
+      pid: 99999,
+      logPath: null,
+      startedAt: now - 20,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    };
+
+    await markDone(commitJob, 1);
+
+    expect(startFixFromJobMock).toHaveBeenCalledOnce();
+    expect(startFixFromJobMock).toHaveBeenCalledWith('standalone-commit');
+    delete process.env.TAMTAM_MAX_STEP_ITERATIONS;
   });
 });
 
