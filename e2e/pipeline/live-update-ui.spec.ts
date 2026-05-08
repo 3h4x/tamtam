@@ -279,6 +279,47 @@ test.describe('Auto-polling live update: running → cancelled', () => {
   });
 });
 
+// ─── Test 2c: Pending release banner clears after poll ──────────────────────
+//
+// ProjectRunsTab also polls pendingReleaseProjects from /api/jobs. Verify the
+// queued-release banner appears while the project is marked pending, then
+// disappears on the next poll cycle without a page reload.
+
+test.describe('Auto-polling live update: pending release banner', () => {
+  test('history tab clears the queued release banner when pendingReleaseProjects no longer includes the project', async ({
+    page,
+  }) => {
+    let queued = true;
+
+    await stubCommonRoutes(page, PROJECT);
+
+    await page.route(
+      (url) =>
+        url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        route.fulfill({
+          json: {
+            jobs: [],
+            pendingReleaseProjects: queued ? [PROJECT] : [],
+          },
+        });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    await expect(
+      page.getByText(/Release queued — will fire automatically/i),
+    ).toBeVisible({ timeout: 8_000 });
+
+    queued = false;
+
+    await expect(
+      page.getByText(/Release queued — will fire automatically/i),
+    ).not.toBeVisible({ timeout: 12_000 });
+  });
+});
+
 // ─── Test 2: Concurrent jobs across projects ─────────────────────────────────
 //
 // The global /runs page fetches /api/jobs without a project filter and renders
