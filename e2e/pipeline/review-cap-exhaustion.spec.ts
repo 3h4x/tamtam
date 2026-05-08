@@ -76,7 +76,8 @@ test.describe('Review-cap exhaustion → file issue + ship anyway', () => {
     // Sanity: title + labels match the canonical TamTam contract.
     const args = issueCreateCall!.args;
     const titleIdx = args.indexOf('--title');
-    expect(args[titleIdx + 1]).toMatch(/unresolved finding(s)? from release|unresolved review from release/);
+    // Title carries no invocation metadata — just the count or the bare form.
+    expect(args[titleIdx + 1]).toMatch(/^chore\(review\): (\d+ unresolved review findings?|unresolved review)$/);
     const labels = args.reduce<string[]>(
       (acc, v, i) => (args[i - 1] === '--label' ? [...acc, v] : acc),
       [],
@@ -96,6 +97,12 @@ test.describe('Review-cap exhaustion → file issue + ship anyway', () => {
     expect(body).not.toContain('stream_event');
     expect(body).not.toContain('content_block_delta');
     expect(body).not.toContain('[tamtam] launching');
+    // No invocation metadata leaks: no release handle, no review job id, no
+    // dangerous permission flags.
+    expect(body).not.toMatch(/Release `/);
+    expect(body).not.toContain('review job');
+    expect(body).not.toContain('--permission-mode');
+    expect(body).not.toContain('bypassPermissions');
 
     // git push must have been invoked — the partial work shipped.
     const pushCall = calls.find((c) => !c.cmd && c.args.includes('push'));

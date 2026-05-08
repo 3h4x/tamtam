@@ -4,8 +4,6 @@ import { readParsedLog } from '@/lib/jobs/verdict';
 import { parseFindings, type ParsedFinding, stripFinalVerdict } from '@/lib/pipeline/review-contract';
 import type { JobData } from '@/lib/jobs/types';
 
-export type ExhaustionReason = 'review-cap' | 'review-stuck' | 'fix-contradicts-review';
-
 export type ExhaustionIssueResult =
   | { ok: true; issueNumber: number; issueUrl: string }
   | { ok: false; error: string };
@@ -18,57 +16,66 @@ const PROSE_FALLBACK_BYTES = 1200;
 
 type ExecLikeResult = Partial<{ stdout: string; stderr: string; exitCode: number }> | null | undefined;
 
-function reasonHumanLabel(reason: ExhaustionReason): string {
-  if (reason === 'review-cap') return 'review iteration cap reached';
-  if (reason === 'review-stuck') return 'review findings stopped converging';
-  return 'fixer claimed findings fixed but reviewer still flags them';
-}
+// Patterns that betray internal invocation details we never want to leak into a
+// public GitHub issue. Full telemetry/launch lines are dropped; inline
+// permission flags are removed so safe reviewer prose in the same field can
+// still be carried into the follow-up issue.
+const INVOCATION_LEAK_LINE_PATTERNS: readonly RegExp[] = [
+  /^\s*\[tamtam\]/i,
+  /^\s*\{.*["']type["']\s*:\s*["'](stream_event|result|content_block_)/i,
+];
 
-function shortReleaseId(releaseId: string | null | undefined): string {
-  if (!releaseId) return 'standalone';
-  // Job ids look like `<project>-release-<epochMicros>` — keep the last 8 of
-  // the numeric tail for a short, human-friendly handle.
-  const tail = releaseId.split('-').pop() ?? releaseId;
-  return tail.slice(-8);
+const INVOCATION_LEAK_INLINE_PATTERNS: readonly RegExp[] = [
+  /\s*--permission-mode(?:[=\s]+[^\s,;.)]+)?/gi,
+  /\bbypassPermissions\b/gi,
+  /\bdangerously[-_]?skip[-_]?permissions\b/gi,
+];
+
+function scrubInvocationLeaks(text: string): string {
+  return text
+    .split('\n')
+    .filter((line) => !INVOCATION_LEAK_LINE_PATTERNS.some((re) => re.test(line)))
+    .map((line) => INVOCATION_LEAK_INLINE_PATTERNS.reduce((acc, re) => acc.replace(re, ''), line).replace(/\s{2,}/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim();
 }
 
 function renderFinding(f: ParsedFinding): string {
   const sev = f.severity ? ` _(severity: ${f.severity})_` : '';
   const rows: string[] = [`### \`${f.id}\`${sev}`];
-  if (f.rootCause) rows.push(``, `**Root cause** — ${f.rootCause}`);
-  if (f.affectedPaths) rows.push(``, `**Affected paths** — ${f.affectedPaths}`);
-  if (f.requiredFix) rows.push(``, `**Required fix** — ${f.requiredFix}`);
-  if (f.requiredTests) rows.push(``, `**Required tests** — ${f.requiredTests}`);
+  const rootCause = f.rootCause ? scrubInvocationLeaks(f.rootCause) : '';
+  const affectedPaths = f.affectedPaths ? scrubInvocationLeaks(f.affectedPaths) : '';
+  const requiredFix = f.requiredFix ? scrubInvocationLeaks(f.requiredFix) : '';
+  const requiredTests = f.requiredTests ? scrubInvocationLeaks(f.requiredTests) : '';
+  if (rootCause) rows.push(``, `**Root cause** — ${rootCause}`);
+  if (affectedPaths) rows.push(``, `**Affected paths** — ${affectedPaths}`);
+  if (requiredFix) rows.push(``, `**Required fix** — ${requiredFix}`);
+  if (requiredTests) rows.push(``, `**Required tests** — ${requiredTests}`);
   return rows.join('\n');
 }
 
 function buildIssueBody(opts: {
-  reason: ExhaustionReason;
-  reviewJob: JobData;
   findings: ParsedFinding[];
   proseFallback: string;
 }): string {
-  const { reason, reviewJob, findings, proseFallback } = opts;
-  const releaseHandle = shortReleaseId(reviewJob.releaseId ?? null);
+  const { findings, proseFallback } = opts;
   const findingCount = findings.length;
+  const safeProse = scrubInvocationLeaks(proseFallback);
   const findingsBlock = findingCount > 0
     ? findings.map(renderFinding).join('\n\n')
-    : `_The reviewer did not produce structured Finding blocks. Raw note from the review:_\n\n${proseFallback ? '> ' + proseFallback.split('\n').filter(Boolean).join('\n> ') : '_(empty)_'}`;
-  const ids = findings.map((f) => `\`${f.id}\``).join(', ') || '_none extracted_';
+    : safeProse
+      ? '> ' + safeProse.split('\n').filter(Boolean).join('\n> ')
+      : '_(no structured findings could be extracted from the review)_';
   return [
     `## Problem`,
-    ``,
-    `Release \`${releaseHandle}\` stopped before reaching LGTM: ${reasonHumanLabel(reason)}.`,
-    `${findingCount} unresolved finding${findingCount === 1 ? '' : 's'} carried over from TamTam review job \`${reviewJob.id}\`.`,
-    ``,
-    `## Approach`,
     ``,
     findingsBlock,
     ``,
     `## Acceptance criteria`,
     ``,
     `- Each finding above is addressed in the implementation and covered by tests.`,
-    `- A fresh review on this branch returns \`Verdict: LGTM\` with none of the Finding IDs above (${ids}) re-flagged.`,
+    `- A fresh review on this branch returns LGTM with no Finding IDs re-flagged.`,
   ].join('\n');
 }
 
@@ -115,7 +122,6 @@ async function detectRepoLabels(projPath: string, repo: string): Promise<Set<str
 
 export async function fileReviewExhaustionIssue(
   reviewJob: JobData,
-  reason: ExhaustionReason,
 ): Promise<ExhaustionIssueResult> {
   const projPath = resolveProjectPath(reviewJob.project);
   if (!projPath) return { ok: false, error: 'project path not found' };
@@ -127,7 +133,9 @@ export async function fileReviewExhaustionIssue(
   // Use the parsed (text-only) log so Finding IDs aren't trapped inside
   // stream-json string escapes. The raw log mixes the agent shim's
   // `[tamtam] launching:` lines and `{"type":"stream_event",...}` JSON, none
-  // of which belongs in a public GitHub issue.
+  // of which belongs in a public GitHub issue. The body deliberately omits
+  // all invocation metadata — the issue is about the unresolved review
+  // findings, not about how TamTam reached this state.
   const parsedLog = readParsedLog(reviewJob, 100_000);
   const findings = parseFindings(parsedLog);
   const proseOnly = stripFinalVerdict(parsedLog).trim();
@@ -135,11 +143,10 @@ export async function fileReviewExhaustionIssue(
     ? `${proseOnly.slice(-PROSE_FALLBACK_BYTES).trim()} …`
     : proseOnly;
 
-  const releaseHandle = shortReleaseId(reviewJob.releaseId ?? null);
   const title = findings.length > 0
-    ? `chore(review): ${findings.length} unresolved finding${findings.length === 1 ? '' : 's'} from release ${releaseHandle}`
-    : `chore(review): unresolved review from release ${releaseHandle}`;
-  const body = buildIssueBody({ reason, reviewJob, findings, proseFallback });
+    ? `chore(review): ${findings.length} unresolved review finding${findings.length === 1 ? '' : 's'}`
+    : `chore(review): unresolved review`;
+  const body = buildIssueBody({ findings, proseFallback });
 
   const labels = repoLabels ? ISSUE_LABELS.filter((label) => repoLabels.has(label)) : ISSUE_LABELS;
   const labelArgs: string[] = [];

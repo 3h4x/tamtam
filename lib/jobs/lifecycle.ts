@@ -193,11 +193,14 @@ async function tryReviewExhaustionFallback(
 ): Promise<{ chainedNext: boolean; releaseStopReason: string | null; forcedReleaseExitCode: number | null }> {
   try {
     const { fileReviewExhaustionIssue } = await import('@/lib/pipeline/review-exhaustion-fallback');
-    const fb = await fileReviewExhaustionIssue(reviewJob, reason);
+    const fb = await fileReviewExhaustionIssue(reviewJob);
     if (!fb.ok) {
       console.log(`[release] exhaustion fallback could not file issue for ${reviewJob.project}: ${fb.error}`);
       return { chainedNext: false, releaseStopReason: null, forcedReleaseExitCode: null };
     }
+    // `reason` is kept on the function signature for the caller-side console
+    // log; it is intentionally not passed into the issue body. See
+    // review-exhaustion-fallback.ts for why invocation metadata is omitted.
     console.log(`[release] review exhaustion (${reason}) → filed issue #${fb.issueNumber} ${fb.issueUrl}; chaining to commit`);
     const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
     const r = await startProjectCommit(reviewJob.project);

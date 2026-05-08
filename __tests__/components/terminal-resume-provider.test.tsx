@@ -87,10 +87,12 @@ describe('pending continue-issue resume provider', () => {
     replaceMock.mockReset()
     runProjectMock.mockReset()
     startStreamMock.mockClear()
+    vi.stubGlobal('fetch', vi.fn())
     terminalStore.reset('proj')
   })
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     terminalStore.reset('proj')
     document.body.innerHTML = ''
   })
@@ -131,6 +133,39 @@ describe('pending continue-issue resume provider', () => {
     }))
     expect(startStreamMock).toHaveBeenCalledWith('proj', 'job-123')
 
+    unmount()
+  })
+
+  it('aborts auto-submit when issue-branch checkout fails and records the error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      statusText: 'Conflict',
+      json: async () => ({ detail: 'dirty worktree' }),
+    }))
+
+    function IssueBranchBootstrapHarness() {
+      useTerminalBootstrap({
+        projectName: 'proj',
+        initialSessionId: undefined,
+        jobParam: null,
+        promptParam: 'continue issue',
+        issueNumberParam: '7',
+        issueTitleParam: 'Fix me',
+        resumeSessionIdParam: null,
+        resumeProviderParam: null,
+        onLoadSessions: vi.fn(),
+      })
+      return null
+    }
+
+    const { unmount } = renderElement(<IssueBranchBootstrapHarness />)
+
+    await vi.waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/project/proj/terminal')
+      expect(terminalStore.get('proj').history.at(-1)?.text).toContain('Could not check out the issue branch: dirty worktree')
+    })
+
+    expect(terminalStore.get('proj').pendingAutoSubmit).toBeNull()
     unmount()
   })
 })
