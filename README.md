@@ -43,7 +43,7 @@ Open `http://localhost:1337`, go to Settings, set your workspace path. TamTam sc
 
 ```bash
 pnpm build && pnpm start  # same end result as rebuild, but split into separate commands
-pnpm restart      # same result as rebuild — build + PM2-managed start/restart
+pnpm restart      # build + restart via scripts/pm2-start.sh under PM2
 pnpm stop       # stop the PM2 server
 pnpm logs       # PM2 log tail
 pnpm dev        # foreground next dev with HMR (local debugging only — stop PM2 first)
