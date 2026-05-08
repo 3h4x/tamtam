@@ -15,9 +15,9 @@
 //   keep the in-memory schedule map in sync without restarting the server.
 //
 // Why not a 3rd-party cron lib:
-//   The schedule grammar tamtam supports is just `Nh` / `Nm` intervals with a
-//   stableHash phase offset (see lib/fire-times.ts). A few lines of date math
-//   cover it without adding a dependency.
+//   The schedule grammar tamtam supports is just `Nm` / `Nh` / `Nd`
+//   intervals with a stableHash phase offset (see lib/fire-times.ts). A few
+//   lines of date math cover it without adding a dependency.
 
 import { stableHash } from './fire-times';
 import { normalizeAgentScheduleOrThrow } from './agent-schedule';
@@ -116,7 +116,8 @@ export function setSchedulerBaseUrl(url: string): void {
 
 /**
  * Compute the next time `schedule` should fire after `fromMs`.
- * Supported grammar: "Nh" (1h, 4h, 24h, …), "Nm" (15m, 30m, …), bare seconds.
+ * Supported grammar: "Nm" (15m, 30m, …), "Nh" (1h, 4h, 24h, …), "Nd"
+ * (3d, 7d, 30d, …), plus bare seconds.
  * Phase offset is derived from a stable hash of the agentId so different
  * agents with the same period don't all fire on the same minute.
  */

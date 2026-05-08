@@ -17,6 +17,7 @@ function getScriptsDir(): string {
 
 function parseScheduleToSeconds(schedule: string): number {
   const s = normalizeAgentScheduleOrThrow(schedule);
+  if (s.endsWith('d')) return parseInt(s.slice(0, -1), 10) * 86400;
   if (s.endsWith('h')) return parseInt(s.slice(0, -1), 10) * 3600;
   if (s.endsWith('m')) return parseInt(s.slice(0, -1), 10) * 60;
   return parseInt(s, 10);

@@ -90,7 +90,7 @@ If you provide both `schedule` and `prompt`, the agent's schedule is automatical
 
 ## Running an Agent
 
-Schedule values are validated on write. Supported formats are positive minute/hour intervals such as `15m`, `30m`, `1h`, `4h`, or `24h`.
+Schedule values are validated on write. Supported formats are positive minute/hour/day intervals such as `15m`, `30m`, `1h`, `4h`, `24h`, `3d`, `7d`, or `30d`.
 
 ### On-Demand Run
 
@@ -299,7 +299,7 @@ When `runner: "pm2"`, TamTam does not create a PM2 cron job. Instead it stores t
 Current behavior:
 
 - `instrumentation-node.ts` calls `reinstallAgents()` on boot to load enabled scheduled agents from the DB and file-agent layer.
-- `lib/scheduling/internal-scheduler.ts` arms one `setTimeout` per agent using the supported `Nh` / `Nm` interval grammar plus a stable per-agent phase offset.
+- `lib/scheduling/internal-scheduler.ts` arms one `setTimeout` per agent using the supported `Nm` / `Nh` / `Nd` interval grammar plus a stable per-agent phase offset.
 - When the timer fires, the scheduler POSTs to `/api/agents/{id}/run` with the stored prompt and `X-Tamtam-Trigger: schedule`.
 - Agent CRUD routes call `installAgentSchedule()` / `uninstallAgentSchedule()`, which delegate to `upsertAgentSchedule()` / `removeAgentSchedule()` so schedule changes apply immediately without restarting the server.
 - Actual agent work still runs as one-shot PM2-managed job processes after `/api/agents/{id}/run` accepts the request. PM2 is used for job execution, not for recurring schedule timers.
@@ -321,6 +321,8 @@ Older TamTam versions tried to register scheduled agents with PM2 cron. PM2's `c
 ### LaunchAgent (macOS)
 
 `runner: "launchctl"` is legacy-only. The code path remains for backward compatibility with pre-existing DB rows and file-agent overrides, but new agents should not use it.
+
+Launchctl uses the same validated interval grammar as the internal scheduler: `Nm`, `Nh`, and `Nd` are all accepted and are converted to `StartInterval` seconds in the generated plist.
 
 When `runner: "launchctl"` is still present on an existing agent, a `.plist` file is created in `~/Library/LaunchAgents/`:
 
