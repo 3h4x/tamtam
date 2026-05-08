@@ -38,6 +38,17 @@ try {
 
 const step = scenario.steps[counter] ?? scenario.steps[scenario.steps.length - 1] ?? { text: 'feat: fallback' };
 
+function applyFileWrites(fileWrites) {
+  if (!Array.isArray(fileWrites)) return;
+  for (const fileWrite of fileWrites) {
+    if (!fileWrite || typeof fileWrite.path !== 'string') continue;
+    const targetPath = path.join(process.cwd(), fileWrite.path);
+    const targetDir = path.dirname(targetPath);
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.writeFileSync(targetPath, String(fileWrite.content ?? ''));
+  }
+}
+
 try {
   fs.mkdirSync(projectShimDir, { recursive: true });
   fs.writeFileSync(counterFile, String(counter + 1));
@@ -46,6 +57,10 @@ try {
 if (step.sleep_ms && step.sleep_ms > 0) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, step.sleep_ms);
 }
+
+// TamTam can mark Codex-backed jobs done as soon as the translated terminal
+// event is observed, so apply scripted workspace mutations before emitting it.
+applyFileWrites(step.write_files);
 
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj) + '\n');

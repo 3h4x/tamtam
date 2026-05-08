@@ -35,6 +35,7 @@ const PROJECTS = [
   'start-detect-agent-idle',
   'queued-release-history',
   'queued-release-terminal',
+  'strip-test-fail-live',
 ];
 
 export default async function globalSetup(): Promise<void> {

@@ -7,7 +7,15 @@ import { SHIM_DIR, WORKSPACE_DIR } from './global-setup';
 // Scenario + state management
 // ---------------------------------------------------------------------------
 
-export function writeScenario(project: string, steps: Array<{ label?: string; text: string }>): void {
+export function writeScenario(
+  project: string,
+  steps: Array<{
+    label?: string;
+    sleep_ms?: number;
+    text: string;
+    write_files?: Array<{ path: string; content: string }>;
+  }>,
+): void {
   const dir = join(SHIM_DIR, project);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'scenario.json'), JSON.stringify({ steps }));
