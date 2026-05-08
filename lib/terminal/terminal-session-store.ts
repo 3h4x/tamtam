@@ -94,6 +94,12 @@ type Listener = () => void
 
 type RecoveredBuffers = Pick<SessionState, 'history' | 'streamBuffer' | 'thinkingBuffer' | 'rawBuffer' | 'streamTools'>
 
+export function terminalExitEntry(exitCode: number): Pick<TermEntry, 'role' | 'text'> {
+  if (exitCode === 0) return { role: 'status', text: 'exit 0 — ok' }
+  if (exitCode === -2 || exitCode === -3) return { role: 'error', text: 'cancelled' }
+  return { role: 'error', text: `exit ${exitCode}` }
+}
+
 function rebuildRecoveredBuffers(log: string, raw: boolean, passthrough: boolean): RecoveredBuffers {
   if (!log) {
     return {
@@ -368,11 +374,7 @@ class TerminalStore {
       if (recovered.streamBuffer) newEntries.push({ role: 'assistant', text: recovered.streamBuffer })
       const exitCode = typeof payload.exit_code === 'number' ? payload.exit_code : null
       if (exitCode !== null) {
-        const ok = exitCode === 0
-        newEntries.push({
-          role: ok ? 'status' : 'error',
-          text: ok ? 'exit 0 — ok' : `exit ${exitCode}`,
-        })
+        newEntries.push(terminalExitEntry(exitCode))
       }
       let pendingAutoSubmit = s.pendingAutoSubmit
       let messageQueue = s.messageQueue
@@ -652,10 +654,7 @@ class TerminalStore {
           }
         } else if (metadata.exitCode !== undefined && metadata.exitCode !== null) {
           const ok = metadata.exitCode === 0
-          newEntries.push({
-            role: ok ? 'status' : 'error',
-            text: ok ? 'exit 0 — ok' : `exit ${metadata.exitCode}`,
-          })
+          newEntries.push(terminalExitEntry(metadata.exitCode))
           if (!ok && typeof metadata.detail === 'string' && metadata.detail) {
             newEntries.push({ role: 'error', text: metadata.detail })
           }

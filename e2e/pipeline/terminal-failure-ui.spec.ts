@@ -62,6 +62,7 @@ test.describe('Terminal failure-path lifecycle', () => {
     await expect(
       page.getByTitle('review in progress — click to open terminal'),
     ).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.getByText('exit 1').first()).toBeVisible({ timeout: 8_000 });
 
     // Phase 3: the terminal should render the Claude output that caused the
     // failure, including the DO NOT SHIP verdict line.

@@ -103,6 +103,8 @@ test.describe('Terminal live lifecycle', () => {
     await expect(
       page.getByTitle('review in progress — click to open terminal'),
     ).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.getByText('cancelled').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('exit -3')).toHaveCount(0);
 
     await page.goto(`/project/${project}/history`);
     await expect(page.getByText(/cancelled/i).first()).toBeVisible({ timeout: 8_000 });
