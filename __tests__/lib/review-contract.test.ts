@@ -4,6 +4,7 @@ import {
   extractFixClaims,
   findingsIdentity,
   parseFindings,
+  parseVerifiedCriteria,
   stripFinalVerdict,
 } from '@/lib/pipeline/review-contract'
 
@@ -95,6 +96,66 @@ describe('review-contract helpers', () => {
       '- Finding ID: b-item',
       '- Finding ID: a-item',
     ].join('\n'))).toBe('a-item|b-item')
+  })
+
+  it('parseVerifiedCriteria returns empty array when section is absent', () => {
+    const log = 'Findings: none\n\nVerdict: LGTM'
+    expect(parseVerifiedCriteria(log)).toEqual([])
+  })
+
+  it('parseVerifiedCriteria parses checked and unchecked lines', () => {
+    const log = [
+      'Findings: none',
+      '',
+      '## Verified criteria',
+      '- [x] Add unit tests for the new endpoint',
+      '- [ ] Update API documentation',
+      '- [x] Handle edge case for empty input',
+      '',
+      'Verdict: LGTM',
+    ].join('\n')
+    expect(parseVerifiedCriteria(log)).toEqual([
+      { text: 'Add unit tests for the new endpoint', verified: true },
+      { text: 'Update API documentation', verified: false },
+      { text: 'Handle edge case for empty input', verified: true },
+    ])
+  })
+
+  it('parseVerifiedCriteria stops at the next ## heading', () => {
+    const log = [
+      '## Verified criteria',
+      '- [x] criterion A',
+      '## Other section',
+      '- [ ] criterion B',
+    ].join('\n')
+    expect(parseVerifiedCriteria(log)).toEqual([
+      { text: 'criterion A', verified: true },
+    ])
+  })
+
+  it('parseVerifiedCriteria stops at a Verdict line', () => {
+    const log = [
+      '## Verified criteria',
+      '- [x] criterion A',
+      '- [ ] criterion B',
+      'Verdict: NEEDS ATTENTION',
+    ].join('\n')
+    expect(parseVerifiedCriteria(log)).toEqual([
+      { text: 'criterion A', verified: true },
+      { text: 'criterion B', verified: false },
+    ])
+  })
+
+  it('parseVerifiedCriteria is case-insensitive for the section header', () => {
+    const log = [
+      '## VERIFIED CRITERIA',
+      '- [X] criterion A',
+      '- [ ] criterion B',
+    ].join('\n')
+    expect(parseVerifiedCriteria(log)).toEqual([
+      { text: 'criterion A', verified: true },
+      { text: 'criterion B', verified: false },
+    ])
   })
 
   it('parses full contract findings without folding ignored contract fields into adjacent fields', () => {

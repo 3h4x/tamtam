@@ -119,6 +119,7 @@ describe('startMarkDod', () => {
   let readFileSyncMock: ReturnType<typeof vi.fn>;
   let writeFileSyncMock: ReturnType<typeof vi.fn>;
   let unlinkSyncMock: ReturnType<typeof vi.fn>;
+  let readParsedLogMock: ReturnType<typeof vi.fn>;
   let startJobMock: ReturnType<typeof vi.fn>;
   let getJobStatusMock: ReturnType<typeof vi.fn>;
   let deleteJobMock: ReturnType<typeof vi.fn>;
@@ -171,6 +172,7 @@ describe('startMarkDod', () => {
     }));
     writeFileSyncMock = vi.fn();
     unlinkSyncMock = vi.fn();
+    readParsedLogMock = vi.fn().mockReturnValue('');
     startJobMock = vi.fn().mockResolvedValue(12345);
     getJobStatusMock = vi.fn().mockResolvedValue({ status: 'done', exitCode: 0 });
     deleteJobMock = vi.fn().mockResolvedValue(undefined);
@@ -192,6 +194,7 @@ describe('startMarkDod', () => {
       updateJob: updateJobMock,
       findActiveReleaseJob: findActiveReleaseJobMock,
       getJob: getJobMock,
+      readParsedLog: readParsedLogMock,
     }));
     vi.doMock('@/lib/jobs/storage', () => ({
       listJobs: listJobsMock,
@@ -769,5 +772,113 @@ describe('startMarkDod', () => {
     const viewCall = execMock.mock.calls[0];
     expect(viewCall[1]).toContain('pr');
     expect(viewCall[1]).toContain('view');
+  });
+
+  // ─── Pipeline mode ────────────────────────────────────────────────────────────
+
+  it('pipeline mode: reads verified criteria from review log instead of spawning Claude', async () => {
+    const activeRelease = { id: 'release-1', kind: 'release', project: 'myproj', startedAt: 100 };
+    const reviewJob = {
+      id: 'review-1', kind: 'review', project: 'myproj',
+      releaseId: 'release-1', finishedAt: 200, startedAt: 150,
+    };
+    findActiveReleaseJobMock.mockReturnValue(activeRelease);
+    // run job must have releaseId set for findReleaseScopedIssueContext to find it
+    listJobsMock.mockReturnValue([
+      activeRelease,
+      reviewJob,
+      makeRunJob({ ghIssueNumber: 42, ghIssueRepo: 'owner/repo', releaseId: 'release-1' }),
+    ]);
+    // Review log contains verified criteria
+    readParsedLogMock.mockImplementation((job: { id: string }) => {
+      if (job.id === 'review-1') {
+        return [
+          'Findings: none',
+          '## Verified criteria',
+          '- [x] Add unit tests',
+          '- [ ] Update documentation',
+          'Verdict: LGTM',
+        ].join('\n');
+      }
+      return '';
+    });
+    const issueJson = JSON.stringify({
+      body: '- [ ] Add unit tests\n- [ ] Update documentation',
+      title: 'Feature issue',
+      author: { login: 'owner' },
+    });
+    execMock
+      .mockResolvedValueOnce(resp(0, issueJson))  // gh issue view
+      .mockResolvedValueOnce(resp(0, ''));          // gh issue edit
+
+    const r = await startMarkDod('myproj', { mode: 'pipeline' }, 0);
+
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.verified).toBe(1);  // Only 'Add unit tests' was [x]
+      expect(r.total).toBe(2);
+      expect(r.changed).toBe(true);
+    }
+    // Claude must NOT have been spawned in pipeline mode
+    expect(startJobMock).not.toHaveBeenCalled();
+    // gh issue edit must have been called to tick the verified box
+    const editCall = execMock.mock.calls.find(
+      (c: any[]) => c[0] === 'gh' && Array.isArray(c[1]) && (c[1] as string[]).includes('edit')
+    );
+    expect(editCall).toBeTruthy();
+  });
+
+  it('pipeline mode: falls back to LLM when no review log exists for the active release', async () => {
+    const activeRelease = { id: 'release-2', kind: 'release', project: 'myproj', startedAt: 100 };
+    // run job linked to release but NO review job for this release
+    findActiveReleaseJobMock.mockReturnValue(activeRelease);
+    listJobsMock.mockReturnValue([
+      activeRelease,
+      makeRunJob({ ghIssueNumber: 42, ghIssueRepo: 'owner/repo', releaseId: 'release-2' }),
+    ]);
+    const issueJson = JSON.stringify({
+      body: '- [ ] Add unit tests',
+      title: 'Feature issue',
+      author: { login: 'owner' },
+    });
+    execMock.mockResolvedValueOnce(resp(0, issueJson));  // gh issue view
+    // LLM path spawns Claude; fail fast so the test doesn't block
+    startJobMock.mockResolvedValue(12345);
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 1 });
+
+    const r = await startMarkDod('myproj', { mode: 'pipeline' }, 0);
+
+    // Returns ok:true (best-effort) even when Claude fails
+    expect(r.ok).toBe(true);
+    // Claude WAS spawned as fallback (startJob called for the verify sub-job)
+    expect(startJobMock).toHaveBeenCalled();
+  });
+
+  it('standalone mode always uses LLM regardless of review log', async () => {
+    const activeRelease = { id: 'release-3', kind: 'release', project: 'myproj', startedAt: 100 };
+    const reviewJob = {
+      id: 'review-3', kind: 'review', project: 'myproj',
+      releaseId: 'release-3', finishedAt: 200, startedAt: 150,
+    };
+    findActiveReleaseJobMock.mockReturnValue(activeRelease);
+    listJobsMock.mockReturnValue([
+      activeRelease,
+      reviewJob,
+      makeRunJob({ releaseId: 'release-3' }),
+    ]);
+    readParsedLogMock.mockReturnValue('## Verified criteria\n- [x] Add unit tests\n');
+    const issueJson = JSON.stringify({
+      body: '- [ ] Add unit tests',
+      title: 'Feature', author: { login: 'owner' },
+    });
+    execMock.mockResolvedValueOnce(resp(0, issueJson));
+    startJobMock.mockResolvedValue(12345);
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 1 });
+
+    // Default mode is 'standalone' — should use Claude, not the review log
+    const r = await startMarkDod('myproj', undefined, 0);
+
+    expect(r.ok).toBe(true);
+    expect(startJobMock).toHaveBeenCalled();
   });
 });

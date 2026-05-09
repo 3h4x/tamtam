@@ -195,7 +195,7 @@ describe('runCompletionHooks – mark-dod integration', () => {
     const logFile = join(tempDir, 'lgtm2.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
     await markDoneFn(makeReviewJob(logFile), 0);
-    expect(startMarkDodMock).toHaveBeenCalledWith('my-proj');
+    expect(startMarkDodMock).toHaveBeenCalledWith('my-proj', { mode: 'pipeline' });
   });
 
   it('still calls startProjectCommit when startMarkDod returns ok:false (non-fatal)', async () => {
@@ -258,7 +258,7 @@ describe('runCompletionHooks – mark-dod integration', () => {
     const logFile = join(tempDir, 'lgtm-direct.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
     await markDoneFn(makeReviewJob(logFile), 0);
-    expect(startMarkDodMock).toHaveBeenCalledWith('my-proj');
+    expect(startMarkDodMock).toHaveBeenCalledWith('my-proj', { mode: 'pipeline' });
     expect(startProjectCommitMock).toHaveBeenCalled();
   });
 
@@ -325,7 +325,7 @@ describe('runCompletionHooks – mark-dod integration', () => {
     writeFileSync(logFile, 'Verdict: LGTM\n');
     await markDoneFn(makeReviewJob(logFile), 0);
 
-    expect(startMarkDodMock).toHaveBeenCalledWith('my-proj');
+    expect(startMarkDodMock).toHaveBeenCalledWith('my-proj', { mode: 'pipeline' });
     expect(startProjectCommitMock).toHaveBeenCalled();
   });
 

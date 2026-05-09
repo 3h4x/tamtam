@@ -48,6 +48,35 @@ async function getProjectPipelineConfig(projectName: string): Promise<{ autoComm
   }
 }
 
+// Wrap plain text as a stream_event NDJSON line so it is picked up by
+// readParsedLog() and visible to the fix agent reading the review log.
+function toStreamTextLine(text: string): string {
+  const event = {
+    type: 'stream_event',
+    event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
+  };
+  return JSON.stringify(event) + '\n';
+}
+
+// Build synthetic findings block for unverified acceptance criteria so the
+// fix agent can read them from the review log and knows what to implement.
+function buildUnverifiedCriteriaFindings(unverified: { text: string }[]): string {
+  const findingLines = unverified.map((c, i) =>
+    `- Finding ID: unverified-criterion-${i + 1}\n` +
+    `  Severity: high\n` +
+    `  Root cause: Acceptance criterion not yet implemented: ${c.text}\n` +
+    `  Affected paths: (implement in the relevant code; see linked issue for details)\n` +
+    `  Required fix: Implement the following acceptance criterion: ${c.text}\n` +
+    `  Required tests: Add tests that verify the criterion is satisfied\n` +
+    `  Verification: Re-run review; ## Verified criteria must mark this [x]`
+  ).join('\n\n');
+  return (
+    '\n\nFindings (from unverified acceptance criteria):\n' +
+    findingLines +
+    '\n\nVerdict: NEEDS ATTENTION\n'
+  );
+}
+
 function reviewSourceType(job: Pick<JobData, 'contextMeta'>): string | null {
   if (!job.contextMeta) return null;
   try {
@@ -540,9 +569,33 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           await markReviewed(job.project, projPath);
         }
       } catch {}
-      // Always persist verdict so it survives log pruning. Standalone reviews
-      // (not in a pipeline) reach this point but not the pipeline branch below.
-      const earlyVerdict = getVerdict(job);
+      // Downgrade LGTM when the review log marks acceptance criteria as [ ].
+      // Runs before the early persist so both pipeline and standalone reviews
+      // get the correct verdict — standalone reviews never reach the pipeline
+      // branch below, so this is their only opportunity to be downgraded.
+      let earlyVerdict = getVerdict(job);
+      if (earlyVerdict === 'LGTM') {
+        try {
+          const { parseVerifiedCriteria } = await import('@/lib/pipeline/review-contract');
+          const reviewText = readParsedLog(job);
+          const allCriteria = parseVerifiedCriteria(reviewText);
+          const unverified = allCriteria.filter(c => !c.verified);
+          if (unverified.length > 0) {
+            const syntheticFindings = buildUnverifiedCriteriaFindings(unverified);
+            if (job.logPath) {
+              try { appendFileSync(job.logPath, toStreamTextLine(syntheticFindings)); } catch {}
+            }
+            earlyVerdict = 'NEEDS ATTENTION';
+            console.log(`[release] review ${job.id} downgraded to NEEDS ATTENTION: ${unverified.length} unverified criteria`);
+          }
+        } catch (e) {
+          console.log(`[release] criteria downgrade check failed for ${job.id}:`, e);
+        }
+      }
+      // Persist verdict so it survives log pruning (standalone and pipeline reviews).
+      // Pipeline reviews may persist again at the end of the pipeline branch;
+      // persistVerdict updates job.verdict in-cache so getVerdict() there reads
+      // the already-downgraded value and writes the same value a second time.
       if (earlyVerdict) persistVerdict(job.id, earlyVerdict);
     }
     // Release pipeline: review LGTM → push; NEEDS ATTENTION/DO NOT SHIP → fix
@@ -567,13 +620,16 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
             console.log(`[release] verdict retry failed for ${job.id}:`, e);
           }
         }
-        const verdict = rawVerdict ?? 'NEEDS ATTENTION';
+        let verdict = rawVerdict ?? 'NEEDS ATTENTION';
         if (!rawVerdict) {
           console.log(`[release] review ${job.id} emitted no verdict — defaulting to NEEDS ATTENTION`);
         }
-        // Persist verdict to DB so it survives log pruning and shows correctly
-        // in pipeline stats (avoids false "parseFailed" counts on pruned logs).
-        if (rawVerdict) persistVerdict(job.id, rawVerdict);
+        // Criteria downgrade (LGTM → NEEDS ATTENTION) was already applied in the
+        // exitCode===0 block above; persistVerdict there updated job.verdict so
+        // getVerdict() returned the correct (possibly downgraded) value as rawVerdict.
+        // Persist again to keep the pipeline branch self-contained and ensure any
+        // retry-rescued verdict is also written (same value — harmless second write).
+        persistVerdict(job.id, verdict);
         if (verdict === 'LGTM') {
           // Pin the "last LGTM'd commit" as a git ref so the next review can
           // narrow its scope from `@{u}..HEAD` to `<ref>..HEAD`. Skipped when
@@ -606,7 +662,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           if (shouldRunDod && !shouldDeferDod) {
             try {
               const { startMarkDod } = await import('@/lib/pipeline/start-mark-dod');
-              const md = await startMarkDod(job.project);
+              const md = await startMarkDod(job.project, { mode: 'pipeline' });
               if (md.ok) {
                 console.log(`[release] DoD verification for #${md.issueNumber}: ${md.verified}/${md.total} verified${md.changed ? ' (issue updated)' : ''}`);
               }
@@ -1066,8 +1122,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           try {
             const { startMarkDod } = await import('@/lib/pipeline/start-mark-dod');
             const dodTarget = job.ghIssueNumber && job.ghIssueRepo
-              ? { issueNumber: job.ghIssueNumber, repo: job.ghIssueRepo }
-              : { prNumber: meta.number, repo: meta.repo };
+              ? { issueNumber: job.ghIssueNumber, repo: job.ghIssueRepo, mode: 'pipeline' as const }
+              : { prNumber: meta.number, repo: meta.repo, mode: 'pipeline' as const };
             const md = await startMarkDod(job.project, dodTarget);
             if (md.ok) {
               const targetLabel = 'issueNumber' in dodTarget

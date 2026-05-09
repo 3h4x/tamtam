@@ -167,6 +167,54 @@ export function parseFindings(text: string): ParsedFinding[] {
   return order.map((id) => findings.get(id)!);
 }
 
+// Output contract section added to the review prompt when acceptance criteria
+// were injected. Instructs the model to emit a ## Verified criteria block.
+export const VERIFIED_CRITERIA_CONTRACT = `
+ACCEPTANCE CRITERIA OUTPUT FORMAT — required when criteria are provided:
+After Findings, emit a ## Verified criteria section:
+
+## Verified criteria
+- [x] criterion text exactly as in the issue body
+- [ ] criterion text that is NOT yet verified in the code
+
+Rules:
+- Emit this section only when acceptance criteria were provided in the prompt.
+- Reproduce each criterion text verbatim from the issue body.
+- Mark [x] only when you can point to concrete implementation in the diff or codebase.
+- Mark [ ] when the implementation is absent, incomplete, or unverifiable.
+- Omit this section entirely when no acceptance criteria were provided.`;
+
+export interface VerifiedCriterion {
+  text: string;
+  verified: boolean;
+}
+
+// Parse the ## Verified criteria section emitted by the reviewer when issue
+// acceptance criteria were injected into the review prompt. Returns all
+// criterion lines found in the section; stops at the next ## heading or a
+// Verdict line. Empty when no section is present.
+export function parseVerifiedCriteria(log: string): VerifiedCriterion[] {
+  const lines = log.split(/\r?\n/);
+  const results: VerifiedCriterion[] = [];
+  let inSection = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^##\s+verified criteria/i.test(trimmed)) {
+      inSection = true;
+      continue;
+    }
+    if (inSection) {
+      if (/^##/.test(trimmed)) break;
+      if (/^verdict\s*:/i.test(trimmed)) break;
+      const m = trimmed.match(/^-\s+\[(x| )\]\s+(.+)$/i);
+      if (m) {
+        results.push({ text: m[2].trim(), verified: m[1].toLowerCase() === 'x' });
+      }
+    }
+  }
+  return results;
+}
+
 export type FixClaim = { id: string; status: 'fixed' | 'not fixed' };
 
 // Parse the Fix checklist emitted by fix jobs (per FIX_OUTPUT_CONTRACT). For
