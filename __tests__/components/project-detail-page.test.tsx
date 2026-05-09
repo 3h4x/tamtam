@@ -8,6 +8,7 @@ import { ProjectDetailPage } from '@/components/ProjectDetailPage'
 import type { FleetHealth } from '@/hooks/useProjectHealth'
 import type { CustomAction, ProjectConfig } from '@/lib/client-api'
 import { dispatchJobsPausedChanged } from '@/lib/shared/jobs-paused-events'
+import type { Task } from '@/lib/shared/types'
 
 const {
   paramsState,
@@ -186,12 +187,41 @@ function buildConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
   }
 }
 
-function buildFleet(): FleetHealth {
+function buildTask(overrides: Partial<Task> = {}): Task {
+  return {
+    id: 'task-1',
+    project: 'acme/widgets',
+    job: null,
+    priority: null,
+    launchctl: 'running',
+    path: '/tmp/acme-widgets',
+    fires_at: '',
+    sync: true,
+    changes: 2,
+    unpushed: 1,
+    reviewed: true,
+    last_run: null,
+    last_run_ago: null,
+    last_run_duration_s: null,
+    last_run_exit: null,
+    release_tag: null,
+    ci: null,
+    ci_failed_url: null,
+    github: null,
+    ...overrides,
+  }
+}
+
+function buildFleet(tasks: Task[] = []): FleetHealth {
   return {
     projects: [{
       project: 'acme/widgets',
       status: 'healthy',
-      tasks: [],
+      tasks: tasks.map(task => ({
+        task,
+        status: 'healthy',
+        summary: task.project,
+      })),
       totalChanges: 2,
       unpushed: 1,
       unreviewedCount: 0,
@@ -207,7 +237,7 @@ function buildFleet(): FleetHealth {
   }
 }
 
-function renderPage() {
+function renderPage(fleet: FleetHealth = buildFleet()) {
   const onRefresh = vi.fn().mockResolvedValue(undefined)
   const container = document.createElement('div')
   document.body.appendChild(container)
@@ -215,7 +245,7 @@ function renderPage() {
 
   flushSync(() => {
     root.render(React.createElement(ProjectDetailPage, {
-      fleet: buildFleet(),
+      fleet,
       onRefresh,
     }))
   })
@@ -607,5 +637,52 @@ describe('ProjectDetailPage', () => {
 
     unmount()
     vi.useRealTimers()
+  })
+
+  it('renders the linked issue badge for slugged issue branches', async () => {
+    fetchBranchMock.mockResolvedValue({ branch: 'fix/issue-77-gates', defaultBranch: 'master', commitsAhead: 1 })
+
+    const { container, unmount } = renderPage(buildFleet([
+      buildTask({ github: 'https://github.com/acme/widgets' }),
+    ]))
+
+    await vi.waitFor(() => {
+      const issueLink = container.querySelector('a[title="Open linked GitHub issue #77"]')
+      expect(issueLink?.getAttribute('href')).toBe('https://github.com/acme/widgets/issues/77')
+      expect(issueLink?.textContent).toContain('#77')
+    })
+
+    unmount()
+  })
+
+  it('renders the linked issue badge for bare issue branches', async () => {
+    fetchBranchMock.mockResolvedValue({ branch: 'fix/issue-99', defaultBranch: 'master', commitsAhead: 0 })
+
+    const { container, unmount } = renderPage(buildFleet([
+      buildTask({ github: 'https://github.com/acme/widgets' }),
+    ]))
+
+    await vi.waitFor(() => {
+      const issueLink = container.querySelector('a[title="Open linked GitHub issue #99"]')
+      expect(issueLink?.getAttribute('href')).toBe('https://github.com/acme/widgets/issues/99')
+      expect(issueLink?.textContent).toContain('#99')
+    })
+
+    unmount()
+  })
+
+  it('does not render the linked issue badge for non-issue branches', async () => {
+    fetchBranchMock.mockResolvedValue({ branch: 'feature/refactor-header', defaultBranch: 'master', commitsAhead: 0 })
+
+    const { container, unmount } = renderPage(buildFleet([
+      buildTask({ github: 'https://github.com/acme/widgets' }),
+    ]))
+
+    await vi.waitFor(() => {
+      expect(fetchBranchMock).toHaveBeenCalledWith('acme/widgets')
+    })
+    expect(container.querySelector('a[title^="Open linked GitHub issue #"]')).toBeNull()
+
+    unmount()
   })
 })

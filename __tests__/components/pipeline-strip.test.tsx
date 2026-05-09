@@ -352,6 +352,22 @@ describe('PipelineStrip', () => {
     unmount()
   })
 
+  it('shows merge during pr-wait without a synthetic pre-merge dod step', () => {
+    const { container, unmount } = renderStrip({
+      config: buildConfig({ auto_pr_merge_enabled: true }),
+      projectJobs: [
+        buildJob({ id: 'review-merge-1', kind: 'review', started_at: 100, verdict: 'LGTM', release_id: 'rel-merge-1' }),
+        buildJob({ id: 'push-merge-1', kind: 'push', started_at: 150, finished_at: 160, release_id: 'rel-merge-1' }),
+        buildJob({ id: 'pr-wait-1', kind: 'pr-wait', started_at: 170, status: 'running', finished_at: null, exit_code: null, release_id: 'rel-merge-1' }),
+      ],
+    })
+
+    expect(container.querySelector('[aria-label^="merge: running."]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="dod:"]')).toBeNull()
+
+    unmount()
+  })
+
   it('confirms and aborts the active release pipeline', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       json: async () => ({ status: 'aborted' }),

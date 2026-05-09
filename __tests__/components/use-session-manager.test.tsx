@@ -355,4 +355,70 @@ describe('useSessionManager', () => {
 
     unmount()
   })
+
+  it('restores a completed single job fallback with log output and context metadata', async () => {
+    terminalStore.update('proj', () => ({
+      claudeSessionId: 'old-session',
+      history: [{ role: 'assistant', text: 'stale entry' }],
+    }))
+
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/jobs/finished-1') {
+        return {
+          json: async () => ({
+            log: 'saved assistant output',
+            context_meta: JSON.stringify({
+              skills: [{ id: 'skill-2', name: 'Docs', description: 'desc', source: 'file' }],
+              docs: [{ name: 'Guide', content: 'updated steps' }],
+            }),
+          }),
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+
+    let controls:
+      | {
+        loadSessions: () => Promise<void>
+        restoreSession: (session: SessionItem) => Promise<void>
+        getSessions: () => SessionItem[]
+        isLoading: () => boolean
+      }
+      | undefined
+
+    const { unmount } = renderElement(
+      <SessionManagerHarness onReady={(value) => { controls = value }} />,
+    )
+
+    await vi.waitFor(() => {
+      expect(controls).toBeTruthy()
+    })
+
+    if (!controls) throw new Error('manager not ready')
+    await controls.restoreSession({
+      id: 'finished-1',
+      prompt: 'show saved output',
+      startedAt: 300,
+      finishedAt: 330,
+      sessionId: 'sess-finished',
+      exitCode: 0,
+    })
+
+    await vi.waitFor(() => {
+      expect(startStreamMock).not.toHaveBeenCalled()
+    })
+
+    const state = terminalStore.get('proj')
+    expect(state.claudeSessionId).toBe('sess-finished')
+    expect(state.sessionKey).toBe('sess-finished')
+    expect(state.selectedItems).toEqual([{ id: 'skill-2', name: 'Docs', description: 'desc', source: 'file' }])
+    expect(state.selectedDocs).toEqual([{ name: 'Guide', content: 'updated steps' }])
+    expect(state.history).toEqual<TermEntry[]>([
+      { role: 'user', text: 'show saved output' },
+      { role: 'assistant', text: 'saved assistant output' },
+    ])
+
+    unmount()
+  })
 })

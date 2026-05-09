@@ -559,6 +559,26 @@ export function ProjectDetailPage({
               </span>
             )
           })()}
+          {currentBranch && githubUrl && (() => {
+            const m = currentBranch.match(/^fix\/issue-(\d+)/)
+            if (!m) return null
+            const issueNumber = m[1]
+            return (
+              <a
+                href={`${githubUrl}/issues/${issueNumber}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-full border border-status-info/30 bg-status-info/10 px-2 py-0.5 text-xs text-status-info hover:bg-status-info/20 transition-colors"
+                title={`Open linked GitHub issue #${issueNumber}`}
+              >
+                <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true" className="shrink-0">
+                  <path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"/>
+                  <path d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z"/>
+                </svg>
+                <span className="font-mono">#{issueNumber}</span>
+              </a>
+            )
+          })()}
           {releaseTag && (
             <span
               className="inline-flex items-center gap-1 rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-xs text-text-secondary font-mono tabular-nums"
