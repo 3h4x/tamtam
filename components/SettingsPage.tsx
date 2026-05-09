@@ -12,6 +12,7 @@ import { NotificationsTab } from '@/components/settings/NotificationsTab'
 import type { NotificationsSettings } from '@/components/settings/NotificationsTab'
 import { CliTab } from '@/components/settings/CliTab'
 import type { CliTabSettings } from '@/components/settings/CliTab'
+import { TrustedGithubUsersField } from '@/components/settings/TrustedGithubUsersField'
 import { parseEnabledProviders } from '@/lib/usage/cli-providers'
 
 interface SettingsMap {
@@ -140,6 +141,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
   const [saving, setSaving]               = useState(false)
   const [saved, setSaved]                 = useState(false)
   const [error, setError]                 = useState<string | null>(null)
+  const [trustedGithubUsersError, setTrustedGithubUsersError] = useState<string | null>(null)
   const [showAdvanced, setShowAdvanced]   = useState(false)
   const activeTab: TabId = initialTab && TABS.some(t => t.id === initialTab) ? initialTab : 'general'
   const switchTab = (id: TabId) => {
@@ -154,6 +156,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
   const [boardResyncMsg, setBoardResyncMsg]   = useState<string | null>(null)
 
   const isDirty = JSON.stringify(settings) !== JSON.stringify(savedSettings)
+  const canSave = isDirty && !saving && !trustedGithubUsersError
 
   useEffect(() => {
     fetch('/api/settings')
@@ -186,7 +189,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
   }, [loading, settings.workspace_path, loadProjects])
 
   const handleSave = useCallback(async () => {
-    if (saving) return
+    if (saving || trustedGithubUsersError) return
     setSaving(true)
     setSaved(false)
     setError(null)
@@ -212,18 +215,18 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
     } finally {
       setSaving(false)
     }
-  }, [saving, settings, loadProjects])
+  }, [saving, settings, loadProjects, trustedGithubUsersError])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault()
-        if (isDirty) handleSave()
+        if (canSave) handleSave()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [isDirty, handleSave])
+  }, [canSave, handleSave])
 
   const handleChange = (key: keyof SettingsMap, value: string) => {
     setSettings((prev) => {
@@ -303,10 +306,10 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
           )}
           <button
             onClick={handleSave}
-            disabled={saving || !isDirty}
+            disabled={!canSave}
             className={`px-4 py-2 text-white border-none rounded-lg font-semibold text-sm transition-colors inline-flex items-center gap-1.5 ${
               saved      ? 'bg-status-success cursor-default' :
-              isDirty    ? 'bg-accent hover:bg-accent-hover cursor-pointer' :
+              canSave ? 'bg-accent hover:bg-accent-hover cursor-pointer' :
                            'bg-accent/40 cursor-default'
             } ${saving ? 'opacity-70 cursor-wait' : ''}`}
           >
@@ -362,6 +365,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
             const allGroupFields = (Object.keys(FIELDS) as SettingsFieldKey[]).filter(
               (k) => FIELDS[k].group === group.id
             ).filter((k) => {
+              if (k === 'trusted_github_users') return false
               // LM Studio replaces the semantic fast/normal/smart selector with
               // its own model identifier field — show one or the other, never both.
               if (k === 'lmstudio_model') return settings.claude_provider === 'lmstudio'
@@ -384,6 +388,16 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                       <SettingsField key={key} fieldKey={key} value={settings[key]} provider={settings.claude_provider} onChange={handleChange} />
                     ))}
                   </div>
+
+                  {group.id === 'general' && (
+                    <div className="mt-4">
+                      <TrustedGithubUsersField
+                        value={settings.trusted_github_users}
+                        onChange={(value) => handleChange('trusted_github_users', value)}
+                        onValidityChange={setTrustedGithubUsersError}
+                      />
+                    </div>
+                  )}
 
                   {group.id === 'general' && (
                     <div className="mt-6 rounded-xl border border-border bg-bg-primary/50 p-4">

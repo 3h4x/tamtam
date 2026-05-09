@@ -84,6 +84,18 @@ describe('settings API', () => {
       expect(data.settings.github_owner).toBe('octocat');
     });
 
+    it('canonicalizes trusted_github_users in the API response', async () => {
+      testDb.db
+        .insert(schema.settings)
+        .values({ key: 'trusted_github_users', value: JSON.stringify(['octocat', ' hubot ', 'OctoCat']) })
+        .run();
+
+      const response = await GET();
+      const data = await response.json();
+
+      expect(data.settings.trusted_github_users).toBe('octocat, hubot');
+    });
+
     it('canonicalizes budget subscription providers in the API response', async () => {
       testDb.db
         .insert(schema.settings)
@@ -379,6 +391,51 @@ describe('settings API', () => {
 
       const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'budget_subscription_providers');
       expect(row?.value).toBe('claude,codex');
+    });
+
+    it('canonicalizes trusted_github_users before persisting them', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ trusted_github_users: 'octocat, hubot ' }),
+      });
+      const response = await PATCH(request);
+
+      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'trusted_github_users');
+      expect(row?.value).toBe(JSON.stringify(['octocat', 'hubot']));
+      await expect(response.json()).resolves.toMatchObject({
+        status: 'ok',
+        settings: expect.objectContaining({
+          trusted_github_users: 'octocat, hubot',
+        }),
+      });
+    });
+
+    it('rejects duplicate trusted_github_users before persisting them', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ trusted_github_users: 'octocat, OctoCat' }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: 'Duplicate GitHub login: OctoCat',
+      });
+      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
+    });
+
+    it('rejects trusted_github_users entries with empty rows', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ trusted_github_users: 'octocat,\n, hubot' }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: 'Trusted GitHub users cannot be empty.',
+      });
+      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
     });
 
     it('canonicalizes budget subscription providers before persisting them', async () => {
