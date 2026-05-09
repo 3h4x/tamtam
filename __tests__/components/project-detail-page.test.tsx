@@ -115,10 +115,6 @@ vi.mock('@/components/DocsTab', () => ({
   DocsTab: ({ projectName }: { projectName: string }) => <div data-testid="docs-tab">{projectName}</div>,
 }))
 
-vi.mock('@/components/RecommendationsTab', () => ({
-  RecommendationsTab: ({ projectName }: { projectName: string }) => <div data-testid="recommendations-tab">{projectName}</div>,
-}))
-
 vi.mock('@/components/project-detail/ConfigTab', () => ({
   ConfigTab: (props: {
     config: ProjectConfig | null

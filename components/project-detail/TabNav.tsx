@@ -3,7 +3,7 @@
 import { fetchJobs } from '@/lib/client-api'
 import { useRouter } from 'next/navigation'
 
-type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'recommendations'
+type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs'
 
 export interface TabNavProps {
   projectName: string
@@ -62,9 +62,6 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, runni
         {runningCount > 0 && (
           <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-status-warning animate-pulse align-middle" title={`${runningCount} running`} />
         )}
-      </button>
-      <button className={tabClass('recommendations')} onClick={() => onSetTab('recommendations')}>
-        Recommendations
       </button>
       <button className={tabClass('issues')} onClick={() => onSetTab('issues')}>
         <span className="sm:hidden">Issues</span>
