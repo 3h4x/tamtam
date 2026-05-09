@@ -184,7 +184,11 @@ async function localHead(path: string): Promise<string | null> {
   }
 }
 
-const NARROW_FILTER = '^release$|^create release$|^dependency[\\\\w -]*$|^label$';
+// Workflows excluded from CI status evaluation. We deliberately keep release
+// workflows IN scope: when a release fails the user needs to see it as a CI
+// failure (otherwise the fix-ci button never surfaces). Only filter routine
+// dependency-bot and labeler workflows here.
+const NARROW_FILTER = '^dependency[\\\\w -]*$|^label$';
 const EVAL_JQ = [
   '| sort_by(.createdAt) | reverse',
   '| unique_by(.workflowName) as $runs',

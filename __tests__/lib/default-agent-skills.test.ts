@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { createHash } from 'crypto';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/lib/db/schema';
+
+function sha256Prefix(content: string): string {
+  return createHash('sha256').update(content).digest('hex').slice(0, 16);
+}
 
 function createTestDb() {
   const sqlite = new Database(':memory:');
@@ -366,6 +371,9 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
     // sha256(...).slice(0,16) === '362c85f7fe916df8', which must stay in
     // KNOWN_DEFAULT_CONTENT_HASHES['agent-issue-cruncher'] so running
     // installs refresh to the self-contained project-resolution version.
+    // The sha256Prefix assertion below proves the fixture content is the real
+    // historical body — a typo here would mismatch the hash and the test
+    // would still pass, masking a dead hash slot.
     const previousDefault = `You are the issue cruncher.
 
 ## 1. Pick an issue
@@ -387,6 +395,9 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
 - Create the issue branch through TamTam's local API: \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/issue-branch" -H 'Content-Type: application/json' -d '{"issue_number":<n>,"issue_title":"<title>"}'\`. The resulting branch is \`fix/issue-<n>-<slug>\` with a lowercase hyphenated slug <=40 chars from the title.
 - Implement the fix. Keep the diff minimal and on-topic.
 - Stop after implementation. Do not run tests, review, commit, push, or merge; TamTam's release pipeline handles the rest.`;
+
+    // Verify the fixture content actually produces the claimed hash — this is the contract test.
+    expect(sha256Prefix(previousDefault)).toBe('362c85f7fe916df8');
 
     testDb.db.insert(schema.skills).values({
       id: 'agent-issue-cruncher',
@@ -412,6 +423,8 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
     // sha256(...).slice(0,16) === '2753dcc26f2f434c', which must stay in
     // KNOWN_DEFAULT_CONTENT_HASHES['agent-issue-cruncher'] so running
     // installs refresh away from the non-canonical project-name heuristic.
+    // The sha256Prefix assertion below is the contract test: it proves the
+    // fixture body is the real historical prompt, not a plausible substitute.
     const previousDefault = `You are the issue cruncher.
 
 ## 1. Resolve project context
@@ -438,6 +451,9 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
 - Create the issue branch through TamTam's local API: \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/issue-branch" -H 'Content-Type: application/json' -d '{"issue_number":<n>,"issue_title":"<title>"}'\`. The resulting branch is \`fix/issue-<n>-<slug>\` with a lowercase hyphenated slug <=40 chars from the title.
 - Implement the fix. Keep the diff minimal and on-topic.
 - Stop after implementation. Do not run tests, review, commit, push, or merge; TamTam's release pipeline handles the rest.`;
+
+    // Contract test: fixture content must produce the exact claimed hash.
+    expect(sha256Prefix(previousDefault)).toBe('2753dcc26f2f434c');
 
     testDb.db.insert(schema.skills).values({
       id: 'agent-issue-cruncher',
