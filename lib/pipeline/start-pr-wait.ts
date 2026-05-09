@@ -13,9 +13,18 @@ const POLL_INTERVAL_MS = parseInt(process.env.TAMTAM_PR_WAIT_POLL_MS ?? '', 10) 
 const TIMEOUT_MS = parseInt(process.env.TAMTAM_PR_WAIT_TIMEOUT_MS ?? '', 10) || 30 * 60 * 1000; // 30 minutes
 // Grace period before treating an empty statusCheckRollup as "no CI configured".
 // On a freshly opened PR, GitHub has not yet registered workflow runs, so the
-// rollup is briefly empty even when CI is about to fire. Without this grace,
-// pr-wait merges immediately on the first poll and races CI.
-const NO_CHECKS_GRACE_MS = parseInt(process.env.TAMTAM_PR_WAIT_NO_CHECKS_GRACE_MS ?? '', 10) || 90_000;
+// rollup is briefly empty even when CI is about to fire.
+const NO_CHECKS_GRACE_MS = (() => {
+  const raw = parseInt(process.env.TAMTAM_PR_WAIT_NO_CHECKS_GRACE_MS ?? '', 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 90_000;
+})();
+// Minimum consecutive polls observing an empty statusCheckRollup before we
+// treat the PR as "no CI configured" and merge. This is an extra guard on top
+// of the time-based grace window above.
+const NO_CHECKS_MIN_POLLS = (() => {
+  const raw = parseInt(process.env.TAMTAM_PR_WAIT_NO_CHECKS_MIN_POLLS ?? '', 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 1;
+})();
 
 interface PrStatus {
   state: string; // OPEN | MERGED | CLOSED
@@ -174,6 +183,7 @@ export function launchPrWait(
       const startedAt = Date.now();
       const deadline = startedAt + TIMEOUT_MS;
       let merged = false;
+      let consecutiveNoChecks = 0;
 
       while (Date.now() < deadline) {
         const status = await getPrStatus(projPath, prNumber, prRepo);
@@ -214,6 +224,35 @@ export function launchPrWait(
             log(`\n# PR has merge conflicts — cannot auto-merge\n`);
             await markDone(job, 1);
             return;
+          }
+
+          // Wait for GitHub to compute mergeability before merging — UNKNOWN
+          // on a freshly opened PR can flip to CONFLICTING on the next poll.
+          if (status.mergeable !== 'MERGEABLE') {
+            log(`\n# mergeable=${status.mergeable} — waiting for GitHub to compute\n`);
+            consecutiveNoChecks = 0;
+            await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+            continue;
+          }
+
+          // No checks reported yet — require N consecutive empty rollups
+          // before treating the PR as "no CI configured". Otherwise we merge
+          // on the first poll of a brand-new PR, racing a workflow that is
+          // about to start.
+          if (conclusion === 'none') {
+            consecutiveNoChecks += 1;
+            const noChecksElapsedMs = Date.now() - startedAt;
+            if (consecutiveNoChecks < NO_CHECKS_MIN_POLLS || noChecksElapsedMs < NO_CHECKS_GRACE_MS) {
+              const remainingGraceMs = Math.max(0, NO_CHECKS_GRACE_MS - noChecksElapsedMs);
+              log(
+                `\n# no checks reported (${consecutiveNoChecks}/${NO_CHECKS_MIN_POLLS}) — ` +
+                `waiting ${Math.ceil(remainingGraceMs / 1000)}s more for CI to register\n`,
+              );
+              await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+              continue;
+            }
+          } else {
+            consecutiveNoChecks = 0;
           }
 
           const mergeResult = await doMerge(projPath, prNumber, prRepo, log);

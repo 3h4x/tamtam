@@ -185,6 +185,13 @@ PR-MERGE-WAIT
   ├─ CI passes → merge PR → switch to default branch → finalize release (exit 0)
   └─ CI fails  → finalize release (exit 1)
 
+`pr-wait` polls the PR immediately, then every 30 seconds by default. When
+GitHub reports an empty `statusCheckRollup`, TamTam does not treat that as "no
+CI configured" right away: it preserves a 90-second grace window before merging
+so a freshly opened PR has time to register workflow runs. The PR must also be
+`mergeable=MERGEABLE`; `mergeable=UNKNOWN` keeps waiting because GitHub can
+still flip that state to `CONFLICTING` on a later poll.
+
 The release meta-job (`kind='release'`) collects log sections from each step. Its own `finishedAt` is set when any step finalizes without chaining.
 
 ### History view — release grouping
