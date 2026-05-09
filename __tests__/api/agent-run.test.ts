@@ -868,7 +868,6 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(fullPrompt).toContain('Exit code: 0');
     expect(fullPrompt).toContain('TAMTAM_PREREQ_MARKER');
     expect(fullPrompt).toContain('analyze the output above');
-
   });
 
   it('injects the trusted-only issue prerequisite for issue-cruncher agents without an explicit prerequisiteCommand', async () => {
@@ -947,11 +946,9 @@ describe('POST /api/agents/{agentId}/run', () => {
     const res = await POST2(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
     expect(res.status).toBe(200);
-    expect(startJobMock).toHaveBeenCalledOnce();
     const [, , fullPrompt] = startJobMock.mock.calls[0];
     expect(fullPrompt).toContain('## Prerequisite Output');
     expect(fullPrompt).toContain('Exit code: 7');
-
   });
 
   it('creates the job row before the prerequisite runs so it is visible in the UI', async () => {
@@ -968,9 +965,9 @@ describe('POST /api/agents/{agentId}/run', () => {
       method: 'POST',
       body: JSON.stringify({ prompt: 'inspect later' }),
     });
+
     const pending = POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-    // Job row appears before the prereq finishes — startJob hasn't fired yet.
     await vi.waitFor(() => {
       expect(createJobMock).toHaveBeenCalledOnce();
       expect(execMock).toHaveBeenCalledWith('bash', ['-c', 'sleep 40'], expect.objectContaining({ cwd: '/path/to/proj' }));
@@ -979,7 +976,6 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     prereq.resolve({ stdout: 'done\n', stderr: '', exitCode: 0 });
     const res = await pending;
-
     expect(res.status).toBe(200);
     expect(createJobMock).toHaveBeenCalledOnce();
     expect(startJobMock).toHaveBeenCalledOnce();
@@ -1002,6 +998,7 @@ describe('POST /api/agents/{agentId}/run', () => {
       method: 'POST',
       body: JSON.stringify({ prompt: 'cancel later' }),
     });
+
     const pending = POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
     await vi.waitFor(() => {
@@ -1016,7 +1013,6 @@ describe('POST /api/agents/{agentId}/run', () => {
     await expect(cancellation).resolves.toBe(true);
     const res = await pending;
     const data = await res.json();
-
     expect(res.status).toBe(200);
     expect(data.status).toBe('cancelled');
     expect(startJobMock).not.toHaveBeenCalled();
@@ -1041,21 +1037,20 @@ describe('POST /api/agents/{agentId}/run', () => {
       method: 'POST',
       body: JSON.stringify({ prompt: 'inspect later' }),
     });
+
     const pending = POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
     await vi.waitFor(() => {
+      expect(createJobMock).toHaveBeenCalledOnce();
       expect(execMock).toHaveBeenCalledWith('bash', ['-c', 'sleep 40'], expect.objectContaining({ cwd: '/path/to/proj' }));
     });
+
     prereq.resolve({ stdout: 'done\n', stderr: '', exitCode: 0 });
     const res = await pending;
     const data = await res.json();
-
     expect(res.status).toBe(409);
     expect(data.code).toBe('project_busy');
     expect(data.blockingJobId).toBe('run-while-prereq');
-    // Job row is created before the prereq, but startJob is never called when
-    // a blocker appears mid-prereq — the job is reaped via markDone.
-    expect(createJobMock).toHaveBeenCalledOnce();
     expect(startJobMock).not.toHaveBeenCalled();
   });
 
@@ -1080,6 +1075,7 @@ File-backed prompt.`);
         method: 'POST',
         body: JSON.stringify({ prompt: 'inspect file agent later' }),
       });
+
       const pending = POST(req, { params: Promise.resolve({ agentId: 'file:proj1:file-agent' }) });
 
       await vi.waitFor(() => {
@@ -1090,7 +1086,6 @@ File-backed prompt.`);
 
       prereq.resolve({ stdout: 'file done\n', stderr: '', exitCode: 0 });
       const res = await pending;
-
       expect(res.status).toBe(200);
       expect(createJobMock).toHaveBeenCalledOnce();
       expect(startJobMock).toHaveBeenCalledOnce();
@@ -1123,6 +1118,7 @@ File-backed prompt.`);
         method: 'POST',
         body: JSON.stringify({ prompt: 'cancel file agent later' }),
       });
+
       const pending = POST(req, { params: Promise.resolve({ agentId: 'file:proj1:file-agent' }) });
 
       await vi.waitFor(() => {
@@ -1137,7 +1133,6 @@ File-backed prompt.`);
       await expect(cancellation).resolves.toBe(true);
       const res = await pending;
       const data = await res.json();
-
       expect(res.status).toBe(200);
       expect(data.status).toBe('cancelled');
       expect(startJobMock).not.toHaveBeenCalled();

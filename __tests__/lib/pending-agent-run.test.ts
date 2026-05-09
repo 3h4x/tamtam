@@ -320,6 +320,28 @@ describe('drainNextAgentRun', () => {
     expect(listQueuedAgents('p1')).toEqual([]);
   });
 
+  it('keeps the head entry queued on a transient 500 replay failure and drains it after retrying later', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            detail: 'Failed to start: pm2 start failed',
+          },
+          500,
+        )
+      )
+      .mockResolvedValueOnce(textResponse('', 200));
+
+    enqueueAgentRun('p1', { agentId: 'a', agentName: 'A', triggeredBy: 'schedule', prompt: '', enqueuedAt: 1 });
+
+    await drainNextAgentRun('p1');
+    expect(listQueuedAgents('p1').map((e) => e.agentId)).toEqual(['a']);
+
+    await drainNextAgentRun('p1');
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(listQueuedAgents('p1')).toEqual([]);
+  });
+
   it('drops the head and lets a later valid entry drain when 409 reports agent_disabled', async () => {
     fetchSpy
       .mockResolvedValueOnce(
