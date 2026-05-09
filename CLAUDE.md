@@ -122,6 +122,7 @@ See `docs/API.md` for the full route reference. New routes must be documented th
 ## Key Patterns
 - Runtime config is stored in DB (`settings`, `projects`, `jobs`, `skills`, `agents`, `recommendations`, `ghStatus`, `ghIssuesCache`, `pipelineLocks`, `queuedAgentRuns`); shared per-project config and file-agent prompts can also live in committed `.tamtam/` files.
 - Workspace path configured in Settings UI; projects discovered by scanning for git repos.
+- Application/runtime DB access should import `db` / `schema` from `@/lib/db`. Do not open ad-hoc `better-sqlite3` connections in `app/`, `components/`, or `lib/`; reserve direct SQLite construction for tests and explicit bootstrap/maintenance scripts.
 - Most CLI calls (git, gh, launchctl, pm2) go through `lib/shared/shell.ts`. `lib/shared/project-data.ts` assembles project data with 10s TTL cache.
 - Client-side API helpers live under `lib/client/` and are surfaced through `lib/client-api.ts`. When a fetch pattern is reused across components, add or extend a helper there instead of duplicating request/response handling in the component.
 - Direct `child_process` usage is the exception, not the default: keep ordinary shelling in `lib/shared/shell.ts`; only use raw spawn/process control in the runner/shim/streaming paths that already need it, and keep the reason obvious in code.
