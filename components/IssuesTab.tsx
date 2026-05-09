@@ -37,6 +37,11 @@ export function IssuesTab({ projectName, onCountChange, jobsPaused = false }: Is
   const [issueDraft, setIssueDraft] = useState('')
   const [planning, setPlanning] = useState(false)
   const onCountChangeRef = useRef(onCountChange)
+  const trimmedIssueDraft = issueDraft.trim()
+  const issuePlanningBlocked = jobsPaused || agentsLoading || planning || !ctoAgent || trimmedIssueDraft.length < 10
+  const issuePlanningTitle = jobsPaused
+    ? 'Jobs are paused globally. Resume jobs to plan an issue.'
+    : 'Cmd/Ctrl+Enter'
 
   useEffect(() => {
     onCountChangeRef.current = onCountChange
@@ -97,7 +102,7 @@ export function IssuesTab({ projectName, onCountChange, jobsPaused = false }: Is
   }, [projectName])
 
   const handlePlanIssue = async () => {
-    const idea = issueDraft.trim()
+    const idea = trimmedIssueDraft
     if (planning) return
     if (jobsPaused) {
       toast('Jobs are paused. Resume jobs before planning an issue.', 'error')
@@ -270,6 +275,7 @@ ${idea}`
                   onKeyDown={(event) => {
                     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
                       event.preventDefault()
+                      if (issuePlanningBlocked) return
                       void handlePlanIssue()
                     }
                   }}
@@ -284,8 +290,8 @@ ${idea}`
                   <button
                     className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-accent/30 bg-accent/10 px-2.5 py-1.5 text-xs font-medium text-accent hover:bg-accent/15 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                     onClick={() => void handlePlanIssue()}
-                    disabled={!ctoAgent || agentsLoading || planning || issueDraft.trim().length < 10}
-                    title="Cmd/Ctrl+Enter"
+                    disabled={issuePlanningBlocked}
+                    title={issuePlanningTitle}
                   >
                     {planning ? (
                       <span className="inline-block h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent animate-spin" />

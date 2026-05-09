@@ -57,13 +57,13 @@ function ctoAgent(overrides: Partial<Agent> = {}): Agent {
   }
 }
 
-function renderTab() {
+function renderTab(props: Partial<React.ComponentProps<typeof IssuesTab>> = {}) {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
 
   flushSync(() => {
-    root.render(React.createElement(IssuesTab, { projectName: 'alpha' }))
+    root.render(React.createElement(IssuesTab, { projectName: 'alpha', ...props }))
   })
 
   return {
@@ -155,6 +155,34 @@ describe('IssuesTab issue planning panel', () => {
 
     expect(container.querySelector('textarea')).toBeNull()
     expect(runAgent).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('keeps the draft editable while blocking issue planning when jobs are paused', async () => {
+    fetchAgents.mockResolvedValue({ agents: [ctoAgent()] })
+    const { container, unmount } = renderTab({ jobsPaused: true })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Plan a GitHub issue')
+    })
+
+    const textarea = container.querySelector('textarea')
+    if (!(textarea instanceof HTMLTextAreaElement)) throw new Error('textarea not found')
+    expect(textarea.disabled).toBe(false)
+    setTextareaValue(textarea, 'Keep local drafting available while global jobs are paused')
+    expect(textarea.value).toBe('Keep local drafting available while global jobs are paused')
+
+    const button = Array.from(container.querySelectorAll('button')).find(node => node.textContent?.includes('Plan issue'))
+    if (!(button instanceof HTMLButtonElement)) throw new Error('plan button not found')
+    expect(button.disabled).toBe(true)
+    expect(button.title).toBe('Jobs are paused globally. Resume jobs to plan an issue.')
+
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', metaKey: true }))
+
+    expect(runAgent).not.toHaveBeenCalled()
+    expect(toastMock).not.toHaveBeenCalled()
+
     unmount()
   })
 })
