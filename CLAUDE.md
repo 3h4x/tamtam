@@ -118,9 +118,9 @@ See `docs/API.md` for the full route reference. New routes must be documented th
 
 ## Definition of Done for UI/Frontend Changes
 - Server must be running (`pnpm start`, or `pnpm rebuild` if a build is needed) before testing
-- Use Chrome DevTools MCP (`mcp__plugin_chrome-devtools-mcp_chrome-devtools__*`) to navigate to the relevant page and screenshot it
+- Use Playwright MCP (`mcp__plugin_playwright_playwright__*`) to navigate to the relevant page and screenshot it. Chrome DevTools MCP is unreliable in this environment — prefer Playwright.
 - Test the golden path and key edge cases visually; check for regressions in adjacent features
-- Do NOT claim frontend work complete without the Chrome MCP screenshot step
+- Do NOT claim frontend work complete without the Playwright screenshot step
 
 ## Key Patterns
 - Runtime config is stored in DB (`settings`, `projects`, `jobs`, `skills`, `agents`, `recommendations`, `ghStatus`, `ghIssuesCache`, `pipelineLocks`, `queuedAgentRuns`); shared per-project config and file-agent prompts can also live in committed `.tamtam/` files.

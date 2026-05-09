@@ -2,8 +2,9 @@
 
 import { fetchJobs } from '@/lib/client-api'
 import { useRouter } from 'next/navigation'
+import { buildProjectTerminalPath } from '@/lib/client/project-routes'
 
-type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents'
+type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents' | 'recommendations'
 
 export interface TabNavProps {
   projectName: string
@@ -31,7 +32,7 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, runni
         .filter(j => j.kind === 'run' && j.session_id)
         .sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0))[0]
       if (lastSession?.session_id) {
-        router.push(`/project/${projectName}/terminal/${lastSession.session_id}`)
+        router.push(buildProjectTerminalPath(projectName, { sessionId: lastSession.session_id }))
         return
       }
     } catch { /* ignore */ }
@@ -65,6 +66,9 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, runni
       </button>
       <button className={tabClass('agents')} onClick={() => onSetTab('agents')}>
         Agents
+      </button>
+      <button className={tabClass('recommendations')} onClick={() => onSetTab('recommendations')}>
+        Recommendations
       </button>
       <button className={tabClass('issues')} onClick={() => onSetTab('issues')}>
         <span className="sm:hidden">Issues</span>
