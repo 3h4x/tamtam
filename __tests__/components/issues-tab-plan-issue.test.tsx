@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { IssuesTab } from '@/components/IssuesTab'
+import { ISSUE_FORMAT_INSTRUCTION } from '@/lib/agents/issue-template'
 import type { Agent } from '@/lib/client-api'
 
 const { fetchAgents, fetchIssuesAndPRs, fetchProjectConfig, pushMock, runAgent, toastMock } = vi.hoisted(() => ({
@@ -140,6 +141,11 @@ describe('IssuesTab issue planning panel', () => {
     expect(prompt).toContain('gh issue list --limit 30 --state open')
     expect(prompt).toContain('gh issue create')
     expect(prompt).toContain('Do not run `git`')
+    expect(prompt).toContain(ISSUE_FORMAT_INSTRUCTION)
+    expect(prompt).toContain('## Problem')
+    expect(prompt).toContain('## Proposed approach')
+    expect(prompt).toContain('## Acceptance criteria')
+    expect(prompt).toContain('- [ ]')
     expect(pushMock).toHaveBeenCalledWith('/project/alpha/terminal?job=job-123')
 
     unmount()

@@ -113,6 +113,8 @@ describe('fileReviewExhaustionIssue', () => {
     expect(body).toContain("API route doesn't handle DB timeout");
     expect(body).toContain('## Problem');
     expect(body).toContain('## Acceptance criteria');
+    expect(body).toContain('- [ ] Each finding above is addressed in the implementation and covered by tests.');
+    expect(body).toContain('- [ ] A fresh review on this branch returns LGTM with no Finding IDs re-flagged.');
     // Approach section is gone now; the body lists findings under Problem.
     expect(body).not.toContain('## Approach');
     // No invocation metadata: no release handle, no review job id, no reason label.

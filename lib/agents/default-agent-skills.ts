@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { ISSUE_FORMAT_INSTRUCTION } from '@/lib/agents/issue-template';
 import { db, schema } from '@/lib/db';
 import { eq } from 'drizzle-orm';
 
@@ -19,7 +20,9 @@ const DEFAULT_AGENT_SKILLS: DefaultSkill[] = [
     name: 'agent:cto',
     description: 'Strategic next-step issues from project state.',
     content: `You are the CTO. Read CLAUDE.md and skim the codebase. List existing GitHub issues with \`gh issue list --limit 20 --state open\` so you don't duplicate.
-Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — title states the outcome, body has problem → approach → acceptance criteria, labels include type + priority. Skip duplicates and in-progress work. Solo project: no team-coordination assumptions. Don't run \`git\` commands or branch/commit/push — TamTam's release pipeline owns version control.`,
+Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — title states the outcome, labels include type + priority, and the body must follow the exact template below. Skip duplicates and in-progress work. Solo project: no team-coordination assumptions. Don't run \`git\` commands or branch/commit/push — TamTam's release pipeline owns version control.
+
+${ISSUE_FORMAT_INSTRUCTION}`,
   },
   {
     id: 'agent-security-review',
@@ -178,7 +181,10 @@ Do NOT PATCH any settings. Surface proposals only — the user applies them in t
 // version — this lets us actually shrink prompts on running installs (issue
 // #64), while still preserving any user customisation.
 const KNOWN_DEFAULT_CONTENT_HASHES: Record<string, string[]> = {
-  'agent-cto': ['a13c143efc007ea5', '1c4a08f78ed7b75c'],
+  // 'a13c143efc007ea5' = pre-issue-#64 verbose default,
+  // '1c4a08f78ed7b75c' = older CTO seed still in the wild,
+  // 'b9a1e7cd36ae83dd' = pre-template-shortening default before issue-template rollout.
+  'agent-cto': ['a13c143efc007ea5', '1c4a08f78ed7b75c', 'b9a1e7cd36ae83dd'],
   'agent-security-review': ['ca362666deba8013', 'a9813f37584e7812'],
   'agent-dependency-check': ['7a470f6f6b45a900'],
   'agent-blog': ['b020ce4f0b6c4d7a', '28c8aeb8eccdfd92'],
