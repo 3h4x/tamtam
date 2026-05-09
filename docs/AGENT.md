@@ -164,6 +164,12 @@ The agent starts immediately as a PM2 process. Output is streamed to a log file 
 
 When an agent finishes, TamTam asks it to include a short `TamTam Run Report` in the final response. The lifecycle parser stores a concise `work_summary` and `modified_files` JSON array on the job row. If a scheduled agent repeatedly finds no actionable work and changes no files, TamTam creates an open project recommendation instead of silently changing the schedule.
 
+### Read-only Agent Runs
+
+`POST /api/agents/{agentId}/run` accepts `readOnly: true` for agents whose task does not touch the local checkout. The canonical case is the built-in `cto` agent when it is used from the Issues tab to shape a user idea into one GitHub issue via `gh issue list` and `gh issue create`.
+
+Read-only runs bypass per-project worktree serialization so they can start while unrelated agents or terminal jobs are running. Specifically, they skip the non-agent busy gate, different-agent queueing, the project start slot, pending-release re-acquire, dirty-worktree, and issue-branch checks. They still reject duplicate runs of the same agent, still queue behind an active release pipeline lock, and still honor the CLI start gate for pause and quota policy.
+
 ### Scheduled Runs
 
 If an agent has both `schedule` and `prompt`, the schedule is installed automatically on creation/update:

@@ -143,13 +143,17 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled, proje
 
   // URL-driven editor toggle: ?agent=new or ?agent=<id>
   const editorParam = searchParams.get('agent')
+  const templateParam = searchParams.get('template')
   const creating = editorParam === 'new'
   const editing = editorParam && editorParam !== 'new' ? agents.find(a => a.id === editorParam) ?? null : null
 
   const setEditorParam = (value: string | null) => {
     const next = new URLSearchParams(Array.from(searchParams.entries()))
     if (value) next.set('agent', value)
-    else next.delete('agent')
+    else {
+      next.delete('agent')
+      next.delete('template')
+    }
     const qs = next.toString()
     router.push(qs ? `${pathname}?${qs}` : pathname)
   }
@@ -174,6 +178,12 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled, proje
   }
 
   useEffect(() => { loadData() }, [projectName])
+
+  useEffect(() => {
+    if (!creating || !templateParam || recommendedTemplate) return
+    const template = [...customTemplates, ...RECOMMENDED_AGENTS].find(t => t.name.toLowerCase() === templateParam.toLowerCase())
+    if (template) setRecommendedTemplate(template)
+  }, [creating, customTemplates, recommendedTemplate, templateParam])
 
   const handleDelete = async (id: string) => {
     try {

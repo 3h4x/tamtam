@@ -63,11 +63,11 @@ export async function improveAgentPrompt(input: ImprovePromptInput): Promise<{ i
   return response.json()
 }
 
-export async function runAgent(agentId: string, prompt: string): Promise<RunAgentResult> {
+export async function runAgent(agentId: string, prompt: string, opts?: { readOnly?: boolean }): Promise<RunAgentResult> {
   const response = await fetch(`/api/agents/${agentId}/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, readOnly: opts?.readOnly === true }),
   })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))

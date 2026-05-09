@@ -26,6 +26,13 @@ import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 
+/**
+ * `readOnly: true` is for agents whose declared task does not edit the local
+ * checkout, such as the built-in cto issue planner. Read-only runs bypass
+ * per-project worktree serialization (busy jobs, other agents, start slot,
+ * pending-release recovery, dirty-worktree, issue-branch), but still honor
+ * same-agent duplicate protection, release pipeline locks, and CLI/budget gates.
+ */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ agentId: string }> }
@@ -63,6 +70,7 @@ export async function POST(
 
   const body = await request.json();
   const taskPrompt = body.prompt?.trim() ?? '';
+  const readOnly = body.readOnly === true;
   const hasSkills = JSON.parse(agent.skillIds || '[]').length > 0;
   if (!taskPrompt && !hasSkills) {
     return NextResponse.json({ detail: 'agent has no prompt and no skills to run' }, { status: 400 });
@@ -101,19 +109,21 @@ export async function POST(
     );
   }
 
-  const blockingJob = await findBlockingRunningJob(
-    agent.project,
-    (job) => !isAgentJobKind(job.kind),
-  );
-  if (blockingJob) {
-    return NextResponse.json(
-      {
-        code: 'project_busy',
-        detail: `Job '${blockingJob.kind}' is already running for ${agent.project} (job ${blockingJob.id})`,
-        blockingJobId: blockingJob.id,
-      },
-      { status: 409 },
+  if (!readOnly) {
+    const blockingJob = await findBlockingRunningJob(
+      agent.project,
+      (job) => !isAgentJobKind(job.kind),
     );
+    if (blockingJob) {
+      return NextResponse.json(
+        {
+          code: 'project_busy',
+          detail: `Job '${blockingJob.kind}' is already running for ${agent.project} (job ${blockingJob.id})`,
+          blockingJobId: blockingJob.id,
+        },
+        { status: 409 },
+      );
+    }
   }
 
   // Only one agent runs at a time per project — concurrent agents racing on
@@ -134,22 +144,24 @@ export async function POST(
         { status: 409 }
       );
     }
-    enqueueAgentRun(agent.project, {
-      agentId: agent.id,
-      agentName: agent.name,
-      triggeredBy,
-      prompt: taskPrompt,
-      enqueuedAt: Date.now(),
-    });
-    return NextResponse.json(
-      {
-        status: 'queued',
-        detail: `Agent '${agent.name}' queued — '${j.kind}' is running for ${agent.project} (job ${j.id})`,
-        blockingJobId: j.id,
-        agent: agent.name,
-      },
-      { status: 202 }
-    );
+    if (!readOnly) {
+      enqueueAgentRun(agent.project, {
+        agentId: agent.id,
+        agentName: agent.name,
+        triggeredBy,
+        prompt: taskPrompt,
+        enqueuedAt: Date.now(),
+      });
+      return NextResponse.json(
+        {
+          status: 'queued',
+          detail: `Agent '${agent.name}' queued — '${j.kind}' is running for ${agent.project} (job ${j.id})`,
+          blockingJobId: j.id,
+          agent: agent.name,
+        },
+        { status: 202 }
+      );
+    }
   }
 
   // Closes the TOCTOU between the listJobs check above and createJob below.
@@ -157,36 +169,40 @@ export async function POST(
   // list, then both pass through the awaits (issue-branch check, git exec,
   // CLI gate) to createJob, producing two simultaneous agent runs for the
   // same project.
-  const slot = tryClaimAgentStartSlot(agent.project, agent.name);
-  if (!slot.ok) {
-    if (slot.runningAgent === agent.name) {
+  let claimedStartSlot = false;
+  if (!readOnly) {
+    const slot = tryClaimAgentStartSlot(agent.project, agent.name);
+    if (!slot.ok) {
+      if (slot.runningAgent === agent.name) {
+        return NextResponse.json(
+          { code: 'already_starting', detail: `Agent '${agent.name}' is already starting for ${agent.project}` },
+          { status: 409 }
+        );
+      }
+      enqueueAgentRun(agent.project, {
+        agentId: agent.id,
+        agentName: agent.name,
+        triggeredBy,
+        prompt: taskPrompt,
+        enqueuedAt: Date.now(),
+      });
       return NextResponse.json(
-        { code: 'already_starting', detail: `Agent '${agent.name}' is already starting for ${agent.project}` },
-        { status: 409 }
+        {
+          status: 'queued',
+          detail: `Agent '${agent.name}' queued — '${slot.runningAgent}' is starting for ${agent.project}`,
+          agent: agent.name,
+        },
+        { status: 202 }
       );
     }
-    enqueueAgentRun(agent.project, {
-      agentId: agent.id,
-      agentName: agent.name,
-      triggeredBy,
-      prompt: taskPrompt,
-      enqueuedAt: Date.now(),
-    });
-    return NextResponse.json(
-      {
-        status: 'queued',
-        detail: `Agent '${agent.name}' queued — '${slot.runningAgent}' is starting for ${agent.project}`,
-        agent: agent.name,
-      },
-      { status: 202 }
-    );
+    claimedStartSlot = true;
   }
 
   try {
     // A previously-queued release must get first chance to reacquire the lock
     // before any newer agent work starts on the same project. Check only once
     // we know no other agent on the project is running or starting.
-    if (getPendingRelease(agent.project)) {
+    if (!readOnly && getPendingRelease(agent.project)) {
       await drainPendingRelease(agent.project);
       const lock = getLock(agent.project);
       if (isLockOwnedByActiveRelease(agent.project) || getPendingRelease(agent.project)) {
@@ -227,7 +243,7 @@ export async function POST(
     // user is mid-refactor. Threshold of 0 disables the gate.
     const settings = getSettings();
     const dirtyThreshold = settings.dirty_worktree_block_threshold;
-    if (dirtyThreshold > 0) {
+    if (!readOnly && dirtyThreshold > 0) {
       const projPath = resolveProjectPath(agent.project);
       if (projPath) {
         const dirtyCount = await getDirtyFileCount(projPath);
@@ -243,16 +259,18 @@ export async function POST(
       }
     }
 
-    const result = await runAgentStart(agent, taskPrompt, triggeredBy);
+    const result = await runAgentStart(agent, taskPrompt, triggeredBy, readOnly);
     return result.response;
   } finally {
-    releaseAgentStartSlot(agent.project);
-    // Always re-check the queue after releasing the synchronous start slot.
-    // Fast-finishing agents can complete and trigger a lifecycle drain before
-    // this route unwinds; that drain now no-ops while the slot is held, so the
-    // post-release route drain is the handoff that guarantees queued work
-    // keeps moving whether startup succeeded or failed.
-    await drainNextAgentRun(agent.project);
+    if (claimedStartSlot) {
+      releaseAgentStartSlot(agent.project);
+      // Always re-check the queue after releasing the synchronous start slot.
+      // Fast-finishing agents can complete and trigger a lifecycle drain before
+      // this route unwinds; that drain now no-ops while the slot is held, so the
+      // post-release route drain is the handoff that guarantees queued work
+      // keeps moving whether startup succeeded or failed.
+      await drainNextAgentRun(agent.project);
+    }
   }
 }
 
@@ -268,6 +286,7 @@ async function runAgentStart(
   agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean; provider?: string | null; prerequisiteCommand?: string | null },
   taskPrompt: string,
   triggeredBy: string,
+  readOnly: boolean,
 ): Promise<{ response: NextResponse; startedJob: boolean }> {
 
   const projPath = resolveProjectPath(agent.project);
@@ -281,7 +300,7 @@ async function runAgentStart(
   // In Direct Branch mode, block agent runs while a fix/issue-* branch is
   // checked out. Scheduled agents committing to an issue branch would mix
   // unrelated work into the issue and push to the wrong branch.
-  const blockedBranch = await checkIssueBranchBlock(agent.project, projPath);
+  const blockedBranch = readOnly ? null : await checkIssueBranchBlock(agent.project, projPath);
   if (blockedBranch) {
     return {
       response: NextResponse.json(
@@ -411,22 +430,24 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     };
   }
 
-  const postPrereqBlockingJob = await findBlockingRunningJob(
-    agent.project,
-    (job) => !isAgentJobKind(job.kind),
-  );
-  if (postPrereqBlockingJob) {
-    return {
-      response: NextResponse.json(
-        {
-          code: 'project_busy',
-          detail: `Job '${postPrereqBlockingJob.kind}' is already running for ${agent.project} (job ${postPrereqBlockingJob.id})`,
-          blockingJobId: postPrereqBlockingJob.id,
-        },
-        { status: 409 },
-      ),
-      startedJob: false,
-    };
+  if (!readOnly) {
+    const postPrereqBlockingJob = await findBlockingRunningJob(
+      agent.project,
+      (job) => !isAgentJobKind(job.kind),
+    );
+    if (postPrereqBlockingJob) {
+      return {
+        response: NextResponse.json(
+          {
+            code: 'project_busy',
+            detail: `Job '${postPrereqBlockingJob.kind}' is already running for ${agent.project} (job ${postPrereqBlockingJob.id})`,
+            blockingJobId: postPrereqBlockingJob.id,
+          },
+          { status: 409 },
+        ),
+        startedJob: false,
+      };
+    }
   }
 
   const initialContextMeta = JSON.stringify(contextMeta);
