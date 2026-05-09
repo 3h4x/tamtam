@@ -3,10 +3,10 @@
 // PM2 cron involvement (that path silently no-op'd; see lib/internal-scheduler.ts).
 export async function reinstallAgents(): Promise<void> {
   const { db, schema } = await import('./lib/db');
-  const { eq } = await import('drizzle-orm');
   const { startInternalScheduler } = await import('./lib/scheduling/internal-scheduler');
   const { syncJobsPauseState } = await import('./lib/shared/job-control');
   const { getSettings } = await import('./lib/shared/config');
+  const { listEnabledProjects } = await import('./lib/shared/enabled-projects');
   type AgentInput = Parameters<typeof startInternalScheduler>[0][number];
   const { reconcilePm2Schedules } = await import('./lib/scheduling/agent-scheduler');
 
@@ -28,9 +28,8 @@ export async function reinstallAgents(): Promise<void> {
   const dbAgentKeys = new Set(dbEnabled.map(a => `${a.project}:${a.name}`));
   const fileEnabled: AgentInput[] = [];
   try {
-    const enabledProjects = db.select().from(schema.projects).where(eq(schema.projects.enabled, true)).all();
     const { scanFileAgents } = await import('./lib/agents/tamtam-file-agents');
-    for (const p of enabledProjects) {
+    for (const p of listEnabledProjects()) {
       try {
         const fileAgents = scanFileAgents(p.path, p.name);
         for (const fa of fileAgents) {

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { installAgentSchedule } from '@/lib/scheduling/agent-scheduler';
 import { errMsg } from '@/lib/shared/types';
 import { getAllAgentsCached, clearAgentsCache, normalizeAgent } from '@/lib/agents/agents-cache';
 import { scanFileAgents, writeFileAgent, type FileAgent } from '@/lib/agents/tamtam-file-agents';
 import { resolveProjectPath } from '@/lib/shared/project-data';
+import { listEnabledProjects } from '@/lib/shared/enabled-projects';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 import { isCliProvider } from '@/lib/usage/cli-providers';
@@ -18,12 +18,8 @@ function getAllFileAgentsCached(): FileAgent[] {
   if (_allFileAgentsCache && now - _allFileAgentsCache.time < ALL_FILE_AGENTS_TTL_MS) {
     return _allFileAgentsCache.agents;
   }
-  let enabledProjects: typeof schema.projects.$inferSelect[] = [];
-  try {
-    enabledProjects = db.select().from(schema.projects).where(eq(schema.projects.enabled, true)).all();
-  } catch { /* projects table may not exist */ }
   const out: FileAgent[] = [];
-  for (const p of enabledProjects) {
+  for (const p of listEnabledProjects()) {
     try {
       for (const fa of scanFileAgents(p.path, p.name)) out.push(fa);
     } catch { /* skip */ }

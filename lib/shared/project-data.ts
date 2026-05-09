@@ -1,6 +1,5 @@
 import { existsSync } from 'fs';
-import { eq } from 'drizzle-orm';
-import { db, schema } from '@/lib/db';
+import { listEnabledProjects } from '@/lib/shared/enabled-projects';
 import {
   getImproveConfig,
   getPriorityMultipliers,
@@ -23,14 +22,8 @@ import type { Task } from '@/lib/shared/types';
  * Get enabled projects from the DB projects table.
  */
 function getEnabledProjects(): Record<string, ProjectConfig> {
-  const dbProjects = db
-    .select()
-    .from(schema.projects)
-    .where(eq(schema.projects.enabled, true))
-    .all();
-
   const projects: Record<string, ProjectConfig> = {};
-  for (const p of dbProjects) {
+  for (const p of listEnabledProjects()) {
     projects[p.name] = {
       path: p.path,
       prompt: '',

@@ -3,6 +3,7 @@ import { homedir } from 'os';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { getSettings } from '@/lib/shared/config';
+import { listEnabledProjects } from '@/lib/shared/enabled-projects';
 
 export const PRIORITY_ORDER = ['critical', 'high', 'medium', 'low'] as const;
 export type Priority = (typeof PRIORITY_ORDER)[number];
@@ -78,14 +79,8 @@ export function getImproveConfig(): ImproveConfig {
   const settings = getSettings();
 
   // Read enabled projects from DB
-  const dbProjects = db
-    .select()
-    .from(schema.projects)
-    .where(eq(schema.projects.enabled, true))
-    .all();
-
   const projects: Record<string, ProjectConfig> = {};
-  for (const p of dbProjects) {
+  for (const p of listEnabledProjects()) {
     projects[p.name] = {
       path: p.path,
       prompt: '',
