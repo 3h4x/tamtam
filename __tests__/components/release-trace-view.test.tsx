@@ -235,4 +235,36 @@ describe('ReleaseTraceView', () => {
 
     unmount()
   })
+
+  it('does not render the board link when board sync is enabled but both URLs are blank', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      if (input === '/api/settings') {
+        return makeResponse({
+          settings: {
+            github_board_sync_enabled: 'true',
+            github_board_view_url: '',
+            github_board_project_url: '   ',
+          },
+        })
+      }
+      return makeResponse(makeTrace({
+        status: 'done',
+        finished_at: 110,
+        exit_code: 0,
+      }))
+    }))
+
+    const { container, unmount } = renderView({
+      projectName: 'alpha',
+      releaseId: 'rel-123456789abc',
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('success')
+    })
+
+    expect(container.textContent).not.toContain('Board')
+
+    unmount()
+  })
 })

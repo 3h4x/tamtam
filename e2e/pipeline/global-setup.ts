@@ -17,6 +17,7 @@ const PROJECTS = [
   'release-controls-happy-path',
   'release-controls-abort',
   'release-controls-paused',
+  'release-controls-external-start',
   'ui-live',
   'runs-live',
   'strip-live',

@@ -5,6 +5,7 @@ import {
   writeScenario,
   resetShimState,
   enableProject,
+  writeGitTiming,
   waitForJobRunning,
   waitForJobCompletion,
   waitForPipelineCompletion,
@@ -20,10 +21,36 @@ const ABORT_SCENARIO = JSON.parse(
 const PAUSED_PROJECT = 'release-controls-paused'
 const SUCCESS_PROJECT = 'release-controls-happy-path'
 const BUSY_PROJECT = 'release-controls-abort'
+const EXTERNAL_START_PROJECT = 'release-controls-external-start'
 
 test.describe('Real release controls lifecycle', () => {
   test.afterEach(async ({ request }) => {
     await request.patch('/api/settings', { data: { jobs_paused: false } })
+  })
+
+  test('release button picks up external jobs_paused changes while the page stays open', async ({
+    page,
+    request,
+  }) => {
+    await enableProject(request, PAUSED_PROJECT, { testsDisabled: true })
+    await request.patch('/api/settings', { data: { jobs_paused: false } })
+
+    await page.goto(`/project/${PAUSED_PROJECT}`)
+
+    const releaseButton = page.getByRole('button', { name: /release/i }).first()
+
+    await expect(releaseButton).toBeVisible({ timeout: 8_000 })
+    await expect(releaseButton).toBeEnabled()
+
+    await request.patch('/api/settings', { data: { jobs_paused: true } })
+
+    await expect(releaseButton).toBeDisabled({ timeout: 15_000 })
+    await expect(releaseButton).toHaveAttribute('title', /jobs are paused globally/i)
+
+    await request.patch('/api/settings', { data: { jobs_paused: false } })
+
+    await expect(releaseButton).toBeEnabled({ timeout: 15_000 })
+    await expect(releaseButton).not.toHaveAttribute('title', /jobs are paused globally/i)
   })
 
   test('release button reflects the real jobs_paused state and re-enables after resuming from the header toggle', async ({
@@ -89,6 +116,46 @@ test.describe('Real release controls lifecycle', () => {
     await expect(idleButton).toBeEnabled()
     await expect(idleButton).not.toHaveAttribute('title', /release pipeline already running/i)
     await expect(busyButton).not.toBeVisible()
+  })
+
+  test('release button detects an externally-started live release and resets after completion without reload', async ({
+    page,
+    request,
+  }) => {
+    writeScenario(EXTERNAL_START_PROJECT, SUCCESS_SCENARIO.steps)
+    resetShimState(EXTERNAL_START_PROJECT)
+    writeGitTiming(EXTERNAL_START_PROJECT, { push: 6500 })
+    await enableProject(request, EXTERNAL_START_PROJECT, { testsDisabled: true })
+
+    await page.goto(`/project/${EXTERNAL_START_PROJECT}`)
+
+    const idleButton = page.getByRole('button', { name: '🚀 Release' })
+    await expect(idleButton).toBeVisible({ timeout: 8_000 })
+    await expect(idleButton).toBeEnabled()
+
+    const releaseResponse = await request.post(`/api/projects/by-project/${EXTERNAL_START_PROJECT}/release`)
+    expect(
+      releaseResponse.status(),
+      `release POST failed: ${await releaseResponse.text()}`,
+    ).toBe(200)
+
+    const runningReview = await waitForJobRunning(request, EXTERNAL_START_PROJECT, 'review', 20_000)
+    expect(runningReview, 'review job should be running').not.toBeNull()
+
+    const busyButton = page.getByRole('button', { name: /releasing/i })
+    await expect(busyButton).toBeVisible({ timeout: 15_000 })
+    await expect(busyButton).toBeDisabled()
+    await expect(busyButton).toHaveAttribute('title', /release pipeline already running/i)
+
+    const result = await waitForPipelineCompletion(request, EXTERNAL_START_PROJECT, 90_000)
+    expect(result.status, 'pipeline should complete').toBe('done')
+    expect(result.releaseJob?.['exit_code'], 'release exit code').toBe(0)
+
+    await expect(busyButton).not.toBeVisible()
+    await expect(page.getByRole('button', { name: /🚀 Release|🚢 Ship \(LGTM\)/ }).first()).toBeVisible({
+      timeout: 15_000,
+    })
+    await expect(page.getByRole('button', { name: /🚀 Release|🚢 Ship \(LGTM\)/ }).first()).toBeEnabled()
   })
 
   test('release button resets to the Ship state after a successful live release without reload', async ({

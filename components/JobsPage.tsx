@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { fetchJobs, fetchProjects } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
+import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
 import {
   buildEntries,
   groupReleaseChildren,
@@ -82,10 +83,7 @@ export function JobsPage() {
       .then((r) => r.json())
       .then((data) => {
         const s = data?.settings ?? data
-        if (s?.github_board_sync_enabled === 'true') {
-          const url = (typeof s?.github_board_view_url === 'string' && s.github_board_view_url) || (typeof s?.github_board_project_url === 'string' ? s.github_board_project_url : '')
-          if (url) setBoardUrl(url)
-        }
+        setBoardUrl(resolveGithubBoardUrl(s))
       })
       .catch(() => undefined)
   }, [])

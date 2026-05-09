@@ -22,6 +22,7 @@ import { OverviewTab } from '@/components/project-detail/OverviewTab'
 import { RecommendationsTab } from '@/components/project-detail/RecommendationsTab'
 import { AgentsTab } from '@/components/AgentsTab'
 import { buildProjectPath, buildProjectTerminalPath } from '@/lib/client/project-routes'
+import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
 
 type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents' | 'recommendations'
 
@@ -122,23 +123,25 @@ export function ProjectDetailPage({
       jobsPausedEventSeqRef.current += 1
       setJobsPaused(paused)
     })
-    const fetchSeq = jobsPausedEventSeqRef.current
-    fetch('/api/settings')
-      .then((r) => r.json())
-      .then((data) => {
-        if (cancelled) return
-        const s = data?.settings ?? data
-        if (jobsPausedEventSeqRef.current === fetchSeq) {
-          setJobsPaused(s?.jobs_paused === 'true')
-        }
-        if (s?.github_board_sync_enabled === 'true') {
-          const url = (typeof s?.github_board_view_url === 'string' && s.github_board_view_url) || (typeof s?.github_board_project_url === 'string' ? s.github_board_project_url : '')
-          if (url) setBoardUrl(url)
-        }
-      })
-      .catch(() => undefined)
+    const loadSettings = () => {
+      const fetchSeq = jobsPausedEventSeqRef.current
+      fetch('/api/settings')
+        .then((r) => r.json())
+        .then((data) => {
+          if (cancelled) return
+          const s = data?.settings ?? data
+          if (jobsPausedEventSeqRef.current === fetchSeq) {
+            setJobsPaused(s?.jobs_paused === 'true')
+          }
+          setBoardUrl(resolveGithubBoardUrl(s))
+        })
+        .catch(() => undefined)
+    }
+    loadSettings()
+    const interval = setInterval(loadSettings, 5000)
     return () => {
       cancelled = true
+      clearInterval(interval)
       unsubscribe()
     }
   }, [])
