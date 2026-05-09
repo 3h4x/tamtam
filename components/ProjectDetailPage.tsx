@@ -11,7 +11,6 @@ import { ProjectRunsTab } from '@/components/ProjectRunsTab'
 import { ChangesTab } from '@/components/ChangesTab'
 import { IssuesTab } from '@/components/IssuesTab'
 import { DocsTab } from '@/components/DocsTab'
-import { RecommendationsTab } from '@/components/RecommendationsTab'
 import { useToast } from '@/components/Toast'
 import { isPipelineBusy } from '@/lib/pipeline/pipeline-status'
 import { subscribeToJobsPausedChanged } from '@/lib/shared/jobs-paused-events'
@@ -21,7 +20,7 @@ import { ProjectActions } from '@/components/project-detail/ProjectActions'
 import { TabNav } from '@/components/project-detail/TabNav'
 import { OverviewTab } from '@/components/project-detail/OverviewTab'
 
-type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'recommendations'
+type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs'
 
 type Verdict = 'LGTM' | 'NEEDS ATTENTION' | 'DO NOT SHIP'
 interface ProjectDetailPageProps {
@@ -37,7 +36,7 @@ export function ProjectDetailPage({
   const name = params.name
   const router = useRouter()
   const { toast } = useToast()
-  const VALID_TABS: Tab[] = ['overview', 'config', 'history', 'terminal', 'changes', 'issues', 'docs', 'recommendations']
+  const VALID_TABS: Tab[] = ['overview', 'config', 'history', 'terminal', 'changes', 'issues', 'docs']
   const activeTab: Tab = params.sessionId
     ? 'terminal'
     : VALID_TABS.includes(params.tab as Tab) ? (params.tab as Tab) : 'overview'
@@ -721,10 +720,6 @@ export function ProjectDetailPage({
 
       {activeTab === 'history' && name && (
         <ProjectRunsTab projectName={name} jobsPaused={jobsPaused} />
-      )}
-
-      {activeTab === 'recommendations' && name && (
-        <RecommendationsTab projectName={name} />
       )}
 
       {/* Terminal Tab */}
