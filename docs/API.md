@@ -78,7 +78,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 
 ## Settings
 
-- `/api/settings` — Settings CRUD (GET, PATCH) — includes GitHub board sync, CLI routing/binary/model, `base_prompt`, permission mode, pipeline model overrides, budget gates, retention, and all `notification_*` keys
+- `/api/settings` — Settings CRUD (GET, PATCH) — includes GitHub board sync, CLI routing/binary/model, `base_prompt`, permission mode, the dedicated global trusted-GitHub-users allowlist (`trusted_github_users`), pipeline model overrides, budget gates, retention, and all `notification_*` keys. `trusted_github_users` is stored as JSON in the DB but exposed by this route as a comma-separated string for the Settings UI.
 - `/api/settings/test-notification` — Send a test webhook payload (POST)
 - `/api/settings/board-resync` — Re-run `syncJobToProjectBoard(job, 'manual')` for the most recent release/agent/run jobs (default last 7d, top 100; `?days=`/`?limit=`); skips pipeline child jobs, stops on GitHub secondary rate-limit, 250 ms inter-call delay (POST → `{ ok, days, limit, scanned, resynced, failed, rateLimited }`)
 - `/api/settings/backup` — SQLite hot backup (POST)

@@ -27,7 +27,7 @@ export function SettingsField({
   return (
     <div className={colSpanClass}>
       <label className="block font-medium text-sm text-text-primary mb-1.5">{field.label}</label>
-      {fieldKey === 'base_prompt' || fieldKey === 'commit_style' || fieldKey === 'review_verdict_rules' || fieldKey === 'trusted_github_users' ? (
+      {fieldKey === 'base_prompt' || fieldKey === 'commit_style' || fieldKey === 'review_verdict_rules' ? (
         <textarea
           value={value}
           onChange={(e) => onChange(fieldKey, e.target.value)}

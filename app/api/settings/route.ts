@@ -17,6 +17,10 @@ import {
   isCliProvider,
   parseEnabledProviders,
 } from '@/lib/usage/cli-providers';
+import {
+  canonicalizeTrustedGithubUsers,
+  validateTrustedGithubUsersInput,
+} from '@/lib/shared/trusted-github-users';
 
 function firstEnabledProvider(value: string | null | undefined): string {
   const enabled = parseEnabledProviders(value);
@@ -120,13 +124,9 @@ const SETTING_KEYS = [
 
 function serializeSettingValue(key: string, value: unknown): string {
   if (key === 'trusted_github_users') {
-    if (Array.isArray(value)) return value.join(', ');
-    try {
-      const parsed = JSON.parse(String(value));
-      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string').join(', ') : '';
-    } catch {
-      return '';
-    }
+    if (Array.isArray(value)) return canonicalizeTrustedGithubUsers(value).join(', ');
+    try { return canonicalizeTrustedGithubUsers(JSON.parse(String(value))).join(', '); } catch {}
+    return canonicalizeTrustedGithubUsers(String(value)).join(', ');
   }
   if (key === 'github_board_status_option_ids' || key === 'github_board_custom_field_ids') {
     if (typeof value === 'string') return value;
@@ -180,6 +180,10 @@ function validateAndSerializeSettingValue(
   key: (typeof SETTING_KEYS)[number],
   value: unknown
 ): { value: string | null; error: string | null } {
+  if (key === 'trusted_github_users' && typeof value === 'string' && value.trim() === '') {
+    return { value: null, error: null };
+  }
+
   if (value === null || value === '') {
     return { value: null, error: null };
   }
@@ -206,10 +210,9 @@ function validateAndSerializeSettingValue(
   }
 
   if (key === 'trusted_github_users') {
-    const users = String(value)
-      .split(/[,\n]/)
-      .map((item) => item.trim())
-      .filter(Boolean);
+    const error = validateTrustedGithubUsersInput(value);
+    if (error) return { value: null, error };
+    const users = canonicalizeTrustedGithubUsers(value);
     return { value: JSON.stringify(users), error: null };
   }
 

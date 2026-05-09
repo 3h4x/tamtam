@@ -222,6 +222,27 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
     expect(data.issues[0].author.login).toBe('repo-owner');
   });
 
+  it('unions global trusted_github_users with project safe_users when trusted_only=1', async () => {
+    getSettingsMock.mockReturnValue({ trusted_github_users: ['octocat'], github_owner: '' });
+    loadFileConfigMock.mockReturnValue({ safe_users: ['repo-owner'] });
+    testDb.db.insert(schema.ghIssuesCache).values({
+      project: 'myproj',
+      repo: 'owner/myproj',
+      prs: '[]',
+      issues: JSON.stringify([
+        { number: 1, title: 'Global', author: { login: 'octocat' }, labels: [], assignees: [] },
+        { number: 2, title: 'Project', author: { login: 'repo-owner' }, labels: [], assignees: [] },
+        { number: 3, title: 'Drop', author: { login: 'outsider' }, labels: [], assignees: [] },
+      ]),
+      fetchedAt: Date.now() / 1000,
+    }).run();
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?trusted_only=1');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.issues.map((issue: { number: number }) => issue.number)).toEqual([1, 2]);
+  });
+
   it('returns no issues when neither global nor project allowlists trust any author', async () => {
     testDb.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
