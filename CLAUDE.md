@@ -9,7 +9,7 @@ TamTam's north star is a **quality-gated release pipeline** for each tracked rep
 - **Direct Branch**: `test → review → (fix loop) → commit → push`
 - **PR Workflow**: `test → review → (fix loop) → commit → push → dod → merge`
 
-Steps are pluggable per project. The **🚀 Release** button triggers the pipeline at the right starting step; with `auto_push_enabled` on, the chain continues automatically. Verdicts (`LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP`) are emitted by Claude during review and drive fix loops. Fixes themselves are unbounded — the cap (3 iterations per release) is enforced on the next verification step (re-test or re-review), so a final fix always lands but may go unverified. The pipeline strip in the Terminal tab shows live step state (`○` pending, spinner running, `✓` done, `!` needs attention, `✗` failed) and is only visible while a pipeline is actively running.
+Steps are pluggable per project. The **🚀 Release** button triggers the pipeline at the right starting step; with `auto_push_enabled` on, the chain continues automatically. Verdicts (`LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP`) are emitted by the selected provider during review and drive fix loops. Fixes themselves are unbounded — the cap (3 iterations per release) is enforced on the next verification step (re-test or re-review), so a final fix always lands but may go unverified. The pipeline strip in the Terminal tab shows live step state (`○` pending, spinner running, `✓` done, `!` needs attention, `✗` failed) and is only visible while a pipeline is actively running.
 
 **See `docs/PIPELINE.md`** for the full state machine, completion-hook chain, helper modules (`lib/pipeline/start-*.ts`), verdict-detection rules, fresh-LGTM skip logic, and `mark-dod` / `pr-wait` behavior.
 

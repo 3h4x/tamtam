@@ -1,6 +1,6 @@
 # Release Pipeline — How It Works
 
-The pipeline is a quality-gated sequence driven by Claude. The exact steps depend on the **workflow mode** configured per project.
+The pipeline is a quality-gated sequence driven by the selected provider. The exact steps depend on the **workflow mode** configured per project.
 
 ## Auto-fix policy (requirements)
 
