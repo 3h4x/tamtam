@@ -118,6 +118,7 @@ describe('AgentModal', () => {
         schedule: null,
         runner: 'pm2',
         enabled: true,
+        prerequisiteCommand: null,
       })
     })
 

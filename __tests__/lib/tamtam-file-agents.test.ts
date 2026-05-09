@@ -109,6 +109,30 @@ Do something.`);
     expect(agents[0].name).toBe('agent');
   });
 
+  it('defaults prerequisiteCommand to null when absent', () => {
+    writeAgent(tmpDir, 'plain', 'Do stuff.');
+    const a = scanFileAgents(tmpDir, 'proj')[0];
+    expect(a.prerequisiteCommand).toBeNull();
+  });
+
+  it('parses prerequisiteCommand from frontmatter (JSON-quoted)', () => {
+    writeAgent(tmpDir, 'tests-watcher', `---
+prerequisiteCommand: "pnpm test --reporter=basic"
+---
+Look at how slow tests are.`);
+    const a = scanFileAgents(tmpDir, 'proj')[0];
+    expect(a.prerequisiteCommand).toBe('pnpm test --reporter=basic');
+  });
+
+  it('parses prerequisiteCommand without quotes when no special characters', () => {
+    writeAgent(tmpDir, 'simple-prereq', `---
+prerequisiteCommand: pnpm test
+---
+Body.`);
+    const a = scanFileAgents(tmpDir, 'proj')[0];
+    expect(a.prerequisiteCommand).toBe('pnpm test');
+  });
+
   it('parses space-separated skillIds', () => {
     writeAgent(tmpDir, 'multi', `---
 skillIds: agent-tests agent-docs-claude
@@ -217,6 +241,40 @@ Original prompt.`);
     writeFileAgent(tmpDir, 'proj', 'agent2', { runner: 'pm2' });
     const content2 = readFileSync(join(tmpDir, '.tamtam', 'agents', 'agent2.md'), 'utf-8');
     expect(content2).not.toContain('runner:');
+  });
+
+  it('round-trips prerequisiteCommand through write + load', () => {
+    writeFileAgent(tmpDir, 'proj', 'tester', {
+      prompt: 'Watch test speed.',
+      prerequisiteCommand: 'pnpm test',
+    });
+    const content = readFileSync(join(tmpDir, '.tamtam', 'agents', 'tester.md'), 'utf-8');
+    expect(content).toContain('prerequisiteCommand:');
+    const a = loadFileAgent(tmpDir, 'proj', 'tester');
+    expect(a!.prerequisiteCommand).toBe('pnpm test');
+  });
+
+  it('clears prerequisiteCommand when set to null', () => {
+    writeFileAgent(tmpDir, 'proj', 'tester', {
+      prompt: 'x',
+      prerequisiteCommand: 'pnpm test',
+    });
+    writeFileAgent(tmpDir, 'proj', 'tester', { prerequisiteCommand: null });
+    const a = loadFileAgent(tmpDir, 'proj', 'tester');
+    expect(a!.prerequisiteCommand).toBeNull();
+    const content = readFileSync(join(tmpDir, '.tamtam', 'agents', 'tester.md'), 'utf-8');
+    expect(content).not.toContain('prerequisiteCommand:');
+  });
+
+  it('preserves prerequisiteCommand when other fields are updated', () => {
+    writeFileAgent(tmpDir, 'proj', 'tester', {
+      prompt: 'x',
+      prerequisiteCommand: 'pnpm test --reporter=basic',
+    });
+    writeFileAgent(tmpDir, 'proj', 'tester', { model: 'smart' });
+    const a = loadFileAgent(tmpDir, 'proj', 'tester');
+    expect(a!.prerequisiteCommand).toBe('pnpm test --reporter=basic');
+    expect(a!.model).toBe('smart');
   });
 
   it('writes enabled: false only when disabled', () => {

@@ -72,10 +72,14 @@ export async function PATCH(
           skillIds: body.skillIds,
         });
       }
-      // Prompt edits always flow to the file. Provider frontmatter is also
-      // committed state, so provider-only updates must write the file too.
-      if (body.prompt !== undefined || provider !== undefined) {
-        writeFileAgent(projPath, parsedFile.project, parsedFile.name, { prompt: body.prompt, provider });
+      // Prompt edits always flow to the file. Provider frontmatter and the
+      // prerequisite shell command are also committed state, so updates to
+      // either must write the file too.
+      if (body.prompt !== undefined || provider !== undefined || body.prerequisiteCommand !== undefined) {
+        const prerequisiteCommand = body.prerequisiteCommand === undefined
+          ? undefined
+          : (typeof body.prerequisiteCommand === 'string' ? (body.prerequisiteCommand.trim() || null) : null);
+        writeFileAgent(projPath, parsedFile.project, parsedFile.name, { prompt: body.prompt, provider, prerequisiteCommand });
       }
       const updated = loadFileAgent(projPath, parsedFile.project, parsedFile.name);
       if (!updated) return NextResponse.json({ detail: 'not found after write' }, { status: 500 });
@@ -114,6 +118,11 @@ export async function PATCH(
   if (body.runner !== undefined) updates.runner = body.runner;
   if (body.enabled !== undefined) updates.enabled = body.enabled;
   if (provider !== undefined) updates.provider = provider;
+  if (body.prerequisiteCommand !== undefined) {
+    updates.prerequisiteCommand = typeof body.prerequisiteCommand === 'string'
+      ? (body.prerequisiteCommand.trim() || null)
+      : null;
+  }
 
   db.update(schema.agents).set(updates).where(eq(schema.agents.id, agentId)).run();
   clearAgentsCache();
@@ -133,6 +142,7 @@ export async function PATCH(
           runner: agent.runner,
           enabled: agent.enabled,
           provider: agent.provider,
+          prerequisiteCommand: agent.prerequisiteCommand,
         });
       } catch { /* non-fatal */ }
     }

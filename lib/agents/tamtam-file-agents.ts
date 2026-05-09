@@ -18,6 +18,7 @@ export interface FileAgent {
   runner: string;
   enabled: boolean;
   provider: string | null;
+  prerequisiteCommand: string | null;
   createdAt: number;
   updatedAt: number;
   source: 'file';
@@ -32,10 +33,11 @@ export interface FileAgentUpdates {
   runner?: string;
   enabled?: boolean;
   provider?: string | null;
+  prerequisiteCommand?: string | null;
 }
 
 // Canonical frontmatter key order for serialization
-const FM_KEY_ORDER = ['provider', 'model', 'schedule', 'skillIds', 'runner', 'enabled'] as const;
+const FM_KEY_ORDER = ['provider', 'model', 'schedule', 'skillIds', 'runner', 'enabled', 'prerequisiteCommand'] as const;
 
 function normalizeFileAgentProvider(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;
@@ -64,6 +66,21 @@ function parseFrontmatter(content: string): { meta: Record<string, string>; body
   }
 
   return { meta, body };
+}
+
+function parsePrerequisiteCommand(raw: string | undefined): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('"')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      return typeof parsed === 'string' && parsed.trim() ? parsed : null;
+    } catch {
+      return trimmed;
+    }
+  }
+  return trimmed;
 }
 
 function parseSkillIds(raw: string): string[] {
@@ -110,6 +127,7 @@ function buildFileAgent(
         ? override.enabled
         : meta.enabled !== 'false',
     provider: normalizeFileAgentProvider(meta.provider),
+    prerequisiteCommand: parsePrerequisiteCommand(meta.prerequisiteCommand),
     createdAt: now,
     updatedAt: now,
     source: 'file',
@@ -124,7 +142,8 @@ function serializeAgent(
   skillIds: string[],
   runner: string,
   enabled: boolean,
-  prompt: string
+  prompt: string,
+  prerequisiteCommand: string | null
 ): string {
   const fmLines: string[] = [];
 
@@ -141,6 +160,8 @@ function serializeAgent(
       fmLines.push(`runner: ${runner}`);
     } else if (key === 'enabled' && !enabled) {
       fmLines.push(`enabled: false`);
+    } else if (key === 'prerequisiteCommand' && prerequisiteCommand) {
+      fmLines.push(`prerequisiteCommand: ${JSON.stringify(prerequisiteCommand)}`);
     }
   }
 
@@ -262,8 +283,11 @@ export function writeFileAgent(
     ? normalizeFileAgentProvider(updates.provider)
     : (current?.provider ?? null);
   const prompt = updates.prompt ?? current?.prompt ?? '';
+  const prerequisiteCommand = updates.prerequisiteCommand !== undefined
+    ? (updates.prerequisiteCommand?.trim() || null)
+    : (current?.prerequisiteCommand ?? null);
 
-  const content = serializeAgent(provider, model, schedule, skillIds, runner, enabled, prompt);
+  const content = serializeAgent(provider, model, schedule, skillIds, runner, enabled, prompt, prerequisiteCommand);
   writeFileSync(filePath, content);
 
   return buildFileAgent(filePath, agentName, projectName, content, Date.now() / 1000);

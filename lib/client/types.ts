@@ -235,6 +235,7 @@ export interface Agent {
   schedule: string | null
   runner: string
   enabled: boolean
+  prerequisiteCommand?: string | null
   createdAt: number
   updatedAt: number
   source?: 'db' | 'file'
