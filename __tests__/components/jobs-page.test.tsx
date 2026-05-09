@@ -121,6 +121,7 @@ describe('JobsPage', () => {
     expect(runningButton.className).toContain('text-status-info')
     expect(runningButton.className).not.toContain('text-status-warning')
     expect(runningBadge.className).toContain('text-status-info')
+    unmount()
   })
 
   it('uses the bounded jobs page and displays the full server total', async () => {
@@ -204,6 +205,28 @@ describe('JobsPage', () => {
       expect(container.textContent).not.toContain('run tests')
     })
 
+    unmount()
+  })
+
+  it('does not render the board link when board sync is enabled but both URLs are blank', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        settings: {
+          github_board_sync_enabled: 'true',
+          github_board_view_url: '',
+          github_board_project_url: '   ',
+        },
+      }),
+    }))
+
+    const { container, unmount } = renderJobsPage()
+
+    await vi.waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 200 })
+    })
+
+    expect(container.textContent).not.toContain('Board')
     unmount()
   })
 })

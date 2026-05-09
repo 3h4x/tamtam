@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ErrorState } from './ErrorState'
+import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
 
 interface ReleaseStep {
   job_id: string
@@ -108,10 +109,7 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
       .then((r) => r.json())
       .then((data) => {
         const s = data?.settings ?? data
-        if (s?.github_board_sync_enabled === 'true') {
-          const url = (typeof s?.github_board_view_url === 'string' && s.github_board_view_url) || (typeof s?.github_board_project_url === 'string' ? s.github_board_project_url : '')
-          if (url) setBoardUrl(url)
-        }
+        setBoardUrl(resolveGithubBoardUrl(s))
       })
       .catch(() => undefined)
   }, [])

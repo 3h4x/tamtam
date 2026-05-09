@@ -288,6 +288,7 @@ describe('ProjectDetailPage', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.unstubAllGlobals()
     document.body.innerHTML = ''
   })
@@ -593,5 +594,46 @@ describe('ProjectDetailPage', () => {
     })
 
     unmount()
+  })
+
+  it('clears the board link after a polled settings refresh blanks the board URLs', async () => {
+    vi.useFakeTimers()
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        json: async () => ({
+          settings: {
+            github_board_sync_enabled: 'true',
+            github_board_view_url: 'https://github.com/orgs/acme/projects/9/views/1',
+            github_board_project_url: 'https://github.com/orgs/acme/projects/9',
+          },
+        }),
+      })
+      .mockResolvedValue({
+        json: async () => ({
+          settings: {
+            github_board_sync_enabled: 'true',
+            github_board_view_url: '',
+            github_board_project_url: '   ',
+          },
+        }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container, unmount } = renderPage()
+
+    await vi.waitFor(() => {
+      const boardLink = container.querySelector('a[title="Open this project on the TamTam GitHub board"]')
+      expect(boardLink?.getAttribute('href')).toBe('https://github.com/orgs/acme/projects/9/views/1?filterQuery=acme%2Fwidgets')
+    })
+
+    await vi.advanceTimersByTimeAsync(5000)
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('a[title="Open this project on the TamTam GitHub board"]')).toBeNull()
+    })
+
+    unmount()
+    vi.useRealTimers()
   })
 })
