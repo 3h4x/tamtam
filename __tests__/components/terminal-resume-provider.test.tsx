@@ -40,6 +40,12 @@ function renderElement(element: React.ReactElement) {
   }
 }
 
+async function flushMicrotasks() {
+  await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
 function BootstrapHarness() {
   useTerminalBootstrap({
     projectName: 'proj',
@@ -85,6 +91,21 @@ function SessionBootstrapHarness({ sessionId }: { sessionId: string }) {
   return null
 }
 
+function LandingBootstrapHarness({ onLoadSessions = vi.fn() }: { onLoadSessions?: () => void }) {
+  useTerminalBootstrap({
+    projectName: 'proj',
+    initialSessionId: undefined,
+    jobParam: null,
+    promptParam: null,
+    issueNumberParam: null,
+    issueTitleParam: null,
+    resumeSessionIdParam: null,
+    resumeProviderParam: null,
+    onLoadSessions,
+  })
+  return null
+}
+
 function SubmitHarness({ onReady }: { onReady: (submit: (text?: string) => Promise<void>) => void }) {
   const { handleSubmit } = useHandleSubmit({
     projectName: 'proj',
@@ -123,6 +144,7 @@ describe('pending continue-issue resume provider', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.useRealTimers()
     terminalStore.reset('proj')
     document.body.innerHTML = ''
   })
@@ -284,6 +306,177 @@ describe('pending continue-issue resume provider', () => {
     })
 
     expect(startStreamMock).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('continues a restored running session with prerequisite-aware streaming', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/jobs?project=proj') {
+        return {
+          ok: true,
+          json: async () => ({
+            jobs: [
+              {
+                id: 'run-done',
+                kind: 'run',
+                status: 'done',
+                session_id: 'sess-prereq',
+                started_at: 100,
+                finished_at: 120,
+                exit_code: 0,
+                user_prompt: 'first prompt',
+                prompt: null,
+                context_meta: JSON.stringify({
+                  skills: [{ id: 'skill-1', name: 'Checklist', description: 'desc', source: 'db' }],
+                  docs: [{ name: 'Runbook', content: 'ops notes' }],
+                }),
+                provider: 'claude',
+              },
+              {
+                id: 'run-live',
+                kind: 'run',
+                status: 'running',
+                session_id: 'sess-prereq',
+                started_at: 200,
+                finished_at: null,
+                exit_code: null,
+                user_prompt: 'live prompt',
+                prompt: null,
+                context_meta: JSON.stringify({
+                  prerequisite: {
+                    command: 'pnpm test',
+                    exitCode: 1,
+                    durationMs: 42,
+                  },
+                }),
+                provider: 'claude',
+              },
+            ],
+          }),
+        }
+      }
+      if (url === '/api/jobs/run-done') {
+        return {
+          ok: true,
+          json: async () => ({ log: 'assistant reply 1', log_pruned: false }),
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+
+    const { unmount } = renderElement(<SessionBootstrapHarness sessionId="sess-prereq" />)
+
+    await vi.waitFor(() => {
+      expect(startStreamMock).toHaveBeenCalledWith('proj', 'run-live', false, true)
+      expect(terminalStore.get('proj').selectedItems).toEqual([
+        { id: 'skill-1', name: 'Checklist', description: 'desc', source: 'db' },
+      ])
+      expect(terminalStore.get('proj').selectedDocs).toEqual([
+        { name: 'Runbook', content: 'ops notes' },
+      ])
+    })
+
+    unmount()
+  })
+
+  it('passes the prerequisite flag when opening a claude job from a job param', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/jobs/review-live') {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'review-live',
+            kind: 'review',
+            release_id: 'rel-2',
+            session_id: null,
+            started_at: 1_700_000_000,
+            exit_code: null,
+            user_prompt: 'review this',
+            prompt: null,
+            context_meta: JSON.stringify({
+              prerequisite: {
+                command: 'pnpm lint',
+                exitCode: 0,
+                durationMs: 12,
+              },
+            }),
+            provider: 'claude',
+          }),
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+
+    const { unmount } = renderElement(<JobBootstrapHarness jobParam="review-live" />)
+
+    await vi.waitFor(() => {
+      expect(startStreamMock).toHaveBeenCalledWith('proj', 'review-live', false, true)
+      expect(terminalStore.get('proj').history).toEqual([
+        { role: 'status', text: expect.stringContaining('review') },
+        { role: 'user', text: 'review this' },
+      ])
+    })
+
+    unmount()
+  })
+
+  it('attaches a fresh terminal landing page to the newest running release only', async () => {
+    vi.useFakeTimers()
+    const onLoadSessions = vi.fn()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          jobs: [
+            {
+              id: 'agent-1',
+              kind: 'agent:nightly',
+              status: 'running',
+              session_id: 'sess-agent',
+              started_at: 100,
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          jobs: [
+            {
+              id: 'release-2',
+              kind: 'release',
+              status: 'running',
+              session_id: null,
+              started_at: 300,
+            },
+            {
+              id: 'release-1',
+              kind: 'release',
+              status: 'running',
+              session_id: null,
+              started_at: 200,
+            },
+          ],
+        }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { unmount } = renderElement(<LandingBootstrapHarness onLoadSessions={onLoadSessions} />)
+
+    await flushMicrotasks()
+
+    expect(onLoadSessions).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(replaceMock).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(1000)
+
+    await vi.waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/project/proj/terminal?job=release-2')
+    })
+
     unmount()
   })
 
