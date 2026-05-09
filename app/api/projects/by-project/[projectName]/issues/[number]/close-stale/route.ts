@@ -1,0 +1,84 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { resolveProjectPath } from '@/lib/shared/project-data';
+import { resolveGithubRepo } from '@/lib/shared/gh-status';
+import { exec } from '@/lib/shared/shell';
+import { getImproveConfig } from '@/lib/scheduling/scheduling';
+
+// Close an issue with a verdict comment when a TamTam run determines the
+// issue is stale, dead, or otherwise no longer actionable. The findings string
+// is posted as a comment first, then the issue is closed (state-reason: not_planned).
+//
+// Body: { findings: string; reason?: 'stale' | 'duplicate' | 'wontfix' | 'fixed' }
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ projectName: string; number: string }> },
+): Promise<NextResponse> {
+  const { projectName, number } = await params;
+  const issueNumber = Number(number);
+  if (!Number.isFinite(issueNumber) || issueNumber <= 0) {
+    return NextResponse.json({ detail: 'invalid issue number' }, { status: 400 });
+  }
+
+  const projPath = resolveProjectPath(projectName);
+  if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
+
+  let body: { findings?: string; reason?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ detail: 'invalid JSON body' }, { status: 400 });
+  }
+
+  const findings = (body.findings ?? '').trim();
+  if (!findings) return NextResponse.json({ detail: 'findings required' }, { status: 400 });
+
+  const reason = (body.reason ?? 'stale').toLowerCase();
+  // GitHub state-reason: only 'not_planned' and 'completed' are accepted via gh CLI;
+  // everything except 'fixed' maps to not_planned.
+  const stateReason = reason === 'fixed' ? 'completed' : 'not_planned';
+
+  const { projects } = getImproveConfig();
+  const projectCfg = Object.values(projects).find((cfg) => cfg.project === projectName);
+  const repo = await resolveGithubRepo(projectName, {
+    github: projectCfg?.github ?? null,
+    path: projPath,
+  });
+
+  const verdictLabel = reason.toUpperCase();
+  const commentBody =
+    `## TamTam verdict: ${verdictLabel}\n\n` +
+    `${findings}\n\n` +
+    `_Closing this issue based on the analysis above. Reopen if the assumption is wrong._`;
+
+  const commentR = await exec(
+    'gh',
+    ['issue', 'comment', String(issueNumber), '--repo', repo, '--body', commentBody],
+    { cwd: projPath, timeout: 30000 },
+  );
+  if (commentR.exitCode !== 0) {
+    return NextResponse.json(
+      { detail: `gh issue comment failed: ${commentR.stderr.trim() || commentR.stdout.trim()}` },
+      { status: 502 },
+    );
+  }
+
+  const closeR = await exec(
+    'gh',
+    ['issue', 'close', String(issueNumber), '--repo', repo, '--reason', stateReason],
+    { cwd: projPath, timeout: 30000 },
+  );
+  if (closeR.exitCode !== 0) {
+    return NextResponse.json(
+      { detail: `gh issue close failed: ${closeR.stderr.trim() || closeR.stdout.trim()}` },
+      { status: 502 },
+    );
+  }
+
+  return NextResponse.json({
+    status: 'closed',
+    issue: issueNumber,
+    repo,
+    reason: stateReason,
+    verdict: verdictLabel,
+  });
+}

@@ -47,6 +47,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 - `issues` — GitHub PRs and issues (GET, with `?refresh=1` to bypass cache); POST merges or approves a PR and switches working copy to default after merge
 - `issue-branch` — Create or checkout `fix/issue-<n>-<slug>` before Claude edits (POST)
 - `continue-issue` — Build a "Continue work" payload for an issue (GET: `?issue_number=N`); returns `{ sessionId, provider, prompt, unverifiedCount, hasContext }`
+- `issues/[number]/close-stale` — Post a verdict comment then close the issue (POST: `{ findings: string; reason?: 'stale' | 'duplicate' | 'wontfix' | 'fixed' }`). `reason` defaults to `stale`; `fixed` maps to GitHub state-reason `completed`, everything else maps to `not_planned`. Returns `{ status: 'closed', issue, repo, reason, verdict }`; `502` when the `gh` CLI calls fail.
 - `mark-dod` — Run DoD verification for the latest release-linked issue or PR context (POST); also triggered automatically after review→LGTM and after successful PR-producing pushes when auto-merge is off
 - `pr-branch` — Fetch and checkout a PR's head branch (POST: `{ branch }`)
 - `pr-gates` — TamTam-side gate state for a PR: tests/review/DoD badges (GET)

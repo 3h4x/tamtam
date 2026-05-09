@@ -274,7 +274,7 @@ Behaviour:
 - The agent is spawned regardless of the prerequisite's exit code. Failures are surfaced through the prompt block (`Exit code: <n>`) so the agent can analyse them.
 - Timeout is 10 minutes (hardcoded for now).
 - The command runs with `bash -c <cmd>` in the project's working directory.
-- The job row is created only after the prerequisite completes, so background probes cannot mark a long prerequisite as a dead PM2 spawn. The per-project agent start slot remains held while the prerequisite runs, so another agent for the same project queues instead of starting concurrently, and project-wide starters such as terminal runs, tests, CI fixes, reruns, and releases see the project as busy.
+- The job row is created with `pid: 0` **before** the prerequisite runs, so the run is immediately visible in the UI and the log file streams in real time. The per-project agent start slot remains held while the prerequisite runs, so another agent for the same project queues instead of starting concurrently, and project-wide starters such as terminal runs, tests, CI fixes, reruns, and releases see the project as busy. Because the job exists early, mid-prerequisite cancellation via the cancel-job endpoint works: the endpoint aborts the prereq process tree, and the route reaps the placeholder cleanly (exitCode 130). The `pid: 0` placeholder is invisible to the probe sweep's PM2 liveness checks, so probes never falsely finalize a running prereq.
 - For file-backed agents, the field is committed frontmatter (`prerequisiteCommand: "pnpm test"`); for DB agents it's stored on the `agents` row.
 
 ## Per-agent statistics
@@ -324,12 +324,12 @@ User/scheduler triggers
           → still pending / release reacquired lock → 202 queued with `code: "pending_release"` or `code: "pipeline_lock"` and a DB-backed queue row
       → Fetch skills from DB (by skillIds)
       → Compose system prompt: `## SkillName\nContent` + `---` separators
-      → Run optional prerequisite command before creating a job row
+      → Create job record (pid: 0, immediately visible in UI)
+      → Run optional prerequisite command (cancellable via cancel-job endpoint)
       → Re-check release/project blockers after the prerequisite completes
+      → Write prerequisite artifact, if applicable
       → Build command:
           claude --print --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions --model {agent.model}
-      → Create job record
-      → Write prerequisite artifact, if applicable
       → Start via PM2 with composed prompt as stdin
       → Return job ID and PID
       → If startup fails before PM2 takes over, release the per-project start slot and drain the next queued fire immediately
