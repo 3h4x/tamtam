@@ -159,4 +159,63 @@ describe('GlobalRecommendationsPage', () => {
 
     unmount()
   })
+
+  it('treats an apply reload failure as a page refresh error, not an item action failure', async () => {
+    const alpha = makeRecommendation({ id: 'alpha-1', project: 'alpha', title: 'Alpha' })
+
+    fetchAllOpenRecommendationsMock
+      .mockResolvedValueOnce({ recommendations: [alpha] })
+      .mockRejectedValueOnce(new Error('refresh failed after apply'))
+    applyRecommendationMock.mockResolvedValue({ recommendation: { ...alpha, status: 'applied' } })
+
+    const { container, unmount } = renderPage()
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Alpha')
+    })
+
+    const acceptButton = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Accept')
+    acceptButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(applyRecommendationMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ id: 'alpha-1' }))
+      expect(fetchAllOpenRecommendationsMock).toHaveBeenCalledTimes(2)
+      expect(container.textContent).toContain('Failed to load recommendations.')
+      expect(container.textContent).toContain('refresh failed after apply')
+    })
+
+    expect(container.textContent).not.toContain('Failed to apply recommendation')
+    expect(container.textContent).not.toContain('Alpha')
+
+    unmount()
+  })
+
+  it('treats a dismiss reload failure as a page refresh error, not an item action failure', async () => {
+    const beta = makeRecommendation({ id: 'beta-1', project: 'beta', title: 'Beta' })
+
+    fetchAllOpenRecommendationsMock
+      .mockResolvedValueOnce({ recommendations: [beta] })
+      .mockRejectedValueOnce(new Error('refresh failed after dismiss'))
+    updateRecommendationMock.mockResolvedValue({ recommendation: { ...beta, status: 'dismissed' } })
+
+    const { container, unmount } = renderPage()
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Beta')
+    })
+
+    const dismissButton = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'dismiss')
+    dismissButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(updateRecommendationMock).toHaveBeenCalledWith('beta', 'beta-1', 'dismissed')
+      expect(fetchAllOpenRecommendationsMock).toHaveBeenCalledTimes(2)
+      expect(container.textContent).toContain('refresh failed after dismiss')
+    })
+
+    expect(container.textContent).not.toContain('Failed to dismiss')
+    expect(container.textContent).not.toContain('Beta')
+
+    unmount()
+  })
 })

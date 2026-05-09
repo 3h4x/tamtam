@@ -19,9 +19,11 @@ import { PipelineStrip } from '@/components/project-detail/PipelineStrip'
 import { ProjectActions } from '@/components/project-detail/ProjectActions'
 import { TabNav } from '@/components/project-detail/TabNav'
 import { OverviewTab } from '@/components/project-detail/OverviewTab'
+import { RecommendationsTab } from '@/components/project-detail/RecommendationsTab'
 import { AgentsTab } from '@/components/AgentsTab'
+import { buildProjectPath, buildProjectTerminalPath } from '@/lib/client/project-routes'
 
-type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents'
+type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents' | 'recommendations'
 
 type Verdict = 'LGTM' | 'NEEDS ATTENTION' | 'DO NOT SHIP'
 interface ProjectDetailPageProps {
@@ -37,12 +39,12 @@ export function ProjectDetailPage({
   const name = params.name
   const router = useRouter()
   const { toast } = useToast()
-  const VALID_TABS: Tab[] = ['overview', 'config', 'history', 'terminal', 'changes', 'issues', 'docs', 'agents']
+  const VALID_TABS: Tab[] = ['overview', 'config', 'history', 'terminal', 'changes', 'issues', 'docs', 'agents', 'recommendations']
   const activeTab: Tab = params.sessionId
     ? 'terminal'
     : VALID_TABS.includes(params.tab as Tab) ? (params.tab as Tab) : 'overview'
   const setActiveTab = (tab: Tab) => {
-    router.push(tab === 'overview' ? `/project/${name}` : `/project/${name}/${tab}`)
+    router.push(tab === 'overview' ? buildProjectPath(name) : buildProjectPath(name, tab))
   }
   const [fixingCi, setFixingCi] = useState(false)
   const [fixCiResult, setFixCiResult] = useState<string | null>(null)
@@ -195,7 +197,7 @@ export function ProjectDetailPage({
     try {
       const result = await runCustomAction(name, actionName)
       toast(`${actionName} started for ${name}`, 'success')
-      router.push(`/project/${name}/terminal?job=${encodeURIComponent(result.job_id)}`)
+      router.push(buildProjectTerminalPath(name, { jobId: result.job_id }))
     } catch (err) {
       toast(err instanceof Error ? err.message : `Failed to run ${actionName}`, 'error')
     } finally {
@@ -322,7 +324,7 @@ export function ProjectDetailPage({
     setTesting(true)
     try {
       const result = await testProject(name)
-      router.push(`/project/${name}/terminal?job=${result.job_id}`)
+      router.push(buildProjectTerminalPath(name, { jobId: result.job_id }))
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to start test', 'error')
     } finally {
@@ -335,7 +337,7 @@ export function ProjectDetailPage({
     setPushing(true)
     try {
       const result = await pushProject(name)
-      router.push(`/project/${name}/terminal?job=${result.job_id}`)
+      router.push(buildProjectTerminalPath(name, { jobId: result.job_id }))
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to push', 'error')
     } finally {
@@ -351,7 +353,7 @@ export function ProjectDetailPage({
       toast(`${result.step}: ${result.message}`, 'info')
       const jobIdToOpen = result.release_job_id ?? result.job_id
       if (jobIdToOpen) {
-        router.push(`/project/${name}/terminal?job=${encodeURIComponent(jobIdToOpen)}`)
+        router.push(buildProjectTerminalPath(name, { jobId: jobIdToOpen }))
       }
     } catch (err) {
       const error = err as Error & { isPipelineLocked?: boolean; blockingJobId?: string }
@@ -373,7 +375,7 @@ export function ProjectDetailPage({
     setPushingToPr(true)
     try {
       const result = await pushProject(name, { commit: true })
-      router.push(`/project/${name}/terminal?job=${encodeURIComponent(result.job_id)}`)
+      router.push(buildProjectTerminalPath(name, { jobId: result.job_id }))
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to push to PR', 'error')
     } finally {
@@ -430,7 +432,7 @@ export function ProjectDetailPage({
     setFixCiResult(null)
     try {
       const result = await fixCi(name)
-      router.push(`/project/${name}/terminal?job=${encodeURIComponent(result.job_id)}`)
+      router.push(buildProjectTerminalPath(name, { jobId: result.job_id }))
     } catch (err) {
       setFixCiResult(err instanceof Error ? err.message : 'Failed to start CI fix')
       setFixingCi(false)
@@ -728,6 +730,10 @@ export function ProjectDetailPage({
           prWorkflowEnabled={!!config?.pr_workflow_enabled}
           projectJobs={projectJobs}
         />
+      )}
+
+      {activeTab === 'recommendations' && name && (
+        <RecommendationsTab projectName={name} />
       )}
 
       {/* Terminal Tab */}
