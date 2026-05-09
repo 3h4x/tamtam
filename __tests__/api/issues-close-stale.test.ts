@@ -1,11 +1,30 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import * as schema from '@/lib/db/schema';
+
+function createTestDb() {
+  const sqlite = new Database(':memory:');
+  sqlite.pragma('journal_mode = WAL');
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS gh_issues_cache (
+      project TEXT PRIMARY KEY,
+      repo TEXT NOT NULL,
+      prs TEXT NOT NULL DEFAULT '[]',
+      issues TEXT NOT NULL DEFAULT '[]',
+      fetched_at REAL NOT NULL
+    );
+  `);
+  return { sqlite, db: drizzle(sqlite, { schema }) };
+}
 
 describe('POST /api/projects/by-project/[projectName]/issues/[number]/close-stale', () => {
   let POST: (req: NextRequest, ctx: { params: Promise<{ projectName: string; number: string }> }) => Promise<Response>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
   let resolveGithubRepoMock: ReturnType<typeof vi.fn>;
+  let testDb: ReturnType<typeof createTestDb>;
 
   function ok(stdout = '') {
     return { exitCode: 0, stdout, stderr: '' };
@@ -25,10 +44,12 @@ describe('POST /api/projects/by-project/[projectName]/issues/[number]/close-stal
 
   beforeEach(async () => {
     vi.resetModules();
+    testDb = createTestDb();
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn().mockResolvedValue(ok());
     resolveGithubRepoMock = vi.fn().mockResolvedValue('owner/repo');
 
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
@@ -45,6 +66,7 @@ describe('POST /api/projects/by-project/[projectName]/issues/[number]/close-stal
   });
 
   afterEach(() => {
+    testDb.sqlite.close();
     vi.resetModules();
   });
 
@@ -65,6 +87,15 @@ describe('POST /api/projects/by-project/[projectName]/issues/[number]/close-stal
   });
 
   it('comments and closes the issue with not_planned by default', async () => {
+    testDb.db.insert(schema.ghIssuesCache)
+      .values({
+        project: 'proj1',
+        repo: 'owner/repo',
+        prs: '[]',
+        issues: '[{"number":42}]',
+        fetchedAt: Date.now() / 1000,
+      })
+      .run();
     const res = await POST(makeRequest({ findings: 'No longer reproducible after the fix in #99.' }), ctx());
     expect(res.status).toBe(200);
     const data = await res.json();
@@ -80,6 +111,8 @@ describe('POST /api/projects/by-project/[projectName]/issues/[number]/close-stal
     expect(commentBody).toContain('No longer reproducible');
 
     expect(calls[1][1]).toEqual(expect.arrayContaining(['issue', 'close', '42', '--repo', 'owner/repo', '--reason', 'not_planned']));
+    const cached = testDb.db.select().from(schema.ghIssuesCache).all();
+    expect(cached).toHaveLength(0);
   });
 
   it('uses completed reason when verdict is fixed', async () => {
@@ -100,6 +133,15 @@ describe('POST /api/projects/by-project/[projectName]/issues/[number]/close-stal
   });
 
   it('returns 502 when gh close fails after comment posted', async () => {
+    testDb.db.insert(schema.ghIssuesCache)
+      .values({
+        project: 'proj1',
+        repo: 'owner/repo',
+        prs: '[]',
+        issues: '[{"number":42}]',
+        fetchedAt: Date.now() / 1000,
+      })
+      .run();
     execMock
       .mockResolvedValueOnce(ok())
       .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'permission denied' });
@@ -107,5 +149,7 @@ describe('POST /api/projects/by-project/[projectName]/issues/[number]/close-stal
     expect(res.status).toBe(502);
     const data = await res.json();
     expect(data.detail).toContain('permission denied');
+    const cached = testDb.db.select().from(schema.ghIssuesCache).all();
+    expect(cached).toHaveLength(1);
   });
 });

@@ -940,6 +940,44 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(drainNextAgentRunMock).toHaveBeenCalledWith('proj1');
   });
 
+  it('cancels a db-backed prerequisite run before the agent spawn begins', async () => {
+    const sharedJob = makeJob();
+    createJobMock.mockReturnValue(sharedJob);
+    const prereq = deferred<{ stdout: string; stderr: string; exitCode: number }>();
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
+      if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
+      if (cmd === 'bash' && args[1] === 'sleep 40') return prereq.promise;
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    insertAgent({ prerequisiteCommand: 'sleep 40' });
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'cancel later' }),
+    });
+    const pending = POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    await vi.waitFor(() => {
+      expect(createJobMock).toHaveBeenCalledOnce();
+      expect(execMock).toHaveBeenCalledWith('bash', ['-c', 'sleep 40'], expect.objectContaining({ cwd: '/path/to/proj' }));
+    });
+
+    const { requestJobCancellation } = await import('@/lib/jobs/cancellation');
+    const cancellation = requestJobCancellation(sharedJob.id, 1_000);
+    prereq.resolve({ stdout: '', stderr: '', exitCode: 130 });
+
+    await expect(cancellation).resolves.toBe(true);
+    const res = await pending;
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.status).toBe('cancelled');
+    expect(startJobMock).not.toHaveBeenCalled();
+    expect(sharedJob.finishedAt).not.toBeNull();
+    expect(sharedJob.exitCode).toBe(130);
+  });
+
   it('re-checks project blockers after a long prerequisite before spawning the agent', async () => {
     const prereq = deferred<{ stdout: string; stderr: string; exitCode: number }>();
     execMock.mockImplementation(async (cmd: string, args: string[]) => {
@@ -1011,6 +1049,54 @@ File-backed prompt.`);
       expect(createJobMock).toHaveBeenCalledOnce();
       expect(startJobMock).toHaveBeenCalledOnce();
       expect(drainNextAgentRunMock).toHaveBeenCalledWith('proj1');
+    } finally {
+      rmSync(projDir, { recursive: true, force: true });
+    }
+  });
+
+  it('cancels a file-backed prerequisite run before the agent spawn begins', async () => {
+    const sharedJob = makeJob();
+    createJobMock.mockReturnValue(sharedJob);
+    const projDir = mkdtempSync(join(tmpdir(), 'tamtam-file-agent-prereq-cancel-'));
+    const prereq = deferred<{ stdout: string; stderr: string; exitCode: number }>();
+    try {
+      mkdirSync(join(projDir, '.tamtam', 'agents'), { recursive: true });
+      writeFileSync(join(projDir, '.tamtam', 'agents', 'file-agent.md'), `---
+prerequisiteCommand: "sleep 45"
+---
+File-backed prompt.`);
+      resolveProjectPathMock.mockReturnValue(projDir);
+      execMock.mockImplementation(async (cmd: string, args: string[]) => {
+        if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
+        if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
+        if (cmd === 'bash' && args[1] === 'sleep 45') return prereq.promise;
+        return { stdout: '', stderr: '', exitCode: 0 };
+      });
+
+      const req = new NextRequest('http://localhost/api/agents/file%3Aproj1%3Afile-agent/run', {
+        method: 'POST',
+        body: JSON.stringify({ prompt: 'cancel file agent later' }),
+      });
+      const pending = POST(req, { params: Promise.resolve({ agentId: 'file:proj1:file-agent' }) });
+
+      await vi.waitFor(() => {
+        expect(createJobMock).toHaveBeenCalledOnce();
+        expect(execMock).toHaveBeenCalledWith('bash', ['-c', 'sleep 45'], expect.objectContaining({ cwd: projDir }));
+      });
+
+      const { requestJobCancellation } = await import('@/lib/jobs/cancellation');
+      const cancellation = requestJobCancellation(sharedJob.id, 1_000);
+      prereq.resolve({ stdout: '', stderr: '', exitCode: 130 });
+
+      await expect(cancellation).resolves.toBe(true);
+      const res = await pending;
+      const data = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(data.status).toBe('cancelled');
+      expect(startJobMock).not.toHaveBeenCalled();
+      expect(sharedJob.finishedAt).not.toBeNull();
+      expect(sharedJob.exitCode).toBe(130);
     } finally {
       rmSync(projDir, { recursive: true, force: true });
     }

@@ -2982,6 +2982,8 @@ describe('runCompletionHooks – release-after-run', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let startReleaseMock: ReturnType<typeof vi.fn>;
   let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
+  let setPendingReleaseMock: ReturnType<typeof vi.fn>;
+  let shouldKeepPendingReleaseMock: ReturnType<typeof vi.fn>;
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
 
   function makeJob(kind: string, overrides: Partial<JobData> = {}): JobData {
@@ -3021,6 +3023,8 @@ describe('runCompletionHooks – release-after-run', () => {
         ? null
         : { autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun }
     );
+    setPendingReleaseMock = vi.fn();
+    shouldKeepPendingReleaseMock = vi.fn().mockReturnValue(false);
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
@@ -3047,6 +3051,10 @@ describe('runCompletionHooks – release-after-run', () => {
     }
     vi.doMock('@/lib/pipeline/start-release', () => ({
       startRelease: startReleaseMock,
+    }));
+    vi.doMock('@/lib/pipeline/pending-release', () => ({
+      setPendingRelease: setPendingReleaseMock,
+      shouldKeepPendingRelease: shouldKeepPendingReleaseMock,
     }));
     vi.doMock('@/lib/pipeline/start-review', () => ({
       startProjectReview: vi.fn().mockResolvedValue({ ok: false, status: 503, detail: 'not needed' }),
@@ -3088,6 +3096,38 @@ describe('runCompletionHooks – release-after-run', () => {
       queueIfBlocked: true,
       sourceJobId: 'agent-my-agent-rar-test',
     });
+  });
+
+  it('triggers startRelease after fix-ci job finishes with exit 0', async () => {
+    const job = makeJob('fix-ci', { id: 'fix-ci-rar-test' });
+    await markDoneFn(job, 0);
+    expect(startReleaseMock).toHaveBeenCalledWith('my-proj', {
+      queueIfBlocked: true,
+      sourceJobId: 'fix-ci-rar-test',
+    });
+  });
+
+  it('preserves pending release intent when fix-ci release chaining is temporarily blocked', async () => {
+    shouldKeepPendingReleaseMock.mockReturnValue(true);
+    startReleaseMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      detail: 'Release pipeline already running for my-proj',
+    });
+    const job = makeJob('fix-ci', { id: 'fix-ci-pending-test' });
+
+    await markDoneFn(job, 0);
+
+    expect(startReleaseMock).toHaveBeenCalledWith('my-proj', {
+      queueIfBlocked: true,
+      sourceJobId: 'fix-ci-pending-test',
+    });
+    expect(shouldKeepPendingReleaseMock).toHaveBeenCalledWith({
+      ok: false,
+      status: 409,
+      detail: 'Release pipeline already running for my-proj',
+    });
+    expect(setPendingReleaseMock).toHaveBeenCalledWith('my-proj');
   });
 
   it('does not trigger startRelease when run job exits non-zero', async () => {

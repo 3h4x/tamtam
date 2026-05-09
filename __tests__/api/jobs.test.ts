@@ -399,6 +399,7 @@ describe('DELETE /api/jobs/[jobId]', () => {
   let updateJobMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
   let requestJobCancellationMock: ReturnType<typeof vi.fn>;
+  let getJobCancellationSignalMock: ReturnType<typeof vi.fn>;
   let killSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
@@ -409,6 +410,7 @@ describe('DELETE /api/jobs/[jobId]', () => {
     updateJobMock = vi.fn();
     execMock = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
     requestJobCancellationMock = vi.fn().mockResolvedValue(true);
+    getJobCancellationSignalMock = vi.fn().mockReturnValue(null);
 
     vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
@@ -419,6 +421,7 @@ describe('DELETE /api/jobs/[jobId]', () => {
       exec: execMock,
     }));
     vi.doMock('@/lib/jobs/cancellation', () => ({
+      getJobCancellationSignal: getJobCancellationSignalMock,
       requestJobCancellation: requestJobCancellationMock,
       SAFE_PID_FLOOR: 100,
       shouldSignalJobPid: (job: { pid: number; kind: string }) => job.pid > 100 && job.kind !== 'push' && job.kind !== 'commit',
@@ -496,6 +499,19 @@ describe('DELETE /api/jobs/[jobId]', () => {
 
     expect(res.status).toBe(200);
     expect(requestJobCancellationMock).toHaveBeenCalledWith('inline-push', 20_000);
+    expect(killSpy).not.toHaveBeenCalled();
+  });
+
+  it('uses cooperative cancellation for agent placeholder jobs with a registered signal', async () => {
+    const job = makeJob({ id: 'agent-prereq', kind: 'agent:Test Agent', pid: 0, finishedAt: null });
+    getJobMock.mockReturnValue(job);
+    getJobCancellationSignalMock.mockReturnValue(new AbortController().signal);
+
+    const req = new NextRequest('http://localhost/api/jobs/agent-prereq', { method: 'DELETE' });
+    const res = await DELETE(req, { params: Promise.resolve({ jobId: 'agent-prereq' }) });
+
+    expect(res.status).toBe(200);
+    expect(requestJobCancellationMock).toHaveBeenCalledWith('agent-prereq', 20_000);
     expect(killSpy).not.toHaveBeenCalled();
   });
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getJob, jobToDict, readParsedLog, readLog, probeJobStatus, updateJob } from '@/lib/jobs/job-storage';
 import {
+  getJobCancellationSignal,
   requestJobCancellation,
   SAFE_PID_FLOOR,
   shouldSignalJobPid,
@@ -45,7 +46,11 @@ export async function DELETE(
     await exec('pm2', ['delete', jobId, '--silent'], { timeout: 5000 });
   } catch {}
 
-  if (job.kind === 'push' || job.kind === 'commit') {
+  const hasCooperativeCancellation = job.kind === 'push'
+    || job.kind === 'commit'
+    || getJobCancellationSignal(job.id) !== null;
+
+  if (hasCooperativeCancellation) {
     job.cancelRequestedExitCode = -2;
     const cancelled = await requestJobCancellation(job.id, 20_000);
     if (!cancelled && job.finishedAt === null) {
