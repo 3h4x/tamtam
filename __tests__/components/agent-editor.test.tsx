@@ -171,6 +171,43 @@ describe('AgentEditor', () => {
     unmount()
   })
 
+  it('does not re-inject the trusted-only prerequisite when editing a cleared issue-cruncher agent', async () => {
+    const { container, unmount } = renderEditor({
+      agent: {
+        id: 'agent-1',
+        name: 'issue-cruncher',
+        project: 'alpha',
+        skillIds: ['agent-issue-cruncher'],
+        docPaths: [],
+        model: 'normal',
+        prompt: '',
+        schedule: null,
+        runner: 'pm2',
+        enabled: true,
+        prerequisiteCommand: null,
+        createdAt: 0,
+        updatedAt: 0,
+      },
+      template: undefined,
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Save changes')
+    })
+
+    buttonByText(container, 'Save changes').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(onSaveMock).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'issue-cruncher',
+        skillIds: ['agent-issue-cruncher'],
+        prerequisiteCommand: null,
+      }))
+    })
+
+    unmount()
+  })
+
   it('replaces the prompt with the improved version when the wand is clicked', async () => {
     improveAgentPromptMock.mockResolvedValueOnce({ improvedPrompt: 'Run pnpm test --reporter=basic and report timing per file.' })
     const { container, unmount } = renderEditor()

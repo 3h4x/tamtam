@@ -9,7 +9,7 @@ import { listEnabledProjects } from '@/lib/shared/enabled-projects';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 import { isCliProvider } from '@/lib/usage/cli-providers';
-import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
+import { parsePrerequisiteCommandInput, resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
 
 const ALL_FILE_AGENTS_TTL_MS = 10_000;
 let _allFileAgentsCache: { agents: FileAgent[]; time: number } | null = null;
@@ -79,14 +79,6 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { name, project, skillIds, docPaths, model, prompt, schedule, runner, enabled } = body;
   const provider = isCliProvider(body.provider) ? body.provider : null;
-  const skillIdsList = skillIds || [];
-  const prerequisiteCommand = resolveAgentPrerequisiteCommand({
-    project: project.trim(),
-    skillIds: skillIdsList,
-    prerequisiteCommand: typeof body.prerequisiteCommand === 'string'
-      ? body.prerequisiteCommand
-      : null,
-  });
 
   if (!name?.trim()) {
     return NextResponse.json({ detail: 'name is required' }, { status: 400 });
@@ -94,6 +86,16 @@ export async function POST(request: NextRequest) {
   if (!project?.trim()) {
     return NextResponse.json({ detail: 'project is required' }, { status: 400 });
   }
+  const projectName = project.trim();
+  const skillIdsList = skillIds || [];
+  const parsedPrerequisiteCommand = parsePrerequisiteCommandInput(body.prerequisiteCommand);
+  const prerequisiteCommand = parsedPrerequisiteCommand !== undefined
+    ? parsedPrerequisiteCommand
+    : resolveAgentPrerequisiteCommand({
+        project: projectName,
+        skillIds: skillIdsList,
+        prerequisiteCommand: null,
+      });
   const { model: parsedModel, error: modelError } = parseOptionalKnownModelInput(model, 'normal');
   if (modelError) {
     return NextResponse.json({ detail: modelError }, { status: 400 });
@@ -108,7 +110,7 @@ export async function POST(request: NextRequest) {
   const agent = {
     id,
     name: name.trim(),
-    project: project.trim(),
+    project: projectName,
     skillIds: JSON.stringify(skillIdsList),
     docPaths: JSON.stringify(docPaths || []),
     model: parsedModel ?? 'normal',
