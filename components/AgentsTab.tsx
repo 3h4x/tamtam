@@ -20,6 +20,16 @@ interface RecommendedAgent extends AgentTemplateRecord {
 
 const RECOMMENDED_AGENTS: RecommendedAgent[] = [
   {
+    name: 'issue-cruncher',
+    description: 'Picks a ready-to-go GitHub issue, implements it, and hands off to the release pipeline. Flags ill-formed issues with needs-info instead of guessing.',
+    model: 'normal',
+    schedule: '',
+    runner: 'pm2',
+    prompt: '',
+    skillIds: ['agent-issue-cruncher'],
+    featured: true,
+  },
+  {
     name: 'security-review',
     description: 'Scans uncommitted diffs for OWASP issues, secrets, and vulnerabilities.',
     model: 'normal',
