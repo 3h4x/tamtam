@@ -292,6 +292,102 @@ describe('fetchProjectData — unpushed field', () => {
   });
 });
 
+describe('fetchProjectData — project selection and metadata', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let execMock: ReturnType<typeof vi.fn>;
+  let existsSyncMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.resetModules();
+    testDb = createTestDb();
+
+    testDb.db.insert(schema.projects).values([
+      {
+        name: 'enabled-proj',
+        path: '/workspace/enabled',
+        enabled: true,
+      },
+      {
+        name: 'disabled-proj',
+        path: '/workspace/disabled',
+        enabled: false,
+      },
+    ]).run();
+
+    execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+    existsSyncMock = vi.fn().mockReturnValue(false);
+
+    vi.doMock('fs', () => ({ existsSync: existsSyncMock }));
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/git/git-utils', () => ({
+      gitChanges: vi.fn().mockResolvedValue(0),
+      isReviewed: vi.fn().mockResolvedValue(null),
+    }));
+    vi.doMock('@/lib/scheduling/launchagent', () => ({
+      launchctlInfo: vi.fn().mockResolvedValue({ loaded: false, pid: null, plistMinute: null, wrapperPhase: null, wrapperCycle: null }),
+      plistPath: vi.fn().mockImplementation((schedId: string) => `/tmp/${schedId}.plist`),
+      pausedPlistPath: vi.fn().mockImplementation((schedId: string) => `/tmp/${schedId}.plist.paused`),
+    }));
+    vi.doMock('@/lib/shared/gh-status', () => ({
+      ghStatusLookup: vi.fn().mockResolvedValue({}),
+    }));
+    vi.doMock('@/lib/jobs/run-history', () => ({
+      lastRunLookup: vi.fn().mockReturnValue({}),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: vi.fn().mockReturnValue({ logDir: '/tmp/logs', claudeBin: 'claude', projects: {}, freqMin: 60 }),
+      getPriorityMultipliers: vi.fn().mockReturnValue({}),
+      effectiveFreqMin: vi.fn().mockReturnValue(60),
+      computeSchedule: vi.fn().mockReturnValue({ minute: 15, cycleHours: 4, hourPhase: 1 }),
+      parseCronTime: vi.fn(),
+      cronFiresStr: vi.fn().mockReturnValue('every 4h'),
+      PRIORITY_ORDER: ['critical', 'high', 'medium', 'low', 'none'],
+    }));
+    vi.doMock('@/lib/scheduling/fire-times', () => ({
+      fireTimesStr: vi.fn().mockReturnValue('every 4h'),
+    }));
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('returns only enabled projects', async () => {
+    const { fetchProjectData } = await import('@/lib/shared/project-data');
+    const result = await fetchProjectData();
+
+    expect(Object.keys(result.projects)).toEqual(['enabled-proj']);
+    expect(result.projects['enabled-proj']).toHaveLength(1);
+  });
+
+  it('normalizes SSH GitHub remotes into https URLs', async () => {
+    execMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('rev-list') && args.includes('@{u}..HEAD')) {
+        return Promise.resolve({ exitCode: 0, stdout: '0\n', stderr: '' });
+      }
+      if (args.includes('remote') && args.includes('get-url') && args.includes('origin')) {
+        return Promise.resolve({ exitCode: 0, stdout: 'git@github.com:acme/widgets.git\n', stderr: '' });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+
+    const { fetchProjectData } = await import('@/lib/shared/project-data');
+    const result = await fetchProjectData();
+
+    expect(result.projects['enabled-proj']?.[0]?.github).toBe('https://github.com/acme/widgets');
+  });
+
+  it('reports paused launchctl state when the paused plist exists', async () => {
+    existsSyncMock.mockImplementation((path: string) => path.endsWith('.plist.paused'));
+
+    const { fetchProjectData } = await import('@/lib/shared/project-data');
+    const result = await fetchProjectData();
+
+    expect(result.projects['enabled-proj']?.[0]?.launchctl).toBe('paused');
+  });
+});
+
 describe('clearProjectDataCache', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let clearProjectDataCache: typeof import('@/lib/shared/project-data').clearProjectDataCache;
