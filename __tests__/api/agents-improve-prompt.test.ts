@@ -71,7 +71,7 @@ describe('POST /api/agents/improve-prompt', () => {
     }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({}),
-      getPermissionModeFlag: () => '--dangerously-skip-permissions',
+      getPermissionModeFlag: () => '--permission-mode bypassPermissions',
     }));
     vi.doMock('@/lib/agents/compose-skills', () => ({
       composeAgentSkills: () => ({ parts: [], docParts: [], metaSkills: [], metaDocs: [] }),
@@ -146,6 +146,9 @@ describe('POST /api/agents/improve-prompt', () => {
     expect(args).toContain('--print');
     expect(args).toContain('--model');
     expect(args).toContain('fast');
+    expect(args).toContain('--permission-mode');
+    expect(args).toContain('bypassPermissions');
+    expect(args).not.toContain('--permission-mode bypassPermissions');
 
     expect(mockProc.stdinChunks.length).toBe(1);
     expect(mockProc.stdinChunks[0]).toContain('write tests');

@@ -269,6 +269,60 @@ console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', 
     expect(final.result).toBe('[codex-shim] codex produced no assistant output');
   });
 
+  it('passes through plain JSON assistant output in text mode', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
+    tempDirs.push(dir);
+    const fakeCodex = join(dir, 'codex');
+    await writeFile(fakeCodex, `#!/usr/bin/env node
+console.log(JSON.stringify({ results: [{ index: 1, text: 'criterion', verified: true }] }));
+`);
+    await chmod(fakeCodex, 0o755);
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--model',
+      'sonnet',
+    ], {
+      ...process.env,
+      CODEX_BIN: fakeCodex,
+    });
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      results: [{ index: 1, text: 'criterion', verified: true }],
+    });
+  });
+
+  it('passes through JSON assistant output with protocol-looking keys in text mode', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
+    tempDirs.push(dir);
+    const fakeCodex = join(dir, 'codex');
+    await writeFile(fakeCodex, `#!/usr/bin/env node
+console.log(JSON.stringify({
+  type: 'verification_report',
+  payload: { status: 'LGTM', item: { type: 'check', verified: true } },
+  usage: { notes: 'assistant output, not Codex telemetry' },
+}));
+`);
+    await chmod(fakeCodex, 0o755);
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--model',
+      'sonnet',
+    ], {
+      ...process.env,
+      CODEX_BIN: fakeCodex,
+    });
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      type: 'verification_report',
+      payload: { status: 'LGTM', item: { type: 'check', verified: true } },
+      usage: { notes: 'assistant output, not Codex telemetry' },
+    });
+  });
+
   it('emits a useful error when Codex exits non-zero without stderr', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
     tempDirs.push(dir);
