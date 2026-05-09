@@ -89,6 +89,32 @@ curl -X POST http://localhost:1337/api/agents \
 
 If you provide both `schedule` and `prompt`, the agent's schedule is automatically installed.
 
+## Built-in Recommended Agents
+
+TamTam ships a curated built-in catalog of recommended agents in [lib/agents/recommended-agents.ts](../lib/agents/recommended-agents.ts). This catalog is a core product surface: it defines the opinionated starter agents shown at the top of the Agents tab before a project has installed its own versions.
+
+Behavior:
+
+- Built-in recommendations are shown in three UI buckets: `essential`, `featured`, and regular recommended.
+- They are templates only. Clicking `Add` creates a normal project agent row; TamTam does not treat the resulting agent as special after creation.
+- `schedule: ''` means manual-only. The template appears in recommendations, but the created agent is unscheduled until the user sets a schedule.
+- Built-in templates are merged with custom templates from Settings → Templates.
+- Custom templates override built-ins by case-insensitive `name`, so teams can replace the shipped default content for a given recommended agent without patching code.
+- Override scope is content only. Settings templates do not carry the built-in `essential` / `featured` flags, so a same-name override suppresses the shipped entry and appears in the regular recommended bucket.
+
+Current notable entries:
+
+- `docs-claude` is marked `essential` because TamTam depends on project-specific Claude guidance being present and current.
+- `manage-agents` is marked `featured` because it maintains the project's broader agent fleet.
+- `issue-cruncher` is marked `featured` and manual-only because it is a high-leverage entry point into TamTam's core issue-to-release workflow: pick a ready GitHub issue, implement it on an issue branch, then hand off to the existing release pipeline.
+
+When changing this catalog:
+
+- Edit the shared module, not `components/AgentsTab.tsx`.
+- Keep names stable; name collisions are the override key.
+- Treat description, model tier, schedule default, and badges as product decisions, not page-local copy.
+- Add or update a unit test if the contract or classification changes.
+
 ## Running an Agent
 
 Schedule values are validated on write. Supported formats are positive minute/hour/day intervals such as `15m`, `30m`, `1h`, `4h`, `24h`, `3d`, `7d`, or `30d`.
