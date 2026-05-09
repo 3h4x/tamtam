@@ -1,12 +1,14 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { fetchIssuesAndPRs, fetchProjectConfig } from '@/lib/client-api'
-import type { GhPullRequest, GhIssue, ProjectConfig } from '@/lib/client-api'
+import { useRouter } from 'next/navigation'
+import { fetchAgents, fetchIssuesAndPRs, fetchProjectConfig, runAgent } from '@/lib/client-api'
+import type { Agent, GhPullRequest, GhIssue, ProjectConfig } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
 import { ErrorState } from './ErrorState'
 import { PRRow } from '@/components/issues-tab/PRRow'
 import { IssueRow } from '@/components/issues-tab/IssueRow'
+import { useToast } from '@/components/Toast'
 
 // Re-export types consumed by subcomponents so callers don't need to change
 export type { GhPullRequest, GhIssue, ProjectConfig }
@@ -18,6 +20,8 @@ interface IssuesTabProps {
 }
 
 export function IssuesTab({ projectName, onCountChange, jobsPaused = false }: IssuesTabProps) {
+  const router = useRouter()
+  const { toast } = useToast()
   const [prs, setPrs] = useState<GhPullRequest[]>([])
   const [issues, setIssues] = useState<GhIssue[]>([])
   const [repo, setRepo] = useState<string | null>(null)
@@ -28,6 +32,10 @@ export function IssuesTab({ projectName, onCountChange, jobsPaused = false }: Is
   const [cachedAt, setCachedAt] = useState<number | null>(null)
   const [fromCache, setFromCache] = useState(false)
   const [projectCfg, setProjectCfg] = useState<ProjectConfig | null>(null)
+  const [agentsLoading, setAgentsLoading] = useState(true)
+  const [ctoAgent, setCtoAgent] = useState<Agent | null>(null)
+  const [issueDraft, setIssueDraft] = useState('')
+  const [planning, setPlanning] = useState(false)
   const onCountChangeRef = useRef(onCountChange)
 
   useEffect(() => {
@@ -68,6 +76,56 @@ export function IssuesTab({ projectName, onCountChange, jobsPaused = false }: Is
   useEffect(() => {
     load('initial')
   }, [load])
+
+  useEffect(() => {
+    let cancelled = false
+    setAgentsLoading(true)
+    fetchAgents(projectName)
+      .then(({ agents }) => {
+        if (cancelled) return
+        setCtoAgent(agents.find(agent =>
+          agent.name.toLowerCase() === 'cto' || agent.skillIds.includes('agent-cto')
+        ) ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) setCtoAgent(null)
+      })
+      .finally(() => {
+        if (!cancelled) setAgentsLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [projectName])
+
+  const handlePlanIssue = async () => {
+    const idea = issueDraft.trim()
+    if (planning) return
+    if (jobsPaused) {
+      toast('Jobs are paused. Resume jobs before planning an issue.', 'error')
+      return
+    }
+    if (!ctoAgent || idea.length < 10) return
+
+    const wrappedPrompt = `Plan a single GitHub issue for the user's idea below. Read CLAUDE.md and skim the codebase enough to make the issue project-correct. Run \`gh issue list --limit 30 --state open\` first to make sure this isn't a duplicate. Then file ONE issue with \`gh issue create\` - title states the outcome, body has problem -> approach -> acceptance criteria, labels include type + priority. Do not run \`git\`. Do not modify any files.
+
+User idea:
+${idea}`
+
+    setPlanning(true)
+    try {
+      const result = await runAgent(ctoAgent.id, wrappedPrompt, { readOnly: true })
+      if (result.status === 'queued') {
+        toast(result.detail || `Agent ${ctoAgent.name} queued`, 'success')
+        return
+      }
+      toast(`Agent ${ctoAgent.name} started`, 'success')
+      setIssueDraft('')
+      router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(result.job_id)}`)
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to plan issue', 'error')
+    } finally {
+      setPlanning(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -160,6 +218,95 @@ export function IssuesTab({ projectName, onCountChange, jobsPaused = false }: Is
               </span>
             ) : 'Refresh'}
           </button>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-border bg-bg-secondary p-3">
+        <div className="flex flex-wrap items-start gap-2">
+          <div className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-accent/20 bg-accent/10 text-accent">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M8 1.5v3" />
+              <path d="M8 11.5v3" />
+              <path d="M1.5 8h3" />
+              <path d="M11.5 8h3" />
+              <path d="M4.2 4.2l1.6 1.6" />
+              <path d="M10.2 10.2l1.6 1.6" />
+              <path d="M11.8 4.2l-1.6 1.6" />
+              <path d="M5.8 10.2l-1.6 1.6" />
+            </svg>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <h3 className="text-sm font-medium text-text-primary">Plan a GitHub issue</h3>
+              <p className="text-xs text-text-tertiary">
+                Describe the outcome. The{' '}
+                <a
+                  href={`/project/${encodeURIComponent(projectName)}/agents${ctoAgent ? `?agent=${encodeURIComponent(ctoAgent.id)}` : '?agent=new&template=cto'}`}
+                  className="text-accent hover:text-accent-hover"
+                >
+                  cto
+                </a>{' '}
+                agent will shape it and file it.
+              </p>
+            </div>
+
+            {!agentsLoading && !ctoAgent ? (
+              <div className="mt-3 rounded-md border border-dashed border-border bg-bg-primary px-3 py-2 text-xs text-text-secondary">
+                Add the{' '}
+                <a
+                  href={`/project/${encodeURIComponent(projectName)}/agents?agent=new&template=cto`}
+                  className="font-medium text-accent hover:text-accent-hover"
+                >
+                  cto agent
+                </a>{' '}
+                in the Agents tab to enable this.
+              </div>
+            ) : (
+              <>
+                <textarea
+                  rows={3}
+                  value={issueDraft}
+                  onChange={(event) => setIssueDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                      event.preventDefault()
+                      void handlePlanIssue()
+                    }
+                  }}
+                  disabled={agentsLoading || planning || !ctoAgent}
+                  className="focus-ring mt-3 w-full resize-y rounded-md border border-border bg-bg-primary px-3 py-2 font-mono text-xs leading-5 text-text-primary placeholder:text-text-tertiary disabled:cursor-not-allowed disabled:opacity-50"
+                  placeholder="Add a per-project quota override on the Settings -> Pipeline tab so heavy projects can have a higher token cap than the global default."
+                />
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary">runs in parallel</span>
+                  <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary">read-only</span>
+                  <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary">uses cto agent</span>
+                  <button
+                    className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-accent/30 bg-accent/10 px-2.5 py-1.5 text-xs font-medium text-accent hover:bg-accent/15 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={() => void handlePlanIssue()}
+                    disabled={!ctoAgent || agentsLoading || planning || issueDraft.trim().length < 10}
+                    title="Cmd/Ctrl+Enter"
+                  >
+                    {planning ? (
+                      <span className="inline-block h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent animate-spin" />
+                    ) : (
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M8 1.5v3" />
+                        <path d="M8 11.5v3" />
+                        <path d="M1.5 8h3" />
+                        <path d="M11.5 8h3" />
+                        <path d="M4.2 4.2l1.6 1.6" />
+                        <path d="M10.2 10.2l1.6 1.6" />
+                        <path d="M11.8 4.2l-1.6 1.6" />
+                        <path d="M5.8 10.2l-1.6 1.6" />
+                      </svg>
+                    )}
+                    <span>{planning ? 'Planning...' : 'Plan issue'}</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 

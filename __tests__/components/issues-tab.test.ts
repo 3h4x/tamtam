@@ -7,14 +7,28 @@ import { flushSync } from 'react-dom'
 import { IssuesTab } from '@/components/IssuesTab'
 import type { GhIssue, GhPullRequest, ProjectConfig } from '@/lib/client-api'
 
-const { fetchIssuesAndPRs, fetchProjectConfig } = vi.hoisted(() => ({
+const { fetchAgents, fetchIssuesAndPRs, fetchProjectConfig, pushMock, runAgent, toastMock } = vi.hoisted(() => ({
+  fetchAgents: vi.fn(),
   fetchIssuesAndPRs: vi.fn(),
   fetchProjectConfig: vi.fn(),
+  pushMock: vi.fn(),
+  runAgent: vi.fn(),
+  toastMock: vi.fn(),
+}))
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: pushMock }),
+}))
+
+vi.mock('@/components/Toast', () => ({
+  useToast: () => ({ toast: toastMock }),
 }))
 
 vi.mock('@/lib/client-api', () => ({
+  fetchAgents,
   fetchIssuesAndPRs,
   fetchProjectConfig,
+  runAgent,
 }))
 
 vi.mock('@/components/issues-tab/PRRow', () => ({
@@ -123,8 +137,13 @@ function renderIssuesTab(props: React.ComponentProps<typeof IssuesTab>) {
 
 describe('IssuesTab', () => {
   beforeEach(() => {
+    fetchAgents.mockReset()
     fetchIssuesAndPRs.mockReset()
     fetchProjectConfig.mockReset()
+    pushMock.mockReset()
+    runAgent.mockReset()
+    toastMock.mockReset()
+    fetchAgents.mockResolvedValue({ agents: [] })
     fetchProjectConfig.mockResolvedValue(buildConfig())
   })
 

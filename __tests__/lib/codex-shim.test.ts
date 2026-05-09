@@ -205,6 +205,46 @@ for (const event of events) console.log(JSON.stringify(event));
     });
   });
 
+  it('silently consumes Codex lifecycle events (item.started, turn.started, etc.) without echoing JSON', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
+    tempDirs.push(dir);
+    const fakeCodex = join(dir, 'codex');
+    await writeFile(fakeCodex, `#!/usr/bin/env node
+const events = [
+  { type: 'thread.started', thread_id: 'sess-life' },
+  { type: 'turn.started' },
+  { type: 'item.started', item: { id: 'item_1', type: 'command_execution', command: 'ls', status: 'in_progress' } },
+  { type: 'item.updated', item: { id: 'item_1', type: 'command_execution', status: 'in_progress' } },
+  { type: 'item.completed', item: { id: 'item_2', type: 'agent_message', text: 'final answer' } },
+  { type: 'turn.completed', usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 2 } },
+];
+for (const event of events) console.log(JSON.stringify(event));
+`);
+    await chmod(fakeCodex, 0o755);
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--output-format',
+      'stream-json',
+      '--model',
+      'sonnet',
+    ], {
+      ...process.env,
+      CODEX_BIN: fakeCodex,
+    });
+
+    expect(result.code).toBe(0);
+    const lines = result.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    const text = lines
+      .filter((line) => line.type === 'stream_event' && line.event?.type === 'content_block_delta')
+      .map((line) => line.event.delta.text)
+      .join('');
+    expect(text).toBe('final answer');
+    expect(text).not.toContain('item.started');
+    expect(text).not.toContain('turn.started');
+    expect(text).not.toContain('command_execution');
+  });
+
   it('reports Codex cached input separately instead of double-counting it as full-price input', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
     tempDirs.push(dir);

@@ -331,12 +331,23 @@ const CODEX_PAYLOAD_EVENT_TYPES = new Set([
   'error',
 ]);
 
+const CODEX_NAMESPACE_PREFIXES = ['item.', 'turn.', 'thread.', 'response.', 'session.'];
+
+function hasCodexNamespacePrefix(value) {
+  if (typeof value !== 'string') return false;
+  for (const prefix of CODEX_NAMESPACE_PREFIXES) {
+    if (value.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
 function isCodexEvent(event, payload, type) {
   if (!event || typeof event !== 'object') return false;
   if (CODEX_WRAPPER_EVENT_TYPES.has(event.type)) {
     return Boolean(event.payload && typeof event.payload === 'object');
   }
   if (CODEX_TOP_LEVEL_EVENT_TYPES.has(event.type)) return true;
+  if (hasCodexNamespacePrefix(event.type) || hasCodexNamespacePrefix(type)) return true;
   if (event.item && typeof event.item === 'object' && event.type === 'item.completed') return true;
   if (event.usage && typeof event.usage === 'object' && event.type === 'turn.completed') return true;
   if (CODEX_PAYLOAD_EVENT_TYPES.has(type)) {
