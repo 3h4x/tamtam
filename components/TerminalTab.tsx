@@ -426,6 +426,33 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
+  const [showCloseStale, setShowCloseStale] = useState(false)
+  const [closeStaleFindings, setCloseStaleFindings] = useState('')
+  const [closeStaleReason, setCloseStaleReason] = useState<'stale' | 'duplicate' | 'wontfix' | 'fixed'>('stale')
+  const [closingStale, setClosingStale] = useState(false)
+  const handleCloseStale = async () => {
+    const issue = issueContextRef.current
+    if (!issue || !issue.number || !closeStaleFindings.trim()) return
+    setClosingStale(true)
+    try {
+      const r = await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/issues/${issue.number}/close-stale`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ findings: closeStaleFindings.trim(), reason: closeStaleReason }),
+      })
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}))
+        alert(`Close failed: ${data.detail ?? r.statusText}`)
+        return
+      }
+      setShowCloseStale(false)
+      setCloseStaleFindings('')
+      issueContextRef.current = null
+    } finally {
+      setClosingStale(false)
+    }
+  }
+
   return (
     <div
       className="mt-4 flex flex-col"
@@ -440,6 +467,63 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
             <span className="text-accent text-sm font-mono">drop image</span>
           </div>
         )}
+
+        {/* Issue actions banner — visible when this session is linked to a GitHub issue */}
+        {issueContextRef.current?.number ? (
+          <div className="px-3 py-2 border-b border-border bg-bg-secondary text-xs flex items-center gap-2 flex-wrap">
+            <span className="text-text-secondary">
+              Issue #{issueContextRef.current.number}
+              {issueContextRef.current.title ? ` — ${issueContextRef.current.title}` : ''}
+            </span>
+            {!showCloseStale ? (
+              <button
+                type="button"
+                onClick={() => setShowCloseStale(true)}
+                className="ml-auto px-2 py-1 rounded border border-border bg-bg-tertiary text-text-secondary hover:text-text-primary"
+                title="Close this issue with a verdict comment"
+              >
+                Close with verdict
+              </button>
+            ) : (
+              <div className="ml-auto flex items-start gap-2 w-full mt-2">
+                <select
+                  value={closeStaleReason}
+                  onChange={(e) => setCloseStaleReason(e.target.value as typeof closeStaleReason)}
+                  className="px-2 py-1 rounded border border-border bg-bg-tertiary text-text-primary text-xs"
+                >
+                  <option value="stale">stale</option>
+                  <option value="duplicate">duplicate</option>
+                  <option value="wontfix">wontfix</option>
+                  <option value="fixed">fixed</option>
+                </select>
+                <textarea
+                  value={closeStaleFindings}
+                  onChange={(e) => setCloseStaleFindings(e.target.value)}
+                  placeholder="Findings to post as a comment before closing…"
+                  rows={3}
+                  className="flex-1 px-2 py-1 rounded border border-border bg-bg-tertiary text-text-primary text-xs font-mono"
+                />
+                <div className="flex flex-col gap-1">
+                  <button
+                    type="button"
+                    disabled={!closeStaleFindings.trim() || closingStale}
+                    onClick={handleCloseStale}
+                    className="px-2 py-1 rounded border border-border bg-accent/20 text-text-primary disabled:opacity-50"
+                  >
+                    {closingStale ? 'closing…' : 'Comment + Close'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowCloseStale(false); setCloseStaleFindings('') }}
+                    className="px-2 py-1 rounded border border-border bg-bg-tertiary text-text-secondary"
+                  >
+                    cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : null}
 
         {/* Terminal header */}
         <TerminalToolbar

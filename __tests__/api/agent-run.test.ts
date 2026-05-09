@@ -202,6 +202,7 @@ describe('POST /api/agents/{agentId}/run', () => {
       updateJob: updateJobMock,
       listJobs: listJobsMock,
       probeJobStatus: probeJobStatusMock,
+      markDone: vi.fn().mockResolvedValue(undefined),
     }));
     vi.doMock('@/lib/jobs/project-active-job', () => ({
       findBlockingRunningJob: findBlockingRunningJobMock,
@@ -733,7 +734,7 @@ describe('POST /api/agents/{agentId}/run', () => {
       body: JSON.stringify({ prompt: 'do it' }),
     });
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
-    expect(updateJobMock).toHaveBeenCalledOnce();
+    expect(updateJobMock).toHaveBeenCalled();
   });
 
   it('composes skills into system prompt', async () => {
@@ -787,8 +788,8 @@ describe('POST /api/agents/{agentId}/run', () => {
     const data = await res.json();
     expect(data.detail).toContain('pm2 not available');
     // Job must be persisted as failed so it doesn't stay "running" in the DB
-    expect(updateJobMock).toHaveBeenCalledOnce();
-    const savedJob = updateJobMock.mock.calls[0][0];
+    expect(updateJobMock).toHaveBeenCalled();
+    const savedJob = updateJobMock.mock.calls[updateJobMock.mock.calls.length - 1][0];
     expect(savedJob.exitCode).toBe(-1);
     expect(savedJob.finishedAt).not.toBeNull();
   });
@@ -907,7 +908,7 @@ describe('POST /api/agents/{agentId}/run', () => {
 
   });
 
-  it('does not create a probe-visible DB agent job until the prerequisite finishes', async () => {
+  it('creates the job row before the prerequisite runs so it is visible in the UI', async () => {
     const prereq = deferred<{ stdout: string; stderr: string; exitCode: number }>();
     execMock.mockImplementation(async (cmd: string, args: string[]) => {
       if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
@@ -923,12 +924,12 @@ describe('POST /api/agents/{agentId}/run', () => {
     });
     const pending = POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
+    // Job row appears before the prereq finishes — startJob hasn't fired yet.
     await vi.waitFor(() => {
+      expect(createJobMock).toHaveBeenCalledOnce();
       expect(execMock).toHaveBeenCalledWith('bash', ['-c', 'sleep 40'], expect.objectContaining({ cwd: '/path/to/proj' }));
     });
-    expect(createJobMock).not.toHaveBeenCalled();
     expect(startJobMock).not.toHaveBeenCalled();
-    expect(drainNextAgentRunMock).not.toHaveBeenCalled();
 
     prereq.resolve({ stdout: 'done\n', stderr: '', exitCode: 0 });
     const res = await pending;
@@ -968,11 +969,13 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(res.status).toBe(409);
     expect(data.code).toBe('project_busy');
     expect(data.blockingJobId).toBe('run-while-prereq');
-    expect(createJobMock).not.toHaveBeenCalled();
+    // Job row is created before the prereq, but startJob is never called when
+    // a blocker appears mid-prereq — the job is reaped via markDone.
+    expect(createJobMock).toHaveBeenCalledOnce();
     expect(startJobMock).not.toHaveBeenCalled();
   });
 
-  it('does not create a probe-visible file agent job until the prerequisite finishes', async () => {
+  it('creates the job row before the prerequisite runs (file agent variant)', async () => {
     const projDir = mkdtempSync(join(tmpdir(), 'tamtam-file-agent-prereq-'));
     const prereq = deferred<{ stdout: string; stderr: string; exitCode: number }>();
     try {
@@ -996,11 +999,10 @@ File-backed prompt.`);
       const pending = POST(req, { params: Promise.resolve({ agentId: 'file:proj1:file-agent' }) });
 
       await vi.waitFor(() => {
+        expect(createJobMock).toHaveBeenCalledOnce();
         expect(execMock).toHaveBeenCalledWith('bash', ['-c', 'sleep 45'], expect.objectContaining({ cwd: projDir }));
       });
-      expect(createJobMock).not.toHaveBeenCalled();
       expect(startJobMock).not.toHaveBeenCalled();
-      expect(drainNextAgentRunMock).not.toHaveBeenCalled();
 
       prereq.resolve({ stdout: 'file done\n', stderr: '', exitCode: 0 });
       const res = await pending;
@@ -1096,7 +1098,7 @@ File-backed prompt.`);
         getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: '/tmp/logs' }),
         getProjectTestConfig: vi.fn().mockReturnValue(null),
       }));
-      vi.doMock('@/lib/jobs/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock, listJobs: listJobsMock, probeJobStatus: probeJobStatusMock }));
+      vi.doMock('@/lib/jobs/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock, listJobs: listJobsMock, probeJobStatus: probeJobStatusMock, markDone: vi.fn().mockResolvedValue(undefined) }));
       vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
       vi.doMock('@/lib/skills/skills', () => ({ SKILLS_DIR: tempSkillsDir, DATA_SKILLS_DIR: join(tempSkillsDir, 'data-skills') }));
       vi.doMock('@/lib/agents/agent-memory', () => ({
@@ -1313,6 +1315,7 @@ describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
       probeJobStatus: vi.fn().mockResolvedValue('done'),
+      markDone: vi.fn().mockResolvedValue(undefined),
     }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       startJob: startJobMock,

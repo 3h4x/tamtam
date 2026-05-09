@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
-import { mkdirSync, writeFileSync } from 'fs';
+import { mkdirSync, writeFileSync, appendFileSync } from 'fs';
 import { join } from 'path';
 import { db, schema } from '@/lib/db';
 import { resolveProjectPath } from '@/lib/shared/project-data';
@@ -9,7 +9,8 @@ import { isLockOwnedByActiveRelease, getLock } from '@/lib/pipeline/pipeline-loc
 import { getPendingRelease, drainPendingRelease } from '@/lib/pipeline/pending-release';
 import { enqueueQueuedAgentRun } from '@/lib/agents/queued-agent-runs';
 import { composeAgentSkills } from '@/lib/agents/compose-skills';
-import { createJob, updateJob, listJobs, probeJobStatus } from '@/lib/jobs/job-storage';
+import { createJob, updateJob, listJobs, probeJobStatus, markDone } from '@/lib/jobs/job-storage';
+import { registerJobCancellation, finishJobCancellation } from '@/lib/jobs/cancellation';
 import { startJob } from '@/lib/jobs/pm2-jobs';
 import { getJobKind, isAgentJobKind } from '@/lib/jobs/kinds';
 import { withBasePrompt, getPermissionModeFlag } from '@/lib/shared/config';
@@ -356,18 +357,38 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     },
   };
 
-  // Run the agent's optional prerequisite shell command before the CLI spawn,
-  // but do not create the job row until after it finishes. A normal
-  // unfinished agent job with pid=0 is probe-visible and would be finalized
-  // after the PM2 spawn grace while a long prerequisite is still running.
+  // Create the job row BEFORE running the prerequisite so the run is visible
+  // in the UI, the log file streams in real time, and the user can cancel
+  // mid-prerequisite. Previously the prereq ran ad-hoc inside the route and
+  // the agent appeared stuck in "starting" for the entire prereq duration
+  // (e.g. `pnpm check` can take many minutes).
+  const initialContextMeta = JSON.stringify(contextMeta);
+  const job = createJob(agent.project, `agent:${agent.name}`, 0, '', taskPrompt, initialContextMeta, taskPrompt);
+  job.provider = provider;
+  const logPath = join(logDir, `${job.id}.log`);
+  job.logPath = logPath;
+  updateJob(job);
+  mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
+
+  // Run the agent's optional prerequisite shell command. The command runs via
+  // the standard `exec` helper with the job's cancellation signal hooked in,
+  // so the existing cancel-job endpoint kills the prereq tree (e.g. a long
+  // `pnpm check`) cleanly. The job row already exists, so the run is visible
+  // in the UI for the entire prereq duration instead of being silently held
+  // in the route until completion.
   let prerequisiteResult: { command: string; exitCode: number; durationMs: number; stdout: string; stderr: string } | null = null;
   const prereqCmd = agent.prerequisiteCommand?.trim();
   if (prereqCmd) {
+    const cancelSignal = registerJobCancellation(job.id);
     const startedAt = Date.now();
+    appendFileSync(/*turbopackIgnore: true*/ logPath,
+      `# prerequisite: ${prereqCmd}\n# cwd: ${projPath}\n# started: ${new Date().toISOString()}\n\n`);
     const result = await exec('bash', ['-c', prereqCmd], {
       cwd: projPath,
       timeout: PREREQUISITE_TIMEOUT_MS,
       killProcessGroup: true,
+      signal: cancelSignal,
+      abortProcessTree: true,
     });
     prerequisiteResult = {
       command: prereqCmd,
@@ -376,6 +397,23 @@ At the end of your run, include a short final section exactly named "TamTam Run 
       stdout: result.stdout || '',
       stderr: result.stderr || '',
     };
+    appendFileSync(/*turbopackIgnore: true*/ logPath,
+      `${result.stdout || ''}${result.stderr ? `\n--- stderr ---\n${result.stderr}` : ''}\n` +
+      `# prerequisite finished — exit ${result.exitCode} in ${prerequisiteResult.durationMs}ms\n\n`);
+
+    if (cancelSignal.aborted) {
+      appendFileSync(/*turbopackIgnore: true*/ logPath, `# prerequisite cancelled by user\n`);
+      job.finishedAt = Date.now() / 1000;
+      job.exitCode = 130;
+      updateJob(job);
+      await markDone(job, 130);
+      finishJobCancellation(job.id);
+      return {
+        response: NextResponse.json({ status: 'cancelled', job_id: job.id }, { status: 200 }),
+        startedJob: false,
+      };
+    }
+    finishJobCancellation(job.id);
   }
 
   // The prerequisite can run for minutes. Re-check project-wide blockers before
@@ -394,6 +432,8 @@ At the end of your run, include a short final section exactly named "TamTam Run 
       });
     } catch (err) {
       console.error('[agent-run-route] failed to persist post-prereq release-lock queue entry:', err);
+      job.exitCode = 1;
+      await markDone(job, 1);
       return {
         response: NextResponse.json(
           { detail: `Failed to queue agent '${agent.name}' while the release pipeline is running` },
@@ -402,6 +442,14 @@ At the end of your run, include a short final section exactly named "TamTam Run 
         startedJob: false,
       };
     }
+    // Reap the placeholder job — actual run starts when the queued entry drains.
+    // Pre-set finishedAt before markDone so the idempotency guard skips hooks:
+    // the placeholder never ran agent work, so release-after-run must not fire.
+    appendFileSync(/*turbopackIgnore: true*/ logPath, `\n# queued behind release pipeline lock — will run when lock releases\n`);
+    job.finishedAt = Date.now() / 1000;
+    job.exitCode = 0;
+    updateJob(job);
+    await markDone(job, 0);
     return {
       response: NextResponse.json(
         {
@@ -420,9 +468,16 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   if (!readOnly) {
     const postPrereqBlockingJob = await findBlockingRunningJob(
       agent.project,
-      (job) => !isAgentJobKind(job.kind),
+      (j) => !isAgentJobKind(j.kind) && j.id !== job.id,
     );
     if (postPrereqBlockingJob) {
+      appendFileSync(/*turbopackIgnore: true*/ logPath, `\n# blocked by ${postPrereqBlockingJob.kind} job ${postPrereqBlockingJob.id}\n`);
+      // Pre-set finishedAt before markDone so the idempotency guard skips hooks:
+      // the placeholder never ran agent work, so agent_run_fail must not fire.
+      job.finishedAt = Date.now() / 1000;
+      job.exitCode = 1;
+      updateJob(job);
+      await markDone(job, 1);
       return {
         response: NextResponse.json(
           {
@@ -437,14 +492,8 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     }
   }
 
-  const initialContextMeta = JSON.stringify(contextMeta);
-  const job = createJob(agent.project, `agent:${agent.name}`, 0, '', taskPrompt, initialContextMeta, taskPrompt);
-  job.provider = provider;
-  const logPath = join(logDir, `${job.id}.log`);
-
   let prerequisiteBlock = '';
   if (prerequisiteResult) {
-    mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
     const artifactPath = join(logDir, `${job.id}.prereq.txt`);
     const artifactBody =
       `# TamTam prerequisite artifact\n` +
@@ -498,7 +547,6 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     ? `${systemPrompt}\n\n---\n\n${taskPrompt}`
     : (systemPrompt || taskPrompt);
   const fullPrompt = withBasePrompt(`${corePrompt}\n\n---\n\n${memoryBlock}`, { projectPath: projPath, provider });
-  job.logPath = logPath;
 
   try {
     const pid = await startJob(job.id, cmd, fullPrompt, projPath, { env: cliEnv });

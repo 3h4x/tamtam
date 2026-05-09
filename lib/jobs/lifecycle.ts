@@ -1268,6 +1268,35 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     }
   }
 
+  // Release-after-fix-ci: a successful CI fix has uncommitted local changes
+  // (the fix-ci prompt instructs Claude not to commit). Trigger the release
+  // pipeline so test → review → commit → push lands the fix and re-runs CI;
+  // otherwise the user clicks "Fix CI", the change sits dirty, and broken CI
+  // never recovers.
+  if (job.kind === 'fix-ci' && job.exitCode === 0) {
+    try {
+      const { startRelease } = await import('@/lib/pipeline/start-release');
+      const r = await startRelease(job.project, { queueIfBlocked: true, sourceJobId: job.id });
+      if (r.ok) {
+        if ('status' in r && r.status === 'queued') {
+          console.log(`[release-after-fix-ci] queued release for ${job.project} after fix-ci ${job.id}`);
+        } else {
+          console.log(`[release-after-fix-ci] triggered release ${r.jobId} for ${job.project} after fix-ci ${job.id}`);
+        }
+      } else {
+        const { shouldKeepPendingRelease, setPendingRelease } = await import('@/lib/pipeline/pending-release');
+        if (shouldKeepPendingRelease(r)) {
+          setPendingRelease(job.project);
+          console.log(`[release-after-fix-ci] queued for ${job.project} (will drain when lock releases): ${r.detail}`);
+        } else {
+          console.log(`[release-after-fix-ci] no release for ${job.project}: ${r.detail}`);
+        }
+      }
+    } catch (e) {
+      console.log(`[release-after-fix-ci] error for ${job.project}:`, e);
+    }
+  }
+
   // Release-after-run: when a terminal/agent run finishes successfully, auto-trigger the release pipeline.
   if ((getJobKind(job.kind) === 'run' || isAgentJobKind(job.kind)) && job.exitCode === 0) {
     try {
