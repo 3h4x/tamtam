@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createHash } from 'crypto';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { execSync } from 'child_process';
 import * as schema from '@/lib/db/schema';
 
 function sha256Prefix(content: string): string {
@@ -539,17 +538,46 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
 
   it('overwrites the previous shipped issue-cruncher default via known hash', () => {
     const now = Date.now() / 1000;
-    const previousSource = execSync('git show 7574b7b:lib/agents/default-agent-skills.ts', { encoding: 'utf8' });
-    const previousDefault = previousSource.match(
-      /id: 'agent-issue-cruncher',[\s\S]*?content: `([\s\S]*?)`,\n  }/
-    )?.[1];
-    expect(previousDefault).toBeTruthy();
+    // Verbatim content from the previously shipped prompt immediately before
+    // the trusted-issues prerequisite-output hardening.
+    // sha256(...).slice(0,16) === '554fcf2c7671a896', which must stay in
+    // KNOWN_DEFAULT_CONTENT_HASHES['agent-issue-cruncher'] so running
+    // installs refresh to the trusted-only prerequisite-output version.
+    // The sha256Prefix assertion below is the contract test for this fixture.
+    const previousDefault = String.raw`You are the issue cruncher.
+
+## 1. Resolve project context
+- Derive the TamTam project name from the current repo directory name (the folder containing \`.git\`). TamTam's \`/api/projects/by-project/<project>/...\` routes use that exact tracked directory name as the project key.
+- Sanity-check \`package.json\` and the CLAUDE.md heading only. If either disagrees with the repo directory name, print \`ISSUE_PROJECT_UNKNOWN\` and stop instead of guessing.
+- Use the repo directory name value in every \`/api/projects/by-project/<project>/...\` call below.
+
+## 2. Pick an issue
+- Run \`gh issue list --state open --limit 30 --json number,title,labels,body,assignees,url\`.
+- Pick the most relevant ready-to-go issue:
+  - Clear scope from the body or acceptance criteria.
+  - No blocker labels: \`blocked\`, \`needs-info\`, \`needs-design\`, \`discussion\`, \`question\`.
+  - Not assigned to someone else.
+  - No open PR already linked to it.
+  - Prefer \`good first issue\`, \`bug\`, \`enhancement\`; prefer small-to-medium effort.
+- If nothing qualifies, print \`NO_ELIGIBLE_ISSUE\` and stop.
+
+## 3. Validate before branching
+- Skim every file path, function, and symbol the issue references. If anything named in the issue does not exist in the repo, or the reproduction cannot be followed, the issue is not ready.
+- When not ready: comment on the issue explaining exactly what's missing, add the \`needs-info\` label with \`gh issue edit <n> --add-label needs-info\` (create it first with \`gh label create needs-info --color FBCA04\` if needed), switch back to the default branch via \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/checkout-default" -H 'Content-Type: application/json' -d '{}'\`, fast-forward it via \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/changes" -H 'Content-Type: application/json' -d '{"strategy":"ff-only"}'\`, print \`ISSUE_NEEDS_INFO <n>\`, and stop. Do not create a fix branch.
+
+## 4. Do the work
+- Comment on the issue announcing start.
+- Create the issue branch through TamTam's local API: \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/issue-branch" -H 'Content-Type: application/json' -d '{"issue_number":<n>,"issue_title":"<title>"}'\`. The resulting branch is \`fix/issue-<n>-<slug>\` with a lowercase hyphenated slug <=40 chars from the title.
+- Implement the fix. Keep the diff minimal and on-topic.
+- Stop after implementation. Do not run tests, review, commit, push, or merge; TamTam's release pipeline handles the rest.`;
+
+    expect(sha256Prefix(previousDefault)).toBe('554fcf2c7671a896');
 
     testDb.db.insert(schema.skills).values({
       id: 'agent-issue-cruncher',
       name: 'agent:issue-cruncher',
       description: 'old',
-      content: previousDefault!,
+      content: previousDefault,
       createdAt: now,
       updatedAt: now,
     }).run();
