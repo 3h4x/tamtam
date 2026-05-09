@@ -8,6 +8,7 @@ import {
   type DocItem,
 } from '@/lib/terminal/terminal-session-store'
 import { isClaudeJobKind } from '../TerminalTab'
+import { hasPrerequisiteContext } from './prerequisite-context'
 
 interface JobDict {
   id: string
@@ -202,22 +203,27 @@ export function useTerminalBootstrap({
         })
 
         const sessionProvider = matches.find(m => m.provider)?.provider ?? null
-        if (lastIsRunning) {
-          const prompt = lastMatch.user_prompt || lastMatch.prompt
-          if (prompt) entries.push({ role: 'user', text: prompt })
-          terminalStore.update(projectName, () => ({
+          if (lastIsRunning) {
+            const prompt = lastMatch.user_prompt || lastMatch.prompt
+            if (prompt) entries.push({ role: 'user', text: prompt })
+            terminalStore.update(projectName, () => ({
             history: entries,
             claudeSessionId: initialSessionId,
             sessionKey: initialSessionId,
             sessionProvider,
             selectedItems: loadedSkills,
-            selectedDocs: loadedDocs,
-            restoredFor: initialSessionId,
-          }))
-          terminalStore.startStream(projectName, lastMatch.id)
-        } else {
-          terminalStore.update(projectName, () => ({
-            history: entries,
+              selectedDocs: loadedDocs,
+              restoredFor: initialSessionId,
+            }))
+            terminalStore.startStream(
+              projectName,
+              lastMatch.id,
+              false,
+              hasPrerequisiteContext(lastMatch.context_meta),
+            )
+          } else {
+            terminalStore.update(projectName, () => ({
+              history: entries,
             claudeSessionId: initialSessionId,
             sessionKey: initialSessionId,
             sessionProvider,
@@ -288,7 +294,12 @@ export function useTerminalBootstrap({
 
         if (isClaudeJob) {
           terminalStore.update(projectName, () => ({ history: entries }))
-          terminalStore.startStream(projectName, jobParam)
+          terminalStore.startStream(
+            projectName,
+            jobParam,
+            false,
+            hasPrerequisiteContext(data.context_meta),
+          )
         } else if (data.log_pruned) {
           entries.push({ role: 'status', text: 'Log file deleted by retention policy' })
           const exitCode = data.exit_code

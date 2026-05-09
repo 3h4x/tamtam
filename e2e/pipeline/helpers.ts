@@ -14,6 +14,9 @@ export function writeScenario(
     sleep_ms?: number;
     text: string;
     write_files?: Array<{ path: string; content: string }>;
+    prompt_assert_contains?: string[];
+    prompt_assert_not_contains?: string[];
+    prompt_capture?: Array<{ label: string; regex: string; flags?: string; group?: number }>;
   }>,
 ): void {
   const dir = join(SHIM_DIR, project);

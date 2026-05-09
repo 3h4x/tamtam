@@ -177,7 +177,7 @@ describe('GET /api/jobs/[jobId]', () => {
   let getJobMock: ReturnType<typeof vi.fn>;
   let probeJobStatusMock: ReturnType<typeof vi.fn>;
   let jobToDictMock: ReturnType<typeof vi.fn>;
-  let readParsedLogMock: ReturnType<typeof vi.fn>;
+  let readDisplayLogMock: ReturnType<typeof vi.fn>;
   let readLogMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
@@ -191,14 +191,14 @@ describe('GET /api/jobs/[jobId]', () => {
       kind: j.kind,
       status: j.finishedAt ? 'done' : 'running',
     }));
-    readParsedLogMock = vi.fn().mockReturnValue('parsed log content');
+    readDisplayLogMock = vi.fn().mockReturnValue('display log content');
     readLogMock = vi.fn().mockReturnValue('raw log content');
 
     vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
       probeJobStatus: probeJobStatusMock,
       jobToDict: jobToDictMock,
-      readParsedLog: readParsedLogMock,
+      readDisplayLog: readDisplayLogMock,
       readLog: readLogMock,
     }));
 
@@ -218,7 +218,7 @@ describe('GET /api/jobs/[jobId]', () => {
     expect(data.detail).toContain('nonexistent');
   });
 
-  it('returns job data with parsed log for Claude-kind jobs', async () => {
+  it('returns job data with display log for Claude-kind jobs', async () => {
     const job = makeJob({ id: 'job-123', finishedAt: 2000, exitCode: 0 });
     getJobMock.mockReturnValue(job);
 
@@ -227,7 +227,7 @@ describe('GET /api/jobs/[jobId]', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.id).toBe('job-123');
-    expect(data.log).toBe('parsed log content');
+    expect(data.log).toBe('display log content');
     expect(readLogMock).not.toHaveBeenCalled();
   });
 
@@ -244,7 +244,7 @@ describe('GET /api/jobs/[jobId]', () => {
     const data = await res.json();
     expect(data.log).toBe('raw log content');
     expect(readLogMock).toHaveBeenCalledWith(job);
-    expect(readParsedLogMock).not.toHaveBeenCalled();
+    expect(readDisplayLogMock).not.toHaveBeenCalled();
   });
 
   it('calls probeJobStatus before returning', async () => {

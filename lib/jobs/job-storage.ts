@@ -3,7 +3,7 @@
 
 export type { JobData } from './types';
 
-export { readLog, readParsedLog, getVerdict } from './verdict';
+export { readLog, readParsedLog, readDisplayLog, getVerdict } from './verdict';
 
 export {
   runWithParent,

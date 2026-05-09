@@ -21,6 +21,15 @@ const projectShimDir = path.join(SHIM_DIR, projectName);
 const scenarioFile = path.join(projectShimDir, 'scenario.json');
 const counterFile = path.join(projectShimDir, 'counter');
 
+function readPromptFromStdin() {
+  try {
+    if (process.stdin.isTTY) return '';
+    return fs.readFileSync(0, 'utf-8');
+  } catch {
+    return '';
+  }
+}
+
 // Determine output mode from argv
 const args = process.argv.slice(2);
 function hasFlag(flag) {
@@ -58,6 +67,44 @@ try {
 }
 
 const step = scenario.steps[counter] ?? scenario.steps[scenario.steps.length - 1] ?? { text: 'feat: fallback' };
+const prompt = readPromptFromStdin();
+
+function buildPromptDrivenText() {
+  const textParts = [];
+  const failures = [];
+
+  for (const required of step.prompt_assert_contains ?? []) {
+    if (!prompt.includes(required)) failures.push(`missing "${required}"`);
+  }
+  for (const forbidden of step.prompt_assert_not_contains ?? []) {
+    if (prompt.includes(forbidden)) failures.push(`unexpected "${forbidden}"`);
+  }
+  for (const capture of step.prompt_capture ?? []) {
+    try {
+      const re = new RegExp(capture.regex, capture.flags || '');
+      const match = prompt.match(re);
+      const index = typeof capture.group === 'number' ? capture.group : 1;
+      textParts.push(
+        `${capture.label}: ${match ? (match[index] ?? match[0]) : '[missing]'}`,
+      );
+      if (!match) failures.push(`capture "${capture.label}" did not match ${capture.regex}`);
+    } catch (error) {
+      failures.push(`invalid regex for "${capture.label}": ${error.message}`);
+    }
+  }
+
+  if (failures.length > 0) {
+    textParts.unshift(`PROMPT ASSERTION FAILED: ${failures.join('; ')}`);
+  }
+
+  return {
+    extraText: textParts.length > 0 ? textParts.join('\n') : '',
+    failed: failures.length > 0,
+  };
+}
+
+const promptDriven = buildPromptDrivenText();
+const stepText = [step.text, promptDriven.extraText].filter(Boolean).join('\n');
 
 function applyFileWrites(fileWrites) {
   if (!Array.isArray(fileWrites)) return;
@@ -105,7 +152,7 @@ if (isStreamJson) {
     type: 'stream_event',
     event: {
       type: 'content_block_delta',
-      delta: { type: 'text_delta', text: step.text },
+      delta: { type: 'text_delta', text: stepText },
     },
   });
   emit({
@@ -115,13 +162,13 @@ if (isStreamJson) {
   emit({
     type: 'result',
     subtype: 'success',
-    is_error: false,
+    is_error: promptDriven.failed,
     result: '',
     session_id: `e2e-session-${projectName}-${counter}`,
     modelUsage: {
       'claude-haiku-4-5': {
         inputTokens: 10,
-        outputTokens: Math.max(5, step.text.length / 4 | 0),
+        outputTokens: Math.max(5, stepText.length / 4 | 0),
         cacheReadInputTokens: 0,
         cacheCreationInputTokens: 0,
       },
@@ -130,7 +177,7 @@ if (isStreamJson) {
   });
 } else {
   // Plain-text mode (commit message generation uses --print without stream-json)
-  process.stdout.write(step.text + '\n');
+  process.stdout.write(stepText + '\n');
 }
 
-process.exit(0);
+process.exit(promptDriven.failed ? 1 : 0);

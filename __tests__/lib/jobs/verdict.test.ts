@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { readLog, readParsedLog, getVerdict, _resetVerdictCache } from '@/lib/jobs/verdict';
+import { readLog, readParsedLog, readDisplayLog, getVerdict, _resetVerdictCache } from '@/lib/jobs/verdict';
 import type { JobData } from '@/lib/jobs/types';
 
 beforeEach(() => {
@@ -355,6 +355,15 @@ describe('readParsedLog', () => {
     const result = readParsedLog(makeJob({ logPath }));
     expect(result).toContain('...');
     expect(result.length).toBeLessThan(700);
+  });
+});
+
+describe('readDisplayLog', () => {
+  it('preserves prerequisite raw lines ahead of parsed assistant output', () => {
+    const rawPrelude = '# prerequisite: printf marker\nmarker=alpha-123\n# prerequisite finished — exit 0 in 12ms\n';
+    const ndjson = [ndjsonText('Agent saw marker alpha-123')].join('\n');
+    const logPath = writeLog(`${rawPrelude}\n${ndjson}\n`);
+    expect(readDisplayLog(makeJob({ logPath }))).toBe(`${rawPrelude}Agent saw marker alpha-123`);
   });
 });
 

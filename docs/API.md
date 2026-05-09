@@ -61,7 +61,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 ## Jobs / Runs
 
 - `/api/jobs` — All runs across projects (GET). Returns `{ jobs, total, pendingReleaseProjects }`; `total` is counted after the optional `project` filter and before any `limit` slice.
-- `/api/jobs/[jobId]` — Job detail (GET, DELETE). `GET` returns parsed log text for normal jobs, but returns the raw aggregated `log` for `release` jobs because release logs mix plain shell output with NDJSON child streams. `DELETE` cooperatively cancels inline `commit`/`push` jobs; if they do not stop cleanly within 20s it returns `409 { detail }` instead of force-killing the server PID.
+- `/api/jobs/[jobId]` — Job detail (GET, DELETE). `GET` returns a display-oriented `log`: `release` jobs return the raw aggregated log verbatim, while other jobs return parsed Claude output with any non-NDJSON passthrough lines (for example agent prerequisite output) preserved ahead of the parsed stream. `DELETE` cooperatively cancels inline `commit`/`push` jobs; if they do not stop cleanly within 20s it returns `409 { detail }` instead of force-killing the server PID.
 - `/api/jobs/[jobId]/logs` — Job log content (GET)
 - `/api/jobs/[jobId]/board-sync` — Manually sync a finished root job to the GitHub project board (POST); rejects running jobs, requires board sync configured, surfaces GitHub failures instead of swallowing them
 - `/api/jobs/[jobId]/rerun` — Re-run a job (POST). Returns `409 { detail, blocking_job_id }` when another job is already running for the project

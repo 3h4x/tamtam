@@ -204,24 +204,56 @@ async function migrateLegacyFileWorkflowFlags(): Promise<void> {
 // In-process job kinds (mark-dod, pr-wait) run inside the next-server itself
 // with pid=0. probeJobStatus deliberately treats them as "running" forever to
 // avoid racing their self-finalization. That's fine while the server is alive,
-// but a server restart kills the in-flight async function — leaving these
-// rows stuck as `running` indefinitely with no markDone ever called. Sweep
-// them at boot and mark them as `exit -1` so the UI stops lying about them.
+// but a server restart kills the in-flight async function.
+//
+// pr-wait is *resumable*: its `contextMeta` records prNumber/prRepo/prUrl, and
+// the polling loop is idempotent (GitHub will eventually finish CI). At boot
+// we restart the wait loop on the same job row instead of marking it failed,
+// because abandoning a wait that's only blocked on remote CI is wasteful —
+// the operator would just have to re-trigger the merge by hand.
+//
+// mark-dod is short-lived (a single GraphQL roundtrip) and doesn't carry
+// resume metadata, so we still reap it as exit -1.
+//
+// Older pr-wait rows created before pid=0 was the convention have pid set to
+// the previous next-server's PID. They look like dead-PM2 jobs to the probe
+// sweep but PM2 doesn't know them, so probe eventually marks them exit -1.
+// Catch them here too: if contextMeta is intact, resume; otherwise reap.
 async function reapAbandonedInlineJobs(): Promise<void> {
   try {
     const { listJobs, markDone } = await import('./lib/jobs/job-storage');
     const orphaned = listJobs().filter(j =>
       j.finishedAt === null
-      && j.pid === 0
       && (j.kind === 'mark-dod' || j.kind === 'pr-wait')
+      && (j.pid === 0 || (j.kind === 'pr-wait' && j.pid !== process.pid))
     );
+    let resumed = 0;
+    let reaped = 0;
     for (const job of orphaned) {
+      if (job.kind === 'pr-wait' && job.contextMeta) {
+        try {
+          const { resumePrWait } = await import('./lib/pipeline/start-pr-wait');
+          const r = resumePrWait(job.id);
+          if (r.ok) {
+            resumed += 1;
+            console.log(`[boot] resumed pr-wait ${job.id} (server restarted mid-run)`);
+            continue;
+          }
+          console.warn(`[boot] could not resume pr-wait ${job.id}: ${r.error} — reaping instead`);
+        } catch (err) {
+          console.error(`[boot] resumePrWait threw for ${job.id}:`, err);
+        }
+      }
       try {
         await markDone(job, -1);
+        reaped += 1;
         console.log(`[boot] reaped abandoned ${job.kind} job ${job.id} (server restarted mid-run)`);
       } catch (err) {
         console.error(`[boot] failed to reap ${job.id}:`, err);
       }
+    }
+    if (resumed > 0 || reaped > 0) {
+      console.log(`[boot] inline-job sweep: resumed=${resumed} reaped=${reaped}`);
     }
   } catch (err) {
     console.error('[boot] reapAbandonedInlineJobs failed:', err);

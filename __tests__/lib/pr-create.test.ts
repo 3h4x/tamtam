@@ -8,6 +8,7 @@ describe('createGenericPR', () => {
     vi.resetModules();
     execMock = vi.fn();
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({ listJobs: vi.fn(() => []) }));
     vi.doMock('@/lib/pipeline/start-commit', () => ({
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn(),
@@ -93,6 +94,7 @@ describe('createGenericPR', () => {
 
 describe('createIssuePR', () => {
   let execMock: ReturnType<typeof vi.fn>;
+  let listJobsMock: ReturnType<typeof vi.fn>;
   let createIssuePR: typeof import('@/lib/pipeline/pr-create').createIssuePR;
 
   const issue = { number: 42, repo: 'org/repo', title: 'Fix login bug' };
@@ -100,7 +102,9 @@ describe('createIssuePR', () => {
   beforeEach(async () => {
     vi.resetModules();
     execMock = vi.fn();
+    listJobsMock = vi.fn(() => []);
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({ listJobs: listJobsMock }));
     vi.doMock('@/lib/pipeline/start-commit', () => ({
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn().mockReturnValue('fix/issue-42-fix-login-bug'),
@@ -225,5 +229,211 @@ describe('createIssuePR', () => {
 
     const result = await createIssuePR('/repo', log, issue);
     expect(result).toBeNull();
+  });
+
+  function getCreatedBody() {
+    const prCreateCall = execMock.mock.calls.find(
+      (c: any[]) => c[0] === 'gh' && c[1]?.includes('create')
+    );
+    expect(prCreateCall).toBeTruthy();
+    const args = prCreateCall![1] as string[];
+    const bodyIdx = args.indexOf('--body');
+    return args[bodyIdx + 1];
+  }
+
+  it('falls back to stub body when no run job is stamped for the issue', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, 'fix/issue-42-fix-login-bug\n'))
+      .mockResolvedValueOnce(resp(0, '[]'))
+      .mockResolvedValueOnce(resp(0, 'https://github.com/org/repo/pull/13\n'));
+
+    await createIssuePR('/repo', log, issue);
+
+    expect(getCreatedBody()).toBe(
+      `Closes #42\n\nImplemented via TamTam from issue [#42](https://github.com/org/repo/issues/42).`,
+    );
+  });
+
+  it('renders summary and files-changed when a recent run job carries report data', async () => {
+    listJobsMock.mockReturnValue([
+      {
+        id: 'job-1',
+        kind: 'run',
+        project: 'proj-a',
+        ghIssueNumber: 42,
+        ghIssueRepo: 'org/repo',
+        startedAt: 1000,
+        workSummary: 'Wired DAO revenue to real gateway data and added tests.',
+        modifiedFiles: JSON.stringify([
+          { path: 'src/app/dao/revenue/page.tsx', status: 'M' },
+          { path: 'src/lib/api/endpoints.ts', status: 'M' },
+        ]),
+      },
+    ]);
+    execMock
+      .mockResolvedValueOnce(resp(0, 'fix/issue-42-fix-login-bug\n'))
+      .mockResolvedValueOnce(resp(0, '[]'))
+      .mockResolvedValueOnce(resp(0, 'https://github.com/org/repo/pull/13\n'));
+
+    await createIssuePR('/repo', log, issue, undefined, 'proj-a');
+
+    const body = getCreatedBody();
+    expect(body).toContain('Closes #42');
+    expect(body).toContain('Wired DAO revenue to real gateway data');
+    expect(body).toContain('## Files changed');
+    expect(body).toContain('- `src/app/dao/revenue/page.tsx` (M)');
+    expect(body).toContain('- `src/lib/api/endpoints.ts` (M)');
+    expect(body).toContain('Implemented via TamTam from issue [#42]');
+  });
+
+  it('picks the most recent matching run job when several are stamped', async () => {
+    listJobsMock.mockReturnValue([
+      {
+        id: 'old',
+        kind: 'run',
+        project: 'proj-a',
+        ghIssueNumber: 42,
+        ghIssueRepo: 'org/repo',
+        startedAt: 100,
+        workSummary: 'Old summary.',
+        modifiedFiles: '[]',
+      },
+      {
+        id: 'newer',
+        kind: 'run',
+        project: 'proj-a',
+        ghIssueNumber: 42,
+        ghIssueRepo: 'org/repo',
+        startedAt: 9000,
+        workSummary: 'Newer summary.',
+        modifiedFiles: '[]',
+      },
+    ]);
+    execMock
+      .mockResolvedValueOnce(resp(0, 'fix/issue-42-fix-login-bug\n'))
+      .mockResolvedValueOnce(resp(0, '[]'))
+      .mockResolvedValueOnce(resp(0, 'https://github.com/org/repo/pull/13\n'));
+
+    await createIssuePR('/repo', log, issue, undefined, 'proj-a');
+
+    const body = getCreatedBody();
+    expect(body).toContain('Newer summary.');
+    expect(body).not.toContain('Old summary.');
+  });
+
+  it('truncates long files-changed lists with a tail marker', async () => {
+    const files = Array.from({ length: 35 }, (_, i) => ({ path: `src/file-${i}.ts`, status: 'M' }));
+    listJobsMock.mockReturnValue([
+      {
+        id: 'job-1',
+        kind: 'run',
+        project: 'proj-a',
+        ghIssueNumber: 42,
+        ghIssueRepo: 'org/repo',
+        startedAt: 1000,
+        workSummary: 'Big change.',
+        modifiedFiles: JSON.stringify(files),
+      },
+    ]);
+    execMock
+      .mockResolvedValueOnce(resp(0, 'fix/issue-42-fix-login-bug\n'))
+      .mockResolvedValueOnce(resp(0, '[]'))
+      .mockResolvedValueOnce(resp(0, 'https://github.com/org/repo/pull/13\n'));
+
+    await createIssuePR('/repo', log, issue, undefined, 'proj-a');
+
+    const body = getCreatedBody();
+    expect(body).toContain('- `src/file-0.ts` (M)');
+    expect(body).toContain('- `src/file-29.ts` (M)');
+    expect(body).not.toContain('- `src/file-30.ts`');
+    expect(body).toContain('- …and 5 more');
+  });
+
+  it('drops files-changed section silently when modifiedFiles JSON is malformed', async () => {
+    listJobsMock.mockReturnValue([
+      {
+        id: 'job-1',
+        kind: 'run',
+        project: 'proj-a',
+        ghIssueNumber: 42,
+        ghIssueRepo: 'org/repo',
+        startedAt: 1000,
+        workSummary: 'Did the thing.',
+        modifiedFiles: '{not json',
+      },
+    ]);
+    execMock
+      .mockResolvedValueOnce(resp(0, 'fix/issue-42-fix-login-bug\n'))
+      .mockResolvedValueOnce(resp(0, '[]'))
+      .mockResolvedValueOnce(resp(0, 'https://github.com/org/repo/pull/13\n'));
+
+    await createIssuePR('/repo', log, issue, undefined, 'proj-a');
+
+    const body = getCreatedBody();
+    expect(body).toContain('Did the thing.');
+    expect(body).not.toContain('## Files changed');
+    expect(body).toContain('Implemented via TamTam from issue [#42]');
+  });
+
+  it('ignores newer stamped run jobs from other projects', async () => {
+    listJobsMock.mockReturnValue([
+      {
+        id: 'other-project-newer',
+        kind: 'run',
+        project: 'proj-b',
+        ghIssueNumber: 42,
+        ghIssueRepo: 'org/repo',
+        startedAt: 9000,
+        workSummary: 'Wrong project summary.',
+        modifiedFiles: JSON.stringify([{ path: 'src/wrong-project.ts', status: 'M' }]),
+      },
+      {
+        id: 'current-project-older',
+        kind: 'run',
+        project: 'proj-a',
+        ghIssueNumber: 42,
+        ghIssueRepo: 'org/repo',
+        startedAt: 1000,
+        workSummary: 'Current project summary.',
+        modifiedFiles: JSON.stringify([{ path: 'src/current-project.ts', status: 'M' }]),
+      },
+    ]);
+    execMock
+      .mockResolvedValueOnce(resp(0, 'fix/issue-42-fix-login-bug\n'))
+      .mockResolvedValueOnce(resp(0, '[]'))
+      .mockResolvedValueOnce(resp(0, 'https://github.com/org/repo/pull/13\n'));
+
+    await createIssuePR('/repo', log, issue, undefined, 'proj-a');
+
+    const body = getCreatedBody();
+    expect(body).toContain('Current project summary.');
+    expect(body).toContain('- `src/current-project.ts` (M)');
+    expect(body).not.toContain('Wrong project summary.');
+    expect(body).not.toContain('src/wrong-project.ts');
+  });
+
+  it('falls back to the stub body when only another project has stamped run data', async () => {
+    listJobsMock.mockReturnValue([
+      {
+        id: 'other-project-only',
+        kind: 'run',
+        project: 'proj-b',
+        ghIssueNumber: 42,
+        ghIssueRepo: 'org/repo',
+        startedAt: 9000,
+        workSummary: 'Wrong project summary.',
+        modifiedFiles: JSON.stringify([{ path: 'src/wrong-project.ts', status: 'M' }]),
+      },
+    ]);
+    execMock
+      .mockResolvedValueOnce(resp(0, 'fix/issue-42-fix-login-bug\n'))
+      .mockResolvedValueOnce(resp(0, '[]'))
+      .mockResolvedValueOnce(resp(0, 'https://github.com/org/repo/pull/13\n'));
+
+    await createIssuePR('/repo', log, issue, undefined, 'proj-a');
+
+    expect(getCreatedBody()).toBe(
+      `Closes #42\n\nImplemented via TamTam from issue [#42](https://github.com/org/repo/issues/42).`,
+    );
   });
 });

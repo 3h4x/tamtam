@@ -44,6 +44,7 @@ const PROJECTS = [
   'commit-failure-history',
   'commit-failure-runs-expand',
   'push-failure-runs-expand',
+  'agent-prereq-terminal',
 ];
 
 export default async function globalSetup(): Promise<void> {
