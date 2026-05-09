@@ -99,8 +99,8 @@ describe('GlobalRecommendationsPage', () => {
     expect(headings).toEqual(['beta2', 'alpha1'])
 
     const links = Array.from(container.querySelectorAll('a')).map((node) => node.getAttribute('href'))
-    expect(links).toContain('/project/beta/recommendations')
-    expect(links).toContain('/project/alpha/recommendations')
+    expect(links).toContain('/project/beta')
+    expect(links).toContain('/project/alpha')
 
     unmount()
   })

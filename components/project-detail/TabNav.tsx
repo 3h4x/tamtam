@@ -4,7 +4,7 @@ import { fetchJobs } from '@/lib/client-api'
 import { useRouter } from 'next/navigation'
 import { buildProjectTerminalPath } from '@/lib/client/project-routes'
 
-type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents' | 'recommendations'
+type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents'
 
 export interface TabNavProps {
   projectName: string
@@ -66,9 +66,6 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, runni
       </button>
       <button className={tabClass('agents')} onClick={() => onSetTab('agents')}>
         Agents
-      </button>
-      <button className={tabClass('recommendations')} onClick={() => onSetTab('recommendations')}>
-        Recommendations
       </button>
       <button className={tabClass('issues')} onClick={() => onSetTab('issues')}>
         <span className="sm:hidden">Issues</span>

@@ -102,21 +102,10 @@ describe('TabNav', () => {
     })
 
     expect(container.textContent).toContain('Changes')
-    expect(container.textContent).toContain('Recommendations')
+    expect(container.textContent).not.toContain('Recommendations')
     expect(container.textContent).toContain('3')
     expect(container.querySelector('[title="2 running"]')).toBeTruthy()
     expect(container.textContent).toContain('5')
-
-    unmount()
-  })
-
-  it('falls back to onSetTab for recommendations without mutating the encoded project route itself', () => {
-    const { container, onSetTab, unmount } = renderTabNav()
-    const recommendationsButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('Recommendations'))
-    recommendationsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-
-    expect(pushMock).not.toHaveBeenCalled()
-    expect(onSetTab).toHaveBeenCalledWith('recommendations')
 
     unmount()
   })

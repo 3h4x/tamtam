@@ -146,7 +146,6 @@ describe('project client helper fallbacks', () => {
   async function getClientApi() {
     const {
       createProjectPR,
-      fetchRecommendations,
       fetchRecommendationsSummary,
       fetchAllOpenRecommendations,
       fetchBehind,
@@ -159,7 +158,6 @@ describe('project client helper fallbacks', () => {
     } = await import('@/lib/client-api');
     return {
       createProjectPR,
-      fetchRecommendations,
       fetchRecommendationsSummary,
       fetchAllOpenRecommendations,
       fetchBehind,
@@ -250,18 +248,6 @@ describe('project client helper fallbacks', () => {
 
     stubFetch(false, { detail: 'action disabled' }, 409, 'Conflict');
     await expect(runCustomAction('proj', 'Deploy')).rejects.toThrow('action disabled');
-  });
-
-  it('fetchRecommendations encodes the project name and returns the payload', async () => {
-    const fetchMock = stubFetch(true, {
-      recommendations: [{ id: 'rec-1', type: 'agent_schedule_backoff', status: 'open' }],
-    });
-    const { fetchRecommendations } = await getClientApi();
-
-    await expect(fetchRecommendations('owner/repo name')).resolves.toEqual({
-      recommendations: [{ id: 'rec-1', type: 'agent_schedule_backoff', status: 'open' }],
-    });
-    expect((fetchMock.mock.calls[0] as [string])[0]).toContain('/by-project/owner%2Frepo%20name/recommendations');
   });
 
   it('updateRecommendation patches JSON and surfaces detail errors', async () => {

@@ -74,7 +74,7 @@ describe('RecommendationCard', () => {
     expect(container.textContent).toContain('dismiss')
     expect(container.textContent).toContain('current 4h / suggested 8h')
     expect(container.textContent).toContain('agent:tests')
-    expect(link.getAttribute('href')).toBe('/project/alpha%2Fcore/recommendations')
+    expect(link.getAttribute('href')).toBe('/project/alpha%2Fcore')
     expect(link.textContent).toBe('alpha/core →')
 
     unmount()

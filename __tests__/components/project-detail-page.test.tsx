@@ -29,7 +29,6 @@ const {
   changesTabPropsMock,
   historyTabPropsMock,
   pipelineStripPropsMock,
-  recommendationsTabPropsMock,
 } = vi.hoisted(() => ({
   paramsState: {
     name: 'acme/widgets',
@@ -54,7 +53,6 @@ const {
   changesTabPropsMock: vi.fn(),
   historyTabPropsMock: vi.fn(),
   pipelineStripPropsMock: vi.fn(),
-  recommendationsTabPropsMock: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -167,13 +165,6 @@ vi.mock('@/components/project-detail/OverviewTab', () => ({
   OverviewTab: ({ projectName }: { projectName: string }) => <div data-testid="overview-tab">{projectName}</div>,
 }))
 
-vi.mock('@/components/project-detail/RecommendationsTab', () => ({
-  RecommendationsTab: ({ projectName }: { projectName: string }) => {
-    recommendationsTabPropsMock({ projectName })
-    return <div data-testid="recommendations-tab">{projectName}</div>
-  },
-}))
-
 function buildConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
   return {
     project: 'acme/widgets',
@@ -269,8 +260,6 @@ describe('ProjectDetailPage', () => {
     changesTabPropsMock.mockReset()
     historyTabPropsMock.mockReset()
     pipelineStripPropsMock.mockReset()
-    recommendationsTabPropsMock.mockReset()
-
     fetchJobsMock.mockResolvedValue({ jobs: [] })
     fetchProjectConfigMock.mockResolvedValue(buildConfig())
     updateProjectConfigMock.mockResolvedValue(buildConfig({ test_command: 'pnpm lint' }))
@@ -310,31 +299,15 @@ describe('ProjectDetailPage', () => {
     unmount()
   })
 
-  it('renders the recommendations tab when the route targets recommendations', async () => {
+  it('falls back to overview when the route targets the removed recommendations tab', async () => {
     paramsState.tab = 'recommendations'
 
     const { container, unmount } = renderPage()
 
     await vi.waitFor(() => {
-      expect(tabNavPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ activeTab: 'recommendations' }))
-      expect(recommendationsTabPropsMock).toHaveBeenLastCalledWith({ projectName: 'acme/widgets' })
-      expect(container.querySelector('[data-testid="recommendations-tab"]')?.textContent).toBe('acme/widgets')
+      expect(tabNavPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ activeTab: 'overview' }))
+      expect(container.querySelector('[data-testid="overview-tab"]')?.textContent).toBe('acme/widgets')
     })
-
-    unmount()
-  })
-
-  it('encodes slash-containing project names when switching to the recommendations tab', async () => {
-    const { unmount } = renderPage()
-
-    await vi.waitFor(() => {
-      expect(tabNavPropsMock).toHaveBeenCalled()
-    })
-
-    const latestTabNavProps = tabNavPropsMock.mock.lastCall?.[0] as { onSetTab: (tab: string) => void } | undefined
-    latestTabNavProps?.onSetTab('recommendations')
-
-    expect(pushMock).toHaveBeenCalledWith('/project/acme%2Fwidgets/recommendations')
 
     unmount()
   })

@@ -471,12 +471,6 @@ export async function fetchProjectDocs(projectName: string): Promise<{ docs: imp
   return response.json()
 }
 
-export async function fetchRecommendations(projectName: string): Promise<{ recommendations: Recommendation[] }> {
-  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/recommendations`)
-  if (!response.ok) throw new Error(`Failed to fetch recommendations: ${response.statusText}`)
-  return response.json()
-}
-
 export async function updateRecommendation(
   projectName: string,
   recommendationId: string,
