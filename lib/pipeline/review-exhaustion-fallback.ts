@@ -56,6 +56,26 @@ function renderFinding(f: ParsedFinding): string {
   return rows.join('\n');
 }
 
+// Severity rank for picking the headline finding. Higher = more important.
+// Findings without a parsed severity sort last but keep their original parse order.
+const SEVERITY_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+
+function humanizeFindingId(id: string): string {
+  return id.replace(/[-_/.]+/g, ' ').trim();
+}
+
+function buildIssueTitle(findings: ParsedFinding[]): string {
+  if (findings.length === 0) return 'chore(review): unresolved review';
+  const ranked = findings
+    .map((f, i) => ({ f, i, rank: f.severity ? SEVERITY_RANK[f.severity] ?? 0 : 0 }))
+    .sort((a, b) => b.rank - a.rank || a.i - b.i);
+  const top = humanizeFindingId(ranked[0].f.id);
+  const extra = findings.length - 1;
+  return extra > 0
+    ? `chore(review): ${top} (+${extra} more)`
+    : `chore(review): ${top}`;
+}
+
 function buildIssueBody(opts: {
   findings: ParsedFinding[];
   proseFallback: string;
@@ -144,9 +164,7 @@ export async function fileReviewExhaustionIssue(
     ? `${proseOnly.slice(-PROSE_FALLBACK_BYTES).trim()} …`
     : proseOnly;
 
-  const title = findings.length > 0
-    ? `chore(review): ${findings.length} unresolved review finding${findings.length === 1 ? '' : 's'}`
-    : `chore(review): unresolved review`;
+  const title = buildIssueTitle(findings);
   const body = buildIssueBody({ findings, proseFallback });
 
   const labels = repoLabels ? ISSUE_LABELS.filter((label) => repoLabels.has(label)) : ISSUE_LABELS;

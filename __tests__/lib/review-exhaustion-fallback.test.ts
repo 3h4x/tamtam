@@ -101,8 +101,9 @@ describe('fileReviewExhaustionIssue', () => {
     expect(args).toContain('-R');
     expect(args).toContain('owner/repo');
     const titleIdx = args.indexOf('--title');
-    // Title must NOT carry release/job/reason metadata — only the count.
-    expect(args[titleIdx + 1]).toBe('chore(review): 3 unresolved review findings');
+    // Title surfaces the highest-severity Finding ID so it actually describes what's broken.
+    // Fixture has hardcoded-secret (high), missing-error-handling (medium), stale-cache (low).
+    expect(args[titleIdx + 1]).toBe('chore(review): hardcoded secret (+2 more)');
     const bodyIdx = args.indexOf('--body');
     const body = args[bodyIdx + 1];
     expect(body).toContain('missing-error-handling');
@@ -258,6 +259,58 @@ describe('fileReviewExhaustionIssue', () => {
     expect(body).not.toContain('--permission-mode');
     expect(body).not.toContain('bypassPermissions');
     expect(body).not.toContain('codex-shim.js');
+  });
+
+  it('uses the bare Finding ID (no "+N more") when only one finding exists', async () => {
+    parsedLog = [
+      '- Finding ID: onchain-summary-rollups-count-degraded-chains',
+      '  Severity: medium',
+      '  Root cause: rollups still aggregate degraded chains.',
+      '',
+      'Verdict: NEEDS ATTENTION',
+    ].join('\n');
+    execMock
+      .mockImplementationOnce(() => resp(0, 'owner/repo'))
+      .mockImplementationOnce(() => resp(0, JSON.stringify([{ name: 'tamtam' }, { name: 'review-followup' }, { name: 'priority-medium' }])))
+      .mockImplementationOnce(() => resp(0, 'https://github.com/owner/repo/issues/11\n'));
+
+    const { fileReviewExhaustionIssue } = await import('@/lib/pipeline/review-exhaustion-fallback');
+    const r = await fileReviewExhaustionIssue(makeReviewJob());
+    expect(r.ok).toBe(true);
+    const createCall = (execMock.mock.calls as [string, string[]][]).find(([cmd, a]) => cmd === 'gh' && a.includes('issue') && a.includes('create'));
+    const args = createCall![1];
+    const titleIdx = args.indexOf('--title');
+    expect(args[titleIdx + 1]).toBe('chore(review): onchain summary rollups count degraded chains');
+  });
+
+  it('promotes the highest-severity finding regardless of source order', async () => {
+    parsedLog = [
+      '- Finding ID: minor-doc-typo',
+      '  Severity: low',
+      '  Root cause: typo in README',
+      '',
+      '- Finding ID: rce-via-template-eval',
+      '  Severity: critical',
+      '  Root cause: unsafe eval of user input',
+      '',
+      '- Finding ID: stale-cache',
+      '  Severity: medium',
+      '  Root cause: cache TTL not respected',
+      '',
+      'Verdict: NEEDS ATTENTION',
+    ].join('\n');
+    execMock
+      .mockImplementationOnce(() => resp(0, 'owner/repo'))
+      .mockImplementationOnce(() => resp(0, JSON.stringify([{ name: 'tamtam' }, { name: 'review-followup' }, { name: 'priority-medium' }])))
+      .mockImplementationOnce(() => resp(0, 'https://github.com/owner/repo/issues/12\n'));
+
+    const { fileReviewExhaustionIssue } = await import('@/lib/pipeline/review-exhaustion-fallback');
+    const r = await fileReviewExhaustionIssue(makeReviewJob());
+    expect(r.ok).toBe(true);
+    const createCall = (execMock.mock.calls as [string, string[]][]).find(([cmd, a]) => cmd === 'gh' && a.includes('issue') && a.includes('create'));
+    const args = createCall![1];
+    const titleIdx = args.indexOf('--title');
+    expect(args[titleIdx + 1]).toBe('chore(review): rce via template eval (+2 more)');
   });
 
   it('skips missing labels and still files the follow-up issue', async () => {

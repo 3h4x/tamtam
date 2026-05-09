@@ -232,6 +232,34 @@ describe('fetchProjectData — unpushed field', () => {
     expect(proj?.unpushed).toBe(5);
   });
 
+  it('falls back to <defaultRef>..HEAD when origin/<branch> exists but ahead count fails', async () => {
+    execMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('rev-list') && args.includes('@{u}..HEAD')) {
+        return Promise.resolve({ exitCode: 128, stdout: '', stderr: 'fatal: no upstream configured for branch' });
+      }
+      if (args.includes('branch') && args.includes('--show-current')) {
+        return Promise.resolve({ exitCode: 0, stdout: 'feature-x\n', stderr: '' });
+      }
+      if (args.includes('rev-parse') && args.includes('--verify') && args.includes('refs/remotes/origin/feature-x')) {
+        return Promise.resolve({ exitCode: 0, stdout: 'abc1234\n', stderr: '' });
+      }
+      if (args.includes('rev-list') && args.includes('refs/remotes/origin/feature-x..HEAD')) {
+        return Promise.resolve({ exitCode: 1, stdout: '', stderr: 'ambiguous argument' });
+      }
+      if (args.includes('symbolic-ref') && args.includes('refs/remotes/origin/HEAD')) {
+        return Promise.resolve({ exitCode: 0, stdout: 'origin/main\n', stderr: '' });
+      }
+      if (args.includes('rev-list') && args.includes('origin/main..HEAD')) {
+        return Promise.resolve({ exitCode: 0, stdout: '4\n', stderr: '' });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+    const { fetchProjectData } = await import('@/lib/shared/project-data');
+    const result = await fetchProjectData();
+    const proj = result.projects['myproj']?.[0];
+    expect(proj?.unpushed).toBe(4);
+  });
+
   it('returns unpushed count from git rev-list', async () => {
     execMock.mockImplementation((_cmd: string, args: string[]) => {
       if (args.includes('rev-list') && args.includes('@{u}..HEAD')) {
