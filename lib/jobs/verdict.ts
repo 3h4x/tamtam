@@ -53,6 +53,43 @@ export function readParsedLog(job: JobData, tailBytes = 100_000): string {
   return rawLog;
 }
 
+export function readDisplayLog(job: JobData, tailBytes = 100_000): string {
+  const rawLog = readLog(job, tailBytes);
+  if (!rawLog) return '';
+
+  const textParts: string[] = [];
+  const events = parseStreamLines(rawLog, {
+    onRawLine: (line) => {
+      textParts.push(`${line}\n`);
+    },
+  });
+
+  for (const event of events) {
+    if (event.type === 'text') {
+      textParts.push(event.text);
+    } else if (event.type === 'tool_use') {
+      textParts.push(`\n\n> Tool: ${event.name}\n`);
+    } else if (event.type === 'tool_result') {
+      const truncated = event.content.length > 500
+        ? event.content.slice(0, 500) + '...'
+        : event.content;
+      textParts.push(`${truncated}\n`);
+    } else if (event.type === 'compacting') {
+      textParts.push('\n[context compacted]\n');
+    } else if (event.type === 'done') {
+      if (event.result.error && event.result.errorText) {
+        textParts.push(event.result.errorText);
+      }
+    }
+  }
+
+  if (textParts.length > 0) {
+    return textParts.join('');
+  }
+
+  return rawLog;
+}
+
 // Memoize verdict per finished review job. Once a job is finalized its log
 // is immutable, so the verdict can't change. /api/jobs polling (every 5 s)
 // and the per-row jobToDict were re-reading every review log file from disk

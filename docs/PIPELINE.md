@@ -192,6 +192,12 @@ so a freshly opened PR has time to register workflow runs. The PR must also be
 `mergeable=MERGEABLE`; `mergeable=UNKNOWN` keeps waiting because GitHub can
 still flip that state to `CONFLICTING` on a later poll.
 
+`pr-wait` is resumable across server restarts. The job row persists
+`{ prNumber, prRepo, prUrl }` in `contextMeta`; on boot, unfinished `pr-wait`
+rows are resumed against the existing job/log instead of being reaped like
+other abandoned inline jobs. `mark-dod` remains non-resumable and is still
+marked failed if a restart interrupts it.
+
 The release meta-job (`kind='release'`) collects log sections from each step. Its own `finishedAt` is set when any step finalizes without chaining.
 
 ### History view — release grouping

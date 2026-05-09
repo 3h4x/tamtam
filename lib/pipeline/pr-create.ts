@@ -1,4 +1,6 @@
 import { exec } from '@/lib/shared/shell';
+import { listJobs } from '@/lib/jobs/job-storage';
+import type { JobData } from '@/lib/jobs/types';
 import { detectMainBranch } from './start-commit';
 
 type ExecLikeResult = Partial<{ stdout: string; stderr: string; exitCode: number }> | null | undefined;
@@ -9,6 +11,66 @@ function normalizeExecResult(result: ExecLikeResult) {
     stderr: typeof result?.stderr === 'string' ? result.stderr : '',
     exitCode: typeof result?.exitCode === 'number' ? result.exitCode : 1,
   };
+}
+
+const MAX_FILES_IN_PR_BODY = 30;
+
+function stubIssuePrBody(issue: { number: number; repo: string }): string {
+  return `Closes #${issue.number}\n\nImplemented via TamTam from issue [#${issue.number}](https://github.com/${issue.repo}/issues/${issue.number}).`;
+}
+
+function findIssueRunJob(issue: { number: number; repo: string }, projectName?: string): JobData | null {
+  let jobs: JobData[];
+  try {
+    jobs = listJobs();
+  } catch {
+    return null;
+  }
+  return jobs
+    .filter(j =>
+      j.kind === 'run'
+      && j.ghIssueNumber === issue.number
+      && (!issue.repo || !j.ghIssueRepo || j.ghIssueRepo === issue.repo)
+      && (!projectName || j.project === projectName)
+    )
+    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0] ?? null;
+}
+
+export function buildIssuePrBody(issue: { number: number; repo: string }, runJob: JobData | null): string {
+  const summary = runJob?.workSummary?.trim() ?? '';
+
+  let files: Array<{ path: string; status?: string }> = [];
+  if (runJob?.modifiedFiles) {
+    try {
+      const parsed = JSON.parse(runJob.modifiedFiles);
+      if (Array.isArray(parsed)) {
+        files = parsed
+          .filter((f): f is { path: string; status?: string } =>
+            !!f && typeof f === 'object' && typeof (f as { path?: unknown }).path === 'string'
+          )
+          .map(f => ({ path: f.path, status: typeof f.status === 'string' ? f.status : undefined }));
+      }
+    } catch {
+      files = [];
+    }
+  }
+
+  if (!summary && files.length === 0) return stubIssuePrBody(issue);
+
+  const parts: string[] = [`Closes #${issue.number}`];
+  if (summary) parts.push(summary);
+
+  if (files.length > 0) {
+    const shown = files.slice(0, MAX_FILES_IN_PR_BODY);
+    const lines = shown.map(f => f.status ? `- \`${f.path}\` (${f.status})` : `- \`${f.path}\``);
+    if (files.length > MAX_FILES_IN_PR_BODY) {
+      lines.push(`- …and ${files.length - MAX_FILES_IN_PR_BODY} more`);
+    }
+    parts.push(`## Files changed\n${lines.join('\n')}`);
+  }
+
+  parts.push(`---\nImplemented via TamTam from issue [#${issue.number}](https://github.com/${issue.repo}/issues/${issue.number}).`);
+  return parts.join('\n\n');
 }
 
 export async function createGenericPR(
@@ -59,6 +121,7 @@ export async function createIssuePR(
   log: (s: string) => void,
   issue: { number: number; repo: string; title: string },
   signal?: AbortSignal,
+  projectName?: string,
 ): Promise<string | null> {
   const branchR = normalizeExecResult(await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000, signal }));
   const currentBranch = branchR.stdout.trim();
@@ -107,7 +170,8 @@ export async function createIssuePR(
   const prTitle = /^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+?\))?:\s/i.test(issue.title)
     ? issue.title
     : `fix: ${issue.title}`;
-  const prBody = `Closes #${issue.number}\n\nImplemented via TamTam from issue [#${issue.number}](https://github.com/${issue.repo}/issues/${issue.number}).`;
+  const runJob = findIssueRunJob(issue, projectName);
+  const prBody = buildIssuePrBody(issue, runJob);
   log(`\n# creating PR for issue #${issue.number}: "${prTitle}"\n`);
 
   const prArgs = [

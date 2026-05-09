@@ -223,7 +223,14 @@ describe('useSessionManager', () => {
                 exit_code: null,
                 user_prompt: 'live prompt',
                 prompt: 'fallback live',
-                context_meta: null,
+                context_meta: JSON.stringify({
+                  prerequisite: {
+                    command: 'printf marker',
+                    exitCode: 0,
+                    durationMs: 12,
+                    artifactPath: '/tmp/run-3.prereq.txt',
+                  },
+                }),
               },
             ],
           }),
@@ -267,7 +274,7 @@ describe('useSessionManager', () => {
 
     await vi.waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/project/proj/terminal/sess-restore')
-      expect(startStreamMock).toHaveBeenCalledWith('proj', 'run-3')
+      expect(startStreamMock).toHaveBeenCalledWith('proj', 'run-3', false, true)
     })
 
     const state = terminalStore.get('proj')
@@ -282,6 +289,68 @@ describe('useSessionManager', () => {
       { role: 'user', text: 'second prompt' },
       { role: 'assistant', text: 'assistant reply 2' },
       { role: 'user', text: 'live prompt' },
+    ])
+
+    unmount()
+  })
+
+  it('enables passthrough when restoring a still-running single job fallback', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/jobs/still-running-1') {
+        return {
+          json: async () => ({
+            session_id: null,
+            context_meta: JSON.stringify({
+              prerequisite: {
+                command: 'printf marker',
+                exitCode: 7,
+                durationMs: 45,
+                artifactPath: '/tmp/still-running-1.prereq.txt',
+              },
+            }),
+          }),
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+
+    let controls:
+      | {
+        loadSessions: () => Promise<void>
+        restoreSession: (session: SessionItem) => Promise<void>
+        getSessions: () => SessionItem[]
+        isLoading: () => boolean
+      }
+      | undefined
+
+    const { unmount } = renderElement(
+      <SessionManagerHarness onReady={(value) => { controls = value }} />,
+    )
+
+    await vi.waitFor(() => {
+      expect(controls).toBeTruthy()
+    })
+
+    if (!controls) throw new Error('manager not ready')
+    await controls.restoreSession({
+      id: 'still-running-1',
+      prompt: 'keep streaming',
+      startedAt: 200,
+      finishedAt: null,
+      sessionId: null,
+      exitCode: null,
+    })
+
+    await vi.waitFor(() => {
+      expect(startStreamMock).toHaveBeenCalledWith('proj', 'still-running-1', false, true)
+    })
+
+    const state = terminalStore.get('proj')
+    expect(state.claudeSessionId).toBeNull()
+    expect(state.sessionKey).toBe('new')
+    expect(state.history).toEqual<TermEntry[]>([
+      { role: 'user', text: 'keep streaming' },
     ])
 
     unmount()

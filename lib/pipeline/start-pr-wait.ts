@@ -3,7 +3,8 @@ import { join } from 'path';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { exec } from '@/lib/shared/shell';
-import { createJob, markDone, updateJob } from '@/lib/jobs/job-storage';
+import { createJob, getJob, markDone, updateJob } from '@/lib/jobs/job-storage';
+import type { JobData } from '@/lib/jobs/types';
 
 export type PrWaitResult =
   | { ok: true; jobId: string; merged: boolean; message: string }
@@ -150,34 +151,31 @@ async function switchToDefault(projPath: string, log: (s: string) => void): Prom
   }
 }
 
-/**
- * Poll PR checks and auto-merge once they pass. Runs as a background async
- * job — fire-and-forget via launchPrWait. Returns immediately with the jobId.
- *
- * On merge: switches working copy back to the default branch and runs mark-dod.
- * On check failure or timeout: marks job failed so the UI surfaces the problem.
- */
-export function launchPrWait(
-  projectName: string,
+export interface PrWaitContextMeta {
+  prNumber: number;
+  prRepo: string;
+  prUrl: string;
+}
+
+function canonicalizeInlinePrWaitJob(job: JobData): void {
+  // Resumed pr-wait jobs must use the inline sentinel pid=0 so
+  // probeJobStatus keeps treating them as self-finalizing in-process work.
+  if (job.pid !== 0) {
+    job.pid = 0;
+    updateJob(job);
+  }
+}
+
+function runPrWaitLoop(
+  job: JobData,
+  projPath: string,
   prNumber: number,
   prRepo: string,
-  prUrl: string,
-): { jobId: string } | { error: string } {
-  const projPath = resolveProjectPath(projectName);
-  if (!projPath) return { error: 'project not found' };
-
-  const { logDir } = getImproveConfig();
-  mkdirSync(logDir, { recursive: true });
-
-  const job = createJob(projectName, 'pr-wait', process.pid, '');
-  const logPath = join(logDir, `${job.id}.log`);
-  job.logPath = logPath;
-  updateJob(job);
-
+  _prUrl: string,
+): void {
+  const logPath = job.logPath ?? '';
   const log = (s: string) => { try { appendFileSync(logPath, s); } catch {} };
-  log(`# pr-wait start — ${new Date().toISOString()}\n# PR #${prNumber} ${prUrl}\n`);
 
-  // Run polling loop in background
   ;(async () => {
     try {
       const startedAt = Date.now();
@@ -292,7 +290,7 @@ export function launchPrWait(
       // Run mark-dod post-merge so verification reflects the merged state
       try {
         const { startMarkDod } = await import('./start-mark-dod');
-        const md = await startMarkDod(projectName, { prNumber, repo: prRepo });
+        const md = await startMarkDod(job.project, { prNumber, repo: prRepo });
         if (md.ok) {
           log(`\n# mark-dod: ${md.verified}/${md.total} verified${md.changed ? ' (issue updated)' : ''}\n`);
         }
@@ -307,6 +305,80 @@ export function launchPrWait(
       await markDone(job, 1);
     }
   })();
+}
 
+/**
+ * Poll PR checks and auto-merge once they pass. Runs as a background async
+ * job — fire-and-forget. Returns immediately with the jobId.
+ *
+ * On merge: switches working copy back to the default branch and runs mark-dod.
+ * On check failure or timeout: marks job failed so the UI surfaces the problem.
+ *
+ * The job's contextMeta stores `{ prNumber, prRepo, prUrl }` so a server
+ * restart can resume the wait via `resumePrWait` instead of abandoning it.
+ */
+export function launchPrWait(
+  projectName: string,
+  prNumber: number,
+  prRepo: string,
+  prUrl: string,
+): { jobId: string } | { error: string } {
+  const projPath = resolveProjectPath(projectName);
+  if (!projPath) return { error: 'project not found' };
+
+  const { logDir } = getImproveConfig();
+  mkdirSync(logDir, { recursive: true });
+
+  const meta: PrWaitContextMeta = { prNumber, prRepo, prUrl };
+  const job = createJob(projectName, 'pr-wait', 0, '', undefined, JSON.stringify(meta));
+  const logPath = join(logDir, `${job.id}.log`);
+  job.logPath = logPath;
+  updateJob(job);
+
+  try { appendFileSync(logPath, `# pr-wait start — ${new Date().toISOString()}\n# PR #${prNumber} ${prUrl}\n`); } catch {}
+
+  runPrWaitLoop(job, projPath, prNumber, prRepo, prUrl);
   return { jobId: job.id };
+}
+
+/**
+ * Resume an in-flight pr-wait job after a server restart. Re-attaches the
+ * polling loop to the existing job row using the prNumber/prRepo/prUrl saved
+ * in its contextMeta. The original log file is appended to so the UI keeps
+ * a continuous trace.
+ */
+export function resumePrWait(jobId: string): { ok: true } | { ok: false; error: string } {
+  const job = getJob(jobId);
+  if (!job) return { ok: false, error: 'job not found' };
+  if (job.kind !== 'pr-wait') return { ok: false, error: 'not a pr-wait job' };
+  if (job.finishedAt !== null) return { ok: false, error: 'job already finished' };
+  if (!job.contextMeta) return { ok: false, error: 'missing contextMeta — cannot resume' };
+
+  let meta: PrWaitContextMeta;
+  try {
+    const parsed = JSON.parse(job.contextMeta);
+    if (typeof parsed?.prNumber !== 'number' || typeof parsed?.prRepo !== 'string' || typeof parsed?.prUrl !== 'string') {
+      return { ok: false, error: 'malformed contextMeta' };
+    }
+    meta = parsed as PrWaitContextMeta;
+  } catch (e) {
+    return { ok: false, error: `contextMeta parse failed: ${e instanceof Error ? e.message : String(e)}` };
+  }
+
+  const projPath = resolveProjectPath(job.project);
+  if (!projPath) return { ok: false, error: 'project not found' };
+
+  canonicalizeInlinePrWaitJob(job);
+
+  if (!job.logPath) {
+    const { logDir } = getImproveConfig();
+    mkdirSync(logDir, { recursive: true });
+    job.logPath = join(logDir, `${job.id}.log`);
+    updateJob(job);
+  }
+
+  try { appendFileSync(job.logPath, `\n# pr-wait resumed after server restart — ${new Date().toISOString()}\n`); } catch {}
+
+  runPrWaitLoop(job, projPath, meta.prNumber, meta.prRepo, meta.prUrl);
+  return { ok: true };
 }

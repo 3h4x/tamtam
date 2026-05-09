@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { terminalStore, type TermEntry, type SkillItem, type DocItem } from '@/lib/terminal/terminal-session-store'
 import type { SessionItem } from './SessionsPanel'
+import { hasPrerequisiteContext } from './prerequisite-context'
 
 interface JobDict {
   id: string
@@ -14,6 +15,11 @@ interface JobDict {
   user_prompt: string | null
   prompt: string | null
   context_meta: string | null
+}
+
+interface JobDetail {
+  session_id?: string | null
+  context_meta?: string | null
 }
 
 export function useSessionManager(projectName: string) {
@@ -106,7 +112,12 @@ export function useSessionManager(projectName: string) {
               selectedDocs: loadedDocs,
               restoredFor: session.sessionId,
             }))
-            terminalStore.startStream(projectName, lastMatch.id)
+            terminalStore.startStream(
+              projectName,
+              lastMatch.id,
+              false,
+              hasPrerequisiteContext(lastMatch.context_meta),
+            )
           } else {
             terminalStore.update(projectName, () => ({
               history: entries,
@@ -125,12 +136,21 @@ export function useSessionManager(projectName: string) {
     // Fallback: single-job restore
     const isStillRunning = session.finishedAt === null && session.exitCode === null
     if (isStillRunning) {
+      let passthrough = false
+      let liveSessionId = session.sessionId
+      try {
+        const res = await fetch(`/api/jobs/${encodeURIComponent(session.id)}`)
+        const data = await res.json() as JobDetail
+        passthrough = hasPrerequisiteContext(data.context_meta)
+        liveSessionId = data.session_id ?? liveSessionId
+      } catch {}
       terminalStore.reset(projectName)
       terminalStore.update(projectName, () => ({
-        claudeSessionId: session.sessionId,
+        claudeSessionId: liveSessionId,
+        sessionKey: liveSessionId || 'new',
         history: session.prompt ? [{ role: 'user', text: session.prompt }] : [],
       }))
-      terminalStore.startStream(projectName, session.id)
+      terminalStore.startStream(projectName, session.id, false, passthrough)
       return
     }
     try {

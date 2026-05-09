@@ -41,6 +41,7 @@ describe('launchPrWait', () => {
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
+      getJob: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/pipeline/start-mark-dod', () => ({
       startMarkDod: startMarkDodMock,
@@ -79,6 +80,7 @@ describe('launchPrWait', () => {
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
+      getJob: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/pipeline/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
     const { launchPrWait: launchPrWait2 } = await import('@/lib/pipeline/start-pr-wait');
@@ -93,7 +95,25 @@ describe('launchPrWait', () => {
 
   it('creates a pr-wait job with kind pr-wait', () => {
     launchPrWait('myproj', 42, 'owner/myrepo', 'https://github.com/owner/myrepo/pull/42');
-    expect(createJobMock).toHaveBeenCalledWith('myproj', 'pr-wait', expect.any(Number), '');
+    expect(createJobMock).toHaveBeenCalledWith(
+      'myproj',
+      'pr-wait',
+      expect.any(Number),
+      '',
+      undefined,
+      expect.stringContaining('"prNumber":42'),
+    );
+  });
+
+  it('persists prNumber/prRepo/prUrl in contextMeta for resumability', () => {
+    launchPrWait('myproj', 42, 'owner/myrepo', 'https://github.com/owner/myrepo/pull/42');
+    const call = createJobMock.mock.calls[0];
+    const meta = JSON.parse(call[5] as string);
+    expect(meta).toEqual({
+      prNumber: 42,
+      prRepo: 'owner/myrepo',
+      prUrl: 'https://github.com/owner/myrepo/pull/42',
+    });
   });
 
   it('marks job done with exit 0 when PR is already merged', async () => {
@@ -743,5 +763,104 @@ describe('launchPrWait', () => {
         expect(markDoneT).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 1);
       }, { timeout: 5000 });
     });
+  });
+});
+
+describe('resumePrWait', () => {
+  let resumePrWait: typeof import('@/lib/pipeline/start-pr-wait').resumePrWait;
+  let getJobMock: ReturnType<typeof vi.fn>;
+  let markDoneMock: ReturnType<typeof vi.fn>;
+  let execMock: ReturnType<typeof vi.fn>;
+  let updateJobMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: JSON.stringify({ state: 'MERGED', mergeable: 'MERGEABLE', statusCheckRollup: [] }), stderr: '' });
+    getJobMock = vi.fn();
+    markDoneMock = vi.fn().mockResolvedValue(undefined);
+    updateJobMock = vi.fn();
+
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: () => '/path/to/proj' }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs' }) }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: vi.fn(),
+      markDone: markDoneMock,
+      updateJob: updateJobMock,
+      getJob: getJobMock,
+    }));
+    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({ startMarkDod: vi.fn().mockResolvedValue({ ok: true, verified: 0, total: 0, changed: false }) }));
+
+    ({ resumePrWait } = await import('@/lib/pipeline/start-pr-wait'));
+  });
+
+  afterEach(() => { vi.resetModules(); });
+
+  it('returns error when job is not found', () => {
+    getJobMock.mockReturnValue(null);
+    expect(resumePrWait('missing')).toEqual({ ok: false, error: 'job not found' });
+  });
+
+  it('returns error when job kind is wrong', () => {
+    getJobMock.mockReturnValue({ id: 'x', kind: 'test', finishedAt: null, contextMeta: '{}' });
+    expect(resumePrWait('x')).toEqual({ ok: false, error: 'not a pr-wait job' });
+  });
+
+  it('returns error when job already finished', () => {
+    getJobMock.mockReturnValue({ id: 'x', kind: 'pr-wait', finishedAt: 1, contextMeta: '{}' });
+    expect(resumePrWait('x')).toEqual({ ok: false, error: 'job already finished' });
+  });
+
+  it('returns error when contextMeta is missing', () => {
+    getJobMock.mockReturnValue({ id: 'x', kind: 'pr-wait', finishedAt: null, contextMeta: null });
+    const r = resumePrWait('x');
+    expect(r.ok).toBe(false);
+  });
+
+  it('returns error when contextMeta is malformed', () => {
+    getJobMock.mockReturnValue({ id: 'x', kind: 'pr-wait', finishedAt: null, contextMeta: '{"prNumber":"not-a-number"}' });
+    const r = resumePrWait('x');
+    expect(r.ok).toBe(false);
+  });
+
+  it('resumes wait loop with parsed contextMeta', async () => {
+    getJobMock.mockReturnValue({
+      id: 'myproj-pr-wait-resume',
+      project: 'myproj',
+      kind: 'pr-wait',
+      finishedAt: null,
+      logPath: '/tmp/tamtam-test-logs/myproj-pr-wait-resume.log',
+      contextMeta: JSON.stringify({ prNumber: 7, prRepo: 'o/r', prUrl: 'https://github.com/o/r/pull/7' }),
+    });
+    const r = resumePrWait('myproj-pr-wait-resume');
+    expect(r).toEqual({ ok: true });
+    // Loop runs against PR #7 — first gh pr view should target it
+    await vi.waitFor(() => {
+      expect(execMock).toHaveBeenCalled();
+      const call = execMock.mock.calls.find(c => c[0] === 'gh');
+      expect(call?.[1]).toContain('7');
+    }, { timeout: 2000 });
+  });
+
+  it('canonicalizes legacy stale pid rows to inline pid=0 before resuming', () => {
+    const job = {
+      id: 'legacy-pr-wait',
+      project: 'myproj',
+      kind: 'pr-wait',
+      pid: 424242,
+      finishedAt: null,
+      logPath: '/tmp/tamtam-test-logs/legacy-pr-wait.log',
+      contextMeta: JSON.stringify({ prNumber: 8, prRepo: 'o/r', prUrl: 'https://github.com/o/r/pull/8' }),
+    };
+    getJobMock.mockReturnValue(job);
+
+    const result = resumePrWait('legacy-pr-wait');
+
+    expect(result).toEqual({ ok: true });
+    expect(job.pid).toBe(0);
+    expect(updateJobMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'legacy-pr-wait',
+      pid: 0,
+    }));
   });
 });
