@@ -37,6 +37,8 @@ const PROJECTS = [
   'queued-release-terminal',
   'strip-test-fail-live',
   'push-failure-live',
+  'commit-failure-live',
+  'commit-failure-trace',
 ];
 
 export default async function globalSetup(): Promise<void> {
