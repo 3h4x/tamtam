@@ -4,6 +4,21 @@ export function hasIssueCruncherSkill(skillIds: string[] | null | undefined): bo
   return Array.isArray(skillIds) && skillIds.includes(ISSUE_CRUNCHER_SKILL_ID);
 }
 
+export function normalizeStoredPrerequisiteCommand(
+  prerequisiteCommand: string | null | undefined,
+): string | null | undefined {
+  if (prerequisiteCommand === null || prerequisiteCommand === undefined) return prerequisiteCommand;
+  const trimmed = prerequisiteCommand.trim();
+  return trimmed ? trimmed : '';
+}
+
+export function parsePrerequisiteCommandInput(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  return trimmed ? trimmed : '';
+}
+
 export function buildIssueCruncherPrerequisiteCommand(projectName: string): string {
   return `curl -fsS "http://localhost:1337/api/projects/by-project/${encodeURIComponent(projectName)}/issues?trusted_only=1"`;
 }
@@ -17,8 +32,8 @@ export function resolveAgentPrerequisiteCommand({
   skillIds: string[] | null | undefined;
   prerequisiteCommand: string | null | undefined;
 }): string | null {
-  const trimmed = prerequisiteCommand?.trim();
-  if (trimmed) return trimmed;
+  const normalized = normalizeStoredPrerequisiteCommand(prerequisiteCommand);
+  if (typeof normalized === 'string') return normalized || null;
   if (!hasIssueCruncherSkill(skillIds)) return null;
   return buildIssueCruncherPrerequisiteCommand(project);
 }

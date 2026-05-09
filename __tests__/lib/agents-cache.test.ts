@@ -94,6 +94,15 @@ describe('normalizeAgent', () => {
     const result = normalizeAgent(row);
     expect(result.skillIds).toEqual([]);
   });
+
+  it('keeps an explicitly cleared issue-cruncher prerequisite blank', () => {
+    const row = makeAgentRow({
+      skillIds: '["agent-issue-cruncher"]',
+      prerequisiteCommand: '',
+    });
+    const result = normalizeAgent(row);
+    expect(result.prerequisiteCommand).toBeNull();
+  });
 });
 
 describe('getAllAgentsCached', () => {

@@ -3,6 +3,7 @@ import { join } from 'path';
 import { getBranchContext, gitLsTreeSync, gitShowSync } from '@/lib/git/git-branch';
 import { getFileAgentOverride } from '@/lib/agents/file-agent-overrides';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
+import { normalizeStoredPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 import { isCliProvider } from '@/lib/usage/cli-providers';
 
@@ -75,12 +76,13 @@ function parsePrerequisiteCommand(raw: string | undefined): string | null {
   if (trimmed.startsWith('"')) {
     try {
       const parsed = JSON.parse(trimmed);
-      return typeof parsed === 'string' && parsed.trim() ? parsed : null;
+      if (typeof parsed !== 'string') return null;
+      return normalizeStoredPrerequisiteCommand(parsed) ?? null;
     } catch {
       return trimmed;
     }
   }
-  return trimmed;
+  return normalizeStoredPrerequisiteCommand(trimmed) ?? null;
 }
 
 function parseSkillIds(raw: string): string[] {
@@ -160,7 +162,7 @@ function serializeAgent(
       fmLines.push(`runner: ${runner}`);
     } else if (key === 'enabled' && !enabled) {
       fmLines.push(`enabled: false`);
-    } else if (key === 'prerequisiteCommand' && prerequisiteCommand) {
+    } else if (key === 'prerequisiteCommand' && prerequisiteCommand !== null) {
       fmLines.push(`prerequisiteCommand: ${JSON.stringify(prerequisiteCommand)}`);
     }
   }
@@ -284,7 +286,7 @@ export function writeFileAgent(
     : (current?.provider ?? null);
   const prompt = updates.prompt ?? current?.prompt ?? '';
   const prerequisiteCommand = updates.prerequisiteCommand !== undefined
-    ? (updates.prerequisiteCommand?.trim() || null)
+    ? (normalizeStoredPrerequisiteCommand(updates.prerequisiteCommand) ?? null)
     : (current?.prerequisiteCommand ?? null);
 
   const content = serializeAgent(provider, model, schedule, skillIds, runner, enabled, prompt, prerequisiteCommand);

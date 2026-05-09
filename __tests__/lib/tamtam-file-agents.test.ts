@@ -124,6 +124,15 @@ Look at how slow tests are.`);
     expect(a.prerequisiteCommand).toBe('pnpm test --reporter=basic');
   });
 
+  it('preserves an explicitly cleared prerequisiteCommand from frontmatter', () => {
+    writeAgent(tmpDir, 'tests-watcher', `---
+prerequisiteCommand: ""
+---
+Look at how slow tests are.`);
+    const a = scanFileAgents(tmpDir, 'proj')[0];
+    expect(a.prerequisiteCommand).toBe('');
+  });
+
   it('parses prerequisiteCommand without quotes when no special characters', () => {
     writeAgent(tmpDir, 'simple-prereq', `---
 prerequisiteCommand: pnpm test
@@ -264,6 +273,17 @@ Original prompt.`);
     expect(a!.prerequisiteCommand).toBeNull();
     const content = readFileSync(join(tmpDir, '.tamtam', 'agents', 'tester.md'), 'utf-8');
     expect(content).not.toContain('prerequisiteCommand:');
+  });
+
+  it('round-trips an explicitly cleared prerequisiteCommand sentinel', () => {
+    writeFileAgent(tmpDir, 'proj', 'tester', {
+      prompt: 'x',
+      prerequisiteCommand: '',
+    });
+    const a = loadFileAgent(tmpDir, 'proj', 'tester');
+    expect(a!.prerequisiteCommand).toBe('');
+    const content = readFileSync(join(tmpDir, '.tamtam', 'agents', 'tester.md'), 'utf-8');
+    expect(content).toContain('prerequisiteCommand: ""');
   });
 
   it('preserves prerequisiteCommand when other fields are updated', () => {

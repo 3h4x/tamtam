@@ -10,7 +10,7 @@ import { resolveProjectPath } from '@/lib/shared/project-data';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 import { isCliProvider } from '@/lib/usage/cli-providers';
-import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
+import { parsePrerequisiteCommandInput, resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
 
 function withEffectivePrerequisite<T extends { project: string; skillIds: string[]; prerequisiteCommand?: string | null }>(
   agent: T,
@@ -90,9 +90,7 @@ export async function PATCH(
       // prerequisite shell command are also committed state, so updates to
       // either must write the file too.
       if (body.prompt !== undefined || provider !== undefined || body.prerequisiteCommand !== undefined) {
-        const prerequisiteCommand = body.prerequisiteCommand === undefined
-          ? undefined
-          : (typeof body.prerequisiteCommand === 'string' ? (body.prerequisiteCommand.trim() || null) : null);
+        const prerequisiteCommand = parsePrerequisiteCommandInput(body.prerequisiteCommand);
         writeFileAgent(projPath, parsedFile.project, parsedFile.name, { prompt: body.prompt, provider, prerequisiteCommand });
       }
       const updated = loadFileAgent(projPath, parsedFile.project, parsedFile.name);
@@ -133,9 +131,7 @@ export async function PATCH(
   if (body.enabled !== undefined) updates.enabled = body.enabled;
   if (provider !== undefined) updates.provider = provider;
   if (body.prerequisiteCommand !== undefined) {
-    updates.prerequisiteCommand = typeof body.prerequisiteCommand === 'string'
-      ? (body.prerequisiteCommand.trim() || null)
-      : null;
+    updates.prerequisiteCommand = parsePrerequisiteCommandInput(body.prerequisiteCommand) ?? '';
   }
 
   db.update(schema.agents).set(updates).where(eq(schema.agents.id, agentId)).run();

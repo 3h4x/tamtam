@@ -481,6 +481,43 @@ describe('agents API', () => {
         'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"'
       );
     });
+
+    it('keeps an explicitly cleared issue-cruncher prerequisite blank on create', async () => {
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'issue-cruncher',
+          project: 'proj1',
+          skillIds: ['agent-issue-cruncher'],
+          prerequisiteCommand: '',
+        }),
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(201);
+      expect(data.agent.prerequisiteCommand).toBeNull();
+
+      const row = testDb.db.select().from(schema.agents).all().find((agent) => agent.id === data.agent.id);
+      expect(row?.prerequisiteCommand).toBe('');
+    });
+
+    it('returns 400 when project is missing instead of throwing during prerequisite resolution', async () => {
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'issue-cruncher',
+          skillIds: ['agent-issue-cruncher'],
+        }),
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data.detail).toBe('project is required');
+    });
   });
 
   describe('GET /agents/{agentId}', () => {
@@ -558,6 +595,34 @@ describe('agents API', () => {
       expect(data.agent.prerequisiteCommand).toBe(
         'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"'
       );
+    });
+
+    it('keeps an explicitly cleared issue-cruncher prerequisite blank in GET responses', async () => {
+      const agentDetailRoute = await import('@/app/api/agents/[agentId]/route');
+      const agentGET = agentDetailRoute.GET;
+      const now = Date.now() / 1000;
+      testDb.db.insert(schema.agents).values({
+        id: 'agent-issue-cleared',
+        name: 'Issue Cruncher',
+        project: 'proj1',
+        skillIds: '["agent-issue-cruncher"]',
+        model: 'normal',
+        prompt: '',
+        schedule: null,
+        runner: 'pm2',
+        prerequisiteCommand: '',
+        createdAt: now,
+        updatedAt: now,
+      }).run();
+
+      const response = await agentGET(
+        new NextRequest('http://localhost/api/agents/agent-issue-cleared'),
+        { params: Promise.resolve({ agentId: 'agent-issue-cleared' }) }
+      );
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.agent.prerequisiteCommand).toBeNull();
     });
   });
 
@@ -639,6 +704,44 @@ describe('agents API', () => {
       const data = await response.json();
       expect(data.agent.model).toBe('smart');
       expect(data.agent.prompt).toBe('new prompt');
+    });
+
+    it('keeps an explicitly cleared issue-cruncher prerequisite blank after PATCH by id', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-issue',
+          name: 'Issue Cruncher',
+          project: 'proj1',
+          skillIds: '["agent-issue-cruncher"]',
+          model: 'normal',
+          prompt: '',
+          schedule: null,
+          runner: 'pm2',
+          prerequisiteCommand: 'echo old',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/proj1');
+
+      const response = await PATCH(new NextRequest('http://localhost/api/agents/agent-issue', {
+        method: 'PATCH',
+        body: JSON.stringify({ prerequisiteCommand: '' }),
+      }), {
+        params: Promise.resolve({ agentId: 'agent-issue' }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.agent.prerequisiteCommand).toBeNull();
+
+      const row = testDb.db.select().from(schema.agents).all().find((agent) => agent.id === 'agent-issue');
+      expect(row?.prerequisiteCommand).toBe('');
+      expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/proj1', 'proj1', 'Issue Cruncher', expect.objectContaining({
+        prerequisiteCommand: '',
+      }));
     });
 
     it('rejects invalid model values on update', async () => {
@@ -877,6 +980,35 @@ describe('agents API', () => {
       expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'my-agent', {
         prompt: undefined,
         provider: 'codex',
+      });
+    });
+
+    it('keeps an explicitly cleared issue-cruncher prerequisite blank for file agents by id', async () => {
+      const existingAgent = {
+        id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
+        skillIds: ['agent-issue-cruncher'] as string[], model: 'sonnet', prompt: 'existing prompt', schedule: null,
+        runner: 'pm2', enabled: true, provider: null, prerequisiteCommand: 'echo old', createdAt: 0, updatedAt: 0,
+        source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
+      };
+      const updatedAgent = { ...existingAgent, prerequisiteCommand: '' };
+      parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      loadFileAgentMock.mockReturnValueOnce(existingAgent).mockReturnValueOnce(updatedAgent);
+      writeFileAgentMock.mockReturnValueOnce(updatedAgent);
+
+      const request = new NextRequest('http://localhost/api/agents/file:myproj:my-agent', {
+        method: 'PATCH',
+        body: JSON.stringify({ prerequisiteCommand: '' }),
+      });
+      const response = await PATCH(request, { params: Promise.resolve({ agentId: 'file:myproj:my-agent' }) });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.agent.prerequisiteCommand).toBeNull();
+      expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'my-agent', {
+        prompt: undefined,
+        provider: undefined,
+        prerequisiteCommand: '',
       });
     });
 
@@ -1387,9 +1519,36 @@ describe('agents API', () => {
       expect(data.agent.prerequisiteCommand).toBeNull();
 
       const row = testDb.db.select().from(schema.agents).all().find((agent) => agent.id === 'agent-bn');
-      expect(row?.prerequisiteCommand).toBeNull();
+      expect(row?.prerequisiteCommand).toBe('');
       expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'Self', expect.objectContaining({
-        prerequisiteCommand: null,
+        prerequisiteCommand: '',
+      }));
+    });
+
+    it('keeps an explicitly cleared issue-cruncher prerequisite blank by project+name for DB agents', async () => {
+      seedAgent(testDb.db, {
+        skillIds: '["agent-issue-cruncher"]',
+        prerequisiteCommand: 'echo ready',
+      });
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          project: 'myproj',
+          name: 'Self',
+          prerequisiteCommand: '',
+        }),
+      }));
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.agent.prerequisiteCommand).toBeNull();
+
+      const row = testDb.db.select().from(schema.agents).all().find((agent) => agent.id === 'agent-bn');
+      expect(row?.prerequisiteCommand).toBe('');
+      expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'Self', expect.objectContaining({
+        prerequisiteCommand: '',
       }));
     });
 
@@ -1601,7 +1760,44 @@ describe('agents API', () => {
         runner: undefined,
         enabled: undefined,
         provider: undefined,
-        prerequisiteCommand: null,
+        prerequisiteCommand: '',
+      });
+    });
+
+    it('keeps an explicitly cleared issue-cruncher prerequisite blank in by-name file-agent fallback', async () => {
+      const existingAgent = {
+        id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
+        skillIds: ['agent-issue-cruncher'] as string[], model: 'sonnet', prompt: 'updated', schedule: null,
+        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+        prerequisiteCommand: 'echo old',
+        source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
+      };
+      const updatedAgent = { ...existingAgent, prerequisiteCommand: '' };
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      loadFileAgentMock.mockReturnValueOnce(existingAgent);
+      writeFileAgentMock.mockReturnValueOnce(updatedAgent);
+
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          project: 'myproj',
+          name: 'my-agent',
+          prerequisiteCommand: '',
+        }),
+      }));
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.agent.prerequisiteCommand).toBeNull();
+      expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'my-agent', {
+        prompt: undefined,
+        model: undefined,
+        schedule: undefined,
+        skillIds: undefined,
+        runner: undefined,
+        enabled: undefined,
+        provider: undefined,
+        prerequisiteCommand: '',
       });
     });
 

@@ -1,6 +1,11 @@
 import { createHash } from 'crypto';
 import { ISSUE_FORMAT_INSTRUCTION } from '@/lib/agents/issue-template';
-import { ISSUE_CRUNCHER_SKILL_ID, hasIssueCruncherSkill, buildIssueCruncherPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
+import {
+  ISSUE_CRUNCHER_SKILL_ID,
+  hasIssueCruncherSkill,
+  buildIssueCruncherPrerequisiteCommand,
+  normalizeStoredPrerequisiteCommand,
+} from '@/lib/agents/issue-cruncher';
 import { db, schema } from '@/lib/db';
 import { eq } from 'drizzle-orm';
 
@@ -247,8 +252,7 @@ function isUnmodifiedDefault(id: string, existingContent: string): boolean {
 export function backfillIssueCruncherPrerequisites(): void {
   const agents = db.select().from(schema.agents).all();
   for (const agent of agents) {
-    const existingPrereq = agent.prerequisiteCommand?.trim();
-    if (existingPrereq) continue;
+    if (normalizeStoredPrerequisiteCommand(agent.prerequisiteCommand) !== null) continue;
     let skillIds: string[] = [];
     try {
       skillIds = JSON.parse(agent.skillIds || '[]');

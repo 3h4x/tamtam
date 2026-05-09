@@ -191,6 +191,30 @@ describe('seedDefaultSkills', () => {
     expect(agent?.prerequisiteCommand).toBe('curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"');
   });
 
+  it('does not backfill an explicitly cleared issue-cruncher prerequisite', () => {
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.agents).values({
+      id: 'agent-2',
+      name: 'issue-cruncher',
+      project: 'proj1',
+      skillIds: '["agent-issue-cruncher"]',
+      docPaths: '[]',
+      model: 'normal',
+      prompt: '',
+      schedule: null,
+      runner: 'pm2',
+      enabled: true,
+      prerequisiteCommand: '',
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+
+    seedFn();
+
+    const agent = testDb.db.select().from(schema.agents).all().find((row) => row.id === 'agent-2');
+    expect(agent?.prerequisiteCommand).toBe('');
+  });
+
   it('inserts agent-release-ready with correct fields', () => {
     seedFn();
     const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-release-ready');
@@ -499,7 +523,7 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
 
   it('overwrites the previous shipped issue-cruncher default via known hash', () => {
     const now = Date.now() / 1000;
-    const previousSource = execSync('git show HEAD:lib/agents/default-agent-skills.ts', { encoding: 'utf8' });
+    const previousSource = execSync('git show 7574b7b:lib/agents/default-agent-skills.ts', { encoding: 'utf8' });
     const previousDefault = previousSource.match(
       /id: 'agent-issue-cruncher',[\s\S]*?content: `([\s\S]*?)`,\n  }/
     )?.[1];

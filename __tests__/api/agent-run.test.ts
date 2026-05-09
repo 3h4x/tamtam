@@ -891,6 +891,29 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(fullPrompt).toContain('Trusted issue');
   });
 
+  it('does not re-inject the issue-cruncher prerequisite after an explicit clear', async () => {
+    insertAgent({
+      name: 'Issue Cruncher',
+      skillIds: '["agent-issue-cruncher"]',
+      prerequisiteCommand: '',
+    });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'pick the next issue' }),
+    });
+
+    await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    expect(execMock).not.toHaveBeenCalledWith(
+      'bash',
+      ['-c', 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"'],
+      expect.anything(),
+    );
+    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    expect(fullPrompt).not.toContain('## Prerequisite Output');
+    expect(fullPrompt).not.toContain('trusted_only=1');
+  });
+
   it('creates the log directory before writing the prerequisite artifact', async () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'tamtam-agent-prereq-logdir-'));
     logDirMock = join(tempRoot, 'missing-logs');

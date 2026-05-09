@@ -45,11 +45,13 @@ export function AgentEditor({
   onBack: () => void
 }) {
   const initialSkillIds = agent?.skillIds || template?.skillIds || []
-  const initialPrerequisite = resolveAgentPrerequisiteCommand({
-    project,
-    skillIds: initialSkillIds,
-    prerequisiteCommand: agent?.prerequisiteCommand ?? null,
-  }) ?? ''
+  const initialPrerequisite = agent
+    ? (agent.prerequisiteCommand ?? '')
+    : (resolveAgentPrerequisiteCommand({
+        project,
+        skillIds: initialSkillIds,
+        prerequisiteCommand: null,
+      }) ?? '')
   const [name, setName] = useState(agent?.name || template?.name || '')
   const [agentPrompt, setAgentPrompt] = useState(agent?.prompt || template?.prompt || '')
   const [selectedSkills, setSelectedSkills] = useState<string[]>(initialSkillIds)
@@ -97,11 +99,13 @@ export function AgentEditor({
     setSchedule(src.schedule || '')
     setRunner(src.runner || 'pm2')
     if (agent) setEnabled(agent.enabled)
-    setPrerequisiteCommand(resolveAgentPrerequisiteCommand({
-      project,
-      skillIds: src.skillIds || [],
-      prerequisiteCommand: agent?.prerequisiteCommand ?? null,
-    }) ?? '')
+    setPrerequisiteCommand(agent
+      ? (agent.prerequisiteCommand ?? '')
+      : (resolveAgentPrerequisiteCommand({
+          project,
+          skillIds: src.skillIds || [],
+          prerequisiteCommand: null,
+        }) ?? ''))
   }, [agent?.id, project, template?.name])
 
   useEffect(() => {
