@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button'
 import { useToast } from '@/components/Toast'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, normalizeModelInput } from '@/lib/agents/model-aliases'
+import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher'
 
 const MODELS = [...MODEL_TIERS]
 const RUNNERS = ['pm2', 'launchctl']
@@ -43,9 +44,15 @@ export function AgentEditor({
   onDelete?: () => void
   onBack: () => void
 }) {
+  const initialSkillIds = agent?.skillIds || template?.skillIds || []
+  const initialPrerequisite = resolveAgentPrerequisiteCommand({
+    project,
+    skillIds: initialSkillIds,
+    prerequisiteCommand: agent?.prerequisiteCommand ?? null,
+  }) ?? ''
   const [name, setName] = useState(agent?.name || template?.name || '')
   const [agentPrompt, setAgentPrompt] = useState(agent?.prompt || template?.prompt || '')
-  const [selectedSkills, setSelectedSkills] = useState<string[]>(agent?.skillIds || template?.skillIds || [])
+  const [selectedSkills, setSelectedSkills] = useState<string[]>(initialSkillIds)
   const [selectedDocPaths, setSelectedDocPaths] = useState<string[]>(agent?.docPaths || [])
   const [availableDocs, setAvailableDocs] = useState<ProjectDoc[]>([])
   const [contextTab, setContextTab] = useState<'skills' | 'docs'>('skills')
@@ -53,7 +60,7 @@ export function AgentEditor({
   const [schedule, setSchedule] = useState(agent?.schedule || template?.schedule || '')
   const [runner, setRunner] = useState(agent?.runner || template?.runner || 'pm2')
   const [enabled, setEnabled] = useState<boolean>(agent ? agent.enabled : true)
-  const [prerequisiteCommand, setPrerequisiteCommand] = useState<string>(agent?.prerequisiteCommand ?? '')
+  const [prerequisiteCommand, setPrerequisiteCommand] = useState<string>(initialPrerequisite)
   const [saving, setSaving] = useState(false)
   const [improving, setImproving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -90,8 +97,12 @@ export function AgentEditor({
     setSchedule(src.schedule || '')
     setRunner(src.runner || 'pm2')
     if (agent) setEnabled(agent.enabled)
-    if (agent) setPrerequisiteCommand(agent.prerequisiteCommand ?? '')
-  }, [agent?.id, template?.name])
+    setPrerequisiteCommand(resolveAgentPrerequisiteCommand({
+      project,
+      skillIds: src.skillIds || [],
+      prerequisiteCommand: agent?.prerequisiteCommand ?? null,
+    }) ?? '')
+  }, [agent?.id, project, template?.name])
 
   useEffect(() => {
     if (!agent) nameRef.current?.focus()

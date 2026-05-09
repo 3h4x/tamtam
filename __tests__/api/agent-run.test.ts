@@ -132,6 +132,9 @@ describe('POST /api/agents/{agentId}/run', () => {
       if (cmd === 'bash' && args[1] === 'echo TAMTAM_PREREQ_MARKER') {
         return { stdout: 'TAMTAM_PREREQ_MARKER\n', stderr: '', exitCode: 0 };
       }
+      if (cmd === 'bash' && args[1] === 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"') {
+        return { stdout: '{"issues":[{"number":1,"title":"Trusted issue"}]}\n', stderr: '', exitCode: 0 };
+      }
       if (cmd === 'bash' && args[1] === 'exit 7') {
         return { stdout: '', stderr: '', exitCode: 7 };
       }
@@ -866,6 +869,26 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(fullPrompt).toContain('TAMTAM_PREREQ_MARKER');
     expect(fullPrompt).toContain('analyze the output above');
 
+  });
+
+  it('injects the trusted-only issue prerequisite for issue-cruncher agents without an explicit prerequisiteCommand', async () => {
+    insertAgent({ name: 'Issue Cruncher', skillIds: '["agent-issue-cruncher"]' });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'pick the next issue' }),
+    });
+
+    await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    expect(execMock).toHaveBeenCalledWith(
+      'bash',
+      ['-c', 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"'],
+      expect.objectContaining({ cwd: '/path/to/proj' }),
+    );
+    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    expect(fullPrompt).toContain('## Prerequisite Output');
+    expect(fullPrompt).toContain('trusted_only=1');
+    expect(fullPrompt).toContain('Trusted issue');
   });
 
   it('creates the log directory before writing the prerequisite artifact', async () => {

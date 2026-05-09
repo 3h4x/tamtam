@@ -57,6 +57,7 @@ function buildSettingsResponse(): Record<string, string> {
 }
 const SETTING_KEYS = [
   'github_owner',
+  'trusted_github_users',
   'github_board_sync_enabled',
   'github_board_project_owner',
   'github_board_project_title',
@@ -118,6 +119,15 @@ const SETTING_KEYS = [
 ] as const;
 
 function serializeSettingValue(key: string, value: unknown): string {
+  if (key === 'trusted_github_users') {
+    if (Array.isArray(value)) return value.join(', ');
+    try {
+      const parsed = JSON.parse(String(value));
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string').join(', ') : '';
+    } catch {
+      return '';
+    }
+  }
   if (key === 'github_board_status_option_ids' || key === 'github_board_custom_field_ids') {
     if (typeof value === 'string') return value;
     if (value && typeof value === 'object') return JSON.stringify(value);
@@ -193,6 +203,14 @@ function validateAndSerializeSettingValue(
 
   if (key === 'review_fix_max_iterations') {
     return parsePositiveIntegerSetting(value, 'review_fix_max_iterations');
+  }
+
+  if (key === 'trusted_github_users') {
+    const users = String(value)
+      .split(/[,\n]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return { value: JSON.stringify(users), error: null };
   }
 
   if (key === 'agent_templates') {

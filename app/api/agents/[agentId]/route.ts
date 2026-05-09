@@ -10,6 +10,20 @@ import { resolveProjectPath } from '@/lib/shared/project-data';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 import { isCliProvider } from '@/lib/usage/cli-providers';
+import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
+
+function withEffectivePrerequisite<T extends { project: string; skillIds: string[]; prerequisiteCommand?: string | null }>(
+  agent: T,
+): T {
+  return {
+    ...agent,
+    prerequisiteCommand: resolveAgentPrerequisiteCommand({
+      project: agent.project,
+      skillIds: agent.skillIds,
+      prerequisiteCommand: agent.prerequisiteCommand,
+    }),
+  };
+}
 
 export async function GET(
   _request: NextRequest,
@@ -23,7 +37,7 @@ export async function GET(
     if (!projPath) return NextResponse.json({ detail: 'not found' }, { status: 404 });
     const agent = loadFileAgent(projPath, parsed.project, parsed.name);
     if (!agent) return NextResponse.json({ detail: 'not found' }, { status: 404 });
-    return NextResponse.json({ agent });
+    return NextResponse.json({ agent: withEffectivePrerequisite(agent) });
   }
 
   const agent = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
@@ -92,7 +106,7 @@ export async function PATCH(
       } catch (e: unknown) {
         console.error(`Failed to update schedule for file agent ${updated.id}:`, errMsg(e));
       }
-      return NextResponse.json({ agent: updated });
+      return NextResponse.json({ agent: withEffectivePrerequisite(updated) });
     } catch (e: unknown) {
       return NextResponse.json({ detail: `Failed to write agent file: ${errMsg(e)}` }, { status: 500 });
     }

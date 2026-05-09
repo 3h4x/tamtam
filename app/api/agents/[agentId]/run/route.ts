@@ -25,6 +25,7 @@ import { getSettings } from '@/lib/shared/config';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
+import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
 
 /**
  * `readOnly: true` is for agents whose declared task does not edit the local
@@ -377,7 +378,11 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   // in the UI for the entire prereq duration instead of being silently held
   // in the route until completion.
   let prerequisiteResult: { command: string; exitCode: number; durationMs: number; stdout: string; stderr: string } | null = null;
-  const prereqCmd = agent.prerequisiteCommand?.trim();
+  const prereqCmd = resolveAgentPrerequisiteCommand({
+    project: agent.project,
+    skillIds: allSkillIds,
+    prerequisiteCommand: agent.prerequisiteCommand,
+  });
   if (prereqCmd) {
     const cancelSignal = registerJobCancellation(job.id);
     const startedAt = Date.now();

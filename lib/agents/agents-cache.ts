@@ -1,15 +1,22 @@
 import { db, schema } from '@/lib/db';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
+import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
 
 export type AgentRow = typeof schema.agents.$inferSelect;
 export type NormalizedAgent = Omit<AgentRow, 'skillIds' | 'docPaths'> & { skillIds: string[]; docPaths: string[] };
 
 export function normalizeAgent(row: AgentRow): NormalizedAgent {
+  const skillIds = JSON.parse(row.skillIds || '[]');
   return {
     ...row,
     model: normalizeModelInput(row.model, 'normal'),
-    skillIds: JSON.parse(row.skillIds || '[]'),
+    skillIds,
     docPaths: JSON.parse(row.docPaths || '[]'),
+    prerequisiteCommand: resolveAgentPrerequisiteCommand({
+      project: row.project,
+      skillIds,
+      prerequisiteCommand: row.prerequisiteCommand,
+    }),
   };
 }
 

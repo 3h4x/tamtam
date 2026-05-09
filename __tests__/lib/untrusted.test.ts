@@ -1,7 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+
+const { mockSettings } = vi.hoisted(() => ({
+  mockSettings: {
+    trusted_github_users: [] as string[],
+  },
+}));
+
+vi.mock('@/lib/shared/config', () => ({
+  getSettings: () => mockSettings,
+}));
+
 import {
   UNTRUSTED_SYSTEM_INSTRUCTION,
   wrapUntrusted,
@@ -72,7 +83,10 @@ describe('UNTRUSTED_SYSTEM_INSTRUCTION', () => {
 describe('isUserTrusted', () => {
   let tmpDir: string;
 
-  beforeEach(() => { tmpDir = makeTmpDir(); });
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    mockSettings.trusted_github_users = [];
+  });
   afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('returns false when no config exists', () => {
@@ -90,6 +104,12 @@ describe('isUserTrusted', () => {
     expect(isUserTrusted('bob', tmpDir)).toBe(true);
   });
 
+  it('returns true when login is in trusted_github_users', () => {
+    mockSettings.trusted_github_users = ['alice', 'bob'];
+    expect(isUserTrusted('alice', tmpDir)).toBe(true);
+    expect(isUserTrusted('bob', tmpDir)).toBe(true);
+  });
+
   it('returns false when login is not in safe_users', () => {
     writeSafeUsers(tmpDir, ['alice']);
     expect(isUserTrusted('eve', tmpDir)).toBe(false);
@@ -97,6 +117,12 @@ describe('isUserTrusted', () => {
 
   it('is case-insensitive', () => {
     writeSafeUsers(tmpDir, ['Alice']);
+    expect(isUserTrusted('alice', tmpDir)).toBe(true);
+    expect(isUserTrusted('ALICE', tmpDir)).toBe(true);
+  });
+
+  it('matches trusted_github_users case-insensitively', () => {
+    mockSettings.trusted_github_users = ['Alice'];
     expect(isUserTrusted('alice', tmpDir)).toBe(true);
     expect(isUserTrusted('ALICE', tmpDir)).toBe(true);
   });

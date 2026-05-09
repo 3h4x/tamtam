@@ -18,6 +18,22 @@ function createTestDb() {
       created_at REAL NOT NULL,
       updated_at REAL NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS agents (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      project TEXT NOT NULL,
+      skill_ids TEXT NOT NULL DEFAULT '[]',
+      doc_paths TEXT NOT NULL DEFAULT '[]',
+      model TEXT NOT NULL DEFAULT 'sonnet',
+      prompt TEXT NOT NULL DEFAULT '',
+      schedule TEXT,
+      runner TEXT NOT NULL DEFAULT 'pm2',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      provider TEXT,
+      prerequisite_command TEXT,
+      created_at REAL NOT NULL,
+      updated_at REAL NOT NULL
+    );
   `);
 
   return { sqlite, db: drizzle(sqlite, { schema }) };

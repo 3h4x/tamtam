@@ -1,3 +1,5 @@
+import { ISSUE_CRUNCHER_SKILL_ID } from '@/lib/agents/issue-cruncher';
+
 export interface RecommendedAgentTemplate {
   name: string
   description: string
@@ -21,7 +23,7 @@ export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
     schedule: '',
     runner: 'pm2',
     prompt: '',
-    skillIds: ['agent-issue-cruncher'],
+    skillIds: [ISSUE_CRUNCHER_SKILL_ID],
     featured: true,
   },
   {

@@ -5,8 +5,18 @@ import { exec } from '@/lib/shared/shell';
 import { getSettings } from '@/lib/shared/config';
 import { db, schema } from '@/lib/db';
 import { homedir } from 'os';
+import { isUserTrusted } from '@/lib/shared/untrusted';
 
 const CACHE_TTL_S = 300; // 5 minutes
+
+function filterTrustedIssues(issues: unknown[], projectPath: string): unknown[] {
+  return issues.filter((issue) => {
+    if (!issue || typeof issue !== 'object') return false;
+    const author = (issue as { author?: { login?: unknown } }).author;
+    if (!author || typeof author.login !== 'string') return false;
+    return isUserTrusted(author.login, projectPath);
+  });
+}
 
 async function getGhRepo(projectName: string, projPath: string): Promise<string | null> {
   try {
@@ -30,6 +40,7 @@ export async function GET(
 ) {
   const { projectName } = await params;
   const forceRefresh = request.nextUrl.searchParams.get('refresh') === '1';
+  const trustedOnly = request.nextUrl.searchParams.get('trusted_only') === '1';
 
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
@@ -43,10 +54,11 @@ export async function GET(
       .get();
 
     if (cached && Date.now() / 1000 - cached.fetchedAt < CACHE_TTL_S) {
+      const cachedIssues = JSON.parse(cached.issues);
       return NextResponse.json({
         repo: cached.repo,
         prs: JSON.parse(cached.prs),
-        issues: JSON.parse(cached.issues),
+        issues: trustedOnly ? filterTrustedIssues(cachedIssues, projPath) : cachedIssues,
         error: null,
         cached: true,
         cachedAt: cached.fetchedAt,
@@ -96,7 +108,14 @@ export async function GET(
       .run();
   }
 
-  return NextResponse.json({ repo, prs, issues, error: ghError, cached: false, cachedAt: fetchedAt });
+  return NextResponse.json({
+    repo,
+    prs,
+    issues: trustedOnly ? filterTrustedIssues(issues, projPath) : issues,
+    error: ghError,
+    cached: false,
+    cachedAt: fetchedAt,
+  });
 }
 
 export async function POST(

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { execSync } from 'child_process';
 import * as schema from '@/lib/db/schema';
 
 function createTestDb() {
@@ -12,6 +13,22 @@ function createTestDb() {
       name TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       content TEXT NOT NULL DEFAULT '',
+      created_at REAL NOT NULL,
+      updated_at REAL NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS agents (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      project TEXT NOT NULL,
+      skill_ids TEXT NOT NULL DEFAULT '[]',
+      doc_paths TEXT NOT NULL DEFAULT '[]',
+      model TEXT NOT NULL DEFAULT 'sonnet',
+      prompt TEXT NOT NULL DEFAULT '',
+      schedule TEXT,
+      runner TEXT NOT NULL DEFAULT 'pm2',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      provider TEXT,
+      prerequisite_command TEXT,
       created_at REAL NOT NULL,
       updated_at REAL NOT NULL
     );
@@ -148,6 +165,30 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('/api/projects/by-project/<project>/issue-branch');
     expect(skill!.content).not.toContain('git checkout');
     expect(skill!.content).not.toContain('git commit');
+  });
+
+  it('backfills the trusted-only prerequisite for existing issue-cruncher agents', () => {
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.agents).values({
+      id: 'agent-1',
+      name: 'issue-cruncher',
+      project: 'proj1',
+      skillIds: '["agent-issue-cruncher"]',
+      docPaths: '[]',
+      model: 'normal',
+      prompt: '',
+      schedule: null,
+      runner: 'pm2',
+      enabled: true,
+      prerequisiteCommand: null,
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+
+    seedFn();
+
+    const agent = testDb.db.select().from(schema.agents).all().find((row) => row.id === 'agent-1');
+    expect(agent?.prerequisiteCommand).toBe('curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"');
   });
 
   it('inserts agent-release-ready with correct fields', () => {
@@ -454,6 +495,31 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
     expect(skill!.content).not.toBe(previousDefault);
     expect(skill!.content).toContain('current repo directory name');
     expect(skill!.content).toContain('If either disagrees with the repo directory name');
+  });
+
+  it('overwrites the previous shipped issue-cruncher default via known hash', () => {
+    const now = Date.now() / 1000;
+    const previousSource = execSync('git show HEAD:lib/agents/default-agent-skills.ts', { encoding: 'utf8' });
+    const previousDefault = previousSource.match(
+      /id: 'agent-issue-cruncher',[\s\S]*?content: `([\s\S]*?)`,\n  }/
+    )?.[1];
+    expect(previousDefault).toBeTruthy();
+
+    testDb.db.insert(schema.skills).values({
+      id: 'agent-issue-cruncher',
+      name: 'agent:issue-cruncher',
+      description: 'old',
+      content: previousDefault!,
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+
+    seedFn();
+
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-issue-cruncher');
+    expect(skill!.content).not.toBe(previousDefault);
+    expect(skill!.content).toContain('Prerequisite Output');
+    expect(skill!.content).toContain("Do not run `gh issue list` directly");
   });
 
   it('overwrites the previous agent-self-improve default via known hash', () => {

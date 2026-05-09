@@ -16,6 +16,7 @@ import { isCliProvider, parseEnabledProviders, type CliProvider } from '@/lib/us
 export interface TamTamConfig {
   workspace_path: string;
   github_owner: string;
+  trusted_github_users: string[];
   github_board_sync_enabled: boolean;
   github_board_project_owner: string;
   github_board_project_title: string;
@@ -78,6 +79,7 @@ export interface TamTamConfig {
 const DEFAULTS: TamTamConfig = {
   workspace_path: '',
   github_owner: '',
+  trusted_github_users: [],
   github_board_sync_enabled: false,
   github_board_project_owner: '',
   github_board_project_title: 'TamTam',
@@ -219,6 +221,7 @@ export function getSettings(): TamTamConfig {
   const config: TamTamConfig = {
     workspace_path: map.workspace_path ?? DEFAULTS.workspace_path,
     github_owner: map.github_owner ?? DEFAULTS.github_owner,
+    trusted_github_users: parseJsonStringArray(map.trusted_github_users),
     github_board_sync_enabled: map.github_board_sync_enabled === 'true',
     github_board_project_owner: map.github_board_project_owner ?? DEFAULTS.github_board_project_owner,
     github_board_project_title: map.github_board_project_title ?? DEFAULTS.github_board_project_title,
@@ -324,6 +327,16 @@ function parseJsonObject(v: string | undefined): Record<string, string> {
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, string> : {};
   } catch {
     return {};
+  }
+}
+
+function parseJsonStringArray(v: string | undefined): string[] {
+  if (!v) return [];
+  try {
+    const parsed = JSON.parse(v);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
   }
 }
 
