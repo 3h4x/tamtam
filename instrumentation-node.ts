@@ -75,15 +75,22 @@ export async function reinstallAgents(): Promise<void> {
 // sweep fixes that: list running Claude-backed jobs and probe them.
 export async function runProbeSweep(): Promise<void> {
   try {
-    const { listJobs, probeJobStatus, PIPELINE_STEP_KINDS } = await import('./lib/jobs/job-storage');
-    const { isAgentJobKind, getJobKind } = await import('./lib/jobs/kinds');
-    const claudeKinds = new Set(['run', 'review', 'fix', 'fix-ci', 'fix-push']);
-    const running = listJobs().filter(j =>
-      j.finishedAt === null
-      && (claudeKinds.has(getJobKind(j.kind)) || isAgentJobKind(j.kind) || PIPELINE_STEP_KINDS.has(getJobKind(j.kind)))
-    );
+    const jobStorage = await import('./lib/jobs/job-storage');
+    const { isClaudeBackedJobKind, getJobKind } = await import('./lib/jobs/kinds');
+    const pipelineStepKinds = 'PIPELINE_STEP_KINDS' in jobStorage && jobStorage.PIPELINE_STEP_KINDS instanceof Set
+      ? jobStorage.PIPELINE_STEP_KINDS
+      : new Set<string>();
+    const running = jobStorage.listJobs().filter((job) => {
+      try {
+        const kind = getJobKind(job?.kind);
+        return job?.finishedAt === null
+          && (isClaudeBackedJobKind(kind) || pipelineStepKinds.has(kind));
+      } catch {
+        return false;
+      }
+    });
     for (const job of running) {
-      try { await probeJobStatus(job); } catch {}
+      try { await jobStorage.probeJobStatus(job); } catch {}
     }
   } catch (err) {
     console.error('[probe-sweep] error:', err);
@@ -93,17 +100,21 @@ export async function runProbeSweep(): Promise<void> {
   // for the project and let reconcileStaleRelease walk the chain — if all
   // steps are done it finalizes the release, otherwise it's a no-op.
   try {
-    const { listJobs, reconcileStaleRelease, PIPELINE_STEP_KINDS } = await import('./lib/jobs/job-storage');
-    const staleReleases = listJobs().filter(j => j.finishedAt === null && j.kind === 'release');
+    const jobStorage = await import('./lib/jobs/job-storage');
+    const pipelineStepKinds = 'PIPELINE_STEP_KINDS' in jobStorage && jobStorage.PIPELINE_STEP_KINDS instanceof Set
+      ? jobStorage.PIPELINE_STEP_KINDS
+      : new Set<string>();
+    const reconcileStaleRelease = 'reconcileStaleRelease' in jobStorage ? jobStorage.reconcileStaleRelease : undefined;
+    const staleReleases = jobStorage.listJobs().filter(j => j.finishedAt === null && j.kind === 'release');
     for (const release of staleReleases) {
-      const stepJob = listJobs().find(j =>
+      const stepJob = jobStorage.listJobs().find(j =>
         j.project === release.project
-        && PIPELINE_STEP_KINDS.has(j.kind)
+        && pipelineStepKinds.has(j.kind)
         && j.finishedAt !== null
         && (j.startedAt ?? 0) >= (release.startedAt ?? 0) - 1
       );
       if (stepJob) {
-        try { await reconcileStaleRelease(stepJob); } catch {}
+        try { await reconcileStaleRelease?.(stepJob); } catch {}
       }
     }
   } catch (err) {
