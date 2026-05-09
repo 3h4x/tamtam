@@ -41,6 +41,7 @@ const PROJECTS = [
   'commit-failure-trace',
   'commit-failure-runs',
   'commit-failure-history',
+  'commit-failure-runs-expand',
 ];
 
 export default async function globalSetup(): Promise<void> {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq, inArray } from 'drizzle-orm';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { basename, join } from 'path';
+import { eq } from 'drizzle-orm';
+import { mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import { db, schema } from '@/lib/db';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
@@ -9,7 +9,7 @@ import { checkIssueBranchBlock } from '@/lib/pipeline/start-release';
 import { isLockOwnedByActiveRelease, getLock } from '@/lib/pipeline/pipeline-lock';
 import { getPendingRelease, drainPendingRelease } from '@/lib/pipeline/pending-release';
 import { enqueueQueuedAgentRun } from '@/lib/agents/queued-agent-runs';
-import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills/skills';
+import { composeAgentSkills } from '@/lib/agents/compose-skills';
 import { createJob, updateJob, listJobs, probeJobStatus } from '@/lib/jobs/job-storage';
 import { startJob } from '@/lib/jobs/pm2-jobs';
 import { getJobKind, isAgentJobKind } from '@/lib/jobs/kinds';
@@ -292,66 +292,15 @@ async function runAgentStart(
     };
   }
 
-  // Compose skills into system prompt. Agent skillIds can be:
-  //   - DB skill UUIDs  -> read content from `skills` table
-  //   - `persona:<path>` -> read file from `skills/docs/skills/<path>.md`
+  // Compose skills + docs into the system prompt. Shared with the magic-wand
+  // prompt-improvement endpoint via `composeAgentSkills`.
   const allSkillIds: string[] = JSON.parse(agent.skillIds);
-  const dbSkillIds = allSkillIds.filter((id) => !id.startsWith('persona:'));
-  const personaPaths = allSkillIds
-    .filter((id) => id.startsWith('persona:'))
-    .map((id) => id.slice('persona:'.length));
-
-  // Load project docs first — they are prepended before skills so skills can reference them.
-  const docPaths: string[] = JSON.parse(agent.docPaths || '[]');
-  const docParts: string[] = [];
-  const metaDocs: Array<{ name: string; path: string }> = [];
-  for (const docPath of docPaths) {
-    const fullPath = join(projPath, docPath);
-    if (!fullPath.startsWith(projPath + '/')) continue;
-    if (existsSync(fullPath)) {
-      try {
-        const content = readFileSync(fullPath, 'utf-8');
-        docParts.push(`## ${basename(docPath)}\n${content}`);
-        metaDocs.push({ name: basename(docPath), path: docPath });
-      } catch {}
-    }
-  }
-
-  const parts: string[] = [];
-  // contextMeta mirrors the terminal's snapshot so the UI can render toolbar
-  // chips for the agent's configured skills when the run is opened.
-  const metaSkills: Array<{ id: string; name: string; description: string; content?: string; source: 'db' | 'file' }> = [];
-  if (dbSkillIds.length > 0) {
-    const rows = db.select().from(schema.skills).where(inArray(schema.skills.id, dbSkillIds)).all();
-    for (const s of rows) {
-      parts.push(`## ${s.name}\n${s.content}`);
-      metaSkills.push({ id: s.id, name: s.name, description: s.description ?? '', content: s.content, source: 'db' });
-    }
-  }
-  const docsBase = join(SKILLS_DIR, 'docs', 'skills');
-  for (const p of personaPaths) {
-    const fallbackName = p.split('/').pop() ?? p;
-    const file = existsSync(join(docsBase, `${p}.md`))
-      ? join(docsBase, `${p}.md`)
-      : join(DATA_SKILLS_DIR, `${p}.md`);
-    if (existsSync(file)) {
-      try {
-        const body = readFileSync(file, 'utf-8');
-        parts.push(body);
-        // Try to pull a human-readable name from frontmatter `name:` or first heading.
-        let display = fallbackName;
-        const fm = body.match(/^---[\s\S]*?\nname:\s*(.+?)\s*\n[\s\S]*?---/);
-        if (fm) display = fm[1].trim();
-        else {
-          const h = body.match(/^#\s+(.+)$/m);
-          if (h) display = h[1].trim();
-        }
-        metaSkills.push({ id: `persona:${p}`, name: display, description: p, source: 'file' });
-      } catch {}
-    } else {
-      metaSkills.push({ id: `persona:${p}`, name: fallbackName, description: p, source: 'file' });
-    }
-  }
+  const docPathsParsed: string[] = JSON.parse(agent.docPaths || '[]');
+  const composed = composeAgentSkills(projPath, allSkillIds, docPathsParsed);
+  const docParts = composed.docParts;
+  const parts = composed.parts;
+  const metaSkills = composed.metaSkills;
+  const metaDocs = composed.metaDocs;
   const allParts = [...docParts, ...parts];
   const reportContract = `## TamTam Run Report
 

@@ -4,24 +4,31 @@ import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
-import { AgentModal } from '@/components/agents-tab/AgentModal'
+import { AgentEditor } from '@/components/agents-tab/AgentEditor'
 
-const { fetchProjectDocsMock, onSaveMock, onCloseMock } = vi.hoisted(() => ({
+const { fetchProjectDocsMock, improveAgentPromptMock, onSaveMock, onBackMock, toastMock } = vi.hoisted(() => ({
   fetchProjectDocsMock: vi.fn(),
+  improveAgentPromptMock: vi.fn(),
   onSaveMock: vi.fn(),
-  onCloseMock: vi.fn(),
+  onBackMock: vi.fn(),
+  toastMock: vi.fn(),
 }))
 
 vi.mock('@/lib/client-api', () => ({
   fetchProjectDocs: fetchProjectDocsMock,
+  improveAgentPrompt: improveAgentPromptMock,
 }))
 
-function renderModal(overrides: Partial<React.ComponentProps<typeof AgentModal>> = {}) {
+vi.mock('@/components/Toast', () => ({
+  useToast: () => ({ toast: toastMock }),
+}))
+
+function renderEditor(overrides: Partial<React.ComponentProps<typeof AgentEditor>> = {}) {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
 
-  const props: React.ComponentProps<typeof AgentModal> = {
+  const props: React.ComponentProps<typeof AgentEditor> = {
     project: 'alpha',
     skills: [
       { id: 'skill-1', name: 'DB Skill', description: 'Database-backed skill', content: 'Review carefully', createdAt: 0, updatedAt: 0 },
@@ -39,12 +46,12 @@ function renderModal(overrides: Partial<React.ComponentProps<typeof AgentModal>>
       skillIds: ['skill-1'],
     },
     onSave: onSaveMock,
-    onClose: onCloseMock,
+    onBack: onBackMock,
     ...overrides,
   }
 
   flushSync(() => {
-    root.render(<AgentModal {...props} />)
+    root.render(<AgentEditor {...props} />)
   })
 
   return {
@@ -68,11 +75,11 @@ function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
   return button
 }
 
-describe('AgentModal', () => {
+describe('AgentEditor', () => {
   beforeEach(() => {
     fetchProjectDocsMock.mockReset()
     onSaveMock.mockReset()
-    onCloseMock.mockReset()
+    onBackMock.mockReset()
     fetchProjectDocsMock.mockResolvedValue({
       docs: [
         { name: 'Runbook', path: 'docs/runbook.md', content: 'Operational notes' },
@@ -85,11 +92,11 @@ describe('AgentModal', () => {
   })
 
   it('loads project docs and saves selected context with normalized model values', async () => {
-    const { container, unmount } = renderModal()
+    const { container, unmount } = renderEditor()
 
     await vi.waitFor(() => {
       expect(fetchProjectDocsMock).toHaveBeenCalledWith('alpha')
-      expect(container.textContent).toContain('Create Agent')
+      expect(container.textContent).toContain('Create agent')
     })
 
     buttonByText(container, 'Docs').dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -106,7 +113,7 @@ describe('AgentModal', () => {
     if (!(schedule instanceof HTMLSelectElement)) throw new Error('schedule select not found')
     setInputValue(schedule, '')
 
-    buttonByText(container, 'Create Agent').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    buttonByText(container, 'Create agent').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     await vi.waitFor(() => {
       expect(onSaveMock).toHaveBeenCalledWith({
@@ -127,7 +134,7 @@ describe('AgentModal', () => {
 
   it('shows an empty-state message when the project has no docs', async () => {
     fetchProjectDocsMock.mockResolvedValueOnce({ docs: [] })
-    const { container, unmount } = renderModal()
+    const { container, unmount } = renderEditor()
 
     buttonByText(container, 'Docs').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
@@ -138,13 +145,37 @@ describe('AgentModal', () => {
     unmount()
   })
 
-  it('closes when Escape is pressed', async () => {
-    const { unmount } = renderModal()
+  it('replaces the prompt with the improved version when the wand is clicked', async () => {
+    improveAgentPromptMock.mockResolvedValueOnce({ improvedPrompt: 'Run pnpm test --reporter=basic and report timing per file.' })
+    const { container, unmount } = renderEditor()
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Inspect the repo')
+    })
 
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    const wand = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('Improve'))
+    if (!(wand instanceof HTMLButtonElement)) throw new Error('improve button not found')
+    wand.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     await vi.waitFor(() => {
-      expect(onCloseMock).toHaveBeenCalled()
+      const textarea = container.querySelector('#agent-prompt') as HTMLTextAreaElement | null
+      expect(textarea?.value).toBe('Run pnpm test --reporter=basic and report timing per file.')
+    })
+    expect(improveAgentPromptMock).toHaveBeenCalledWith({
+      project: 'alpha',
+      draftPrompt: 'Inspect the repo',
+      skillIds: ['skill-1'],
+      docPaths: [],
+    })
+    unmount()
+  })
+
+  it('calls onBack when Cancel button is clicked', async () => {
+    const { container, unmount } = renderEditor()
+
+    buttonByText(container, 'Cancel').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(onBackMock).toHaveBeenCalled()
     })
 
     unmount()

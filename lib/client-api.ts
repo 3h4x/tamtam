@@ -87,9 +87,10 @@ export {
   updateAgent,
   deleteAgent,
   runAgent,
+  improveAgentPrompt,
 } from './client/agents'
 
-export type { RunAgentResult } from './client/agents'
+export type { RunAgentResult, ImprovePromptInput } from './client/agents'
 
 export {
   fetchSkills,

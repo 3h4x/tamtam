@@ -1,7 +1,6 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { AgentsTab } from '@/components/AgentsTab'
 import {
   ACTIVE_WORK_BUCKET_ORDER,
   activeWorkAccentClass,
@@ -11,6 +10,7 @@ import {
   type KindBucket,
 } from '@/components/project-runs/utils'
 import { StatusStrip } from '@/components/project-detail/StatusStrip'
+import { AgentsStats } from '@/components/project-detail/AgentsStats'
 import { formatAgo } from '@/lib/shared/format'
 import type { JobInfo, ProjectConfig } from '@/lib/client-api'
 
@@ -38,9 +38,7 @@ export interface OverviewTabProps {
   releaseTag: string | null
   aggregateCi: string | null
   config: ProjectConfig | null
-  currentBranch: string | null
   runningJobs: JobInfo[]
-  projectJobs: JobInfo[]
   jobsLoaded: boolean
   onOpenChanges: () => void
 }
@@ -59,9 +57,7 @@ export function OverviewTab({
   ciFailedUrl,
   releaseTag,
   config,
-  currentBranch,
   runningJobs,
-  projectJobs,
   jobsLoaded,
   onOpenChanges,
 }: OverviewTabProps) {
@@ -175,12 +171,7 @@ export function OverviewTab({
         onOpenJob={(jobId) => router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(jobId)}`)}
       />
 
-      <AgentsTab
-        projectName={projectName}
-        currentBranch={currentBranch}
-        prWorkflowEnabled={!!config?.pr_workflow_enabled}
-        projectJobs={projectJobs}
-      />
+      <AgentsStats projectName={projectName} />
     </>
   )
 }

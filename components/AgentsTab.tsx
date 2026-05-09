@@ -1,13 +1,13 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { fetchAgents, createAgent, updateAgent, deleteAgent, runAgent, fetchSkills, fetchPersonas } from '@/lib/client-api'
 import type { Agent, Skill, Persona, JobInfo } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { useToast } from '@/components/Toast'
-import { AgentModal } from '@/components/agents-tab/AgentModal'
+import { AgentEditor, type AgentEditorSavePayload } from '@/components/agents-tab/AgentEditor'
 import { AgentRow } from '@/components/agents-tab/AgentRow'
 import { RecommendedAgents } from '@/components/agents-tab/RecommendedAgents'
 import { normalizeModelInput } from '@/lib/agents/model-aliases'
@@ -129,17 +129,30 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled, proje
     ? `Direct Branch mode is on while issue branch '${currentBranch}' is checked out — finish or abandon the issue work first.`
     : ''
   const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const { toast } = useToast()
   const [agents, setAgents] = useState<Agent[]>([])
   const [skills, setSkills] = useState<Skill[]>([])
   const [personas, setPersonas] = useState<Persona[]>([])
   const [loading, setLoading] = useState(true)
-  const [editing, setEditing] = useState<Agent | null>(null)
-  const [creating, setCreating] = useState(false)
   const [recommendedTemplate, setRecommendedTemplate] = useState<AgentTemplateRecord | null>(null)
   const [runSubmitting, setRunSubmitting] = useState<string | null>(null)
   const [runPromptAgent, setRunPromptAgent] = useState<string | null>(null)
   const [runPrompt, setRunPrompt] = useState('')
+
+  // URL-driven editor toggle: ?agent=new or ?agent=<id>
+  const editorParam = searchParams.get('agent')
+  const creating = editorParam === 'new'
+  const editing = editorParam && editorParam !== 'new' ? agents.find(a => a.id === editorParam) ?? null : null
+
+  const setEditorParam = (value: string | null) => {
+    const next = new URLSearchParams(Array.from(searchParams.entries()))
+    if (value) next.set('agent', value)
+    else next.delete('agent')
+    const qs = next.toString()
+    router.push(qs ? `${pathname}?${qs}` : pathname)
+  }
 
   const [customTemplates, setCustomTemplates] = useState<AgentTemplateRecord[]>([])
 
@@ -166,7 +179,7 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled, proje
     try {
       await deleteAgent(id)
       setAgents(prev => prev.filter(a => a.id !== id))
-      if (editing?.id === id) setEditing(null)
+      if (editing?.id === id) setEditorParam(null)
     } catch {}
   }
 
@@ -205,9 +218,9 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled, proje
     }
   }
 
-  const closeModal = () => { setEditing(null); setCreating(false); setRecommendedTemplate(null) }
+  const closeEditor = () => { setRecommendedTemplate(null); setEditorParam(null) }
 
-  const handleSaveAgent = async (data: { name: string; prompt: string; skillIds: string[]; docPaths: string[]; model: string; schedule: string | null; runner: string; enabled: boolean; prerequisiteCommand: string | null }) => {
+  const handleSaveAgent = async (data: AgentEditorSavePayload) => {
     const parseAgent = (a: Agent & { skillIds: string | string[]; docPaths?: string | string[] }): Agent => ({
       ...a,
       model: normalizeModelInput(a.model, 'normal'),
@@ -223,7 +236,7 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled, proje
       const created = parseAgent(result.agent)
       setAgents(prev => [...prev, created])
     }
-    closeModal()
+    closeEditor()
   }
 
   // Derive last-run timestamp per agent from project jobs (kind = "agent:name")
@@ -234,6 +247,23 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled, proje
     const ts = job.finished_at ?? job.started_at ?? 0
     const prev = lastRunByAgent.get(name)
     if (!prev || ts > prev.ts) lastRunByAgent.set(name, { ts, exitCode: job.exit_code })
+  }
+
+  // Editor takes over the tab when ?agent=… is set in the URL.
+  if (!loading && (creating || editing)) {
+    return (
+      <AgentEditor
+        key={editing?.id || recommendedTemplate?.name || 'new'}
+        agent={editing || undefined}
+        template={(!editing && recommendedTemplate) || undefined}
+        project={projectName}
+        skills={skills}
+        personas={personas}
+        onSave={handleSaveAgent}
+        onDelete={editing ? () => handleDelete(editing.id) : undefined}
+        onBack={closeEditor}
+      />
+    )
   }
 
   if (loading) return (
@@ -274,7 +304,7 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled, proje
         </h3>
         <button
           className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer"
-          onClick={() => { setRecommendedTemplate(null); setCreating(true); setEditing(null); setRunPromptAgent(null) }}
+          onClick={() => { setRecommendedTemplate(null); setEditorParam('new'); setRunPromptAgent(null) }}
         >
           + New Agent
         </button>
@@ -315,7 +345,7 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled, proje
               blockedReason={blockedReason}
               lastRunAgo={lastRunAgo}
               lastRunFailed={lastRunFailed}
-              onEdit={(a) => { setEditing(a); setCreating(false) }}
+              onEdit={(a) => { setEditorParam(a.id) }}
               onToggleEnabled={handleToggleEnabled}
               onRun={handleRun}
               onToggleRunPrompt={(id) => { setRunPromptAgent(runPromptAgent === id ? null : id); setRunPrompt('') }}
@@ -330,23 +360,8 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled, proje
         agents={agents}
         customTemplates={customTemplates}
         recommendedAgents={RECOMMENDED_AGENTS}
-        onAddAgent={(rec) => { setRecommendedTemplate(rec); setCreating(true); setEditing(null) }}
+        onAddAgent={(rec) => { setRecommendedTemplate(rec); setEditorParam('new') }}
       />
-
-      {/* Agent modal */}
-      {(creating || editing) && (
-        <AgentModal
-          key={editing?.id || recommendedTemplate?.name || 'new'}
-          agent={editing || undefined}
-          template={(!editing && recommendedTemplate) || undefined}
-          project={projectName}
-          skills={skills}
-          personas={personas}
-          onSave={handleSaveAgent}
-          onDelete={editing ? () => handleDelete(editing.id) : undefined}
-          onClose={closeModal}
-        />
-      )}
     </div>
   )
 }

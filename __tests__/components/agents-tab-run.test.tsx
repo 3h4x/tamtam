@@ -24,6 +24,8 @@ const {
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
+  usePathname: () => '/project/alpha/agents',
+  useSearchParams: () => new URLSearchParams(),
 }))
 
 vi.mock('@/components/Toast', () => ({
@@ -44,8 +46,8 @@ vi.mock('@/components/agents-tab/RecommendedAgents', () => ({
   RecommendedAgents: () => null,
 }))
 
-vi.mock('@/components/agents-tab/AgentModal', () => ({
-  AgentModal: () => null,
+vi.mock('@/components/agents-tab/AgentEditor', () => ({
+  AgentEditor: () => null,
 }))
 
 function renderTab() {

@@ -19,8 +19,9 @@ import { PipelineStrip } from '@/components/project-detail/PipelineStrip'
 import { ProjectActions } from '@/components/project-detail/ProjectActions'
 import { TabNav } from '@/components/project-detail/TabNav'
 import { OverviewTab } from '@/components/project-detail/OverviewTab'
+import { AgentsTab } from '@/components/AgentsTab'
 
-type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs'
+type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents'
 
 type Verdict = 'LGTM' | 'NEEDS ATTENTION' | 'DO NOT SHIP'
 interface ProjectDetailPageProps {
@@ -36,7 +37,7 @@ export function ProjectDetailPage({
   const name = params.name
   const router = useRouter()
   const { toast } = useToast()
-  const VALID_TABS: Tab[] = ['overview', 'config', 'history', 'terminal', 'changes', 'issues', 'docs']
+  const VALID_TABS: Tab[] = ['overview', 'config', 'history', 'terminal', 'changes', 'issues', 'docs', 'agents']
   const activeTab: Tab = params.sessionId
     ? 'terminal'
     : VALID_TABS.includes(params.tab as Tab) ? (params.tab as Tab) : 'overview'
@@ -654,9 +655,7 @@ export function ProjectDetailPage({
           releaseTag={releaseTag}
           aggregateCi={aggregateCi}
           config={config}
-          currentBranch={currentBranch}
           runningJobs={runningJobs}
-          projectJobs={projectJobs}
           jobsLoaded={jobsLoaded}
           onOpenChanges={() => setActiveTab('changes')}
         />
@@ -720,6 +719,15 @@ export function ProjectDetailPage({
 
       {activeTab === 'history' && name && (
         <ProjectRunsTab projectName={name} jobsPaused={jobsPaused} />
+      )}
+
+      {activeTab === 'agents' && name && (
+        <AgentsTab
+          projectName={name}
+          currentBranch={currentBranch}
+          prWorkflowEnabled={!!config?.pr_workflow_enabled}
+          projectJobs={projectJobs}
+        />
       )}
 
       {/* Terminal Tab */}
