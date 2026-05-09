@@ -43,6 +43,26 @@ export async function deleteAgent(agentId: string): Promise<void> {
   if (!response.ok) throw new Error('Failed to delete agent')
 }
 
+export interface ImprovePromptInput {
+  project: string
+  draftPrompt: string
+  skillIds: string[]
+  docPaths: string[]
+}
+
+export async function improveAgentPrompt(input: ImprovePromptInput): Promise<{ improvedPrompt: string }> {
+  const response = await fetch('/api/agents/improve-prompt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || 'Failed to improve prompt')
+  }
+  return response.json()
+}
+
 export async function runAgent(agentId: string, prompt: string): Promise<RunAgentResult> {
   const response = await fetch(`/api/agents/${agentId}/run`, {
     method: 'POST',

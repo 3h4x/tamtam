@@ -181,6 +181,7 @@ describe('instrumentation', () => {
       vi.doMock('./lib/scheduling/internal-scheduler', () => internalSchedulerMock);
       vi.doMock('@/lib/scheduling/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
       vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
+      vi.doMock('./lib/agents/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
       vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
 
       const { reinstallAgents } = await import('@/instrumentation-node');
@@ -227,6 +228,7 @@ describe('instrumentation', () => {
       vi.doMock('./lib/scheduling/internal-scheduler', () => internalSchedulerMock);
       vi.doMock('@/lib/scheduling/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
       vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
+      vi.doMock('./lib/agents/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
       vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
 
       const { reinstallAgents } = await import('@/instrumentation-node');
@@ -265,6 +267,7 @@ describe('instrumentation', () => {
       vi.doMock('./lib/scheduling/internal-scheduler', () => internalSchedulerMock);
       vi.doMock('@/lib/scheduling/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
       vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
+      vi.doMock('./lib/agents/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
       vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
 
       const { reinstallAgents } = await import('@/instrumentation-node');

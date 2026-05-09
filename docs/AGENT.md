@@ -224,6 +224,34 @@ Behaviour:
 - The job row is created only after the prerequisite completes, so background probes cannot mark a long prerequisite as a dead PM2 spawn. The per-project agent start slot remains held while the prerequisite runs, so another agent for the same project queues instead of starting concurrently, and project-wide starters such as terminal runs, tests, CI fixes, reruns, and releases see the project as busy.
 - For file-backed agents, the field is committed frontmatter (`prerequisiteCommand: "pnpm test"`); for DB agents it's stored on the `agents` row.
 
+## Per-agent statistics
+
+The Overview tab's "Scheduled agents" block fetches `GET /api/agents/scheduler-health` (for upcoming/last-fire timing) and `GET /api/agents/stats?project=<name>` (for run-history aggregates) every 30s and 60s respectively. For each scheduled agent it surfaces:
+
+- **runs** — total `agent:<name>` job rows on the project.
+- **avg duration** — mean of `jobs.duration_ms` across finished runs.
+- **success rate** — share of finished runs with `exit_code = 0` (only shown when below 100%).
+- **tokens** — sum of `input_tokens + output_tokens + cache_read_tokens + cache_create_tokens`.
+- **cost** — sum of `jobs.cost_usd`.
+- **files touched** — sum of `JSON.parse(jobs.modified_files).length`.
+- **fixes triggered** — for agents whose name matches `/review/i`, the count of `fix` jobs sharing a `release_id` with one of this agent's runs. A rough proxy for the impact of review agents on the fix-loop.
+
+A header strip above the per-agent list shows project-wide totals (runs, tokens, cost, files touched) so users can see cumulative agent impact at a glance. All values are computed server-side in `app/api/agents/stats/route.ts`; no UI-level aggregation.
+
+## Magic-wand Prompt Rewrite
+
+The Agents tab's editor includes a **✨ Improve** button next to the Prompt textarea. Clicking it sends the current draft to `POST /api/agents/improve-prompt`, which synchronously invokes `claude --print --model fast` with:
+
+1. A baked-in TamTam-agents primer (`lib/agents/wand-primer.ts`) describing how skills compose, what `prerequisiteCommand` does, and the run-report contract.
+2. The project's `CLAUDE.md` (if present).
+3. Whatever skills/docs the user has selected in the form right now (resolved via the same `composeAgentSkills` helper the run path uses).
+4. A meta-instruction telling Claude to output only the rewritten prompt — no preamble, no fences.
+
+Behaviour:
+- One-shot, non-streaming. UI shows a spinner; on success the textarea is replaced with the result. Native Cmd+Z restores the original draft.
+- Honours the budget gate (`checkCliStartGate`). A blocked provider surfaces a toast and the textarea is left unchanged.
+- 120s timeout. No job row, no PM2 entry, no log file.
+
 This allows agents to be reusable — the same agent can run with different task prompts while keeping the skill composition consistent.
 
 ## Request Flow

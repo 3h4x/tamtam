@@ -1,0 +1,133 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { and, eq, isNotNull, like } from 'drizzle-orm';
+import { db, schema } from '@/lib/db';
+import { errMsg } from '@/lib/shared/types';
+
+export interface PerAgentStat {
+  /** Agent kind without the `agent:` prefix — same as the agent name. */
+  name: string;
+  runs: number;
+  finishedRuns: number;
+  successfulRuns: number;
+  avgDurationMs: number | null;
+  totalDurationMs: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
+  costUsd: number;
+  modifiedFilesCount: number;
+  /**
+   * For agents whose name contains "review" — total `fix` jobs sharing a
+   * release_id with one of this agent's runs. Approximates "fixes triggered
+   * per review". Always 0 for non-review agents.
+   */
+  reviewFixesTriggered: number;
+}
+
+function safeJsonArray(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.filter((s): s is string => typeof s === 'string');
+  } catch {
+    /* ignore */
+  }
+  return [];
+}
+
+export async function GET(request: NextRequest) {
+  const project = request.nextUrl.searchParams.get('project');
+  if (!project) return NextResponse.json({ detail: 'project query param is required' }, { status: 400 });
+
+  try {
+    const agentJobs = db
+      .select()
+      .from(schema.jobs)
+      .where(and(eq(schema.jobs.project, project), like(schema.jobs.kind, 'agent:%')))
+      .all();
+
+    // Group by agent name (kind = `agent:<name>`)
+    const byAgent = new Map<string, typeof agentJobs>();
+    for (const j of agentJobs) {
+      const name = j.kind.slice('agent:'.length);
+      if (!byAgent.has(name)) byAgent.set(name, []);
+      byAgent.get(name)!.push(j);
+    }
+
+    // Pre-collect all release IDs touched by review-style agents so we can
+    // count their fix children in a single query.
+    const reviewReleaseIds = new Set<string>();
+    for (const [name, jobs] of byAgent) {
+      if (!/review/i.test(name)) continue;
+      for (const j of jobs) if (j.releaseId) reviewReleaseIds.add(j.releaseId);
+    }
+    const fixesByRelease = new Map<string, number>();
+    if (reviewReleaseIds.size > 0) {
+      const fixJobs = db
+        .select({ releaseId: schema.jobs.releaseId })
+        .from(schema.jobs)
+        .where(and(eq(schema.jobs.project, project), eq(schema.jobs.kind, 'fix'), isNotNull(schema.jobs.releaseId)))
+        .all();
+      for (const f of fixJobs) {
+        if (!f.releaseId || !reviewReleaseIds.has(f.releaseId)) continue;
+        fixesByRelease.set(f.releaseId, (fixesByRelease.get(f.releaseId) ?? 0) + 1);
+      }
+    }
+
+    const perAgent: PerAgentStat[] = [];
+    for (const [name, jobs] of byAgent) {
+      let durationSum = 0;
+      let durationCount = 0;
+      let finished = 0;
+      let successful = 0;
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let cacheReadTokens = 0;
+      let cacheCreateTokens = 0;
+      let costUsd = 0;
+      let modifiedFilesCount = 0;
+      let reviewFixesTriggered = 0;
+      const isReviewAgent = /review/i.test(name);
+
+      for (const j of jobs) {
+        if (j.finishedAt !== null) finished += 1;
+        if (j.exitCode === 0) successful += 1;
+        if (j.durationMs && j.durationMs > 0) {
+          durationSum += j.durationMs;
+          durationCount += 1;
+        }
+        inputTokens += j.inputTokens ?? 0;
+        outputTokens += j.outputTokens ?? 0;
+        cacheReadTokens += j.cacheReadTokens ?? 0;
+        cacheCreateTokens += j.cacheCreateTokens ?? 0;
+        costUsd += j.costUsd ?? 0;
+        modifiedFilesCount += safeJsonArray(j.modifiedFiles).length;
+        if (isReviewAgent && j.releaseId) {
+          reviewFixesTriggered += fixesByRelease.get(j.releaseId) ?? 0;
+        }
+      }
+
+      perAgent.push({
+        name,
+        runs: jobs.length,
+        finishedRuns: finished,
+        successfulRuns: successful,
+        avgDurationMs: durationCount > 0 ? Math.round(durationSum / durationCount) : null,
+        totalDurationMs: durationSum,
+        inputTokens,
+        outputTokens,
+        cacheReadTokens,
+        cacheCreateTokens,
+        costUsd: Math.round(costUsd * 10000) / 10000,
+        modifiedFilesCount,
+        reviewFixesTriggered,
+      });
+    }
+
+    perAgent.sort((a, b) => a.name.localeCompare(b.name));
+    return NextResponse.json({ project, agents: perAgent });
+  } catch (err) {
+    return NextResponse.json({ detail: errMsg(err) }, { status: 500 });
+  }
+}
