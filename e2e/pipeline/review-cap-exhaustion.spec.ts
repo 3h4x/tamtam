@@ -76,8 +76,8 @@ test.describe('Review-cap exhaustion → file issue + ship anyway', () => {
     // Sanity: title + labels match the canonical TamTam contract.
     const args = issueCreateCall!.args;
     const titleIdx = args.indexOf('--title');
-    // Title carries no invocation metadata — just the count or the bare form.
-    expect(args[titleIdx + 1]).toMatch(/^chore\(review\): (\d+ unresolved review findings?|unresolved review)$/);
+    // Title carries no invocation metadata — either the headline Finding ID (with optional "+N more") or the bare form.
+    expect(args[titleIdx + 1]).toMatch(/^chore\(review\): ([a-z0-9][a-z0-9 ]*( \(\+\d+ more\))?|unresolved review)$/);
     const labels = args.reduce<string[]>(
       (acc, v, i) => (args[i - 1] === '--label' ? [...acc, v] : acc),
       [],
