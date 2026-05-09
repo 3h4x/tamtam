@@ -14,12 +14,12 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 |---|---|
 | **Multi-project overview** | All your git repos at a glance — uncommitted changes, CI status, last run |
 | **Skill composition** | DB-backed skills + file-based skills from `skills/docs/skills/` and `data/skills/`. Mix and match into agents |
-| **Real-time streaming** | Token-by-token output via SSE. Watch Claude think as it works |
-| **Interactive terminal** | Full Claude runner per project — model tier selector (Fast / Normal / Smart), skill picker, persistent sessions across reconnects |
+| **Real-time streaming** | Token-by-token output via SSE. Watch the selected provider work in real time |
+| **Interactive terminal** | Full runner per project — model tier selector (Fast / Normal / Smart), skill picker, persistent sessions across reconnects |
 | **Smart push** | AI-generated commit messages, diff preview, one-click push |
-| **CI repair** | Failed CI run? One click sends Claude to fix it |
+| **CI repair** | Failed CI run? One click sends the selected provider to fix it |
 | **Scheduling** | Built-in interval scheduler — daily reviews, nightly audits, whatever you need, running unattended |
-| **Release pipeline** | Quality-gated Direct Branch or PR Workflow: test → review → fix loop → commit → push (→ DoD → merge), all driven by the selected Claude-compatible provider |
+| **Release pipeline** | Quality-gated Direct Branch or PR Workflow: test → review → fix loop → commit → push (→ DoD → merge), all driven by the selected provider |
 | **Cross-project recommendations** | Open agent and scheduler suggestions across every project in `/recommendations` |
 | **Custom actions** | Per-project bash commands (deploy, migrate, seed) as colored buttons |
 | **Notifications** | Unseen run alerts with bell badge; outbound webhooks (Slack, Discord, ntfy, generic) for release success/fail/aborted, fix-loop-exhausted, review-do-not-ship, agent-run-fail, and budget-blocked events |
@@ -94,7 +94,7 @@ Skills are reusable instruction blocks injected into agent prompts. Two sources:
 - **DB-backed** — create and edit via `/skills`
 - **File-based** — auto-scanned from `skills/docs/skills/` (the `claude-skills` submodule) and `data/skills/`; any `.md` file in a category subdirectory, with optional YAML frontmatter (`title`, `description`)
 
-Agents are built by selecting a model, writing a prompt, and attaching any number of skills. At run time, skill content is prepended to the prompt before Claude sees it.
+Agents are built by selecting a model, writing a prompt, and attaching any number of skills. At run time, skill content is prepended to the prompt before the configured provider sees it.
 
 ## Agents
 

@@ -2,7 +2,7 @@
 
 Next.js monolith (App Router) for managing Claude-compatible CLI agents across multiple projects. Define skills, compose agents, run them on demand or on a schedule.
 
-## Vision: CI/CD for code, driven by Claude
+## Vision: CI/CD for code, driven by the selected provider
 
 TamTam's north star is a **quality-gated release pipeline** for each tracked repo: `test → review → (fix loop) → commit → push → dod → merge`.
 
