@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useState, useEffect, useMemo } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { fetchJobs, releaseProject, pushProject, syncJobBoard } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
@@ -331,10 +332,13 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
           a release while another release was in flight (or jobs were paused)
           — the request was queued and will fire once the lock releases. */}
       {pendingReleaseQueued && (
-        <div className="mb-3 px-3 py-2 rounded-md border border-accent/30 bg-accent/5 text-xs text-accent flex items-center gap-2">
+        <Link
+          href={`/pipeline?project=${encodeURIComponent(projectName)}`}
+          className="mb-3 px-3 py-2 rounded-md border border-accent/30 bg-accent/5 text-xs text-accent flex items-center gap-2 hover:bg-accent/10 transition-colors"
+        >
           <span className="font-mono">↦</span>
           <span>Release queued — will fire automatically when the running pipeline finishes (or jobs resume).</span>
-        </div>
+        </Link>
       )}
       {/* Search + summary */}
       <div className="flex items-center gap-3 mb-3 flex-wrap">

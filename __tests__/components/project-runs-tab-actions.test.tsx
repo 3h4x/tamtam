@@ -19,6 +19,12 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
 }))
 
+vi.mock('next/link', () => ({
+  default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
+    <a href={href} {...props}>{children}</a>
+  ),
+}))
+
 vi.mock('@/lib/client-api', () => ({
   fetchJobs: fetchJobsMock,
   releaseProject: releaseProjectMock,
@@ -345,6 +351,27 @@ describe('ProjectRunsTab release actions', () => {
       expect(buttonByText(container, 'Continue release').disabled).toBe(false)
       expect(buttonByText(container, 'Continue release').title).toContain('Start a new release attempt')
     })
+
+    unmount()
+  })
+
+  it('links the queued release banner to the current project pipeline view', async () => {
+    fetchJobsMock.mockResolvedValue({
+      jobs: [],
+      pendingReleaseProjects: ['alpha'],
+    })
+
+    const { container, unmount } = renderTab()
+
+    await vi.waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(container.textContent).toContain('Release queued')
+    })
+
+    const bannerLink = Array.from(container.querySelectorAll('a')).find((node) => node.textContent?.includes('Release queued'))
+    if (!(bannerLink instanceof HTMLAnchorElement)) throw new Error('queued release banner link not found')
+
+    expect(bannerLink.getAttribute('href')).toBe('/pipeline?project=alpha')
 
     unmount()
   })
