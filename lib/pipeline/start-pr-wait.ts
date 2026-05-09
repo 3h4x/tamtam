@@ -290,7 +290,7 @@ function runPrWaitLoop(
       // Run mark-dod post-merge so verification reflects the merged state
       try {
         const { startMarkDod } = await import('./start-mark-dod');
-        const md = await startMarkDod(job.project, { prNumber, repo: prRepo });
+        const md = await startMarkDod(job.project, { prNumber, repo: prRepo, mode: 'pipeline' });
         if (md.ok) {
           log(`\n# mark-dod: ${md.verified}/${md.total} verified${md.changed ? ' (issue updated)' : ''}\n`);
         }
