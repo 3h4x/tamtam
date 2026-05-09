@@ -351,7 +351,7 @@ export function ConfigTab({
               className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
               value={commitStyleInput}
               onChange={(e) => setCommitStyleInput(e.target.value)}
-              placeholder={'e.g. Use cyberpunk/cypherpunk vocabulary: neural, synth, grid, cipher, daemon, void.\nFormat: <type>: <cryptic description>. Max 60 chars, no period.'}
+              placeholder={'e.g. Conventional commits, imperative mood, subject under 72 chars, no trailing period.\nFormat: <type>(<scope>): <description>.'}
             />
             <p className="text-xs text-text-tertiary mt-1">Project-specific style guide for auto-generated commit messages. Committed to <span className="font-mono">.tamtam/config.yml</span>; falls back to the global setting when empty.</p>
           </div>

@@ -242,13 +242,11 @@ export function getProjectTestConfig(projName: string): {
     testCommand: row.testCommand ?? null,
     testCronEnabled: !!row.testCronEnabled,
     testCronSchedule: row.testCronSchedule ?? null,
-    autoCommitEnabled: !!row.autoCommitEnabled,
-    autoPushEnabled: !!row.autoPushEnabled,
-    autoPrMergeEnabled: !!row.autoPrMergeEnabled,
-    releaseAfterRun: !!row.releaseAfterRun,
-    // Default ON — matches pre-existing behavior for any project that hasn't
-    // been touched since the column was added.
-    issueAutoBranch: row.issueAutoBranch == null ? true : !!row.issueAutoBranch,
+    autoCommitEnabled: row.autoCommitEnabled ?? false,
+    autoPushEnabled: row.autoPushEnabled ?? false,
+    autoPrMergeEnabled: row.autoPrMergeEnabled ?? false,
+    releaseAfterRun: row.releaseAfterRun ?? false,
+    issueAutoBranch: row.issueAutoBranch ?? true,
     testsDisabled: !!row.testsDisabled,
     reviewDisabled: !!row.reviewDisabled,
   };

@@ -1,5 +1,5 @@
 {
-  "version": "7",
+  "version": "6",
   "dialect": "sqlite",
   "entries": [
     {
@@ -91,6 +91,20 @@
       "version": "6",
       "when": 1778329700573,
       "tag": "0012_first_chronomancer",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1778332757561,
+      "tag": "0013_watery_boomer",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1778332845739,
+      "tag": "0014_black_sasquatch",
       "breakpoints": true
     }
   ]

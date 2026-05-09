@@ -36,15 +36,15 @@ async function getProjectPipelineConfig(projectName: string): Promise<{ autoComm
     return {
       autoCommitEnabled: !!cfg?.autoCommitEnabled,
       autoPushEnabled: !!cfg?.autoPushEnabled,
-      // Default ON: every agent run owns a release. The Project Config tab
-      // can opt a repo out (read-only mirrors, archived projects). Older
-      // rows still in the DB with `false` are respected — only nullish
-      // values get the new default.
-      releaseAfterRun: cfg?.releaseAfterRun ?? true,
+      // Default OFF: release-after-run is an explicit per-project opt-in.
+      // Keep the lifecycle hook aligned with the schema, config route, and
+      // scheduling helper so background jobs do not infer a release unless
+      // the project row explicitly enables it.
+      releaseAfterRun: cfg?.releaseAfterRun ?? false,
       autoPrMergeEnabled: !!cfg?.autoPrMergeEnabled,
     };
   } catch {
-    return { autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: true, autoPrMergeEnabled: false };
+    return { autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false, autoPrMergeEnabled: false };
   }
 }
 
