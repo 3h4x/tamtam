@@ -18,10 +18,9 @@ export function GlobalRecommendationsPage() {
   const loadErrorMessage = (err: unknown) => err instanceof Error ? err.message : 'Failed to load recommendations'
 
   const load = async () => {
-    setLoadError(null)
     const data = await fetchAllOpenRecommendations()
     setItems(data.recommendations)
-    setLoading(false)
+    setLoadError(null)
   }
 
   useEffect(() => {
@@ -55,7 +54,12 @@ export function GlobalRecommendationsPage() {
     setErrors((prev) => { const { [item.id]: _, ...rest } = prev; void _; return rest })
     try {
       await updateRecommendation(item.project, item.id, 'dismissed')
-      await load()
+      setItems((prev) => prev.filter((candidate) => candidate.id !== item.id))
+      try {
+        await load()
+      } catch (err) {
+        setLoadError(loadErrorMessage(err))
+      }
     } catch (err) {
       setErrors((prev) => ({ ...prev, [item.id]: err instanceof Error ? err.message : 'Failed to dismiss' }))
     } finally {
@@ -68,7 +72,12 @@ export function GlobalRecommendationsPage() {
     setErrors((prev) => { const { [item.id]: _, ...rest } = prev; void _; return rest })
     try {
       await applyRecommendation(item.project, item)
-      await load()
+      setItems((prev) => prev.filter((candidate) => candidate.id !== item.id))
+      try {
+        await load()
+      } catch (err) {
+        setLoadError(loadErrorMessage(err))
+      }
     } catch (err) {
       setErrors((prev) => ({ ...prev, [item.id]: err instanceof Error ? err.message : 'Failed to apply recommendation' }))
     } finally {
@@ -104,10 +113,13 @@ export function GlobalRecommendationsPage() {
             className="mt-3 rounded border border-status-error/40 px-2 py-1 text-xs font-medium hover:bg-status-error/10"
             onClick={() => {
               setLoading(true)
-              void load().catch((err) => {
-                setLoadError(loadErrorMessage(err))
-                setLoading(false)
-              })
+              void load()
+                .catch((err) => {
+                  setLoadError(loadErrorMessage(err))
+                })
+                .finally(() => {
+                  setLoading(false)
+                })
             }}
           >
             Retry

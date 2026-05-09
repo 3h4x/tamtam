@@ -244,7 +244,7 @@ Before merging UI work, verify:
 11. **Privacy markers.** `data-private` on project names and any sensitive identifier.
 12. **Sentence-case headings, lowercase status labels, UPPERCASE verdicts/column headers.**
 13. **Live preview check.** Open the relevant `docs/ui-preview/*.html` and confirm the new pattern matches.
-14. **DoD (per `CLAUDE.md`)**: server running under PM2 (`pnpm rebuild`), navigate via Chrome DevTools MCP, take a screenshot in both light and dark themes.
+14. **DoD (per `CLAUDE.md`)**: server running under PM2 (`pnpm rebuild`), navigate via Playwright MCP, take a screenshot in both light and dark themes.
 
 ---
 
