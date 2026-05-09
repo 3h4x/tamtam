@@ -312,6 +312,53 @@ function textFromCompletedItem(event) {
   return '';
 }
 
+const CODEX_WRAPPER_EVENT_TYPES = new Set(['event_msg', 'response_item']);
+const CODEX_TOP_LEVEL_EVENT_TYPES = new Set([
+  'session_meta',
+  'thread.started',
+  'turn.started',
+  'turn.completed',
+  'item.completed',
+]);
+const CODEX_PAYLOAD_EVENT_TYPES = new Set([
+  'agent_message',
+  'assistant_message',
+  'message',
+  'response.output_text.delta',
+  'output_text_delta',
+  'task_complete',
+  'token_count',
+  'error',
+]);
+
+function isCodexEvent(event, payload, type) {
+  if (!event || typeof event !== 'object') return false;
+  if (CODEX_WRAPPER_EVENT_TYPES.has(event.type)) {
+    return Boolean(event.payload && typeof event.payload === 'object');
+  }
+  if (CODEX_TOP_LEVEL_EVENT_TYPES.has(event.type)) return true;
+  if (event.item && typeof event.item === 'object' && event.type === 'item.completed') return true;
+  if (event.usage && typeof event.usage === 'object' && event.type === 'turn.completed') return true;
+  if (CODEX_PAYLOAD_EVENT_TYPES.has(type)) {
+    return Boolean(
+      event.payload ||
+      event.item ||
+      event.usage ||
+      event.info ||
+      event.message ||
+      event.text ||
+      event.delta ||
+      event.content ||
+      event.error ||
+      payload?.last_agent_message
+    );
+  }
+  return typeof event.thread_id === 'string' ||
+    typeof event.session_id === 'string' ||
+    typeof payload?.thread_id === 'string' ||
+    typeof payload?.session_id === 'string';
+}
+
 function shouldEmitText(text, emittedTexts) {
   if (!text) return false;
   const key = text.trim();
@@ -431,6 +478,11 @@ function launchCodex({ prompt, model, streamJson, attempt = 0, retryState = null
 
     const handleLine = (line) => {
       if (!line.trim()) return;
+      if (!streamJson) {
+        fullText += `${line}\n`;
+        emitter.write(`${line}\n`);
+        return;
+      }
       const event = parseJsonLine(line);
       if (!event) {
         fullText += `${line}\n`;
@@ -439,6 +491,11 @@ function launchCodex({ prompt, model, streamJson, attempt = 0, retryState = null
       }
       const payload = unwrapCodexEvent(event);
       const type = payload?.type || event.type || '';
+      if (!isCodexEvent(event, payload, type)) {
+        fullText += `${line}\n`;
+        emitter.write(`${line}\n`);
+        return;
+      }
       sessionId = sessionFromEvent(payload) || sessionFromEvent(event) || sessionId;
       if (sessionId) state.sessionId = sessionId;
       if (type === 'token_count' || type === 'turn.completed') {

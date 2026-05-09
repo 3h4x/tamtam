@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 export interface AgentStat {
   name: string
@@ -25,30 +25,35 @@ export function useAgentStats(projectName: string, intervalMs = 60_000): {
 } {
   const [byName, setByName] = useState<Map<string, AgentStat>>(new Map())
   const [loading, setLoading] = useState(true)
+  const requestTokenRef = useRef(0)
 
-  const fetchOnce = async () => {
+  const fetchOnce = useCallback(async () => {
+    const token = ++requestTokenRef.current
     try {
       const res = await fetch(`/api/agents/stats?project=${encodeURIComponent(projectName)}`)
       if (!res.ok) return
       const data = await res.json()
+      if (requestTokenRef.current !== token) return
       const map = new Map<string, AgentStat>()
       for (const s of (data.agents ?? []) as AgentStat[]) map.set(s.name, s)
       setByName(map)
     } catch {
       /* ignore — keep prior snapshot */
     } finally {
-      setLoading(false)
+      if (requestTokenRef.current === token) setLoading(false)
     }
-  }
+  }, [projectName])
 
   useEffect(() => {
-    let cancelled = false
+    setByName(new Map())
     setLoading(true)
     void fetchOnce()
-    const id = setInterval(() => { if (!cancelled) void fetchOnce() }, intervalMs)
-    return () => { cancelled = true; clearInterval(id) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectName, intervalMs])
+    const id = setInterval(() => { void fetchOnce() }, intervalMs)
+    return () => {
+      requestTokenRef.current += 1
+      clearInterval(id)
+    }
+  }, [fetchOnce, intervalMs])
 
   return { byName, loading, refresh: fetchOnce }
 }
