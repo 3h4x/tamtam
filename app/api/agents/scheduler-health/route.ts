@@ -4,6 +4,7 @@ import { db, schema } from '@/lib/db';
 import { getSchedulerHealth, reconcilePm2Schedules, installAgentSchedule } from '@/lib/scheduling/agent-scheduler';
 import { dumpInternalScheduler } from '@/lib/scheduling/internal-scheduler';
 import { scanFileAgents } from '@/lib/agents/tamtam-file-agents';
+import { listEnabledProjects } from '@/lib/shared/enabled-projects';
 import { errMsg } from '@/lib/shared/types';
 
 function loadAgentsForCheck() {
@@ -17,12 +18,8 @@ function loadAgentsForCheck() {
     prompt: a.prompt ?? '',
   }));
   const dbKeys = new Set(dbAgents.map(a => `${a.project}:${a.name}`));
-  let enabledProjects: Array<{ name: string; path: string }> = [];
-  try {
-    enabledProjects = db.select().from(schema.projects).where(eq(schema.projects.enabled, true)).all();
-  } catch { /* projects table may not exist in test envs */ }
   const fileAgents: typeof dbAgents = [];
-  for (const p of enabledProjects) {
+  for (const p of listEnabledProjects()) {
     try {
       for (const fa of scanFileAgents(p.path, p.name)) {
         if (dbKeys.has(`${fa.project}:${fa.name}`)) continue;

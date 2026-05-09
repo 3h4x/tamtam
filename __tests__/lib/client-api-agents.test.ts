@@ -138,4 +138,43 @@ describe('client agents helpers', () => {
 
     await expect(deleteAgent('ghost')).rejects.toThrow('Failed to delete agent');
   });
+
+  it('improveAgentPrompt posts the draft context and returns the improved prompt', async () => {
+    const fetchMock = stubFetch(true, { improvedPrompt: 'Run pnpm test and summarize failures.' });
+    const { improveAgentPrompt } = await getClientAgents();
+
+    await expect(
+      improveAgentPrompt({
+        project: 'proj',
+        draftPrompt: 'make tests better',
+        skillIds: ['agent-tests'],
+        docPaths: ['docs/testing.md'],
+      }),
+    ).resolves.toEqual({ improvedPrompt: 'Run pnpm test and summarize failures.' });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/agents/improve-prompt');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
+    expect(JSON.parse(init.body as string)).toEqual({
+      project: 'proj',
+      draftPrompt: 'make tests better',
+      skillIds: ['agent-tests'],
+      docPaths: ['docs/testing.md'],
+    });
+  });
+
+  it('improveAgentPrompt surfaces API detail errors', async () => {
+    stubFetch(false, { detail: 'providers are over budget' });
+    const { improveAgentPrompt } = await getClientAgents();
+
+    await expect(
+      improveAgentPrompt({
+        project: 'proj',
+        draftPrompt: 'x',
+        skillIds: [],
+        docPaths: [],
+      }),
+    ).rejects.toThrow('providers are over budget');
+  });
 });
