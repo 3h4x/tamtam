@@ -377,6 +377,37 @@ describe('queued-agent-runs', () => {
     vi.unstubAllGlobals();
   });
 
+  it('keeps the DB row on a transient 500 replay failure and drains it after retrying later', async () => {
+    enqueueQueuedAgentRun('myproject', {
+      project: 'myproject',
+      agentId: 'agent-1',
+      agentName: 'docs',
+      triggeredBy: 'manual',
+      prompt: 'run docs',
+      enqueuedAt: 1_000,
+    });
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        text: vi.fn().mockResolvedValue(JSON.stringify({
+          detail: 'Failed to start: pm2 start failed',
+        })),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: vi.fn().mockResolvedValue(''),
+      }));
+
+    await drainQueuedAgentRunsForProject('myproject');
+    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+
+    await drainQueuedAgentRunsForProject('myproject');
+    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
+    vi.unstubAllGlobals();
+  });
+
   it('single-flights concurrent drains for the same project', async () => {
     enqueueQueuedAgentRun('myproject', {
       project: 'myproject',
