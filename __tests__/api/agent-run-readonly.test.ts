@@ -98,7 +98,6 @@ describe('POST /api/agents/{agentId}/run readOnly', () => {
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue('/tmp/proj1') }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: vi.fn().mockReturnValue({ logDir: '/tmp/logs' }) }));
-    vi.doMock('@/lib/pipeline/start-release', () => ({ checkIssueBranchBlock: vi.fn().mockResolvedValue(null) }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
       isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),

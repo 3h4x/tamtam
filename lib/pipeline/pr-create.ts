@@ -21,7 +21,7 @@ export async function createGenericPR(
   const mainBranch = await detectMainBranch(projPath, signal);
 
   if (!currentBranch || currentBranch === mainBranch) {
-    log(`\n# PR Workflow: on default branch — skipping PR creation\n`);
+    log(`\n# on default branch — skipping PR creation\n`);
     return false;
   }
 
@@ -37,7 +37,7 @@ export async function createGenericPR(
     } catch {}
   }
 
-  log(`\n# PR Workflow — creating PR for branch ${currentBranch}\n`);
+  log(`\n# creating PR for branch ${currentBranch}\n`);
   const prR = normalizeExecResult(await exec('gh', ['pr', 'create', '--fill', '--base', mainBranch], { cwd: projPath, timeout: 30000, signal }));
   if (prR.stdout) log(prR.stdout);
   if (prR.stderr) log(prR.stderr);

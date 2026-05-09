@@ -172,8 +172,6 @@ export function writeProjectFieldYaml(
     db.update(schema.projects).set({ autoPrMergeEnabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
   } else if (fieldName === 'release_after_run') {
     db.update(schema.projects).set({ releaseAfterRun: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
-  } else if (fieldName === 'pr_workflow_enabled') {
-    db.update(schema.projects).set({ prWorkflowEnabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
   } else if (fieldName === 'issue_auto_branch') {
     db.update(schema.projects).set({ issueAutoBranch: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)).run();
   } else if (fieldName === 'tests_disabled') {
@@ -230,7 +228,6 @@ export function getProjectTestConfig(projName: string): {
   autoPushEnabled: boolean;
   autoPrMergeEnabled: boolean;
   releaseAfterRun: boolean;
-  prWorkflowEnabled: boolean;
   issueAutoBranch: boolean;
   testsDisabled: boolean;
   reviewDisabled: boolean;
@@ -249,7 +246,6 @@ export function getProjectTestConfig(projName: string): {
     autoPushEnabled: !!row.autoPushEnabled,
     autoPrMergeEnabled: !!row.autoPrMergeEnabled,
     releaseAfterRun: !!row.releaseAfterRun,
-    prWorkflowEnabled: !!row.prWorkflowEnabled,
     // Default ON — matches pre-existing behavior for any project that hasn't
     // been touched since the column was added.
     issueAutoBranch: row.issueAutoBranch == null ? true : !!row.issueAutoBranch,

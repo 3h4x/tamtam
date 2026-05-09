@@ -6,7 +6,7 @@
 
 `.tamtam/config.yml` and `.tamtam/agents/*.md` are committed files that control TamTam's behaviour for a project: which agents run on a schedule, which test command and custom actions are shared, which users are trusted, and which project-specific prompt guidance is injected.
 
-When TamTam checks out a PR head branch (via the PR Workflow or the "Work on" issue flow), the working tree switches to the attacker-controlled branch. Without protection, any file in `.tamtam/` would be silently honoured — allowing:
+When TamTam checks out a PR head branch (via any non-default-branch release or the "Work on" issue flow), the working tree switches to the attacker-controlled branch. Without protection, any file in `.tamtam/` would be silently honoured — allowing:
 
 1. **New scheduled agents** — a PR adds `.tamtam/agents/pwn.md` with `schedule: 15m`, a malicious prompt, or a malicious `prerequisiteCommand`; TamTam registers and runs it automatically.
 2. **Gate bypass** — `tests_disabled: true`, `review_disabled: true`, `auto_pr_merge_enabled: true` in `.tamtam/config.yml` lets the attacker's PR skip every safety check and self-merge.

@@ -143,6 +143,30 @@ export function issueBranchName(issue: { number: number; title: string }): strin
   return `fix/issue-${issue.number}${slugTitle ? `-${slugTitle}` : ''}`;
 }
 
+export async function isIssueContextCompatibleWithCurrentBranch(
+  issue: IssueContext,
+  projPath: string,
+): Promise<boolean> {
+  let currentBranch = '';
+  let mainBranch = '';
+  try {
+    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+    currentBranch = branchR.stdout.trim();
+    mainBranch = await detectMainBranch(projPath);
+  } catch {
+    // git unreachable — fall through with optimistic context.
+  }
+
+  if (currentBranch && mainBranch) {
+    const inferredBranch = issueBranchName({ number: issue.number, title: issue.title });
+    if (currentBranch !== mainBranch && currentBranch !== inferredBranch) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 export async function findIssueContext(
   projectName: string,
   projPath: string,
@@ -182,25 +206,12 @@ export async function findIssueContext(
   }
   if (candidates.length === 0) return null;
 
-  let currentBranch = '';
-  let mainBranch = '';
-  // If the working tree is currently checked out on a different feature
-  // branch (not the default branch and not the inferred fix/issue-N branch),
-  // trust the human's branch over the inferred issue context.
-  try {
-    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
-    currentBranch = branchR.stdout.trim();
-    mainBranch = await detectMainBranch(projPath);
-  } catch {
-    // git unreachable — fall through with optimistic context.
-  }
-
   for (const issue of candidates) {
-    if (currentBranch && mainBranch) {
-      const inferredBranch = issueBranchName({ number: issue.number, title: issue.title });
-      if (currentBranch !== mainBranch && currentBranch !== inferredBranch) {
-        continue;
-      }
+    // If the working tree is currently checked out on a different feature
+    // branch (not the default branch and not the inferred fix/issue-N branch),
+    // trust the human's branch over the inferred issue context.
+    if (!(await isIssueContextCompatibleWithCurrentBranch(issue, projPath))) {
+      continue;
     }
     const repo = issue.repo;
     // Skip already-closed issues — otherwise the next release after an
@@ -263,12 +274,9 @@ async function runCommit(
   if (issueCtx === undefined) issueCtx = await findIssueContext(projectName, projPath);
 
   // Determine if we need to switch off the default branch before committing.
-  // Required for issue-linked runs (so the PR diff isn't empty) AND for
-  // PR Workflow mode in general (changes must land on a feature branch, not main).
-  const needsBranch = !!issueCtx || await (async () => {
-    const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
-    return !!getProjectTestConfig(projectName)?.prWorkflowEnabled;
-  })();
+  // This is only required for issue-linked runs so the subsequent issue PR
+  // has a real branch diff instead of an empty main-vs-main comparison.
+  const needsBranch = !!issueCtx;
 
   if (needsBranch) {
     const branchR = await execStep('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });

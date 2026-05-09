@@ -413,7 +413,6 @@ export async function updateProjectConfig(
     auto_push_enabled?: boolean
     auto_pr_merge_enabled?: boolean
     release_after_run?: boolean
-    pr_workflow_enabled?: boolean
     issue_auto_branch?: boolean
     tests_disabled?: boolean
     review_disabled?: boolean

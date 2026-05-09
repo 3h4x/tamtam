@@ -253,15 +253,12 @@ describe('runCompletionHooks – mark-dod integration', () => {
     expect(startMarkDodMock).toHaveBeenCalled();
   });
 
-  it('does NOT call startMarkDod on direct-branch release (pr_workflow_enabled=false)', async () => {
-    // DoD verification only makes sense when publishing via a PR against an
-    // issue. On direct-branch releases there are no acceptance-criteria
-    // checkboxes to tick and running Claude inline would stall the chain.
+  it('calls startMarkDod on issue-linked releases even without the old PR workflow flag', async () => {
     getProjectTestConfigMock.mockReturnValue({ autoPushEnabled: true, autoCommitEnabled: false, prWorkflowEnabled: false });
     const logFile = join(tempDir, 'lgtm-direct.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
     await markDoneFn(makeReviewJob(logFile), 0);
-    expect(startMarkDodMock).not.toHaveBeenCalled();
+    expect(startMarkDodMock).toHaveBeenCalledWith('my-proj');
     expect(startProjectCommitMock).toHaveBeenCalled();
   });
 

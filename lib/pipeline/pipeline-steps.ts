@@ -11,8 +11,6 @@
 // parallel server-side `registerStepRunner()` for execution logic, plugins will
 // not have to coordinate two naming systems.
 
-export type PipelineMode = 'direct' | 'pr';
-
 // The chip registry does not depend on the full ProjectConfig — it only needs
 // the handful of fields the built-in steps inspect. Keeping the shape narrow
 // lets plugins implement their own steps without depending on `lib/client-api`.
@@ -23,7 +21,6 @@ export interface StepConfigView {
   auto_commit_enabled?: boolean;
   auto_push_enabled?: boolean;
   auto_pr_merge_enabled?: boolean;
-  pr_workflow_enabled?: boolean;
 }
 
 export interface StepSetters {
@@ -43,7 +40,6 @@ export interface StepToggleContext {
 export interface PipelineStep {
   id: string;
   label: string;
-  modes: PipelineMode[];
   mandatory: boolean;
   isActive: (ctx: StepToggleContext) => boolean;
   onToggle?: (ctx: StepToggleContext) => void;
@@ -54,7 +50,6 @@ export const BUILT_IN_STEPS: PipelineStep[] = [
   {
     id: 'test',
     label: 'test',
-    modes: ['direct', 'pr'],
     mandatory: false,
     isActive: ({ config }) => !config.tests_disabled && !!config.effective_test_command,
     onToggle: ({ config, setters, focusElement }) => {
@@ -76,7 +71,6 @@ export const BUILT_IN_STEPS: PipelineStep[] = [
   {
     id: 'review',
     label: 'review',
-    modes: ['direct', 'pr'],
     mandatory: false,
     isActive: ({ config }) => !config.review_disabled,
     onToggle: ({ config, setters }) => setters.setReviewDisabled(!config.review_disabled),
@@ -87,7 +81,6 @@ export const BUILT_IN_STEPS: PipelineStep[] = [
   {
     id: 'fix',
     label: 'fix',
-    modes: ['direct', 'pr'],
     mandatory: true,
     isActive: ({ config }) => !config.review_disabled,
     description: ({ config }) => config.review_disabled
@@ -97,7 +90,6 @@ export const BUILT_IN_STEPS: PipelineStep[] = [
   {
     id: 'commit',
     label: 'commit',
-    modes: ['direct', 'pr'],
     mandatory: false,
     isActive: ({ config }) => !!config.auto_commit_enabled,
     onToggle: ({ config, setters }) => {
@@ -115,7 +107,6 @@ export const BUILT_IN_STEPS: PipelineStep[] = [
   {
     id: 'push',
     label: 'push',
-    modes: ['direct', 'pr'],
     mandatory: false,
     isActive: ({ config }) => !!config.auto_push_enabled,
     onToggle: ({ config, setters }) => {
@@ -124,29 +115,20 @@ export const BUILT_IN_STEPS: PipelineStep[] = [
       if (next) setters.setAutoCommit(true);
       if (!next) setters.setAutoMerge(false);
     },
-    description: ({ config }) => {
-      const pr = !!config.pr_workflow_enabled;
-      return config.auto_push_enabled
-        ? (pr
-            ? 'Push the commit to the feature/issue branch (opens a PR if missing). Click to disable.'
-            : 'Push to origin after auto-commit. Click to disable.')
-        : (pr
-            ? 'Push the commit to the feature/issue branch (opens a PR if missing). Click to enable (also enables commit).'
-            : 'Push to origin after auto-commit. Click to enable (also enables commit).');
-    },
+    description: ({ config }) => config.auto_push_enabled
+      ? 'Push to the current branch after auto-commit. Opens a PR when the branch is not the default. Click to disable.'
+      : 'Push to the current branch after auto-commit. Opens a PR when the branch is not the default. Click to enable (also enables commit).',
   },
   {
     id: 'dod',
     label: 'dod',
-    modes: ['pr'],
     mandatory: true,
     isActive: () => true,
-    description: () => 'Verify Definition-of-Done checkboxes on the linked GitHub issue against the implementation. Always runs in PR Workflow.',
+    description: () => 'Verifies DoD against the linked issue or the PR created by push. Skipped when the release has neither issue nor PR context.',
   },
   {
     id: 'merge',
     label: 'merge',
-    modes: ['pr'],
     mandatory: false,
     isActive: ({ config }) => !!config.auto_pr_merge_enabled,
     onToggle: ({ config, setters }) => {
@@ -179,8 +161,8 @@ export function _resetExtraSteps(): void {
   EXTRA_STEPS.length = 0;
 }
 
-export function getPipelineSteps(mode: PipelineMode): PipelineStep[] {
-  const all = [...BUILT_IN_STEPS, ...EXTRA_STEPS].filter(s => s.modes.includes(mode));
+export function getPipelineSteps(): PipelineStep[] {
+  const all = [...BUILT_IN_STEPS, ...EXTRA_STEPS];
   return all.sort((a, b) => {
     const ai = BUILT_IN_ORDER.indexOf(a.id);
     const bi = BUILT_IN_ORDER.indexOf(b.id);

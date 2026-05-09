@@ -4,12 +4,9 @@ Next.js monolith (App Router) for managing Claude-compatible CLI agents across m
 
 ## Vision: CI/CD for code, driven by Claude
 
-TamTam's north star is a **quality-gated release pipeline** for each tracked repo. Each project picks a workflow mode in its Config tab:
+TamTam's north star is a **quality-gated release pipeline** for each tracked repo: `test → review → (fix loop) → commit → push → dod → merge`.
 
-- **Direct Branch**: `test → review → (fix loop) → commit → push`
-- **PR Workflow**: `test → review → (fix loop) → commit → push → dod → merge`
-
-Steps are pluggable per project. The **🚀 Release** button triggers the pipeline at the right starting step; with `auto_push_enabled` on, the chain continues automatically. Verdicts (`LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP`) are emitted by the selected provider during review and drive fix loops. Fixes themselves are unbounded — the cap (3 iterations per release) is enforced on the next verification step (re-test or re-review), so a final fix always lands but may go unverified. The pipeline strip in the Terminal tab shows live step state (`○` pending, spinner running, `✓` done, `!` needs attention, `✗` failed) and is only visible while a pipeline is actively running.
+Steps are pluggable per project. The **🚀 Release** button triggers the pipeline at the right starting step; with `auto_push_enabled` on, the chain continues automatically. PR-vs-direct behavior is decided at runtime from branch context: releases on the default branch push directly, while releases on any non-default branch open or reuse a PR so `dod` and `merge` can run when applicable. Verdicts (`LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP`) are emitted by the selected provider during review and drive fix loops. Fixes themselves are unbounded — the cap (3 iterations per release) is enforced on the next verification step (re-test or re-review), so a final fix always lands but may go unverified. The pipeline strip in the Terminal tab shows live step state (`○` pending, spinner running, `✓` done, `!` needs attention, `✗` failed) and is only visible while a pipeline is actively running.
 
 **See `docs/PIPELINE.md`** for the full state machine, completion-hook chain, helper modules (`lib/pipeline/start-*.ts`), verdict-detection rules, fresh-LGTM skip logic, and `mark-dod` / `pr-wait` behavior.
 
@@ -133,7 +130,7 @@ See `docs/API.md` for the full route reference. New routes must be documented th
 - `commit_style` setting injects a style guide into commit-message generation; `review_verdict_rules` drives LGTM/NEEDS ATTENTION/DO NOT SHIP — both configurable in Settings → Pipeline. All settings keys/types/defaults: `docs/SETTINGS.md`.
 - File-based skills scanned from `skills/docs/skills/` and `data/skills/` (category subdirs, any `.md` with optional YAML frontmatter: `title`, `description`). DB-backed skills via `/skills` page or API; built-in agent skills (cto, security-review, dependency-check, blog, ci-monitor, release-ready, tests, gha-audit, docs-claude, readme-sync, self-improve, manage-agents, senior-fullstack) seeded from `lib/agents/default-agent-skills.ts`.
 - GitHub owner fallback configurable via `GITHUB_OWNER` env or Settings UI.
-- Issue-driven runs auto-checkout `fix/issue-<n>-<slug>` (via `issue-branch` route from TerminalTab); in PR Workflow, after merge the working copy is returned to the default branch.
+- Issue-driven runs auto-checkout `fix/issue-<n>-<slug>` (via `issue-branch` route from TerminalTab); after merge the working copy is returned to the default branch.
 - Outbound webhook notifications (`lib/shared/notifications.ts`): Slack, Discord, ntfy, or generic JSON POST; HMAC-SHA256 signed when `notification_webhook_secret` is set; events: `release_success`, `release_fail`, `release_aborted`, `fix_loop_exhausted`, `review_do_not_ship`, `agent_run_fail`, `budget_blocked`. `TAMTAM_BASE_URL` sets log link base.
 - Log/row retention (`lib/jobs/retention.ts`): `pruneProjectLogs` after each run (`log_retention_count` / `log_retention_days`, defaults 200 / 30); `runNightlyCleanup` deletes finished `jobs` rows older than `job_row_retention_days` (default 180); called once at startup then every 24h from `instrumentation-node.ts`.
 - **Global job pause + budget gates** (`lib/shared/job-control.ts`): when `jobs_paused` is `true`, all pipeline routes return HTTP 409 and the internal scheduler pauses. When `budget_block_runs_enabled` is on and active quota exceeds `budget_block_at_pct`, job starts return HTTP 429. Pause state is module-level; `syncJobsPauseState` is called on settings write and on boot.
@@ -175,7 +172,7 @@ commits:
     Format: <type>: <cryptic description>. Max 60 chars, no period.
 ```
 
-Supported keys: `test_command`, `custom_actions`, `safe_users`, `commit_style`. **Workflow flags** (`pr_workflow_enabled`, `auto_commit_enabled`, `auto_push_enabled`, `auto_pr_merge_enabled`, `release_after_run`, `test_cron_enabled`, `test_cron_schedule`, `tests_disabled`, `review_disabled`, `issue_auto_branch`) are **DB-only** — each developer opts in individually. Older `.tamtam/config.yml` files may still contain those keys; TamTam migrates them to the DB on startup and ignores them on subsequent reads.
+Supported keys: `test_command`, `custom_actions`, `safe_users`, `commit_style`. **Workflow flags** (`auto_commit_enabled`, `auto_push_enabled`, `auto_pr_merge_enabled`, `release_after_run`, `test_cron_enabled`, `test_cron_schedule`, `tests_disabled`, `review_disabled`, `issue_auto_branch`) are **DB-only** — each developer opts in individually. Older `.tamtam/config.yml` files may still contain those keys; TamTam migrates them to the DB on startup and ignores them on subsequent reads.
 
 On a feature/PR branch, config is read from `origin/<defaultBranch>` (not the working tree) to prevent privilege escalation from untrusted branches.
 

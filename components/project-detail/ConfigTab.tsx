@@ -22,8 +22,6 @@ export interface ConfigTabProps {
   setAutoPrMergeEnabledInput: (v: boolean) => void
   releaseAfterRunInput: boolean
   setReleaseAfterRunInput: (v: boolean) => void
-  prWorkflowEnabledInput: boolean
-  setPrWorkflowEnabledInput: (v: boolean) => void
   issueAutoBranchInput: boolean
   setIssueAutoBranchInput: (v: boolean) => void
   testsDisabledInput: boolean
@@ -63,8 +61,6 @@ export function ConfigTab({
   setAutoPrMergeEnabledInput,
   releaseAfterRunInput,
   setReleaseAfterRunInput,
-  prWorkflowEnabledInput,
-  setPrWorkflowEnabledInput,
   issueAutoBranchInput,
   setIssueAutoBranchInput,
   testsDisabledInput,
@@ -226,32 +222,7 @@ export function ConfigTab({
       <div className="bg-bg-secondary rounded-md border border-border">
         <div className="px-4 py-2 border-b border-border flex items-baseline justify-between gap-3 flex-wrap">
           <h3 className="text-sm font-semibold text-text-primary">Release Pipeline</h3>
-          <p className="text-xs text-text-tertiary">Click a step to toggle. Fix is gated by review.{prWorkflowEnabledInput ? ' dod always runs in PR Workflow.' : ''}</p>
-        </div>
-
-        {/* Mode selector */}
-        <div className="px-4 py-3 border-b border-border flex items-center gap-3 flex-wrap">
-          <div className="flex gap-1 p-0.5 bg-bg-tertiary rounded-md border border-border">
-            <button
-              type="button"
-              onClick={() => { setPrWorkflowEnabledInput(false); setAutoPrMergeEnabledInput(false) }}
-              className={`px-3 py-1 rounded text-xs font-medium transition-all ${!prWorkflowEnabledInput ? 'bg-bg-secondary text-text-primary shadow-sm border border-border' : 'text-text-tertiary hover:text-text-secondary'}`}
-            >
-              Direct Branch
-            </button>
-            <button
-              type="button"
-              onClick={() => setPrWorkflowEnabledInput(true)}
-              className={`px-3 py-1 rounded text-xs font-medium transition-all ${prWorkflowEnabledInput ? 'bg-bg-secondary text-text-primary shadow-sm border border-border' : 'text-text-tertiary hover:text-text-secondary'}`}
-            >
-              PR Workflow
-            </button>
-          </div>
-          <p className="text-xs text-text-tertiary flex-1 min-w-[16rem]">
-            {prWorkflowEnabledInput
-              ? 'Push to feature branch, review via PR, verify DoD checkboxes before merge.'
-              : 'Commit and push directly to the current branch. No PR.'}
-          </p>
+          <p className="text-xs text-text-tertiary">Click a step to toggle. Fix is gated by review. `dod` runs for issue-linked releases and for PR-backed branch releases when auto-merge is off.</p>
         </div>
 
         {/* Clickable pipeline flow strip */}
@@ -265,7 +236,6 @@ export function ConfigTab({
                 auto_commit_enabled: autoCommitEnabledInput,
                 auto_push_enabled: autoPushEnabledInput,
                 auto_pr_merge_enabled: autoPrMergeEnabledInput,
-                pr_workflow_enabled: prWorkflowEnabledInput,
               },
               setters: {
                 setAutoCommit: setAutoCommitEnabledInput,
@@ -282,7 +252,7 @@ export function ConfigTab({
                 }
               },
             }
-            const steps = getPipelineSteps(prWorkflowEnabledInput ? 'pr' : 'direct')
+            const steps = getPipelineSteps()
             return (
               <>
                 <div className="flex items-center gap-1.5 flex-wrap">

@@ -24,8 +24,10 @@ export async function GET(
   return NextResponse.json({
     project: projectName,
     // test_command is the only value the file is allowed to override on read;
-    // the rest of the workflow flags are DB-only so each developer can opt in
-    // independently of teammates' .tamtam/config.yml.
+    // the remaining pipeline toggles are DB-only so each developer can opt in
+    // independently of teammates' .tamtam/config.yml. Legacy
+    // `pr_workflow_enabled` is gone; branch-derived push/PR behavior now
+    // decides that at runtime.
     test_command: fileConfig?.test_command ?? testCfg?.testCommand ?? '',
     detected_test_command: detectedTestCmd ?? '',
     effective_test_command: fileConfig?.test_command ?? testCfg?.testCommand ?? detectedTestCmd ?? '',
@@ -35,7 +37,6 @@ export async function GET(
     auto_push_enabled: testCfg?.autoPushEnabled ?? false,
     auto_pr_merge_enabled: testCfg?.autoPrMergeEnabled ?? false,
     release_after_run: testCfg?.releaseAfterRun ?? false,
-    pr_workflow_enabled: testCfg?.prWorkflowEnabled ?? false,
     issue_auto_branch: testCfg?.issueAutoBranch ?? true,
     tests_disabled: testCfg?.testsDisabled ?? false,
     review_disabled: testCfg?.reviewDisabled ?? false,
@@ -114,7 +115,7 @@ export async function PATCH(
   // `.tamtam/config.yml` doesn't change underneath them.
   const booleanFields = [
     'test_cron_enabled', 'auto_commit_enabled', 'auto_push_enabled',
-    'auto_pr_merge_enabled', 'release_after_run', 'pr_workflow_enabled',
+    'auto_pr_merge_enabled', 'release_after_run',
     'tests_disabled', 'review_disabled', 'issue_auto_branch',
   ] as const;
 

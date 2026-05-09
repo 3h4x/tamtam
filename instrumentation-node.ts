@@ -112,7 +112,7 @@ export async function runProbeSweep(): Promise<void> {
 }
 
 /**
- * One-shot migration: workflow flags (auto_push_enabled, pr_workflow_enabled,
+ * One-shot migration: workflow flags (auto_push_enabled, auto_commit_enabled,
  * gates, test cron …) used to be honored from `.tamtam/config.yml`. They are
  * now DB-only. To preserve existing behavior for installs that already had
  * those flags in their committed config, we copy each project's legacy flag
@@ -155,9 +155,6 @@ async function migrateLegacyFileWorkflowFlags(): Promise<void> {
       const updates: Partial<typeof schema.projects.$inferInsert> = {};
       // Each column: only seed when current DB row matches the column default
       // (false / null), implying it has never been set by the user.
-      if (typeof legacy.pr_workflow_enabled === 'boolean' && !proj.prWorkflowEnabled) {
-        updates.prWorkflowEnabled = legacy.pr_workflow_enabled;
-      }
       if (typeof legacy.auto_commit_enabled === 'boolean' && !proj.autoCommitEnabled) {
         updates.autoCommitEnabled = legacy.auto_commit_enabled;
       }
