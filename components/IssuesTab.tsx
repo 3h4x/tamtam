@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import { ISSUE_FORMAT_INSTRUCTION } from '@/lib/agents/issue-template'
 import { fetchAgents, fetchIssuesAndPRs, fetchProjectConfig, runAgent } from '@/lib/client-api'
 import type { Agent, GhPullRequest, GhIssue, ProjectConfig } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
@@ -110,7 +111,9 @@ export function IssuesTab({ projectName, onCountChange, jobsPaused = false }: Is
     }
     if (!ctoAgent || idea.length < 10) return
 
-    const wrappedPrompt = `Plan a single GitHub issue for the user's idea below. Read CLAUDE.md and skim the codebase enough to make the issue project-correct. Run \`gh issue list --limit 30 --state open\` first to make sure this isn't a duplicate. Then file ONE issue with \`gh issue create\` - title states the outcome, body has problem -> approach -> acceptance criteria, labels include type + priority. Do not run \`git\`. Do not modify any files.
+    const wrappedPrompt = `Plan a single GitHub issue for the user's idea below. Read CLAUDE.md and skim the codebase enough to make the issue project-correct. Run \`gh issue list --limit 30 --state open\` first to make sure this isn't a duplicate. Then file ONE issue with \`gh issue create\` - title states the outcome, labels include type + priority. Do not run \`git\`. Do not modify any files.
+
+${ISSUE_FORMAT_INSTRUCTION}
 
 User idea:
 ${idea}`

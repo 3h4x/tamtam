@@ -1,6 +1,7 @@
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { exec } from '@/lib/shared/shell';
 import { readParsedLog } from '@/lib/jobs/verdict';
+import { normalizeAcceptanceCriteria } from '@/lib/agents/issue-template';
 import { parseFindings, type ParsedFinding, stripFinalVerdict } from '@/lib/pipeline/review-contract';
 import type { JobData } from '@/lib/jobs/types';
 
@@ -67,16 +68,16 @@ function buildIssueBody(opts: {
     : safeProse
       ? '> ' + safeProse.split('\n').filter(Boolean).join('\n> ')
       : '_(no structured findings could be extracted from the review)_';
-  return [
+  return normalizeAcceptanceCriteria([
     `## Problem`,
     ``,
     findingsBlock,
     ``,
     `## Acceptance criteria`,
     ``,
-    `- Each finding above is addressed in the implementation and covered by tests.`,
-    `- A fresh review on this branch returns LGTM with no Finding IDs re-flagged.`,
-  ].join('\n');
+    `- [ ] Each finding above is addressed in the implementation and covered by tests.`,
+    `- [ ] A fresh review on this branch returns LGTM with no Finding IDs re-flagged.`,
+  ].join('\n'));
 }
 
 function normalizeExecResult(result: ExecLikeResult) {

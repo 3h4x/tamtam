@@ -74,6 +74,10 @@ describe('seedDefaultSkills', () => {
     expect(skill!.name).toBe('agent:cto');
     expect(skill!.content).toContain('You are the CTO');
     expect(skill!.content).toContain('gh issue create');
+    expect(skill!.content).toContain('## Problem');
+    expect(skill!.content).toContain('## Proposed approach');
+    expect(skill!.content).toContain('## Acceptance criteria');
+    expect(skill!.content).toContain('- [ ]');
   });
 
   it('inserts agent-senior-fullstack with correct fields', () => {
@@ -296,6 +300,33 @@ Be opinionated. Prioritize ruthlessly.
     expect(skill!.content).not.toBe(previousDefault);
     // Current default is much shorter; the whole point of the upgrade.
     expect(skill!.content.length).toBeLessThan(previousDefault.length);
+  });
+
+  it('overwrites the immediately previous agent-cto default during template rollout', () => {
+    const now = Date.now() / 1000;
+    // Verbatim content from the prompt shipped immediately before the
+    // canonical issue-template rollout.
+    // sha256(...).slice(0,16) === 'b9a1e7cd36ae83dd', which must stay in
+    // KNOWN_DEFAULT_CONTENT_HASHES['agent-cto'] so running installs upgrade.
+    const previousDefault = `You are the CTO. Read CLAUDE.md and skim the codebase. List existing GitHub issues with \`gh issue list --limit 20 --state open\` so you don't duplicate.
+Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — title states the outcome, body has problem → approach → acceptance criteria, labels include type + priority. Skip duplicates and in-progress work. Solo project: no team-coordination assumptions. Don't run \`git\` commands or branch/commit/push — TamTam's release pipeline owns version control.`;
+
+    testDb.db.insert(schema.skills).values({
+      id: 'agent-cto',
+      name: 'agent:cto',
+      description: 'old',
+      content: previousDefault,
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+
+    seedFn();
+
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-cto');
+    expect(skill!.content).not.toBe(previousDefault);
+    expect(skill!.content).toContain('exact template below');
+    expect(skill!.content).toContain('## Acceptance criteria');
+    expect(skill!.content).toContain('- [ ] <verifiable outcome 1>');
   });
 
   it('preserves a user-customised skill (hash does not match a known default)', () => {

@@ -168,6 +168,22 @@ When an agent finishes, TamTam asks it to include a short `TamTam Run Report` in
 
 `POST /api/agents/{agentId}/run` accepts `readOnly: true` for agents whose task does not touch the local checkout. The canonical case is the built-in `cto` agent when it is used from the Issues tab to shape a user idea into one GitHub issue via `gh issue list` and `gh issue create`.
 
+That issue-planning flow now uses one shared body contract so downstream DoD automation can parse it reliably:
+
+```md
+## Problem
+<one paragraph describing the gap and why it matters>
+
+## Proposed approach
+<bulleted or short-paragraph plan>
+
+## Acceptance criteria
+- [ ] <verifiable outcome 1>
+- [ ] <verifiable outcome 2>
+```
+
+The section order matters, and each acceptance criterion must use an unchecked `- [ ]` checkbox. `mark-dod` parses those boxes from the GitHub issue body and ticks verified items in place.
+
 Read-only runs bypass per-project worktree serialization so they can start while unrelated agents or terminal jobs are running. Specifically, they skip the non-agent busy gate, different-agent queueing, the project start slot, pending-release re-acquire, and dirty-worktree checks. They still reject duplicate runs of the same agent, still queue behind an active release pipeline lock, and still honor the CLI start gate for pause and quota policy.
 
 Issue-branch behavior is now split by trigger type:
