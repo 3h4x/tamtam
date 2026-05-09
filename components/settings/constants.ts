@@ -23,7 +23,7 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
   },
   trusted_github_users: {
     label: 'Trusted GitHub Users',
-    help: 'Comma-separated global allowlist for issue/PR authors whose GitHub content TamTam may treat as trusted. Unioned with each project’s `.tamtam/config.yml` `security.safe_users`.',
+    help: 'Global allowlist for issue/PR authors whose GitHub content TamTam may treat as trusted. Managed through the dedicated editor in Settings → General.',
     group: 'general',
     span: 2,
   },
