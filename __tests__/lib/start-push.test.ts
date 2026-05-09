@@ -68,6 +68,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn().mockReturnValue('fix/issue-1-test'),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
     vi.doMock('@/lib/usage/resolve-provider', () => ({
       checkCliStartGate: checkCliStartGateMock,
@@ -281,6 +282,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn(),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
     const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     const r = await fn('missing');
@@ -367,6 +369,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn().mockReturnValue('fix/issue-1-test'),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
 
     vi.resetModules();
@@ -399,6 +402,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn().mockReturnValue('fix/issue-1-test'),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
     const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
 
@@ -532,6 +536,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn(),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
     const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     await fn('missing');
@@ -569,6 +574,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn(),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
     const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     const r = await fn('proj');
@@ -610,6 +616,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn(),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
     execMock
       .mockImplementationOnce(() => resp(0, '0'));  // git rev-list --count (not ahead)
@@ -653,6 +660,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue({ number: 42, repo: 'owner/repo', title: 'Fix login bug' }),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn().mockReturnValue('fix/issue-42-fix-login-bug'),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
 
     execMock
@@ -710,6 +718,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue({ number: 42, repo: 'owner/repo', title: 'Fix login bug' }),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn().mockReturnValue('fix/issue-42-fix-login-bug'),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
 
     execMock
@@ -766,6 +775,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue(null), // issue is closed, findIssueContext returns null
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn().mockReturnValue('fix/issue-7-already-shipped'),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
 
     execMock
@@ -781,6 +791,62 @@ describe('startProjectPush — push result tracking', () => {
 
     const prCreateCall = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'gh' && args.includes('pr') && args.includes('create'));
     expect(prCreateCall).toBeUndefined();
+  });
+
+  it('falls back to deriveIssueContextFromBranch when findIssueContext returns null', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+      clearProjectDataCache: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/gh-status', () => ({ invalidateProject: vi.fn() }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      setProjectPushResult: setProjectPushResultMock,
+      getProjectTestConfig: vi.fn().mockReturnValue({ prWorkflowEnabled: true }),
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: createJobMock,
+      markDone: markDoneMock,
+      updateJob: updateJobMock,
+      listJobs: vi.fn().mockReturnValue([]), // no recent run jobs with issue stamp
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: {} }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    // findIssueContext returns null (recency window expired), but branch reveals the issue
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
+      generateCommitMessage: vi.fn().mockResolvedValue('fix: stale context'),
+      findIssueContext: vi.fn().mockResolvedValue(null),
+      detectMainBranch: vi.fn().mockResolvedValue('main'),
+      issueBranchName: vi.fn().mockReturnValue('fix/issue-33-stale-context'),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue({ number: 33, repo: 'owner/repo', title: 'Stale context fix' }),
+    }));
+
+    execMock
+      .mockImplementationOnce(() => resp(0, '1\n'))                                                      // rev-list --count
+      .mockImplementationOnce(() => resp(0, '# branch.head fix/issue-33-stale-context\n# branch.ab +0 -0\n')) // behind check
+      .mockImplementationOnce(() => resp(0))                                                             // git push
+      .mockImplementationOnce(() => resp(0, 'abc1234'))                                                  // git rev-parse
+      .mockImplementationOnce(() => resp(0, 'fix/issue-33-stale-context'))                               // branch --show-current inside createIssuePR
+      .mockImplementationOnce(() => resp(0, '[]'))                                                       // gh pr list — no existing PR
+      .mockImplementationOnce(() => resp(0, 'https://github.com/owner/repo/pull/33\n'))                  // gh pr create
+      .mockImplementationOnce(() => resp(0))                                                             // git checkout main
+      .mockImplementationOnce(() => resp(0));                                                            // git pull --ff-only
+
+    const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
+    const r = await fn('proj');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.message).toContain('PR created');
+      expect(r.message).toContain('https://github.com/owner/repo/pull/33');
+    }
+    const prCreateCall = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'gh' && args.includes('pr') && args.includes('create'));
+    expect(prCreateCall).toBeTruthy();
   });
 
   it('creates a PR for an issue-linked push even when prWorkflowEnabled is off (Work-on opt-in)', async () => {
@@ -816,6 +882,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue({ number: 42, repo: 'owner/repo', title: 'Fix login bug' }),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn().mockReturnValue('fix/issue-42-fix-login-bug'),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
 
     execMock
@@ -888,6 +955,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn().mockReturnValue('fix/issue-45-test'),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
 
     execMock
@@ -937,6 +1005,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn(),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
 
     execMock
@@ -998,6 +1067,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn(),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
 
     const existingUrl = 'https://github.com/owner/repo/pull/7';
@@ -1058,6 +1128,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn(),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
 
     execMock
@@ -1106,6 +1177,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn(),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
 
     execMock
@@ -1156,6 +1228,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue({ number: 25, repo: 'owner/repo', title: 'feat(stake)' }),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn().mockReturnValue('fix/issue-25-real-liquidity'),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
 
     execMock
@@ -1212,6 +1285,7 @@ describe('startProjectPush — push result tracking', () => {
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn(),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
 
     execMock
@@ -1531,6 +1605,7 @@ describe('launchProjectPush — fire-and-forget', () => {
       findIssueContext: vi.fn().mockResolvedValue(null),
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn().mockReturnValue('fix/issue-1-test'),
+      deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null),
     }));
     vi.doMock('fs', () => ({
       mkdirSync: mkdirSyncMock,
@@ -1682,7 +1757,7 @@ describe('pushCurrentBranch', () => {
     vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }), setProjectPushResult: vi.fn() }));
     vi.doMock('@/lib/jobs/job-storage', () => ({ createJob: vi.fn(), markDone: vi.fn(), updateJob: vi.fn(), listJobs: vi.fn().mockReturnValue([]) }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({ getLock: vi.fn(), acquireLock: vi.fn(), isLockOwnedByActiveRelease: vi.fn() }));
-    vi.doMock('@/lib/pipeline/start-commit', () => ({ generateCommitMessage: vi.fn(), findIssueContext: vi.fn(), detectMainBranch: vi.fn(), issueBranchName: vi.fn() }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({ generateCommitMessage: vi.fn(), findIssueContext: vi.fn(), detectMainBranch: vi.fn(), issueBranchName: vi.fn(), deriveIssueContextFromBranch: vi.fn().mockResolvedValue(null) }));
     vi.doMock('@/lib/shared/notifications', () => ({ notify: vi.fn() }));
 
     const mod = await import('@/lib/pipeline/start-push');

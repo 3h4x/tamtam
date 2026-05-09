@@ -143,6 +143,42 @@ export function issueBranchName(issue: { number: number; title: string }): strin
   return `fix/issue-${issue.number}${slugTitle ? `-${slugTitle}` : ''}`;
 }
 
+export async function deriveIssueContextFromBranch(
+  projPath: string,
+  signal?: AbortSignal,
+): Promise<IssueContext | null> {
+  const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000, signal });
+  if (branchR.exitCode !== 0) return null;
+  const currentBranch = branchR.stdout.trim();
+  const m = currentBranch.match(/^fix\/issue-(\d+)(?:-|$)/);
+  if (!m) return null;
+  const number = parseInt(m[1], 10);
+  if (!Number.isFinite(number) || number <= 0) return null;
+
+  const repoR = await exec(
+    'gh', ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'],
+    { cwd: projPath, timeout: 10000, signal },
+  );
+  const repo = repoR.exitCode === 0 ? repoR.stdout.trim() : '';
+  if (!repo) return null;
+
+  const issueR = await exec(
+    'gh', ['issue', 'view', String(number), '--repo', repo, '--json', 'title,state'],
+    { cwd: projPath, timeout: 10000, signal },
+  );
+  if (issueR.exitCode !== 0) return null;
+  try {
+    const parsed = JSON.parse(issueR.stdout) as { title?: string; state?: string };
+    const state = (parsed.state ?? '').toString().toUpperCase();
+    if (state && state !== 'OPEN') return null;
+    const title = (parsed.title ?? '').trim();
+    if (!title) return null;
+    return { number, repo, title };
+  } catch {
+    return null;
+  }
+}
+
 export async function isIssueContextCompatibleWithCurrentBranch(
   issue: IssueContext,
   projPath: string,

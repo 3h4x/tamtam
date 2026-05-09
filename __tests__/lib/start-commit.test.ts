@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { issueBranchName } from '@/lib/pipeline/start-commit';
+import { issueBranchName, deriveIssueContextFromBranch } from '@/lib/pipeline/start-commit';
 
 describe('issueBranchName', () => {
   it('produces fix/issue-N-slug from a normal title', () => {
@@ -27,6 +27,87 @@ describe('issueBranchName', () => {
 
   it('handles a purely numeric title', () => {
     expect(issueBranchName({ number: 10, title: '12345' })).toBe('fix/issue-10-12345');
+  });
+});
+
+describe('deriveIssueContextFromBranch', () => {
+  let execMock: ReturnType<typeof vi.fn>;
+  let derive: typeof deriveIssueContextFromBranch;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    execMock = vi.fn();
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    ({ deriveIssueContextFromBranch: derive } = await import('@/lib/pipeline/start-commit'));
+  });
+
+  afterEach(() => {
+    vi.doUnmock('@/lib/shared/shell');
+  });
+
+  it('returns null when current branch does not match fix/issue-N pattern', async () => {
+    execMock.mockResolvedValueOnce({ exitCode: 0, stdout: 'feature/foo\n', stderr: '' });
+    expect(await derive('/repo')).toBeNull();
+  });
+
+  it('returns issue context when on fix/issue-N branch with open issue', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'fix/issue-26-foo\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 't3rn/portal\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: JSON.stringify({ title: 'Fix stake page', state: 'OPEN' }), stderr: '' });
+    expect(await derive('/repo')).toEqual({ number: 26, repo: 't3rn/portal', title: 'Fix stake page' });
+  });
+
+  it('returns null when the issue is already closed', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'fix/issue-7\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'owner/repo\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: JSON.stringify({ title: 'Done', state: 'CLOSED' }), stderr: '' });
+    expect(await derive('/repo')).toBeNull();
+  });
+
+  it('returns null when git branch command fails', async () => {
+    execMock.mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'fatal: not a git repo' });
+    expect(await derive('/repo')).toBeNull();
+  });
+
+  it('returns null when gh repo view fails', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'fix/issue-10-bug\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'gh: no repo' });
+    expect(await derive('/repo')).toBeNull();
+  });
+
+  it('returns null when gh issue view fails', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'fix/issue-10-bug\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'owner/repo\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'gh: not found' });
+    expect(await derive('/repo')).toBeNull();
+  });
+
+  it('returns null when issue JSON is malformed', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'fix/issue-11-crash\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'owner/repo\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'not-json', stderr: '' });
+    expect(await derive('/repo')).toBeNull();
+  });
+
+  it('returns null when issue title is empty', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'fix/issue-12-empty\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'owner/repo\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: JSON.stringify({ title: '   ', state: 'OPEN' }), stderr: '' });
+    expect(await derive('/repo')).toBeNull();
+  });
+
+  it('returns issue context when state is absent (treated as open)', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'fix/issue-15-feature\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'owner/repo\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: JSON.stringify({ title: 'Add feature' }), stderr: '' });
+    expect(await derive('/repo')).toEqual({ number: 15, repo: 'owner/repo', title: 'Add feature' });
   });
 });
 

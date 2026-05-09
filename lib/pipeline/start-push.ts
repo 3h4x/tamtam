@@ -13,7 +13,7 @@ import {
   throwIfJobCancelled,
 } from '@/lib/jobs/cancellation';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { generateCommitMessage, findIssueContext } from './start-commit';
+import { generateCommitMessage, findIssueContext, deriveIssueContextFromBranch } from './start-commit';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { createGenericPR, createIssuePR } from './pr-create';
 import { decidePrContext } from './pr-context';
@@ -186,7 +186,8 @@ export async function startProjectPush(
   mkdirSync(logDir, { recursive: true });
   // Stamp issue context on the push job so downstream hooks can pick it up
   // without re-scanning run jobs (avoids context loss on intervening runs).
-  const earlyIssueCtx = await findIssueContext(projectName, projPath);
+  const earlyIssueCtx =
+    (await findIssueContext(projectName, projPath)) ?? (await deriveIssueContextFromBranch(projPath));
   const job = createJob(
     projectName, 'push', process.pid, '',
     undefined, undefined, undefined,
@@ -457,6 +458,14 @@ async function runPush(
 
   // Resolve issue context if not passed in (e.g. called from launchProjectPush).
   if (issueCtx === undefined) issueCtx = await findIssueContext(projectName, projPath);
+  // Fallback: if no run-job stamp matched, derive from the current branch name.
+  // Why: keeps the "Closes #N" PR body when the issue-tagged run is older than
+  // the 30-min recency window in findIssueContext (e.g. release re-runs after
+  // manual edits) but the worktree is still on fix/issue-N-…
+  if (!issueCtx) {
+    const fromBranch = await deriveIssueContextFromBranch(projPath, signal);
+    if (fromBranch) issueCtx = fromBranch;
+  }
 
   // Check if there's anything to push. `rev-list @{u}..HEAD` fails with a
   // non-zero exit when @{u} is unresolvable — which happens on a fresh
