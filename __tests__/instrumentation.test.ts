@@ -385,6 +385,19 @@ describe('instrumentation', () => {
       await expect(runProbeSweep()).resolves.not.toThrow();
     });
 
+    it('still probes claude-backed jobs when PIPELINE_STEP_KINDS is unavailable', async () => {
+      const probeJobStatus = vi.fn().mockResolvedValue(undefined);
+      vi.doMock('@/lib/jobs/job-storage', () => ({
+        listJobs: () => [makeJob('run'), makeJob('review')],
+        probeJobStatus,
+      }));
+      mockDeps([]);
+
+      const { runProbeSweep } = await import('@/instrumentation-node');
+      await expect(runProbeSweep()).resolves.not.toThrow();
+      expect(probeJobStatus).toHaveBeenCalledTimes(2);
+    });
+
     it('skips malformed jobs without a string kind', async () => {
       const { probeJobStatus } = mockJobStorage([
         { id: 'job-missing-kind', finishedAt: null },
