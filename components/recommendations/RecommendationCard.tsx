@@ -42,7 +42,7 @@ export function RecommendationCard({
             <span className="font-mono text-xs text-text-tertiary">updated {formatAgo(item.updated_at)}</span>
             {showProjectLink && (
               <Link
-                href={`/project/${encodeURIComponent(item.project)}/recommendations`}
+                href={`/project/${encodeURIComponent(item.project)}`}
                 className="font-mono text-xs text-accent hover:underline"
               >
                 {item.project} →

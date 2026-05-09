@@ -64,7 +64,6 @@ export {
   saveCustomActions,
   runCustomAction,
   fetchProjectDocs,
-  fetchRecommendations,
   fetchRecommendationsSummary,
   fetchAllOpenRecommendations,
   updateRecommendation,

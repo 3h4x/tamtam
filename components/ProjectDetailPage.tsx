@@ -19,12 +19,11 @@ import { PipelineStrip } from '@/components/project-detail/PipelineStrip'
 import { ProjectActions } from '@/components/project-detail/ProjectActions'
 import { TabNav } from '@/components/project-detail/TabNav'
 import { OverviewTab } from '@/components/project-detail/OverviewTab'
-import { RecommendationsTab } from '@/components/project-detail/RecommendationsTab'
 import { AgentsTab } from '@/components/AgentsTab'
 import { buildProjectPath, buildProjectTerminalPath } from '@/lib/client/project-routes'
 import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
 
-type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents' | 'recommendations'
+type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents'
 
 type Verdict = 'LGTM' | 'NEEDS ATTENTION' | 'DO NOT SHIP'
 interface ProjectDetailPageProps {
@@ -40,7 +39,7 @@ export function ProjectDetailPage({
   const name = params.name
   const router = useRouter()
   const { toast } = useToast()
-  const VALID_TABS: Tab[] = ['overview', 'config', 'history', 'terminal', 'changes', 'issues', 'docs', 'agents', 'recommendations']
+  const VALID_TABS: Tab[] = ['overview', 'config', 'history', 'terminal', 'changes', 'issues', 'docs', 'agents']
   const activeTab: Tab = params.sessionId
     ? 'terminal'
     : VALID_TABS.includes(params.tab as Tab) ? (params.tab as Tab) : 'overview'
@@ -726,10 +725,6 @@ export function ProjectDetailPage({
           currentBranch={currentBranch}
           projectJobs={projectJobs}
         />
-      )}
-
-      {activeTab === 'recommendations' && name && (
-        <RecommendationsTab projectName={name} />
       )}
 
       {/* Terminal Tab */}
