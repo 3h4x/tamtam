@@ -3,6 +3,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // 1ms poll (not 0 — parseInt('0') || 30_000 = 30_000 since 0 is falsy)
 process.env.TAMTAM_PR_WAIT_POLL_MS = '1';
 process.env.TAMTAM_PR_WAIT_TIMEOUT_MS = '5000';
+process.env.TAMTAM_PR_WAIT_NO_CHECKS_GRACE_MS = '0';
+// Allow the first empty-rollup poll to merge in tests that don't care about
+// CI registration timing. Production default still keeps a 90s grace window.
+process.env.TAMTAM_PR_WAIT_NO_CHECKS_MIN_POLLS = '1';
 
 describe('launchPrWait', () => {
   let launchPrWait: typeof import('@/lib/pipeline/start-pr-wait').launchPrWait;
@@ -103,6 +107,135 @@ describe('launchPrWait', () => {
     await vi.waitFor(() => {
       expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 0);
     }, { timeout: 3000 });
+  });
+
+  it('does NOT merge while mergeable is UNKNOWN (waits for GitHub to compute)', async () => {
+    // First poll: UNKNOWN — must NOT merge.
+    // Second poll: MERGEABLE with passing checks — merges and cleans up.
+    execMock
+      .mockResolvedValueOnce(resp(0, JSON.stringify({
+        state: 'OPEN', mergeable: 'UNKNOWN',
+        statusCheckRollup: [{ name: 'ci', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+      })))
+      .mockResolvedValueOnce(resp(0, JSON.stringify({
+        state: 'OPEN', mergeable: 'MERGEABLE',
+        statusCheckRollup: [{ name: 'ci', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+      })))
+      .mockResolvedValueOnce(resp(0, 'merged'));
+    mockCleanupSuccess();
+
+    launchPrWait('myproj', 100, 'owner/repo', 'https://github.com/owner/repo/pull/100');
+
+    await vi.waitFor(() => {
+      const mergeCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('merge'));
+      expect(mergeCalls.length).toBe(1);
+    }, { timeout: 3000 });
+  });
+
+  it('does NOT merge on the first poll when checks: none (regression: race with CI registration)', async () => {
+    // Require 3 consecutive empty-rollup polls before merging.
+    vi.resetModules();
+    process.env.TAMTAM_PR_WAIT_NO_CHECKS_MIN_POLLS = '3';
+    process.env.TAMTAM_PR_WAIT_NO_CHECKS_GRACE_MS = '0';
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+    }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs' }),
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: createJobMock, markDone: markDoneMock, updateJob: updateJobMock,
+    }));
+    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
+    const { launchPrWait: lpw } = await import('@/lib/pipeline/start-pr-wait');
+
+    // First two polls: empty rollup — must NOT merge yet.
+    // Third poll: empty rollup — now allowed to merge.
+    execMock
+      .mockResolvedValueOnce(resp(0, JSON.stringify({
+        state: 'OPEN', mergeable: 'MERGEABLE', statusCheckRollup: [],
+      })))
+      .mockResolvedValueOnce(resp(0, JSON.stringify({
+        state: 'OPEN', mergeable: 'MERGEABLE', statusCheckRollup: [],
+      })))
+      .mockResolvedValueOnce(resp(0, JSON.stringify({
+        state: 'OPEN', mergeable: 'MERGEABLE', statusCheckRollup: [],
+      })))
+      .mockResolvedValueOnce(resp(0, 'merged'));
+    mockCleanupSuccess();
+
+    lpw('myproj', 200, 'owner/repo', 'https://github.com/owner/repo/pull/200');
+
+    await vi.waitFor(() => {
+      const mergeCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('merge'));
+      expect(mergeCalls.length).toBe(1);
+    }, { timeout: 3000 });
+
+    // Confirm merge happened only after the third status poll, not the first.
+    const callsBeforeMerge = execMock.mock.calls;
+    const firstMergeIdx = callsBeforeMerge.findIndex(([cmd, args]: any) => cmd === 'gh' && args.includes('merge'));
+    const statusPollsBefore = callsBeforeMerge
+      .slice(0, firstMergeIdx)
+      .filter(([cmd, args]: any) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'view');
+    expect(statusPollsBefore.length).toBeGreaterThanOrEqual(3);
+
+    process.env.TAMTAM_PR_WAIT_NO_CHECKS_MIN_POLLS = '1';
+    process.env.TAMTAM_PR_WAIT_NO_CHECKS_GRACE_MS = '0';
+  });
+
+  it('does NOT merge before the default 90s empty-rollup grace elapses', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.resetModules();
+      delete process.env.TAMTAM_PR_WAIT_POLL_MS;
+      process.env.TAMTAM_PR_WAIT_TIMEOUT_MS = '200000';
+      delete process.env.TAMTAM_PR_WAIT_NO_CHECKS_GRACE_MS;
+      delete process.env.TAMTAM_PR_WAIT_NO_CHECKS_MIN_POLLS;
+      vi.doMock('@/lib/shared/project-data', () => ({
+        resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+      }));
+      vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+      vi.doMock('@/lib/scheduling/scheduling', () => ({
+        getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs' }),
+      }));
+      vi.doMock('@/lib/jobs/job-storage', () => ({
+        createJob: createJobMock, markDone: markDoneMock, updateJob: updateJobMock,
+      }));
+      vi.doMock('@/lib/pipeline/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
+      const { launchPrWait: lpw } = await import('@/lib/pipeline/start-pr-wait');
+
+      execMock
+        .mockResolvedValueOnce(resp(0, JSON.stringify({
+          state: 'OPEN', mergeable: 'MERGEABLE', statusCheckRollup: [],
+        })))
+        .mockResolvedValueOnce(resp(0, JSON.stringify({
+          state: 'OPEN', mergeable: 'MERGEABLE', statusCheckRollup: [],
+        })))
+        .mockResolvedValueOnce(resp(0, JSON.stringify({
+          state: 'OPEN', mergeable: 'MERGEABLE', statusCheckRollup: [],
+        })))
+        .mockResolvedValueOnce(resp(0, JSON.stringify({
+          state: 'OPEN', mergeable: 'MERGEABLE', statusCheckRollup: [],
+        })))
+        .mockResolvedValueOnce(resp(0, 'merged'));
+      mockCleanupSuccess();
+
+      lpw('myproj', 201, 'owner/repo', 'https://github.com/owner/repo/pull/201');
+
+      await vi.advanceTimersByTimeAsync(89_999);
+      expect(execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('merge'))).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await Promise.resolve();
+      expect(execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('merge'))).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+      process.env.TAMTAM_PR_WAIT_POLL_MS = '1';
+      process.env.TAMTAM_PR_WAIT_TIMEOUT_MS = '5000';
+      process.env.TAMTAM_PR_WAIT_NO_CHECKS_GRACE_MS = '0';
+      process.env.TAMTAM_PR_WAIT_NO_CHECKS_MIN_POLLS = '1';
+    }
   });
 
   it('marks job done with exit 1 when PR is closed without merging', async () => {
