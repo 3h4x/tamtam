@@ -402,19 +402,6 @@ describe('getProjectTestConfig — testsDisabled / reviewDisabled', () => {
     expect(cfg?.autoPushEnabled).toBe(true);
   });
 
-  it('defaults prWorkflowEnabled to false when column is NULL', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
-    const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
-    expect(cfg?.prWorkflowEnabled).toBe(false);
-  });
-
-  it('returns prWorkflowEnabled=true when set', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, prWorkflowEnabled: true }).run();
-    const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
-    expect(cfg?.prWorkflowEnabled).toBe(true);
-  });
 });
 
 describe('getImproveConfig — logDir path expansion', () => {

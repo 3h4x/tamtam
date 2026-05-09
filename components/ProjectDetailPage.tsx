@@ -77,7 +77,6 @@ export function ProjectDetailPage({
   const [autoPushEnabledInput, setAutoPushEnabledInput] = useState(false)
   const [autoPrMergeEnabledInput, setAutoPrMergeEnabledInput] = useState(false)
   const [releaseAfterRunInput, setReleaseAfterRunInput] = useState(false)
-  const [prWorkflowEnabledInput, setPrWorkflowEnabledInput] = useState(false)
   const [issueAutoBranchInput, setIssueAutoBranchInput] = useState(true)
   const [testsDisabledInput, setTestsDisabledInput] = useState(false)
   const [reviewDisabledInput, setReviewDisabledInput] = useState(false)
@@ -181,7 +180,6 @@ export function ProjectDetailPage({
     setAutoPushEnabledInput(!!data.auto_push_enabled)
     setAutoPrMergeEnabledInput(!!data.auto_pr_merge_enabled)
     setReleaseAfterRunInput(!!data.release_after_run)
-    setPrWorkflowEnabledInput(!!data.pr_workflow_enabled)
     setIssueAutoBranchInput(data.issue_auto_branch ?? true)
     setTestsDisabledInput(!!data.tests_disabled)
     setReviewDisabledInput(!!data.review_disabled)
@@ -468,7 +466,6 @@ export function ProjectDetailPage({
     auto_push_enabled: autoPushEnabledInput,
     auto_pr_merge_enabled: autoPrMergeEnabledInput,
     release_after_run: releaseAfterRunInput,
-    pr_workflow_enabled: prWorkflowEnabledInput,
     issue_auto_branch: issueAutoBranchInput,
     tests_disabled: testsDisabledInput,
     review_disabled: reviewDisabledInput,
@@ -501,7 +498,6 @@ export function ProjectDetailPage({
     configInputs.auto_push_enabled !== !!config.auto_push_enabled ||
     configInputs.auto_pr_merge_enabled !== !!config.auto_pr_merge_enabled ||
     configInputs.release_after_run !== !!config.release_after_run ||
-    configInputs.pr_workflow_enabled !== !!config.pr_workflow_enabled ||
     configInputs.issue_auto_branch !== (config.issue_auto_branch ?? true) ||
     configInputs.tests_disabled !== !!config.tests_disabled ||
     configInputs.review_disabled !== !!config.review_disabled ||
@@ -686,8 +682,6 @@ export function ProjectDetailPage({
             setAutoPrMergeEnabledInput={setAutoPrMergeEnabledInput}
             releaseAfterRunInput={releaseAfterRunInput}
             setReleaseAfterRunInput={setReleaseAfterRunInput}
-            prWorkflowEnabledInput={prWorkflowEnabledInput}
-            setPrWorkflowEnabledInput={setPrWorkflowEnabledInput}
             issueAutoBranchInput={issueAutoBranchInput}
             setIssueAutoBranchInput={setIssueAutoBranchInput}
             testsDisabledInput={testsDisabledInput}
@@ -730,7 +724,6 @@ export function ProjectDetailPage({
         <AgentsTab
           projectName={name}
           currentBranch={currentBranch}
-          prWorkflowEnabled={!!config?.pr_workflow_enabled}
           projectJobs={projectJobs}
         />
       )}

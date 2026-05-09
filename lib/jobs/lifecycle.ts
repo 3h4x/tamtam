@@ -29,7 +29,7 @@ import {
 } from '@/lib/pipeline/release-context';
 import { getJobKind, isAgentJobKind, isClaudeBackedJobKind } from '@/lib/jobs/kinds';
 
-async function getProjectPipelineConfig(projectName: string): Promise<{ autoCommitEnabled: boolean; autoPushEnabled: boolean; releaseAfterRun: boolean; autoPrMergeEnabled: boolean; prWorkflowEnabled: boolean }> {
+async function getProjectPipelineConfig(projectName: string): Promise<{ autoCommitEnabled: boolean; autoPushEnabled: boolean; releaseAfterRun: boolean; autoPrMergeEnabled: boolean }> {
   try {
     const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
     const cfg = getProjectTestConfig(projectName);
@@ -42,10 +42,9 @@ async function getProjectPipelineConfig(projectName: string): Promise<{ autoComm
       // values get the new default.
       releaseAfterRun: cfg?.releaseAfterRun ?? true,
       autoPrMergeEnabled: !!cfg?.autoPrMergeEnabled,
-      prWorkflowEnabled: !!cfg?.prWorkflowEnabled,
     };
   } catch {
-    return { autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: true, autoPrMergeEnabled: false, prWorkflowEnabled: false };
+    return { autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: true, autoPrMergeEnabled: false };
   }
 }
 
@@ -595,22 +594,14 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
             console.log(`[release] failed to set reviewed ref for ${job.project}:`, e);
           }
 
-          // DoD verification only makes sense in PR Workflow mode AND when we
-          // have a linked GitHub issue. On a direct-branch release (no PR, no
-          // issue) there are no acceptance-criteria checkboxes to tick, so
-          // running mark-dod just burns Claude calls and risks stalling the
-          // release on an inline claude-cli invocation.
-          //
-          // When PR Workflow + auto_pr_merge + issue are all set, defer DoD
-          // to launchPrWait (post-merge) so verification reflects the merged
-          // state. Otherwise (PR Workflow + issue but no auto-merge) run it
-          // now so the review can tick boxes before manual merge.
+          // DoD verification is now gated only by issue linkage. When
+          // auto_pr_merge_enabled is on, defer DoD to launchPrWait
+          // (post-merge) so verification reflects the merged state.
           const hasIssueContext = (
             findReleaseScopedIssueContext(job.project) ??
             findLatestIssueRunContext(job.project)
           ) !== null;
-          const prWorkflow = !!pipelineCfg.prWorkflowEnabled;
-          const shouldRunDod = prWorkflow && hasIssueContext;
+          const shouldRunDod = hasIssueContext;
           const shouldDeferDod = shouldRunDod && pipelineCfg.autoPrMergeEnabled;
           if (shouldRunDod && !shouldDeferDod) {
             try {
@@ -625,7 +616,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           } else if (shouldDeferDod) {
             console.log(`[release] deferring mark-dod to post-merge for ${job.project} (auto_pr_merge_enabled)`);
           } else {
-            console.log(`[release] skipping mark-dod for ${job.project} (pr_workflow_enabled=${prWorkflow}, hasIssueContext=${hasIssueContext})`);
+            console.log(`[release] skipping mark-dod for ${job.project} (hasIssueContext=${hasIssueContext})`);
           }
           const commitCount = recentStepCount(job.project, 'commit', job);
           if (commitCount >= maxStepIterations()) {

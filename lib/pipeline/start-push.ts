@@ -13,9 +13,10 @@ import {
   throwIfJobCancelled,
 } from '@/lib/jobs/cancellation';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { generateCommitMessage, findIssueContext, detectMainBranch } from './start-commit';
+import { generateCommitMessage, findIssueContext } from './start-commit';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { createGenericPR, createIssuePR } from './pr-create';
+import { decidePrContext } from './pr-context';
 
 export type PushResult =
   | { ok: true; commitSha: string; message: string; prUrl?: string; prNumber?: number; prRepo?: string }
@@ -568,19 +569,6 @@ async function runPush(
   const shaR = await execStep('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
   const commitSha = shaR.exitCode === 0 ? shaR.stdout.trim() : '';
 
-  // PR creation rules:
-  //   - Issue-linked push → ALWAYS create a PR. Clicking "Work on issue N" is
-  //     an explicit opt-in to the issue-driven workflow; the user expects a
-  //     PR that closes the issue regardless of the project's pr_workflow
-  //     setting (which only governs *non-issue* feature branches).
-  //   - Non-issue push + pr_workflow_enabled → create a generic PR for the
-  //     feature branch.
-  //   - Non-issue push without pr_workflow_enabled → push to current branch,
-  //     no PR.
-  const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
-  const pipelineConfig = getProjectTestConfig(projectName);
-  const prWorkflowEnabled = !!pipelineConfig?.prWorkflowEnabled;
-
   if (issueCtx) {
     const prUrl = await createIssuePR(projPath, log, issueCtx, signal);
     // Stay on the issue branch until the PR merges, regardless of whether
@@ -597,23 +585,9 @@ async function runPush(
     return { ok: true, commitSha, message: 'pushed (PR creation failed — see log)' };
   }
 
-  // Direct Branch mode on a fix/issue-* branch (no issue context): auto-return to
-  // default branch after push so the next release targets the right branch.
-  if (!prWorkflowEnabled) {
-    const branchR = await execStep('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
-    const currentBranch = branchR?.stdout?.trim() ?? '';
-    if (currentBranch.startsWith('fix/issue-')) {
-      const mainBranch = await detectMainBranch(projPath, signal);
-      log(`\n# Direct Branch mode on issue branch — switching back to ${mainBranch}\n`);
-      const coR = await execStep('git', ['-C', projPath, 'checkout', mainBranch], { timeout: 10000 });
-      if (coR.stdout) log(coR.stdout);
-      if (coR.stderr) log(coR.stderr);
-      clearProjectDataCache();
-    }
-  }
-
-  // PR Workflow without issue context: create a generic PR for the feature branch.
-  if (prWorkflowEnabled) {
+  const prDecision = await decidePrContext(projPath, signal);
+  if (prDecision.shouldOpenPr) {
+    log(`\n# branch-derived PR decision: ${prDecision.reason}\n`);
     const prResult = await createGenericPR(projPath, log, signal);
     if (prResult) {
       const prNumber = parseInt(prResult.prUrl.split('/').pop() ?? '0', 10) || undefined;
@@ -629,5 +603,6 @@ async function runPush(
     return { ok: true, commitSha, message: 'pushed (PR creation failed — see log)' };
   }
 
+  log(`\n# branch-derived direct push: ${prDecision.reason}\n`);
   return { ok: true, commitSha, message: 'pushed' };
 }

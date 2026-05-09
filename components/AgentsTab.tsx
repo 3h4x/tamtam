@@ -116,18 +116,12 @@ const RECOMMENDED_AGENTS: RecommendedAgent[] = [
 interface AgentsTabProps {
   projectName: string
   currentBranch?: string | null
-  prWorkflowEnabled?: boolean
   projectJobs?: JobInfo[]
 }
 
-export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled, projectJobs = [] }: AgentsTabProps) {
-  // Server rejects agent runs in Direct Branch mode while a fix/issue-* branch
-  // is checked out (see app/api/agents/[agentId]/run/route.ts). Mirror that
-  // check on the client so the buttons reflect reality.
-  const agentRunsBlocked = !prWorkflowEnabled && !!currentBranch?.startsWith('fix/issue-')
-  const blockedReason = agentRunsBlocked
-    ? `Direct Branch mode is on while issue branch '${currentBranch}' is checked out — finish or abandon the issue work first.`
-    : ''
+export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
+  const agentRunsBlocked = false
+  const blockedReason = ''
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()

@@ -8,7 +8,6 @@ import { getBranchContext, gitShowSync } from '@/lib/git/git-branch';
  * now DB-only. Kept here so the one-shot startup migration can find them.
  */
 const LEGACY_WORKFLOW_KEYS = [
-  'pr_workflow_enabled',
   'auto_commit_enabled',
   'auto_push_enabled',
   'auto_pr_merge_enabled',

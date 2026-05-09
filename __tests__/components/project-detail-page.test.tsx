@@ -186,7 +186,6 @@ function buildConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
     auto_push_enabled: false,
     auto_pr_merge_enabled: false,
     release_after_run: false,
-    pr_workflow_enabled: false,
     issue_auto_branch: true,
     tests_disabled: false,
     review_disabled: false,

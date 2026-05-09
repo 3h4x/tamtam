@@ -213,11 +213,6 @@ try {
   sqlite.exec('ALTER TABLE projects ADD COLUMN auto_pr_merge_enabled INTEGER DEFAULT 0');
 } catch {}
 
-// Migrate: add pr_workflow_enabled column to projects if missing
-try {
-  sqlite.exec('ALTER TABLE projects ADD COLUMN pr_workflow_enabled INTEGER DEFAULT 0');
-} catch {}
-
 // Migrate: add issue_auto_branch to projects — controls the "Work on" feature-branch step.
 // Default 1 (existing behavior: always provision fix/issue-<n>-<slug>).
 try {

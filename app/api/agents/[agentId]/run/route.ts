@@ -5,7 +5,6 @@ import { join } from 'path';
 import { db, schema } from '@/lib/db';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
-import { checkIssueBranchBlock } from '@/lib/pipeline/start-release';
 import { isLockOwnedByActiveRelease, getLock } from '@/lib/pipeline/pipeline-lock';
 import { getPendingRelease, drainPendingRelease } from '@/lib/pipeline/pending-release';
 import { enqueueQueuedAgentRun } from '@/lib/agents/queued-agent-runs';
@@ -30,8 +29,10 @@ import { checkCliStartGate } from '@/lib/usage/resolve-provider';
  * `readOnly: true` is for agents whose declared task does not edit the local
  * checkout, such as the built-in cto issue planner. Read-only runs bypass
  * per-project worktree serialization (busy jobs, other agents, start slot,
- * pending-release recovery, dirty-worktree, issue-branch), but still honor
- * same-agent duplicate protection, release pipeline locks, and CLI/budget gates.
+ * pending-release recovery, dirty-worktree), but still honor same-agent
+ * duplicate protection, release pipeline locks, and CLI/budget gates. Manual
+ * agent runs are allowed on `fix/issue-*` branches; only scheduled fires are
+ * skipped there by the internal scheduler.
  */
 export async function POST(
   request: NextRequest,
@@ -293,20 +294,6 @@ async function runAgentStart(
   if (!projPath) {
     return {
       response: NextResponse.json({ detail: `project '${agent.project}' not found` }, { status: 404 }),
-      startedJob: false,
-    };
-  }
-
-  // In Direct Branch mode, block agent runs while a fix/issue-* branch is
-  // checked out. Scheduled agents committing to an issue branch would mix
-  // unrelated work into the issue and push to the wrong branch.
-  const blockedBranch = readOnly ? null : await checkIssueBranchBlock(agent.project, projPath);
-  if (blockedBranch) {
-    return {
-      response: NextResponse.json(
-        { code: 'issue_branch', detail: `Cannot run agent in Direct Branch mode while on issue branch '${blockedBranch}' — finish or abandon issue work first`, branch: blockedBranch },
-        { status: 409 }
-      ),
       startedJob: false,
     };
   }

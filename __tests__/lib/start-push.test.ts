@@ -143,7 +143,8 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, '# branch.head feature/release\n# branch.ab +0 -0\n'))
       .mockImplementationOnce(() => resp(0))
       .mockImplementationOnce(() => resp(0, 'abc1234'))
-      .mockImplementationOnce(() => resp(0, 'feature/release\n'))
+      .mockImplementationOnce(() => resp(0, 'feature/release\n')) // decidePrContext
+      .mockImplementationOnce(() => resp(0, 'feature/release\n')) // createGenericPR
       .mockImplementationOnce(() => resp(1, '', 'no pull request found'))
       .mockImplementationOnce(() => resp(0, 'https://github.com/acme/widgets/pull/42\n'))
       .mockImplementationOnce(() => resp(0, 'acme/widgets\n'))
@@ -857,7 +858,7 @@ describe('startProjectPush — push result tracking', () => {
     if (r.ok) expect(r.message).toBe('pushed');
   });
 
-  it('auto-returns to default branch in Direct Branch mode when on fix/issue-* with no issue context', async () => {
+  it('leaves the current branch alone when pushing a non-issue fix branch without issue context', async () => {
     vi.resetModules();
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
@@ -894,8 +895,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, '# branch.head fix/issue-45-test\n# branch.ab +0 -0\n')) // behind check
       .mockImplementationOnce(() => resp(0))                                               // git push
       .mockImplementationOnce(() => resp(0, 'abc1234'))                                   // git rev-parse
-      .mockImplementationOnce(() => resp(0, 'fix/issue-45-test\n'))                       // git branch --show-current
-      .mockImplementationOnce(() => resp(0));                                              // git checkout main
+      .mockImplementationOnce(() => resp(0, 'fix/issue-45-test\n'));                      // git branch --show-current
 
     const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     const r = await fn('proj');
@@ -904,10 +904,10 @@ describe('startProjectPush — push result tracking', () => {
     const checkoutCall = (execMock.mock.calls as [string, string[]][]).find(
       ([cmd, args]) => cmd === 'git' && args.includes('checkout') && args.includes('main'),
     );
-    expect(checkoutCall).toBeTruthy();
+    expect(checkoutCall).toBeUndefined();
   });
 
-  it('creates a generic PR when prWorkflowEnabled and auto-merge is off (returns to main)', async () => {
+  it('creates a generic PR when pushing a non-default feature branch', async () => {
     vi.resetModules();
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
@@ -944,12 +944,11 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, '# branch.head feat/x\n# branch.ab +0 -0\n')) // behind check
       .mockImplementationOnce(() => resp(0))                                       // git push
       .mockImplementationOnce(() => resp(0, 'abc1234'))                            // git rev-parse
+      .mockImplementationOnce(() => resp(0, 'feat/my-feature'))                    // git branch --show-current (decidePrContext)
       .mockImplementationOnce(() => resp(0, 'feat/my-feature'))                    // git branch --show-current (createGenericPR)
       .mockImplementationOnce(() => resp(1, '', 'no pr'))                          // gh pr view (no existing PR)
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/repo/pull/42\n')) // gh pr create
-      .mockImplementationOnce(() => resp(0, 'owner/repo'))                         // gh repo view
-      .mockImplementationOnce(() => resp(0))                                       // git checkout main
-      .mockImplementationOnce(() => resp(0));                                      // git pull --ff-only
+      .mockImplementationOnce(() => resp(0, 'owner/repo'));                        // gh repo view
 
     const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     const r = await fn('proj');
@@ -969,7 +968,7 @@ describe('startProjectPush — push result tracking', () => {
     expect(checkoutMain).toBeUndefined();
   });
 
-  it('returns existing PR url without creating a new one when prWorkflowEnabled and PR already exists', async () => {
+  it('returns existing PR url without creating a new one on a non-default feature branch', async () => {
     vi.resetModules();
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
@@ -1007,11 +1006,10 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, '# branch.head feat/x\n# branch.ab +0 -0\n')) // behind check
       .mockImplementationOnce(() => resp(0))                                       // git push
       .mockImplementationOnce(() => resp(0, 'abc1234'))                            // git rev-parse
-      .mockImplementationOnce(() => resp(0, 'feat/my-feature'))                    // git branch --show-current
+      .mockImplementationOnce(() => resp(0, 'feat/my-feature'))                    // git branch --show-current (decidePrContext)
+      .mockImplementationOnce(() => resp(0, 'feat/my-feature'))                    // git branch --show-current (createGenericPR)
       .mockImplementationOnce(() => resp(0, JSON.stringify({ url: existingUrl }))) // gh pr view (existing PR)
-      .mockImplementationOnce(() => resp(0, 'owner/repo'))                         // gh repo view
-      .mockImplementationOnce(() => resp(0))                                       // git checkout main
-      .mockImplementationOnce(() => resp(0));                                      // git pull --ff-only
+      .mockImplementationOnce(() => resp(0, 'owner/repo'));                        // gh repo view
 
     const { startProjectPush: fn } = await import('@/lib/pipeline/start-push');
     const r = await fn('proj');
@@ -1030,7 +1028,7 @@ describe('startProjectPush — push result tracking', () => {
     expect(prCreateCall).toBeUndefined();
   });
 
-  it('returns "pushed (PR creation failed)" when prWorkflowEnabled but gh pr create fails', async () => {
+  it('returns "pushed (PR creation failed)" when generic PR creation fails on a feature branch', async () => {
     vi.resetModules();
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
@@ -1067,7 +1065,8 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, '# branch.head feat/x\n# branch.ab +0 -0\n')) // behind check
       .mockImplementationOnce(() => resp(0))                                       // git push
       .mockImplementationOnce(() => resp(0, 'abc1234'))                            // git rev-parse
-      .mockImplementationOnce(() => resp(0, 'feat/my-feature'))                    // git branch --show-current
+      .mockImplementationOnce(() => resp(0, 'feat/my-feature'))                    // git branch --show-current (decidePrContext)
+      .mockImplementationOnce(() => resp(0, 'feat/my-feature'))                    // git branch --show-current (createGenericPR)
       .mockImplementationOnce(() => resp(1, '', 'no pr'))                          // gh pr view (no existing PR)
       .mockImplementationOnce(() => resp(1, '', 'pr create failed'));              // gh pr create fails
 

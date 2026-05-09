@@ -10,7 +10,7 @@ import { listJobs, probeJobStatus, createJob, updateJob, getJob, runWithParent }
 import { exec } from '@/lib/shared/shell';
 import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/scheduling';
 import { acquireLock, releaseLock, reassignLock } from './pipeline-lock';
-import { detectMainBranch, findIssueContext } from './start-commit';
+import { findIssueContext, isIssueContextCompatibleWithCurrentBranch } from './start-commit';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { hasFreshLgtm, hasLocalCommitsAhead } from './release-state';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
@@ -36,6 +36,28 @@ export type ReleaseResult =
 export interface StartReleaseOptions {
   queueIfBlocked?: boolean;
   sourceJobId?: string;
+}
+
+async function resolveReleaseIssueContext(
+  projectName: string,
+  projPath: string,
+  sourceJob: ReturnType<typeof getJob>,
+): Promise<IssueContext | null> {
+  if (sourceJob?.project === projectName && sourceJob.ghIssueNumber != null) {
+    const sourceIssue = {
+      number: sourceJob.ghIssueNumber,
+      repo: sourceJob.ghIssueRepo ?? '',
+      title: sourceJob.ghIssueTitle ?? '',
+    };
+    return (await isIssueContextCompatibleWithCurrentBranch(sourceIssue, projPath))
+      ? sourceIssue
+      : null;
+  }
+
+  const hasIssueTaggedRun = listJobs().some(
+    (job) => job.project === projectName && job.kind === 'run' && job.ghIssueNumber != null,
+  );
+  return hasIssueTaggedRun ? await findIssueContext(projectName, projPath) : null;
 }
 
 // Create a meta "release" job and start a PM2 monitor process for it.
@@ -169,21 +191,6 @@ async function hasChanges(projPath: string): Promise<boolean> {
  *  2. If a test command is configured/detected → start tests
  *  3. If there are changes or unpushed commits → start review
  */
-/**
- * Returns the current branch name if agent runs should be blocked (Direct Branch
- * mode + fix/issue-* branch checked out), otherwise null.
- */
-export async function checkIssueBranchBlock(
-  projectName: string,
-  projPath: string,
-): Promise<string | null> {
-  const cfg = getProjectTestConfig(projectName);
-  if (!cfg || cfg.prWorkflowEnabled) return null;
-  const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
-  const branch = branchR.stdout.trim();
-  return branch.startsWith('fix/issue-') ? branch : null;
-}
-
 async function queueRelease(projectName: string, blockingJobId?: string): Promise<ReleaseResult> {
   const { setPendingRelease } = await import('./pending-release');
   setPendingRelease(projectName);
@@ -212,27 +219,6 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
     return gate;
   }
 
-  // In Direct Branch mode, guard against releasing from an unexpected branch.
-  // fix/issue-* branches are "expected" (issue work), but any other non-default
-  // branch indicates the user landed here by accident and the push would go to
-  // the wrong place. Reject early with a clear message rather than silently
-  // pushing to the wrong branch.
-  const releaseCfg = getProjectTestConfig(projectName);
-  if (releaseCfg && !releaseCfg.prWorkflowEnabled) {
-    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
-    const currentBranch = branchR.stdout.trim();
-    if (currentBranch && !currentBranch.startsWith('fix/issue-')) {
-      const defaultBranch = await detectMainBranch(projPath);
-      if (currentBranch !== defaultBranch) {
-        return {
-          ok: false,
-          status: 409,
-          detail: `Direct Branch mode: working copy is on '${currentBranch}' (expected '${defaultBranch}' or a fix/issue-* branch). Switch branches before releasing.`,
-        };
-      }
-    }
-  }
-
   const blockingJob = await findBlockingRunningJob(
     projectName,
     (job) => !RELEASE_PIPELINE_KINDS.has(job.kind),
@@ -252,18 +238,7 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
     return { ok: false, status: 409, detail: `Release pipeline already running for ${projectName}` };
   }
 
-  const hasIssueTaggedRun = listJobs().some(
-    (job) => job.project === projectName && job.kind === 'run' && job.ghIssueNumber != null,
-  );
-  const issueContext = sourceJob?.project === projectName && sourceJob.ghIssueNumber != null
-    ? {
-        number: sourceJob.ghIssueNumber,
-        repo: sourceJob.ghIssueRepo ?? '',
-        title: sourceJob.ghIssueTitle ?? '',
-      }
-    : hasIssueTaggedRun
-      ? await findIssueContext(projectName, projPath)
-      : null;
+  const issueContext = await resolveReleaseIssueContext(projectName, projPath, sourceJob);
 
   const changes = await hasChanges(projPath);
   const unpushed = await hasLocalCommitsAhead(projPath);

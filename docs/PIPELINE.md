@@ -1,6 +1,6 @@
 # Release Pipeline — How It Works
 
-The pipeline is a quality-gated sequence driven by the selected provider. The exact steps depend on the **workflow mode** configured per project.
+The pipeline is a quality-gated sequence driven by the selected provider. The registry is unified per project: `test → review → fix → commit → push → dod → merge`.
 
 ## Auto-fix policy (requirements)
 
@@ -60,47 +60,26 @@ Implications:
 - Release/test/push entrypoints no longer rely on the legacy active-provider snapshot, so a full Claude window does not block a release when another enabled CLI is healthy.
 - Once a release starts, the chosen provider is stamped onto the release/test/push jobs so downstream review/fix/commit steps inherit the same provider instead of repicking mid-pipeline.
 
-## Workflow Modes
+## Branch-derived PR behavior
 
-Each project has a mode selector in its Config tab:
+There is no longer a per-project pipeline mode selector. Push behavior is decided at runtime:
 
-| Mode | Push destination | Extra steps |
-|------|-----------------|-------------|
-| **Direct Branch** | Current branch, directly | — |
-| **PR Workflow** | Feature/issue branch → pull request | `dod` → optional `merge` |
+| Working-copy branch | Push behavior | Downstream steps |
+|---------------------|---------------|------------------|
+| Default branch | Push directly to the current branch | `dod` runs only when the release is issue-linked; `merge` is skipped |
+| Any non-default branch | Push current branch and open or reuse a PR | `dod` runs for issue-linked releases and for generic PR-backed pushes when auto-merge is off; `merge` runs when auto-merge is enabled |
 
-### Direct Branch
+`fix/issue-<n>-<slug>` branches are first-class release branches. They no longer auto-return to the default branch after push; the working copy returns to the default branch after PR merge.
 
-```
-test → [fix loop] → review → [fix loop] → commit → push
-```
+### `decidePrContext`
 
-Changes are committed and pushed straight to whatever branch is currently checked out. No pull request is created.
+`lib/pipeline/pr-context.ts` resolves:
 
-#### Direct Branch + issue-branch interaction
+- `currentBranch` via `git branch --show-current`
+- `defaultBranch` via `detectMainBranch(projectPath)`
+- `shouldOpenPr` via `currentBranch !== defaultBranch`
 
-When a user clicks **Work on** for a GitHub issue, TamTam checks out a `fix/issue-<n>-<slug>` branch. In Direct Branch mode this creates a potential conflict with scheduled agents, which are expected to operate on the default branch. The following rules are enforced:
-
-| Situation | Behavior |
-|-----------|----------|
-| Scheduled/manual **agent run** while on `fix/issue-*` in Direct Branch mode | **Refused (409)** — agent must not commit to the issue branch. Finish or abandon issue work first. |
-| `startRelease` (🚀 Release button) while on `fix/issue-*` in Direct Branch mode | **Allowed** — user explicitly triggered it. After a successful push the working copy is automatically returned to the default branch. |
-| `startRelease` while on any other non-default, non-issue branch in Direct Branch mode | **Refused (409)** — unexpected branch; switch to the default branch before releasing. |
-| **Work on** (issue-branch checkout) while a pipeline is actively running | **Refused (409)** — switching branches mid-pipeline would corrupt the working copy. Wait for the pipeline to finish. |
-| Successful push on `fix/issue-*` in Direct Branch mode | Working copy is automatically **returned to the default branch** (mirrors PR Workflow post-merge behavior). |
-
-### PR Workflow
-
-```
-test → [fix loop] → review → [fix loop] → commit → push → dod → merge (optional)
-```
-
-Changes are pushed to the current feature/issue branch. A pull request is created (or updated) automatically. After push:
-
-- **dod** — Claude verifies which acceptance-criteria checkboxes in the linked GitHub issue are actually implemented, then ticks the verified ones. Best-effort and non-fatal; the pipeline continues regardless.
-- **merge** — if *Auto-merge PR* is enabled, TamTam polls CI checks and merges the PR once they pass. If disabled, the PR is left open for manual merge.
-
-The `fix/issue-<n>-<slug>` branch is checked out automatically when opening a terminal run from an issue in the Issues tab. After a successful PR merge the working copy is returned to the default branch.
+`start-push.ts` uses this helper for non-issue releases. Issue-linked pushes still always create an issue PR.
 
 ---
 
@@ -116,7 +95,7 @@ The `fix/issue-<n>-<slug>` branch is checked out automatically when opening a te
 
 ## State machine
 
-### Direct Branch
+### Unified pipeline
 
 ```
 startRelease()
@@ -184,7 +163,9 @@ FIX
   └─ exit ≠0 → completion hook → finalize release (exit 1)
 
 PUSH
-  ├─ exit 0  → completion hook → finalize release (exit 0)
+  ├─ exit 0  → completion hook → start MARK-DOD when issue-linked, or when a generic push produced a PR and auto-merge is off
+  │                              → start PR-MERGE-WAIT when a push produced a PR and auto-merge is on
+  │                              → otherwise finalize release (exit 0)
   └─ exit ≠0 → completion hook
       ├─ isHookRejection(log) → start FIX-PUSH (if attempts < 2 per 30 min)
       └─ Not a hook error    → finalize release (exit 1)
@@ -193,12 +174,6 @@ FIX-PUSH
   ├─ exit 0  → completion hook → start PUSH (retry)
   └─ exit ≠0 → completion hook → finalize release (exit 1)
 ```
-
-### PR Workflow (additional steps after PUSH succeeds)
-
-```
-PUSH exit 0
-  └─ completion hook → start MARK-DOD
 
 MARK-DOD
   ├─ exit 0  → completion hook
@@ -209,7 +184,6 @@ MARK-DOD
 PR-MERGE-WAIT
   ├─ CI passes → merge PR → switch to default branch → finalize release (exit 0)
   └─ CI fails  → finalize release (exit 1)
-```
 
 The release meta-job (`kind='release'`) collects log sections from each step. Its own `finishedAt` is set when any step finalizes without chaining.
 
@@ -230,8 +204,8 @@ Called by `markDone()` after every job finishes. Hooks run in order:
 5. **Test chaining**: If `test` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW.
 6. **Push hook fix**: If `push` exits ≠0 and log matches hook rejection patterns: start FIX-PUSH (within attempt cap).
 7. **Fix-push re-push**: If `fix-push` exits 0: start PUSH again.
-8. **DoD (PR Workflow)**: If `push` exits 0 and `pr_workflow_enabled`: start MARK-DOD.
-9. **PR merge wait (PR Workflow)**: If `mark-dod` completes and `auto_pr_merge_enabled`: start PR-MERGE-WAIT.
+8. **DoD**: If `push` exits 0 and the release is issue-linked, or the push produced a PR without issue context: start MARK-DOD unless auto-merge defers it to post-merge.
+9. **PR merge wait**: If a push produced a PR and `auto_pr_merge_enabled`: start PR-MERGE-WAIT; issue-linked DoD is deferred to post-merge on that path.
 10. **Release finalization**: If a pipeline job ran but no chaining happened, write `# release finished — exit {code}` to meta-log and mark the release job done.
 11. **Fix-CI auto-retry**: If `fix-ci` exits ≠0 within ~5 s of starting (boot crash): schedule retry after 500–3000 ms backoff. Capped at 2 retries within a 120-s window. These are hardcoded constants — not user-tunable.
 12. **Review-exhaustion fallback**: If a **NEEDS ATTENTION** review→fix loop hits `review_fix_max_iterations`, repeats the same findings (`reviewIsStuck`), or the fixer claims a Finding ID was fixed but the reviewer still flags it (`fixContradictsReview`): file a `chore(review): <count> unresolved review finding(s)` issue (or `chore(review): unresolved review` when no structured findings were extracted) containing the structured unresolved findings or a quoted prose excerpt. The issue title/body intentionally omit release handles, job IDs, exhaustion reasons, shim launch lines, stream-json telemetry, and permission-mode flags. TamTam tries to apply the canonical labels `tamtam` `review-followup` `priority-medium`, skips any of those labels that do not exist in the repo, then chains to commit + push so the partial work ships. Falls back to the legacy abort if `gh issue create` fails. **DO NOT SHIP** reviews never use this path — they still stop the release before commit/push.
@@ -333,8 +307,7 @@ All stored in the `projects` DB table; editable via the project Config tab.
 |------|---------|-------------|
 | `auto_commit_enabled` | off | On LGTM, stage + commit automatically |
 | `auto_push_enabled` | off | Push after auto-commit; also enables review→fix→push chaining for standalone review runs |
-| `pr_workflow_enabled` | off | Use PR Workflow mode — push to feature branch, run DoD, optionally merge |
-| `auto_pr_merge_enabled` | off | After DoD, poll CI and auto-merge the PR *(PR Workflow only)* |
+| `auto_pr_merge_enabled` | off | After DoD, poll CI and auto-merge the PR when the push path produced a PR |
 | `release_after_run` | off | Trigger the full pipeline automatically after each successful agent/terminal run |
 
 When `auto_push_enabled` is **off**: pipeline chaining only happens during an active Release run.
@@ -358,7 +331,7 @@ Checks the push job log for strings from husky, lint-staged, eslint, pre-commit 
 | `lib/start-test.ts` | `startProjectTest(project)` | Detects and runs test command |
 | `lib/start-push.ts` | `startProjectPush(project)` | git add → commit message → push |
 | `lib/start-fix-push.ts` | `startFixPush(project, log)` | Provides hook error context to Claude for fix |
-| `lib/start-mark-dod.ts` | `startMarkDod(project)` | DoD verification + GitHub issue checkbox update *(PR Workflow)* |
+| `lib/start-mark-dod.ts` | `startMarkDod(project)` | DoD verification against the linked issue or PR, with checkbox updates when issue criteria exist |
 | `lib/job-storage.ts` | `markDone(jobId, exitCode)` | Called by PM2 exit handler; triggers all completion hooks |
 
 ---
@@ -517,5 +490,5 @@ The `configSnapshot` section reflects the same shared recovery-budget helper use
 | Push fails, no `fix-push` triggered | Hook strings not matched by `isHookRejection` | Check the push log for hook output; add new hook string patterns to `lib/start-fix-push.ts` |
 | Release button grayed out / 400 | No changes and no unpushed commits | Make a change or verify `git status` |
 | `DO NOT SHIP` verdict loops forever | Fix cap reached | Inspect fix logs; may need manual code changes |
-| DoD step skipped | No linked GitHub issue on the run | DoD only runs when a `gh_issue_number` is set on the job |
-| PR not created after push | `pr_workflow_enabled` is off, or not on a feature branch | Enable PR Workflow mode in project Config |
+| DoD step skipped | No linked GitHub issue and no PR context from the push | DoD only runs when the release is issue-linked or the push produced a PR |
+| PR not created after push | The working copy is already on the default branch | Re-run from a non-default branch if you want PR flow |

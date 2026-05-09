@@ -85,6 +85,13 @@
       "when": 1778317765116,
       "tag": "0011_natural_nebula",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1778329700573,
+      "tag": "0012_first_chronomancer",
+      "breakpoints": true
     }
   ]
 }
