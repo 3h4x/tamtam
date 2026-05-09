@@ -67,6 +67,37 @@ Dev-only CVEs are lower priority. Note breaking changes on major bumps.`,
     content: `\`gh run list --limit 5\`. If the latest failed: \`gh run view <id> --log-failed\`, classify (test/type/lint/build/secret), apply a minimal fix touching only what's broken. Do not skip tests to make CI green. Reproduce locally before editing. If green, say so and stop.`,
   },
   {
+    id: 'agent-issue-cruncher',
+    name: 'agent:issue-cruncher',
+    description: 'Pick a ready-to-go issue, do the work, hand off to the pipeline.',
+    content: `You are the issue cruncher.
+
+## 1. Resolve project context
+- Derive the TamTam project name from the current repo directory name (the folder containing \`.git\`). TamTam's \`/api/projects/by-project/<project>/...\` routes use that exact tracked directory name as the project key.
+- Sanity-check \`package.json\` and the CLAUDE.md heading only. If either disagrees with the repo directory name, print \`ISSUE_PROJECT_UNKNOWN\` and stop instead of guessing.
+- Use the repo directory name value in every \`/api/projects/by-project/<project>/...\` call below.
+
+## 2. Pick an issue
+- Run \`gh issue list --state open --limit 30 --json number,title,labels,body,assignees,url\`.
+- Pick the most relevant ready-to-go issue:
+  - Clear scope from the body or acceptance criteria.
+  - No blocker labels: \`blocked\`, \`needs-info\`, \`needs-design\`, \`discussion\`, \`question\`.
+  - Not assigned to someone else.
+  - No open PR already linked to it.
+  - Prefer \`good first issue\`, \`bug\`, \`enhancement\`; prefer small-to-medium effort.
+- If nothing qualifies, print \`NO_ELIGIBLE_ISSUE\` and stop.
+
+## 3. Validate before branching
+- Skim every file path, function, and symbol the issue references. If anything named in the issue does not exist in the repo, or the reproduction cannot be followed, the issue is not ready.
+- When not ready: comment on the issue explaining exactly what's missing, add the \`needs-info\` label with \`gh issue edit <n> --add-label needs-info\` (create it first with \`gh label create needs-info --color FBCA04\` if needed), switch back to the default branch via \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/checkout-default" -H 'Content-Type: application/json' -d '{}'\`, fast-forward it via \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/changes" -H 'Content-Type: application/json' -d '{"strategy":"ff-only"}'\`, print \`ISSUE_NEEDS_INFO <n>\`, and stop. Do not create a fix branch.
+
+## 4. Do the work
+- Comment on the issue announcing start.
+- Create the issue branch through TamTam's local API: \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/issue-branch" -H 'Content-Type: application/json' -d '{"issue_number":<n>,"issue_title":"<title>"}'\`. The resulting branch is \`fix/issue-<n>-<slug>\` with a lowercase hyphenated slug <=40 chars from the title.
+- Implement the fix. Keep the diff minimal and on-topic.
+- Stop after implementation. Do not run tests, review, commit, push, or merge; TamTam's release pipeline handles the rest.`,
+  },
+  {
     id: 'agent-release-ready',
     name: 'agent:release-ready',
     description: 'Pre-flight check before shipping.',
@@ -109,7 +140,7 @@ BUDGET. A new unit test should finish in <500ms. After writing one, run \`pnpm v
     name: 'agent:self-improve',
     description: 'Improve this project\'s agents in TamTam.',
     content: `TamTam API at http://localhost:1337 (local-only).
-1. Project name from package.json or CLAUDE.md heading.
+1. Project name = current repo directory name (the folder containing \`.git\`), because TamTam keys \`/api/agents?project=<name>\` by that tracked directory name. Use \`package.json\` / CLAUDE.md only as sanity checks; if they disagree, stop instead of guessing.
 2. \`curl -s "http://localhost:1337/api/agents?project=<name>"\`
 3. Read CLAUDE.md and skim the codebase for current patterns.
 4. For each agent, decide if its prompt reflects current patterns. If yes, skip.
@@ -123,7 +154,7 @@ Only patch \`prompt\`. Shorter is better. Don't restate the skill. Don't run \`g
     description: 'CRUD agents in TamTam to match project needs.',
     content: `TamTam API at http://localhost:1337 (local-only).
 
-Gather: CLAUDE.md, project name (jq package.json / pyproject.toml / dir name), and current activity by skimming the codebase.
+Gather: CLAUDE.md, project name from the current repo directory name (the folder containing \`.git\`), and current activity by skimming the codebase. Use \`package.json\` / \`pyproject.toml\` / CLAUDE.md only as sanity checks; if they disagree with the repo directory name, stop instead of guessing.
 Fetch: \`curl -s "http://localhost:1337/api/agents?project=<name>"\` — fields: id, name, prompt, skillIds, model, schedule, runner, enabled.
 
 Decide changes: missing test agent? stale agents referencing dead paths? duplicate purpose? missing schedule? Don't create for hypothetical needs.
@@ -144,7 +175,7 @@ Report: created, updated, deleted, no-change. Filter strictly by this project. K
     id: 'agent-review-tuner',
     name: 'agent:review-tuner',
     description: 'Analyse recent releases and propose review/fix prompt tweaks.',
-    content: `Project name from package.json or CLAUDE.md heading. TamTam API at http://localhost:1337 (local-only).
+    content: `Project name = current repo directory name (the folder containing \`.git\`). TamTam API at http://localhost:1337 (local-only). Use \`package.json\` / CLAUDE.md only as sanity checks; if they disagree with the repo directory name, stop instead of guessing.
 
 1. \`curl -s "http://localhost:1337/api/jobs?project=<name>&kind=release&limit=20"\` — last release meta-jobs.
 2. For each release id: \`curl -s "http://localhost:1337/api/projects/by-project/<name>/release/<id>"\` — step list with verdicts, durations, log excerpts.
@@ -189,16 +220,18 @@ const KNOWN_DEFAULT_CONTENT_HASHES: Record<string, string[]> = {
   'agent-dependency-check': ['7a470f6f6b45a900'],
   'agent-blog': ['b020ce4f0b6c4d7a', '28c8aeb8eccdfd92'],
   'agent-ci-monitor': ['4ca89e530c8eaf95'],
+  'agent-issue-cruncher': ['362c85f7fe916df8', '2753dcc26f2f434c'],
   'agent-release-ready': ['4677689a0e0667df', 'a0ea7848cdb1310d'],
   'agent-gha-audit': ['f8250345bd7da948'],
   'agent-readme-sync': ['28e3cb210b152a02', '4494288241d143e8'],
   'agent-tests': ['fb8477be3f13e216', '739215b8306af83a'],
-  'agent-self-improve': ['a5a48f854a97f7b3', 'b4f077bfe18ed1bb'],
-  'agent-manage-agents': ['6afb7cebf46efee8', '9e7d0fc34508977f'],
+  'agent-self-improve': ['a5a48f854a97f7b3', 'b4f077bfe18ed1bb', '441fabde58b560b7'],
+  'agent-manage-agents': ['6afb7cebf46efee8', '9e7d0fc34508977f', '2f49c23946d7bd2f'],
   // 'c2a96b81a863ae7f' = pre-2026-05 default, '53267ca2a0043218' = older still,
   // 'f1c4d1702a613fdc' = the short-lived "stay on current branch" wording.
   // All three should refresh to the new git-free version on next boot.
   'agent-docs-claude': ['53267ca2a0043218', 'c2a96b81a863ae7f', 'f1c4d1702a613fdc'],
+  'agent-review-tuner': ['f156455212bb6bfc'],
   'agent-senior-fullstack': ['ab7344ee6a0a7a21'],
 };
 

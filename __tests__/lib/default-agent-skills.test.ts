@@ -47,6 +47,8 @@ describe('seedDefaultSkills', () => {
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:self-improve');
     expect(skill!.content).toContain('http://localhost:1337');
+    expect(skill!.content).toContain('Project name = current repo directory name');
+    expect(skill!.content).toContain('if they disagree, stop instead of guessing');
     expect(skill!.content).toContain('/api/agents/by-name');
     expect(skill!.description).toContain('TamTam');
   });
@@ -132,6 +134,22 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('gh run view');
   });
 
+  it('inserts agent-issue-cruncher with correct fields', () => {
+    seedFn();
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-issue-cruncher');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:issue-cruncher');
+    expect(skill!.description).toContain('ready-to-go issue');
+    expect(skill!.content).toContain('current repo directory name');
+    expect(skill!.content).toContain('If either disagrees with the repo directory name');
+    expect(skill!.content).toContain('ISSUE_PROJECT_UNKNOWN');
+    expect(skill!.content).toContain('/api/projects/by-project/<project>/checkout-default');
+    expect(skill!.content).toContain('/api/projects/by-project/<project>/changes');
+    expect(skill!.content).toContain('/api/projects/by-project/<project>/issue-branch');
+    expect(skill!.content).not.toContain('git checkout');
+    expect(skill!.content).not.toContain('git commit');
+  });
+
   it('inserts agent-release-ready with correct fields', () => {
     seedFn();
     const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-release-ready');
@@ -169,7 +187,20 @@ describe('seedDefaultSkills', () => {
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:manage-agents');
     expect(skill!.content).toContain('http://localhost:1337');
+    expect(skill!.content).toContain('project name from the current repo directory name');
+    expect(skill!.content).toContain('if they disagree with the repo directory name, stop instead of guessing');
     expect(skill!.content).toContain('/api/agents');
+  });
+
+  it('inserts agent-review-tuner with correct fields', () => {
+    seedFn();
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-review-tuner');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:review-tuner');
+    expect(skill!.description).toContain('review/fix prompt tweaks');
+    expect(skill!.content).toContain('Project name = current repo directory name');
+    expect(skill!.content).toContain('if they disagree with the repo directory name, stop instead of guessing');
+    expect(skill!.content).toContain('/api/projects/by-project/<name>/release/<id>');
   });
 
   it('inserts agent-readme-sync with correct fields', () => {
@@ -327,6 +358,219 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
     expect(skill!.content).toContain('exact template below');
     expect(skill!.content).toContain('## Acceptance criteria');
     expect(skill!.content).toContain('- [ ] <verifiable outcome 1>');
+  });
+
+  it('overwrites the previous agent-issue-cruncher default via known hash', () => {
+    const now = Date.now() / 1000;
+    // Verbatim content from the first shipped issue-cruncher draft.
+    // sha256(...).slice(0,16) === '362c85f7fe916df8', which must stay in
+    // KNOWN_DEFAULT_CONTENT_HASHES['agent-issue-cruncher'] so running
+    // installs refresh to the self-contained project-resolution version.
+    const previousDefault = `You are the issue cruncher.
+
+## 1. Pick an issue
+- Run \`gh issue list --state open --limit 30 --json number,title,labels,body,assignees,url\`.
+- Pick the most relevant ready-to-go issue:
+  - Clear scope from the body or acceptance criteria.
+  - No blocker labels: \`blocked\`, \`needs-info\`, \`needs-design\`, \`discussion\`, \`question\`.
+  - Not assigned to someone else.
+  - No open PR already linked to it.
+  - Prefer \`good first issue\`, \`bug\`, \`enhancement\`; prefer small-to-medium effort.
+- If nothing qualifies, print \`NO_ELIGIBLE_ISSUE\` and stop.
+
+## 2. Validate before branching
+- Skim every file path, function, and symbol the issue references. If anything named in the issue does not exist in the repo, or the reproduction cannot be followed, the issue is not ready.
+- When not ready: comment on the issue explaining exactly what's missing, add the \`needs-info\` label with \`gh issue edit <n> --add-label needs-info\` (create it first with \`gh label create needs-info --color FBCA04\` if needed), switch back to the default branch via \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/checkout-default" -H 'Content-Type: application/json' -d '{}'\`, fast-forward it via \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/changes" -H 'Content-Type: application/json' -d '{"strategy":"ff-only"}'\`, print \`ISSUE_NEEDS_INFO <n>\`, and stop. Do not create a fix branch.
+
+## 3. Do the work
+- Comment on the issue announcing start.
+- Create the issue branch through TamTam's local API: \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/issue-branch" -H 'Content-Type: application/json' -d '{"issue_number":<n>,"issue_title":"<title>"}'\`. The resulting branch is \`fix/issue-<n>-<slug>\` with a lowercase hyphenated slug <=40 chars from the title.
+- Implement the fix. Keep the diff minimal and on-topic.
+- Stop after implementation. Do not run tests, review, commit, push, or merge; TamTam's release pipeline handles the rest.`;
+
+    testDb.db.insert(schema.skills).values({
+      id: 'agent-issue-cruncher',
+      name: 'agent:issue-cruncher',
+      description: 'old',
+      content: previousDefault,
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+
+    seedFn();
+
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-issue-cruncher');
+    expect(skill!.content).not.toBe(previousDefault);
+    expect(skill!.content).toContain('current repo directory name');
+    expect(skill!.content).toContain('ISSUE_PROJECT_UNKNOWN');
+  });
+
+  it('overwrites the non-canonical agent-issue-cruncher default via known hash', () => {
+    const now = Date.now() / 1000;
+    // Verbatim content from the prompt shipped immediately before canonical
+    // repo-directory project resolution.
+    // sha256(...).slice(0,16) === '2753dcc26f2f434c', which must stay in
+    // KNOWN_DEFAULT_CONTENT_HASHES['agent-issue-cruncher'] so running
+    // installs refresh away from the non-canonical project-name heuristic.
+    const previousDefault = `You are the issue cruncher.
+
+## 1. Resolve project context
+- Derive the TamTam project name from \`package.json\`, the CLAUDE.md heading, or the repo directory name.
+- Use that exact value in every \`/api/projects/by-project/<project>/...\` call below.
+- If you cannot determine the project name confidently, print \`ISSUE_PROJECT_UNKNOWN\` and stop.
+
+## 2. Pick an issue
+- Run \`gh issue list --state open --limit 30 --json number,title,labels,body,assignees,url\`.
+- Pick the most relevant ready-to-go issue:
+  - Clear scope from the body or acceptance criteria.
+  - No blocker labels: \`blocked\`, \`needs-info\`, \`needs-design\`, \`discussion\`, \`question\`.
+  - Not assigned to someone else.
+  - No open PR already linked to it.
+  - Prefer \`good first issue\`, \`bug\`, \`enhancement\`; prefer small-to-medium effort.
+- If nothing qualifies, print \`NO_ELIGIBLE_ISSUE\` and stop.
+
+## 3. Validate before branching
+- Skim every file path, function, and symbol the issue references. If anything named in the issue does not exist in the repo, or the reproduction cannot be followed, the issue is not ready.
+- When not ready: comment on the issue explaining exactly what's missing, add the \`needs-info\` label with \`gh issue edit <n> --add-label needs-info\` (create it first with \`gh label create needs-info --color FBCA04\` if needed), switch back to the default branch via \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/checkout-default" -H 'Content-Type: application/json' -d '{}'\`, fast-forward it via \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/changes" -H 'Content-Type: application/json' -d '{"strategy":"ff-only"}'\`, print \`ISSUE_NEEDS_INFO <n>\`, and stop. Do not create a fix branch.
+
+## 4. Do the work
+- Comment on the issue announcing start.
+- Create the issue branch through TamTam's local API: \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/issue-branch" -H 'Content-Type: application/json' -d '{"issue_number":<n>,"issue_title":"<title>"}'\`. The resulting branch is \`fix/issue-<n>-<slug>\` with a lowercase hyphenated slug <=40 chars from the title.
+- Implement the fix. Keep the diff minimal and on-topic.
+- Stop after implementation. Do not run tests, review, commit, push, or merge; TamTam's release pipeline handles the rest.`;
+
+    testDb.db.insert(schema.skills).values({
+      id: 'agent-issue-cruncher',
+      name: 'agent:issue-cruncher',
+      description: 'old',
+      content: previousDefault,
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+
+    seedFn();
+
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-issue-cruncher');
+    expect(skill!.content).not.toBe(previousDefault);
+    expect(skill!.content).toContain('current repo directory name');
+    expect(skill!.content).toContain('If either disagrees with the repo directory name');
+  });
+
+  it('overwrites the previous agent-self-improve default via known hash', () => {
+    const now = Date.now() / 1000;
+    // Verbatim content from the previously shipped prompt before canonical
+    // repo-directory project resolution.
+    // sha256(...).slice(0,16) === '441fabde58b560b7', which must stay in
+    // KNOWN_DEFAULT_CONTENT_HASHES['agent-self-improve'] so running installs
+    // refresh to the canonical TamTam project-key version.
+    const previousDefault = `TamTam API at http://localhost:1337 (local-only).
+1. Project name from package.json or CLAUDE.md heading.
+2. \`curl -s "http://localhost:1337/api/agents?project=<name>"\`
+3. Read CLAUDE.md and skim the codebase for current patterns.
+4. For each agent, decide if its prompt reflects current patterns. If yes, skip.
+5. \`curl -X PATCH http://localhost:1337/api/agents/by-name -H 'Content-Type: application/json' -d '{"project":"<n>","name":"<a>","prompt":"<improved>"}'\`
+
+Only patch \`prompt\`. Shorter is better. Don't restate the skill. Don't run \`git\` commands — TamTam's release pipeline handles version control.`;
+
+    testDb.db.insert(schema.skills).values({
+      id: 'agent-self-improve',
+      name: 'agent:self-improve',
+      description: 'old',
+      content: previousDefault,
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+
+    seedFn();
+
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-self-improve');
+    expect(skill!.content).not.toBe(previousDefault);
+    expect(skill!.content).toContain('Project name = current repo directory name');
+    expect(skill!.content).toContain('if they disagree, stop instead of guessing');
+  });
+
+  it('overwrites the previous agent-manage-agents default via known hash', () => {
+    const now = Date.now() / 1000;
+    // Verbatim content from the previously shipped prompt before canonical
+    // repo-directory project resolution.
+    // sha256(...).slice(0,16) === '2f49c23946d7bd2f', which must stay in
+    // KNOWN_DEFAULT_CONTENT_HASHES['agent-manage-agents'] so running installs
+    // refresh to the canonical TamTam project-key version.
+    const previousDefault = `TamTam API at http://localhost:1337 (local-only).
+
+Gather: CLAUDE.md, project name (jq package.json / pyproject.toml / dir name), and current activity by skimming the codebase.
+Fetch: \`curl -s "http://localhost:1337/api/agents?project=<name>"\` — fields: id, name, prompt, skillIds, model, schedule, runner, enabled.
+
+Decide changes: missing test agent? stale agents referencing dead paths? duplicate purpose? missing schedule? Don't create for hypothetical needs.
+
+Create: \`POST /api/agents\` with \`{project, name, prompt, skillIds: [], model, schedule, runner: "pm2", enabled: true}\`. Prefer semantic tiers: fast for cheap tasks, normal for the default, smart only for hard reasoning. Legacy haiku/sonnet/opus aliases still resolve.
+Update: \`PATCH /api/agents/by-name\` (\`prompt\` only unless asked).
+Delete: \`DELETE /api/agents/<id>\` only when stale/broken.
+
+Report: created, updated, deleted, no-change. Filter strictly by this project. Keep prompts 3–8 sentences. Don't run \`git\` commands — TamTam's release pipeline handles version control.`;
+
+    testDb.db.insert(schema.skills).values({
+      id: 'agent-manage-agents',
+      name: 'agent:manage-agents',
+      description: 'old',
+      content: previousDefault,
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+
+    seedFn();
+
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-manage-agents');
+    expect(skill!.content).not.toBe(previousDefault);
+    expect(skill!.content).toContain('project name from the current repo directory name');
+    expect(skill!.content).toContain('if they disagree with the repo directory name, stop instead of guessing');
+  });
+
+  it('overwrites the previous agent-review-tuner default via known hash', () => {
+    const now = Date.now() / 1000;
+    // Verbatim content from the previously shipped prompt before canonical
+    // repo-directory project resolution.
+    // sha256(...).slice(0,16) === 'f156455212bb6bfc', which must stay in
+    // KNOWN_DEFAULT_CONTENT_HASHES['agent-review-tuner'] so running installs
+    // refresh to the canonical TamTam project-key version.
+    const previousDefault = `Project name from package.json or CLAUDE.md heading. TamTam API at http://localhost:1337 (local-only).
+
+1. \`curl -s "http://localhost:1337/api/jobs?project=<name>&kind=release&limit=20"\` — last release meta-jobs.
+2. For each release id: \`curl -s "http://localhost:1337/api/projects/by-project/<name>/release/<id>"\` — step list with verdicts, durations, log excerpts.
+3. \`curl -s "http://localhost:1337/api/projects/by-project/<name>/config"\` — current \`review_prompt_addendum\` and \`fix_prompt_addendum\`.
+
+Look for patterns:
+- Review repeatedly flags the same false positive → propose \`review_prompt_addendum\` text loosening that rule.
+- Fix loops repeatedly hit the 3-iteration cap → propose \`fix_prompt_addendum\` text clarifying intent or constraining scope.
+- DO NOT SHIP verdicts on cosmetic findings → propose narrowing review scope.
+
+Output (in your TamTam Run Report):
+\`\`\`
+## Review Tuner — [project]
+### Last N releases
+| Release | Verdict | Fix iters | Outcome |
+### Proposed changes
+- review_prompt_addendum: <text or "no change">
+- fix_prompt_addendum: <text or "no change">
+- Confidence: low | medium | high
+\`\`\`
+Do NOT PATCH any settings. Surface proposals only — the user applies them in the Config tab.`;
+
+    testDb.db.insert(schema.skills).values({
+      id: 'agent-review-tuner',
+      name: 'agent:review-tuner',
+      description: 'old',
+      content: previousDefault,
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+
+    seedFn();
+
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-review-tuner');
+    expect(skill!.content).not.toBe(previousDefault);
+    expect(skill!.content).toContain('Project name = current repo directory name');
+    expect(skill!.content).toContain('if they disagree with the repo directory name, stop instead of guessing');
   });
 
   it('preserves a user-customised skill (hash does not match a known default)', () => {
