@@ -34,6 +34,8 @@ export interface ConfigTabProps {
   setReviewPromptAddendumInput: (v: string) => void
   fixPromptAddendumInput: string
   setFixPromptAddendumInput: (v: string) => void
+  commitStyleInput: string
+  setCommitStyleInput: (v: string) => void
 
   editActions: CustomAction[]
   setEditActions: (v: CustomAction[]) => void
@@ -73,6 +75,8 @@ export function ConfigTab({
   setReviewPromptAddendumInput,
   fixPromptAddendumInput,
   setFixPromptAddendumInput,
+  commitStyleInput,
+  setCommitStyleInput,
   editActions,
   setEditActions,
   anyDirty,
@@ -365,6 +369,21 @@ export function ConfigTab({
               placeholder="e.g. Prefer minimal diffs; do not refactor unrelated code."
             />
             <p className="text-xs text-text-tertiary mt-1">Appended to the standard fix prompt. Empty = use defaults.</p>
+          </div>
+          <div>
+            <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="commit-style">
+              Commit message style
+              <span className="ml-2 text-text-tertiary font-normal">.tamtam/config.yml</span>
+            </label>
+            <textarea
+              id="commit-style"
+              rows={4}
+              className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
+              value={commitStyleInput}
+              onChange={(e) => setCommitStyleInput(e.target.value)}
+              placeholder={'e.g. Use cyberpunk/cypherpunk vocabulary: neural, synth, grid, cipher, daemon, void.\nFormat: <type>: <cryptic description>. Max 60 chars, no period.'}
+            />
+            <p className="text-xs text-text-tertiary mt-1">Project-specific style guide for auto-generated commit messages. Committed to <span className="font-mono">.tamtam/config.yml</span>; falls back to the global setting when empty.</p>
           </div>
         </div>
 

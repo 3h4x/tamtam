@@ -107,7 +107,7 @@ Manual sync behavior:
 | Key | Type | Default | Effect |
 |-----|------|---------|--------|
 | `base_prompt` | string | Long system prompt | Prepended to every Claude invocation — reviews, fixes, runs, agents |
-| `commit_style` | string | Conventional commits guide | Injected into the push commit-message generation prompt |
+| `commit_style` | string | Conventional commits guide | Injected into the push commit-message generation prompt; overridden per project by `.tamtam/config.yml` `commits.commit_style` when present |
 | `review_verdict_rules` | string | Pragmatic rules | Injected into review prompts; drives LGTM / NEEDS ATTENTION / DO NOT SHIP decisions |
 
 ### Notifications
@@ -310,6 +310,8 @@ These live on the `projects` table row, accessed via `GET/PATCH /api/projects/by
 | `testCronEnabled` | boolean | `false` | Scheduled test runs |
 | `testCronSchedule` | string | `''` | Cron interval for scheduled tests |
 | `customActions` | JSON | `[]` | Per-project buttons (name, command, color) shown in the UI |
+
+The same config endpoint also exposes file-backed team-contract values from `.tamtam/config.yml`. `commit_style` is written under `commits.commit_style`; when present it overrides the global `settings.commit_style` for auto-generated commit messages in that project, and an empty value removes the project override.
 
 ---
 

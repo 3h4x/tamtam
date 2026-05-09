@@ -99,12 +99,19 @@ export interface FileProjectConfig {
   test_command?: string;
   custom_actions?: FileCustomAction[];
   safe_users?: string[];
+  // Per-project commit-message style guide. When set, replaces the global
+  // `commit_style` setting for this repo's auto-generated commit messages.
+  // Lives in the file (not the DB) because it's a team contract — every
+  // contributor's commits should follow the project's voice (e.g. borged's
+  // cyberpunk style).
+  commit_style?: string;
 }
 
 const GROUPS: { label: string; keys: (keyof FileProjectConfig)[] }[] = [
   { label: 'pipeline', keys: ['test_command'] },
   { label: 'actions', keys: ['custom_actions'] },
   { label: 'security', keys: ['safe_users'] },
+  { label: 'commits', keys: ['commit_style'] },
 ];
 
 const ALL_KEYS = new Set<string>(GROUPS.flatMap(g => g.keys as string[]));
@@ -144,6 +151,8 @@ function parseConfigYaml(raw: string): FileProjectConfig | null {
     const config: FileProjectConfig = {};
 
     if (typeof flat.test_command === 'string') config.test_command = flat.test_command;
+
+    if (typeof flat.commit_style === 'string') config.commit_style = flat.commit_style;
 
     // An explicitly-empty array means "no actions" and must be respected
     // (so committing an empty list clears teammates' DB-stored actions on pull).
@@ -244,12 +253,21 @@ export function writeFileConfig(
     }
   }
 
-  // Build grouped document object from recognized keys.
+  // Build grouped document object from recognized keys, preserving unknown
+  // sibling keys inside known sections.
   const doc: Record<string, Record<string, unknown>> = {};
   for (const group of GROUPS) {
-    const section: Record<string, unknown> = {};
+    const rawSection = rawDoc[group.label];
+    const section: Record<string, unknown> =
+      rawSection !== null && typeof rawSection === 'object' && !Array.isArray(rawSection)
+        ? { ...(rawSection as Record<string, unknown>) }
+        : {};
     for (const key of group.keys as string[]) {
-      if (current[key] !== undefined) section[key] = current[key];
+      if (current[key] !== undefined) {
+        section[key] = current[key];
+      } else {
+        delete section[key];
+      }
     }
     if (Object.keys(section).length > 0) doc[group.label] = section;
   }

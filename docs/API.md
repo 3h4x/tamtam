@@ -28,7 +28,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 ## Project actions (`by-project/[name]/...`)
 
 - `action` — Custom actions (GET, PUT, POST). POST is pause-gated and returns `409 { detail }` when `jobs_paused` is enabled globally.
-- `config` — Project test command + workflow flags + per-project pipeline prompt addenda (`review_prompt_addendum`, `fix_prompt_addendum`) (GET, PATCH)
+- `config` — Project test command + workflow flags + per-project pipeline prompt addenda (`review_prompt_addendum`, `fix_prompt_addendum`) + file-backed commit-message style override (`commit_style`) (GET, PATCH). `commit_style` is stored in `.tamtam/config.yml`; empty string clears the project override so commit generation falls back to the global setting.
 - `run` — Run Claude on project (POST, accepts `model` param). Returns `409 { detail, blocking_job_id }` when another job is already running for the project. Manual terminal runs bypass `jobs_paused` — the global pause does not block this endpoint.
 - `review` — Start AI code review (POST)
 - `review-pr` — Start AI review of a GitHub PR (POST). PR review prompts ignore `.tamtam/` metadata changes unless the review is explicitly about TamTam configuration.

@@ -43,7 +43,12 @@ export async function generateCommitMessage(
   ]);
 
   const { context } = buildDiffContext(statR.stdout, diffR.stdout);
-  const styleGuide = (getSettings().commit_style ?? '').trim();
+  // Per-project .tamtam/config.yml `commit_style` overrides the global
+  // `commit_style` setting. Lets repos pin their own voice (e.g. borged's
+  // cyberpunk commit style) without affecting other projects.
+  const { loadFileConfig } = await import('@/lib/skills/tamtam-file-config');
+  const fileStyle = (loadFileConfig(projPath)?.commit_style ?? '').trim();
+  const styleGuide = (fileStyle || (getSettings().commit_style ?? '')).trim();
 
   const buildPrompt = (extra = '') =>
     `Output exactly one conventional commit title. No prose, no code blocks, no backticks, no quotes.

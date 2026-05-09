@@ -124,6 +124,30 @@ gates:
     ]);
   });
 
+  it('parses commit_style at the top level', () => {
+    writeConfig(tmpDir, 'commit_style: |\n  Use cyberpunk vocabulary.\n  No periods.\n');
+    expect(loadFileConfig(tmpDir)?.commit_style).toBe('Use cyberpunk vocabulary.\nNo periods.\n');
+  });
+
+  it('parses commit_style under the commits group', () => {
+    writeConfig(tmpDir, 'commits:\n  commit_style: "feat: <cryptic>"\n');
+    expect(loadFileConfig(tmpDir)?.commit_style).toBe('feat: <cryptic>');
+  });
+
+  it('writes commit_style under the commits group and round-trips', () => {
+    writeFileConfig(tmpDir, { commit_style: 'cyberpunk only' });
+    const raw = readFileSync(join(tmpDir, '.tamtam', 'config.yml'), 'utf-8');
+    expect(raw).toContain('commits:');
+    expect(raw).toContain('commit_style: cyberpunk only');
+    expect(loadFileConfig(tmpDir)?.commit_style).toBe('cyberpunk only');
+  });
+
+  it('removes commit_style when written as null', () => {
+    writeFileConfig(tmpDir, { commit_style: 'first style' });
+    writeFileConfig(tmpDir, { commit_style: null });
+    expect(loadFileConfig(tmpDir)?.commit_style).toBeUndefined();
+  });
+
   it('drops custom_actions entries missing name or command', () => {
     writeConfig(tmpDir, `custom_actions:
   - name: ok
@@ -208,5 +232,30 @@ describe('writeFileConfig', () => {
     expect(content).toContain('custom_section');
     expect(content).toContain('foo');
     expect(content).toContain('bar');
+  });
+
+  it('preserves unknown commits keys when writing unrelated fields', () => {
+    writeConfig(tmpDir, 'commits:\n  template: ticket-first\n');
+    writeFileConfig(tmpDir, { test_command: 'pnpm test' });
+    const content = readFileSync(join(tmpDir, '.tamtam', 'config.yml'), 'utf-8');
+    expect(content).toContain('commits:');
+    expect(content).toContain('template: ticket-first');
+  });
+
+  it('preserves unknown commits keys when updating commit_style', () => {
+    writeConfig(tmpDir, 'commits:\n  template: ticket-first\n  commit_style: old style\n');
+    writeFileConfig(tmpDir, { commit_style: 'new style' });
+    const content = readFileSync(join(tmpDir, '.tamtam', 'config.yml'), 'utf-8');
+    expect(content).toContain('template: ticket-first');
+    expect(content).toContain('commit_style: new style');
+  });
+
+  it('preserves unknown commits keys when removing commit_style', () => {
+    writeConfig(tmpDir, 'commits:\n  template: ticket-first\n  commit_style: old style\n');
+    writeFileConfig(tmpDir, { commit_style: null });
+    const content = readFileSync(join(tmpDir, '.tamtam', 'config.yml'), 'utf-8');
+    expect(content).toContain('commits:');
+    expect(content).toContain('template: ticket-first');
+    expect(content).not.toContain('commit_style:');
   });
 });

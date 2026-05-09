@@ -334,6 +334,7 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
   let clearProjectDataCacheMock: ReturnType<typeof vi.fn>;
   let installTestScheduleMock: ReturnType<typeof vi.fn>;
   let uninstallTestScheduleMock: ReturnType<typeof vi.fn>;
+  let writeFileConfigMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -345,12 +346,22 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     clearProjectDataCacheMock = vi.fn();
     installTestScheduleMock = vi.fn();
     uninstallTestScheduleMock = vi.fn();
+    writeFileConfigMock = vi.fn();
 
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: clearProjectDataCacheMock,
     }));
     vi.doMock('@/lib/shared/config', () => ({ reloadConfig: reloadConfigMock }));
+    vi.doMock('@/lib/skills/tamtam-file-config', () => ({
+      loadFileConfig: vi.fn().mockReturnValue(null),
+      writeFileConfig: writeFileConfigMock,
+      getBranchContext: vi.fn().mockReturnValue({
+        currentBranch: 'main',
+        defaultBranch: 'main',
+        isDefaultBranch: true,
+      }),
+    }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
       writeProjectFieldYaml: writeProjectFieldYamlMock,
@@ -406,6 +417,87 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     });
     await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'test_command', null);
+  });
+
+  it('persists commit_style to the project file config', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ commit_style: '  Use cyberpunk vocabulary.  ' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).not.toHaveBeenCalled();
+    expect(writeFileConfigMock).toHaveBeenCalledWith('/path/to/proj', {
+      commit_style: 'Use cyberpunk vocabulary.',
+    });
+  });
+
+  it('clears commit_style from the project file config when whitespace-only', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ commit_style: '   \n  ' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeFileConfigMock).toHaveBeenCalledWith('/path/to/proj', {
+      commit_style: null,
+    });
+  });
+
+  it('returns 500 when writing file-backed config fails', async () => {
+    writeFileConfigMock.mockImplementation(() => {
+      throw new Error('disk full');
+    });
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ commit_style: 'cyberpunk only' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.detail).toContain('.tamtam/config.yml');
+    expect(reloadConfigMock).not.toHaveBeenCalled();
+    expect(clearProjectDataCacheMock).not.toHaveBeenCalled();
+  });
+
+  it('does not apply DB test_command when a mixed file-backed config write fails', async () => {
+    writeFileConfigMock.mockImplementation(() => {
+      throw new Error('disk full');
+    });
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        test_command: 'pnpm test',
+        commit_style: 'cyberpunk only',
+      }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(500);
+    expect(writeFileConfigMock).toHaveBeenCalledWith('/path/to/proj', {
+      test_command: 'pnpm test',
+      commit_style: 'cyberpunk only',
+    });
+    expect(writeProjectFieldYamlMock).not.toHaveBeenCalled();
+    expect(reloadConfigMock).not.toHaveBeenCalled();
+    expect(clearProjectDataCacheMock).not.toHaveBeenCalled();
+  });
+
+  it('does not apply DB workflow flags when a mixed file-backed config write fails', async () => {
+    writeFileConfigMock.mockImplementation(() => {
+      throw new Error('disk full');
+    });
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        commit_style: 'cyberpunk only',
+        auto_push_enabled: true,
+      }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(500);
+    expect(writeProjectFieldYamlMock).not.toHaveBeenCalled();
+    expect(reloadConfigMock).not.toHaveBeenCalled();
+    expect(clearProjectDataCacheMock).not.toHaveBeenCalled();
   });
 
   it('calls reloadConfig and clearProjectDataCache after update', async () => {
