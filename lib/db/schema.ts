@@ -20,7 +20,7 @@ export const projects = sqliteTable('projects', {
   autoCommitEnabled: integer('auto_commit_enabled', { mode: 'boolean' }).default(false),
   autoPushEnabled: integer('auto_push_enabled', { mode: 'boolean' }).default(false),
   autoPrMergeEnabled: integer('auto_pr_merge_enabled', { mode: 'boolean' }).default(false),
-  releaseAfterRun: integer('release_after_run', { mode: 'boolean' }).default(true),
+  releaseAfterRun: integer('release_after_run', { mode: 'boolean' }).default(false),
   issueAutoBranch: integer('issue_auto_branch', { mode: 'boolean' }).default(true),
   lastPushError: text('last_push_error'),
   lastPushAt: real('last_push_at'),

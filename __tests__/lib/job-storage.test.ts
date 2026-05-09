@@ -3006,11 +3006,21 @@ describe('runCompletionHooks – release-after-run', () => {
     };
   }
 
-  beforeEach(async () => {
+  async function loadMarkDone({
+    releaseAfterRun = true,
+    schedulingModuleThrows = false,
+  }: {
+    releaseAfterRun?: boolean | null;
+    schedulingModuleThrows?: boolean;
+  } = {}) {
     vi.resetModules();
     testDb = createTestDb();
     startReleaseMock = vi.fn().mockResolvedValue({ ok: true, step: 'review', jobId: 'rel-1', releaseJobId: 'rel-job-1', message: 'Running review' });
-    getProjectTestConfigMock = vi.fn().mockReturnValue({ autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: true });
+    getProjectTestConfigMock = vi.fn().mockReturnValue(
+      releaseAfterRun === null
+        ? null
+        : { autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun }
+    );
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
@@ -3026,9 +3036,15 @@ describe('runCompletionHooks – release-after-run', () => {
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/proj'),
     }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: getProjectTestConfigMock,
-    }));
+    if (schedulingModuleThrows) {
+      vi.doMock('@/lib/scheduling/scheduling', () => {
+        throw new Error('failed to load scheduling');
+      });
+    } else {
+      vi.doMock('@/lib/scheduling/scheduling', () => ({
+        getProjectTestConfig: getProjectTestConfigMock,
+      }));
+    }
     vi.doMock('@/lib/pipeline/start-release', () => ({
       startRelease: startReleaseMock,
     }));
@@ -3046,6 +3062,10 @@ describe('runCompletionHooks – release-after-run', () => {
 
     const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
+  }
+
+  beforeEach(async () => {
+    await loadMarkDone();
   });
 
   afterEach(() => {
@@ -3078,6 +3098,20 @@ describe('runCompletionHooks – release-after-run', () => {
 
   it('does not trigger startRelease when releaseAfterRun=false', async () => {
     getProjectTestConfigMock.mockReturnValue({ autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false });
+    const job = makeJob('run');
+    await markDoneFn(job, 0);
+    expect(startReleaseMock).not.toHaveBeenCalled();
+  });
+
+  it('does not trigger startRelease when the project has no config row', async () => {
+    await loadMarkDone({ releaseAfterRun: null });
+    const job = makeJob('run');
+    await markDoneFn(job, 0);
+    expect(startReleaseMock).not.toHaveBeenCalled();
+  });
+
+  it('does not trigger startRelease when the scheduling module import fails', async () => {
+    await loadMarkDone({ schedulingModuleThrows: true });
     const job = makeJob('run');
     await markDoneFn(job, 0);
     expect(startReleaseMock).not.toHaveBeenCalled();
