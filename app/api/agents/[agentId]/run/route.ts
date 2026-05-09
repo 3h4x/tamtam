@@ -397,16 +397,23 @@ At the end of your run, include a short final section exactly named "TamTam Run 
       stdout: result.stdout || '',
       stderr: result.stderr || '',
     };
+    const prerequisiteCancelled =
+      cancelSignal.aborted
+      || job.finishedAt != null
+      || job.abortedAt != null
+      || job.exitCode === -2;
     appendFileSync(/*turbopackIgnore: true*/ logPath,
       `${result.stdout || ''}${result.stderr ? `\n--- stderr ---\n${result.stderr}` : ''}\n` +
       `# prerequisite finished — exit ${result.exitCode} in ${prerequisiteResult.durationMs}ms\n\n`);
 
-    if (cancelSignal.aborted) {
+    if (prerequisiteCancelled) {
       appendFileSync(/*turbopackIgnore: true*/ logPath, `# prerequisite cancelled by user\n`);
-      job.finishedAt = Date.now() / 1000;
-      job.exitCode = 130;
-      updateJob(job);
-      await markDone(job, 130);
+      if (job.finishedAt === null) {
+        job.finishedAt = Date.now() / 1000;
+        job.exitCode = 130;
+        updateJob(job);
+        await markDone(job, 130);
+      }
       finishJobCancellation(job.id);
       return {
         response: NextResponse.json({ status: 'cancelled', job_id: job.id }, { status: 200 }),

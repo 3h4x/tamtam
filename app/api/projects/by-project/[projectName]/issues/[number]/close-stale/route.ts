@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { eq } from 'drizzle-orm';
+import { db, schema } from '@/lib/db';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { resolveGithubRepo } from '@/lib/shared/gh-status';
 import { exec } from '@/lib/shared/shell';
@@ -72,6 +74,14 @@ export async function POST(
       { detail: `gh issue close failed: ${closeR.stderr.trim() || closeR.stdout.trim()}` },
       { status: 502 },
     );
+  }
+
+  try {
+    db.delete(schema.ghIssuesCache)
+      .where(eq(schema.ghIssuesCache.project, projectName))
+      .run();
+  } catch (e) {
+    console.error('[close-stale] failed to invalidate ghIssuesCache:', e);
   }
 
   return NextResponse.json({
