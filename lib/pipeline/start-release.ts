@@ -13,6 +13,7 @@ import { acquireLock, releaseLock, reassignLock } from './pipeline-lock';
 import { detectMainBranch, findIssueContext } from './start-commit';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { hasFreshLgtm, hasLocalCommitsAhead } from './release-state';
+import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import type { IssueContext } from './release-context';
 
 const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push', 'pr-wait', 'mark-dod', 'release']);
@@ -230,6 +231,20 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
         };
       }
     }
+  }
+
+  const blockingJob = await findBlockingRunningJob(
+    projectName,
+    (job) => !RELEASE_PIPELINE_KINDS.has(job.kind),
+  );
+  if (blockingJob) {
+    if (options.queueIfBlocked) return queueRelease(projectName, blockingJob.id);
+    return {
+      ok: false,
+      status: 409,
+      detail: `Job '${blockingJob.kind}' is already running for ${projectName} (job ${blockingJob.id})`,
+      blockingJobId: blockingJob.id,
+    };
   }
 
   if (await isReleasePipelineRunning(projectName)) {

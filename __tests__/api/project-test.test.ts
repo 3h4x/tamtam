@@ -163,6 +163,25 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
     expect(data.detail).toContain('already running');
   });
 
+  it('returns 409 while an agent prerequisite is holding the project start slot', async () => {
+    const { tryClaimAgentStartSlot, releaseAgentStartSlot } = await import('@/lib/agents/pending-agent-run');
+    expect(tryClaimAgentStartSlot('proj1', 'Prereq Agent')).toEqual({ ok: true });
+    try {
+      const req = new NextRequest('http://localhost/api/projects/by-project/proj1/test', {
+        method: 'POST',
+      });
+      const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+      const data = await res.json();
+
+      expect(res.status).toBe(409);
+      expect(data.blocking_job_id).toBe('proj1-agent-starting');
+      expect(data.detail).toContain("Job 'agent:Prereq Agent' is already running");
+      expect(createJobMock).not.toHaveBeenCalled();
+    } finally {
+      releaseAgentStartSlot('proj1');
+    }
+  });
+
   it('starts test job and returns job info', async () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/test', {
       method: 'POST',

@@ -121,6 +121,25 @@ describe('startRelease — release pipeline entry decision tree', () => {
     if (!r.ok) expect(r.status).toBe(404);
   });
 
+  it('blocks release startup while an agent prerequisite holds the project start slot', async () => {
+    const { tryClaimAgentStartSlot, releaseAgentStartSlot } = await import('@/lib/agents/pending-agent-run');
+    expect(tryClaimAgentStartSlot('proj', 'Prereq Agent')).toEqual({ ok: true });
+    try {
+      const r = await startRelease('proj');
+
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.status).toBe(409);
+        expect(r.blockingJobId).toBe('proj-agent-starting');
+        expect(r.detail).toContain("Job 'agent:Prereq Agent' is already running");
+      }
+      expect(createJobMock).not.toHaveBeenCalled();
+      expect(startProjectTestMock).not.toHaveBeenCalled();
+    } finally {
+      releaseAgentStartSlot('proj');
+    }
+  });
+
   it('marks release-job startup failures as retryable before any step starts', async () => {
     detectTestCommandMock.mockReturnValue(null);
     execMock
@@ -353,19 +372,20 @@ describe('startRelease — release pipeline entry decision tree', () => {
     if (!r.ok) expect(r.status).toBe(409);
   });
 
-  it('ignores non-pipeline running jobs (e.g. run, agent) when deciding conflict', async () => {
+  it('blocks release startup when another project job is already running', async () => {
     listJobsMock.mockReturnValue([
       { id: 'j1', project: 'proj', kind: 'run', finishedAt: null },
     ]);
     probeJobStatusMock.mockResolvedValue('running');
-    detectTestCommandMock.mockReturnValue(null);
-    execMock
-      .mockImplementationOnce(() => gitStatus(' M foo.ts\n')) // status --porcelain (hasChanges)
-      .mockImplementationOnce(() => gitAhead('0'));           // rev-list --count
-    startProjectReviewMock.mockResolvedValue({ ok: true, jobId: 'r1' });
+
     const r = await startRelease('proj');
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.step).toBe('review');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(409);
+      expect(r.blockingJobId).toBe('j1');
+      expect(r.detail).toContain("Job 'run' is already running");
+    }
   });
 
   it('returns 400 when there are no changes and no unpushed commits', async () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import Database from 'better-sqlite3';
@@ -66,6 +66,7 @@ describe('POST /api/agents/{agentId}/run', () => {
   let updateJobMock: ReturnType<typeof vi.fn>;
   let listJobsMock: ReturnType<typeof vi.fn>;
   let probeJobStatusMock: ReturnType<typeof vi.fn>;
+  let execMock: ReturnType<typeof vi.fn>;
   let runGatesMock: ReturnType<typeof vi.fn>;
   let enqueueAgentRunMock: ReturnType<typeof vi.fn>;
   let enqueueQueuedAgentRunMock: ReturnType<typeof vi.fn>;
@@ -78,6 +79,7 @@ describe('POST /api/agents/{agentId}/run', () => {
   let getPendingReleaseMock: ReturnType<typeof vi.fn>;
   let drainPendingReleaseMock: ReturnType<typeof vi.fn>;
   let tempSkillsDir: string;
+  let logDirMock: string;
   let settingsMock: Record<string, unknown>;
 
   const now = Date.now() / 1000;
@@ -116,6 +118,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     vi.doUnmock('@/lib/usage/resolve-provider');
     testDb = createTestDb();
     tempSkillsDir = mkdtempSync(join(tmpdir(), 'tamtam-agent-run-test-'));
+    logDirMock = '/tmp/logs';
 
     startJobMock = vi.fn().mockResolvedValue(12345);
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
@@ -123,6 +126,17 @@ describe('POST /api/agents/{agentId}/run', () => {
     updateJobMock = vi.fn();
     listJobsMock = vi.fn().mockReturnValue([]);
     probeJobStatusMock = vi.fn().mockResolvedValue('done');
+    execMock = vi.fn().mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
+      if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
+      if (cmd === 'bash' && args[1] === 'echo TAMTAM_PREREQ_MARKER') {
+        return { stdout: 'TAMTAM_PREREQ_MARKER\n', stderr: '', exitCode: 0 };
+      }
+      if (cmd === 'bash' && args[1] === 'exit 7') {
+        return { stdout: '', stderr: '', exitCode: 7 };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
     runGatesMock = vi.fn().mockReturnValue(null);
     enqueueAgentRunMock = vi.fn();
     enqueueQueuedAgentRunMock = vi.fn();
@@ -138,7 +152,7 @@ describe('POST /api/agents/{agentId}/run', () => {
       workspace_path: '',
       github_owner: '',
       claude_bin: 'claude',
-      log_dir: '/tmp/logs',
+      log_dir: logDirMock,
       cli_bin_claude: '',
       cli_bin_codex: '',
       cli_bin_gemini: '',
@@ -174,9 +188,12 @@ describe('POST /api/agents/{agentId}/run', () => {
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
+    vi.doMock('@/lib/shared/shell', () => ({
+      exec: execMock,
+    }));
 
     vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: '/tmp/logs' }),
+      getImproveConfig: vi.fn(() => ({ claudeBin: 'claude', logDir: logDirMock })),
       getProjectTestConfig: vi.fn().mockReturnValue(null),
     }));
 
@@ -850,6 +867,26 @@ describe('POST /api/agents/{agentId}/run', () => {
 
   });
 
+  it('creates the log directory before writing the prerequisite artifact', async () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'tamtam-agent-prereq-logdir-'));
+    logDirMock = join(tempRoot, 'missing-logs');
+    try {
+      insertAgent({ prerequisiteCommand: 'echo TAMTAM_PREREQ_MARKER' });
+      const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+        method: 'POST',
+        body: JSON.stringify({ prompt: 'inspect artifact' }),
+      });
+      const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+      expect(res.status).toBe(200);
+      const artifactPath = join(logDirMock, 'test-job-id.prereq.txt');
+      expect(existsSync(artifactPath)).toBe(true);
+      expect(readFileSync(artifactPath, 'utf-8')).toContain('TAMTAM_PREREQ_MARKER');
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it('still spawns the agent when the prerequisite exits non-zero', async () => {
     mkdirSync('/tmp/logs', { recursive: true });
     resolveProjectPathMock.mockReturnValue('/tmp');
@@ -868,6 +905,113 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(fullPrompt).toContain('## Prerequisite Output');
     expect(fullPrompt).toContain('Exit code: 7');
 
+  });
+
+  it('does not create a probe-visible DB agent job until the prerequisite finishes', async () => {
+    const prereq = deferred<{ stdout: string; stderr: string; exitCode: number }>();
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
+      if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
+      if (cmd === 'bash' && args[1] === 'sleep 40') return prereq.promise;
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    insertAgent({ prerequisiteCommand: 'sleep 40' });
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'inspect later' }),
+    });
+    const pending = POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    await vi.waitFor(() => {
+      expect(execMock).toHaveBeenCalledWith('bash', ['-c', 'sleep 40'], expect.objectContaining({ cwd: '/path/to/proj' }));
+    });
+    expect(createJobMock).not.toHaveBeenCalled();
+    expect(startJobMock).not.toHaveBeenCalled();
+    expect(drainNextAgentRunMock).not.toHaveBeenCalled();
+
+    prereq.resolve({ stdout: 'done\n', stderr: '', exitCode: 0 });
+    const res = await pending;
+
+    expect(res.status).toBe(200);
+    expect(createJobMock).toHaveBeenCalledOnce();
+    expect(startJobMock).toHaveBeenCalledOnce();
+    expect(drainNextAgentRunMock).toHaveBeenCalledWith('proj1');
+  });
+
+  it('re-checks project blockers after a long prerequisite before spawning the agent', async () => {
+    const prereq = deferred<{ stdout: string; stderr: string; exitCode: number }>();
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
+      if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
+      if (cmd === 'bash' && args[1] === 'sleep 40') return prereq.promise;
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    findBlockingRunningJobMock
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(makeJob({ id: 'run-while-prereq', kind: 'run' }));
+    insertAgent({ prerequisiteCommand: 'sleep 40' });
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'inspect later' }),
+    });
+    const pending = POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    await vi.waitFor(() => {
+      expect(execMock).toHaveBeenCalledWith('bash', ['-c', 'sleep 40'], expect.objectContaining({ cwd: '/path/to/proj' }));
+    });
+    prereq.resolve({ stdout: 'done\n', stderr: '', exitCode: 0 });
+    const res = await pending;
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.code).toBe('project_busy');
+    expect(data.blockingJobId).toBe('run-while-prereq');
+    expect(createJobMock).not.toHaveBeenCalled();
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
+  it('does not create a probe-visible file agent job until the prerequisite finishes', async () => {
+    const projDir = mkdtempSync(join(tmpdir(), 'tamtam-file-agent-prereq-'));
+    const prereq = deferred<{ stdout: string; stderr: string; exitCode: number }>();
+    try {
+      mkdirSync(join(projDir, '.tamtam', 'agents'), { recursive: true });
+      writeFileSync(join(projDir, '.tamtam', 'agents', 'file-agent.md'), `---
+prerequisiteCommand: "sleep 45"
+---
+File-backed prompt.`);
+      resolveProjectPathMock.mockReturnValue(projDir);
+      execMock.mockImplementation(async (cmd: string, args: string[]) => {
+        if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
+        if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
+        if (cmd === 'bash' && args[1] === 'sleep 45') return prereq.promise;
+        return { stdout: '', stderr: '', exitCode: 0 };
+      });
+
+      const req = new NextRequest('http://localhost/api/agents/file%3Aproj1%3Afile-agent/run', {
+        method: 'POST',
+        body: JSON.stringify({ prompt: 'inspect file agent later' }),
+      });
+      const pending = POST(req, { params: Promise.resolve({ agentId: 'file:proj1:file-agent' }) });
+
+      await vi.waitFor(() => {
+        expect(execMock).toHaveBeenCalledWith('bash', ['-c', 'sleep 45'], expect.objectContaining({ cwd: projDir }));
+      });
+      expect(createJobMock).not.toHaveBeenCalled();
+      expect(startJobMock).not.toHaveBeenCalled();
+      expect(drainNextAgentRunMock).not.toHaveBeenCalled();
+
+      prereq.resolve({ stdout: 'file done\n', stderr: '', exitCode: 0 });
+      const res = await pending;
+
+      expect(res.status).toBe(200);
+      expect(createJobMock).toHaveBeenCalledOnce();
+      expect(startJobMock).toHaveBeenCalledOnce();
+      expect(drainNextAgentRunMock).toHaveBeenCalledWith('proj1');
+    } finally {
+      rmSync(projDir, { recursive: true, force: true });
+    }
   });
 
   it('records resolved skills in contextMeta so the terminal toolbar can show chips', async () => {
