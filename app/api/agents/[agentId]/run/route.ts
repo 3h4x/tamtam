@@ -371,18 +371,14 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   updateJob(job);
   mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
 
-  // Run the agent's optional prerequisite shell command. The command runs via
-  // the standard `exec` helper with the job's cancellation signal hooked in,
-  // so the existing cancel-job endpoint kills the prereq tree (e.g. a long
-  // `pnpm check`) cleanly. The job row already exists, so the run is visible
-  // in the UI for the entire prereq duration instead of being silently held
-  // in the route until completion.
-  let prerequisiteResult: { command: string; exitCode: number; durationMs: number; stdout: string; stderr: string } | null = null;
   const prereqCmd = resolveAgentPrerequisiteCommand({
     project: agent.project,
     skillIds: allSkillIds,
     prerequisiteCommand: agent.prerequisiteCommand,
   });
+
+  let prerequisiteResult: { command: string; exitCode: number; durationMs: number; stdout: string; stderr: string } | null = null;
+
   if (prereqCmd) {
     const cancelSignal = registerJobCancellation(job.id);
     const startedAt = Date.now();
@@ -429,8 +425,8 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   }
 
   // The prerequisite can run for minutes. Re-check project-wide blockers before
-  // spawning the agent in case another workflow entered through a path that
-  // did not observe the in-memory pre-start slot.
+  // spawning the agent so a queued/manual replay never gets acknowledged as
+  // "started" until the final start disposition is known.
   if (isLockOwnedByActiveRelease(agent.project)) {
     const lock = getLock(agent.project);
     try {
@@ -443,7 +439,7 @@ At the end of your run, include a short final section exactly named "TamTam Run 
         enqueuedAt: Date.now(),
       });
     } catch (err) {
-      console.error('[agent-run-route] failed to persist post-prereq release-lock queue entry:', err);
+      console.error('[agent-run] failed to persist post-prereq release-lock queue entry:', err);
       job.exitCode = 1;
       await markDone(job, 1);
       return {
@@ -454,9 +450,6 @@ At the end of your run, include a short final section exactly named "TamTam Run 
         startedJob: false,
       };
     }
-    // Reap the placeholder job — actual run starts when the queued entry drains.
-    // Pre-set finishedAt before markDone so the idempotency guard skips hooks:
-    // the placeholder never ran agent work, so release-after-run must not fire.
     appendFileSync(/*turbopackIgnore: true*/ logPath, `\n# queued behind release pipeline lock — will run when lock releases\n`);
     job.finishedAt = Date.now() / 1000;
     job.exitCode = 0;
@@ -484,8 +477,6 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     );
     if (postPrereqBlockingJob) {
       appendFileSync(/*turbopackIgnore: true*/ logPath, `\n# blocked by ${postPrereqBlockingJob.kind} job ${postPrereqBlockingJob.id}\n`);
-      // Pre-set finishedAt before markDone so the idempotency guard skips hooks:
-      // the placeholder never ran agent work, so agent_run_fail must not fire.
       job.finishedAt = Date.now() / 1000;
       job.exitCode = 1;
       updateJob(job);
@@ -567,6 +558,8 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     job.finishedAt = Date.now() / 1000;
     job.exitCode = -1;
     updateJob(job);
+    appendFileSync(/*turbopackIgnore: true*/ logPath, `\n# failed to start agent: ${errMsg(e)}\n`);
+    await markDone(job, -1);
     return {
       response: NextResponse.json({ detail: `Failed to start: ${errMsg(e)}` }, { status: 500 }),
       startedJob: false,
