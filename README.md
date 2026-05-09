@@ -20,6 +20,7 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 | **CI repair** | Failed CI run? One click sends Claude to fix it |
 | **Scheduling** | Built-in interval scheduler — daily reviews, nightly audits, whatever you need, running unattended |
 | **Release pipeline** | Quality-gated Direct Branch or PR Workflow: test → review → fix loop → commit → push (→ DoD → merge), all driven by Claude |
+| **Cross-project recommendations** | Open agent and scheduler suggestions across every project |
 | **Custom actions** | Per-project bash commands (deploy, migrate, seed) as colored buttons |
 | **Notifications** | Unseen run alerts with bell badge; outbound webhooks (Slack, Discord, ntfy, generic) for release success/fail/aborted, fix-loop-exhausted, review-do-not-ship, agent-run-fail, and budget-blocked events |
 

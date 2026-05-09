@@ -90,6 +90,7 @@ TamTam runs in **production mode** (`next start`) under PM2 — no HMR. After an
 - `/agents` — Agents management
 - `/monitoring` — Prometheus + Loki health dashboard
 - `/pipeline` — Pipeline health metrics (filterable by 24h/7d/30d/all)
+- `/recommendations` — Cross-project recommendations dashboard
 - `/stats` — Token usage dashboard
 - `/runs` — All runs across projects (`/jobs` redirects here)
 - `/logs` — Log viewer
