@@ -11,6 +11,11 @@ export type PrWaitResult =
 
 const POLL_INTERVAL_MS = parseInt(process.env.TAMTAM_PR_WAIT_POLL_MS ?? '', 10) || 30_000;
 const TIMEOUT_MS = parseInt(process.env.TAMTAM_PR_WAIT_TIMEOUT_MS ?? '', 10) || 30 * 60 * 1000; // 30 minutes
+// Grace period before treating an empty statusCheckRollup as "no CI configured".
+// On a freshly opened PR, GitHub has not yet registered workflow runs, so the
+// rollup is briefly empty even when CI is about to fire. Without this grace,
+// pr-wait merges immediately on the first poll and races CI.
+const NO_CHECKS_GRACE_MS = parseInt(process.env.TAMTAM_PR_WAIT_NO_CHECKS_GRACE_MS ?? '', 10) || 90_000;
 
 interface PrStatus {
   state: string; // OPEN | MERGED | CLOSED
@@ -166,7 +171,8 @@ export function launchPrWait(
   // Run polling loop in background
   ;(async () => {
     try {
-      const deadline = Date.now() + TIMEOUT_MS;
+      const startedAt = Date.now();
+      const deadline = startedAt + TIMEOUT_MS;
       let merged = false;
 
       while (Date.now() < deadline) {
