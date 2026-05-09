@@ -25,6 +25,7 @@ function createTestDb() {
       runner TEXT NOT NULL DEFAULT 'pm2',
       enabled INTEGER NOT NULL DEFAULT 1,
       provider TEXT,
+      prerequisite_command TEXT,
       created_at REAL NOT NULL,
       updated_at REAL NOT NULL
     );
@@ -814,6 +815,59 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(fullPrompt).toContain('DB-SKILL-BODY');
     expect(fullPrompt).toContain('REVIEWER-FILE-CONTENT');
     expect(fullPrompt).toContain('task');
+  });
+
+  it('omits the prerequisite block when the agent has no prerequisiteCommand', async () => {
+    insertAgent();
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'task' }),
+    });
+    await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    expect(fullPrompt).not.toContain('## Prerequisite Output');
+    expect(fullPrompt).not.toContain('Exit code:');
+  });
+
+  it('runs the prerequisite command and prepends its output to the prompt', async () => {
+    mkdirSync('/tmp/logs', { recursive: true });
+    resolveProjectPathMock.mockReturnValue('/tmp');
+    const POST2 = POST;
+
+    insertAgent({ prerequisiteCommand: 'echo TAMTAM_PREREQ_MARKER' });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'analyze the output above' }),
+    });
+    await POST2(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    expect(fullPrompt).toContain('## Prerequisite Output');
+    expect(fullPrompt).toContain('echo TAMTAM_PREREQ_MARKER');
+    expect(fullPrompt).toContain('Exit code: 0');
+    expect(fullPrompt).toContain('TAMTAM_PREREQ_MARKER');
+    expect(fullPrompt).toContain('analyze the output above');
+
+  });
+
+  it('still spawns the agent when the prerequisite exits non-zero', async () => {
+    mkdirSync('/tmp/logs', { recursive: true });
+    resolveProjectPathMock.mockReturnValue('/tmp');
+    const POST2 = POST;
+
+    insertAgent({ prerequisiteCommand: 'exit 7' });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'inspect failure' }),
+    });
+    const res = await POST2(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    expect(res.status).toBe(200);
+    expect(startJobMock).toHaveBeenCalledOnce();
+    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    expect(fullPrompt).toContain('## Prerequisite Output');
+    expect(fullPrompt).toContain('Exit code: 7');
+
   });
 
   it('records resolved skills in contextMeta so the terminal toolbar can show chips', async () => {

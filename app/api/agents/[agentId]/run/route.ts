@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq, inArray } from 'drizzle-orm';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { basename, join } from 'path';
 import { db, schema } from '@/lib/db';
 import { resolveProjectPath } from '@/lib/shared/project-data';
@@ -33,7 +33,7 @@ export async function POST(
   const { agentId } = await params;
 
   // Resolve agent — either a DB row or a file-based agent
-  let agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean; provider?: string | null } | null = null;
+  let agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean; provider?: string | null; prerequisiteCommand?: string | null } | null = null;
 
   const parsedFileId = parseFileAgentId(agentId);
   if (parsedFileId) {
@@ -256,8 +256,16 @@ export async function POST(
   }
 }
 
+const PREREQUISITE_TIMEOUT_MS = 10 * 60 * 1000;
+const PREREQUISITE_OUTPUT_MAX = 64 * 1024;
+
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return s.slice(0, max) + `\n\n[…truncated ${s.length - max} bytes]`;
+}
+
 async function runAgentStart(
-  agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean; provider?: string | null },
+  agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean; provider?: string | null; prerequisiteCommand?: string | null },
   taskPrompt: string,
   triggeredBy: string,
 ): Promise<{ response: NextResponse; startedJob: boolean }> {
@@ -352,21 +360,10 @@ At the end of your run, include a short final section exactly named "TamTam Run 
 - Files changed: comma-separated repo-relative paths, or "none"
 - Actionable work: "yes" or "no"
 - Schedule recommendation: optional; only suggest a less frequent schedule when this run found no actionable work`;
-  const systemPrompt = [...allParts, reportContract].filter(Boolean).join('\n\n---\n\n');
   const [headR, statusR] = await Promise.all([
     exec('git', ['-C', projPath, 'rev-parse', 'HEAD'], { timeout: 5000 }),
     exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 }),
   ]);
-  const contextMeta = JSON.stringify({
-    skills: metaSkills,
-    docs: metaDocs,
-    agent: { id: agent.id, name: agent.name, schedule: agent.schedule, triggeredBy },
-    baseline: {
-      head: headR.exitCode === 0 ? headR.stdout.trim() : null,
-      status: statusR.exitCode === 0 ? statusR.stdout : null,
-      dirty: statusR.exitCode === 0 ? statusR.stdout.trim().length > 0 : null,
-    },
-  });
 
   const requestedModel = agent.model ? normalizeModelInput(agent.model, 'normal') : null;
   const { logDir } = getImproveConfig();
@@ -393,6 +390,81 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   const claudeBin = resolveCliBin(provider, settings);
   const cliEnv = resolveCliEnv(provider, settings);
 
+  // Create the job record now so the prerequisite step (run before the
+  // agent CLI is spawned) can write its artifact at <logDir>/<jobId>.prereq.txt.
+  const initialContextMeta = JSON.stringify({
+    skills: metaSkills,
+    docs: metaDocs,
+    agent: { id: agent.id, name: agent.name, schedule: agent.schedule, triggeredBy },
+    baseline: {
+      head: headR.exitCode === 0 ? headR.stdout.trim() : null,
+      status: statusR.exitCode === 0 ? statusR.stdout : null,
+      dirty: statusR.exitCode === 0 ? statusR.stdout.trim().length > 0 : null,
+    },
+  });
+  const job = createJob(agent.project, `agent:${agent.name}`, 0, '', taskPrompt, initialContextMeta, taskPrompt);
+  job.provider = provider;
+  const logPath = join(logDir, `${job.id}.log`);
+
+  // Run the agent's optional prerequisite shell command before the CLI spawn,
+  // capture stdout/stderr to <logDir>/<jobId>.prereq.txt, and prepend a
+  // summary block to the system prompt so the agent sees command + duration
+  // + exit code + output. We continue regardless of exit code — the agent
+  // may need to react to a failing run (e.g. analyze why tests failed).
+  let prerequisiteBlock = '';
+  let prerequisiteMeta: { command: string; exitCode: number; durationMs: number; artifactPath: string } | null = null;
+  const prereqCmd = agent.prerequisiteCommand?.trim();
+  if (prereqCmd) {
+    const startedAt = Date.now();
+    const result = await exec('bash', ['-c', prereqCmd], {
+      cwd: projPath,
+      timeout: PREREQUISITE_TIMEOUT_MS,
+    });
+    const durationMs = Date.now() - startedAt;
+    const artifactPath = join(logDir, `${job.id}.prereq.txt`);
+    const stdout = result.stdout || '';
+    const stderr = result.stderr || '';
+    const artifactBody =
+      `# TamTam prerequisite artifact\n` +
+      `command: ${prereqCmd}\n` +
+      `exit_code: ${result.exitCode}\n` +
+      `duration_ms: ${durationMs}\n` +
+      `cwd: ${projPath}\n` +
+      `--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}\n`;
+    try {
+      writeFileSync(/*turbopackIgnore: true*/ artifactPath, artifactBody);
+    } catch (e) {
+      console.error('[agent-run] failed to write prereq artifact:', errMsg(e));
+    }
+    const truncatedStdout = truncate(stdout, PREREQUISITE_OUTPUT_MAX);
+    const truncatedStderr = truncate(stderr, PREREQUISITE_OUTPUT_MAX);
+    prerequisiteBlock =
+      `## Prerequisite Output\n` +
+      `Command: \`${prereqCmd}\`\n` +
+      `Exit code: ${result.exitCode}\n` +
+      `Duration: ${durationMs} ms\n` +
+      `Artifact: ${artifactPath}\n\n` +
+      `--- stdout ---\n${truncatedStdout}\n\n` +
+      `--- stderr ---\n${truncatedStderr}`;
+    prerequisiteMeta = {
+      command: prereqCmd,
+      exitCode: result.exitCode,
+      durationMs,
+      artifactPath,
+    };
+  }
+
+  const systemPrompt = [...allParts, prerequisiteBlock, reportContract].filter(Boolean).join('\n\n---\n\n');
+
+  if (prerequisiteMeta) {
+    try {
+      const merged = { ...JSON.parse(initialContextMeta), prerequisite: prerequisiteMeta };
+      job.contextMeta = JSON.stringify(merged);
+    } catch {
+      job.contextMeta = initialContextMeta;
+    }
+  }
+
   // Inject agent memory so it can track state across runs.
   const memDir = getAgentMemoryDir();
   ensureAgentMemoryDir(memDir, agent.project);
@@ -410,10 +482,6 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     ? `${systemPrompt}\n\n---\n\n${taskPrompt}`
     : (systemPrompt || taskPrompt);
   const fullPrompt = withBasePrompt(`${corePrompt}\n\n---\n\n${memoryBlock}`, { projectPath: projPath, provider });
-
-  const job = createJob(agent.project, `agent:${agent.name}`, 0, '', taskPrompt, contextMeta, taskPrompt);
-  job.provider = provider;
-  const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
 
   try {

@@ -101,6 +101,7 @@ export const agents = sqliteTable('agents', {
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
   docPaths: text('doc_paths').notNull().default('[]'),  // JSON array of project-relative doc paths
   provider: text('provider'),
+  prerequisiteCommand: text('prerequisite_command'),  // shell command run before the agent; stdout/stderr captured to <logDir>/<jobId>.prereq.txt and prepended to the prompt
   createdAt: real('created_at').notNull(),
   updatedAt: real('updated_at').notNull(),
 });

@@ -69,6 +69,9 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { name, project, skillIds, docPaths, model, prompt, schedule, runner, enabled } = body;
   const provider = isCliProvider(body.provider) ? body.provider : null;
+  const prerequisiteCommand = typeof body.prerequisiteCommand === 'string'
+    ? (body.prerequisiteCommand.trim() || null)
+    : null;
 
   if (!name?.trim()) {
     return NextResponse.json({ detail: 'name is required' }, { status: 400 });
@@ -99,6 +102,7 @@ export async function POST(request: NextRequest) {
     runner: runner || 'pm2',
     enabled: enabled !== false,
     provider,
+    prerequisiteCommand,
     createdAt: now,
     updatedAt: now,
   };
@@ -118,6 +122,7 @@ export async function POST(request: NextRequest) {
           runner: agent.runner,
           enabled: agent.enabled,
           provider: agent.provider,
+          prerequisiteCommand: agent.prerequisiteCommand,
         });
     } catch { /* non-fatal */ }
   }

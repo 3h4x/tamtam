@@ -207,7 +207,7 @@ export function AgentsTab({ projectName, currentBranch, prWorkflowEnabled, proje
 
   const closeModal = () => { setEditing(null); setCreating(false); setRecommendedTemplate(null) }
 
-  const handleSaveAgent = async (data: { name: string; prompt: string; skillIds: string[]; docPaths: string[]; model: string; schedule: string | null; runner: string; enabled: boolean }) => {
+  const handleSaveAgent = async (data: { name: string; prompt: string; skillIds: string[]; docPaths: string[]; model: string; schedule: string | null; runner: string; enabled: boolean; prerequisiteCommand: string | null }) => {
     const parseAgent = (a: Agent & { skillIds: string | string[]; docPaths?: string | string[] }): Agent => ({
       ...a,
       model: normalizeModelInput(a.model, 'normal'),

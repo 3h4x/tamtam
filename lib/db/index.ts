@@ -289,6 +289,9 @@ try {
 try {
   sqlite.exec('ALTER TABLE agents ADD COLUMN provider TEXT');
 } catch {}
+try {
+  sqlite.exec('ALTER TABLE agents ADD COLUMN prerequisite_command TEXT');
+} catch {}
 
 // Migrate: remove deprecated fix-ci retry settings.
 // These old keys controlled fast-crash auto-restarts of fix-ci jobs; they do

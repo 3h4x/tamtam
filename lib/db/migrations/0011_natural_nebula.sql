@@ -1,0 +1,1 @@
+ALTER TABLE `agents` ADD `prerequisite_command` text;

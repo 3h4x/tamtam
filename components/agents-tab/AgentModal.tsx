@@ -26,7 +26,7 @@ export function AgentModal({
   project: string
   skills: Skill[]
   personas: Persona[]
-  onSave: (data: { name: string; prompt: string; skillIds: string[]; docPaths: string[]; model: string; schedule: string | null; runner: string; enabled: boolean }) => Promise<void>
+  onSave: (data: { name: string; prompt: string; skillIds: string[]; docPaths: string[]; model: string; schedule: string | null; runner: string; enabled: boolean; prerequisiteCommand: string | null }) => Promise<void>
   onDelete?: () => void
   onClose: () => void
 }) {
@@ -40,6 +40,7 @@ export function AgentModal({
   const [schedule, setSchedule] = useState(agent?.schedule || template?.schedule || '')
   const [runner, setRunner] = useState(agent?.runner || template?.runner || 'pm2')
   const [enabled, setEnabled] = useState<boolean>(agent ? agent.enabled : true)
+  const [prerequisiteCommand, setPrerequisiteCommand] = useState<string>(agent?.prerequisiteCommand ?? '')
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [skillSearch, setSkillSearch] = useState('')
@@ -77,6 +78,7 @@ export function AgentModal({
     setSchedule(src.schedule || '')
     setRunner(src.runner || 'pm2')
     if (agent) setEnabled(agent.enabled)
+    if (agent) setPrerequisiteCommand(agent.prerequisiteCommand ?? '')
   }, [agent?.id, template?.name])
 
   useEffect(() => {
@@ -108,7 +110,7 @@ export function AgentModal({
     if (!name.trim() || saving) return
     setSaving(true)
     try {
-      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, docPaths: selectedDocPaths, model, schedule: schedule || null, runner, enabled })
+      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, docPaths: selectedDocPaths, model, schedule: schedule || null, runner, enabled, prerequisiteCommand: prerequisiteCommand.trim() || null })
     } catch {}
     setSaving(false)
   }
@@ -206,6 +208,22 @@ export function AgentModal({
               placeholder={selectedSkills.length > 0
                 ? 'Optional: repo-specific hints to append to the skill (e.g. "focus on lib/auth").'
                 : 'What should this agent do when it runs?'}
+            />
+          </div>
+
+          {/* Prerequisite command */}
+          <div>
+            <label htmlFor="agent-prerequisite" className="flex items-baseline gap-2 mb-1.5">
+              <span className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">Prerequisite Command</span>
+              <span className="text-xs text-text-tertiary font-normal normal-case">optional — runs before the agent; output injected into the prompt</span>
+            </label>
+            <input
+              id="agent-prerequisite"
+              type="text"
+              className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors font-mono"
+              value={prerequisiteCommand}
+              onChange={(e) => setPrerequisiteCommand(e.target.value)}
+              placeholder="e.g. pnpm test"
             />
           </div>
 

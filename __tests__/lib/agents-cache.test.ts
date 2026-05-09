@@ -19,6 +19,7 @@ function createTestDb() {
       runner TEXT NOT NULL DEFAULT 'pm2',
       enabled INTEGER NOT NULL DEFAULT 1,
       provider TEXT,
+      prerequisite_command TEXT,
       created_at REAL NOT NULL,
       updated_at REAL NOT NULL
     );
@@ -39,6 +40,7 @@ function makeAgentRow(overrides: Partial<typeof schema.agents.$inferSelect> = {}
     runner: 'pm2',
     enabled: true,
     provider: null,
+    prerequisiteCommand: null,
     createdAt: 1000,
     updatedAt: 1000,
     ...overrides,
