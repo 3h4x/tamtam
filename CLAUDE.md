@@ -167,9 +167,14 @@ actions:
 security:
   safe_users:                     # GitHub logins whose PR comments are not wrapped as untrusted
     - octocat
+
+commits:
+  commit_style: |                 # per-project commit voice; overrides the global commit_style setting
+    Use cyberpunk vocabulary: neural, synth, grid, cipher, daemon, void.
+    Format: <type>: <cryptic description>. Max 60 chars, no period.
 ```
 
-Supported keys: `test_command`, `custom_actions`, `safe_users`. **Workflow flags** (`pr_workflow_enabled`, `auto_commit_enabled`, `auto_push_enabled`, `auto_pr_merge_enabled`, `release_after_run`, `test_cron_enabled`, `test_cron_schedule`, `tests_disabled`, `review_disabled`, `issue_auto_branch`) are **DB-only** — each developer opts in individually. Older `.tamtam/config.yml` files may still contain those keys; TamTam migrates them to the DB on startup and ignores them on subsequent reads.
+Supported keys: `test_command`, `custom_actions`, `safe_users`, `commit_style`. **Workflow flags** (`pr_workflow_enabled`, `auto_commit_enabled`, `auto_push_enabled`, `auto_pr_merge_enabled`, `release_after_run`, `test_cron_enabled`, `test_cron_schedule`, `tests_disabled`, `review_disabled`, `issue_auto_branch`) are **DB-only** — each developer opts in individually. Older `.tamtam/config.yml` files may still contain those keys; TamTam migrates them to the DB on startup and ignores them on subsequent reads.
 
 On a feature/PR branch, config is read from `origin/<defaultBranch>` (not the working tree) to prevent privilege escalation from untrusted branches.
 

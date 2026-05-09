@@ -80,6 +80,7 @@ export function ProjectDetailPage({
   const [reviewDisabledInput, setReviewDisabledInput] = useState(false)
   const [reviewPromptAddendumInput, setReviewPromptAddendumInput] = useState('')
   const [fixPromptAddendumInput, setFixPromptAddendumInput] = useState('')
+  const [commitStyleInput, setCommitStyleInput] = useState('')
   const [configSaving, setConfigSaving] = useState(false)
   const [configSaved, setConfigSaved] = useState(false)
 
@@ -181,6 +182,7 @@ export function ProjectDetailPage({
     setReviewDisabledInput(!!data.review_disabled)
     setReviewPromptAddendumInput(data.review_prompt_addendum ?? '')
     setFixPromptAddendumInput(data.fix_prompt_addendum ?? '')
+    setCommitStyleInput(data.commit_style ?? '')
   }
 
   const handleCustomAction = async (actionName: string) => {
@@ -467,6 +469,7 @@ export function ProjectDetailPage({
     review_disabled: reviewDisabledInput,
     review_prompt_addendum: reviewPromptAddendumInput,
     fix_prompt_addendum: fixPromptAddendumInput,
+    commit_style: commitStyleInput,
   }
 
   const handleSaveConfig = async () => {
@@ -498,7 +501,8 @@ export function ProjectDetailPage({
     configInputs.tests_disabled !== !!config.tests_disabled ||
     configInputs.review_disabled !== !!config.review_disabled ||
     configInputs.review_prompt_addendum !== (config.review_prompt_addendum ?? '') ||
-    configInputs.fix_prompt_addendum !== (config.fix_prompt_addendum ?? '')
+    configInputs.fix_prompt_addendum !== (config.fix_prompt_addendum ?? '') ||
+    configInputs.commit_style !== (config.commit_style ?? '')
   )
 
   const actionsDirty = JSON.stringify(editActions) !== JSON.stringify(customActions)
@@ -691,6 +695,8 @@ export function ProjectDetailPage({
             setReviewPromptAddendumInput={setReviewPromptAddendumInput}
             fixPromptAddendumInput={fixPromptAddendumInput}
             setFixPromptAddendumInput={setFixPromptAddendumInput}
+            commitStyleInput={commitStyleInput}
+            setCommitStyleInput={setCommitStyleInput}
             editActions={editActions}
             setEditActions={setEditActions}
             anyDirty={anyDirty}

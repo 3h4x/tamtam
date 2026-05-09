@@ -41,6 +41,9 @@ export async function GET(
     review_disabled: testCfg?.reviewDisabled ?? false,
     review_prompt_addendum: pipelinePrompts.reviewPromptAddendum ?? '',
     fix_prompt_addendum: pipelinePrompts.fixPromptAddendum ?? '',
+    // Per-project commit style. File-only (team contract); empty string means
+    // fall back to the global `commit_style` setting at commit-generation time.
+    commit_style: fileConfig?.commit_style ?? '',
     last_push_error: pushResult?.lastPushError ?? null,
     last_push_at: pushResult?.lastPushAt ?? null,
     // Keys whose values currently come from .tamtam/config.yml — limited to the
@@ -70,14 +73,24 @@ export async function PATCH(
 
   // Collect all changes for a single file write
   const fileUpdates: Parameters<typeof writeFileConfig>[1] = {};
+  const dbUpdates: { field: string; value: string | null }[] = [];
 
   // test_command is the team contract — write it to BOTH the DB (for cache
   // performance) and `.tamtam/config.yml` (so teammates pick it up on pull).
   if (body.test_command !== undefined) {
     touched = true;
     const value = body.test_command?.trim() || null;
-    if (!writeProjectFieldYaml(projectName, 'test_command', value)) return notFound();
+    dbUpdates.push({ field: 'test_command', value });
     fileUpdates.test_command = value;
+  }
+
+  // commit_style is file-only (team contract). No DB column — every read goes
+  // through loadFileConfig at commit-generation time so a checkout swap picks
+  // up the new style immediately.
+  if (body.commit_style !== undefined) {
+    touched = true;
+    const raw = typeof body.commit_style === 'string' ? body.commit_style.trim() : '';
+    fileUpdates.commit_style = raw.length > 0 ? raw : null;
   }
 
   if (body.test_cron_schedule !== undefined) {
@@ -93,7 +106,7 @@ export async function PATCH(
         );
       }
     }
-    if (!writeProjectFieldYaml(projectName, 'test_cron_schedule', value)) return notFound();
+    dbUpdates.push({ field: 'test_cron_schedule', value });
   }
 
   // Workflow flags are intentionally DB-only — each developer opts in
@@ -108,7 +121,7 @@ export async function PATCH(
   for (const field of booleanFields) {
     if (body[field] !== undefined) {
       touched = true;
-      if (!writeProjectFieldYaml(projectName, field, body[field] ? '1' : '0')) return notFound();
+      dbUpdates.push({ field, value: body[field] ? '1' : '0' });
     }
   }
 
@@ -119,17 +132,26 @@ export async function PATCH(
     if (body[field] !== undefined) {
       touched = true;
       const value = typeof body[field] === 'string' && body[field].trim() ? body[field] : null;
-      if (!writeProjectFieldYaml(projectName, field, value)) return notFound();
+      dbUpdates.push({ field, value });
     }
   }
 
-  // Write all changed fields to .tamtam/config.yml in one pass
+  // Write file-backed fields before DB-backed fields so a .tamtam/config.yml
+  // failure cannot leave a mixed PATCH partially applied in the DB.
   if (Object.keys(fileUpdates).length > 0) {
     try {
       writeFileConfig(projPath, fileUpdates);
-    } catch {
-      // Non-fatal: DB write already succeeded, file write is best-effort
+    } catch (err) {
+      console.error('Failed to write .tamtam/config.yml', err);
+      return NextResponse.json(
+        { detail: 'failed to write .tamtam/config.yml' },
+        { status: 500 }
+      );
     }
+  }
+
+  for (const update of dbUpdates) {
+    if (!writeProjectFieldYaml(projectName, update.field, update.value)) return notFound();
   }
 
   // If any cron field changed, reconcile the PM2 cron entry.

@@ -145,6 +145,7 @@ export interface ProjectConfig {
   review_disabled?: boolean
   review_prompt_addendum?: string
   fix_prompt_addendum?: string
+  commit_style?: string
   last_push_error?: string | null
   last_push_at?: number | null
   file_config?: string[]

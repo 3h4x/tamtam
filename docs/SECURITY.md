@@ -4,13 +4,14 @@
 
 ### The Problem
 
-`.tamtam/config.yml` and `.tamtam/agents/*.md` are committed files that control TamTam's behaviour for a project: which agents run on a schedule, whether review gates are skipped, which users are trusted, and whether PRs are auto-merged.
+`.tamtam/config.yml` and `.tamtam/agents/*.md` are committed files that control TamTam's behaviour for a project: which agents run on a schedule, which test command and custom actions are shared, which users are trusted, and which project-specific prompt guidance is injected.
 
 When TamTam checks out a PR head branch (via the PR Workflow or the "Work on" issue flow), the working tree switches to the attacker-controlled branch. Without protection, any file in `.tamtam/` would be silently honoured — allowing:
 
 1. **New scheduled agents** — a PR adds `.tamtam/agents/pwn.md` with `schedule: 15m` and a malicious prompt; TamTam registers and runs it automatically.
 2. **Gate bypass** — `tests_disabled: true`, `review_disabled: true`, `auto_pr_merge_enabled: true` in `.tamtam/config.yml` lets the attacker's PR skip every safety check and self-merge.
 3. **Trust escalation** — adding their own login to `safe_users` marks their content as trusted, enabling follow-on prompt injection via issue/PR bodies.
+4. **Prompt steering** — changing `commits.commit_style` injects attacker-controlled guidance into generated commit-message prompts.
 
 ### The Defence: Default-Branch Pinning
 
@@ -49,10 +50,9 @@ The following fields are automatically protected by default-branch pinning:
 | Field | Risk if bypassed |
 |---|---|
 | `safe_users` | Attacker marks themselves trusted; prompt injection via issue bodies |
-| `auto_pr_merge_enabled` | PR self-merges without human review |
-| `tests_disabled` | CI step skipped; broken/malicious code ships |
-| `review_disabled` | Code review step skipped |
-| `release_after_run` | Every agent run triggers a release |
+| `test_command` | Verification command changed or weakened before release |
+| `custom_actions` | New project-page buttons run attacker-chosen shell commands |
+| `commit_style` | Commit-message generation prompt is steered by untrusted branch content |
 | Any `.tamtam/agents/*.md` | New scheduled agent runs arbitrary prompts |
 
 ### Relationship to Other Defences
