@@ -9,6 +9,8 @@
 // because the internal scheduler re-fires scheduled agents on the next
 // tick, and manually-queued runs are a transient signal anyway.
 
+import type { JobData } from '@/lib/jobs/types';
+
 export type QueueEntry = {
   agentId: string;
   agentName: string;
@@ -28,14 +30,24 @@ const TEMPORARY_DRAIN_RETRY_MS = 30_000;
 // both proceed through the awaits to createJob — bypassing the per-project
 // serialization the listJobs check is meant to enforce. Map value is the
 // agentName so a same-agent race can return 409 instead of double-queueing.
-const startingAgents = new Map<string, string>();
+type StartingAgent = {
+  agentName: string;
+  startedAt: number;
+};
+
+declare global {
+  var __tamtamStartingAgents: Map<string, StartingAgent> | undefined;
+}
+
+const startingAgents = globalThis.__tamtamStartingAgents ?? new Map<string, StartingAgent>();
+globalThis.__tamtamStartingAgents = startingAgents;
 
 export function tryClaimAgentStartSlot(project: string, agentName: string):
   | { ok: true }
   | { ok: false; runningAgent: string } {
   const existing = startingAgents.get(project);
-  if (existing) return { ok: false, runningAgent: existing };
-  startingAgents.set(project, agentName);
+  if (existing) return { ok: false, runningAgent: existing.agentName };
+  startingAgents.set(project, { agentName, startedAt: Date.now() / 1000 });
   return { ok: true };
 }
 
@@ -45,6 +57,31 @@ export function releaseAgentStartSlot(project: string): void {
 
 export function hasAgentStartSlot(project: string): boolean {
   return startingAgents.has(project);
+}
+
+export function getAgentStartSlotJob(project: string): JobData | null {
+  const slot = startingAgents.get(project);
+  if (!slot) return null;
+  return {
+    id: `${project}-agent-starting`,
+    project,
+    kind: `agent:${slot.agentName}`,
+    prompt: null,
+    pid: 0,
+    logPath: null,
+    startedAt: slot.startedAt,
+    finishedAt: null,
+    exitCode: null,
+    seen: false,
+    contextMeta: null,
+    userPrompt: null,
+    parentJobId: null,
+    ghIssueNumber: null,
+    ghIssueRepo: null,
+    ghIssueTitle: null,
+    releaseId: null,
+    abortedAt: null,
+  };
 }
 
 // Idempotent per (project, agentId) — re-enqueueing the same agent while it

@@ -8,6 +8,7 @@ import { resolveProjectPath } from '@/lib/shared/project-data';
 import { createJob, listJobs, probeJobStatus, updateJob, markDone } from '@/lib/jobs/job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
+import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 
 export function detectTestCommand(projPath: string, projectName?: string): string | null {
   // Explicit off-switch — overrides user/auto-detected command. Wrapped in
@@ -77,6 +78,19 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
     if (lock) {
       return { ok: false, status: 409, detail: `Pipeline is running for ${projectName}`, blockingJobId: lock.lockedByJobId };
     }
+  }
+
+  const blockingJob = await findBlockingRunningJob(
+    projectName,
+    (job) => job.kind !== 'test' && !(underRelease && job.kind === 'release'),
+  );
+  if (blockingJob) {
+    return {
+      ok: false,
+      status: 409,
+      detail: `Job '${blockingJob.kind}' is already running for ${projectName} (job ${blockingJob.id})`,
+      blockingJobId: blockingJob.id,
+    };
   }
 
   const jobs = listJobs();

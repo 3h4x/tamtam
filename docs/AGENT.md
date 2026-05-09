@@ -33,6 +33,7 @@ Agents are reusable automation units that combine skills, a model, a prompt temp
 | `runner` | string | `pm2` | Scheduler mode: `"pm2"` for the internal scheduler, or legacy `"launchctl"` on macOS |
 | `enabled` | boolean | `true` | Enable/disable without deletion |
 | `provider` | string \| null | `null` | Optional preferred CLI provider (`claude`, `codex`, `gemini`, `lmstudio`). TamTam falls back to the enabled-provider chooser if the preferred provider cannot be used. |
+| `prerequisiteCommand` | string \| null | `null` | Optional `bash -c` command run in the project directory before the agent CLI starts. Output is captured to a prerequisite artifact and prepended to the agent prompt. |
 | `createdAt` | number | — | Unix timestamp (seconds) |
 | `updatedAt` | number | — | Unix timestamp (seconds) |
 
@@ -84,7 +85,7 @@ curl -X POST http://localhost:1337/api/agents \
 ```
 
 **Required fields:** `name`, `project`  
-**Optional fields:** `skillIds` (default `[]`), `model`, `prompt`, `schedule`, `runner`, `enabled`
+**Optional fields:** `skillIds` (default `[]`), `model`, `prompt`, `schedule`, `runner`, `enabled`, `prerequisiteCommand`
 
 If you provide both `schedule` and `prompt`, the agent's schedule is automatically installed.
 
@@ -197,6 +198,32 @@ The final prompt sent to Claude is:
 
 For file-backed agents in `.tamtam/agents/*.md`, `provider:` is committed frontmatter and is preserved on prompt-only writes. TamTam treats it as part of the shared agent contract, not as an ephemeral UI-only override.
 
+## Prerequisite Command
+
+An agent may declare an optional `prerequisiteCommand` — a shell command that runs before the agent CLI is spawned. Its stdout/stderr are captured to `<logDir>/<jobId>.prereq.txt` (alongside the run's `.log`/`.prompt` files) and a summary block is prepended to the system prompt the agent receives:
+
+```
+## Prerequisite Output
+Command: `pnpm test`
+Exit code: 0
+Duration: 4218 ms
+Artifact: /Users/me/logs/agent-…-job.prereq.txt
+
+--- stdout ---
+…suite output…
+
+--- stderr ---
+```
+
+This lets you build agents that react to fresh runtime state — e.g. a "test-speed watcher" that runs `pnpm test`, sees the duration, and proposes optimizations when the suite slows down. Output is truncated to ~64 KiB per stream in the prompt block; the full artifact file is always written.
+
+Behaviour:
+- The agent is spawned regardless of the prerequisite's exit code. Failures are surfaced through the prompt block (`Exit code: <n>`) so the agent can analyse them.
+- Timeout is 10 minutes (hardcoded for now).
+- The command runs with `bash -c <cmd>` in the project's working directory.
+- The job row is created only after the prerequisite completes, so background probes cannot mark a long prerequisite as a dead PM2 spawn. The per-project agent start slot remains held while the prerequisite runs, so another agent for the same project queues instead of starting concurrently, and project-wide starters such as terminal runs, tests, CI fixes, reruns, and releases see the project as busy.
+- For file-backed agents, the field is committed frontmatter (`prerequisiteCommand: "pnpm test"`); for DB agents it's stored on the `agents` row.
+
 This allows agents to be reusable — the same agent can run with different task prompts while keeping the skill composition consistent.
 
 ## Request Flow
@@ -216,9 +243,12 @@ User/scheduler triggers
           → still pending / release reacquired lock → 202 queued with `code: "pending_release"` or `code: "pipeline_lock"` and a DB-backed queue row
       → Fetch skills from DB (by skillIds)
       → Compose system prompt: `## SkillName\nContent` + `---` separators
+      → Run optional prerequisite command before creating a job row
+      → Re-check release/project blockers after the prerequisite completes
       → Build command:
           claude --print --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions --model {agent.model}
       → Create job record
+      → Write prerequisite artifact, if applicable
       → Start via PM2 with composed prompt as stdin
       → Return job ID and PID
       → If startup fails before PM2 takes over, release the per-project start slot and drain the next queued fire immediately

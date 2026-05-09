@@ -73,6 +73,28 @@ describe('findBlockingRunningJob', () => {
     expect(probeJobStatusMock).toHaveBeenCalledWith(reviewJob);
   });
 
+  it('treats an agent start slot as a project blocker without probing it', async () => {
+    listJobsMock.mockReturnValue([]);
+    const { tryClaimAgentStartSlot, releaseAgentStartSlot } = await import('@/lib/agents/pending-agent-run');
+    expect(tryClaimAgentStartSlot('proj', 'Prereq Agent')).toEqual({ ok: true });
+
+    try {
+      const { findBlockingRunningJob } = await import('@/lib/jobs/project-active-job');
+      const blocker = await findBlockingRunningJob('proj');
+
+      expect(blocker).toMatchObject({
+        id: 'proj-agent-starting',
+        project: 'proj',
+        kind: 'agent:Prereq Agent',
+        pid: 0,
+        finishedAt: null,
+      });
+      expect(probeJobStatusMock).not.toHaveBeenCalled();
+    } finally {
+      releaseAgentStartSlot('proj');
+    }
+  });
+
   it('returns null when every candidate has already stopped', async () => {
     const runJob = makeJob({ id: 'run-1', kind: 'run' });
     const fixJob = makeJob({ id: 'fix-1', kind: 'fix' });

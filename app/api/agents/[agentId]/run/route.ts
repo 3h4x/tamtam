@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq, inArray } from 'drizzle-orm';
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { basename, join } from 'path';
 import { db, schema } from '@/lib/db';
 import { resolveProjectPath } from '@/lib/shared/project-data';
@@ -390,9 +390,7 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   const claudeBin = resolveCliBin(provider, settings);
   const cliEnv = resolveCliEnv(provider, settings);
 
-  // Create the job record now so the prerequisite step (run before the
-  // agent CLI is spawned) can write its artifact at <logDir>/<jobId>.prereq.txt.
-  const initialContextMeta = JSON.stringify({
+  const contextMeta = {
     skills: metaSkills,
     docs: metaDocs,
     agent: { id: agent.id, name: agent.name, schedule: agent.schedule, triggeredBy },
@@ -401,69 +399,130 @@ At the end of your run, include a short final section exactly named "TamTam Run 
       status: statusR.exitCode === 0 ? statusR.stdout : null,
       dirty: statusR.exitCode === 0 ? statusR.stdout.trim().length > 0 : null,
     },
-  });
-  const job = createJob(agent.project, `agent:${agent.name}`, 0, '', taskPrompt, initialContextMeta, taskPrompt);
-  job.provider = provider;
-  const logPath = join(logDir, `${job.id}.log`);
+  };
 
   // Run the agent's optional prerequisite shell command before the CLI spawn,
-  // capture stdout/stderr to <logDir>/<jobId>.prereq.txt, and prepend a
-  // summary block to the system prompt so the agent sees command + duration
-  // + exit code + output. We continue regardless of exit code — the agent
-  // may need to react to a failing run (e.g. analyze why tests failed).
-  let prerequisiteBlock = '';
-  let prerequisiteMeta: { command: string; exitCode: number; durationMs: number; artifactPath: string } | null = null;
+  // but do not create the job row until after it finishes. A normal
+  // unfinished agent job with pid=0 is probe-visible and would be finalized
+  // after the PM2 spawn grace while a long prerequisite is still running.
+  let prerequisiteResult: { command: string; exitCode: number; durationMs: number; stdout: string; stderr: string } | null = null;
   const prereqCmd = agent.prerequisiteCommand?.trim();
   if (prereqCmd) {
     const startedAt = Date.now();
     const result = await exec('bash', ['-c', prereqCmd], {
       cwd: projPath,
       timeout: PREREQUISITE_TIMEOUT_MS,
+      killProcessGroup: true,
     });
-    const durationMs = Date.now() - startedAt;
+    prerequisiteResult = {
+      command: prereqCmd,
+      exitCode: result.exitCode,
+      durationMs: Date.now() - startedAt,
+      stdout: result.stdout || '',
+      stderr: result.stderr || '',
+    };
+  }
+
+  // The prerequisite can run for minutes. Re-check project-wide blockers before
+  // spawning the agent in case another workflow entered through a path that
+  // did not observe the in-memory pre-start slot.
+  if (isLockOwnedByActiveRelease(agent.project)) {
+    const lock = getLock(agent.project);
+    try {
+      enqueueQueuedAgentRun(agent.project, {
+        project: agent.project,
+        agentId: agent.id,
+        agentName: agent.name,
+        triggeredBy,
+        prompt: taskPrompt,
+        enqueuedAt: Date.now(),
+      });
+    } catch (err) {
+      console.error('[agent-run-route] failed to persist post-prereq release-lock queue entry:', err);
+      return {
+        response: NextResponse.json(
+          { detail: `Failed to queue agent '${agent.name}' while the release pipeline is running` },
+          { status: 500 },
+        ),
+        startedJob: false,
+      };
+    }
+    return {
+      response: NextResponse.json(
+        {
+          status: 'queued',
+          code: 'pipeline_lock',
+          detail: `Agent '${agent.name}' queued — release pipeline is running for ${agent.project} (job ${lock?.lockedByJobId ?? 'unknown'})`,
+          blockingJobId: lock?.lockedByJobId,
+          agent: agent.name,
+        },
+        { status: 202 },
+      ),
+      startedJob: false,
+    };
+  }
+
+  const postPrereqBlockingJob = await findBlockingRunningJob(
+    agent.project,
+    (job) => !isAgentJobKind(job.kind),
+  );
+  if (postPrereqBlockingJob) {
+    return {
+      response: NextResponse.json(
+        {
+          code: 'project_busy',
+          detail: `Job '${postPrereqBlockingJob.kind}' is already running for ${agent.project} (job ${postPrereqBlockingJob.id})`,
+          blockingJobId: postPrereqBlockingJob.id,
+        },
+        { status: 409 },
+      ),
+      startedJob: false,
+    };
+  }
+
+  const initialContextMeta = JSON.stringify(contextMeta);
+  const job = createJob(agent.project, `agent:${agent.name}`, 0, '', taskPrompt, initialContextMeta, taskPrompt);
+  job.provider = provider;
+  const logPath = join(logDir, `${job.id}.log`);
+
+  let prerequisiteBlock = '';
+  if (prerequisiteResult) {
+    mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
     const artifactPath = join(logDir, `${job.id}.prereq.txt`);
-    const stdout = result.stdout || '';
-    const stderr = result.stderr || '';
     const artifactBody =
       `# TamTam prerequisite artifact\n` +
-      `command: ${prereqCmd}\n` +
-      `exit_code: ${result.exitCode}\n` +
-      `duration_ms: ${durationMs}\n` +
+      `command: ${prerequisiteResult.command}\n` +
+      `exit_code: ${prerequisiteResult.exitCode}\n` +
+      `duration_ms: ${prerequisiteResult.durationMs}\n` +
       `cwd: ${projPath}\n` +
-      `--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}\n`;
+      `--- stdout ---\n${prerequisiteResult.stdout}\n--- stderr ---\n${prerequisiteResult.stderr}\n`;
     try {
       writeFileSync(/*turbopackIgnore: true*/ artifactPath, artifactBody);
     } catch (e) {
       console.error('[agent-run] failed to write prereq artifact:', errMsg(e));
     }
-    const truncatedStdout = truncate(stdout, PREREQUISITE_OUTPUT_MAX);
-    const truncatedStderr = truncate(stderr, PREREQUISITE_OUTPUT_MAX);
+    const truncatedStdout = truncate(prerequisiteResult.stdout, PREREQUISITE_OUTPUT_MAX);
+    const truncatedStderr = truncate(prerequisiteResult.stderr, PREREQUISITE_OUTPUT_MAX);
     prerequisiteBlock =
       `## Prerequisite Output\n` +
-      `Command: \`${prereqCmd}\`\n` +
-      `Exit code: ${result.exitCode}\n` +
-      `Duration: ${durationMs} ms\n` +
+      `Command: \`${prerequisiteResult.command}\`\n` +
+      `Exit code: ${prerequisiteResult.exitCode}\n` +
+      `Duration: ${prerequisiteResult.durationMs} ms\n` +
       `Artifact: ${artifactPath}\n\n` +
       `--- stdout ---\n${truncatedStdout}\n\n` +
       `--- stderr ---\n${truncatedStderr}`;
-    prerequisiteMeta = {
-      command: prereqCmd,
-      exitCode: result.exitCode,
-      durationMs,
-      artifactPath,
-    };
+    job.contextMeta = JSON.stringify({
+      ...contextMeta,
+      prerequisite: {
+        command: prerequisiteResult.command,
+        exitCode: prerequisiteResult.exitCode,
+        durationMs: prerequisiteResult.durationMs,
+        artifactPath,
+      },
+    });
   }
 
   const systemPrompt = [...allParts, prerequisiteBlock, reportContract].filter(Boolean).join('\n\n---\n\n');
-
-  if (prerequisiteMeta) {
-    try {
-      const merged = { ...JSON.parse(initialContextMeta), prerequisite: prerequisiteMeta };
-      job.contextMeta = JSON.stringify(merged);
-    } catch {
-      job.contextMeta = initialContextMeta;
-    }
-  }
 
   // Inject agent memory so it can track state across runs.
   const memDir = getAgentMemoryDir();

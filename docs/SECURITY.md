@@ -8,7 +8,7 @@
 
 When TamTam checks out a PR head branch (via the PR Workflow or the "Work on" issue flow), the working tree switches to the attacker-controlled branch. Without protection, any file in `.tamtam/` would be silently honoured — allowing:
 
-1. **New scheduled agents** — a PR adds `.tamtam/agents/pwn.md` with `schedule: 15m` and a malicious prompt; TamTam registers and runs it automatically.
+1. **New scheduled agents** — a PR adds `.tamtam/agents/pwn.md` with `schedule: 15m`, a malicious prompt, or a malicious `prerequisiteCommand`; TamTam registers and runs it automatically.
 2. **Gate bypass** — `tests_disabled: true`, `review_disabled: true`, `auto_pr_merge_enabled: true` in `.tamtam/config.yml` lets the attacker's PR skip every safety check and self-merge.
 3. **Trust escalation** — adding their own login to `safe_users` marks their content as trusted, enabling follow-on prompt injection via issue/PR bodies.
 4. **Prompt steering** — changing `commits.commit_style` injects attacker-controlled guidance into generated commit-message prompts.
@@ -53,7 +53,7 @@ The following fields are automatically protected by default-branch pinning:
 | `test_command` | Verification command changed or weakened before release |
 | `custom_actions` | New project-page buttons run attacker-chosen shell commands |
 | `commit_style` | Commit-message generation prompt is steered by untrusted branch content |
-| Any `.tamtam/agents/*.md` | New scheduled agent runs arbitrary prompts |
+| Any `.tamtam/agents/*.md` | New scheduled agent runs arbitrary prompts or committed prerequisite shell commands |
 
 ### Relationship to Other Defences
 

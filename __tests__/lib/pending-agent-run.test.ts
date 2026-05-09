@@ -96,6 +96,22 @@ describe('agent start slot', () => {
     clearAllQueues();
     expect(hasAgentStartSlot('p1')).toBe(false);
   });
+
+  it('keeps start slots visible across module reloads', async () => {
+    clearAllQueues();
+    const first = await import('@/lib/agents/pending-agent-run');
+    expect(first.tryClaimAgentStartSlot('p-global', 'Prereq Agent')).toEqual({ ok: true });
+
+    vi.resetModules();
+    const second = await import('@/lib/agents/pending-agent-run');
+
+    expect(second.hasAgentStartSlot('p-global')).toBe(true);
+    expect(second.tryClaimAgentStartSlot('p-global', 'Other Agent')).toEqual({
+      ok: false,
+      runningAgent: 'Prereq Agent',
+    });
+    second.releaseAgentStartSlot('p-global');
+  });
 });
 
 describe('drainNextAgentRun', () => {
