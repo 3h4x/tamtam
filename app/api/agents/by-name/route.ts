@@ -9,6 +9,20 @@ import { resolveProjectPath } from '@/lib/shared/project-data';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 import { isCliProvider } from '@/lib/usage/cli-providers';
+import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
+
+function withEffectivePrerequisite<T extends { project: string; skillIds: string[]; prerequisiteCommand?: string | null }>(
+  agent: T,
+): T {
+  return {
+    ...agent,
+    prerequisiteCommand: resolveAgentPrerequisiteCommand({
+      project: agent.project,
+      skillIds: agent.skillIds,
+      prerequisiteCommand: agent.prerequisiteCommand,
+    }),
+  };
+}
 
 // PATCH /api/agents/by-name
 // Lets an agent update itself by project+name without knowing its UUID.
@@ -18,6 +32,9 @@ export async function PATCH(request: NextRequest) {
   const body = await request.json();
   const { project, name, ...fields } = body;
   const provider = fields.provider === null ? null : (isCliProvider(fields.provider) ? fields.provider : undefined);
+  const prerequisiteCommand = fields.prerequisiteCommand === undefined
+    ? undefined
+    : (typeof fields.prerequisiteCommand === 'string' ? (fields.prerequisiteCommand.trim() || null) : null);
 
   if (!project?.trim() || !name?.trim()) {
     return NextResponse.json({ detail: 'project and name are required' }, { status: 400 });
@@ -45,6 +62,7 @@ export async function PATCH(request: NextRequest) {
     if (fields.runner !== undefined) updates.runner = fields.runner;
     if (fields.enabled !== undefined) updates.enabled = fields.enabled;
     if (provider !== undefined) updates.provider = provider;
+    if (fields.prerequisiteCommand !== undefined) updates.prerequisiteCommand = prerequisiteCommand;
 
     db.update(schema.agents).set(updates).where(eq(schema.agents.id, existing.id)).run();
     clearAgentsCache();
@@ -60,14 +78,15 @@ export async function PATCH(request: NextRequest) {
           writeFileAgent(projPath, agent.project, agent.name, {
             prompt: agent.prompt,
             model: agent.model,
-            schedule: agent.schedule,
-            skillIds,
-            runner: agent.runner,
-            enabled: agent.enabled,
-            provider: agent.provider,
-          });
-        } catch { /* non-fatal */ }
-      }
+          schedule: agent.schedule,
+          skillIds,
+          runner: agent.runner,
+          enabled: agent.enabled,
+          provider: agent.provider,
+          prerequisiteCommand: agent.prerequisiteCommand,
+        });
+      } catch { /* non-fatal */ }
+    }
       try {
         const hasSkills = JSON.parse(agent.skillIds || '[]').length > 0;
         if (agent.schedule && agent.enabled && (agent.prompt || hasSkills)) {
@@ -97,6 +116,7 @@ export async function PATCH(request: NextRequest) {
           runner: fields.runner,
           enabled: fields.enabled,
           provider,
+          prerequisiteCommand,
         });
         try {
           if (updated.schedule && updated.enabled && (updated.prompt || updated.skillIds.length > 0)) {
@@ -107,7 +127,7 @@ export async function PATCH(request: NextRequest) {
         } catch (e: unknown) {
           console.error(`Failed to update schedule for file agent ${updated.id}:`, errMsg(e));
         }
-        return NextResponse.json({ agent: updated });
+        return NextResponse.json({ agent: withEffectivePrerequisite(updated) });
       } catch (e: unknown) {
         return NextResponse.json({ detail: `Failed to write agent file: ${errMsg(e)}` }, { status: 500 });
       }

@@ -34,6 +34,7 @@ describe('instrumentation', () => {
 
   afterEach(() => {
     process.env.NEXT_RUNTIME = originalRuntime;
+    vi.unstubAllEnvs();
     vi.resetModules();
   });
 
@@ -81,6 +82,26 @@ describe('instrumentation', () => {
         () => expect(startInternalSchedulerMock).toHaveBeenCalledTimes(1),
         { timeout: 2000 }
       );
+    });
+  });
+
+  describe('registerNode()', () => {
+    it('backfills issue-cruncher prerequisites during boot', async () => {
+      vi.stubEnv('NODE_ENV', 'test');
+      mockDeps([]);
+      const backfillIssueCruncherPrerequisitesMock = vi.fn();
+
+      vi.doMock('@/lib/agents/default-agent-skills', () => ({
+        backfillIssueCruncherPrerequisites: backfillIssueCruncherPrerequisitesMock,
+      }));
+      vi.doMock('./lib/agents/default-agent-skills', () => ({
+        backfillIssueCruncherPrerequisites: backfillIssueCruncherPrerequisitesMock,
+      }));
+
+      const { registerNode } = await import('@/instrumentation-node');
+      await registerNode();
+
+      expect(backfillIssueCruncherPrerequisitesMock).toHaveBeenCalledTimes(1);
     });
   });
 

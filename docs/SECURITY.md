@@ -65,6 +65,8 @@ The following fields are automatically protected by default-branch pinning:
 
 These layers are independent and complementary. Pinning stops the _registration_ of malicious agents; sandboxing limits what registered agents can do; untrusted wrapping stops prompt injection from issue/PR bodies.
 
+For issue-driven automation, TamTam now also gates issue selection before the LLM sees issue bodies: `GET /api/projects/by-project/[project]/issues?trusted_only=1` filters server-side to authors trusted by the union of global `trusted_github_users` and per-project `.tamtam/config.yml` `security.safe_users`. The default issue-cruncher agent consumes that trusted-only prerequisite output and must not call `gh issue list` directly.
+
 ### Implementation Files
 
 - `lib/git-branch.ts` — synchronous git helpers (`getBranchContext`, `gitShowSync`, `gitLsTreeSync`)

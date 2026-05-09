@@ -23,6 +23,8 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
   let POST: any;
   let execMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
+  let loadFileConfigMock: ReturnType<typeof vi.fn>;
+  let getSettingsMock: ReturnType<typeof vi.fn>;
   let testDb: ReturnType<typeof createTestDb>;
 
   beforeEach(async () => {
@@ -30,6 +32,8 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
     testDb = createTestDb();
     execMock = vi.fn();
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
+    loadFileConfigMock = vi.fn().mockReturnValue(null);
+    getSettingsMock = vi.fn().mockReturnValue({ trusted_github_users: [], github_owner: '' });
 
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
@@ -37,6 +41,14 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
     }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/skills/tamtam-file-config', () => ({ loadFileConfig: loadFileConfigMock }));
+    vi.doMock('@/lib/shared/config', async () => {
+      const actual = await vi.importActual<typeof import('@/lib/shared/config')>('@/lib/shared/config');
+      return {
+        ...actual,
+        getSettings: getSettingsMock,
+      };
+    });
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/issues/route');
     GET = mod.GET;
@@ -167,6 +179,123 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
       .get();
     expect(row).toBeTruthy();
     expect(JSON.parse(row!.prs)).toHaveLength(1);
+  });
+
+  it('keeps only globally trusted issue authors when trusted_only=1', async () => {
+    getSettingsMock.mockReturnValue({ trusted_github_users: ['trusted-user'], github_owner: '' });
+    testDb.db.insert(schema.ghIssuesCache).values({
+      project: 'myproj',
+      repo: 'owner/myproj',
+      prs: JSON.stringify([{ number: 11, title: 'PR One' }]),
+      issues: JSON.stringify([
+        { number: 1, title: 'Keep', author: { login: 'trusted-user' }, labels: [], assignees: [] },
+        { number: 2, title: 'Drop', author: { login: 'other-user' }, labels: [], assignees: [] },
+      ]),
+      fetchedAt: Date.now() / 1000,
+    }).run();
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?trusted_only=1');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.issues).toHaveLength(1);
+    expect(data.issues[0].number).toBe(1);
+    expect(data.prs).toHaveLength(1);
+  });
+
+  it('keeps project safe_users issue authors when trusted_only=1', async () => {
+    loadFileConfigMock.mockReturnValue({ safe_users: ['repo-owner'] });
+    testDb.db.insert(schema.ghIssuesCache).values({
+      project: 'myproj',
+      repo: 'owner/myproj',
+      prs: '[]',
+      issues: JSON.stringify([
+        { number: 1, title: 'Keep', author: { login: 'repo-owner' }, labels: [], assignees: [] },
+        { number: 2, title: 'Drop', author: { login: 'outsider' }, labels: [], assignees: [] },
+      ]),
+      fetchedAt: Date.now() / 1000,
+    }).run();
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?trusted_only=1');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.issues).toHaveLength(1);
+    expect(data.issues[0].author.login).toBe('repo-owner');
+  });
+
+  it('returns no issues when neither global nor project allowlists trust any author', async () => {
+    testDb.db.insert(schema.ghIssuesCache).values({
+      project: 'myproj',
+      repo: 'owner/myproj',
+      prs: '[]',
+      issues: JSON.stringify([
+        { number: 1, title: 'Drop', author: { login: 'outsider' }, labels: [], assignees: [] },
+      ]),
+      fetchedAt: Date.now() / 1000,
+    }).run();
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?trusted_only=1');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.issues).toEqual([]);
+  });
+
+  it('returns no issues when both allowlists are empty', async () => {
+    getSettingsMock.mockReturnValue({ trusted_github_users: [], github_owner: '' });
+    loadFileConfigMock.mockReturnValue({ safe_users: [] });
+    testDb.db.insert(schema.ghIssuesCache).values({
+      project: 'myproj',
+      repo: 'owner/myproj',
+      prs: '[]',
+      issues: JSON.stringify([
+        { number: 1, title: 'Drop', author: { login: 'outsider' }, labels: [], assignees: [] },
+      ]),
+      fetchedAt: Date.now() / 1000,
+    }).run();
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?trusted_only=1');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.issues).toEqual([]);
+  });
+
+  it('matches trusted authors case-insensitively when trusted_only=1', async () => {
+    getSettingsMock.mockReturnValue({ trusted_github_users: ['Trusted-User'], github_owner: '' });
+    testDb.db.insert(schema.ghIssuesCache).values({
+      project: 'myproj',
+      repo: 'owner/myproj',
+      prs: '[]',
+      issues: JSON.stringify([
+        { number: 1, title: 'Keep', author: { login: 'trusted-user' }, labels: [], assignees: [] },
+      ]),
+      fetchedAt: Date.now() / 1000,
+    }).run();
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?trusted_only=1');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.issues).toHaveLength(1);
+  });
+
+  it('leaves prs untouched when trusted_only=1', async () => {
+    getSettingsMock.mockReturnValue({ trusted_github_users: [], github_owner: '' });
+    testDb.db.insert(schema.ghIssuesCache).values({
+      project: 'myproj',
+      repo: 'owner/myproj',
+      prs: JSON.stringify([
+        { number: 11, title: 'Visible PR', author: { login: 'outsider' } },
+      ]),
+      issues: JSON.stringify([
+        { number: 1, title: 'Drop', author: { login: 'outsider' }, labels: [], assignees: [] },
+      ]),
+      fetchedAt: Date.now() / 1000,
+    }).run();
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?trusted_only=1');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.prs).toHaveLength(1);
+    expect(data.prs[0].title).toBe('Visible PR');
+    expect(data.issues).toEqual([]);
   });
 });
 

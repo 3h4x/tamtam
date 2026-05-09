@@ -270,6 +270,8 @@ Artifact: /Users/me/logs/agent-…-job.prereq.txt
 
 This lets you build agents that react to fresh runtime state — e.g. a "test-speed watcher" that runs `pnpm test`, sees the duration, and proposes optimizations when the suite slows down. Output is truncated to ~64 KiB per stream in the prompt block; the full artifact file is always written.
 
+Built-in `issue-cruncher` agents have a default prerequisite even when the field is blank: TamTam injects `curl -fsS "http://localhost:1337/api/projects/by-project/<project>/issues?trusted_only=1"` so the agent reads only trusted issue bodies from the local API instead of calling `gh issue list` directly. New DB-backed issue-cruncher agents get that command on creation, existing DB-backed ones are backfilled on startup, and the run path also applies the same fallback defensively if an older row still lacks it.
+
 Behaviour:
 - The agent is spawned regardless of the prerequisite's exit code. Failures are surfaced through the prompt block (`Exit code: <n>`) so the agent can analyse them.
 - Timeout is 10 minutes (hardcoded for now).

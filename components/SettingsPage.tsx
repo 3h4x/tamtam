@@ -17,6 +17,7 @@ import { parseEnabledProviders } from '@/lib/usage/cli-providers'
 interface SettingsMap {
   workspace_path: string
   github_owner: string
+  trusted_github_users: string
   github_board_sync_enabled: string
   github_board_project_owner: string
   github_board_project_title: string
@@ -106,7 +107,7 @@ const GROUPS: {
   cols: number
 }[] = [
   { id: 'pipeline', title: 'Release Pipeline', description: 'Commit, review, fix-loop, and retention rules for the release pipeline', cols: 2 },
-  { id: 'general',  title: 'General',          description: 'Workspace location, GitHub defaults, and scheduling windows',     cols: 3 },
+  { id: 'general',  title: 'General',          description: 'Workspace location, GitHub defaults, trust allowlists, and scheduling windows', cols: 3 },
 ]
 
 const TABS: { id: TabId; label: string }[] = [

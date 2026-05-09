@@ -58,6 +58,7 @@ describe('config', () => {
       expect(config).toEqual({
         workspace_path: '',
         github_owner: '',
+        trusted_github_users: [],
         github_board_sync_enabled: false,
         github_board_project_owner: '',
         github_board_project_title: 'TamTam',

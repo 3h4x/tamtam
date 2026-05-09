@@ -9,9 +9,23 @@ import { listEnabledProjects } from '@/lib/shared/enabled-projects';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 import { isCliProvider } from '@/lib/usage/cli-providers';
+import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
 
 const ALL_FILE_AGENTS_TTL_MS = 10_000;
 let _allFileAgentsCache: { agents: FileAgent[]; time: number } | null = null;
+
+function withEffectivePrerequisite<T extends { project: string; skillIds: string[]; prerequisiteCommand?: string | null }>(
+  agent: T,
+): T {
+  return {
+    ...agent,
+    prerequisiteCommand: resolveAgentPrerequisiteCommand({
+      project: agent.project,
+      skillIds: agent.skillIds,
+      prerequisiteCommand: agent.prerequisiteCommand,
+    }),
+  };
+}
 
 function getAllFileAgentsCached(): FileAgent[] {
   const now = Date.now();
@@ -45,7 +59,7 @@ export async function GET(request: NextRequest) {
     if (projPath) {
       for (const fa of scanFileAgents(projPath, project)) {
         if (name && fa.name !== name) continue;
-        if (!dbKeys.has(`${fa.project}:${fa.name}`)) normalized.push(fa);
+        if (!dbKeys.has(`${fa.project}:${fa.name}`)) normalized.push(withEffectivePrerequisite(fa));
       }
     }
   } else {
@@ -54,7 +68,7 @@ export async function GET(request: NextRequest) {
     // for 10 s to avoid filesystem hits on every request.
     for (const fa of getAllFileAgentsCached()) {
       if (name && fa.name !== name) continue;
-      if (!dbKeys.has(`${fa.project}:${fa.name}`)) normalized.push(fa);
+      if (!dbKeys.has(`${fa.project}:${fa.name}`)) normalized.push(withEffectivePrerequisite(fa));
     }
   }
 
@@ -65,9 +79,14 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { name, project, skillIds, docPaths, model, prompt, schedule, runner, enabled } = body;
   const provider = isCliProvider(body.provider) ? body.provider : null;
-  const prerequisiteCommand = typeof body.prerequisiteCommand === 'string'
-    ? (body.prerequisiteCommand.trim() || null)
-    : null;
+  const skillIdsList = skillIds || [];
+  const prerequisiteCommand = resolveAgentPrerequisiteCommand({
+    project: project.trim(),
+    skillIds: skillIdsList,
+    prerequisiteCommand: typeof body.prerequisiteCommand === 'string'
+      ? body.prerequisiteCommand
+      : null,
+  });
 
   if (!name?.trim()) {
     return NextResponse.json({ detail: 'name is required' }, { status: 400 });
@@ -90,7 +109,7 @@ export async function POST(request: NextRequest) {
     id,
     name: name.trim(),
     project: project.trim(),
-    skillIds: JSON.stringify(skillIds || []),
+    skillIds: JSON.stringify(skillIdsList),
     docPaths: JSON.stringify(docPaths || []),
     model: parsedModel ?? 'normal',
     prompt: prompt || '',
@@ -114,7 +133,7 @@ export async function POST(request: NextRequest) {
           prompt: agent.prompt,
           model: agent.model,
           schedule: agent.schedule,
-          skillIds: skillIds || [],
+          skillIds: skillIdsList,
           runner: agent.runner,
           enabled: agent.enabled,
           provider: agent.provider,

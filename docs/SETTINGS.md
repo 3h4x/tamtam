@@ -20,6 +20,7 @@ All settings stored in the `settings` table (key-value, both TEXT). Accessed via
 |-----|------|---------|--------|
 | `workspace_path` | string | `''` | Root directory scanned for git repos; drives the projects list |
 | `github_owner` | string | `''` | Default GitHub org/user for repos without an explicit remote URL |
+| `trusted_github_users` | JSON string array | `[]` | Global GitHub-login allowlist for trusted external issue/PR authors. Stored as JSON in `settings`, unioned with each project’s `.tamtam/config.yml` `security.safe_users`, and used by untrusted-content wrapping plus trusted-only issue selection |
 | `github_board_sync_enabled` | boolean | `false` | Stored as `'true'`/`'false'`. Enables GitHub Project sync for run/release lifecycle updates |
 | `github_board_project_owner` | string | `''` | GitHub org/user that owns the shared TamTam project board. Falls back to `github_owner` when blank |
 | `github_board_project_title` | string | `'TamTam'` | Project board title TamTam creates or reuses when sync is enabled |
@@ -275,6 +276,7 @@ github_owner, github_board_sync_enabled, github_board_project_owner,
 github_board_project_title, github_board_project_number, github_board_project_url,
 github_board_view_url, github_board_project_id, github_board_status_field_id,
 github_board_status_option_ids, github_board_custom_field_ids,
+trusted_github_users,
 claude_provider, claude_bin, lmstudio_model, cli_enabled_providers,
 cli_bin_claude, cli_bin_codex, cli_bin_gemini, cli_bin_lmstudio,
 cli_default_model_claude, cli_default_model_codex,

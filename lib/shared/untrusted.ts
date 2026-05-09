@@ -1,4 +1,5 @@
 import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
+import { getSettings } from '@/lib/shared/config';
 
 /**
  * Prepended to pipeline-session prompts that may contain external GitHub content.
@@ -24,9 +25,13 @@ export function withUntrustedPreamble(prompt: string): string {
 
 /** Returns true when the GitHub login is listed in the project's safe_users config. */
 export function isUserTrusted(githubLogin: string, projectPath: string): boolean {
+  const normalizedLogin = githubLogin.toLowerCase();
+  const globalTrustedUsers = getSettings().trusted_github_users ?? [];
+  if (globalTrustedUsers.some(user => user.toLowerCase() === normalizedLogin)) return true;
+
   const config = loadFileConfig(projectPath);
   if (!config?.safe_users?.length) return false;
-  return config.safe_users.some(u => u.toLowerCase() === githubLogin.toLowerCase());
+  return config.safe_users.some(user => user.toLowerCase() === normalizedLogin);
 }
 
 /**

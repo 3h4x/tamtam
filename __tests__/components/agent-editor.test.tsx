@@ -145,6 +145,32 @@ describe('AgentEditor', () => {
     unmount()
   })
 
+  it('defaults the trusted-only prerequisite for issue-cruncher templates on save', async () => {
+    const { container, unmount } = renderEditor({
+      template: {
+        name: 'issue-cruncher',
+        description: 'Template',
+        model: 'normal',
+        schedule: '',
+        runner: 'pm2',
+        prompt: '',
+        skillIds: ['agent-issue-cruncher'],
+      },
+    })
+
+    buttonByText(container, 'Create agent').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(onSaveMock).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'issue-cruncher',
+        skillIds: ['agent-issue-cruncher'],
+        prerequisiteCommand: 'curl -fsS "http://localhost:1337/api/projects/by-project/alpha/issues?trusted_only=1"',
+      }))
+    })
+
+    unmount()
+  })
+
   it('replaces the prompt with the improved version when the wand is clicked', async () => {
     improveAgentPromptMock.mockResolvedValueOnce({ improvedPrompt: 'Run pnpm test --reporter=basic and report timing per file.' })
     const { container, unmount } = renderEditor()
