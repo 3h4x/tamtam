@@ -3699,7 +3699,6 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
     expect(startMarkDodMock).toHaveBeenCalledWith('my-proj', {
       prNumber: 55,
       repo: 'owner/repo',
-      mode: 'pipeline',
     });
   });
 
@@ -3717,7 +3716,6 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
     expect(startMarkDodMock).toHaveBeenCalledWith('my-proj', {
       prNumber: 55,
       repo: 'owner/repo',
-      mode: 'pipeline',
     });
   });
 

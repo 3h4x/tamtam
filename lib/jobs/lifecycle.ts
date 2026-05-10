@@ -728,7 +728,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           if (shouldRunDod && !shouldDeferDod) {
             try {
               const { startMarkDod } = await import('@/lib/pipeline/start-mark-dod');
-              const md = await startMarkDod(job.project, { mode: 'pipeline' });
+              const md = await startMarkDod(job.project);
               if (md.ok) {
                 console.log(`[release] DoD verification for #${md.issueNumber}: ${md.verified}/${md.total} verified${md.changed ? ' (issue updated)' : ''}`);
               }
@@ -1188,8 +1188,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           try {
             const { startMarkDod } = await import('@/lib/pipeline/start-mark-dod');
             const dodTarget = job.ghIssueNumber && job.ghIssueRepo
-              ? { issueNumber: job.ghIssueNumber, repo: job.ghIssueRepo, mode: 'pipeline' as const }
-              : { prNumber: meta.number, repo: meta.repo, mode: 'pipeline' as const };
+              ? { issueNumber: job.ghIssueNumber, repo: job.ghIssueRepo }
+              : { prNumber: meta.number, repo: meta.repo };
             const md = await startMarkDod(job.project, dodTarget);
             if (md.ok) {
               const targetLabel = 'issueNumber' in dodTarget

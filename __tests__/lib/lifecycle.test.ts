@@ -2562,7 +2562,7 @@ describe('push → dod target selection', () => {
 
     await markDoneFn(job, 0);
 
-    expect(startMarkDodMock).toHaveBeenCalledWith('proj', { issueNumber: 7, repo: 'owner/repo', mode: 'pipeline' });
+    expect(startMarkDodMock).toHaveBeenCalledWith('proj', { issueNumber: 7, repo: 'owner/repo' });
   });
 
   it('falls back to PR target when ghIssueNumber is null', async () => {
@@ -2576,7 +2576,7 @@ describe('push → dod target selection', () => {
 
     await markDoneFn(job, 0);
 
-    expect(startMarkDodMock).toHaveBeenCalledWith('proj', { prNumber: 42, repo: 'owner/repo', mode: 'pipeline' });
+    expect(startMarkDodMock).toHaveBeenCalledWith('proj', { prNumber: 42, repo: 'owner/repo' });
   });
 
   it('skips dod entirely when contextMeta has no prNumber', async () => {

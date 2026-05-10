@@ -61,7 +61,7 @@ describe('POST /api/projects/by-project/{projectName}/mark-dod', () => {
       ok: true, jobId: 'j', issueNumber: 1, verified: 0, total: 0, changed: false,
     });
     await POST(new Request('http://localhost'), params('specific-project'));
-    expect(startMarkDodMock).toHaveBeenCalledWith('specific-project', { mode: 'standalone' });
+    expect(startMarkDodMock).toHaveBeenCalledWith('specific-project');
   });
 
   it('forwards explicit issue context from request body as override', async () => {
@@ -78,7 +78,6 @@ describe('POST /api/projects/by-project/{projectName}/mark-dod', () => {
       issueNumber: 8,
       prNumber: undefined,
       repo: 'owner/repo',
-      mode: 'standalone',
     });
   });
 
@@ -96,7 +95,6 @@ describe('POST /api/projects/by-project/{projectName}/mark-dod', () => {
       issueNumber: undefined,
       prNumber: 39,
       repo: 'owner/repo',
-      mode: 'standalone',
     });
   });
 
@@ -110,7 +108,7 @@ describe('POST /api/projects/by-project/{projectName}/mark-dod', () => {
       body: JSON.stringify({ issue_number: 8 }),
     });
     await POST(req, params('myproj'));
-    expect(startMarkDodMock).toHaveBeenCalledWith('myproj', { mode: 'standalone' });
+    expect(startMarkDodMock).toHaveBeenCalledWith('myproj');
   });
 
   it('ignores invalid JSON body (treats as no override)', async () => {
@@ -123,7 +121,7 @@ describe('POST /api/projects/by-project/{projectName}/mark-dod', () => {
       body: 'not-json',
     });
     await POST(req, params('myproj'));
-    expect(startMarkDodMock).toHaveBeenCalledWith('myproj', { mode: 'standalone' });
+    expect(startMarkDodMock).toHaveBeenCalledWith('myproj');
   });
 
   it('returns 200 with changed:false when nothing was updated', async () => {

@@ -8,8 +8,7 @@ import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { currentParent } from '@/lib/jobs/parent-context';
 import { exec } from '@/lib/shared/shell';
 import { getPermissionModeFlag, getPipelineModel, getSettings } from '@/lib/shared/config';
-import { createJob, findActiveReleaseJob, listJobs, markDone, readParsedLog, updateJob } from '@/lib/jobs/job-storage';
-import { parseVerifiedCriteria } from './review-contract';
+import { createJob, findActiveReleaseJob, markDone, updateJob } from '@/lib/jobs/job-storage';
 import { wrapIfUntrusted, withUntrustedPreamble } from '@/lib/shared/untrusted';
 import { startJob, getJobStatus, deleteJob } from '@/lib/jobs/pm2-jobs';
 import { ensureBranchForCtx } from './mark-dod-branch';
@@ -103,24 +102,11 @@ export function tickCriteria(body: string, verifiedTexts: Set<string>): { body: 
  * recent run job — useful for PRs created outside the issue-driven flow
  * (manual `gh pr create`, /create-pr endpoint, etc.).
  */
-// Find the latest finished review job belonging to the active release.
-// Used in pipeline mode to read its log for verified criteria.
-function findLatestReviewJobForRelease(projectName: string): import('@/lib/jobs/types').JobData | null {
-  const activeRelease = findActiveReleaseJob(projectName);
-  if (!activeRelease) return null;
-  const jobs = listJobs();
-  const candidates = jobs.filter(
-    j => j.project === projectName && j.kind === 'review' && j.releaseId === activeRelease.id && j.finishedAt !== null
-  );
-  return candidates.sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0))[0] ?? null;
-}
-
 export async function startMarkDod(
   projectName: string,
-  override?: { issueNumber?: number; prNumber?: number; repo?: string; mode?: 'pipeline' | 'standalone' },
+  override?: { issueNumber?: number; prNumber?: number; repo?: string },
   _pollIntervalMs = 2000,
 ): Promise<MarkDodResult> {
-  const mode = override?.mode ?? 'standalone';
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
 
@@ -203,64 +189,7 @@ export async function startMarkDod(
     }
     log(`# found ${criteria.length} unchecked criteria to verify\n`);
 
-    // 2a. Pipeline mode: read verified criteria from the latest review log.
-    // No Claude spawn — deterministic, free, instant. Falls through to the
-    // LLM path only when no review log is available (manual mark-dod call).
-    if (mode === 'pipeline') {
-      const reviewJob = findLatestReviewJobForRelease(projectName);
-      if (reviewJob) {
-        const reviewLog = readParsedLog(reviewJob);
-        const reviewCriteria = parseVerifiedCriteria(reviewLog);
-        const norm = (s: string) => s.replace(/[`*_]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-        const verifiedTexts = new Set<string>();
-        for (const rc of reviewCriteria) {
-          if (!rc.verified) continue;
-          const want = norm(rc.text);
-          const hit = criteria.find(c => norm(c.text) === want);
-          if (hit) verifiedTexts.add(hit.text);
-        }
-        log(`# pipeline mode: ${verifiedTexts.size} / ${criteria.length} verified from review log ${reviewJob.id}\n`);
-        for (const rc of reviewCriteria) {
-          log(`# [${rc.verified ? 'VERIFIED' : 'unverified'}] ${rc.text.slice(0, 120)}\n`);
-        }
-        job.contextMeta = buildMarkDodContextMeta({ ...ctx, title }, isPr, verifiedTexts.size, criteria.length);
-        updateJob(job);
-        if (verifiedTexts.size === 0) {
-          log(`# no criteria verified — leaving ${ctxLabel} body unchanged\n`);
-          await markDone(job, 0);
-          return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: 0, total: criteria.length, changed: false };
-        }
-        const { body: updated, ticked } = tickCriteria(body, verifiedTexts);
-        if (ticked === 0 || updated === body) {
-          log(`# verified texts didn't match any checkbox exactly — skipping edit\n`);
-          await markDone(job, 0);
-          return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: verifiedTexts.size, total: criteria.length, changed: false };
-        }
-        const tmpFilePipeline = join(tmpdir(), `tamtam-${ctxLabel}-${ctx.number}-${Date.now()}.md`);
-        writeFileSync(tmpFilePipeline, updated);
-        try {
-          const editArgsPipeline = isPr
-            ? ['pr', 'edit', String(ctx.number), '--repo', ctx.repo, '--body-file', tmpFilePipeline]
-            : ['issue', 'edit', String(ctx.number), '--repo', ctx.repo, '--body-file', tmpFilePipeline];
-          const editR = await exec('gh', editArgsPipeline, { cwd: projPath, timeout: 15000 });
-          if (editR.stdout) log(editR.stdout);
-          if (editR.stderr) log(editR.stderr);
-          if (editR.exitCode !== 0) {
-            log(`# gh ${ctxLabel} edit failed\n`);
-            await markDone(job, 1);
-            return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: verifiedTexts.size, total: criteria.length, changed: false };
-          }
-          log(`# DoD updated on ${ctx.repo}#${ctx.number}: ticked ${ticked} of ${criteria.length}\n`);
-          await markDone(job, 0);
-          return { ok: true, jobId: job.id, issueNumber: ctx.number, verified: verifiedTexts.size, total: criteria.length, changed: true };
-        } finally {
-          try { unlinkSync(tmpFilePipeline); } catch {}
-        }
-      }
-      log(`# pipeline mode: no review log found — falling back to LLM verification\n`);
-    }
-
-    // 2b. Standalone mode: ask Claude to VERIFY each criterion against the codebase.
+    // Ask Claude to VERIFY each criterion against the codebase.
     // External content (title, criteria from issue body) is wrapped in
     // <untrusted> tags so injected instructions cannot hijack Claude.
     const criteriaListRaw = criteria.map((c, i) => `${i + 1}. ${c.text}`).join('\n');

@@ -434,12 +434,39 @@ export function PipelineStrip({
   const pushAction = pushJob ? openJob(pushJob) : null
   const pushRetryAction = pushState === 'failed' && !pushErrorIsCommit ? handleRetryPush : null
 
-  const dodState = stateOf(dodJob)
-  const dodHint = dodJob?.status === 'running' ? 'DoD verification in progress — click to open terminal'
-    : dodJob?.exit_code === 0 ? 'DoD verified — click to view log'
-    : dodJob && dodJob.exit_code !== 0 ? 'DoD verification failed — click to view log'
-    : reviewState === 'done' ? 'waiting for push'
-    : 'waiting for LGTM review'
+  function readDodCounts(job: JobInfo | undefined): { verified: number; total: number } | null {
+    if (!job?.context_meta) return null
+    try {
+      const meta = JSON.parse(job.context_meta) as { verified?: number | null; total?: number | null }
+      if (typeof meta.verified === 'number' && typeof meta.total === 'number') {
+        return { verified: meta.verified, total: meta.total }
+      }
+    } catch { /* malformed contextMeta — fall through */ }
+    return null
+  }
+  const dodCounts = readDodCounts(dodJob)
+  let dodState: StepState
+  if (!dodJob) {
+    dodState = 'pending'
+  } else if (dodJob.status === 'running') {
+    dodState = 'running'
+  } else if (dodJob.exit_code !== 0) {
+    dodState = 'failed'
+  } else if (dodCounts && dodCounts.total > 0) {
+    if (dodCounts.verified === 0) dodState = 'warning'
+    else if (dodCounts.verified < dodCounts.total) dodState = 'warning'
+    else dodState = 'done'
+  } else {
+    dodState = 'done'
+  }
+  const dodHint = dodJob?.status === 'running'
+    ? 'DoD verification in progress — click to open terminal'
+    : dodJob && dodCounts && dodCounts.total > 0
+      ? `DoD: ${dodCounts.verified} / ${dodCounts.total} verified${dodCounts.verified < dodCounts.total ? ` — ${dodCounts.total - dodCounts.verified} unticked` : ''} — click to view log`
+      : dodJob?.exit_code === 0 ? 'DoD verified — click to view log'
+      : dodJob && dodJob.exit_code !== 0 ? 'DoD verification failed — click to view log'
+      : reviewState === 'done' ? 'waiting for push'
+      : 'waiting for LGTM review'
   const dodAction = dodJob ? openJob(dodJob) : null
 
   // Surface PR creation as its own chip. The push job stores
