@@ -425,6 +425,36 @@ describe('GET /api/stats/pipeline', () => {
     expect(data.stepDurations['pr-wait'].avg).toBe(30_000);
   });
 
+  it('includes synthetic agent step from parentJobId trigger job', async () => {
+    const now = Date.now() / 1000;
+    // The release's parentJobId points to the triggering run, which is outside
+    // the releaseId graph. computeStepDurations must look it up via parentJobId
+    // to populate the synthetic `agent` step duration.
+    const trigger = makeJob({ id: 'trigger-1', project: 'p1', kind: 'run', exitCode: 0, startedAt: now - 500, finishedAt: now - 200, durationMs: 300_000, costUsd: 0.5 });
+    const release = { ...makeRelease('rel-1', 'p1', 0, now - 200, now - 100), parentJobId: 'trigger-1' };
+    listJobsMock.mockReturnValue([trigger, release]);
+
+    const res = await GET(new NextRequest('http://localhost/api/stats/pipeline?window=all'));
+    const data = await res.json();
+
+    expect(data.stepDurations.agent).toBeDefined();
+    expect(data.stepDurations.agent.count).toBe(1);
+    expect(data.stepDurations.agent.avg).toBe(300_000);
+    expect(data.stepDurations.agent.avgCostUsd).toBe(0.5);
+  });
+
+  it('omits synthetic agent step when no release has a parentJobId', async () => {
+    const now = Date.now() / 1000;
+    listJobsMock.mockReturnValue([
+      makeRelease('rel-no-parent', 'p1', 0, now - 300, now - 200),
+    ]);
+
+    const res = await GET(new NextRequest('http://localhost/api/stats/pipeline?window=all'));
+    const data = await res.json();
+
+    expect(data.stepDurations.agent).toBeUndefined();
+  });
+
   it('computes MTTR from successful release durations', async () => {
     const now = Date.now() / 1000;
     listJobsMock.mockReturnValue([
