@@ -1,12 +1,12 @@
 # Agents — How They Work
 
-Agents are reusable automation units that combine skills, a model, a prompt template, and optional scheduling. Each agent runs the selected provider through TamTam's Claude-compatible CLI shim layer with a composed system prompt (skills) and a task prompt, either on-demand or on a recurring schedule.
+Agents are reusable automation units that combine skills, optional attached project docs, a model, a prompt template, and optional scheduling. Each agent runs the selected provider through TamTam's Claude-compatible CLI shim layer with a composed system prompt (skills + selected docs) and a task prompt, either on-demand or on a recurring schedule.
 
 ## When to read this
 
 - Creating a new agent via API or UI
 - Debugging why a scheduled agent isn't firing
-- Understanding how skills are composed into the system prompt
+- Understanding how skills and attached project docs are composed into the system prompt
 - Preventing duplicate/concurrent agent runs
 - Understanding the internal scheduler and legacy launchctl compatibility
 
@@ -14,10 +14,10 @@ Agents are reusable automation units that combine skills, a model, a prompt temp
 
 ## Concepts
 
-- **Agent** — A configuration combining skills, model, and prompt template
+- **Agent** — A configuration combining skills, optional attached project docs, model, and prompt template
 - **Scheduled run** — Automatic execution on an interval (e.g., "1h", "30m"), driven by the in-process scheduler for `runner: "pm2"` or by legacy `launchctl` rows
 - **On-demand run** — Manual execution triggered via API or UI
-- **Skill composition** — Skills are prepended as a system prompt before the task prompt
+- **Agent context composition** — Skills and attached docs are prepended as context before the task prompt
 
 ## Agent Fields
 
@@ -27,6 +27,7 @@ Agents are reusable automation units that combine skills, a model, a prompt temp
 | `name` | string | required | Display name (e.g., "Daily Tests") |
 | `project` | string | required | Project name (must exist in workspace) |
 | `skillIds` | string (JSON array) | `[]` | Array of skill IDs to compose as system prompt |
+| `docPaths` | string (JSON array) | `[]` | Array of project-relative doc paths to include alongside skills in the composed prompt context |
 | `model` | string | `normal` | Semantic model tier: `fast`, `normal`, or `smart`. Legacy `haiku`, `sonnet`, and `opus` aliases are still accepted. |
 | `prompt` | string | `''` | Default task prompt for scheduled runs |
 | `schedule` | string | `null` | Run interval for scheduling: `"30m"`, `"1h"`, `"8h"`, etc. or `null` for manual only |
@@ -85,7 +86,7 @@ curl -X POST http://localhost:1337/api/agents \
 ```
 
 **Required fields:** `name`, `project`  
-**Optional fields:** `skillIds` (default `[]`), `model`, `prompt`, `schedule`, `runner`, `enabled`, `prerequisiteCommand`
+**Optional fields:** `skillIds` (default `[]`), `docPaths` (default `[]`), `model`, `prompt`, `schedule`, `runner`, `enabled`, `provider`, `prerequisiteCommand`
 
 If you provide both `schedule` and `prompt`, the agent's schedule is automatically installed.
 
@@ -228,9 +229,9 @@ If an agent has both `schedule` and `prompt`, the schedule is installed automati
 
 On each scheduled trigger, the agent runs with its stored `prompt`.
 
-## Skill Composition
+## Agent Context Composition
 
-Skills are combined into a system prompt before the task prompt:
+Skills and attached project docs are combined into a system prompt before the task prompt:
 
 ```
 ## Skill 1 Name
@@ -243,12 +244,17 @@ Skill 2 content...
 
 ---
 
+## README.md
+Selected project documentation...
+
+---
+
 [Task prompt provided at run time]
 ```
 
 The final prompt sent to the selected provider is:
 ```
-[Base prompt from settings] + [Composed skills] + [Task prompt]
+[Base prompt from settings] + [Composed skills/docs] + [Task prompt]
 ```
 
 For file-backed agents in `.tamtam/agents/*.md`, `provider:` is committed frontmatter and is preserved on prompt-only writes. TamTam treats it as part of the shared agent contract, not as an ephemeral UI-only override.

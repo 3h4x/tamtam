@@ -59,7 +59,7 @@ pnpm mcp:http <tool> [json_args]  # call local TamTam HTTP endpoints via .tamtam
 
 ## Configuration
 
-Runtime config lives in the SQLite database (`data/db/tamtam.db`). Shared per-project settings can also be committed in `.tamtam/config.yml`, and file-agent prompts can live in `.tamtam/agents/*.md`.
+Runtime config lives in the SQLite database by default (`data/db/tamtam.db`, override with `TAMTAM_DB_PATH`). Shared per-project settings can also be committed in `.tamtam/config.yml`, and file-agent prompts can live in `.tamtam/agents/*.md`.
 
 The Settings area is split across `/settings/general`, `/settings/cli`, `/settings/pipeline`, `/settings/notifications`, `/settings/projects`, `/settings/templates`, and `/settings/database`.
 Bare `/settings` redirects to `/settings/general`, and legacy `/jobs` redirects to `/runs`.
@@ -82,6 +82,7 @@ Optional env vars:
 
 ```bash
 GITHUB_OWNER=...       # GitHub org/user fallback for CI lookups
+TAMTAM_DB_PATH=...     # Override the SQLite database location (default: data/db/tamtam.db)
 TAMTAM_BASE_URL=...    # Base URL for outbound webhook log links (default: http://localhost:1337)
 PROMETHEUS_URL=...     # Prometheus base URL for monitoring dashboard (default: http://localhost:9090)
 LOKI_URL=...           # Loki base URL for log monitoring (default: http://localhost:3100)
@@ -94,7 +95,7 @@ Skills are reusable instruction blocks injected into agent prompts. Two sources:
 - **DB-backed** — create and edit via `/skills`
 - **File-based** — auto-scanned from `skills/docs/skills/` (the `claude-skills` submodule) and `data/skills/`; any `.md` file in a category subdirectory, with optional YAML frontmatter (`title`, `description`)
 
-Agents are built by selecting a model, writing a prompt, and attaching any number of skills. At run time, skill content is prepended to the prompt before the configured provider sees it.
+Agents are built by selecting a model, writing a prompt, and attaching any number of skills and project docs. Agents can also pin a provider or prerequisite command. At run time, attached content is prepended to the prompt before the configured provider sees it.
 
 ## Agents
 

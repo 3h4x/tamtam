@@ -12,14 +12,14 @@ Steps are pluggable per project. The **🚀 Release** button triggers the pipeli
 
 ## Concepts
 - **Skills** — reusable prompt/instruction blocks (DB-backed + file-based skills from `skills/docs/skills/` and `data/skills/`)
-- **Agents** — composed from skills + model + prompt + interval schedule + runner. `pm2` is the default runner; `launchctl` is deprecated.
+- **Agents** — composed from skills + project docs + model + prompt + interval schedule + runner; agents can also pin a provider and prerequisite command. `pm2` is the default runner; `launchctl` is deprecated.
 - **Runs** — individual executions of an agent; the legacy `/jobs` URL redirects to `/runs`
 - **Custom Actions** — per-project bash commands (e.g. deploy) with configurable button color
 - **Release Pipeline** — see Vision above
 
 ## Tech Stack
 - **Framework**: Next.js 16 (App Router) — both frontend and backend
-- **Database**: Drizzle ORM + better-sqlite3, WAL mode, DB at `data/db/tamtam.db` (gitignored)
+- **Database**: Drizzle ORM + better-sqlite3, WAL mode, default DB at `data/db/tamtam.db` (gitignored; override with `TAMTAM_DB_PATH`)
 - **Streaming**: SSE via route handlers for real-time run output
 - **Styling**: Tailwind CSS v4
 - **Agent providers**: Claude-compatible CLI shims for Claude, Gemini, LM Studio, Codex, and custom backends
@@ -128,7 +128,7 @@ See `docs/API.md` for the full route reference. New routes must be documented th
 - Client-side API helpers live under `lib/client/` and are surfaced through `lib/client-api.ts`. When a fetch pattern is reused across components, add or extend a helper there instead of duplicating request/response handling in the component.
 - Direct `child_process` usage is the exception, not the default: keep ordinary shelling in `lib/shared/shell.ts`; only use raw spawn/process control in the runner/shim/streaming paths that already need it, and keep the reason obvious in code.
 - Terminal runs use the selected provider's `stream-json` output for token-by-token streaming via PM2 + log file + fs.watch + NDJSON parser. SSE at `/api/streaming/[jobId]`. See `docs/STREAMING.md`.
-- Agent runs compose skill content into the prompt before sending to the configured provider. An agent may declare an optional `prerequisiteCommand` shell command that runs before the CLI is spawned; its output (command, exit code, duration, stdout/stderr) is captured to `<logDir>/<jobId>.prereq.txt` and prepended to the agent's prompt. The Overview "Scheduled agents" block surfaces per-agent statistics — average run duration, success rate, total tokens (cache-aware), `cost_usd`, files touched, and (for review agents) the number of `fix` jobs sharing a `release_id` — fed by `/api/agents/stats`. The Agents tab opens a full-page editor with a ✨ Improve button next to the Prompt textarea, backed by `/api/agents/improve-prompt`. See `docs/AGENT.md` for skill composition, scheduling, runner lifecycle, the prerequisite hook, the stats aggregation, and the magic-wand prompt-rewrite endpoint.
+- Agent runs compose skill and project-doc content into the prompt before sending to the configured provider. An agent may declare an optional `prerequisiteCommand` shell command that runs before the CLI is spawned; its output (command, exit code, duration, stdout/stderr) is captured to `<logDir>/<jobId>.prereq.txt` and prepended to the agent's prompt. The Overview "Scheduled agents" block surfaces per-agent statistics — average run duration, success rate, total tokens (cache-aware), `cost_usd`, files touched, and (for review agents) the number of `fix` jobs sharing a `release_id` — fed by `/api/agents/stats`. The Agents tab opens a full-page editor with a ✨ Improve button next to the Prompt textarea, backed by `/api/agents/improve-prompt`. See `docs/AGENT.md` for skill composition, scheduling, runner lifecycle, the prerequisite hook, the stats aggregation, and the magic-wand prompt-rewrite endpoint.
 - `commit_style` setting injects a style guide into commit-message generation; `review_verdict_rules` drives LGTM/NEEDS ATTENTION/DO NOT SHIP — both configurable in Settings → Pipeline. All settings keys/types/defaults: `docs/SETTINGS.md`.
 - File-based skills scanned from `skills/docs/skills/` and `data/skills/` (category subdirs, any `.md` with optional YAML frontmatter: `title`, `description`). DB-backed skills via `/skills` page or API; built-in agent skills (cto, security-review, dependency-check, blog, ci-monitor, release-ready, tests, gha-audit, docs-claude, readme-sync, self-improve, manage-agents, senior-fullstack) seeded from `lib/agents/default-agent-skills.ts`.
 - GitHub owner fallback configurable via `GITHUB_OWNER` env or Settings UI.
