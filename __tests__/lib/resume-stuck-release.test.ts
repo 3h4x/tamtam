@@ -271,6 +271,45 @@ describe('resume-stuck-release helpers', () => {
     expect(release.exitCode).toBe(0);
   });
 
+  it('returns an error when re-acquiring the pipeline lock throws', async () => {
+    const now = Date.now() / 1000;
+    const release = makeJob({
+      id: 'release-lock-error',
+      project: 'proj',
+      kind: 'release',
+      startedAt: now - 300,
+      finishedAt: now - 60,
+      exitCode: 0,
+    });
+    getJobMock.mockReturnValue(release);
+    listJobsMock.mockReturnValue([
+      makeJob({
+        id: 'review-1',
+        project: 'proj',
+        kind: 'review',
+        releaseId: 'release-lock-error',
+        startedAt: now - 290,
+        finishedAt: now - 280,
+        exitCode: 0,
+      }),
+    ]);
+    acquireLockMock.mockRejectedValue(new Error('lock service offline'));
+
+    const { resumeStuckRelease } = await import('@/lib/pipeline/resume-stuck-release');
+    const resumed = await resumeStuckRelease('proj', 'release-lock-error');
+
+    expect(resumed).toEqual({
+      ok: false,
+      status: 'error',
+      detail: 'failed to re-acquire pipeline lock: lock service offline',
+      attempted: false,
+    });
+    expect(updateJobMock).not.toHaveBeenCalled();
+    expect(runCompletionHooksMock).not.toHaveBeenCalled();
+    expect(release.finishedAt).toBe(now - 60);
+    expect(release.exitCode).toBe(0);
+  });
+
   it('does not spend the auto-resume budget when lock contention prevents reopening', async () => {
     const now = Date.now() / 1000;
     testDb.db.insert(schema.jobs).values({
@@ -328,5 +367,56 @@ describe('resume-stuck-release helpers', () => {
     expect(updateJobMock).toHaveBeenCalledTimes(1);
     expect(runCompletionHooksMock).toHaveBeenCalledTimes(1);
     expect(runCompletionHooksMock.mock.calls[0]?.[0]).toMatchObject({ id: 'test-1', kind: 'test' });
+  });
+
+  it('caps auto-resume after two attempted hook restarts', async () => {
+    const now = Date.now() / 1000;
+    testDb.db.insert(schema.jobs).values({
+      id: 'release-max-attempts',
+      project: 'proj',
+      kind: 'release',
+      prompt: null,
+      pid: 0,
+      logPath: null,
+      startedAt: now - 300,
+      finishedAt: now - 60,
+      exitCode: 0,
+      seen: false,
+    } as any).run();
+    listJobsMock.mockReturnValue([
+      makeJob({
+        id: 'commit-1',
+        project: 'proj',
+        kind: 'commit',
+        releaseId: 'release-max-attempts',
+        startedAt: now - 290,
+        finishedAt: now - 280,
+        exitCode: 0,
+      }),
+    ]);
+    getJobMock.mockImplementation((id: string) => {
+      if (id !== 'release-max-attempts') return null;
+      return makeJob({
+        id: 'release-max-attempts',
+        project: 'proj',
+        kind: 'release',
+        startedAt: now - 300,
+        finishedAt: now - 60,
+        exitCode: 0,
+      });
+    });
+    runCompletionHooksMock.mockRejectedValue(new Error('hook failed'));
+
+    const { autoResumeStuckReleases, _resetAutoResumeAttempts } = await import('@/lib/pipeline/resume-stuck-release');
+
+    _resetAutoResumeAttempts();
+    await autoResumeStuckReleases();
+    await autoResumeStuckReleases();
+    await autoResumeStuckReleases();
+
+    expect(acquireLockMock).toHaveBeenCalledTimes(2);
+    expect(updateJobMock).toHaveBeenCalledTimes(4);
+    expect(runCompletionHooksMock).toHaveBeenCalledTimes(2);
+    expect(releaseLockMock).toHaveBeenCalledTimes(2);
   });
 });
