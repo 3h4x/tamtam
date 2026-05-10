@@ -23,6 +23,14 @@ vi.mock('@/components/project-detail/StatusStrip', () => ({
   StatusStrip: () => <div data-testid="status-strip" />,
 }))
 
+vi.mock('@/components/project-detail/PipelineStatsPanel', () => ({
+  PipelineStatsPanel: ({ projectName }: { projectName: string }) => <div data-testid="pipeline-stats">{projectName}</div>,
+}))
+
+vi.mock('@/components/project-detail/AgentsStats', () => ({
+  AgentsStats: ({ projectName }: { projectName: string }) => <div data-testid="agents-stats">{projectName}</div>,
+}))
+
 vi.mock('@/lib/shared/format', () => ({
   formatAgo: (ts: number) => `ago:${ts}`,
 }))
@@ -142,6 +150,8 @@ describe('OverviewTab active work', () => {
     expect(buttons.some((button) => button.textContent?.includes('pipeline'))).toBe(false)
     expect(buttons.some((button) => button.textContent?.includes('other'))).toBe(false)
     expect(container.textContent).toContain('+1 more running job')
+    expect(container.querySelector('[data-testid="pipeline-stats"]')?.textContent).toBe('acme/widgets')
+    expect(container.querySelector('[data-testid="agents-stats"]')?.textContent).toBe('acme/widgets')
 
     unmount()
   })

@@ -405,14 +405,24 @@ describe('GET /api/stats/pipeline', () => {
     const reviews = [10_000, 20_000, 30_000, 40_000, 50_000].map((ms, i) =>
       makeJob({ id: `r${i}`, project: 'p1', kind: 'review', exitCode: 0, startedAt: now - 3600 + i, finishedAt: now - 3600 + i + ms / 1000, durationMs: ms }),
     );
-    listJobsMock.mockReturnValue(reviews);
+    const releases = [
+      makeRelease('rel-a', 'p1', 0, now - 900, now - 780),
+      makeRelease('rel-b', 'p1', 0, now - 700, now - 610),
+    ];
+    const mergeWaits = [
+      makeJob({ id: 'pw-1', project: 'p1', kind: 'pr-wait', exitCode: 0, startedAt: now - 200, finishedAt: now - 170, durationMs: 30_000 }),
+    ];
+    listJobsMock.mockReturnValue([...reviews, ...releases, ...mergeWaits]);
 
     const res = await GET(new NextRequest('http://localhost/api/stats/pipeline?window=all'));
     const data = await res.json();
     expect(data.stepDurations.review).toBeDefined();
     expect(data.stepDurations.review.count).toBe(5);
+    expect(data.stepDurations.review.avg).toBe(30_000);
     expect(data.stepDurations.review.median).toBe(30_000);
     expect(data.stepDurations.review.p95).toBe(50_000);
+    expect(data.stepDurations.release.avg).toBe(105_000);
+    expect(data.stepDurations['pr-wait'].avg).toBe(30_000);
   });
 
   it('computes MTTR from successful release durations', async () => {
@@ -427,6 +437,7 @@ describe('GET /api/stats/pipeline', () => {
     const data = await res.json();
     expect(data.mttr).not.toBeNull();
     expect(data.mttr.count).toBe(2);
+    expect(data.mttr.avg).toBe(90_000);
     expect(data.mttr.median).toBe(60_000);
   });
 
