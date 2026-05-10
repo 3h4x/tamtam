@@ -110,10 +110,13 @@ export async function resolveGithubRepo(
       const r = await exec('git', ['-C', expanded, 'remote', 'get-url', 'origin'], { timeout: 5000 });
       if (r.exitCode === 0) {
         let url = r.stdout.trim();
-        if (url.startsWith('git@github.com:')) url = url.slice('git@github.com:'.length);
-        else if (url.startsWith('https://github.com/')) url = url.slice('https://github.com/'.length);
-        url = url.replace(/\.git$/, '');
-        if (url && url.includes('/')) return url;
+        if (url.startsWith('git@github.com:')) {
+          url = url.slice('git@github.com:'.length).replace(/\.git$/, '');
+          if (url.includes('/')) return url;
+        } else if (url.startsWith('https://github.com/')) {
+          url = url.slice('https://github.com/'.length).replace(/\.git$/, '');
+          if (url.includes('/')) return url;
+        }
       }
     } catch {}
   }
