@@ -48,7 +48,7 @@ export function resolveProjectPath(projectName: string): string | null {
 }
 
 function launchctlState(info: LaunchctlInfo, schedId: string): string {
-  if (info.loaded && info.pid) return 'running';
+  if (info.loaded && info.pid !== null) return 'running';
   if (info.loaded) return 'loaded';
   if (existsSync(pausedPlistPath(schedId))) return 'paused';
   if (existsSync(plistPath(schedId))) return 'installed';

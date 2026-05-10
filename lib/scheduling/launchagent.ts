@@ -71,8 +71,10 @@ export async function launchctlInfo(project: string): Promise<LaunchctlInfo> {
   };
 
   if (result.exitCode === 0) {
-    const pidMatch = result.stdout.match(/"PID"\s*=\s*(\d+)/);
-    const exitMatch = result.stdout.match(/"LastExitStatus"\s*=\s*(\d+)/);
+    // `launchctl list <label>` output varies by macOS version and can emit
+    // either `PID = 123;` or `"PID" = 123;` style keys.
+    const pidMatch = result.stdout.match(/"?PID"?\s*=\s*(\d+)/);
+    const exitMatch = result.stdout.match(/"?LastExitStatus"?\s*=\s*(\d+)/);
     if (pidMatch) info.pid = parseInt(pidMatch[1], 10);
     if (exitMatch) info.lastExit = parseInt(exitMatch[1], 10);
   }

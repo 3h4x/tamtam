@@ -86,6 +86,19 @@ describe('launchagent', () => {
       expect(info.lastExit).toBe(0);
     });
 
+    it('parses PID from unquoted launchctl output keys', async () => {
+      const output = `{
+        PID = 54321;
+        LastExitStatus = 7;
+      }`;
+      execMock.mockResolvedValue(makeExecResult(0, output));
+
+      const info = await launchctlInfo('myproject');
+      expect(info.loaded).toBe(true);
+      expect(info.pid).toBe(54321);
+      expect(info.lastExit).toBe(7);
+    });
+
     it('returns null PID when PID key is missing from output', async () => {
       const output = `{
         "LastExitStatus" = 1;
