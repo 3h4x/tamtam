@@ -59,7 +59,7 @@ export async function GET(
   const { projectName } = await params;
   const forceRefresh = request.nextUrl.searchParams.get('refresh') === '1';
   const trustedOnly = request.nextUrl.searchParams.get('trusted_only') === '1';
-  const slim = request.nextUrl.searchParams.get('slim') === '1';
+  const slim = request.nextUrl.searchParams.get('full') !== '1';
 
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });

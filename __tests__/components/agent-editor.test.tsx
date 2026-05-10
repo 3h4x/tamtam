@@ -164,7 +164,7 @@ describe('AgentEditor', () => {
       expect(onSaveMock).toHaveBeenCalledWith(expect.objectContaining({
         name: 'issue-cruncher',
         skillIds: ['agent-issue-cruncher'],
-        prerequisiteCommand: 'curl -fsS "http://localhost:1337/api/projects/by-project/alpha/issues?trusted_only=1&slim=1"',
+        prerequisiteCommand: 'curl -fsS "http://localhost:1337/api/projects/by-project/alpha/issues?trusted_only=1"',
       }))
     })
 

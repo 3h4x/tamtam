@@ -219,7 +219,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
     const data = await res.json();
     expect(data.issues).toHaveLength(1);
-    expect(data.issues[0].author.login).toBe('repo-owner');
+    expect(data.issues[0].number).toBe(1);
   });
 
   it('unions global trusted_github_users with project safe_users when trusted_only=1', async () => {
@@ -317,6 +317,49 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
     expect(data.prs).toHaveLength(1);
     expect(data.prs[0].title).toBe('Visible PR');
     expect(data.issues).toEqual([]);
+  });
+
+  it('strips body and heavy fields by default (slim)', async () => {
+    testDb.db.insert(schema.ghIssuesCache).values({
+      project: 'myproj',
+      repo: 'owner/myproj',
+      prs: JSON.stringify([{ number: 5, title: 'My PR', headRefName: 'feat/x', isDraft: false, labels: [{ id: '1', name: 'bug', description: '', color: 'red' }], author: { login: 'me' }, body: 'big pr body' }]),
+      issues: JSON.stringify([{ number: 3, title: 'My Issue', labels: [{ id: '2', name: 'enhancement', description: '', color: 'blue' }], author: { login: 'me' }, body: 'long issue body', assignees: [] }]),
+      fetchedAt: Date.now() / 1000,
+    }).run();
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    const issue = data.issues[0];
+    expect(issue.number).toBe(3);
+    expect(issue.title).toBe('My Issue');
+    expect(issue.labels).toEqual(['enhancement']);
+    expect(issue.body).toBeUndefined();
+    expect(issue.author).toBeUndefined();
+    const pr = data.prs[0];
+    expect(pr.number).toBe(5);
+    expect(pr.labels).toEqual(['bug']);
+    expect(pr.branch).toBe('feat/x');
+    expect(pr.body).toBeUndefined();
+    expect(pr.author).toBeUndefined();
+  });
+
+  it('returns full issue data when full=1', async () => {
+    testDb.db.insert(schema.ghIssuesCache).values({
+      project: 'myproj',
+      repo: 'owner/myproj',
+      prs: '[]',
+      issues: JSON.stringify([{ number: 3, title: 'My Issue', labels: [], author: { login: 'me' }, body: 'long issue body', assignees: [] }]),
+      fetchedAt: Date.now() / 1000,
+    }).run();
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?full=1');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    const issue = data.issues[0];
+    expect(issue.body).toBe('long issue body');
+    expect(issue.author).toEqual({ login: 'me' });
   });
 });
 
