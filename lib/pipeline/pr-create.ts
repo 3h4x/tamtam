@@ -1,5 +1,5 @@
 import { exec } from '@/lib/shared/shell';
-import { listJobs } from '@/lib/jobs/job-storage';
+import { getJob } from '@/lib/jobs/job-storage';
 import type { JobData } from '@/lib/jobs/types';
 import { detectMainBranch } from './start-commit';
 
@@ -17,21 +17,30 @@ function stubIssuePrBody(issue: { number: number; repo: string }): string {
   return `Closes #${issue.number}\n\nImplemented via TamTam from issue [#${issue.number}](https://github.com/${issue.repo}/issues/${issue.number}).`;
 }
 
-function findIssueRunJob(issue: { number: number; repo: string }, projectName?: string): JobData | null {
-  let jobs: JobData[];
-  try {
-    jobs = listJobs();
-  } catch {
-    return null;
+// Walk the parent_job_id chain upward from `originJobId` and return the first
+// ancestor whose work_summary describes the implementation work this PR is
+// landing — typically an `agent:issue-cruncher` run or a terminal `run` linked
+// to this issue. Walking the chain is the only correct lookup: matching by
+// gh_issue_number alone can return a different agent run with the same number
+// from a previous attempt or a different release.
+function findOriginRunByParentChain(originJobId: string | null | undefined): JobData | null {
+  if (!originJobId) return null;
+  const seen = new Set<string>();
+  let cursor: string | null = originJobId;
+  while (cursor && !seen.has(cursor)) {
+    seen.add(cursor);
+    const job: JobData | null = getJob(cursor) ?? null;
+    if (!job) return null;
+    // Eligible origin kinds: the ones that actually carry an implementation
+    // work_summary worth surfacing in the PR body. Pipeline meta-jobs
+    // (release/test/review/commit/push/fix*/pr*/mark-dod) are skipped — they
+    // don't author the work, they orchestrate it.
+    if (job.kind === 'agent:issue-cruncher' || (job.kind === 'run' && job.ghIssueNumber != null)) {
+      if (job.workSummary && job.workSummary.trim()) return job;
+    }
+    cursor = job.parentJobId ?? null;
   }
-  return jobs
-    .filter(j =>
-      j.kind === 'run'
-      && j.ghIssueNumber === issue.number
-      && (!issue.repo || !j.ghIssueRepo || j.ghIssueRepo === issue.repo)
-      && (!projectName || j.project === projectName)
-    )
-    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0] ?? null;
+  return null;
 }
 
 export function buildIssuePrBody(issue: { number: number; repo: string }, runJob: JobData | null): string {
@@ -92,7 +101,13 @@ export async function createIssuePR(
   log: (s: string) => void,
   issue: { number: number; repo: string; title: string },
   signal?: AbortSignal,
-  projectName?: string,
+  // `originJobId` is the job that triggered PR creation — typically the push
+  // job. We walk its parent_job_id chain upward to find the originating
+  // implementation run (agent:issue-cruncher / kind='run' issue) whose
+  // work_summary populates the PR body. Walking the chain is the only
+  // correct lookup; matching by gh_issue_number alone can pull a workSummary
+  // from a different agent run with the same number.
+  originJobId?: string | null,
 ): Promise<string | null> {
   const branchR = normalizeExecResult(await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000, signal }));
   const currentBranch = branchR.stdout.trim();
@@ -141,7 +156,7 @@ export async function createIssuePR(
   const prTitle = /^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+?\))?:\s/i.test(issue.title)
     ? issue.title
     : `fix: ${issue.title}`;
-  const runJob = findIssueRunJob(issue, projectName);
+  const runJob = findOriginRunByParentChain(originJobId);
   const prBody = buildIssuePrBody(issue, runJob);
   log(`\n# creating PR for issue #${issue.number}: "${prTitle}"\n`);
 

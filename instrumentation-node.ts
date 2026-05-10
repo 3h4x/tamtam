@@ -278,34 +278,56 @@ async function reapAbandonedInlineJobs(): Promise<void> {
 // see `isReleasePipelineRunning` = true (because the bash monitor is alive)
 // and bounce with "Release pipeline already running for X" until the monitor
 // times out 4h later. Reap them at boot.
-async function reapOrphanReleases(): Promise<void> {
+const ORPHAN_RELEASE_HANDOFF_GRACE_SEC = 5;
+
+export async function reapOrphanReleases(): Promise<void> {
   try {
-    const { listJobs, markDone } = await import('./lib/jobs/job-storage');
+    const { listJobs, markDone, reconcileStaleRelease, getJob } = await import('./lib/jobs/job-storage');
     const { db, schema } = await import('./lib/db');
     const { exec } = await import('./lib/shared/shell');
     const { eq } = await import('drizzle-orm');
 
     const candidates = listJobs().filter(j => j.kind === 'release' && j.finishedAt === null);
     for (const job of candidates) {
-      // Treat as orphan only when there are no live child steps. If a child
-      // step is still running, the release is genuinely in-flight and the
-      // probe sweep / completion hooks will finalize it.
-      const hasLiveChild = listJobs().some(j =>
-        j.releaseId === job.id && j.id !== job.id && j.finishedAt === null
-      );
-      if (hasLiveChild) continue;
+      const releaseChildren = listJobs()
+        .filter((candidate) => candidate.releaseId === job.id && candidate.id !== job.id)
+        .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+      const runningChild = releaseChildren.find((candidate) => candidate.finishedAt === null);
+      if (runningChild) continue;
 
-      // No child step ever ran AND lock is either absent, owned by this
-      // release, or stuck on the `${project}-release-pending` placeholder
-      // (the failed handoff seen when the start-release flow lost its
-      // second `acquireLock` against self-heal grace). Anything else means
-      // a different release legitimately owns the lock.
+      // Reap/reconcile only when the project lock is absent, still owned by
+      // this release, or stuck on the `${project}-release-pending`
+      // placeholder. Any other owner means a different release legitimately
+      // owns the project now.
       const lockRow = db.select().from(schema.pipelineLocks).where(eq(schema.pipelineLocks.project, job.project)).get();
       const placeholderId = `${job.project}-release-pending`;
       const lockedByThisRelease = !!lockRow && lockRow.lockedByJobId === job.id;
       const lockedByPlaceholder = !!lockRow && lockRow.lockedByJobId === placeholderId;
       const ownsOrPlaceholder = !lockRow || lockedByThisRelease || lockedByPlaceholder;
       if (!ownsOrPlaceholder) continue;
+
+      // If at least one child step finished before the restart, prefer
+      // release reconciliation over force-reaping. That preserves the normal
+      // "release exit code mirrors the completed chain" behavior while still
+      // healing rows stranded after the last child's markDone path died.
+      const latestFinishedChild = releaseChildren.find((candidate) => candidate.finishedAt !== null) ?? null;
+      const newestChildEdge = latestFinishedChild
+        ? Math.max(latestFinishedChild.finishedAt || 0, latestFinishedChild.startedAt || 0)
+        : 0;
+      const quietLongEnough = newestChildEdge === 0 || Date.now() / 1000 - newestChildEdge >= ORPHAN_RELEASE_HANDOFF_GRACE_SEC;
+      if (latestFinishedChild && quietLongEnough) {
+        try {
+          await reconcileStaleRelease(latestFinishedChild);
+        } catch (err) {
+          console.error(`[boot] reconcileStaleRelease failed for orphan release ${job.id}:`, err);
+        }
+        if (getJob(job.id)?.finishedAt != null) {
+          console.log(`[boot] reconciled stranded release ${job.id} from child ${latestFinishedChild.id}`);
+          continue;
+        }
+      }
+
+      if (latestFinishedChild && !quietLongEnough) continue;
 
       try {
         await exec('pm2', ['stop', job.id, '--silent'], { timeout: 5000 });
@@ -320,7 +342,10 @@ async function reapOrphanReleases(): Promise<void> {
 
       try {
         await markDone(job, -1);
-        console.log(`[boot] reaped orphan release ${job.id} (orchestrator died — no child steps, no lock)`);
+        const reason = latestFinishedChild
+          ? `child ${latestFinishedChild.id} finished but no continuation survived restart`
+          : 'orchestrator died before the first child step';
+        console.log(`[boot] reaped orphan release ${job.id} (${reason})`);
       } catch (err) {
         console.error(`[boot] failed to reap orphan release ${job.id}:`, err);
       }

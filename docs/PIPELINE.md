@@ -198,6 +198,14 @@ rows are resumed against the existing job/log instead of being reaped like
 other abandoned inline jobs. `mark-dod` remains non-resumable and is still
 marked failed if a restart interrupts it.
 
+Boot recovery also heals stranded `release` rows. If the server dies before
+the first child step starts, TamTam reaps the orphaned release directly. If a
+child step already finished before the restart, boot recovery gives the chain a
+short 5-second handoff grace, then reconciles the release from the newest
+finished child instead of force-marking the release failed. Releases are only
+left alone when a child step is still genuinely running or another release now
+owns the project lock.
+
 The release meta-job (`kind='release'`) collects log sections from each step. Its own `finishedAt` is set when any step finalizes without chaining.
 
 ### History view — release grouping

@@ -20,9 +20,12 @@ Conventions a good TamTam-agent prompt follows:
 - Be concrete and project-specific: name the files, scripts, or commands the
   agent should touch. Vague verbs like "improve" produce drift.
 - Assume the working directory is the project root; the agent already has
-  shell, file-edit, and git access via the standard CLI tools.
-- If the agent should commit or push, say so explicitly; otherwise it will
-  leave the worktree dirty.
+  shell and file-edit access via the standard CLI tools.
+- The agent must NEVER run \`git commit\`, \`git push\`, \`gh pr create\`, or
+  open/merge PRs. TamTam's release pipeline owns version control: it stages,
+  commits, pushes, opens PRs, and merges after review. The agent should leave
+  edits in the worktree and stop. Do not include "then commit", "and push",
+  or any equivalent step in the prompt.
 - End with a short machine-readable run report contract — TamTam already
   asks for "TamTam Run Report" at the end of every run, so the user prompt
   does NOT need to repeat that.

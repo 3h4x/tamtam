@@ -276,6 +276,7 @@ describe('startProjectPush — push result tracking', () => {
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn(),
@@ -391,6 +392,7 @@ describe('startProjectPush — push result tracking', () => {
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
@@ -530,6 +532,7 @@ describe('startProjectPush — push result tracking', () => {
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn(),
@@ -563,6 +566,7 @@ describe('startProjectPush — push result tracking', () => {
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue({ project: 'proj', lockedByJobId: 'blocking-job-99', acquiredAt: Date.now() / 1000 }),
@@ -605,6 +609,7 @@ describe('startProjectPush — push result tracking', () => {
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue({ project: 'proj', lockedByJobId: 'release-job', acquiredAt: Date.now() / 1000 }),
@@ -649,6 +654,7 @@ describe('startProjectPush — push result tracking', () => {
         id: 'run-job-1', project: 'proj', kind: 'run', startedAt: Date.now() / 1000,
         ghIssueNumber: 42, ghIssueRepo: 'owner/repo', ghIssueTitle: 'Fix login bug',
       }]),
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
@@ -707,6 +713,7 @@ describe('startProjectPush — push result tracking', () => {
         id: 'run-1', project: 'proj', kind: 'run', startedAt: Date.now() / 1000,
         ghIssueNumber: 42, ghIssueRepo: 'owner/repo', ghIssueTitle: 'Fix login bug',
       }]),
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
@@ -764,6 +771,7 @@ describe('startProjectPush — push result tracking', () => {
         id: 'run-job-stale', project: 'proj', kind: 'run', startedAt: Date.now() / 1000,
         ghIssueNumber: 7, ghIssueRepo: 'owner/repo', ghIssueTitle: 'Already shipped',
       }]),
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
@@ -812,6 +820,7 @@ describe('startProjectPush — push result tracking', () => {
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]), // no recent run jobs with issue stamp
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
@@ -871,6 +880,7 @@ describe('startProjectPush — push result tracking', () => {
         id: 'run-job-issue', project: 'proj', kind: 'run', startedAt: Date.now() / 1000,
         ghIssueNumber: 42, ghIssueRepo: 'owner/repo', ghIssueTitle: 'Fix login bug',
       }]),
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
@@ -944,6 +954,7 @@ describe('startProjectPush — push result tracking', () => {
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
@@ -994,6 +1005,7 @@ describe('startProjectPush — push result tracking', () => {
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
@@ -1056,6 +1068,7 @@ describe('startProjectPush — push result tracking', () => {
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
@@ -1117,6 +1130,7 @@ describe('startProjectPush — push result tracking', () => {
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
@@ -1166,6 +1180,7 @@ describe('startProjectPush — push result tracking', () => {
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
@@ -1217,6 +1232,7 @@ describe('startProjectPush — push result tracking', () => {
         id: 'run-1', project: 'proj', kind: 'run', startedAt: Date.now() / 1000,
         ghIssueNumber: 25, ghIssueRepo: 'owner/repo', ghIssueTitle: 'feat(stake): real per-chain liquidity',
       }]),
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
@@ -1274,6 +1290,7 @@ describe('startProjectPush — push result tracking', () => {
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: vi.fn().mockReturnValue(null),
@@ -1330,6 +1347,7 @@ describe('generateCommitMessage', () => {
     }));
     vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: vi.fn().mockReturnValue([]),
+      getJob: vi.fn(() => null),
       createJob: vi.fn(),
       markDone: vi.fn(),
       updateJob: vi.fn(),
@@ -1502,6 +1520,7 @@ describe('generateCommitMessage', () => {
     }));
     vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: vi.fn().mockReturnValue([]),
+      getJob: vi.fn(() => null),
       createJob: vi.fn(),
       markDone: vi.fn(),
       updateJob: vi.fn(),
@@ -1599,6 +1618,7 @@ describe('launchProjectPush — fire-and-forget', () => {
       markDone: markDoneMock,
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
+      getJob: vi.fn(() => null),
     }));
     vi.doMock('@/lib/pipeline/start-commit', () => ({
       generateCommitMessage: vi.fn().mockResolvedValue('feat: test'),
