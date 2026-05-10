@@ -491,6 +491,24 @@ export async function registerNode(): Promise<void> {
   };
   setInterval(reconcileRecovery, probeIntervalMs);
 
+  // Auto-resume any release that was finalized as "done" while its chain
+  // actually stopped at a non-terminal step that exited 0 (test/fix/review/
+  // commit). Most common cause: completion hook crashed or server restarted
+  // between markDone() and the next step spawning. The reconciler now
+  // prevents this for live releases, but legacy stuck releases still need a
+  // sweep. Runs every 5 min — slow on purpose, this is recovery, not a hot
+  // path. The helper itself caps attempts per release id.
+  const autoResumeStuck = async () => {
+    try {
+      const { autoResumeStuckReleases } = await import('@/lib/pipeline/resume-stuck-release');
+      await autoResumeStuckReleases();
+    } catch (err) {
+      console.error('[auto-resume] sweep failed:', err);
+    }
+  };
+  void autoResumeStuck();
+  setInterval(autoResumeStuck, 5 * 60 * 1000);
+
   // Quota drain ticker: every 60s, refresh the cached subscription quota and,
   // if we're below the block threshold, drain any releases or DB-queued agent
   // fires that were deferred while the 5h window was full.

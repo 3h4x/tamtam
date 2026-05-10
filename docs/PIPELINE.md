@@ -206,6 +206,25 @@ finished child instead of force-marking the release failed. Releases are only
 left alone when a child step is still genuinely running or another release now
 owns the project lock.
 
+When reconciliation detects a chain that ended at a non-terminal success step
+(`test`, `fix`, `review`, `commit`) without a successor, it re-fires that
+step's completion hook instead of silently finalizing the release green. This
+covers interrupted handoffs such as a server rebuild between `markDone()` and
+the downstream `start-*` helper. If operators need to revive an older
+already-finished release manually, `POST /api/projects/by-project/<project>/release/<id>/resume`
+re-acquires the project pipeline lock, reopens the release row, and re-fires
+the last finished non-terminal step's completion hook. The route refuses to
+resume while another active release owns the lock or while any other same-project
+pipeline step is still running, and if the hook launch throws it restores the
+original finished state before releasing the lock.
+Both the manual resume path and the 5-minute `autoResumeStuckReleases` sweep
+rebuild the same contiguous release chain as `reconcileStaleRelease`: children
+must hand off within 60 seconds, and a trailing `mark-dod` is treated as a
+side-step rather than the terminal chain tail. That keeps later manual retry
+steps reusing the same `release_id` from being mistaken for the release's
+authoritative stopping point. The background sweep only touches releases that
+finished successfully within the last 24 hours.
+
 The release meta-job (`kind='release'`) collects log sections from each step. Its own `finishedAt` is set when any step finalizes without chaining.
 
 ### History view — release grouping

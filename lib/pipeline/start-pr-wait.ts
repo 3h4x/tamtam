@@ -27,10 +27,27 @@ const NO_CHECKS_MIN_POLLS = (() => {
   return Number.isFinite(raw) && raw >= 0 ? raw : 1;
 })();
 
+// statusCheckRollup mixes two GraphQL types:
+//   * `CheckRun` (GitHub Actions, etc.) — has `status` (QUEUED|IN_PROGRESS|COMPLETED)
+//     and `conclusion` (SUCCESS|FAILURE|NEUTRAL|SKIPPED|...).
+//   * `StatusContext` (legacy commit statuses — Vercel, CircleCI, …) — has
+//     `state` (PENDING|SUCCESS|ERROR|FAILURE) and no `status`/`conclusion`.
+// Treating the second shape as the first leaves StatusContexts permanently
+// "pending" because `c.status` is `undefined !== 'COMPLETED'`, so a PR that is
+// already MERGEABLE with a passing legacy status check polls forever.
 interface PrStatus {
   state: string; // OPEN | MERGED | CLOSED
   mergeable: string; // MERGEABLE | CONFLICTING | UNKNOWN
-  checks: Array<{ name: string; status: string; conclusion: string | null }>;
+  checks: Array<{
+    __typename?: string;
+    name?: string;
+    context?: string;
+    // CheckRun fields
+    status?: string;
+    conclusion?: string | null;
+    // StatusContext fields
+    state?: string;
+  }>;
 }
 
 async function getPrStatus(projPath: string, prNumber: number, repo: string): Promise<PrStatus | null> {
@@ -52,15 +69,27 @@ async function getPrStatus(projPath: string, prNumber: number, repo: string): Pr
   }
 }
 
+function classifyCheck(c: PrStatus['checks'][number]): 'pass' | 'fail' | 'pending' {
+  // StatusContext (legacy commit statuses, e.g. Vercel): only has `state`.
+  if (c.__typename === 'StatusContext' || (c.state !== undefined && c.status === undefined)) {
+    const s = (c.state ?? '').toUpperCase();
+    if (s === 'PENDING' || s === 'EXPECTED' || s === '') return 'pending';
+    if (s === 'SUCCESS') return 'pass';
+    return 'fail'; // ERROR | FAILURE | anything unknown
+  }
+  // CheckRun (GitHub Actions, etc.): has `status` + `conclusion`.
+  if ((c.status ?? '').toUpperCase() !== 'COMPLETED') return 'pending';
+  const conc = (c.conclusion ?? '').toUpperCase();
+  if (conc === 'SUCCESS' || conc === 'NEUTRAL' || conc === 'SKIPPED') return 'pass';
+  return 'fail';
+}
+
 function checksConclusion(checks: PrStatus['checks']): 'pass' | 'fail' | 'pending' | 'none' {
   if (checks.length === 0) return 'none';
-  const pending = checks.some(c => c.status !== 'COMPLETED');
-  if (pending) return 'pending';
-  const failed = checks.some(c => {
-    const ok = c.conclusion === 'SUCCESS' || c.conclusion === 'NEUTRAL' || c.conclusion === 'SKIPPED';
-    return !ok;
-  });
-  return failed ? 'fail' : 'pass';
+  const classified = checks.map(classifyCheck);
+  if (classified.includes('fail')) return 'fail';
+  if (classified.includes('pending')) return 'pending';
+  return 'pass';
 }
 
 type MergeOutcome = { ok: true } | { ok: false; permanent: boolean };
@@ -209,8 +238,8 @@ function runPrWaitLoop(
 
         if (conclusion === 'fail') {
           const failedChecks = status.checks
-            .filter(c => c.status === 'COMPLETED' && c.conclusion !== 'SUCCESS' && c.conclusion !== 'NEUTRAL' && c.conclusion !== 'SKIPPED')
-            .map(c => `  ${c.name}: ${c.conclusion}`)
+            .filter(c => classifyCheck(c) === 'fail')
+            .map(c => `  ${c.name ?? c.context ?? '?'}: ${(c.conclusion ?? c.state ?? 'unknown').toLowerCase()}`)
             .join('\n');
           log(`\n# checks failed:\n${failedChecks}\n`);
           await markDone(job, 1);

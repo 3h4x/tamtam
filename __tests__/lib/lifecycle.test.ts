@@ -286,22 +286,24 @@ describe('reconcileStaleRelease', () => {
     expect(row?.exitCode).toBe(0);
   });
 
-  it('finalizes release with exit 1 when any step in the chain failed', async () => {
+  it('finalizes release with exit 1 when the last step of the chain failed', async () => {
     const now = Date.now() / 1000;
+    // Chain ends at a hard failure (test exit 1, no follow-up fix). Reconciler
+    // must finalize the release as a failure rather than treating it as a
+    // resumable stuck pipeline (which only applies when the LAST step exited 0).
     testDb.db.insert(schema.jobs).values([
       makeJobRow({ id: 'release-fail', project: 'proj', kind: 'release', startedAt: now - 60 }) as any,
-      makeJobRow({ id: 'test-fail', project: 'proj', kind: 'test', releaseId: 'release-fail', startedAt: now - 50, finishedAt: now - 40, exitCode: 1 }) as any,
-      makeJobRow({ id: 'fix-fail', project: 'proj', kind: 'fix', releaseId: 'release-fail', startedAt: now - 35, finishedAt: now - 15, exitCode: 0 }) as any,
+      makeJobRow({ id: 'fix-fail', project: 'proj', kind: 'fix', releaseId: 'release-fail', startedAt: now - 50, finishedAt: now - 35, exitCode: 0 }) as any,
+      makeJobRow({ id: 'test-fail', project: 'proj', kind: 'test', releaseId: 'release-fail', startedAt: now - 30, finishedAt: now - 15, exitCode: 1 }) as any,
     ]).run();
 
     const { reconcileStaleRelease: fn } = await import('@/lib/jobs/job-storage');
 
-    const fixJob = makeJob('fix', { project: 'proj', releaseId: 'release-fail', finishedAt: now - 15, exitCode: 0 });
-    await fn(fixJob);
+    const testJob = makeJob('test', { project: 'proj', releaseId: 'release-fail', finishedAt: now - 15, exitCode: 1 });
+    await fn(testJob);
 
     const row = testDb.db.select().from(schema.jobs).where(eq(schema.jobs.id, 'release-fail')).get();
     expect(row?.finishedAt).not.toBeNull();
-    // test step failed — release must report exit 1
     expect(row?.exitCode).toBe(1);
   });
 

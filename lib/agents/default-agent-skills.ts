@@ -18,8 +18,8 @@ interface DefaultSkill {
 
 // Skill bodies are deliberately terse. Every line lands in the prompt prefix
 // and is read back from cache on every tool turn — verbose "## Gotchas"
-// sections used to dominate cache-read spend (issue #64). Keep each skill
-// under ~30 lines and resist re-stating Claude's defaults.
+// sections previously dominated cache-read spend. Keep each skill under
+// ~30 lines and resist re-stating Claude's defaults.
 const DEFAULT_AGENT_SKILLS: DefaultSkill[] = [
   {
     id: 'agent-cto',

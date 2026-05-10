@@ -204,7 +204,7 @@ export function PipelinePage() {
   // historical gap that shrinks as old jobs age out of the window).
   const parseable = verdicts.total - (verdicts.prunedMissingVerdict ?? 0)
   const parseFailRate = parseable > 0 ? verdicts.parseFailed / parseable : null
-  // Inverted scale: low parse-fail = good. Issue #62 target is < 10%.
+  // Inverted scale: low parse-fail = good. Target is < 10%.
   const parseFailColor =
     parseFailRate == null ? undefined : parseFailRate <= 0.1 ? 'green' : parseFailRate <= 0.25 ? 'yellow' : 'red'
 

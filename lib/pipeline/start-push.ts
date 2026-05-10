@@ -495,9 +495,9 @@ async function runPush(
     log(`\n# no upstream configured — push will --set-upstream origin <branch>\n`);
   }
 
-  // Pre-push hooks (e.g. borged's full CI pipeline) can take 15-20 minutes.
-  // killProcessGroup ensures the entire hook process tree (check.ts + vitest workers)
-  // is killed if the timeout fires, preventing orphaned workers.
+  // Pre-push hooks that run a full CI pipeline can take 15-20 minutes.
+  // killProcessGroup ensures the entire hook process tree (build + worker
+  // processes) is killed if the timeout fires, preventing orphans.
   const PUSH_TIMEOUT = 25 * 60 * 1000; // 25 minutes
 
   const tryPush = async (extraArgs: string[] = []): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
