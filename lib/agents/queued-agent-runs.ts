@@ -188,7 +188,7 @@ export async function drainQueuedAgentRunsForProject(project: string): Promise<v
           const raw = await r.text().catch(() => '');
           const parsed = parseQueueDrainResponse(raw);
           if (shouldKeepQueuedRunOn409(parsed, raw)) {
-            console.warn(
+            console.log(
               `[queued-agent-runs] keeping ${entry.agentName} queued for ${project}: ${r.status} ${(parsed?.code ?? 'transient_409')} ${(parsed?.detail ?? raw).slice(0, 200)}`,
             );
             continue;

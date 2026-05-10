@@ -239,6 +239,18 @@ sqlite3 data/db/tamtam.db "SELECT project, datetime(fetched_at, 'unixepoch') FRO
 | `lib/job-storage.ts` | Job CRUD, memory cache, `markDone`, completion hooks |
 | `lib/config.ts` | Settings read/write with 5s TTL cache |
 
+### Summary maintenance scripts
+
+TamTam stores concise agent and issue-run summaries in `jobs.work_summary`. If older rows are missing that field, use the maintenance scripts below against the intended SQLite database.
+
+Set `TAMTAM_DB_PATH=/abs/path/to/tamtam.db` to target a non-default database. If unset, the scripts use `data/db/tamtam.db` under the repo root.
+
+| Command | Behavior |
+|------|------|
+| `pnpm backfill:issue-run-summaries` | Read/write. Scans finished issue-linked `run` jobs with an empty `work_summary`, extracts a summary from each NDJSON log, and updates matching DB rows. |
+| `pnpm check:summary-extraction` | Read-only. Samples recent jobs with logs and prints the extracted summary so you can validate the parser before or after a backfill. |
+| `pnpm peek:summary -- /abs/path/to/log.ndjson` | Read-only. Dumps the last parsed assistant paragraphs from a single log file to help debug why a summary was or was not extracted. |
+
 ---
 
 ## Common Issues
