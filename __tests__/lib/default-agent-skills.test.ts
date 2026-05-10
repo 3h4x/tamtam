@@ -192,7 +192,7 @@ describe('seedDefaultSkills', () => {
     seedFn();
 
     const agent = testDb.db.select().from(schema.agents).all().find((row) => row.id === 'agent-1');
-    expect(agent?.prerequisiteCommand).toBe('curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"');
+    expect(agent?.prerequisiteCommand).toBe('curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1&slim=1"');
   });
 
   it('does not backfill an explicitly cleared issue-cruncher prerequisite', () => {
