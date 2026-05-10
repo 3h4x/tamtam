@@ -434,6 +434,18 @@ describe('fetchProjectData — project selection and metadata', () => {
     expect(result.projects['enabled-proj']?.[0]?.launchctl).toBe('loaded');
   });
 
+  it('reports running state when pid is 0 (falsy but not null)', async () => {
+    // pid === 0 is a valid PID on some macOS launchctl outputs and must not be
+    // treated as absent. The fix changed the guard from `info.pid` (truthy) to
+    // `info.pid !== null` so that PID 0 still resolves to 'running'.
+    launchctlInfoMock.mockResolvedValue({ loaded: true, pid: 0, plistMinute: null, wrapperPhase: null, wrapperCycle: null });
+
+    const { fetchProjectData } = await import('@/lib/shared/project-data');
+    const result = await fetchProjectData();
+
+    expect(result.projects['enabled-proj']?.[0]?.launchctl).toBe('running');
+  });
+
   it('reports missing launchctl state when daemon is not loaded and no plist files exist', async () => {
     existsSyncMock.mockReturnValue(false);
 
