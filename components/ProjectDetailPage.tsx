@@ -22,6 +22,7 @@ import { OverviewTab } from '@/components/project-detail/OverviewTab'
 import { AgentsTab } from '@/components/AgentsTab'
 import { buildProjectPath, buildProjectTerminalPath } from '@/lib/client/project-routes'
 import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
+import { ProjectLogo } from '@/components/ProjectLogo'
 
 type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents'
 
@@ -532,6 +533,7 @@ export function ProjectDetailPage({
           left-aligned toolbar regardless of branch length or active tab. */}
       <div className="mb-4 flex flex-col gap-3">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
+          <ProjectLogo projectName={project.project} size={24} />
           <h2 className="text-xl font-semibold text-text-primary" data-private>{project.project}</h2>
           {currentBranch && (() => {
             const isDefault = !!defaultBranch && currentBranch === defaultBranch

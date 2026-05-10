@@ -54,6 +54,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 - `pr-gates` — TamTam-side gate state for a PR: tests/review/DoD badges (GET)
 - `branch` — Current + default branch (GET → `{ branch, defaultBranch, commitsAhead }`); no `git fetch` issued
 - `behind` — Ahead/behind commit counts vs remote (GET)
+- `logo` — Repo-local project logo asset (GET). Detects a repo-local image from a small built-in allowlist of common paths such as `.tamtam/logo.*`, `public/logo.*`, `public/icon.*`, `public/favicon.*`, `app/icon.*`, `src/app/icon.*`, and root-level `logo.*`, then streams that file with the matching image content type. Returns `404` when the project is unknown or no supported local logo file exists.
 - `logs` — Project run log files (GET)
 - `docs` — Project documentation files (GET)
 - `recommendations` — GET; PATCH `{ id, status }` to update non-terminal state (`open` or `dismissed`)
