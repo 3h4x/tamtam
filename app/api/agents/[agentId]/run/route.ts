@@ -29,12 +29,15 @@ import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
 
 /**
  * `readOnly: true` is for agents whose declared task does not edit the local
- * checkout, such as the built-in cto issue planner. Read-only runs bypass
- * per-project worktree serialization (busy jobs, other agents, start slot,
- * pending-release recovery, dirty-worktree), but still honor same-agent
- * duplicate protection, release pipeline locks, and CLI/budget gates. Manual
- * agent runs are allowed on `fix/issue-*` branches; only scheduled fires are
- * skipped there by the internal scheduler.
+ * checkout, such as the built-in cto issue planner. Only explicit read-only
+ * runs skip per-project worktree serialization; mutable agent metadata such as
+ * name or skill IDs must not change concurrency behavior.
+ *
+ * Read-only runs skip per-project worktree serialization (busy jobs, other
+ * agents, start slot, pending-release recovery, dirty-worktree), but still
+ * honor same-agent duplicate protection, release pipeline locks, and
+ * CLI/budget gates. Manual agent runs are allowed on `fix/issue-*` branches;
+ * only scheduled fires are skipped there by the internal scheduler.
  */
 export async function POST(
   request: NextRequest,
@@ -74,7 +77,8 @@ export async function POST(
   const body = await request.json();
   const taskPrompt = body.prompt?.trim() ?? '';
   const readOnly = body.readOnly === true;
-  const hasSkills = JSON.parse(agent.skillIds || '[]').length > 0;
+  const agentSkillIds: string[] = JSON.parse(agent.skillIds || '[]');
+  const hasSkills = agentSkillIds.length > 0;
   if (!taskPrompt && !hasSkills) {
     return NextResponse.json({ detail: 'agent has no prompt and no skills to run' }, { status: 400 });
   }

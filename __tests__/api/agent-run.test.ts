@@ -468,6 +468,29 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(startJobMock).not.toHaveBeenCalled();
   });
 
+  it('does not let manage-agents metadata bypass a non-agent project blocker', async () => {
+    insertAgent({
+      name: 'manage-agents',
+      skillIds: '["agent-manage-agents"]',
+      schedule: '1h',
+    });
+    findBlockingRunningJobMock.mockResolvedValue(makeJob({ id: 'run-123', kind: 'run' }));
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'audit the agent fleet' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.code).toBe('project_busy');
+    expect(data.blockingJobId).toBe('run-123');
+    expect(enqueueAgentRunMock).not.toHaveBeenCalled();
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
   it('releases the starting slot after a pre-start failure so same-agent retries are not stranded', async () => {
     insertAgent({ schedule: '1h' });
     const pendingStart = deferred<void>();
@@ -555,6 +578,34 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(res.status).toBe(200);
     expect(enqueueAgentRunMock).not.toHaveBeenCalled();
     expect(startJobMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let manage-agents metadata run alongside a different agent on the same project', async () => {
+    insertAgent({
+      name: 'manage-agents',
+      skillIds: '["agent-manage-agents"]',
+      schedule: '1h',
+    });
+    listJobsMock.mockReturnValue([
+      makeJob({ id: 'job-other', kind: 'agent:Other Agent', finishedAt: null }),
+    ]);
+    probeJobStatusMock.mockResolvedValue('running');
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'audit the agent fleet' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(202);
+    expect(data.status).toBe('queued');
+    expect(data.blockingJobId).toBe('job-other');
+    expect(startJobMock).not.toHaveBeenCalled();
+    expect(enqueueAgentRunMock).toHaveBeenCalledOnce();
+    expect(tryClaimAgentStartSlotMock).not.toHaveBeenCalled();
   });
 
   it('ignores malformed running-job rows whose kind is not a string', async () => {
@@ -1054,6 +1105,45 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(startJobMock).not.toHaveBeenCalled();
   });
 
+  it('re-checks the post-prerequisite blocker for manage-agents metadata', async () => {
+    const prereq = deferred<{ stdout: string; stderr: string; exitCode: number }>();
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
+      if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
+      if (cmd === 'bash' && args[1] === 'sleep 40') return prereq.promise;
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    findBlockingRunningJobMock
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(makeJob({ id: 'run-while-prereq', kind: 'run' }));
+    insertAgent({
+      name: 'manage-agents',
+      skillIds: '["agent-manage-agents"]',
+      prerequisiteCommand: 'sleep 40',
+    });
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'audit the agent fleet' }),
+    });
+
+    const pending = POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    await vi.waitFor(() => {
+      expect(createJobMock).toHaveBeenCalledOnce();
+      expect(execMock).toHaveBeenCalledWith('bash', ['-c', 'sleep 40'], expect.objectContaining({ cwd: '/path/to/proj' }));
+    });
+
+    prereq.resolve({ stdout: 'done\n', stderr: '', exitCode: 0 });
+    const res = await pending;
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.code).toBe('project_busy');
+    expect(data.blockingJobId).toBe('run-while-prereq');
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
   it('creates the job row before the prerequisite runs (file agent variant)', async () => {
     const projDir = mkdtempSync(join(tmpdir(), 'tamtam-file-agent-prereq-'));
     const prereq = deferred<{ stdout: string; stderr: string; exitCode: number }>();
@@ -1090,6 +1180,35 @@ File-backed prompt.`);
       expect(createJobMock).toHaveBeenCalledOnce();
       expect(startJobMock).toHaveBeenCalledOnce();
       expect(drainNextAgentRunMock).toHaveBeenCalledWith('proj1');
+    } finally {
+      rmSync(projDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not let file-agent metadata bypass a non-agent project blocker', async () => {
+    const projDir = mkdtempSync(join(tmpdir(), 'tamtam-file-agent-concurrency-'));
+    try {
+      mkdirSync(join(projDir, '.tamtam', 'agents'), { recursive: true });
+      writeFileSync(join(projDir, '.tamtam', 'agents', 'manage-agents.md'), `---
+skillIds: ["agent-manage-agents"]
+---
+File-backed prompt.`);
+      resolveProjectPathMock.mockReturnValue(projDir);
+      findBlockingRunningJobMock.mockResolvedValue(makeJob({ id: 'run-123', kind: 'run' }));
+
+      const req = new NextRequest('http://localhost/api/agents/file%3Aproj1%3Amanage-agents/run', {
+        method: 'POST',
+        body: JSON.stringify({ prompt: 'audit the file-backed fleet' }),
+      });
+
+      const res = await POST(req, { params: Promise.resolve({ agentId: 'file:proj1:manage-agents' }) });
+      const data = await res.json();
+
+      expect(res.status).toBe(409);
+      expect(data.code).toBe('project_busy');
+      expect(data.blockingJobId).toBe('run-123');
+      expect(startJobMock).not.toHaveBeenCalled();
+      expect(enqueueAgentRunMock).not.toHaveBeenCalled();
     } finally {
       rmSync(projDir, { recursive: true, force: true });
     }

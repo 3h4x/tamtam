@@ -211,6 +211,7 @@ That issue-planning flow now uses one shared body contract so downstream DoD aut
 The section order matters, and each acceptance criterion must use an unchecked `- [ ]` checkbox. `mark-dod` parses those boxes from the GitHub issue body and ticks verified items in place.
 
 Read-only runs bypass per-project worktree serialization so they can start while unrelated agents or terminal jobs are running. Specifically, they skip the non-agent busy gate, different-agent queueing, the project start slot, pending-release re-acquire, and dirty-worktree checks. They still reject duplicate runs of the same agent, still queue behind an active release pipeline lock, and still honor the CLI start gate for pause and quota policy.
+Agent metadata does not grant that bypass. Names, skill IDs, file-vs-DB storage, and schedule source must not affect concurrency; only the explicit `readOnly: true` run request opts into the lighter path.
 
 Issue-branch behavior is now split by trigger type:
 
