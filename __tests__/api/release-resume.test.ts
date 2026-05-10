@@ -163,6 +163,26 @@ describe('POST /api/projects/by-project/{projectName}/release/{releaseId}/resume
     expect(release.exitCode).toBe(0);
   });
 
+  it('returns 500 when re-acquiring the pipeline lock throws', async () => {
+    const release = makeJob();
+    getJobMock.mockReturnValue(release);
+    listJobsMock.mockReturnValue([
+      makeJob({ id: 'review-1', kind: 'review', releaseId: 'release-1', startedAt: 1010, finishedAt: 1020, exitCode: 0 }),
+    ]);
+    acquireLockMock.mockRejectedValue(new Error('lock service offline'));
+
+    const res = await POST(req(), params());
+
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toEqual({
+      detail: 'failed to re-acquire pipeline lock: lock service offline',
+    });
+    expect(updateJobMock).not.toHaveBeenCalled();
+    expect(runCompletionHooksMock).not.toHaveBeenCalled();
+    expect(release.finishedAt).toBe(2000);
+    expect(release.exitCode).toBe(0);
+  });
+
   it('reopens the release and re-fires completion hooks on the last non-terminal success step', async () => {
     const release = makeJob();
     const lastStep = makeJob({
