@@ -672,7 +672,7 @@ describe('reviewIsStuck convergence guard', () => {
     expect(startFixFromJobMock).toHaveBeenCalledOnce();
   });
 
-  it('finalizes release with exit 1 when repeated review findings stop convergence', async () => {
+  it('stops before exhaustion fallback when repeated review findings stop convergence (DO NOT SHIP)', async () => {
     const now = Date.now() / 1000;
     const releaseLog = join(tempDir, 'release-stuck-final.log');
     writeFileSync(releaseLog, '# release\n');
@@ -706,9 +706,6 @@ describe('reviewIsStuck convergence guard', () => {
 
     await markDoneFn(curReview, 0);
 
-    const row = testDb.db.select().from(schema.jobs).all().find((r) => r.id === 'release-stuck-final');
-    expect(row?.exitCode).toBe(1);
-    expect(row?.finishedAt).not.toBeNull();
     expect(fileReviewExhaustionIssueMock).not.toHaveBeenCalled();
     expect(startProjectCommitMock).not.toHaveBeenCalled();
     const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
@@ -750,7 +747,7 @@ describe('reviewIsStuck convergence guard', () => {
     expect(startFixFromJobMock).toHaveBeenCalledWith('cur-review2');
   });
 
-  it('stops the release when the prior fix claimed an ID fixed but review still flags it', async () => {
+  it('stops before exhaustion fallback when prior fix claimed an ID fixed but review still flags it (DO NOT SHIP)', async () => {
     const now = Date.now() / 1000;
     const releaseLog = join(tempDir, 'release-contradict.log');
     writeFileSync(releaseLog, '# release\n');
@@ -814,9 +811,6 @@ describe('reviewIsStuck convergence guard', () => {
     expect(startFixFromJobMock).not.toHaveBeenCalled();
     expect(fileReviewExhaustionIssueMock).not.toHaveBeenCalled();
     expect(startProjectCommitMock).not.toHaveBeenCalled();
-    const row = testDb.db.select().from(schema.jobs).all().find((r) => r.id === 'release-contradict');
-    expect(row?.exitCode).toBe(1);
-    expect(row?.finishedAt).not.toBeNull();
     const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
     expect(notifyEvents).toContain('review_do_not_ship');
   });
@@ -1055,7 +1049,7 @@ describe('fix→review review-count cap', () => {
     expect(startProjectReviewMock).toHaveBeenCalledWith('proj');
   });
 
-  it('does NOT file an exhaustion issue or start commit when the capped review is DO NOT SHIP', async () => {
+  it('stops before exhaustion fallback when the capped review is DO NOT SHIP', async () => {
     const now = Date.now() / 1000;
     const releaseId = 'release-cap-do-not-ship';
     const reviewLog = join(tempDir, 'r3-review.log');
@@ -1082,6 +1076,9 @@ describe('fix→review review-count cap', () => {
     expect(startProjectReviewMock).not.toHaveBeenCalled();
     expect(fileReviewExhaustionIssueMock).not.toHaveBeenCalled();
     expect(startProjectCommitMock).not.toHaveBeenCalled();
+    const releaseRow = testDb.db.select().from(schema.jobs).all().find((row) => row.id === releaseId);
+    expect(releaseRow?.exitCode).toBe(1);
+    expect(releaseRow?.finishedAt).not.toBeNull();
     const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
     expect(notifyEvents).toContain('review_do_not_ship');
   });
@@ -1211,6 +1208,36 @@ describe('review_fix_max_iterations only caps review-side recovery', () => {
     expect(startProjectCommitMock).toHaveBeenCalledOnce();
     const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
     expect(notifyEvents).toContain('fix_loop_exhausted');
+  });
+
+  it('stops standalone auto-push review exhaustion when the cited review is DO NOT SHIP', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tamtam-standalone-review-cap-'));
+    try {
+      const now = Date.now() / 1000;
+      const reviewLog = join(tempDir, 'standalone-review-cap-do-not-ship.log');
+      writeFileSync(reviewLog, ndjsonText([
+        'Findings:',
+        '- Finding ID: auth-bypass',
+        'Verdict: DO NOT SHIP',
+      ].join('\n')));
+
+      testDb.db.insert(schema.jobs).values([
+        makeJobRow({ id: 'standalone-r1', project: 'proj', kind: 'review', logPath: reviewLog, startedAt: now - 180, finishedAt: now - 160, exitCode: 0 }) as any,
+      ]).run();
+
+      const { markDone } = await import('@/lib/jobs/job-storage');
+      const fixJob = makeFixJob('standalone-f1', { parentJobId: 'standalone-r1', startedAt: now - 30 });
+
+      await markDone(fixJob, 0);
+
+      expect(startProjectReviewMock).not.toHaveBeenCalled();
+      expect(fileReviewExhaustionIssueMock).not.toHaveBeenCalled();
+      expect(startProjectCommitMock).not.toHaveBeenCalled();
+      const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+      expect(notifyEvents).toContain('review_do_not_ship');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('stops the release when exhaustion issue filing succeeds but the follow-up commit cannot start', async () => {
