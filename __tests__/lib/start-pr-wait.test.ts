@@ -374,7 +374,7 @@ describe('launchPrWait', () => {
     launchPrWait('myproj', 13, 'owner/repo', 'https://github.com/owner/repo/pull/13');
 
     await vi.waitFor(() => {
-      expect(startMarkDodMock).toHaveBeenCalledWith('myproj', { prNumber: 13, repo: 'owner/repo', mode: 'pipeline' });
+      expect(startMarkDodMock).toHaveBeenCalledWith('myproj', { prNumber: 13, repo: 'owner/repo' });
       expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 0);
     }, { timeout: 3000 });
   });
@@ -418,7 +418,7 @@ describe('launchPrWait', () => {
     launchPrWait('myproj', 66, 'owner/repo', 'https://github.com/owner/repo/pull/66');
 
     await vi.waitFor(() => {
-      expect(startMarkDodMock).toHaveBeenCalledWith('myproj', { issueNumber: 42, repo: 'owner/repo', mode: 'pipeline' });
+      expect(startMarkDodMock).toHaveBeenCalledWith('myproj', { issueNumber: 42, repo: 'owner/repo' });
       expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 0);
     }, { timeout: 3000 });
   });

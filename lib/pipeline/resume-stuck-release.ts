@@ -199,6 +199,106 @@ export async function resumeStuckRelease(
   };
 }
 
+// Detect agent / terminal runs that finished successfully on projects with
+// auto_commit / auto_push / release_after_run enabled, but never spawned a
+// release pipeline. The release-after-run completion hook is supposed to do
+// this but it can be skipped on server restart, mid-hook crash, or before
+// this fix added the auto_commit/auto_push fallback. Returns one entry per
+// stuck terminal run for the most recent run per project (older ones are
+// superseded by newer activity and shouldn't trigger their own release).
+export interface OrphanedRun {
+  jobId: string;
+  project: string;
+  finishedAt: number;
+}
+
+export function findOrphanedAgentRuns(limit = 50): OrphanedRun[] {
+  const cutoff = Date.now() / 1000 - SCAN_WINDOW_MS / 1000;
+  const all = listJobs();
+  const candidates = all
+    .filter(
+      (j) =>
+        j.exitCode === 0 &&
+        j.finishedAt != null &&
+        (j.finishedAt ?? 0) >= cutoff &&
+        (j.kind === 'run' || j.kind.startsWith('agent:')),
+    )
+    .sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0));
+
+  // Keep only the most recent qualifying run per project — older agent runs
+  // are stale and resuming them on top of newer work would clobber it.
+  const seenProjects = new Set<string>();
+  const newestPerProject: JobData[] = [];
+  for (const j of candidates) {
+    if (seenProjects.has(j.project)) continue;
+    seenProjects.add(j.project);
+    newestPerProject.push(j);
+  }
+
+  const orphaned: OrphanedRun[] = [];
+  for (const job of newestPerProject) {
+    // Skip if a pipeline-step / release is currently running or started after
+    // the agent finished — the chain is being handled (or was handled).
+    // Include finishedAt === null so an in-flight release that began before the
+    // agent finished is not missed by the startedAt-only guard.
+    const newer = all.find(
+      (j) =>
+        j.project === job.project &&
+        (j.kind === 'release' || PIPELINE_STEP_KINDS.has(j.kind)) &&
+        (j.finishedAt === null || (j.startedAt ?? 0) > (job.finishedAt ?? 0)),
+    );
+    if (newer) continue;
+    orphaned.push({
+      jobId: job.id,
+      project: job.project,
+      finishedAt: job.finishedAt ?? 0,
+    });
+    if (orphaned.length >= limit) break;
+  }
+  return orphaned;
+}
+
+const orphanResumeAttempts = new Map<string, number>();
+
+export async function autoResumeOrphanedAgentRuns(): Promise<void> {
+  let orphaned: OrphanedRun[];
+  try {
+    orphaned = findOrphanedAgentRuns(50);
+  } catch (err) {
+    console.error('[auto-resume-agent] scan failed:', err);
+    return;
+  }
+  if (orphaned.length === 0) return;
+  for (const o of orphaned) {
+    const attempts = orphanResumeAttempts.get(o.jobId) ?? 0;
+    if (attempts >= MAX_AUTO_RESUME_ATTEMPTS) continue;
+    try {
+      const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
+      const cfg = getProjectTestConfig(o.project);
+      const wantsAutoShip = !!(cfg?.releaseAfterRun);
+      if (!wantsAutoShip) continue;
+      // Only count an attempt after confirming the project wants auto-ship and
+      // just before calling startRelease — mirrors autoResumeStuckReleases which
+      // gates on r.attempted. This way transient config errors and lock conflicts
+      // don't exhaust the retry budget without an actual release being attempted.
+      orphanResumeAttempts.set(o.jobId, attempts + 1);
+      const { startRelease } = await import('@/lib/pipeline/start-release');
+      const r = await startRelease(o.project, { queueIfBlocked: true, sourceJobId: o.jobId });
+      if (r.ok) {
+        console.log(
+          `[auto-resume-agent] kicked off release for ${o.project} after orphaned run ${o.jobId} (attempt ${attempts + 1}/${MAX_AUTO_RESUME_ATTEMPTS})`,
+        );
+      } else {
+        orphanResumeAttempts.set(o.jobId, attempts);
+        console.log(`[auto-resume-agent] ${o.project}: ${r.detail}`);
+      }
+    } catch (err) {
+      orphanResumeAttempts.set(o.jobId, attempts);
+      console.error(`[auto-resume-agent] ${o.jobId} threw:`, err);
+    }
+  }
+}
+
 // Background ticker: scan for stuck-and-finalized releases and resume them
 // up to MAX_AUTO_RESUME_ATTEMPTS times each. Idempotent and best-effort —
 // errors on a single release don't block others.
@@ -232,4 +332,5 @@ export async function autoResumeStuckReleases(): Promise<void> {
 
 export function _resetAutoResumeAttempts(): void {
   autoResumeAttempts.clear();
+  orphanResumeAttempts.clear();
 }

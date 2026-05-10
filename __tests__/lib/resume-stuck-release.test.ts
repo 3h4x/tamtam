@@ -369,6 +369,146 @@ describe('resume-stuck-release helpers', () => {
     expect(runCompletionHooksMock.mock.calls[0]?.[0]).toMatchObject({ id: 'test-1', kind: 'test' });
   });
 
+  // ─── autoResumeOrphanedAgentRuns ─────────────────────────────────────────────
+
+  describe('autoResumeOrphanedAgentRuns — attempt counter gating', () => {
+    let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
+    let startReleaseMock: ReturnType<typeof vi.fn>;
+
+    function makeAgentJob(overrides: Partial<JobData> = {}): JobData {
+      const now = Date.now() / 1000;
+      return makeJob({
+        id: 'agent-job-1',
+        kind: 'agent:test',
+        project: 'proj',
+        exitCode: 0,
+        startedAt: now - 120,
+        finishedAt: now - 60,
+        ...overrides,
+      });
+    }
+
+    beforeEach(() => {
+      getProjectTestConfigMock = vi.fn().mockReturnValue({
+        releaseAfterRun: true,
+        autoCommitEnabled: false,
+        autoPushEnabled: false,
+      });
+      startReleaseMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'new-release-1' });
+
+      vi.doMock('@/lib/scheduling/scheduling', () => ({
+        getProjectTestConfig: getProjectTestConfigMock,
+      }));
+      vi.doMock('@/lib/pipeline/start-release', () => ({
+        startRelease: startReleaseMock,
+      }));
+    });
+
+    it('does not consume an attempt when wantsAutoShip is false', async () => {
+      getProjectTestConfigMock.mockReturnValue({
+        releaseAfterRun: false,
+        autoCommitEnabled: false,
+        autoPushEnabled: false,
+      });
+      listJobsMock.mockReturnValue([makeAgentJob()]);
+
+      const { autoResumeOrphanedAgentRuns, _resetAutoResumeAttempts } = await import('@/lib/pipeline/resume-stuck-release');
+      _resetAutoResumeAttempts();
+      await autoResumeOrphanedAgentRuns();
+      // No release attempted
+      expect(startReleaseMock).not.toHaveBeenCalled();
+
+      // On the next sweep, attempt count is still 0 so it can run again
+      getProjectTestConfigMock.mockReturnValue({
+        releaseAfterRun: true,
+        autoCommitEnabled: false,
+        autoPushEnabled: false,
+      });
+      await autoResumeOrphanedAgentRuns();
+      expect(startReleaseMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not consume an attempt when startRelease returns ok:false', async () => {
+      startReleaseMock.mockResolvedValue({ ok: false, status: 409, detail: 'pipeline lock held' });
+      listJobsMock.mockReturnValue([makeAgentJob()]);
+
+      const { autoResumeOrphanedAgentRuns, _resetAutoResumeAttempts } = await import('@/lib/pipeline/resume-stuck-release');
+      _resetAutoResumeAttempts();
+      await autoResumeOrphanedAgentRuns();
+      expect(startReleaseMock).toHaveBeenCalledTimes(1);
+
+      // Attempt counter was not advanced — second sweep retries
+      startReleaseMock.mockResolvedValue({ ok: true, jobId: 'new-release-2' });
+      await autoResumeOrphanedAgentRuns();
+      expect(startReleaseMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not consume an attempt when getProjectTestConfig throws', async () => {
+      getProjectTestConfigMock.mockImplementationOnce(() => { throw new Error('db error'); });
+      listJobsMock.mockReturnValue([makeAgentJob()]);
+
+      const { autoResumeOrphanedAgentRuns, _resetAutoResumeAttempts } = await import('@/lib/pipeline/resume-stuck-release');
+      _resetAutoResumeAttempts();
+      await autoResumeOrphanedAgentRuns();
+      expect(startReleaseMock).not.toHaveBeenCalled();
+
+      // Counter was not incremented — second sweep tries again
+      await autoResumeOrphanedAgentRuns();
+      expect(startReleaseMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not consume an attempt when startRelease throws', async () => {
+      startReleaseMock.mockRejectedValueOnce(new Error('network error'));
+      listJobsMock.mockReturnValue([makeAgentJob()]);
+
+      const { autoResumeOrphanedAgentRuns, _resetAutoResumeAttempts } = await import('@/lib/pipeline/resume-stuck-release');
+      _resetAutoResumeAttempts();
+      await autoResumeOrphanedAgentRuns();
+      expect(startReleaseMock).toHaveBeenCalledTimes(1);
+
+      // Counter was rolled back on throw — second sweep retries
+      startReleaseMock.mockResolvedValue({ ok: true, jobId: 'new-release-3' });
+      await autoResumeOrphanedAgentRuns();
+      expect(startReleaseMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('advances counter on success and caps at MAX_AUTO_RESUME_ATTEMPTS', async () => {
+      listJobsMock.mockReturnValue([makeAgentJob()]);
+
+      const { autoResumeOrphanedAgentRuns, _resetAutoResumeAttempts } = await import('@/lib/pipeline/resume-stuck-release');
+      _resetAutoResumeAttempts();
+      await autoResumeOrphanedAgentRuns();
+      expect(startReleaseMock).toHaveBeenCalledTimes(1);
+
+      await autoResumeOrphanedAgentRuns();
+      expect(startReleaseMock).toHaveBeenCalledTimes(2);
+
+      // Third sweep: counter is at MAX (2) — job is excluded
+      await autoResumeOrphanedAgentRuns();
+      expect(startReleaseMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('skips orphan when a release is currently in-flight (started before agent finished)', async () => {
+      const now = Date.now() / 1000;
+      const agentJob = makeAgentJob({ finishedAt: now - 30 });
+      // Release started before the agent finished but is still running (finishedAt null)
+      const inFlightRelease = makeJob({
+        id: 'release-in-flight',
+        kind: 'release',
+        project: 'proj',
+        startedAt: now - 120,
+        finishedAt: null,
+        exitCode: null,
+      });
+      listJobsMock.mockReturnValue([agentJob, inFlightRelease]);
+
+      const { autoResumeOrphanedAgentRuns, _resetAutoResumeAttempts } = await import('@/lib/pipeline/resume-stuck-release');
+      _resetAutoResumeAttempts();
+      await autoResumeOrphanedAgentRuns();
+      expect(startReleaseMock).not.toHaveBeenCalled();
+    });
+  });
+
   it('caps auto-resume after two attempted hook restarts', async () => {
     const now = Date.now() / 1000;
     testDb.db.insert(schema.jobs).values({

@@ -829,68 +829,7 @@ describe('startProjectReview', () => {
     expect(prompt).toContain('Focus on security issues.');
   });
 
-  it('injects acceptance criteria from linked issue when an active release has issue context', async () => {
-    // Simulate staged changes so determineReviewScope returns ok:true
-    execMock
-      .mockResolvedValueOnce(resp(0, ' M lib/foo.ts'))    // git status
-      .mockResolvedValueOnce(resp(0, '1 file changed'))   // git diff --stat
-      .mockResolvedValueOnce(resp(0, 'diff --git a/lib/foo.ts\n+change\n'))  // git diff
-      .mockResolvedValueOnce(resp(0, JSON.stringify({     // gh issue view
-        body: '## Acceptance criteria\n- [ ] Add unit tests\n- [ ] Update documentation',
-        title: 'Feature: new endpoint',
-      })));
-    findReleaseScopedIssueContextMock.mockReturnValue({ number: 42, repo: 'owner/repo', title: 'Feature: new endpoint' });
-
-    vi.resetModules();
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj') }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir: '/tmp' }) }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: createJobMock, updateJob: updateJobMock, listJobs: vi.fn().mockReturnValue([]),
-      readLog: readLogMock, readParsedLog: readParsedLogMock, probeJobStatus: probeJobStatusMock,
-    }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: () => ({ review_verdict_rules: '' }),
-      withBasePrompt: (s: string) => s,
-      getPermissionModeFlag: () => '--dangerously-skip-permissions',
-      getPipelineModel: () => 'sonnet',
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      getLock: getLockMock, acquireLock: acquireLockMock,
-      isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
-    }));
-    vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/code-reviewer.md' }));
-    vi.doMock('@/lib/usage/resolve-provider', () => ({ checkCliStartGate: checkCliStartGateMock }));
-    vi.doMock('@/lib/pipeline/release-context', () => ({
-      findReleaseScopedIssueContext: findReleaseScopedIssueContextMock,
-    }));
-    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({
-      extractCriteria: vi.fn().mockReturnValue([
-        { raw: '- [ ] Add unit tests', text: 'Add unit tests' },
-        { raw: '- [ ] Update documentation', text: 'Update documentation' },
-      ]),
-    }));
-    vi.doMock('@/lib/shared/untrusted', () => ({
-      wrapUntrusted: (text: string) => `<untrusted>${text}</untrusted>`,
-    }));
-    vi.doMock('fs', () => ({
-      existsSync: vi.fn().mockReturnValue(false),
-      lstatSync: vi.fn(), readFileSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn(),
-    }));
-    const { startProjectReview: fn } = await import('@/lib/pipeline/start-review');
-    const r = await fn('proj');
-
-    expect(r.ok).toBe(true);
-    const prompt: string = startJobMock.mock.calls[0][2];
-    expect(prompt).toContain('ACCEPTANCE CRITERIA');
-    expect(prompt).toContain('Add unit tests');
-    expect(prompt).toContain('Update documentation');
-    expect(prompt).toContain('Verified criteria');
-  });
-
-  it('omits acceptance criteria block when no active release has an issue context', async () => {
-    // findReleaseScopedIssueContextMock already returns null from beforeEach
+  it('does not inject acceptance criteria into the review prompt — DoD verification is mark-dod\'s job', async () => {
     execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'))
       .mockResolvedValueOnce(resp(0, '1 file changed'))
       .mockResolvedValueOnce(resp(0, 'diff --git a/lib/foo.ts\n+change\n'));
@@ -898,8 +837,7 @@ describe('startProjectReview', () => {
     await startProjectReview('proj');
 
     const prompt: string = startJobMock.mock.calls[0][2];
-    // The VERIFIED_CRITERIA_CONTRACT is always in the template but no criteria were injected
     expect(prompt).not.toContain('ACCEPTANCE CRITERIA:');
-    expect(prompt).not.toContain('Add unit tests');
+    expect(prompt).not.toContain('Verified criteria');
   });
 });

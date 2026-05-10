@@ -13,9 +13,7 @@ import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { CODE_REVIEWER_SKILL } from '@/lib/skills/skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings, getPipelineModel } from '@/lib/shared/config';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { extractFindingIds, REVIEW_OUTPUT_CONTRACT, VERIFIED_CRITERIA_CONTRACT, stripFinalVerdict } from './review-contract';
-import { findReleaseScopedIssueContext } from './release-context';
-import { wrapUntrusted } from '@/lib/shared/untrusted';
+import { extractFindingIds, REVIEW_OUTPUT_CONTRACT, stripFinalVerdict } from './review-contract';
 import type { JobData } from '@/lib/jobs/types';
 
 export type StartReviewResult =
@@ -57,9 +55,7 @@ function loadReviewPrompt(projectName: string): string {
     '- If the only remaining issue is a documentation update and the exact docs change is obvious, apply the documentation edit yourself during this review.\n' +
     '- After applying that docs-only fix, do not emit a NEEDS ATTENTION finding for it; summarize the docs edit and end with Verdict: LGTM.\n' +
     '- Do not use this rule for code, tests, configuration behavior, migrations, security issues, or ambiguous documentation work; those still require normal findings.\n\n' +
-    '{acceptance_criteria}\n\n' +
     REVIEW_OUTPUT_CONTRACT + '\n\n' +
-    VERIFIED_CRITERIA_CONTRACT + '\n\n' +
     'OUTPUT FORMAT — strict. Your final non-empty line must be exactly one of:\n\n' +
     '    Verdict: LGTM\n' +
     '    Verdict: NEEDS ATTENTION\n' +
@@ -263,34 +259,6 @@ function describePriorReviewStep(job: JobData): string {
 ${excerpt || '(no log excerpt)'}`;
 }
 
-// Fetch unchecked acceptance criteria from the linked issue (if any) and return
-// a formatted block for injection into the review prompt. Returns empty string
-// when there is no active release, no linked issue, or no unchecked criteria.
-async function fetchAcceptanceCriteriaContext(projectName: string, projPath: string): Promise<string> {
-  const issueCtx = findReleaseScopedIssueContext(projectName);
-  if (!issueCtx) return '';
-  const viewR = await exec('gh', ['issue', 'view', String(issueCtx.number), '--repo', issueCtx.repo, '--json', 'body,title'], { cwd: projPath, timeout: 15000 });
-  if (viewR.exitCode !== 0) return '';
-  let parsed: { body?: string; title?: string } = {};
-  try { parsed = JSON.parse(viewR.stdout); } catch { return ''; }
-  const body = parsed.body ?? '';
-  const title = parsed.title ?? '';
-  // Import extractCriteria lazily to avoid circular dependency at module init time.
-  const { extractCriteria } = await import('./start-mark-dod');
-  const criteria = extractCriteria(body);
-  if (criteria.length === 0) return '';
-  const criteriaLines = criteria.map(c => `- [ ] ${c.text}`).join('\n');
-  const wrappedBody = wrapUntrusted(`${title}\n\n${criteriaLines}`, 'github_issue_body');
-  return (
-    'ACCEPTANCE CRITERIA:\n' +
-    'The linked GitHub issue contains the following unchecked acceptance criteria.\n' +
-    'Evaluate each one against the code being reviewed — check the diff and codebase for concrete implementation.\n\n' +
-    wrappedBody + '\n\n' +
-    'For each criterion emit a line in the ## Verified criteria section (see format below).\n' +
-    'If criteria are absent from the ## Verified criteria section, the pipeline treats them as unverified.'
-  );
-}
-
 /** Start a code review for the given project. Returns the new job id or a structured error. */
 export async function startProjectReview(
   projectName: string,
@@ -345,14 +313,12 @@ export async function startProjectReview(
     return { ok: false, status: 400, detail: scope.detail };
   }
 
-  const criteriaContext = await fetchAcceptanceCriteriaContext(projectName, projPath).catch(() => '');
   const prompt = withBasePrompt(
     loadReviewPrompt(projectName)
       .replace('{project}', projectName)
       .replace('{path}', projPath)
       .replace('{review_scope}', scope.prompt)
-      .replace('{release_context}', releaseContextForReview(projectName))
-      .replace('{acceptance_criteria}', criteriaContext),
+      .replace('{release_context}', releaseContextForReview(projectName)),
     { projectPath: projPath, provider }
   );
 

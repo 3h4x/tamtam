@@ -500,8 +500,13 @@ export async function registerNode(): Promise<void> {
   // path. The helper itself caps attempts per release id.
   const autoResumeStuck = async () => {
     try {
-      const { autoResumeStuckReleases } = await import('@/lib/pipeline/resume-stuck-release');
+      const { autoResumeStuckReleases, autoResumeOrphanedAgentRuns } = await import('@/lib/pipeline/resume-stuck-release');
       await autoResumeStuckReleases();
+      // Agent / terminal runs that finished cleanly but never triggered a
+      // release on a project that has auto_commit / auto_push / release_after_run
+      // on. These look "fine" individually (exit 0, no chain) but the user's
+      // intent (ship after the agent finishes) was never honored.
+      await autoResumeOrphanedAgentRuns();
     } catch (err) {
       console.error('[auto-resume] sweep failed:', err);
     }

@@ -26,7 +26,7 @@ export async function POST(
         }
       }
     } catch { /* no body or invalid JSON — fall through to implicit lookup */ }
-    const result = await startMarkDod(projectName, { ...override, mode: 'standalone' });
+    const result = override ? await startMarkDod(projectName, override) : await startMarkDod(projectName);
     if (!result.ok) return NextResponse.json({ detail: result.detail }, { status: result.status });
     return NextResponse.json(result);
   } catch (e) {

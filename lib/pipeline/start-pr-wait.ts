@@ -339,8 +339,8 @@ function runPrWaitLoop(
       try {
         const { startMarkDod } = await import('./start-mark-dod');
         const target = issueTarget
-          ? { ...issueTarget, mode: 'pipeline' as const }
-          : { prNumber, repo: prRepo, mode: 'pipeline' as const };
+          ? { ...issueTarget }
+          : { prNumber, repo: prRepo };
         log(`\n# mark-dod target: ${issueTarget ? `issue #${issueTarget.issueNumber}` : `PR #${prNumber}`}\n`);
         const md = await startMarkDod(job.project, target);
         if (md.ok) {
