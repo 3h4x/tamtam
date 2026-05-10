@@ -442,6 +442,45 @@ export function PipelineStrip({
     : 'waiting for LGTM review'
   const dodAction = dodJob ? openJob(dodJob) : null
 
+  // Surface PR creation as its own chip. The push job stores
+   //   context_meta = JSON.stringify({ prUrl, prNumber, prRepo })
+  // when it opens or attaches a PR; pr-wait carries the same fields once it
+  // takes over. We don't have a dedicated `pr` job kind today, so we derive
+  // the chip from whichever of push / pr-wait carries the URL — that gives
+  // users a visible, clickable "pr" step in the strip without forcing a
+  // pipeline state-machine rewrite.
+  function readPrUrl(job: JobInfo | undefined): { url: string; number?: number; repo?: string } | null {
+    if (!job?.context_meta) return null
+    try {
+      const meta = JSON.parse(job.context_meta) as { prUrl?: string; prNumber?: number; prRepo?: string }
+      if (meta && typeof meta.prUrl === 'string' && meta.prUrl) {
+        return { url: meta.prUrl, number: meta.prNumber, repo: meta.prRepo }
+      }
+    } catch { /* malformed contextMeta — treat as no PR */ }
+    return null
+  }
+  const prInfo = readPrUrl(pushJob) ?? readPrUrl(prWaitJob)
+  let prState: StepState
+  let prHint = ''
+  let prAction: (() => void) | null = null
+  if (pushState === 'running' || pushState === 'pending') {
+    prState = 'pending'
+    prHint = 'waiting for push to open PR'
+  } else if (pushState === 'failed') {
+    prState = 'failed'
+    prHint = 'push failed — PR not created'
+  } else if (prInfo) {
+    prState = 'done'
+    const numPart = prInfo.number ? ` #${prInfo.number}` : ''
+    prHint = `PR${numPart} created — click to open in GitHub`
+    prAction = () => { window.open(prInfo.url, '_blank', 'noopener,noreferrer') }
+  } else {
+    // Push succeeded but no PR was opened — direct push on default branch.
+    prState = 'skipped'
+    prHint = 'no PR — pushed directly to default branch'
+  }
+  const showPrChip = !!pushJob && (!!prInfo || prState === 'pending' || prState === 'failed')
+
   const prWaitState = stateOf(prWaitJob)
   const prWaitHint = prWaitJob?.status === 'running'
     ? 'waiting for CI checks and auto-merge — click to open terminal'
@@ -467,6 +506,9 @@ export function PipelineStrip({
   }
   if (pushJob) {
     steps.push({ label: 'push', state: pushState, hint: pushHint, action: pushAction, retryAction: pushRetryAction, jobId: pushJob.id })
+  }
+  if (showPrChip) {
+    steps.push({ label: 'pr', state: prState, hint: prHint, action: prAction, jobId: pushJob?.id ?? null })
   }
   if (dodJob) {
     steps.push({ label: 'dod', state: dodState, hint: dodHint, action: dodAction, jobId: dodJob.id })

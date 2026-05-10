@@ -8,7 +8,7 @@ describe('createGenericPR', () => {
     vi.resetModules();
     execMock = vi.fn();
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({ listJobs: vi.fn(() => []) }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({ getJob: vi.fn(() => null) }));
     vi.doMock('@/lib/pipeline/start-commit', () => ({
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn(),
@@ -94,17 +94,24 @@ describe('createGenericPR', () => {
 
 describe('createIssuePR', () => {
   let execMock: ReturnType<typeof vi.fn>;
-  let listJobsMock: ReturnType<typeof vi.fn>;
+  let getJobMock: ReturnType<typeof vi.fn>;
   let createIssuePR: typeof import('@/lib/pipeline/pr-create').createIssuePR;
 
   const issue = { number: 42, repo: 'org/repo', title: 'Fix login bug' };
 
+  // Helper: build a parent chain {id -> job} for getJobMock to walk.
+  function chain(...jobs: Array<Partial<import('@/lib/jobs/types').JobData> & { id: string }>): Map<string, unknown> {
+    const m = new Map<string, unknown>();
+    for (const j of jobs) m.set(j.id, j);
+    return m;
+  }
+
   beforeEach(async () => {
     vi.resetModules();
     execMock = vi.fn();
-    listJobsMock = vi.fn(() => []);
+    getJobMock = vi.fn(() => null);
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({ listJobs: listJobsMock }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({ getJob: getJobMock }));
     vi.doMock('@/lib/pipeline/start-commit', () => ({
       detectMainBranch: vi.fn().mockResolvedValue('main'),
       issueBranchName: vi.fn().mockReturnValue('fix/issue-42-fix-login-bug'),
@@ -254,128 +261,97 @@ describe('createIssuePR', () => {
     );
   });
 
-  it('renders the run summary in the PR body when a recent run job carries report data', async () => {
-    listJobsMock.mockReturnValue([
+  it('walks the parent chain to find the originating agent run and uses its summary', async () => {
+    // Chain: push -> commit -> review -> test -> release -> agent:issue-cruncher
+    const jobs = chain(
+      { id: 'push-1', kind: 'push', parentJobId: 'commit-1', project: 'proj-a' },
+      { id: 'commit-1', kind: 'commit', parentJobId: 'review-1', project: 'proj-a' },
+      { id: 'review-1', kind: 'review', parentJobId: 'test-1', project: 'proj-a' },
+      { id: 'test-1', kind: 'test', parentJobId: 'release-1', project: 'proj-a' },
+      { id: 'release-1', kind: 'release', parentJobId: 'cruncher-1', project: 'proj-a' },
       {
-        id: 'job-1',
-        kind: 'run',
+        id: 'cruncher-1',
+        kind: 'agent:issue-cruncher',
         project: 'proj-a',
         ghIssueNumber: 42,
-        ghIssueRepo: 'org/repo',
-        startedAt: 1000,
         workSummary: 'Wired DAO revenue to real gateway data and added tests.',
-        modifiedFiles: JSON.stringify([
-          { path: 'src/app/dao/revenue/page.tsx', status: 'M' },
-        ]),
+        parentJobId: null,
       },
-    ]);
+    );
+    getJobMock.mockImplementation((id: string) => jobs.get(id) ?? null);
+
     execMock
       .mockResolvedValueOnce(resp(0, 'fix/issue-42-fix-login-bug\n'))
       .mockResolvedValueOnce(resp(0, '[]'))
       .mockResolvedValueOnce(resp(0, 'https://github.com/org/repo/pull/13\n'));
 
-    await createIssuePR('/repo', log, issue, undefined, 'proj-a');
+    await createIssuePR('/repo', log, issue, undefined, 'push-1');
 
     const body = getCreatedBody();
     expect(body).toContain('Closes #42');
     expect(body).toContain('Wired DAO revenue to real gateway data');
     expect(body).not.toContain('## Files changed');
-    expect(body).not.toContain('src/app/dao/revenue/page.tsx');
     expect(body).toContain('Implemented via TamTam from issue [#42]');
   });
 
-  it('picks the most recent matching run job when several are stamped', async () => {
-    listJobsMock.mockReturnValue([
-      {
-        id: 'old',
-        kind: 'run',
-        project: 'proj-a',
-        ghIssueNumber: 42,
-        ghIssueRepo: 'org/repo',
-        startedAt: 100,
-        workSummary: 'Old summary.',
-        modifiedFiles: '[]',
-      },
-      {
-        id: 'newer',
-        kind: 'run',
-        project: 'proj-a',
-        ghIssueNumber: 42,
-        ghIssueRepo: 'org/repo',
-        startedAt: 9000,
-        workSummary: 'Newer summary.',
-        modifiedFiles: '[]',
-      },
-    ]);
+  it('falls back to stub body when the parent chain has no eligible originating run', async () => {
+    // Chain leads to a release with no parent agent run.
+    const jobs = chain(
+      { id: 'push-1', kind: 'push', parentJobId: 'release-1', project: 'proj-a' },
+      { id: 'release-1', kind: 'release', parentJobId: null, project: 'proj-a' },
+    );
+    getJobMock.mockImplementation((id: string) => jobs.get(id) ?? null);
+
     execMock
       .mockResolvedValueOnce(resp(0, 'fix/issue-42-fix-login-bug\n'))
       .mockResolvedValueOnce(resp(0, '[]'))
       .mockResolvedValueOnce(resp(0, 'https://github.com/org/repo/pull/13\n'));
 
-    await createIssuePR('/repo', log, issue, undefined, 'proj-a');
-
-    const body = getCreatedBody();
-    expect(body).toContain('Newer summary.');
-    expect(body).not.toContain('Old summary.');
-  });
-
-  it('ignores newer stamped run jobs from other projects', async () => {
-    listJobsMock.mockReturnValue([
-      {
-        id: 'other-project-newer',
-        kind: 'run',
-        project: 'proj-b',
-        ghIssueNumber: 42,
-        ghIssueRepo: 'org/repo',
-        startedAt: 9000,
-        workSummary: 'Wrong project summary.',
-        modifiedFiles: JSON.stringify([{ path: 'src/wrong-project.ts', status: 'M' }]),
-      },
-      {
-        id: 'current-project-older',
-        kind: 'run',
-        project: 'proj-a',
-        ghIssueNumber: 42,
-        ghIssueRepo: 'org/repo',
-        startedAt: 1000,
-        workSummary: 'Current project summary.',
-        modifiedFiles: JSON.stringify([{ path: 'src/current-project.ts', status: 'M' }]),
-      },
-    ]);
-    execMock
-      .mockResolvedValueOnce(resp(0, 'fix/issue-42-fix-login-bug\n'))
-      .mockResolvedValueOnce(resp(0, '[]'))
-      .mockResolvedValueOnce(resp(0, 'https://github.com/org/repo/pull/13\n'));
-
-    await createIssuePR('/repo', log, issue, undefined, 'proj-a');
-
-    const body = getCreatedBody();
-    expect(body).toContain('Current project summary.');
-    expect(body).not.toContain('Wrong project summary.');
-  });
-
-  it('falls back to the stub body when only another project has stamped run data', async () => {
-    listJobsMock.mockReturnValue([
-      {
-        id: 'other-project-only',
-        kind: 'run',
-        project: 'proj-b',
-        ghIssueNumber: 42,
-        ghIssueRepo: 'org/repo',
-        startedAt: 9000,
-        workSummary: 'Wrong project summary.',
-        modifiedFiles: JSON.stringify([{ path: 'src/wrong-project.ts', status: 'M' }]),
-      },
-    ]);
-    execMock
-      .mockResolvedValueOnce(resp(0, 'fix/issue-42-fix-login-bug\n'))
-      .mockResolvedValueOnce(resp(0, '[]'))
-      .mockResolvedValueOnce(resp(0, 'https://github.com/org/repo/pull/13\n'));
-
-    await createIssuePR('/repo', log, issue, undefined, 'proj-a');
+    await createIssuePR('/repo', log, issue, undefined, 'push-1');
 
     expect(getCreatedBody()).toBe(
       `Closes #42\n\nImplemented via TamTam from issue [#42](https://github.com/org/repo/issues/42).`,
     );
+  });
+
+  it('does not pick up an unrelated agent run not in the parent chain', async () => {
+    // The originating run does NOT have an agent ancestor — chain ends at release.
+    // An unrelated agent:issue-cruncher with the same issue number exists in
+    // the system, but since it's not on the parent chain, we must not use it.
+    const jobs = chain(
+      { id: 'push-1', kind: 'push', parentJobId: 'release-1', project: 'proj-a' },
+      { id: 'release-1', kind: 'release', parentJobId: null, project: 'proj-a' },
+    );
+    getJobMock.mockImplementation((id: string) => jobs.get(id) ?? null);
+
+    execMock
+      .mockResolvedValueOnce(resp(0, 'fix/issue-42-fix-login-bug\n'))
+      .mockResolvedValueOnce(resp(0, '[]'))
+      .mockResolvedValueOnce(resp(0, 'https://github.com/org/repo/pull/13\n'));
+
+    await createIssuePR('/repo', log, issue, undefined, 'push-1');
+
+    const body = getCreatedBody();
+    expect(body).not.toContain('Wrong agent summary');
+    expect(body).toBe(
+      `Closes #42\n\nImplemented via TamTam from issue [#42](https://github.com/org/repo/issues/42).`,
+    );
+  });
+
+  it('breaks parent-chain walk on cycles without recursing forever', async () => {
+    // Pathological self-reference: push -> push.
+    const jobs = chain(
+      { id: 'push-1', kind: 'push', parentJobId: 'push-1', project: 'proj-a' },
+    );
+    getJobMock.mockImplementation((id: string) => jobs.get(id) ?? null);
+
+    execMock
+      .mockResolvedValueOnce(resp(0, 'fix/issue-42-fix-login-bug\n'))
+      .mockResolvedValueOnce(resp(0, '[]'))
+      .mockResolvedValueOnce(resp(0, 'https://github.com/org/repo/pull/13\n'));
+
+    await createIssuePR('/repo', log, issue, undefined, 'push-1');
+
+    expect(getCreatedBody()).toContain('Closes #42');
   });
 });

@@ -50,8 +50,50 @@ describe('issue-run summary scripts', () => {
     };
 
     expect(pkg.scripts['backfill:issue-run-summaries']).toBe('node scripts/backfill-issue-run-summaries.mjs');
+    expect(pkg.scripts['backfill:issue-cruncher-numbers']).toBe('node scripts/backfill-issue-cruncher-numbers.mjs');
     expect(pkg.scripts['check:summary-extraction']).toBe('node scripts/check-summary-extraction.mjs');
     expect(pkg.scripts['peek:summary']).toBe('node scripts/peek-summary.mjs');
+  });
+
+  it('runs the issue-cruncher number backfill against a temp sqlite database', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tamtam-issue-cruncher-backfill-'));
+    try {
+      const dbPath = join(dir, 'tamtam.db');
+      const db = new Database(dbPath);
+      createJobsTable(db);
+      db.prepare(`
+        INSERT INTO jobs (id, project, kind, pid, started_at, log_path, finished_at, gh_issue_number, work_summary)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('cruncher-1', 'proj', 'agent:issue-cruncher', 1003, 1, null, 2, null, 'Worked issue #70, wired the endpoint, and added guardrails.');
+      db.prepare(`
+        INSERT INTO jobs (id, project, kind, pid, started_at, log_path, finished_at, gh_issue_number, work_summary)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('cruncher-2', 'proj', 'agent:issue-cruncher', 1004, 1, null, 2, null, 'Refreshed docs only.');
+      db.close();
+
+      const env = { ...process.env, TAMTAM_DB_PATH: dbPath };
+      const stdout = execFileSync(
+        process.execPath,
+        ['scripts/backfill-issue-cruncher-numbers.mjs'],
+        { cwd: repoRoot, env, encoding: 'utf-8' },
+      );
+      expect(stdout).toContain('Found 2 issue-cruncher rows to backfill');
+      expect(stdout).toContain('[cruncher-1] -> #70');
+      expect(stdout).toContain('Done. updated=1 skipped=1');
+
+      const checkDb = new Database(dbPath, { readonly: true });
+      const updated = checkDb.prepare('SELECT gh_issue_number AS ghIssueNumber FROM jobs WHERE id = ?').get('cruncher-1') as
+        | { ghIssueNumber: number | null }
+        | undefined;
+      const untouched = checkDb.prepare('SELECT gh_issue_number AS ghIssueNumber FROM jobs WHERE id = ?').get('cruncher-2') as
+        | { ghIssueNumber: number | null }
+        | undefined;
+      expect(updated?.ghIssueNumber).toBe(70);
+      expect(untouched?.ghIssueNumber).toBeNull();
+      checkDb.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('runs the backfill and inspection scripts against a temp sqlite database', () => {

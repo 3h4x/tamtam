@@ -58,7 +58,7 @@ Skip framework-escaped output and parameterized queries.`,
 | Package | Current | Latest | Notes |
 **Recommendation:** [one sentence]
 \`\`\`
-Dev-only CVEs are lower priority. Note breaking changes on major bumps.`,
+Dev-only CVEs are lower priority. Note breaking changes on major bumps. Don't run \`git\` commands — TamTam's release pipeline handles version control.`,
   },
   {
     id: 'agent-blog',
@@ -70,7 +70,7 @@ Dev-only CVEs are lower priority. Note breaking changes on major bumps.`,
     id: 'agent-ci-monitor',
     name: 'agent:ci-monitor',
     description: 'Check CI and apply targeted fixes when red.',
-    content: `\`gh run list --limit 5\`. If the latest failed: \`gh run view <id> --log-failed\`, classify (test/type/lint/build/secret), apply a minimal fix touching only what's broken. Do not skip tests to make CI green. Reproduce locally before editing. If green, say so and stop.`,
+    content: `\`gh run list --limit 5\`. If the latest failed: \`gh run view <id> --log-failed\`, classify (test/type/lint/build/secret), apply a minimal fix touching only what's broken. Do not skip tests to make CI green. Reproduce locally before editing. If green, say so and stop. Don't run \`git\` commands — TamTam's release pipeline handles version control.`,
   },
   {
     id: ISSUE_CRUNCHER_SKILL_ID,
@@ -122,7 +122,7 @@ Don't run \`git\` commands — TamTam's release pipeline handles version control
     id: 'agent-gha-audit',
     name: 'agent:gha-audit',
     description: 'Audit and fill gaps in .github/workflows.',
-    content: `Read \`.github/workflows/\`. Ensure: a CI workflow (tests + lint + types on push/PR), a release workflow if applicable, action versions pinned to current major or SHA, secrets documented. Match deploy mechanism in CLAUDE.md. Don't duplicate Dependabot if already configured. Report what existed, what was created, what was upgraded.`,
+    content: `Read \`.github/workflows/\`. Ensure: a CI workflow (tests + lint + types on push/PR), a release workflow if applicable, action versions pinned to current major or SHA, secrets documented. Match deploy mechanism in CLAUDE.md. Don't duplicate Dependabot if already configured. Report what existed, what was created, what was upgraded. Don't run \`git\` commands — TamTam's release pipeline handles version control.`,
   },
   {
     id: 'agent-readme-sync',
@@ -140,7 +140,7 @@ NO WALL-CLOCK WAITS. If the code under test uses debouncing, setTimeout, setInte
 
 USER-EVENT + FAKE TIMERS. \`userEvent.type\` stalls under fake timers because each keystroke awaits a real-time delay. Either: (a) configure once with \`const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })\` and use \`user.type\`, or (b) fire the input change directly (\`fireEvent.change(input, { target: { value: '...' } })\`) when the test only cares about the resulting handler call — not the keystroke choreography.
 
-BUDGET. A new unit test should finish in <500ms. After writing one, run \`pnpm vitest run <file> --reporter=verbose\` and read the duration. If a single test exceeds 1s, you have a real timer somewhere — fix it before committing. Slow tests are a recurring offence; treat duration as part of correctness, not a nice-to-have.`,
+BUDGET. A new unit test should finish in <500ms. After writing one, run \`pnpm vitest run <file> --reporter=verbose\` and read the duration. If a single test exceeds 1s, you have a real timer somewhere — fix it before stopping. Slow tests are a recurring offence; treat duration as part of correctness, not a nice-to-have.`,
   },
   {
     id: 'agent-self-improve',
@@ -203,13 +203,13 @@ Output (in your TamTam Run Report):
 - fix_prompt_addendum: <text or "no change">
 - Confidence: low | medium | high
 \`\`\`
-Do NOT PATCH any settings. Surface proposals only — the user applies them in the Config tab.`,
+Do NOT PATCH any settings. Surface proposals only — the user applies them in the Config tab. Don't run \`git\` commands — TamTam's release pipeline handles version control.`,
   },
   {
     id: 'agent-senior-fullstack',
     name: 'agent:senior-fullstack',
     description: 'Senior fullstack engineer persona.',
-    content: `Senior fullstack engineer. Read CLAUDE.md and the manifest first; follow the project's established patterns. When scaffolding: match existing similar features exactly, add tests in the project's style, audit any new deps. When reviewing: flag P0 (security/critical), P1 (high impact), P2 (improvements). Don't refactor beyond the task's scope.`,
+    content: `Senior fullstack engineer. Read CLAUDE.md and the manifest first; follow the project's established patterns. When scaffolding: match existing similar features exactly, add tests in the project's style, audit any new deps. When reviewing: flag P0 (security/critical), P1 (high impact), P2 (improvements). Don't refactor beyond the task's scope. Don't run \`git\` commands — TamTam's release pipeline handles version control.`,
   },
 ];
 
@@ -224,22 +224,28 @@ const KNOWN_DEFAULT_CONTENT_HASHES: Record<string, string[]> = {
   // 'b9a1e7cd36ae83dd' = pre-template-shortening default before issue-template rollout.
   'agent-cto': ['a13c143efc007ea5', '1c4a08f78ed7b75c', 'b9a1e7cd36ae83dd'],
   'agent-security-review': ['ca362666deba8013', 'a9813f37584e7812'],
-  'agent-dependency-check': ['7a470f6f6b45a900'],
+  // '299c6853f741a1de' = pre-git-free-guard default (no "Don't run git commands" line).
+  'agent-dependency-check': ['7a470f6f6b45a900', '299c6853f741a1de'],
   'agent-blog': ['b020ce4f0b6c4d7a', '28c8aeb8eccdfd92'],
-  'agent-ci-monitor': ['4ca89e530c8eaf95'],
+  // '169e64a32796f5f6' = pre-git-free-guard default.
+  'agent-ci-monitor': ['4ca89e530c8eaf95', '169e64a32796f5f6'],
   'agent-issue-cruncher': ['362c85f7fe916df8', '2753dcc26f2f434c', '554fcf2c7671a896'],
   'agent-release-ready': ['4677689a0e0667df', 'a0ea7848cdb1310d'],
-  'agent-gha-audit': ['f8250345bd7da948'],
+  // '4048125c52cd7b0f' = pre-git-free-guard default.
+  'agent-gha-audit': ['f8250345bd7da948', '4048125c52cd7b0f'],
   'agent-readme-sync': ['28e3cb210b152a02', '4494288241d143e8'],
-  'agent-tests': ['fb8477be3f13e216', '739215b8306af83a'],
+  // 'bf05d4ff324af45e' = pre "fix it before stopping" copy edit (was "before committing").
+  'agent-tests': ['fb8477be3f13e216', '739215b8306af83a', 'bf05d4ff324af45e'],
   'agent-self-improve': ['a5a48f854a97f7b3', 'b4f077bfe18ed1bb', '441fabde58b560b7'],
   'agent-manage-agents': ['6afb7cebf46efee8', '9e7d0fc34508977f', '2f49c23946d7bd2f'],
   // 'c2a96b81a863ae7f' = pre-2026-05 default, '53267ca2a0043218' = older still,
   // 'f1c4d1702a613fdc' = the short-lived "stay on current branch" wording.
   // All three should refresh to the new git-free version on next boot.
   'agent-docs-claude': ['53267ca2a0043218', 'c2a96b81a863ae7f', 'f1c4d1702a613fdc'],
-  'agent-review-tuner': ['f156455212bb6bfc'],
-  'agent-senior-fullstack': ['ab7344ee6a0a7a21'],
+  // 'e7496058060e8bd4' = pre-git-free-guard default.
+  'agent-review-tuner': ['f156455212bb6bfc', 'e7496058060e8bd4'],
+  // 'd2b9ebcdd7b0de6c' = pre-git-free-guard default.
+  'agent-senior-fullstack': ['ab7344ee6a0a7a21', 'd2b9ebcdd7b0de6c'],
 };
 
 function isUnmodifiedDefault(id: string, existingContent: string): boolean {

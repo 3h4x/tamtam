@@ -579,7 +579,7 @@ async function runPush(
   const commitSha = shaR.exitCode === 0 ? shaR.stdout.trim() : '';
 
   if (issueCtx) {
-    const prUrl = await createIssuePR(projPath, log, issueCtx, signal, projectName);
+    const prUrl = await createIssuePR(projPath, log, issueCtx, signal, job?.id ?? null);
     // Stay on the issue branch until the PR merges, regardless of whether
     // auto-merge is enabled. The user iterates on the branch (more fixes,
     // more pushes); switching to main now strands them with conflicts. The

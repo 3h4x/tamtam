@@ -14,6 +14,7 @@
     "logs": "pm2 logs tamtam",
     "mcp:http": "node scripts/mcp-http-tools-call.mjs",
     "backfill:issue-run-summaries": "node scripts/backfill-issue-run-summaries.mjs",
+    "backfill:issue-cruncher-numbers": "node scripts/backfill-issue-cruncher-numbers.mjs",
     "check:summary-extraction": "node scripts/check-summary-extraction.mjs",
     "peek:summary": "node scripts/peek-summary.mjs",
     "build": "NODE_ENV=production next build",

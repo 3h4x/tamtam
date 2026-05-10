@@ -287,10 +287,33 @@ function runPrWaitLoop(
       }
       log(`\n# on ${switchResult.branch}\n`);
 
-      // Run mark-dod post-merge so verification reflects the merged state
+      // Run mark-dod post-merge so verification reflects the merged state.
+      // Prefer the linked issue when one exists: acceptance-criteria
+      // checklists usually live in the issue body, not the PR body. Walk
+      // the parent chain to find an ancestor stamped with gh_issue_number
+      // (typically the push or commit job). Without this, mark-dod reads
+      // the PR body — which carries only "Closes #N" and no checklist —
+      // and reports "no unchecked DoD boxes — nothing to verify".
+      let issueTarget: { issueNumber: number; repo: string } | null = null;
+      const seen = new Set<string>();
+      let cursor: string | null = job.parentJobId ?? null;
+      while (cursor && !seen.has(cursor)) {
+        seen.add(cursor);
+        const ancestor: JobData | null = getJob(cursor) ?? null;
+        if (!ancestor) break;
+        if (ancestor.ghIssueNumber != null && ancestor.ghIssueRepo) {
+          issueTarget = { issueNumber: ancestor.ghIssueNumber, repo: ancestor.ghIssueRepo };
+          break;
+        }
+        cursor = ancestor.parentJobId ?? null;
+      }
       try {
         const { startMarkDod } = await import('./start-mark-dod');
-        const md = await startMarkDod(job.project, { prNumber, repo: prRepo, mode: 'pipeline' });
+        const target = issueTarget
+          ? { ...issueTarget, mode: 'pipeline' as const }
+          : { prNumber, repo: prRepo, mode: 'pipeline' as const };
+        log(`\n# mark-dod target: ${issueTarget ? `issue #${issueTarget.issueNumber}` : `PR #${prNumber}`}\n`);
+        const md = await startMarkDod(job.project, target);
         if (md.ok) {
           log(`\n# mark-dod: ${md.verified}/${md.total} verified${md.changed ? ' (issue updated)' : ''}\n`);
         }

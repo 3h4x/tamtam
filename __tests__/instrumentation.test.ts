@@ -105,6 +105,110 @@ describe('instrumentation', () => {
     });
   });
 
+  describe('reapOrphanReleases()', () => {
+    function mockOrphanReleaseDeps({
+      jobs,
+      lockRow = null,
+      execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+      markDoneMock = vi.fn().mockResolvedValue(undefined),
+      reconcileStaleReleaseMock = vi.fn().mockResolvedValue(undefined),
+    }: {
+      jobs: Array<Record<string, unknown>>;
+      lockRow?: { lockedByJobId: string } | null;
+      execMock?: ReturnType<typeof vi.fn>;
+      markDoneMock?: ReturnType<typeof vi.fn>;
+      reconcileStaleReleaseMock?: ReturnType<typeof vi.fn>;
+    }) {
+      const byId = new Map(jobs.map((job) => [job.id as string, job]));
+      const lockGet = vi.fn().mockReturnValue(lockRow);
+      const lockWhere = vi.fn().mockReturnValue({ get: lockGet });
+      const deleteRun = vi.fn();
+      const deleteWhere = vi.fn().mockReturnValue({ run: deleteRun });
+      const dbMock = {
+        select: vi.fn().mockReturnValue({
+          from: vi.fn().mockReturnValue({
+            where: lockWhere,
+          }),
+        }),
+        delete: vi.fn().mockReturnValue({
+          where: deleteWhere,
+        }),
+      };
+
+      vi.doMock('@/lib/jobs/job-storage', () => ({
+        listJobs: vi.fn(() => jobs),
+        getJob: vi.fn((id: string) => byId.get(id) ?? null),
+        markDone: markDoneMock,
+        reconcileStaleRelease: reconcileStaleReleaseMock,
+      }));
+      vi.doMock('./lib/jobs/job-storage', () => ({
+        listJobs: vi.fn(() => jobs),
+        getJob: vi.fn((id: string) => byId.get(id) ?? null),
+        markDone: markDoneMock,
+        reconcileStaleRelease: reconcileStaleReleaseMock,
+      }));
+      vi.doMock('@/lib/db', () => ({ db: dbMock, schema: { pipelineLocks: { project: 'project' } } }));
+      vi.doMock('./lib/db', () => ({ db: dbMock, schema: { pipelineLocks: { project: 'project' } } }));
+      vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+      vi.doMock('./lib/shared/shell', () => ({ exec: execMock }));
+      vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
+
+      return { execMock, markDoneMock, reconcileStaleReleaseMock, deleteRun };
+    }
+
+    it('reconciles a stranded release from its newest finished child after the handoff grace', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-05-10T12:00:00Z'));
+        const release = { id: 'release-1', project: 'proj', kind: 'release', finishedAt: null, startedAt: 100 };
+        const push = { id: 'push-1', project: 'proj', kind: 'push', releaseId: 'release-1', finishedAt: 150, startedAt: 140 };
+        const { markDoneMock, reconcileStaleReleaseMock } = mockOrphanReleaseDeps({
+          jobs: [release, push],
+          reconcileStaleReleaseMock: vi.fn().mockImplementation(async () => {
+            release.finishedAt = 160;
+          }),
+        });
+
+        const { reapOrphanReleases } = await import('@/instrumentation-node');
+        await reapOrphanReleases();
+
+        expect(reconcileStaleReleaseMock).toHaveBeenCalledWith(push);
+        expect(markDoneMock).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('skips releases that still have a live child step', async () => {
+      const release = { id: 'release-2', project: 'proj', kind: 'release', finishedAt: null, startedAt: 100 };
+      const review = { id: 'review-2', project: 'proj', kind: 'review', releaseId: 'release-2', finishedAt: null, startedAt: 140 };
+      const { execMock, markDoneMock, reconcileStaleReleaseMock } = mockOrphanReleaseDeps({
+        jobs: [release, review],
+      });
+
+      const { reapOrphanReleases } = await import('@/instrumentation-node');
+      await reapOrphanReleases();
+
+      expect(reconcileStaleReleaseMock).not.toHaveBeenCalled();
+      expect(markDoneMock).not.toHaveBeenCalled();
+      expect(execMock).not.toHaveBeenCalled();
+    });
+
+    it('still reaps zero-child orphan releases directly', async () => {
+      const release = { id: 'release-3', project: 'proj', kind: 'release', finishedAt: null, startedAt: 100 };
+      const { execMock, markDoneMock, reconcileStaleReleaseMock } = mockOrphanReleaseDeps({
+        jobs: [release],
+      });
+
+      const { reapOrphanReleases } = await import('@/instrumentation-node');
+      await reapOrphanReleases();
+
+      expect(reconcileStaleReleaseMock).not.toHaveBeenCalled();
+      expect(execMock).toHaveBeenCalledTimes(2);
+      expect(markDoneMock).toHaveBeenCalledWith(release, -1);
+    });
+  });
+
   describe('reinstallAgents()', () => {
     it('arms the internal scheduler with all enabled scheduled agents', async () => {
       const agents = [

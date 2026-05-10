@@ -107,6 +107,17 @@ function maybeRecommendSchedule(job: JobData, ctx: AgentContextMeta, files: Modi
   });
 }
 
+// agent:issue-cruncher reports the picked issue inline in its summary
+// ("Worked issue `#70`, …"). Parsing it lets createIssuePR look up this job
+// later — the agent itself never stamps gh_issue_number on its own row.
+function parseIssueNumberFromSummary(summary: string | null | undefined): number | null {
+  if (!summary) return null;
+  const m = summary.match(/(?:issue\s+|#)(\d{1,6})\b/i);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 export async function finalizeAgentRunReport(job: JobData, rawLog: string): Promise<void> {
   const isAgent = isAgentJobKind(job.kind);
   const isIssueRun = job.kind === 'run' && job.ghIssueNumber != null;
@@ -117,5 +128,9 @@ export async function finalizeAgentRunReport(job: JobData, rawLog: string): Prom
   const files = await modifiedFiles(job, ctx);
   job.workSummary = summary;
   job.modifiedFiles = JSON.stringify(files);
+  if (job.kind === 'agent:issue-cruncher' && job.ghIssueNumber == null) {
+    const parsed = parseIssueNumberFromSummary(summary);
+    if (parsed != null) job.ghIssueNumber = parsed;
+  }
   if (isAgent) maybeRecommendSchedule(job, ctx, files, actionable);
 }
