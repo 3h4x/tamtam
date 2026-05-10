@@ -1,6 +1,6 @@
 # Agents — How They Work
 
-Agents are reusable automation units that combine skills, a model, a prompt template, and optional scheduling. Each agent runs Claude CLI with a composed system prompt (skills) and a task prompt, either on-demand or on a recurring schedule.
+Agents are reusable automation units that combine skills, a model, a prompt template, and optional scheduling. Each agent runs the selected provider through TamTam's Claude-compatible CLI shim layer with a composed system prompt (skills) and a task prompt, either on-demand or on a recurring schedule.
 
 ## When to read this
 
@@ -246,7 +246,7 @@ Skill 2 content...
 [Task prompt provided at run time]
 ```
 
-The final prompt sent to Claude is:
+The final prompt sent to the selected provider is:
 ```
 [Base prompt from settings] + [Composed skills] + [Task prompt]
 ```
@@ -333,7 +333,7 @@ User/scheduler triggers
       → Re-check release/project blockers after the prerequisite completes
       → Write prerequisite artifact, if applicable
       → Build command:
-          claude --print --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions --model {agent.model}
+          {selected-provider-shim} --print --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions --model {agent.model}
       → Start via PM2 with composed prompt as stdin
       → Return job ID and PID
       → If startup fails before PM2 takes over, release the per-project start slot and drain the next queued fire immediately
