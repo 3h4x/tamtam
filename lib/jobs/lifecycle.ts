@@ -775,8 +775,9 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           if (contradiction.stuck) {
             const legacyStop = `fix claimed ${contradiction.ids.join(', ')} fixed but review still flags them — stopping`;
             if (verdict === 'DO NOT SHIP') {
-              noteReleaseStop(legacyStop);
+              notificationEvent = 'review_do_not_ship';
               releaseStopReason = legacyStop;
+              noteReleaseStop(releaseStopReason);
               forcedReleaseExitCode = 1;
             } else {
               notificationEvent = 'fix_loop_exhausted';
@@ -795,8 +796,9 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           } else if (stuck) {
             const legacyStop = `review findings unchanged from previous iteration for ${job.project} — fix not converging, stopping`;
             if (verdict === 'DO NOT SHIP') {
-              noteReleaseStop(legacyStop);
+              notificationEvent = 'review_do_not_ship';
               releaseStopReason = legacyStop;
+              noteReleaseStop(releaseStopReason);
               forcedReleaseExitCode = 1;
             } else {
               notificationEvent = 'fix_loop_exhausted';
