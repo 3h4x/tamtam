@@ -413,6 +413,41 @@ describe('fetchProjectData — project selection and metadata', () => {
 
     expect(result.projects['enabled-proj']?.[0]?.launchctl).toBe('installed');
   });
+
+  it('reports running launchctl state when daemon is loaded with a pid', async () => {
+    vi.doMock('@/lib/scheduling/launchagent', () => ({
+      launchctlInfo: vi.fn().mockResolvedValue({ loaded: true, pid: 12345, plistMinute: null, wrapperPhase: null, wrapperCycle: null }),
+      plistPath: vi.fn().mockImplementation((schedId: string) => `/tmp/${schedId}.plist`),
+      pausedPlistPath: vi.fn().mockImplementation((schedId: string) => `/tmp/${schedId}.plist.paused`),
+    }));
+
+    const { fetchProjectData } = await import('@/lib/shared/project-data');
+    const result = await fetchProjectData();
+
+    expect(result.projects['enabled-proj']?.[0]?.launchctl).toBe('running');
+  });
+
+  it('reports loaded launchctl state when daemon is loaded but has no pid', async () => {
+    vi.doMock('@/lib/scheduling/launchagent', () => ({
+      launchctlInfo: vi.fn().mockResolvedValue({ loaded: true, pid: null, plistMinute: null, wrapperPhase: null, wrapperCycle: null }),
+      plistPath: vi.fn().mockImplementation((schedId: string) => `/tmp/${schedId}.plist`),
+      pausedPlistPath: vi.fn().mockImplementation((schedId: string) => `/tmp/${schedId}.plist.paused`),
+    }));
+
+    const { fetchProjectData } = await import('@/lib/shared/project-data');
+    const result = await fetchProjectData();
+
+    expect(result.projects['enabled-proj']?.[0]?.launchctl).toBe('loaded');
+  });
+
+  it('reports missing launchctl state when daemon is not loaded and no plist files exist', async () => {
+    existsSyncMock.mockReturnValue(false);
+
+    const { fetchProjectData } = await import('@/lib/shared/project-data');
+    const result = await fetchProjectData();
+
+    expect(result.projects['enabled-proj']?.[0]?.launchctl).toBe('missing');
+  });
 });
 
 describe('clearProjectDataCache', () => {
