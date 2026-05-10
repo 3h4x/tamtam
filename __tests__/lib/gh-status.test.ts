@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { homedir } from 'os';
 import * as schema from '@/lib/db/schema';
 
 function createTestDb() {
@@ -328,5 +329,63 @@ describe('gh-status ghRepo auto-detection via git remote', () => {
       const repoArg = (ghApiCalls[0][1] as string[]).find((a) => a.includes('3h4x/tamtam'));
       expect(repoArg).toBeTruthy();
     }
+  });
+});
+
+describe('gh-status repo helpers', () => {
+  let testDb: ReturnType<typeof createTestDb>;
+  let execMock: ReturnType<typeof vi.fn>;
+  let mockGetSettings: ReturnType<typeof vi.fn>;
+  let extractGithubRepoFromUrl: typeof import('@/lib/shared/gh-status').extractGithubRepoFromUrl;
+  let resolveGithubRepo: typeof import('@/lib/shared/gh-status').resolveGithubRepo;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    testDb = createTestDb();
+    execMock = vi.fn();
+    mockGetSettings = vi.fn().mockReturnValue({ github_owner: '' });
+
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: mockGetSettings }));
+
+    const mod = await import('@/lib/shared/gh-status');
+    extractGithubRepoFromUrl = mod.extractGithubRepoFromUrl;
+    resolveGithubRepo = mod.resolveGithubRepo;
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    delete process.env.GITHUB_OWNER;
+  });
+
+  it('extracts owner/repo from canonical GitHub URLs only', () => {
+    expect(extractGithubRepoFromUrl('https://github.com/3h4x/tamtam/actions/runs/1')).toBe('3h4x/tamtam');
+    expect(extractGithubRepoFromUrl('https://github.com/3h4x/tamtam/')).toBe('3h4x/tamtam');
+    expect(extractGithubRepoFromUrl('https://example.com/3h4x/tamtam')).toBeNull();
+  });
+
+  it('returns cfg.github directly without shelling out', async () => {
+    await expect(resolveGithubRepo('tamtam', { github: '3h4x/tamtam', path: '/repo' })).resolves.toBe('3h4x/tamtam');
+    expect(execMock).not.toHaveBeenCalled();
+  });
+
+  it('expands a tilde path before asking git for origin', async () => {
+    execMock.mockResolvedValue({ exitCode: 0, stdout: 'git@github.com:3h4x/tamtam.git\n', stderr: '' });
+
+    await expect(resolveGithubRepo('tamtam', { path: '~/workspace/tamtam' })).resolves.toBe('3h4x/tamtam');
+
+    expect(execMock).toHaveBeenCalledWith(
+      'git',
+      ['-C', `${homedir()}/workspace/tamtam`, 'remote', 'get-url', 'origin'],
+      { timeout: 5000 },
+    );
+  });
+
+  it('falls back to the configured owner when the remote is not a GitHub repo', async () => {
+    mockGetSettings.mockReturnValue({ github_owner: 'fallback-owner' });
+    execMock.mockResolvedValue({ exitCode: 0, stdout: 'git@gitlab.com:3h4x/tamtam.git\n', stderr: '' });
+
+    await expect(resolveGithubRepo('tamtam', { path: '/repo' })).resolves.toBe('fallback-owner/tamtam');
   });
 });
