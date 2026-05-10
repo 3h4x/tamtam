@@ -1,6 +1,6 @@
 # Streaming — How It Works
 
-All Claude runs (terminal, review, fix, test, push) share the same streaming infrastructure: PM2 spawns the process, writes NDJSON to a log file, and an SSE endpoint tails that file to the browser.
+TamTam's streamed runs share the same infrastructure: PM2 spawns the process, writes output to a log file, and an SSE endpoint tails that file to the browser. For provider-backed runs, TamTam uses a Claude-compatible `stream-json` contract: the native Claude CLI emits that NDJSON directly, while Gemini, Codex, LM Studio, and compatible custom backends are normalized to the same shape by the bundled shims.
 
 ## When to read this
 
@@ -56,15 +56,15 @@ SSE event types (parsed mode):
 | `thinking` | thinking text string |
 | `tool_use` | `{ name, input }` JSON |
 | `tool_result` | `{ content }` JSON |
-| `done` | `{ exitCode, detail? }` JSON — or the Claude `result` object if stream-json |
+| `done` | `{ exitCode, detail? }` JSON — or the provider `result` object if stream-json |
 
 On non-zero exit, `done` includes a `detail` field with a human-readable diagnosis extracted from the log (e.g. "log file empty — rate-limited", "wrappers only — claude exited immediately").
 
 ---
 
-## Claude CLI stream-json format
+## Claude-compatible stream-json format
 
-The `--output-format stream-json --include-partial-messages --verbose` flags produce NDJSON.
+TamTam's shims normalize supported providers to the same NDJSON contract produced by Claude CLI `--output-format stream-json --include-partial-messages --verbose`.
 
 ```
 Text token:   {"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}}
@@ -88,7 +88,7 @@ Takes one or more NDJSON lines as a string. Silently skips malformed or irreleva
 
 ## Terminal tab (interactive, multi-turn)
 
-The terminal tab is the interactive case: user types, Claude responds, session persists across turns.
+The terminal tab is the interactive case: user types, the selected provider responds, and the session persists across turns.
 
 ### Request flow
 
@@ -96,7 +96,7 @@ The terminal tab is the interactive case: user types, Claude responds, session p
 User types → handleSubmit()
   → POST /api/projects/by-project/[name]/run
       → createJob(project, 'run', ..., contextMeta)
-      → PM2 spawns: claude --print --output-format stream-json --include-partial-messages --verbose --model {model}
+      → PM2 spawns: {selected-provider-shim} --print --output-format stream-json --include-partial-messages --verbose --model {model}
       → returns { job_id }
   → startStreaming(job_id)
       → EventSource /api/streaming/[jobId]
@@ -134,15 +134,15 @@ Streamed text → `streamBuffer`. `requestAnimationFrame` loop advances `display
 
 ### Transport recovery during rebuilds
 
-The terminal does not treat a transient SSE disconnect as a failed Claude run.
+The terminal does not treat a transient SSE disconnect as a failed provider run.
 
 - `EventSource.onerror` closes the broken socket but keeps the session live
 - the client probes `GET /api/jobs/[jobId]` and rebuilds the in-flight turn from the persisted log
-- for passthrough jobs such as `release`, the recovery path replays the mixed raw/NDJSON log through the same parser used by `/api/streaming/[jobId]?passthrough=1`, so shell output stays monospace while Claude sections still render as assistant/tool/thinking entries
+- for passthrough jobs such as `release`, the recovery path replays the mixed raw/NDJSON log through the same parser used by `/api/streaming/[jobId]?passthrough=1`, so shell output stays monospace while provider-backed sections still render as assistant/tool/thinking entries
 - while the job is still running, the terminal polls job state instead of reopening SSE from byte 0 (which would duplicate already-rendered output)
 - once the job finishes, the client finalizes the transcript from the recovered job payload
 
-This is specifically to survive `pnpm run rebuild` / PM2 restarts without injecting `Connection error` or `claude run failed` lines into an otherwise healthy terminal session.
+This is specifically to survive `pnpm run rebuild` / PM2 restarts without injecting `Connection error` or provider-failure lines into an otherwise healthy terminal session.
 
 ### Model selection
 
@@ -152,7 +152,7 @@ Model picker (Fast / Normal / Smart) persists via `PATCH /api/settings` (`defaul
 
 ## Non-terminal job streaming (review, fix, test, push)
 
-These jobs run without `--output-format stream-json` — they write plain text (or mixed) to the log. The SSE endpoint works the same way; clients typically use `?raw=1` or consume the parsed text events and ignore tool events.
+Review and fix jobs also use the provider-backed `stream-json` path, while shell-oriented jobs such as test and push write plain text (or mixed) output to the log. The SSE endpoint works the same way; clients either use `?raw=1` when they need the original log stream or consume the parsed text/tool events.
 
 The pipeline chain in `lib/job-storage.ts` completion hooks reads job output via the log file directly (not SSE) using `getJobLog()` — SSE is only for browser clients.
 
@@ -179,7 +179,7 @@ Verdict detection (`getVerdict`) reads the **last 2000 chars** of the parsed log
 | `lib/pm2-jobs.ts` | PM2 process lifecycle, exit handler → `markDone` |
 | `components/TerminalTab.tsx` | Terminal UI, SSE client, skill/docs/persona picker, session URL nav |
 | `app/project/[name]/terminal/[sessionId]/page.tsx` | Session-specific route |
-| `app/api/projects/by-project/[name]/run/route.ts` | Starts Claude CLI via PM2, stores `contextMeta` |
+| `app/api/projects/by-project/[name]/run/route.ts` | Starts the selected provider via PM2, stores `contextMeta` |
 | `app/api/projects/by-project/[name]/docs/route.ts` | Lists `docs/*.md` for docs picker |
 
 ---
@@ -207,7 +207,7 @@ Verdict detection (`getVerdict`) reads the **last 2000 chars** of the parsed log
 | Kind | Format | Client parses |
 |------|--------|---------------|
 | `run` | `stream-json` NDJSON | text, thinking, tool_use, tool_result, done |
-| `review`, `fix`, `fix-push` | Plain text mixed | Text events + done |
+| `review`, `fix`, `fix-push` | `stream-json` NDJSON | text, thinking, tool_use, tool_result, done |
 | `test`, `push`, `action` | Plain text | Text events + done |
 
 ### Log file locations
@@ -248,7 +248,7 @@ Use Chrome DevTools MCP (`mcp__plugin_chrome-devtools-mcp_chrome-devtools__*`) o
 | Completed session | `/project/[name]/terminal/[sessionId]` | Click entry in History; auto-set after first response completes |
 | Running job (live) | `/project/[name]/terminal?job=[jobId]` | Click a running entry in History tab |
 
-The `?job=` param is used during live streaming because the session ID isn't known until Claude emits the `result` line. After the session finishes, the URL stabilises to `/terminal/[sessionId]`.
+The `?job=` param is used during live streaming because the session ID isn't known until the provider emits the `result` line. After the session finishes, the URL stabilises to `/terminal/[sessionId]`.
 
 ### Session states and input placeholder
 
