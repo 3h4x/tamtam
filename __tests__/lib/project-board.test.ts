@@ -1088,6 +1088,66 @@ describe('project board integration', () => {
     expect(storedMeta.itemId).toBe('DI_REPLACEMENT');
   });
 
+  it('retries with a recreated draft item when the title/body edit hits a stale DI_ id', async () => {
+    const job = makeJob({
+      id: 'run-stale-draft',
+      kind: 'run',
+      prompt: 'draft card got deleted',
+      contextMeta: JSON.stringify({ githubBoard: { itemId: 'DI_STALE' } }),
+    });
+
+    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    resolveProjectPathMock.mockReturnValue('/tmp/repo');
+    getJobMock.mockImplementation((id: string) => (id === 'run-stale-draft' ? job : null));
+
+    const calls: string[][] = [];
+    let staleBodyEditAttempted = false;
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'git') return { exitCode: 0, stdout: 'main\n', stderr: '' };
+      if (args[0] === 'project' && args[1] === 'item-list') {
+        return { exitCode: 0, stdout: JSON.stringify({ items: [] }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-edit') {
+        const targetsStaleDraft = args.includes('DI_STALE');
+        const editsBody = args.includes('--title') && args.includes('--body');
+        if (targetsStaleDraft && editsBody && !staleBodyEditAttempted) {
+          staleBodyEditAttempted = true;
+          return { exitCode: 1, stdout: '', stderr: 'item not found' };
+        }
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-create') {
+        return { exitCode: 0, stdout: JSON.stringify({ id: 'DI_RECREATED' }), stderr: '' };
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
+    await syncJobToProjectBoard(job, 'manual', { requireConfigured: true });
+
+    const itemCreateCalls = calls.filter((entry) => entry[1] === 'project' && entry[2] === 'item-create');
+    expect(itemCreateCalls).toHaveLength(1);
+    const staleBodyEditCalls = calls.filter((entry) =>
+      entry[1] === 'project' &&
+      entry[2] === 'item-edit' &&
+      entry.includes('DI_STALE') &&
+      entry.includes('--title') &&
+      entry.includes('--body'),
+    );
+    expect(staleBodyEditCalls).toHaveLength(1);
+    const recreatedBodyEditCalls = calls.filter((entry) =>
+      entry[1] === 'project' &&
+      entry[2] === 'item-edit' &&
+      entry.includes('DI_RECREATED') &&
+      entry.includes('--title') &&
+      entry.includes('--body'),
+    );
+    expect(recreatedBodyEditCalls).toHaveLength(1);
+    const storedMeta = JSON.parse(job.contextMeta ?? '{}').githubBoard;
+    expect(storedMeta.itemId).toBe('DI_RECREATED');
+  });
+
   it('clears invalid item IDs (not starting with DI_) and creates new ones', async () => {
     const job = makeJob({
       id: 'run-invalid-id',
