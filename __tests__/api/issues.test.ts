@@ -336,13 +336,13 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
     expect(issue.title).toBe('My Issue');
     expect(issue.labels).toEqual(['enhancement']);
     expect(issue.body).toBeUndefined();
-    expect(issue.author).toBeUndefined();
+    expect(issue.author).toBe('me');
     const pr = data.prs[0];
     expect(pr.number).toBe(5);
     expect(pr.labels).toEqual(['bug']);
     expect(pr.branch).toBe('feat/x');
     expect(pr.body).toBeUndefined();
-    expect(pr.author).toBeUndefined();
+    expect(pr.author).toBe('me');
   });
 
   it('returns full issue data when full=1', async () => {

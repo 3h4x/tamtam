@@ -18,22 +18,27 @@ function filterTrustedIssues(issues: unknown[], projectPath: string): unknown[] 
   });
 }
 
+function slimLabels(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((l: unknown) => (l && typeof l === 'object' ? String((l as Record<string, unknown>).name ?? '') : String(l)));
+}
+
+function slimAuthor(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const login = (raw as Record<string, unknown>).login;
+  return typeof login === 'string' ? login : null;
+}
+
 function slimIssue(issue: unknown): unknown {
   if (!issue || typeof issue !== 'object') return issue;
   const o = issue as Record<string, unknown>;
-  const labels = Array.isArray(o.labels)
-    ? o.labels.map((l: unknown) => (l && typeof l === 'object' ? (l as Record<string, unknown>).name : l))
-    : [];
-  return { number: o.number, title: o.title, labels, url: o.url };
+  return { number: o.number, title: o.title, labels: slimLabels(o.labels), author: slimAuthor(o.author), url: o.url };
 }
 
 function slimPR(pr: unknown): unknown {
   if (!pr || typeof pr !== 'object') return pr;
   const o = pr as Record<string, unknown>;
-  const labels = Array.isArray(o.labels)
-    ? o.labels.map((l: unknown) => (l && typeof l === 'object' ? (l as Record<string, unknown>).name : l))
-    : [];
-  return { number: o.number, title: o.title, labels, url: o.url, branch: o.headRefName, isDraft: o.isDraft };
+  return { number: o.number, title: o.title, labels: slimLabels(o.labels), author: slimAuthor(o.author), url: o.url, branch: o.headRefName, isDraft: o.isDraft };
 }
 
 async function getGhRepo(projectName: string, projPath: string): Promise<string | null> {
