@@ -297,6 +297,7 @@ describe('fetchProjectData — project selection and metadata', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let execMock: ReturnType<typeof vi.fn>;
   let existsSyncMock: ReturnType<typeof vi.fn>;
+  let launchctlInfoMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.resetModules();
@@ -317,6 +318,7 @@ describe('fetchProjectData — project selection and metadata', () => {
 
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     existsSyncMock = vi.fn().mockReturnValue(false);
+    launchctlInfoMock = vi.fn().mockResolvedValue({ loaded: false, pid: null, plistMinute: null, wrapperPhase: null, wrapperCycle: null });
 
     vi.doMock('fs', () => ({ existsSync: existsSyncMock }));
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
@@ -326,7 +328,7 @@ describe('fetchProjectData — project selection and metadata', () => {
       isReviewed: vi.fn().mockResolvedValue(null),
     }));
     vi.doMock('@/lib/scheduling/launchagent', () => ({
-      launchctlInfo: vi.fn().mockResolvedValue({ loaded: false, pid: null, plistMinute: null, wrapperPhase: null, wrapperCycle: null }),
+      launchctlInfo: launchctlInfoMock,
       plistPath: vi.fn().mockImplementation((schedId: string) => `/tmp/${schedId}.plist`),
       pausedPlistPath: vi.fn().mockImplementation((schedId: string) => `/tmp/${schedId}.plist.paused`),
     }));
@@ -415,11 +417,7 @@ describe('fetchProjectData — project selection and metadata', () => {
   });
 
   it('reports running launchctl state when daemon is loaded with a pid', async () => {
-    vi.doMock('@/lib/scheduling/launchagent', () => ({
-      launchctlInfo: vi.fn().mockResolvedValue({ loaded: true, pid: 12345, plistMinute: null, wrapperPhase: null, wrapperCycle: null }),
-      plistPath: vi.fn().mockImplementation((schedId: string) => `/tmp/${schedId}.plist`),
-      pausedPlistPath: vi.fn().mockImplementation((schedId: string) => `/tmp/${schedId}.plist.paused`),
-    }));
+    launchctlInfoMock.mockResolvedValue({ loaded: true, pid: 12345, plistMinute: null, wrapperPhase: null, wrapperCycle: null });
 
     const { fetchProjectData } = await import('@/lib/shared/project-data');
     const result = await fetchProjectData();
@@ -428,11 +426,7 @@ describe('fetchProjectData — project selection and metadata', () => {
   });
 
   it('reports loaded launchctl state when daemon is loaded but has no pid', async () => {
-    vi.doMock('@/lib/scheduling/launchagent', () => ({
-      launchctlInfo: vi.fn().mockResolvedValue({ loaded: true, pid: null, plistMinute: null, wrapperPhase: null, wrapperCycle: null }),
-      plistPath: vi.fn().mockImplementation((schedId: string) => `/tmp/${schedId}.plist`),
-      pausedPlistPath: vi.fn().mockImplementation((schedId: string) => `/tmp/${schedId}.plist.paused`),
-    }));
+    launchctlInfoMock.mockResolvedValue({ loaded: true, pid: null, plistMinute: null, wrapperPhase: null, wrapperCycle: null });
 
     const { fetchProjectData } = await import('@/lib/shared/project-data');
     const result = await fetchProjectData();
