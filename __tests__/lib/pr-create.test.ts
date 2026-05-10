@@ -254,7 +254,7 @@ describe('createIssuePR', () => {
     );
   });
 
-  it('renders summary and files-changed when a recent run job carries report data', async () => {
+  it('renders the run summary in the PR body when a recent run job carries report data', async () => {
     listJobsMock.mockReturnValue([
       {
         id: 'job-1',
@@ -266,7 +266,6 @@ describe('createIssuePR', () => {
         workSummary: 'Wired DAO revenue to real gateway data and added tests.',
         modifiedFiles: JSON.stringify([
           { path: 'src/app/dao/revenue/page.tsx', status: 'M' },
-          { path: 'src/lib/api/endpoints.ts', status: 'M' },
         ]),
       },
     ]);
@@ -280,9 +279,8 @@ describe('createIssuePR', () => {
     const body = getCreatedBody();
     expect(body).toContain('Closes #42');
     expect(body).toContain('Wired DAO revenue to real gateway data');
-    expect(body).toContain('## Files changed');
-    expect(body).toContain('- `src/app/dao/revenue/page.tsx` (M)');
-    expect(body).toContain('- `src/lib/api/endpoints.ts` (M)');
+    expect(body).not.toContain('## Files changed');
+    expect(body).not.toContain('src/app/dao/revenue/page.tsx');
     expect(body).toContain('Implemented via TamTam from issue [#42]');
   });
 
@@ -321,60 +319,6 @@ describe('createIssuePR', () => {
     expect(body).not.toContain('Old summary.');
   });
 
-  it('truncates long files-changed lists with a tail marker', async () => {
-    const files = Array.from({ length: 35 }, (_, i) => ({ path: `src/file-${i}.ts`, status: 'M' }));
-    listJobsMock.mockReturnValue([
-      {
-        id: 'job-1',
-        kind: 'run',
-        project: 'proj-a',
-        ghIssueNumber: 42,
-        ghIssueRepo: 'org/repo',
-        startedAt: 1000,
-        workSummary: 'Big change.',
-        modifiedFiles: JSON.stringify(files),
-      },
-    ]);
-    execMock
-      .mockResolvedValueOnce(resp(0, 'fix/issue-42-fix-login-bug\n'))
-      .mockResolvedValueOnce(resp(0, '[]'))
-      .mockResolvedValueOnce(resp(0, 'https://github.com/org/repo/pull/13\n'));
-
-    await createIssuePR('/repo', log, issue, undefined, 'proj-a');
-
-    const body = getCreatedBody();
-    expect(body).toContain('- `src/file-0.ts` (M)');
-    expect(body).toContain('- `src/file-29.ts` (M)');
-    expect(body).not.toContain('- `src/file-30.ts`');
-    expect(body).toContain('- …and 5 more');
-  });
-
-  it('drops files-changed section silently when modifiedFiles JSON is malformed', async () => {
-    listJobsMock.mockReturnValue([
-      {
-        id: 'job-1',
-        kind: 'run',
-        project: 'proj-a',
-        ghIssueNumber: 42,
-        ghIssueRepo: 'org/repo',
-        startedAt: 1000,
-        workSummary: 'Did the thing.',
-        modifiedFiles: '{not json',
-      },
-    ]);
-    execMock
-      .mockResolvedValueOnce(resp(0, 'fix/issue-42-fix-login-bug\n'))
-      .mockResolvedValueOnce(resp(0, '[]'))
-      .mockResolvedValueOnce(resp(0, 'https://github.com/org/repo/pull/13\n'));
-
-    await createIssuePR('/repo', log, issue, undefined, 'proj-a');
-
-    const body = getCreatedBody();
-    expect(body).toContain('Did the thing.');
-    expect(body).not.toContain('## Files changed');
-    expect(body).toContain('Implemented via TamTam from issue [#42]');
-  });
-
   it('ignores newer stamped run jobs from other projects', async () => {
     listJobsMock.mockReturnValue([
       {
@@ -407,9 +351,7 @@ describe('createIssuePR', () => {
 
     const body = getCreatedBody();
     expect(body).toContain('Current project summary.');
-    expect(body).toContain('- `src/current-project.ts` (M)');
     expect(body).not.toContain('Wrong project summary.');
-    expect(body).not.toContain('src/wrong-project.ts');
   });
 
   it('falls back to the stub body when only another project has stamped run data', async () => {
