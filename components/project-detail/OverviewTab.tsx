@@ -11,6 +11,7 @@ import {
 } from '@/components/project-runs/utils'
 import { StatusStrip } from '@/components/project-detail/StatusStrip'
 import { AgentsStats } from '@/components/project-detail/AgentsStats'
+import { PipelineStatsPanel } from '@/components/project-detail/PipelineStatsPanel'
 import { formatAgo } from '@/lib/shared/format'
 import type { JobInfo, ProjectConfig } from '@/lib/client-api'
 
@@ -170,6 +171,8 @@ export function OverviewTab({
         onOpenChanges={onOpenChanges}
         onOpenJob={(jobId) => router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(jobId)}`)}
       />
+
+      <PipelineStatsPanel projectName={projectName} />
 
       <AgentsStats projectName={projectName} />
     </>

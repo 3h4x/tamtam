@@ -456,8 +456,8 @@ The `/pipeline` page (accessible from the main nav or via the **Pipeline** butto
 | **Pipeline success rate** | % of `release` jobs that finished with exit 0 |
 | **Review LGTM rate** | % of completed `review` jobs with a `LGTM` verdict |
 | **Fix loop convergence** | % of releases-with-fixes that eventually succeeded; "hit cap" = 3 fix jobs within 30 min without LGTM |
-| **Median release time** | p50 wall-clock time from `release` start to finish (successful releases only) |
-| **Step durations** | Median and p95 for each pipeline step: `test`, `review`, `fix`, `commit`, `push`, `fix-push`, `mark-dod` |
+| **Avg successful release time** | mean wall-clock time from `release` start to finish across successful releases only; the card also shows median and p95 |
+| **Step durations** | Avg, median, and p95 for each pipeline step: `release`, `test`, `review`, `fix`, `commit`, `push`, `pr-wait`, `fix-push`, `mark-dod` |
 | **Verdict distribution** | Stacked breakdown of LGTM / NEEDS ATTENTION / DO NOT SHIP / parse-failed across all reviews |
 
 All metrics support a **24h / 7d / 30d / all-time** filter.

@@ -185,6 +185,33 @@ export interface JobInfo {
   provider?: string | null
 }
 
+export interface PipelineDurationStats {
+  avg: number
+  median: number
+  p95: number
+  count: number
+}
+
+export interface ProjectPipelineStats {
+  window: '24h' | '7d' | '30d' | 'all'
+  generatedAt: number
+  project: string | null
+  pipelineSuccess: {
+    succeeded: number
+    failed: number
+    total: number
+    rate: number
+  }
+  fixLoop: {
+    total: number
+    converged: number
+    hitCap: number
+    avgIterations: number
+  }
+  stepDurations: Record<string, PipelineDurationStats>
+  mttr: PipelineDurationStats | null
+}
+
 export interface ModifiedFileSummary {
   path: string
   status: string

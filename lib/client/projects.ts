@@ -10,6 +10,7 @@ import type {
   ProjectConfig,
   MarkDodResult,
   Recommendation,
+  ProjectPipelineStats,
 } from './types'
 
 export const API_BASE = '/api/projects'
@@ -61,6 +62,21 @@ export async function fetchTaskDetail(taskId: string): Promise<TaskDetail> {
   const response = await fetch(`${API_BASE}/${taskId}/detail`)
   if (!response.ok) {
     throw new Error(`Failed to fetch task detail: ${response.statusText}`)
+  }
+  return response.json()
+}
+
+export async function fetchProjectPipelineStats(
+  projectName: string,
+  window_: '24h' | '7d' | '30d' | 'all' = '30d',
+): Promise<ProjectPipelineStats> {
+  const params = new URLSearchParams({
+    project: projectName,
+    window: window_,
+  })
+  const response = await fetch(`/api/stats/pipeline?${params.toString()}`)
+  if (!response.ok) {
+    throw new Error(`Failed to fetch pipeline stats: ${response.statusText}`)
   }
   return response.json()
 }

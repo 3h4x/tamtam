@@ -100,7 +100,7 @@ function DurationRow({ label, stats }: { label: string; stats: DurationStats | u
     return (
       <tr className="border-b border-border/40 last:border-b-0">
         <td className="px-3 py-2 font-mono text-sm text-text-primary">{label}</td>
-        <td className="px-3 py-2 text-right text-text-tertiary text-sm" colSpan={3}>
+        <td className="px-3 py-2 text-right text-text-tertiary text-sm" colSpan={4}>
           no data
         </td>
       </tr>
@@ -110,13 +110,14 @@ function DurationRow({ label, stats }: { label: string; stats: DurationStats | u
     <tr className="border-b border-border/40 last:border-b-0 hover:bg-bg-tertiary/40">
       <td className="px-3 py-2 font-mono text-sm text-text-primary">{label}</td>
       <td className="px-3 py-2 text-right tabular-nums text-sm text-text-secondary">{stats.count.toLocaleString()}</td>
+      <td className="px-3 py-2 text-right tabular-nums text-sm font-medium text-text-primary">{fmtDuration(stats.avg)}</td>
       <td className="px-3 py-2 text-right tabular-nums text-sm font-medium text-text-primary">{fmtDuration(stats.median)}</td>
       <td className="px-3 py-2 text-right tabular-nums text-sm text-text-secondary">{fmtDuration(stats.p95)}</td>
     </tr>
   )
 }
 
-const STEP_KINDS = ['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'mark-dod'] as const
+const STEP_KINDS = ['release', 'test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'fix-push', 'mark-dod'] as const
 
 export function PipelinePage() {
   const searchParams = useSearchParams()
@@ -283,9 +284,9 @@ export function PipelinePage() {
           color={convColor as 'green' | 'yellow' | 'red' | undefined}
         />
         <StatCard
-          label="Median release time"
-          value={fmtDuration(mttr?.median ?? null)}
-          sub={mttr ? `p95 ${fmtDuration(mttr.p95)} · ${mttr.count} releases` : 'No completed releases'}
+          label="Avg successful release time"
+          value={fmtDuration(mttr?.avg ?? null)}
+          sub={mttr ? `median ${fmtDuration(mttr.median)} · p95 ${fmtDuration(mttr.p95)} · ${mttr.count} successful releases` : 'No completed releases'}
           color="blue"
         />
       </div>
@@ -314,7 +315,7 @@ export function PipelinePage() {
       <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
         <div className="px-4 py-3 border-b border-border bg-bg-tertiary">
           <h2 className="text-sm font-medium text-text-primary">Step durations</h2>
-          <p className="text-xs text-text-tertiary mt-0.5">Median and p95 wall-clock time per pipeline step</p>
+          <p className="text-xs text-text-tertiary mt-0.5">Avg, median, and p95 wall-clock time per pipeline step</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse">
@@ -322,6 +323,7 @@ export function PipelinePage() {
               <tr>
                 <th className="px-3 py-2 text-xs font-medium text-text-secondary text-left">Step</th>
                 <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Runs</th>
+                <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Avg</th>
                 <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Median</th>
                 <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">p95</th>
               </tr>

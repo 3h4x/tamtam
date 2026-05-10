@@ -38,6 +38,7 @@ export interface FixLoopStats {
 }
 
 export interface DurationStats {
+  avg: number;
   median: number;
   p95: number;
   count: number;
@@ -198,7 +199,7 @@ function computeFixLoop(
 }
 
 function computeStepDurations(jobs: JobData[]): Record<string, DurationStats> {
-  const STEP_KINDS = ['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'mark-dod'];
+  const STEP_KINDS = ['release', 'test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'fix-push', 'mark-dod'];
   const result: Record<string, DurationStats> = {};
   for (const kind of STEP_KINDS) {
     const durations = jobs
@@ -206,7 +207,12 @@ function computeStepDurations(jobs: JobData[]): Record<string, DurationStats> {
       .map((j) => jobDurationMs(j))
       .filter((d): d is number => d != null);
     if (durations.length > 0) {
-      result[kind] = { median: percentile(durations, 50), p95: percentile(durations, 95), count: durations.length };
+      result[kind] = {
+        avg: Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length),
+        median: percentile(durations, 50),
+        p95: percentile(durations, 95),
+        count: durations.length,
+      };
     }
   }
   return result;
@@ -243,7 +249,12 @@ function computeMetrics(
     .filter((d): d is number => d != null);
   const mttr: DurationStats | null =
     successDurations.length > 0
-      ? { median: percentile(successDurations, 50), p95: percentile(successDurations, 95), count: successDurations.length }
+      ? {
+          avg: Math.round(successDurations.reduce((sum, value) => sum + value, 0) / successDurations.length),
+          median: percentile(successDurations, 50),
+          p95: percentile(successDurations, 95),
+          count: successDurations.length,
+        }
       : null;
 
   const projects: PipelineProjectRow[] = [];
