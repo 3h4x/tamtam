@@ -617,6 +617,7 @@ export function ProjectDetailPage({
             aggregateCi={aggregateCi}
             ciFailedUrl={ciFailedUrl}
             githubUrl={githubUrl}
+            websiteUrl={config?.website ?? null}
             jobsPaused={jobsPaused}
             config={config}
             verdict={verdict}

@@ -42,6 +42,7 @@ function buildProps(overrides: Partial<React.ComponentProps<typeof ProjectAction
     aggregateCi: null,
     ciFailedUrl: null,
     githubUrl: null,
+    websiteUrl: null,
     jobsPaused: false,
     config: buildConfig(),
     verdict: undefined,

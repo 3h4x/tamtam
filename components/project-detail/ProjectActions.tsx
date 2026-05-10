@@ -11,6 +11,7 @@ export interface ProjectActionsProps {
   aggregateCi: string | null
   ciFailedUrl: string | null
   githubUrl: string | null
+  websiteUrl: string | null
   jobsPaused: boolean
 
   config: ProjectConfig | null
@@ -59,6 +60,7 @@ export function ProjectActions({
   aggregateCi,
   ciFailedUrl,
   githubUrl,
+  websiteUrl,
   jobsPaused,
   config,
   verdict,
@@ -297,6 +299,18 @@ export function ProjectActions({
         >
           Pipeline
         </Link>
+      )}
+      {websiteUrl && (
+        <a
+          className={buttonVariants({ variant: 'ghost' })}
+          href={websiteUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open project website"
+        >
+          Website
+          <span aria-hidden="true" className="text-text-tertiary">↗</span>
+        </a>
       )}
       {githubUrl && (
         <a
