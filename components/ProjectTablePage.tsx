@@ -8,6 +8,7 @@ import type { FleetHealth } from '@/hooks/useProjectHealth'
 import { formatAgo } from '@/lib/shared/format'
 import { getAggregateCi, getCiFailedUrl } from '@/lib/shared/statusConstants'
 import { LoadingState } from '@/components/LoadingState'
+import { ProjectLogo } from '@/components/ProjectLogo'
 import { useToast } from '@/components/Toast'
 
 type SortKey = 'project' | 'status' | 'changes' | 'last_run' | 'next_run' | 'ci'
@@ -482,6 +483,7 @@ const isReviewRunning = (projectName: string) =>
                 {/* Project */}
                 <td className="px-4 py-2">
                   <span className="flex items-center gap-2">
+                    <ProjectLogo projectName={project.project} size={20} />
                     <span className="font-medium text-text-primary" data-private>{project.project}</span>
                     {issueCounts[project.project]?.prs > 0 && (
                       <span
