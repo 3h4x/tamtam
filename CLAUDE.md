@@ -222,6 +222,7 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 | `docs/E2E.md` | Playwright pipeline e2e harness: mocks, scenarios, helpers | Writing or debugging pipeline e2e tests in `e2e/pipeline/` |
 
 ## Coding Conventions
+- **Stay project-generic in source**: TamTam is shared infrastructure across many projects. Do NOT reference any specific project slug, GitHub owner/repo, PR number, or issue number in code, comments, log strings, variable names, or commit messages within source files. Describe the symptom or behavior generically — say what triggers the bug, not which ticket reported it. Discovery context belongs in chat / PR descriptions, not in source. Such references rot fast (the ticket closes, projects get renamed) and leak operational context to anyone pulling the repo.
 - **Runtime versions**: Next.js 16, React 19, TypeScript 6 (strict), Tailwind CSS v4, pnpm 10. Do not use APIs requiring a higher version than what's pinned in `package.json`.
 - **Path imports**: always use the `@/` alias, never relative `../../`.
 - **File naming**: kebab-case (`start-fix.ts`); PascalCase only for React component files (`AgentsTab.tsx`).

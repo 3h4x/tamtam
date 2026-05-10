@@ -17,6 +17,11 @@ import type { JobData } from './types';
 import { findingsIdentity, extractFindingIds, extractFixClaims } from '@/lib/pipeline/review-contract';
 import { hasFreshLgtm, hasLocalCommitsAhead } from '@/lib/pipeline/release-state';
 import {
+  buildReleaseStepChain,
+  getEffectiveReleaseChainTail,
+  RESUMABLE_RELEASE_STEP_KINDS,
+} from '@/lib/pipeline/release-chain';
+import {
   getFixPushAttemptCap,
   getMaxStepIterations,
   getReviewFixMaxIterations,
@@ -400,11 +405,19 @@ function findLinkedActiveReleaseJob(job: JobData): JobData | null {
 export const PIPELINE_STEP_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod']);
 const RELEASE_RECONCILE_GRACE_MS = 5_000;
 
-// A child is part of a release's chain only if it starts shortly after the
-// release (or shortly after the previous step finished). Beyond this gap we
-// assume an unrelated pipeline job crept in while the release was stuck and
-// should NOT be counted in the finalized exit code.
-const PIPELINE_CHAIN_GAP_SEC = 60;
+// Steps from which the pipeline is expected to chain to another step when
+// exit 0. If the chain ends at one of these and we're past the grace window,
+// the completion hook never successfully ran (server restart, hook crash).
+// We re-fire it in `reconcileStaleRelease` so the pipeline picks up where
+// it stalled instead of being silently finalized as success.
+const EXPECTED_CHAIN_KINDS = RESUMABLE_RELEASE_STEP_KINDS;
+
+// Per (release, lastStep) re-fire attempt counter — if a re-fire still
+// produces no chain after this many attempts, fall through to the original
+// finalize-as-success behavior. Keeps a permanently-stuck step from looping
+// forever across probe sweeps.
+const MAX_RECONCILE_REFIRES = 2;
+const reconcileRefireAttempts = new Map<string, number>();
 
 export async function reconcileStaleRelease(job: JobData): Promise<void> {
   if (!PIPELINE_STEP_KINDS.has(job.kind)) return;
@@ -420,16 +433,9 @@ export async function reconcileStaleRelease(job: JobData): Promise<void> {
       && linkedReleaseId(j) === release.id
       && (j.startedAt || 0) >= releaseStart - 1)
     .sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
-  // Walk the chain: accept the first child if it started within the chain
-  // gap of the release start, then each subsequent child if it started within
-  // the gap of the previous child's finish. Break once the chain breaks —
-  // later jobs are unrelated activity.
-  const chain: JobData[] = [];
+  const chain = buildReleaseStepChain(release, candidates);
   let edge = releaseStart;
-  for (const c of candidates) {
-    if ((c.startedAt || 0) - edge > PIPELINE_CHAIN_GAP_SEC) break;
-    chain.push(c);
-    // If a child is still running, defer: the chain is active.
+  for (const c of chain) {
     if (c.finishedAt === null) return;
     edge = c.finishedAt || edge;
   }
@@ -471,10 +477,70 @@ export async function reconcileStaleRelease(job: JobData): Promise<void> {
     }
     return;
   }
+
+  // Detect "incomplete pipeline": the chain ends at a step that should have
+  // chained to another step (test→review/commit/push, fix→test, review→commit/fix,
+  // commit→push) but no successor exists. This happens when the completion hook
+  // is interrupted — most often by a server rebuild that kills the Node process
+  // between markDone() and runCompletionHooks() persisting the next step. The
+  // old behavior was to silently finalize as success, leaving releases marked
+  // "done" but never committed/pushed/merged.
+  //
+  // Recovery: re-fire the completion hook for the last step. Hooks are designed
+  // to be idempotent (they re-check git state and pipeline locks before
+  // spawning), so re-running them either kicks off the missing step (chain
+  // alive again) or naturally finalizes the release if there really is nothing
+  // to do.
+  const lastStep = getEffectiveReleaseChainTail(chain);
+  if (!lastStep) return;
+  // Stuck signature: the LAST step ended exit 0 and is one from which the
+  // pipeline expects to chain further. Earlier failures in the chain are
+  // part of normal recovery (test fails → fix → test passes); they don't
+  // disqualify. Only the final step's outcome matters for "did the chain
+  // get cut short".
+  const lastStepLooksStuck = lastStep.exitCode === 0 && EXPECTED_CHAIN_KINDS.has(lastStep.kind);
+  const refireKey = `${release.id}:${lastStep.id}`;
+  if (
+    lastStepLooksStuck &&
+    (reconcileRefireAttempts.get(refireKey) ?? 0) < MAX_RECONCILE_REFIRES
+  ) {
+    const attempt = (reconcileRefireAttempts.get(refireKey) ?? 0) + 1;
+    reconcileRefireAttempts.set(refireKey, attempt);
+    console.log(
+      `[release] reconciler detected incomplete pipeline ${release.id} (${job.project}) — last step ${lastStep.kind} ${lastStep.id} exited 0 but did not chain; re-firing completion hooks (attempt ${attempt}/${MAX_RECONCILE_REFIRES})`
+    );
+    try {
+      await runCompletionHooks(lastStep);
+    } catch (e) {
+      console.log(`[release] re-fired completion hooks failed for ${lastStep.id}:`, e);
+    }
+    // Whether the hook chained a new step (next reconcile picks up the new
+    // chain) or finalized the release itself, return — do not also call
+    // finalizeReleaseJob below, that would double-finalize on success.
+    return;
+  }
+
   const worstExit = chain.reduce((acc, c) => Math.max(acc, pipelineExitCodeForStep(c)), 0);
+  // If we hit the re-fire cap on a still-non-chaining step, finalize as
+  // failure so the user sees the release didn't ship instead of a misleading
+  // green. Stop reason is recorded for the trace UI.
+  let stopReason: string | null = null;
+  let finalExit = worstExit;
+  if (
+    lastStepLooksStuck &&
+    (reconcileRefireAttempts.get(refireKey) ?? 0) >= MAX_RECONCILE_REFIRES
+  ) {
+    stopReason = `pipeline incomplete: stuck at ${lastStep.kind} ${lastStep.id} — completion hook never chained the next step (likely interrupted by a server restart). Re-fire attempts exhausted.`;
+    finalExit = 1;
+    persistReleaseStopReason(release, stopReason);
+    if (release.logPath) {
+      try { appendFileSync(release.logPath, `\n# release stopped — ${stopReason}\n`); } catch {}
+    }
+    reconcileRefireAttempts.delete(refireKey);
+  }
   try {
-    await finalizeReleaseJob(release, worstExit);
-    console.log(`[release] reconciled stale release ${release.id} (${job.project}) — ${chain.length} chained step${chain.length === 1 ? '' : 's'}, exit ${worstExit}`);
+    await finalizeReleaseJob(release, finalExit);
+    console.log(`[release] reconciled stale release ${release.id} (${job.project}) — ${chain.length} chained step${chain.length === 1 ? '' : 's'}, exit ${finalExit}${stopReason ? ` (${stopReason})` : ''}`);
   } catch (e) {
     console.log(`[release] reconciler failed for ${release.id}:`, e);
   }

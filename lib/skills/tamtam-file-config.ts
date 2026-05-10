@@ -101,8 +101,7 @@ export interface FileProjectConfig {
   // Per-project commit-message style guide. When set, replaces the global
   // `commit_style` setting for this repo's auto-generated commit messages.
   // Lives in the file (not the DB) because it's a team contract — every
-  // contributor's commits should follow the project's voice (e.g. borged's
-  // cyberpunk style).
+  // contributor's commits should follow the project's voice.
   commit_style?: string;
 }
 
