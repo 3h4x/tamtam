@@ -379,6 +379,23 @@ describe('fetchProjectData — project selection and metadata', () => {
     expect(result.projects['enabled-proj']?.[0]?.github).toBe('https://github.com/acme/widgets');
   });
 
+  it('prefers the configured GitHub slug without shelling for the remote URL', async () => {
+    testDb.sqlite.prepare('UPDATE projects SET github = ? WHERE name = ?').run('acme/configured-repo', 'enabled-proj');
+
+    execMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('rev-list') && args.includes('@{u}..HEAD')) {
+        return Promise.resolve({ exitCode: 0, stdout: '0\n', stderr: '' });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+
+    const { fetchProjectData } = await import('@/lib/shared/project-data');
+    const result = await fetchProjectData();
+
+    expect(result.projects['enabled-proj']?.[0]?.github).toBe('https://github.com/acme/configured-repo');
+    expect(execMock.mock.calls.some(([, args]) => Array.isArray(args) && args.includes('remote') && args.includes('get-url'))).toBe(false);
+  });
+
   it('reports paused launchctl state when the paused plist exists', async () => {
     existsSyncMock.mockImplementation((path: string) => path.endsWith('.plist.paused'));
 
@@ -386,6 +403,15 @@ describe('fetchProjectData — project selection and metadata', () => {
     const result = await fetchProjectData();
 
     expect(result.projects['enabled-proj']?.[0]?.launchctl).toBe('paused');
+  });
+
+  it('reports installed launchctl state when only the plist exists', async () => {
+    existsSyncMock.mockImplementation((path: string) => path.endsWith('.plist'));
+
+    const { fetchProjectData } = await import('@/lib/shared/project-data');
+    const result = await fetchProjectData();
+
+    expect(result.projects['enabled-proj']?.[0]?.launchctl).toBe('installed');
   });
 });
 
