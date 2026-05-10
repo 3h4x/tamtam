@@ -145,6 +145,7 @@ export interface ProjectConfig {
   review_prompt_addendum?: string
   fix_prompt_addendum?: string
   commit_style?: string
+  website?: string
   last_push_error?: string | null
   last_push_at?: number | null
   file_config?: string[]
@@ -190,6 +191,7 @@ export interface PipelineDurationStats {
   median: number
   p95: number
   count: number
+  avgCostUsd?: number | null
 }
 
 export interface ProjectPipelineStats {

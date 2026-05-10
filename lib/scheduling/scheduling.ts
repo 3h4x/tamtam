@@ -182,6 +182,8 @@ export function writeProjectFieldYaml(
     db.update(schema.projects).set({ reviewPromptAddendum: value }).where(eq(schema.projects.name, projName)).run();
   } else if (fieldName === 'fix_prompt_addendum') {
     db.update(schema.projects).set({ fixPromptAddendum: value }).where(eq(schema.projects.name, projName)).run();
+  } else if (fieldName === 'website') {
+    db.update(schema.projects).set({ website: value }).where(eq(schema.projects.name, projName)).run();
   }
   return true;
 }

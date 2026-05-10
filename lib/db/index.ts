@@ -45,7 +45,8 @@ sqlite.exec(`
     enabled INTEGER DEFAULT 0,
     github TEXT,
     priority TEXT,
-    custom_actions TEXT
+    custom_actions TEXT,
+    website TEXT
   );
   CREATE TABLE IF NOT EXISTS skills (
     id TEXT PRIMARY KEY,
@@ -121,6 +122,9 @@ try {
 } catch {}
 try {
   sqlite.exec('ALTER TABLE projects ADD COLUMN last_push_at REAL');
+} catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN website TEXT');
 } catch {}
 
 // Migrate: add enabled column to agents if missing

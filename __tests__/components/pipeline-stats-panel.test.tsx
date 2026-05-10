@@ -33,7 +33,7 @@ function makePipelineStats(overrides: Partial<ProjectPipelineStats> = {}): Proje
       avgIterations: 1,
     },
     stepDurations: {
-      release: { avg: 90_000, median: 80_000, p95: 120_000, count: 3 },
+      release: { avg: 90_000, median: 80_000, p95: 120_000, count: 3, avgCostUsd: 10.3333 },
       test: { avg: 20_000, median: 18_000, p95: 30_000, count: 3 },
     },
     mttr: {
@@ -41,6 +41,7 @@ function makePipelineStats(overrides: Partial<ProjectPipelineStats> = {}): Proje
       median: 80_000,
       p95: 120_000,
       count: 2,
+      avgCostUsd: 5.5,
     },
     ...overrides,
   }
@@ -95,6 +96,22 @@ describe('PipelineStatsPanel', () => {
       expect(container.textContent).toContain('Failed to load pipeline stats. Showing last successful snapshot.')
       expect(container.textContent).toContain('avg successful release')
       expect(container.textContent).toContain('Updated')
+    })
+
+    unmount()
+  })
+
+  it('keeps the avg cost card aligned to successful releases only', async () => {
+    fetchProjectPipelineStatsMock.mockResolvedValueOnce(makePipelineStats())
+
+    const { container, unmount } = renderPanel()
+
+    await vi.waitFor(() => {
+      expect(fetchProjectPipelineStatsMock).toHaveBeenCalledWith('acme/widgets', '30d')
+      expect(container.textContent).toContain('avg cost per release')
+      expect(container.textContent).toContain('$5.50')
+      expect(container.textContent).toContain('successful releases only · 2 successful releases')
+      expect(container.textContent).not.toContain('summed across all steps sharing a release_id')
     })
 
     unmount()

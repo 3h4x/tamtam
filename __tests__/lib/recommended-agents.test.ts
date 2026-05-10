@@ -22,4 +22,15 @@ describe('RECOMMENDED_AGENTS', () => {
     const agent = RECOMMENDED_AGENTS.find(entry => entry.name === 'docs-claude')
     expect(agent?.essential).toBe(true)
   })
+
+  it('keeps qa as a featured scheduled template backed by agent-qa', () => {
+    const agent = RECOMMENDED_AGENTS.find(entry => entry.name === 'qa')
+    expect(agent).toMatchObject({
+      model: 'normal',
+      schedule: '24h',
+      runner: 'pm2',
+      featured: true,
+      skillIds: ['agent-qa'],
+    })
+  })
 })

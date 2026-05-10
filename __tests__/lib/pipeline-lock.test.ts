@@ -52,7 +52,8 @@ function createTestDb() {
     CREATE TABLE IF NOT EXISTS projects (
       name TEXT PRIMARY KEY,
       path TEXT NOT NULL,
-      enabled INTEGER DEFAULT 1
+      enabled INTEGER DEFAULT 1,
+      website TEXT
     );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };

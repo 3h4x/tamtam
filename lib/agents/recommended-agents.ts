@@ -109,6 +109,16 @@ export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
     essential: true,
   },
   {
+    name: 'qa',
+    description: 'Browses the project website with Playwright, clicks through the UI, and hands off bugs / errors / UX issues to the cto agent to file as GitHub issues.',
+    model: 'normal',
+    schedule: '24h',
+    runner: 'pm2',
+    prompt: '',
+    skillIds: ['agent-qa'],
+    featured: true,
+  },
+  {
     name: 'manage-agents',
     description: 'Audits TamTam agents for this project and creates, updates, or removes them to match current project needs.',
     model: 'normal',

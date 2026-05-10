@@ -82,6 +82,7 @@ export function ProjectDetailPage({
   const [reviewPromptAddendumInput, setReviewPromptAddendumInput] = useState('')
   const [fixPromptAddendumInput, setFixPromptAddendumInput] = useState('')
   const [commitStyleInput, setCommitStyleInput] = useState('')
+  const [websiteInput, setWebsiteInput] = useState('')
   const [configSaving, setConfigSaving] = useState(false)
   const [configSaved, setConfigSaved] = useState(false)
 
@@ -185,6 +186,7 @@ export function ProjectDetailPage({
     setReviewPromptAddendumInput(data.review_prompt_addendum ?? '')
     setFixPromptAddendumInput(data.fix_prompt_addendum ?? '')
     setCommitStyleInput(data.commit_style ?? '')
+    setWebsiteInput(data.website ?? '')
   }
 
   const handleCustomAction = async (actionName: string) => {
@@ -471,6 +473,7 @@ export function ProjectDetailPage({
     review_prompt_addendum: reviewPromptAddendumInput,
     fix_prompt_addendum: fixPromptAddendumInput,
     commit_style: commitStyleInput,
+    website: websiteInput,
   }
 
   const handleSaveConfig = async () => {
@@ -502,7 +505,8 @@ export function ProjectDetailPage({
     configInputs.review_disabled !== !!config.review_disabled ||
     configInputs.review_prompt_addendum !== (config.review_prompt_addendum ?? '') ||
     configInputs.fix_prompt_addendum !== (config.fix_prompt_addendum ?? '') ||
-    configInputs.commit_style !== (config.commit_style ?? '')
+    configInputs.commit_style !== (config.commit_style ?? '') ||
+    configInputs.website !== (config.website ?? '')
   )
 
   const actionsDirty = JSON.stringify(editActions) !== JSON.stringify(customActions)
@@ -713,6 +717,8 @@ export function ProjectDetailPage({
             setFixPromptAddendumInput={setFixPromptAddendumInput}
             commitStyleInput={commitStyleInput}
             setCommitStyleInput={setCommitStyleInput}
+            websiteInput={websiteInput}
+            setWebsiteInput={setWebsiteInput}
             editActions={editActions}
             setEditActions={setEditActions}
             anyDirty={anyDirty}

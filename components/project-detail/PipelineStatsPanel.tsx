@@ -8,10 +8,10 @@ type Window = '7d' | '30d' | 'all'
 
 const WINDOWS: Window[] = ['7d', '30d', 'all']
 
-const STEP_ORDER = ['release', 'test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'fix-push', 'mark-dod'] as const
+const STEP_ORDER = ['agent', 'test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'fix-push', 'mark-dod'] as const
 
 const STEP_META: Record<(typeof STEP_ORDER)[number], { label: string; detail: string }> = {
-  release: { label: 'pipeline total', detail: 'end-to-end release time' },
+  agent: { label: 'agent / trigger', detail: 'the run that kicked off each release — usually the longest + costliest step' },
   test: { label: 'tests', detail: 'verification before review' },
   review: { label: 'review', detail: 'provider verdict pass' },
   fix: { label: 'fix', detail: 'apply review or test fixes' },
@@ -37,6 +37,13 @@ function formatDuration(ms: number | null | undefined): string {
 function formatPercent(value: number | null | undefined): string {
   if (value == null) return '—'
   return `${Math.round(value * 100)}%`
+}
+
+function formatCost(value: number | null | undefined): string {
+  if (value == null || value <= 0) return '—'
+  if (value < 0.01) return `$${value.toFixed(4)}`
+  if (value < 1) return `$${value.toFixed(3)}`
+  return `$${value.toFixed(2)}`
 }
 
 function MetricCard({
@@ -90,6 +97,7 @@ function StepCard({ step, stats }: { step: (typeof STEP_ORDER)[number]; stats?: 
         <div className="text-right text-xs text-text-secondary tabular-nums">
           <div>median {formatDuration(stats?.median)}</div>
           <div>p95 {formatDuration(stats?.p95)}</div>
+          <div>avg cost {formatCost(stats?.avgCostUsd)}</div>
         </div>
       </div>
     </div>
@@ -172,7 +180,7 @@ export function PipelineStatsPanel({ projectName }: { projectName: string }) {
         <div className="min-w-0">
           <div className="text-sm font-medium text-text-primary">Pipeline performance</div>
           <div className="mt-0.5 text-xs text-text-secondary">
-            Average time per release step for <span className="font-mono text-text-primary">{projectName}</span>
+            Average time per release step for <span className="font-mono text-sm font-semibold text-accent">{projectName}</span>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -207,11 +215,21 @@ export function PipelineStatsPanel({ projectName }: { projectName: string }) {
               {refreshError}
             </div>
           )}
-          <div className="grid gap-3 p-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 p-3 sm:grid-cols-2 xl:grid-cols-5">
             <MetricCard
               label="avg successful release"
               value={formatDuration(data?.mttr?.avg)}
               detail={data?.mttr ? `median ${formatDuration(data.mttr.median)} · p95 ${formatDuration(data.mttr.p95)} · ${data.mttr.count} successful releases` : 'No successful releases yet'}
+              tone="info"
+            />
+            <MetricCard
+              label="avg cost per release"
+              value={formatCost(data?.mttr?.avgCostUsd)}
+              detail={
+                data?.mttr?.avgCostUsd != null && data?.mttr
+                  ? `successful releases only · ${data.mttr.count} successful release${data.mttr.count === 1 ? '' : 's'}`
+                  : 'No successful release cost recorded in this window'
+              }
               tone="info"
             />
             <MetricCard

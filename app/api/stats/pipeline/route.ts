@@ -42,6 +42,7 @@ export interface DurationStats {
   median: number;
   p95: number;
   count: number;
+  avgCostUsd?: number | null;
 }
 
 export interface PipelineProjectRow {
@@ -198,23 +199,65 @@ function computeFixLoop(
   };
 }
 
+function buildDurationStats(durations: number[], costs: number[]): DurationStats {
+  const avgCostUsd = costs.length > 0 ? costs.reduce((s, v) => s + v, 0) / costs.length : null;
+  return {
+    avg: Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length),
+    median: percentile(durations, 50),
+    p95: percentile(durations, 95),
+    count: durations.length,
+    avgCostUsd: avgCostUsd != null ? Math.round(avgCostUsd * 10000) / 10000 : null,
+  };
+}
+
 function computeStepDurations(jobs: JobData[]): Record<string, DurationStats> {
   const STEP_KINDS = ['release', 'test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'fix-push', 'mark-dod'];
   const result: Record<string, DurationStats> = {};
-  for (const kind of STEP_KINDS) {
-    const durations = jobs
-      .filter((j) => j.kind === kind && j.finishedAt != null)
-      .map((j) => jobDurationMs(j))
-      .filter((d): d is number => d != null);
-    if (durations.length > 0) {
-      result[kind] = {
-        avg: Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length),
-        median: percentile(durations, 50),
-        p95: percentile(durations, 95),
-        count: durations.length,
-      };
-    }
+
+  // For the `release` step, "cost" is the total of all jobs sharing the release_id —
+  // the meta-job itself rarely has a cost recorded, but its child steps do.
+  const costByReleaseId = new Map<string, number>();
+  for (const j of jobs) {
+    if (!j.releaseId || j.costUsd == null) continue;
+    costByReleaseId.set(j.releaseId, (costByReleaseId.get(j.releaseId) ?? 0) + j.costUsd);
   }
+
+  for (const kind of STEP_KINDS) {
+    const finished = jobs.filter((j) => j.kind === kind && j.finishedAt != null);
+    const durations = finished.map((j) => jobDurationMs(j)).filter((d): d is number => d != null);
+    if (durations.length === 0) continue;
+
+    let costs: number[];
+    if (kind === 'release') {
+      costs = finished.map((j) => costByReleaseId.get(j.id) ?? (j.costUsd ?? 0)).filter((c) => c > 0);
+    } else {
+      costs = finished.map((j) => j.costUsd ?? 0).filter((c) => c > 0);
+    }
+
+    result[kind] = buildDurationStats(durations, costs);
+  }
+
+  // Synthetic `agent` step: the run that triggered each release. Releases store
+  // the trigger as `parentJobId` and intentionally do NOT inherit its releaseId,
+  // so we have to look it up explicitly. This is typically the most expensive
+  // and longest part of the pipeline (the agent doing actual work) — surfacing
+  // it is critical for cost analysis.
+  const jobById = new Map(jobs.map((j) => [j.id, j] as const));
+  const releaseJobs = jobs.filter((j) => j.kind === 'release' && j.finishedAt != null);
+  const triggerDurations: number[] = [];
+  const triggerCosts: number[] = [];
+  for (const r of releaseJobs) {
+    if (!r.parentJobId) continue;
+    const trigger = jobById.get(r.parentJobId);
+    if (!trigger || trigger.finishedAt == null) continue;
+    const d = jobDurationMs(trigger);
+    if (d != null) triggerDurations.push(d);
+    if (trigger.costUsd != null && trigger.costUsd > 0) triggerCosts.push(trigger.costUsd);
+  }
+  if (triggerDurations.length > 0) {
+    result['agent'] = buildDurationStats(triggerDurations, triggerCosts);
+  }
+
   return result;
 }
 
@@ -243,10 +286,34 @@ function computeMetrics(
 
   const stepDurations = computeStepDurations(scoped);
 
-  const successDurations = releaseJobs
-    .filter((j) => j.exitCode === 0)
-    .map((j) => jobDurationMs(j))
-    .filter((d): d is number => d != null);
+  const releaseCostMap = new Map<string, number>();
+  for (const j of scoped) {
+    if (!j.releaseId || j.costUsd == null) continue;
+    releaseCostMap.set(j.releaseId, (releaseCostMap.get(j.releaseId) ?? 0) + j.costUsd);
+  }
+  // Add the triggering agent/run (parent of release) to both duration and
+  // cost — it's outside the releaseId graph but it's the biggest line item
+  // of the pipeline. Without it, "avg successful release" hides the most
+  // expensive step.
+  const scopedById = new Map(scoped.map((j) => [j.id, j] as const));
+  const successReleases = releaseJobs.filter((j) => j.exitCode === 0);
+  const successDurations = successReleases
+    .map((j) => {
+      const releaseMs = jobDurationMs(j);
+      const trigger = j.parentJobId ? scopedById.get(j.parentJobId) : null;
+      const triggerMs = trigger ? jobDurationMs(trigger) : null;
+      if (releaseMs == null && triggerMs == null) return null;
+      return (releaseMs ?? 0) + (triggerMs ?? 0);
+    })
+    .filter((d): d is number => d != null && d > 0);
+  const successCosts = successReleases
+    .map((j) => {
+      const releaseCost = releaseCostMap.get(j.id) ?? (j.costUsd ?? 0);
+      const trigger = j.parentJobId ? scopedById.get(j.parentJobId) : null;
+      const triggerCost = trigger?.costUsd ?? 0;
+      return releaseCost + triggerCost;
+    })
+    .filter((c) => c > 0);
   const mttr: DurationStats | null =
     successDurations.length > 0
       ? {
@@ -254,6 +321,10 @@ function computeMetrics(
           median: percentile(successDurations, 50),
           p95: percentile(successDurations, 95),
           count: successDurations.length,
+          avgCostUsd:
+            successCosts.length > 0
+              ? Math.round((successCosts.reduce((s, v) => s + v, 0) / successCosts.length) * 10000) / 10000
+              : null,
         }
       : null;
 

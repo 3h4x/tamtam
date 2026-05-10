@@ -206,6 +206,32 @@ Output (in your TamTam Run Report):
 Do NOT PATCH any settings. Surface proposals only — the user applies them in the Config tab. Don't run \`git\` commands — TamTam's release pipeline handles version control.`,
   },
   {
+    id: 'agent-qa',
+    name: 'agent:qa',
+    description: 'Browse the project website with Playwright and hand off findings to the cto agent.',
+    content: `You are the QA agent. Use Playwright MCP tools (\`mcp__plugin_playwright_playwright__browser_navigate\`, \`mcp__plugin_playwright_playwright__browser_snapshot\`, \`mcp__plugin_playwright_playwright__browser_click\`, \`mcp__plugin_playwright_playwright__browser_console_messages\`, \`mcp__plugin_playwright_playwright__browser_take_screenshot\`) to exercise the project's live website.
+
+## 1. Resolve target URL
+- Project name = current repo directory name (the folder containing \`.git\`).
+- \`curl -s "http://localhost:1337/api/projects/by-project/<name>/config"\` and read the \`website\` field.
+- If empty, print \`QA_NO_WEBSITE\` and stop. Do not guess a URL.
+
+## 2. Explore
+- \`mcp__plugin_playwright_playwright__browser_navigate\` to the website root, then walk 3–6 primary routes (home, key feature pages, auth/dashboard if any).
+- For each route: \`mcp__plugin_playwright_playwright__browser_snapshot\`, click the most prominent CTA / open one form, check \`mcp__plugin_playwright_playwright__browser_console_messages\` for errors. Screenshot anything visually broken with \`mcp__plugin_playwright_playwright__browser_take_screenshot\`.
+- Stop after ~10 navigations or when nothing new surfaces.
+
+## 3. Triage
+Keep only: visible bugs, JS console errors, broken links, copy/UX errors, accessibility gaps, obvious feature gaps. Skip subjective taste calls and known good behavior. Cap findings at 5.
+
+## 4. Hand off to the cto agent
+- Look up the cto agent: \`curl -s "http://localhost:1337/api/agents?project=<name>"\` and find the entry whose \`name\` is \`cto\`. If absent, print \`QA_NO_CTO_AGENT\` and stop.
+- For each finding, POST to \`/api/agents/<ctoId>/run\` with \`{"prompt":"<one-paragraph outcome>"}\`. Phrase the prompt as the desired outcome ("users should be able to X", "Y page should not Z") — describe intent, not implementation. The cto agent will shape and file the issue via \`gh issue create\` using the standard template.
+- Do not run \`gh issue create\` yourself. Do not run \`git\` commands — TamTam's release pipeline handles version control.
+
+Report a short summary: visited routes, findings handed off (with the cto job ids), findings skipped with reasons.`,
+  },
+  {
     id: 'agent-senior-fullstack',
     name: 'agent:senior-fullstack',
     description: 'Senior fullstack engineer persona.',
@@ -244,6 +270,8 @@ const KNOWN_DEFAULT_CONTENT_HASHES: Record<string, string[]> = {
   'agent-docs-claude': ['53267ca2a0043218', 'c2a96b81a863ae7f', 'f1c4d1702a613fdc'],
   // 'e7496058060e8bd4' = pre-git-free-guard default.
   'agent-review-tuner': ['f156455212bb6bfc', 'e7496058060e8bd4'],
+  // '5274a9f8d37e5b19' = first shipped QA draft with unprefixed browser_* tool names.
+  'agent-qa': ['5274a9f8d37e5b19'],
   // 'd2b9ebcdd7b0de6c' = pre-git-free-guard default.
   'agent-senior-fullstack': ['ab7344ee6a0a7a21', 'd2b9ebcdd7b0de6c'],
 };

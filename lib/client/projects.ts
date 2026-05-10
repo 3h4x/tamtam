@@ -435,6 +435,7 @@ export async function updateProjectConfig(
     review_prompt_addendum?: string
     fix_prompt_addendum?: string
     commit_style?: string
+    website?: string
   }
 ): Promise<{ status: string }> {
   const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/config`, {

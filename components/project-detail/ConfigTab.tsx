@@ -34,6 +34,8 @@ export interface ConfigTabProps {
   setFixPromptAddendumInput: (v: string) => void
   commitStyleInput: string
   setCommitStyleInput: (v: string) => void
+  websiteInput: string
+  setWebsiteInput: (v: string) => void
 
   editActions: CustomAction[]
   setEditActions: (v: CustomAction[]) => void
@@ -73,6 +75,8 @@ export function ConfigTab({
   setFixPromptAddendumInput,
   commitStyleInput,
   setCommitStyleInput,
+  websiteInput,
+  setWebsiteInput,
   editActions,
   setEditActions,
   anyDirty,
@@ -136,6 +140,24 @@ export function ConfigTab({
             {anySaving && <span className="inline-block w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin shrink-0" />}
             {anySaving ? 'Saving…' : allSaved ? 'Saved!' : 'Save'}
           </button>
+        </div>
+      </div>
+
+      {/* Website */}
+      <div className="bg-bg-secondary rounded-md border border-border">
+        <div className="px-4 py-2 border-b border-border flex items-baseline gap-3">
+          <h3 className="text-sm font-semibold text-text-primary">Website</h3>
+          <p className="text-xs text-text-tertiary">Public URL the QA agent will browse for bugs</p>
+        </div>
+        <div className="px-4 py-3">
+          <input
+            id="project-website"
+            type="text"
+            className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
+            value={websiteInput}
+            onChange={(e) => setWebsiteInput(e.target.value)}
+            placeholder="https://example.com"
+          />
         </div>
       </div>
 

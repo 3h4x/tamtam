@@ -30,7 +30,8 @@ function createTestDb() {
       last_push_error TEXT,
       last_push_at REAL,
       review_prompt_addendum TEXT,
-      fix_prompt_addendum TEXT
+      fix_prompt_addendum TEXT,
+      website TEXT
     );
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
