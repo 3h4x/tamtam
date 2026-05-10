@@ -441,6 +441,28 @@ describe('GET /api/stats/pipeline', () => {
     expect(data.mttr.median).toBe(60_000);
   });
 
+  it('computes release cost separately for all finished releases vs successful releases only', async () => {
+    const now = Date.now() / 1000;
+    listJobsMock.mockReturnValue([
+      makeRelease('rel-success-a', 'p1', 0, now - 1200, now - 1140),
+      makeRelease('rel-success-b', 'p1', 0, now - 900, now - 810),
+      makeRelease('rel-failed', 'p1', 1, now - 600, now - 510),
+      makeJob({ id: 'test-a', project: 'p1', kind: 'test', exitCode: 0, startedAt: now - 1190, finishedAt: now - 1180, releaseId: 'rel-success-a', costUsd: 1 }),
+      makeJob({ id: 'review-a', project: 'p1', kind: 'review', exitCode: 0, startedAt: now - 1180, finishedAt: now - 1170, releaseId: 'rel-success-a', costUsd: 2 }),
+      makeJob({ id: 'test-b', project: 'p1', kind: 'test', exitCode: 0, startedAt: now - 890, finishedAt: now - 880, releaseId: 'rel-success-b', costUsd: 3 }),
+      makeJob({ id: 'review-b', project: 'p1', kind: 'review', exitCode: 0, startedAt: now - 880, finishedAt: now - 870, releaseId: 'rel-success-b', costUsd: 5 }),
+      makeJob({ id: 'test-failed', project: 'p1', kind: 'test', exitCode: 1, startedAt: now - 590, finishedAt: now - 580, releaseId: 'rel-failed', costUsd: 20 }),
+    ]);
+
+    const res = await GET(new NextRequest('http://localhost/api/stats/pipeline?window=all'));
+    const data = await res.json();
+
+    expect(data.mttr.avgCostUsd).toBe(5.5);
+    expect(data.mttr.count).toBe(2);
+    expect(data.stepDurations.release.avgCostUsd).toBe(10.3333);
+    expect(data.stepDurations.release.count).toBe(3);
+  });
+
   it('filters by time window', async () => {
     const now = Date.now() / 1000;
     listJobsMock.mockReturnValue([

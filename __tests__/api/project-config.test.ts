@@ -8,16 +8,34 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
   let GET: any;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
+  let projectRow: { website?: string | null } | undefined;
 
   beforeEach(async () => {
     vi.resetModules();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-config-test-'));
+    projectRow = undefined;
 
     resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
 
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: vi.fn(),
+    }));
+    vi.doMock('@/lib/db', () => ({
+      db: {
+        select: () => ({
+          from: () => ({
+            where: () => ({
+              get: () => projectRow,
+            }),
+          }),
+        }),
+      },
+      schema: {
+        projects: {
+          name: 'name',
+        },
+      },
     }));
     vi.doMock('@/lib/shared/config', () => ({ reloadConfig: vi.fn() }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({
@@ -113,6 +131,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     const data = await res.json();
     expect(data.review_prompt_addendum).toBe('');
     expect(data.fix_prompt_addendum).toBe('');
+    expect(data.website).toBe('');
   });
 
   it('surfaces review/fix prompt addenda when set', async () => {
@@ -239,6 +258,14 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     expect(data.release_after_run).toBe(true);
   });
 
+  it('surfaces the stored website URL when present', async () => {
+    projectRow = { website: 'https://example.com/app' };
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.website).toBe('https://example.com/app');
+  });
+
   it('detects pnpm test when package.json has test script and pnpm-lock.yaml exists', async () => {
     writeFileSync(join(tempDir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run' } }));
     writeFileSync(join(tempDir, 'pnpm-lock.yaml'), '');
@@ -335,9 +362,11 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
   let installTestScheduleMock: ReturnType<typeof vi.fn>;
   let uninstallTestScheduleMock: ReturnType<typeof vi.fn>;
   let writeFileConfigMock: ReturnType<typeof vi.fn>;
+  let projectRow: { website?: string | null } | undefined;
 
   beforeEach(async () => {
     vi.resetModules();
+    projectRow = undefined;
 
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     writeProjectFieldYamlMock = vi.fn().mockReturnValue(true);
@@ -351,6 +380,22 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: clearProjectDataCacheMock,
+    }));
+    vi.doMock('@/lib/db', () => ({
+      db: {
+        select: () => ({
+          from: () => ({
+            where: () => ({
+              get: () => projectRow,
+            }),
+          }),
+        }),
+      },
+      schema: {
+        projects: {
+          name: 'name',
+        },
+      },
     }));
     vi.doMock('@/lib/shared/config', () => ({ reloadConfig: reloadConfigMock }));
     vi.doMock('@/lib/skills/tamtam-file-config', () => ({
@@ -419,6 +464,19 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'test_command', null);
   });
 
+  it('rejects non-string test_command payloads instead of clearing the stored value', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ test_command: false }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toContain('test_command must be a string');
+    expect(writeProjectFieldYamlMock).not.toHaveBeenCalled();
+    expect(writeFileConfigMock).not.toHaveBeenCalled();
+  });
+
   it('persists commit_style to the project file config', async () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
       method: 'PATCH',
@@ -442,6 +500,19 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     expect(writeFileConfigMock).toHaveBeenCalledWith('/path/to/proj', {
       commit_style: null,
     });
+  });
+
+  it('rejects non-string commit_style payloads instead of clearing the file config', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ commit_style: { tone: 'cyberpunk' } }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toContain('commit_style must be a string');
+    expect(writeFileConfigMock).not.toHaveBeenCalled();
+    expect(writeProjectFieldYamlMock).not.toHaveBeenCalled();
   });
 
   it('returns 500 when writing file-backed config fails', async () => {
@@ -508,6 +579,74 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(reloadConfigMock).toHaveBeenCalledOnce();
     expect(clearProjectDataCacheMock).toHaveBeenCalledOnce();
+  });
+
+  it('persists a trimmed website URL to the DB-only project config', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ website: '  https://example.com/app  ' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'website', 'https://example.com/app');
+  });
+
+  it('clears website when whitespace-only', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ website: '   ' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'website', null);
+  });
+
+  it('rejects invalid website URLs', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ website: 'not a url' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toContain('valid URL');
+    expect(writeProjectFieldYamlMock).not.toHaveBeenCalledWith('proj1', 'website', expect.anything());
+  });
+
+  it('rejects non-http website URLs', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ website: 'ftp://example.com/app' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toContain('http(s)');
+    expect(writeProjectFieldYamlMock).not.toHaveBeenCalledWith('proj1', 'website', expect.anything());
+  });
+
+  it('rejects boolean website payloads instead of clearing the stored value', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ website: false }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toContain('string URL');
+    expect(writeProjectFieldYamlMock).not.toHaveBeenCalledWith('proj1', 'website', expect.anything());
+  });
+
+  it('rejects object website payloads instead of clearing the stored value', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ website: { href: 'https://example.com/app' } }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toContain('string URL');
+    expect(writeProjectFieldYamlMock).not.toHaveBeenCalledWith('proj1', 'website', expect.anything());
   });
 
   it('returns ok without writing when body has no test_command', async () => {
@@ -655,6 +794,18 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'test_cron_schedule', null);
   });
 
+  it('rejects non-string test_cron_schedule payloads', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ test_cron_schedule: 30 }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toContain('test_cron_schedule must be a string');
+    expect(writeProjectFieldYamlMock).not.toHaveBeenCalled();
+  });
+
   it('writes auto_commit_enabled=1 when set to true', async () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
       method: 'PATCH',
@@ -673,6 +824,18 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(res.status).toBe(200);
     expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'auto_commit_enabled', '0');
+  });
+
+  it('rejects non-boolean workflow flag payloads', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ auto_commit_enabled: 'false' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toContain('auto_commit_enabled must be a boolean');
+    expect(writeProjectFieldYamlMock).not.toHaveBeenCalled();
   });
 
   it('returns 404 when project not found while writing auto_commit_enabled', async () => {
@@ -785,6 +948,16 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'review_prompt_addendum', 'Treat console.log as non-blocker.');
   });
 
+  it('trims review_prompt_addendum before persisting', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ review_prompt_addendum: '  Treat console.log as non-blocker.  ' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'review_prompt_addendum', 'Treat console.log as non-blocker.');
+  });
+
   it('clears review_prompt_addendum when whitespace-only', async () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
       method: 'PATCH',
@@ -792,6 +965,18 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     });
     await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'review_prompt_addendum', null);
+  });
+
+  it('rejects non-string review_prompt_addendum payloads', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ review_prompt_addendum: ['bad'] }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toContain('review_prompt_addendum must be a string');
+    expect(writeProjectFieldYamlMock).not.toHaveBeenCalled();
   });
 
   it('persists fix_prompt_addendum text', async () => {

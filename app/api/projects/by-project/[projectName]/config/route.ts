@@ -1,10 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { writeProjectFieldYaml, getProjectTestConfig, getProjectPushResult, getProjectPipelinePrompts } from '@/lib/scheduling/scheduling';
+import { db, schema } from '@/lib/db';
+import { eq } from 'drizzle-orm';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/shared/project-data';
 import { reloadConfig } from '@/lib/shared/config';
 import { installTestSchedule, uninstallTestSchedule, parseTestScheduleToCron } from '@/lib/scheduling/test-scheduler';
 import { detectTestCommand } from '@/lib/pipeline/start-test';
 import { loadFileConfig, writeFileConfig, getBranchContext } from '@/lib/skills/tamtam-file-config';
+
+function badRequest(detail: string) {
+  return NextResponse.json({ detail }, { status: 400 });
+}
+
+function readOptionalTrimmedString(
+  body: Record<string, unknown>,
+  field: string,
+): string | null | Response {
+  if (typeof body[field] !== 'string') {
+    return badRequest(`${field} must be a string`);
+  }
+  const value = body[field].trim();
+  return value || null;
+}
 
 export async function GET(
   _request: NextRequest,
@@ -20,6 +37,7 @@ export async function GET(
   const fileConfig = loadFileConfig(projPath);
   const branchCtx = getBranchContext(projPath);
   const pipelinePrompts = getProjectPipelinePrompts(projectName);
+  const projectRow = db.select().from(schema.projects).where(eq(schema.projects.name, projectName)).get();
 
   return NextResponse.json({
     project: projectName,
@@ -42,6 +60,7 @@ export async function GET(
     review_disabled: testCfg?.reviewDisabled ?? false,
     review_prompt_addendum: pipelinePrompts.reviewPromptAddendum ?? '',
     fix_prompt_addendum: pipelinePrompts.fixPromptAddendum ?? '',
+    website: projectRow?.website ?? '',
     // Per-project commit style. File-only (team contract); empty string means
     // fall back to the global `commit_style` setting at commit-generation time.
     commit_style: fileConfig?.commit_style ?? '',
@@ -67,7 +86,7 @@ export async function PATCH(
     return NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
   }
 
-  const body = await request.json();
+  const body = await request.json() as Record<string, unknown>;
   let touched = false;
   const notFound = () =>
     NextResponse.json({ detail: `Project '${projectName}' not found` }, { status: 404 });
@@ -79,8 +98,9 @@ export async function PATCH(
   // test_command is the team contract — write it to BOTH the DB (for cache
   // performance) and `.tamtam/config.yml` (so teammates pick it up on pull).
   if (body.test_command !== undefined) {
+    const value = readOptionalTrimmedString(body, 'test_command');
+    if (value instanceof Response) return value;
     touched = true;
-    const value = body.test_command?.trim() || null;
     dbUpdates.push({ field: 'test_command', value });
     fileUpdates.test_command = value;
   }
@@ -89,14 +109,16 @@ export async function PATCH(
   // through loadFileConfig at commit-generation time so a checkout swap picks
   // up the new style immediately.
   if (body.commit_style !== undefined) {
+    const value = readOptionalTrimmedString(body, 'commit_style');
+    if (value instanceof Response) return value;
     touched = true;
-    const raw = typeof body.commit_style === 'string' ? body.commit_style.trim() : '';
-    fileUpdates.commit_style = raw.length > 0 ? raw : null;
+    fileUpdates.commit_style = value;
   }
 
   if (body.test_cron_schedule !== undefined) {
+    const value = readOptionalTrimmedString(body, 'test_cron_schedule');
+    if (value instanceof Response) return value;
     touched = true;
-    const value = body.test_cron_schedule?.trim() || null;
     if (value) {
       try {
         parseTestScheduleToCron(value);
@@ -121,9 +143,32 @@ export async function PATCH(
 
   for (const field of booleanFields) {
     if (body[field] !== undefined) {
+      if (typeof body[field] !== 'boolean') {
+        return badRequest(`${field} must be a boolean`);
+      }
       touched = true;
       dbUpdates.push({ field, value: body[field] ? '1' : '0' });
     }
+  }
+
+  // Per-project website URL the QA agent browses. DB-only metadata.
+  if (body.website !== undefined) {
+    touched = true;
+    if (typeof body.website !== 'string') {
+      return NextResponse.json({ detail: 'website must be a string URL' }, { status: 400 });
+    }
+    const raw = body.website.trim();
+    if (raw) {
+      try {
+        const u = new URL(raw);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+          return NextResponse.json({ detail: 'website must be http(s)' }, { status: 400 });
+        }
+      } catch {
+        return NextResponse.json({ detail: 'website must be a valid URL' }, { status: 400 });
+      }
+    }
+    dbUpdates.push({ field: 'website', value: raw || null });
   }
 
   // Pipeline prompt addenda — DB-only. Each developer tunes locally; not
@@ -131,8 +176,9 @@ export async function PATCH(
   const promptFields = ['review_prompt_addendum', 'fix_prompt_addendum'] as const;
   for (const field of promptFields) {
     if (body[field] !== undefined) {
+      const value = readOptionalTrimmedString(body, field);
+      if (value instanceof Response) return value;
       touched = true;
-      const value = typeof body[field] === 'string' && body[field].trim() ? body[field] : null;
       dbUpdates.push({ field, value });
     }
   }
