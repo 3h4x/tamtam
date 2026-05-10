@@ -14,6 +14,7 @@ describe('launchPrWait', () => {
   let createJobMock: ReturnType<typeof vi.fn>;
   let markDoneMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
+  let getJobMock: ReturnType<typeof vi.fn>;
   let startMarkDodMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
@@ -28,6 +29,7 @@ describe('launchPrWait', () => {
     }));
     markDoneMock = vi.fn().mockResolvedValue(undefined);
     updateJobMock = vi.fn();
+    getJobMock = vi.fn().mockReturnValue(null);
     startMarkDodMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'dod-1', issueNumber: 42, verified: 2, total: 2, changed: true });
 
     vi.doMock('@/lib/shared/project-data', () => ({
@@ -41,7 +43,7 @@ describe('launchPrWait', () => {
       createJob: createJobMock,
       markDone: markDoneMock,
       updateJob: updateJobMock,
-      getJob: vi.fn().mockReturnValue(null),
+      getJob: getJobMock,
     }));
     vi.doMock('@/lib/pipeline/start-mark-dod', () => ({
       startMarkDod: startMarkDodMock,
@@ -373,6 +375,50 @@ describe('launchPrWait', () => {
 
     await vi.waitFor(() => {
       expect(startMarkDodMock).toHaveBeenCalledWith('myproj', { prNumber: 13, repo: 'owner/repo', mode: 'pipeline' });
+      expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 0);
+    }, { timeout: 3000 });
+  });
+
+  it('targets the linked issue for mark-dod when an ancestor job carries issue metadata', async () => {
+    createJobMock.mockImplementationOnce((project: string, kind: string, pid: number, logPath: string) => ({
+      id: `${project}-${kind}-test`,
+      project,
+      kind,
+      pid,
+      logPath,
+      parentJobId: 'push-1',
+      prompt: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      contextMeta: null,
+      userPrompt: null,
+    }));
+    getJobMock.mockImplementation((jobId: string) => {
+      if (jobId === 'push-1') return { id: 'push-1', parentJobId: 'review-1', ghIssueNumber: null, ghIssueRepo: null };
+      if (jobId === 'review-1') return { id: 'review-1', parentJobId: null, ghIssueNumber: 42, ghIssueRepo: 'owner/repo' };
+      return null;
+    });
+    execMock
+      .mockResolvedValueOnce(resp(0, JSON.stringify({
+        state: 'OPEN',
+        mergeable: 'MERGEABLE',
+        statusCheckRollup: [{ name: 'ci', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+      })))
+      .mockResolvedValueOnce(resp(0, 'merged'));
+    mockCleanupSuccess();
+
+    launchPrWait('myproj', 66, 'owner/repo', 'https://github.com/owner/repo/pull/66');
+
+    await vi.waitFor(() => {
+      expect(startMarkDodMock).toHaveBeenCalledWith('myproj', { issueNumber: 42, repo: 'owner/repo', mode: 'pipeline' });
       expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 0);
     }, { timeout: 3000 });
   });
