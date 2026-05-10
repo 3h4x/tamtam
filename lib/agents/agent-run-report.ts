@@ -145,12 +145,14 @@ function maybeRecommendSchedule(job: JobData, ctx: AgentContextMeta, files: Modi
 }
 
 export async function finalizeAgentRunReport(job: JobData, rawLog: string): Promise<void> {
-  if (!isAgentJobKind(job.kind)) return;
+  const isAgent = isAgentJobKind(job.kind);
+  const isIssueRun = job.kind === 'run' && job.ghIssueNumber != null;
+  if (!isAgent && !isIssueRun) return;
   const ctx = parseContextMeta(job.contextMeta);
   const text = assistantText(rawLog);
   const { summary, actionable } = extractSummary(text);
   const files = await modifiedFiles(job, ctx);
   job.workSummary = summary;
   job.modifiedFiles = JSON.stringify(files);
-  maybeRecommendSchedule(job, ctx, files, actionable);
+  if (isAgent) maybeRecommendSchedule(job, ctx, files, actionable);
 }

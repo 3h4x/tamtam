@@ -1505,7 +1505,7 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
       job.exitCode = 1;
     }
   }
-  if (isAgentJobKind(job.kind)) {
+  if (isAgentJobKind(job.kind) || (job.kind === 'run' && job.ghIssueNumber != null)) {
     try {
       const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
       await finalizeAgentRunReport(job, rawLog);

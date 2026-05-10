@@ -13,8 +13,6 @@ function normalizeExecResult(result: ExecLikeResult) {
   };
 }
 
-const MAX_FILES_IN_PR_BODY = 30;
-
 function stubIssuePrBody(issue: { number: number; repo: string }): string {
   return `Closes #${issue.number}\n\nImplemented via TamTam from issue [#${issue.number}](https://github.com/${issue.repo}/issues/${issue.number}).`;
 }
@@ -38,39 +36,12 @@ function findIssueRunJob(issue: { number: number; repo: string }, projectName?: 
 
 export function buildIssuePrBody(issue: { number: number; repo: string }, runJob: JobData | null): string {
   const summary = runJob?.workSummary?.trim() ?? '';
-
-  let files: Array<{ path: string; status?: string }> = [];
-  if (runJob?.modifiedFiles) {
-    try {
-      const parsed = JSON.parse(runJob.modifiedFiles);
-      if (Array.isArray(parsed)) {
-        files = parsed
-          .filter((f): f is { path: string; status?: string } =>
-            !!f && typeof f === 'object' && typeof (f as { path?: unknown }).path === 'string'
-          )
-          .map(f => ({ path: f.path, status: typeof f.status === 'string' ? f.status : undefined }));
-      }
-    } catch {
-      files = [];
-    }
-  }
-
-  if (!summary && files.length === 0) return stubIssuePrBody(issue);
-
-  const parts: string[] = [`Closes #${issue.number}`];
-  if (summary) parts.push(summary);
-
-  if (files.length > 0) {
-    const shown = files.slice(0, MAX_FILES_IN_PR_BODY);
-    const lines = shown.map(f => f.status ? `- \`${f.path}\` (${f.status})` : `- \`${f.path}\``);
-    if (files.length > MAX_FILES_IN_PR_BODY) {
-      lines.push(`- …and ${files.length - MAX_FILES_IN_PR_BODY} more`);
-    }
-    parts.push(`## Files changed\n${lines.join('\n')}`);
-  }
-
-  parts.push(`---\nImplemented via TamTam from issue [#${issue.number}](https://github.com/${issue.repo}/issues/${issue.number}).`);
-  return parts.join('\n\n');
+  if (!summary) return stubIssuePrBody(issue);
+  return [
+    `Closes #${issue.number}`,
+    summary,
+    `---\nImplemented via TamTam from issue [#${issue.number}](https://github.com/${issue.repo}/issues/${issue.number}).`,
+  ].join('\n\n');
 }
 
 export async function createGenericPR(
