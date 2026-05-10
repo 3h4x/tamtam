@@ -160,7 +160,9 @@ describe('instrumentation', () => {
       vi.useFakeTimers();
       try {
         vi.setSystemTime(new Date('2026-05-10T12:00:00Z'));
-        const release = { id: 'release-1', project: 'proj', kind: 'release', finishedAt: null, startedAt: 100 };
+        const release: { id: string; project: string; kind: string; finishedAt: number | null; startedAt: number } = {
+          id: 'release-1', project: 'proj', kind: 'release', finishedAt: null, startedAt: 100,
+        };
         const push = { id: 'push-1', project: 'proj', kind: 'push', releaseId: 'release-1', finishedAt: 150, startedAt: 140 };
         const { markDoneMock, reconcileStaleReleaseMock } = mockOrphanReleaseDeps({
           jobs: [release, push],
