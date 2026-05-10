@@ -309,6 +309,70 @@ describe('pending continue-issue resume provider', () => {
     unmount()
   })
 
+  it('restores a running session even when context_meta is malformed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/jobs?project=proj') {
+        return {
+          ok: true,
+          json: async () => ({
+            jobs: [
+              {
+                id: 'run-old',
+                kind: 'run',
+                status: 'done',
+                session_id: 'sess-bad-meta',
+                started_at: 100,
+                finished_at: 120,
+                exit_code: 0,
+                user_prompt: 'first prompt',
+                prompt: null,
+                context_meta: '{not json',
+                provider: 'claude',
+              },
+              {
+                id: 'run-live',
+                kind: 'run',
+                status: 'running',
+                session_id: 'sess-bad-meta',
+                started_at: 200,
+                finished_at: null,
+                exit_code: null,
+                user_prompt: 'live prompt',
+                prompt: null,
+                context_meta: '{still not json',
+                provider: 'claude',
+              },
+            ],
+          }),
+        }
+      }
+      if (url === '/api/jobs/run-old') {
+        return {
+          ok: true,
+          json: async () => ({ log: 'assistant reply 1', log_pruned: false }),
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+
+    const { unmount } = renderElement(<SessionBootstrapHarness sessionId="sess-bad-meta" />)
+
+    await vi.waitFor(() => {
+      expect(startStreamMock).toHaveBeenCalledWith('proj', 'run-live', false, false)
+      expect(terminalStore.get('proj').history).toEqual([
+        { role: 'user', text: 'first prompt' },
+        { role: 'assistant', text: 'assistant reply 1' },
+        { role: 'user', text: 'live prompt' },
+      ])
+      expect(terminalStore.get('proj').sessionProvider).toBe('claude')
+      expect(terminalStore.get('proj').selectedItems).toEqual([])
+      expect(terminalStore.get('proj').selectedDocs).toEqual([])
+    })
+
+    unmount()
+  })
+
   it('continues a restored running session with prerequisite-aware streaming', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
@@ -417,6 +481,45 @@ describe('pending continue-issue resume provider', () => {
         { role: 'status', text: expect.stringContaining('review') },
         { role: 'user', text: 'review this' },
       ])
+    })
+
+    unmount()
+  })
+
+  it('boots a non-Claude release job param into the generic streaming path', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/jobs/release-live') {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'release-live',
+            kind: 'release',
+            release_id: null,
+            session_id: null,
+            started_at: 1_700_000_000,
+            exit_code: null,
+            user_prompt: 'ship it',
+            prompt: null,
+            context_meta: '{bad json',
+            provider: 'codex',
+            log_pruned: false,
+          }),
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+
+    const { unmount } = renderElement(<JobBootstrapHarness jobParam="release-live" />)
+
+    await vi.waitFor(() => {
+      expect(startStreamMock).toHaveBeenCalledWith('proj', 'release-live', false, true)
+      expect(terminalStore.get('proj').history).toEqual([
+        { role: 'status', text: expect.stringContaining('release') },
+        { role: 'user', text: 'ship it' },
+      ])
+      expect(terminalStore.get('proj').selectedItems).toEqual([])
+      expect(terminalStore.get('proj').selectedDocs).toEqual([])
     })
 
     unmount()
