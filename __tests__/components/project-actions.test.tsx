@@ -192,4 +192,105 @@ describe('ProjectActions', () => {
 
     unmount()
   })
+
+  it('renders website and github external links when provided', () => {
+    const { container, unmount } = renderProjectActions(buildProps({
+      websiteUrl: 'https://example.com',
+      githubUrl: 'https://github.com/acme/widgets',
+    }))
+
+    const links = Array.from(container.querySelectorAll('a'))
+    const websiteLink = links.find((a) => a.textContent?.includes('Website'))
+    const githubLink = links.find((a) => a.textContent?.includes('GitHub'))
+
+    expect(websiteLink).toBeTruthy()
+    expect(websiteLink?.getAttribute('href')).toBe('https://example.com')
+    expect(websiteLink?.getAttribute('target')).toBe('_blank')
+    expect(websiteLink?.getAttribute('rel')).toContain('noopener')
+
+    expect(githubLink).toBeTruthy()
+    expect(githubLink?.getAttribute('href')).toBe('https://github.com/acme/widgets')
+    expect(githubLink?.getAttribute('target')).toBe('_blank')
+
+    unmount()
+  })
+
+  it('omits website and github links when urls are null', () => {
+    const { container, unmount } = renderProjectActions(buildProps({
+      websiteUrl: null,
+      githubUrl: null,
+    }))
+
+    const links = Array.from(container.querySelectorAll('a'))
+    expect(links.find((a) => a.textContent?.includes('Website'))).toBeUndefined()
+    expect(links.find((a) => a.textContent?.includes('GitHub'))).toBeUndefined()
+
+    unmount()
+  })
+
+  it('shows 🚢 Ship (LGTM) button on fresh LGTM and fires onRelease', () => {
+    const onRelease = vi.fn()
+    const { container, unmount } = renderProjectActions(buildProps({
+      verdict: 'LGTM',
+      hasUnreviewed: false,
+      totalChanges: 3,
+      onRelease,
+    }))
+
+    const shipBtn = buttonByText(container, '🚢 Ship (LGTM)')
+    expect(shipBtn.disabled).toBe(false)
+    expect(shipBtn.title).toContain('review already LGTM')
+    shipBtn.click()
+    expect(onRelease).toHaveBeenCalledOnce()
+
+    unmount()
+  })
+
+  it('disables release with nothing-to-release title when no changes and no unpushed commits', () => {
+    const { container, unmount } = renderProjectActions(buildProps({
+      totalChanges: 0,
+      unpushed: 0,
+      currentBranch: 'master',
+      openPrBranches: [],
+      openPrByBranch: {},
+    }))
+
+    const releaseBtn = buttonByText(container, '🚀 Release')
+    expect(releaseBtn.disabled).toBe(true)
+    expect(releaseBtn.title).toContain('Nothing to release')
+
+    unmount()
+  })
+
+  it('renders diverged pull controls and fires correct handlers', () => {
+    const onPull = vi.fn()
+    const onDismissDiverged = vi.fn()
+    const { container, unmount } = renderProjectActions(buildProps({
+      pullDiverged: true,
+      totalChanges: 0,
+      onPull,
+      onDismissDiverged,
+      currentBranch: 'master',
+      openPrBranches: [],
+      openPrByBranch: {},
+    }))
+
+    const rebaseBtn = buttonByText(container, 'Rebase')
+    const mergeBtn = buttonByText(container, 'Merge')
+    expect(rebaseBtn.disabled).toBe(false)
+    expect(mergeBtn.disabled).toBe(false)
+
+    rebaseBtn.click()
+    expect(onPull).toHaveBeenCalledWith('rebase')
+
+    mergeBtn.click()
+    expect(onPull).toHaveBeenCalledWith('merge')
+
+    const dismissBtn = container.querySelector('[aria-label="Dismiss diverged warning"]') as HTMLButtonElement
+    expect(dismissBtn).toBeTruthy()
+    dismissBtn.click()
+    expect(onDismissDiverged).toHaveBeenCalledOnce()
+
+    unmount()
+  })
 })
