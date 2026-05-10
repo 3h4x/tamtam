@@ -555,6 +555,39 @@ describe('project board integration', () => {
     expect(storedMeta.itemId).toBe('ITEM_EXISTING');
   });
 
+  it('trusts a stored PVTI item id and skips board rediscovery', async () => {
+    const job = makeJob({
+      id: 'run-existing-pvti',
+      kind: 'run',
+      prompt: 'Reuse existing card',
+      contextMeta: JSON.stringify({ githubBoard: { itemId: 'PVTI_STORED' } }),
+    });
+
+    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    resolveProjectPathMock.mockReturnValue('/tmp/repo');
+    getJobMock.mockImplementation((id: string) => (id === 'run-existing-pvti' ? job : null));
+
+    const calls: string[][] = [];
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'git') {
+        return { exitCode: 0, stdout: 'main\n', stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-edit') {
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true }), stderr: '' };
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
+    await syncJobToProjectBoard(job, 'manual', { requireConfigured: true });
+
+    expect(calls.some((entry) => entry[1] === 'project' && entry[2] === 'item-list')).toBe(false);
+    expect(calls.some((entry) => entry[1] === 'project' && entry[2] === 'item-create')).toBe(false);
+    const storedMeta = JSON.parse(job.contextMeta ?? '{}').githubBoard;
+    expect(storedMeta.itemId).toBe('PVTI_STORED');
+  });
+
   it('writes Project / Agent / Run kind / Branch custom fields and skips re-writes on the next sync', async () => {
     const job = makeJob({
       id: 'agent-cf-1',
