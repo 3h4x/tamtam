@@ -32,7 +32,7 @@ describe('issue-cruncher helpers', () => {
 
   it('builds the trusted issues endpoint with URL-encoded project names', () => {
     expect(buildIssueCruncherPrerequisiteCommand('repo name/with space')).toBe(
-      'curl -fsS "http://localhost:1337/api/projects/by-project/repo%20name%2Fwith%20space/issues?trusted_only=1"',
+      'curl -fsS "http://localhost:1337/api/projects/by-project/repo%20name%2Fwith%20space/issues?trusted_only=1&slim=1"',
     )
   })
 

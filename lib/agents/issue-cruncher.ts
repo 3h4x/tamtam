@@ -20,7 +20,7 @@ export function parsePrerequisiteCommandInput(value: unknown): string | undefine
 }
 
 export function buildIssueCruncherPrerequisiteCommand(projectName: string): string {
-  return `curl -fsS "http://localhost:1337/api/projects/by-project/${encodeURIComponent(projectName)}/issues?trusted_only=1"`;
+  return `curl -fsS "http://localhost:1337/api/projects/by-project/${encodeURIComponent(projectName)}/issues?trusted_only=1&slim=1"`;
 }
 
 export function resolveAgentPrerequisiteCommand({

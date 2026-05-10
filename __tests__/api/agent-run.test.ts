@@ -132,7 +132,7 @@ describe('POST /api/agents/{agentId}/run', () => {
       if (cmd === 'bash' && args[1] === 'echo TAMTAM_PREREQ_MARKER') {
         return { stdout: 'TAMTAM_PREREQ_MARKER\n', stderr: '', exitCode: 0 };
       }
-      if (cmd === 'bash' && args[1] === 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"') {
+      if (cmd === 'bash' && args[1] === 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1&slim=1"') {
         return { stdout: '{"issues":[{"number":1,"title":"Trusted issue"}]}\n', stderr: '', exitCode: 0 };
       }
       if (cmd === 'bash' && args[1] === 'exit 7') {
@@ -881,7 +881,7 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     expect(execMock).toHaveBeenCalledWith(
       'bash',
-      ['-c', 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"'],
+      ['-c', 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1&slim=1"'],
       expect.objectContaining({ cwd: '/path/to/proj' }),
     );
     const [, , fullPrompt] = startJobMock.mock.calls[0];
@@ -905,7 +905,7 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     expect(execMock).not.toHaveBeenCalledWith(
       'bash',
-      ['-c', 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"'],
+      ['-c', 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1&slim=1"'],
       expect.anything(),
     );
     const [, , fullPrompt] = startJobMock.mock.calls[0];

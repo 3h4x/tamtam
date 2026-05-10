@@ -18,6 +18,24 @@ function filterTrustedIssues(issues: unknown[], projectPath: string): unknown[] 
   });
 }
 
+function slimIssue(issue: unknown): unknown {
+  if (!issue || typeof issue !== 'object') return issue;
+  const o = issue as Record<string, unknown>;
+  const labels = Array.isArray(o.labels)
+    ? o.labels.map((l: unknown) => (l && typeof l === 'object' ? (l as Record<string, unknown>).name : l))
+    : [];
+  return { number: o.number, title: o.title, labels, url: o.url };
+}
+
+function slimPR(pr: unknown): unknown {
+  if (!pr || typeof pr !== 'object') return pr;
+  const o = pr as Record<string, unknown>;
+  const labels = Array.isArray(o.labels)
+    ? o.labels.map((l: unknown) => (l && typeof l === 'object' ? (l as Record<string, unknown>).name : l))
+    : [];
+  return { number: o.number, title: o.title, labels, url: o.url, branch: o.headRefName, isDraft: o.isDraft };
+}
+
 async function getGhRepo(projectName: string, projPath: string): Promise<string | null> {
   try {
     const r = await exec('git', ['-C', projPath, 'remote', 'get-url', 'origin'], { timeout: 5000 });
@@ -41,6 +59,7 @@ export async function GET(
   const { projectName } = await params;
   const forceRefresh = request.nextUrl.searchParams.get('refresh') === '1';
   const trustedOnly = request.nextUrl.searchParams.get('trusted_only') === '1';
+  const slim = request.nextUrl.searchParams.get('slim') === '1';
 
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
@@ -55,10 +74,12 @@ export async function GET(
 
     if (cached && Date.now() / 1000 - cached.fetchedAt < CACHE_TTL_S) {
       const cachedIssues = JSON.parse(cached.issues);
+      const cachedPRs = JSON.parse(cached.prs);
+      const filteredIssues = trustedOnly ? filterTrustedIssues(cachedIssues, projPath) : cachedIssues;
       return NextResponse.json({
         repo: cached.repo,
-        prs: JSON.parse(cached.prs),
-        issues: trustedOnly ? filterTrustedIssues(cachedIssues, projPath) : cachedIssues,
+        prs: slim ? cachedPRs.map(slimPR) : cachedPRs,
+        issues: slim ? filteredIssues.map(slimIssue) : filteredIssues,
         error: null,
         cached: true,
         cachedAt: cached.fetchedAt,
@@ -108,10 +129,11 @@ export async function GET(
       .run();
   }
 
+  const filteredIssues = trustedOnly ? filterTrustedIssues(issues, projPath) : issues;
   return NextResponse.json({
     repo,
-    prs,
-    issues: trustedOnly ? filterTrustedIssues(issues, projPath) : issues,
+    prs: slim ? prs.map(slimPR) : prs,
+    issues: slim ? filteredIssues.map(slimIssue) : filteredIssues,
     error: ghError,
     cached: false,
     cachedAt: fetchedAt,
