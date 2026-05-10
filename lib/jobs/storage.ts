@@ -7,11 +7,25 @@ import type { JobData } from './types';
 
 export { runWithParent } from './parent-context';
 
-export const jobsCache = new Map<string, JobData>();
+// In production, pin the cache on globalThis so route handlers and lifecycle
+// hooks share state across Next.js's separate module realms. Without this,
+// marking a job done in the lifecycle realm leaves the API-route realm's
+// cache stale, so /api/jobs keeps returning status:"running" forever
+// (probe.ts trusts the cached job.finishedAt for inline push/commit and
+// never re-checks the DB).
+//
+// Tests use vi.resetModules() to get a fresh storage module per test;
+// globalThis pinning would defeat that, so skip it in test runs.
+type JobsCacheGlobals = { __tamtamJobsCache?: Map<string, JobData>; __tamtamJobsCacheLoaded?: boolean };
+const g = globalThis as JobsCacheGlobals;
+const isTestEnv = !!process.env.VITEST || process.env.NODE_ENV === 'test';
+if (!isTestEnv && !g.__tamtamJobsCache) g.__tamtamJobsCache = new Map<string, JobData>();
+export const jobsCache = isTestEnv ? new Map<string, JobData>() : (g.__tamtamJobsCache as Map<string, JobData>);
 let loaded = false;
 
 export function loadFromDb(): void {
-  if (loaded) return;
+  const isLoaded = isTestEnv ? loaded : g.__tamtamJobsCacheLoaded;
+  if (isLoaded) return;
   try {
     const rows = db.select().from(schema.jobs).all();
     for (const row of rows) {
@@ -50,7 +64,8 @@ export function loadFromDb(): void {
         provider: row.provider ?? null,
       });
     }
-    loaded = true;
+    if (isTestEnv) loaded = true;
+    else g.__tamtamJobsCacheLoaded = true;
   } catch (e) {
     console.error('Failed to load jobs from DB:', e);
   }

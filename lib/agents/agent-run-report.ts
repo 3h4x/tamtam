@@ -1,9 +1,9 @@
-import { parseStreamLines } from '@/lib/jobs/claude-stream-parser';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { exec } from '@/lib/shared/shell';
 import { upsertRecommendation } from '@/lib/recommendations/recommendations';
 import { isAgentJobKind } from '@/lib/jobs/kinds';
 import type { JobData } from '@/lib/jobs/types';
+import { extractAssistantTextFromRawLog, extractWorkSummary } from '@/lib/agents/work-summary-extractor.mjs';
 
 interface AgentContextMeta {
   agent?: { id?: string; name?: string; schedule?: string | null; triggeredBy?: string };
@@ -23,43 +23,6 @@ function parseContextMeta(raw: string | null | undefined): AgentContextMeta {
   } catch {
     return {};
   }
-}
-
-function assistantText(rawLog: string): string {
-  return parseStreamLines(rawLog)
-    .filter((e) => e.type === 'text')
-    .map((e) => e.type === 'text' ? e.text : '')
-    .join('')
-    .trim();
-}
-
-function compact(s: string, max = 280): string {
-  const oneLine = s.replace(/\s+/g, ' ').trim();
-  if (oneLine.length <= max) return oneLine;
-  return `${oneLine.slice(0, max - 1).trimEnd()}…`;
-}
-
-function reportField(text: string, label: string): string | null {
-  const re = new RegExp(`^\\s*[-*]?\\s*${label}:\\s*(.+)$`, 'im');
-  return text.match(re)?.[1]?.trim() ?? null;
-}
-
-function extractSummary(text: string): { summary: string | null; actionable: boolean | null } {
-  const reportIdx = text.toLowerCase().lastIndexOf('tamtam run report');
-  const report = reportIdx >= 0 ? text.slice(reportIdx) : text;
-  const summary = reportField(report, 'Summary');
-  const actionableRaw = reportField(report, 'Actionable work');
-  const actionable = actionableRaw
-    ? /^yes\b/i.test(actionableRaw) ? true : /^no\b/i.test(actionableRaw) ? false : null
-    : null;
-  if (summary) return { summary: compact(summary), actionable };
-
-  const paragraphs = text
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter(Boolean)
-    .filter((p) => !/tamtam run report/i.test(p));
-  return { summary: paragraphs.length ? compact(paragraphs[paragraphs.length - 1]) : null, actionable };
 }
 
 function parseNameStatus(stdout: string, confidence: 'high' | 'low'): ModifiedFile[] {
@@ -149,8 +112,8 @@ export async function finalizeAgentRunReport(job: JobData, rawLog: string): Prom
   const isIssueRun = job.kind === 'run' && job.ghIssueNumber != null;
   if (!isAgent && !isIssueRun) return;
   const ctx = parseContextMeta(job.contextMeta);
-  const text = assistantText(rawLog);
-  const { summary, actionable } = extractSummary(text);
+  const text = extractAssistantTextFromRawLog(rawLog);
+  const { summary, actionable } = extractWorkSummary(text);
   const files = await modifiedFiles(job, ctx);
   job.workSummary = summary;
   job.modifiedFiles = JSON.stringify(files);

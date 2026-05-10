@@ -136,7 +136,7 @@ describe('finalizeAgentRunReport', () => {
     expect(upsertRecommendationMock).not.toHaveBeenCalled();
   });
 
-  it('falls back to the last paragraph when the report block is missing', async () => {
+  it('falls back to the trailing summary block when the report block is missing', async () => {
     execMock
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
@@ -148,8 +148,40 @@ describe('finalizeAgentRunReport', () => {
       log('Investigated recent changes.\n\nNo actionable coverage gaps remain after the latest checks.'),
     );
 
-    expect(job.workSummary).toBe('No actionable coverage gaps remain after the latest checks.');
+    expect(job.workSummary).toBe(
+      'Investigated recent changes.\n\nNo actionable coverage gaps remain after the latest checks.'
+    );
     expect(upsertRecommendationMock).not.toHaveBeenCalled();
+  });
+
+  it('stops at narration markers when walking back through paragraphs', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob();
+
+    await finalizeAgentRunReport(
+      job,
+      log("Let me read the file first.\n\nNow I'll fix the bug.\n\nFixed the off-by-one in foo.ts and added a regression test."),
+    );
+
+    expect(job.workSummary).toBe('Fixed the off-by-one in foo.ts and added a regression test.');
+  });
+
+  it('stops at bare gerund narration markers when walking back through paragraphs', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob();
+
+    await finalizeAgentRunReport(
+      job,
+      log('Reviewing the failing specs first.\n\nChecking the fixture setup now.\n\nFixed the off-by-one in foo.ts and added a regression test.'),
+    );
+
+    expect(job.workSummary).toBe('Fixed the off-by-one in foo.ts and added a regression test.');
   });
 
   it('deduplicates files found in both git diff and git status', async () => {
