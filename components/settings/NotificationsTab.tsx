@@ -79,7 +79,13 @@ export function NotificationsTab({
           <h3 className="text-sm font-semibold text-text-primary">Webhook Configuration</h3>
           <p className="text-xs text-text-tertiary">Configure outbound notifications for release pipeline events</p>
         </div>
-        <div className="px-5 py-4 space-y-4">
+        <form
+          className="px-5 py-4 space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void handleTestNotification()
+          }}
+        >
           <div>
             <label className="block font-medium text-sm text-text-primary mb-1.5">Webhook URL</label>
             <input
@@ -106,7 +112,7 @@ export function NotificationsTab({
 
           <div className="flex items-center gap-3 pt-2">
             <button
-              onClick={handleTestNotification}
+              type="submit"
               disabled={testSending || !settings.notification_webhook_url}
               className={`px-4 py-1.5 text-white border-none rounded-lg font-semibold text-sm cursor-pointer transition-colors ${
                 testSuccess ? 'bg-status-success' : 'bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed'
@@ -118,7 +124,7 @@ export function NotificationsTab({
               <span className="text-sm text-status-error">{testError}</span>
             )}
           </div>
-        </div>
+        </form>
       </div>
 
       {/* Event Toggles */}

@@ -1,18 +1,14 @@
-'use client'
+import { notFound } from 'next/navigation'
+import { ProjectPageShell } from '@/components/project-detail/ProjectPageShell'
 
-import { useProjects } from '@/components/ProjectsProvider'
-import { ProjectDetailPage } from '@/components/ProjectDetailPage'
-import { LoadingState } from '@/components/LoadingState'
+const VALID_TABS = ['overview', 'config', 'history', 'terminal', 'changes', 'issues', 'docs', 'agents'] as const
+type Tab = (typeof VALID_TABS)[number]
 
-export default function ProjectTabPage() {
-  const { tasks, loading, fleet, loadProjects } = useProjects()
+export default async function ProjectTabPage({ params }: { params: Promise<{ tab: string }> }) {
+  const { tab } = await params
+  if (!VALID_TABS.includes(tab as Tab)) {
+    notFound()
+  }
 
-  if (loading && tasks.length === 0) return <LoadingState />
-
-  return (
-    <ProjectDetailPage
-      fleet={fleet}
-      onRefresh={loadProjects}
-    />
-  )
+  return <ProjectPageShell />
 }
