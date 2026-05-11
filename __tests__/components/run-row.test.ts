@@ -33,6 +33,7 @@ function makeEntry(overrides: Partial<Entry> = {}): Entry {
     model: 'sonnet',
     navJobId: 'job-1',
     navSessionId: 'session-12345678',
+    releaseId: null,
     failureLabel: null,
     releaseOutcome: null,
     logPruned: false,

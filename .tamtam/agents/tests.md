@@ -1,7 +1,8 @@
 ---
-model: sonnet
-schedule: 2h
+model: normal
+schedule: 4h
 skillIds: ["agent-tests"]
+prerequisiteCommand: ""
 ---
 
 

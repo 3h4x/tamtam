@@ -18,6 +18,7 @@ import {
   entryIsRunning,
   entryNeedsAttention,
   latestReleaseKey,
+  PIPELINE_CHILD_KINDS,
 } from '@/components/project-runs/utils'
 import type { Entry, KindBucket } from '@/components/project-runs/utils'
 import { RunRow } from '@/components/project-runs/RunRow'
@@ -83,6 +84,44 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   const [releaseActionState, setReleaseActionState] = useState<{ jobId: string; label: string } | null>(null)
   const [stepRetryState, setStepRetryState] = useState<{ jobId: string; label: string } | null>(null)
   const [boardActionState, setBoardActionState] = useState<{ jobId: string; label: string } | null>(null)
+  const [stopState, setStopState] = useState<{ jobId: string; label: string } | null>(null)
+
+  const stopTargetFor = (e: Entry): { jobId: string; mode: 'job' | 'release' } | null => {
+    if (e.key.startsWith('vgroup:')) return null
+    if (e.kind === 'release' && e.status === 'running') return { jobId: e.navJobId, mode: 'release' }
+    if (e.releaseOutcome?.status === 'running') {
+      return { jobId: e.releaseOutcome.releaseJobId, mode: 'release' }
+    }
+    if (e.status === 'running' && e.releaseId && PIPELINE_CHILD_KINDS.has(e.kind)) {
+      return { jobId: e.releaseId, mode: 'release' }
+    }
+    if (e.status === 'running') return { jobId: e.navJobId, mode: 'job' }
+    return null
+  }
+
+  const stopRun = async (e: Entry) => {
+    const target = stopTargetFor(e)
+    if (!target) return
+    const { jobId } = target
+    setStopState({ jobId, label: 'stopping' })
+    try {
+      const res = target.mode === 'release'
+        ? await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/release/abort`, { method: 'POST' })
+        : await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+      const body = await res.json().catch(() => ({})) as { status?: string; detail?: string }
+      const abortPending = target.mode === 'release' && body.status === 'abort_pending'
+      if (!res.ok && !abortPending) {
+        throw new Error(body?.detail || `HTTP ${res.status}`)
+      }
+      setStopState({ jobId, label: abortPending ? 'abort pending' : 'stopped' })
+      setTimeout(() => setStopState((prev) => (prev?.jobId === jobId ? null : prev)), abortPending ? 2500 : 1500)
+      await loadJobs()
+    } catch (error) {
+      console.error('[history] stop failed', error)
+      setStopState({ jobId, label: 'failed' })
+      setTimeout(() => setStopState((prev) => (prev?.jobId === jobId ? null : prev)), 2500)
+    }
+  }
   const toggleExpanded = (key: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -320,10 +359,29 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
         {boardActive ? boardActionState?.label : 'Sync board'}
       </button>
     ) : null
-    const buttonCount = [stepRetryButton, releaseButton, boardButton].filter(Boolean).length
-    if (buttonCount === 0) return null
-    if (buttonCount === 1) return stepRetryButton ?? releaseButton ?? boardButton
-    return <div className="flex items-center gap-2">{stepRetryButton}{releaseButton}{boardButton}</div>
+    // Ordinary running jobs are cancelled through the job endpoint. Running
+    // releases use the pipeline abort route so the active step is stopped and
+    // the pipeline lock is finalized. Agent/run rows may look running only
+    // because an attached release is still active; in that case target the
+    // release, not the already-finished parent job.
+    const stopTarget = stopTargetFor(e)
+    const showStop = stopTarget != null
+    const stopActive = stopTarget != null && stopState?.jobId === stopTarget.jobId
+    const stopButton = showStop ? (
+      <button
+        type="button"
+        className="px-2 py-0.5 text-[10px] rounded border border-status-error/40 text-status-error bg-status-error/10 hover:bg-status-error/15 disabled:opacity-60 cursor-pointer"
+        disabled={stopActive}
+        onClick={() => stopRun(e)}
+        title="Send SIGTERM and mark this run cancelled"
+      >
+        {stopActive ? stopState?.label : 'Stop'}
+      </button>
+    ) : null
+    const buttons = [stopButton, stepRetryButton, releaseButton, boardButton].filter(Boolean)
+    if (buttons.length === 0) return null
+    if (buttons.length === 1) return buttons[0]
+    return <div className="flex items-center gap-2">{buttons}</div>
   }
 
   return (

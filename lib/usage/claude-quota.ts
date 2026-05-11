@@ -134,9 +134,31 @@ function rateLimitBackoffMs(cache: CacheState, retryAfterHeader: string | null):
   return Math.max(retryAfterMs, exponentialMs);
 }
 
+// QA container has no Claude credentials and no network egress to
+// api.anthropic.com — short-circuit with a static healthy snapshot so the
+// quota panel renders instead of throwing on every poll.
+function buildQaModeSnapshot(now: number): QuotaSnapshot {
+  return buildSnapshot(
+    {
+      five_hour: { utilization: 0, resets_at: null },
+      seven_day: { utilization: 0, resets_at: null },
+      seven_day_sonnet: { utilization: 0, resets_at: null },
+      seven_day_opus: { utilization: 0, resets_at: null },
+    },
+    now,
+    false,
+  );
+}
+
 export async function getClaudeQuota(options: { force?: boolean } = {}): Promise<QuotaSnapshot> {
   const cache = getCache();
   const now = Date.now();
+
+  if (process.env.TAMTAM_QA_MODE === '1') {
+    if (!cache.snapshot) cache.snapshot = buildQaModeSnapshot(now);
+    cache.fetchedAt = now;
+    return cache.snapshot;
+  }
 
   if (cache.retryAfterMs > now) {
     if (cache.snapshot) return { ...cache.snapshot, stale: true };

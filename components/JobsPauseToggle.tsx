@@ -38,7 +38,9 @@ export function JobsPauseToggle() {
         setJobsPaused(settings.jobs_paused === 'true')
       }
       if (!merge || 'budget_block_runs_enabled' in settings) {
-        setBudgetGateEnabled(settings.budget_block_runs_enabled === 'true')
+        const enabled = settings.budget_block_runs_enabled === 'true'
+        setBudgetGateEnabled(enabled)
+        if (!enabled) setAutoThrottle(null)
       }
     }
     const load = async () => {
@@ -67,6 +69,11 @@ export function JobsPauseToggle() {
 
   useEffect(() => {
     let live = true
+    if (!budgetGateEnabled) {
+      return () => {
+        live = false
+      }
+    }
     const loadQuota = async () => {
       try {
         const res = await fetch('/api/usage/quota')
@@ -78,7 +85,7 @@ export function JobsPauseToggle() {
         // The server now computes the multi-provider verdict so we don't
         // light up "scheduled paused" when one provider is over but a sibling
         // (e.g. Codex) still has weekly headroom.
-        if (!budgetGateEnabled || !snap.gateEnabled) { setAutoThrottle(null); return }
+        if (!snap.gateEnabled) { setAutoThrottle(null); return }
         setAutoThrottle(snap.schedulerThrottle ?? null)
       } catch {
         // ignore — fail open

@@ -277,6 +277,12 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
   useEffect(() => {
     let active = true
     let interval: ReturnType<typeof setInterval> | null = null
+    if (!budgetGateEnabled) {
+      setScheduledThrottlePaused(false)
+      return () => {
+        active = false
+      }
+    }
     const load = async () => {
       try {
         const r = await fetch('/api/usage/quota')

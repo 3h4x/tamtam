@@ -186,6 +186,7 @@ export interface Entry {
   model: string | null
   navJobId: string
   navSessionId: string | null
+  releaseId: string | null
   verdict?: JobInfo['verdict']
   failureLabel?: string | null
   releaseOutcome?: ReleaseOutcome | null
@@ -445,6 +446,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       model: j.model ?? modelFromContext(j.context_meta),
       navJobId: j.id,
       navSessionId: j.session_id ?? null,
+      releaseId: j.release_id ?? null,
       verdict: j.verdict,
       failureLabel: null,
       releaseOutcome: null,
@@ -680,6 +682,7 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
           model: null,
           navJobId: last.navJobId,
           navSessionId: null,
+          releaseId: null,
           verdict: undefined,
           failureLabel: attention?.failureLabel ?? null,
           releaseOutcome: null,
