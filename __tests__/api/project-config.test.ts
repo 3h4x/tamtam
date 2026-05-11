@@ -8,7 +8,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
   let GET: any;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
-  let projectRow: { website?: string | null } | undefined;
+  let projectRow: { website?: string | null; qaUrl?: string | null } | undefined;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -362,7 +362,7 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
   let installTestScheduleMock: ReturnType<typeof vi.fn>;
   let uninstallTestScheduleMock: ReturnType<typeof vi.fn>;
   let writeFileConfigMock: ReturnType<typeof vi.fn>;
-  let projectRow: { website?: string | null } | undefined;
+  let projectRow: { website?: string | null; qaUrl?: string | null } | undefined;
 
   beforeEach(async () => {
     vi.resetModules();

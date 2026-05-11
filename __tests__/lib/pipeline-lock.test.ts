@@ -53,7 +53,8 @@ function createTestDb() {
       name TEXT PRIMARY KEY,
       path TEXT NOT NULL,
       enabled INTEGER DEFAULT 1,
-      website TEXT
+      website TEXT,
+      qa_url TEXT
     );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };
