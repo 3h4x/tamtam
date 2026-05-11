@@ -1,0 +1,145 @@
+#!/usr/bin/env node
+/* eslint-env node */
+
+const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+const statePath = process.env.TAMTAM_QA_PM2_STATE || '/qa/pm2-state.json';
+fs.mkdirSync(path.dirname(statePath), { recursive: true });
+
+function readState() {
+  try {
+    return JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function writeState(state) {
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+}
+
+function indexOfValue(args, flag) {
+  const idx = args.indexOf(flag);
+  return idx >= 0 ? idx + 1 : -1;
+}
+
+function stateEntry(name, proc) {
+  return {
+    name,
+    pid: proc.pid,
+    pm2_env: { status: proc.status, exit_code: proc.exit_code ?? null, pm_exec_path: proc.script },
+  };
+}
+
+const args = process.argv.slice(2);
+const cmd = args[0];
+let state = readState();
+
+if (cmd === '__qa_pm2_supervise') {
+  const [, passedStatePath, name, cwd, launchCmd, launchArgsJson] = args;
+  process.env.TAMTAM_QA_PM2_STATE = passedStatePath;
+  const launchArgs = JSON.parse(launchArgsJson || '[]');
+  const child = spawn(launchCmd, launchArgs, {
+    cwd,
+    env: process.env,
+    stdio: 'ignore',
+  });
+
+  function mark(status, exitCode = null) {
+    const latest = readState();
+    if (latest[name]) {
+      latest[name].status = status;
+      latest[name].exit_code = exitCode;
+      writeState(latest);
+    }
+  }
+
+  function forward(sig) {
+    try { child.kill(sig); } catch {}
+  }
+
+  process.on('SIGTERM', () => forward('SIGTERM'));
+  process.on('SIGINT', () => forward('SIGINT'));
+  process.on('SIGHUP', () => forward('SIGHUP'));
+
+  child.on('exit', (code, signal) => {
+    mark('stopped', code ?? (signal ? 1 : 0));
+    process.exit(0);
+  });
+  child.on('error', () => {
+    mark('errored', 1);
+    process.exit(1);
+  });
+  return;
+}
+
+if (cmd === 'jlist') {
+  const list = Object.entries(state).map(([name, proc]) => stateEntry(name, proc));
+  process.stdout.write(JSON.stringify(list));
+  process.exit(0);
+}
+
+if (cmd === 'describe') {
+  process.exit(state[args[1]] ? 0 : 1);
+}
+
+if (cmd === 'delete' || cmd === 'stop') {
+  const name = args[1];
+  if (name && state[name]) {
+    try { process.kill(state[name].pid, 'SIGTERM'); } catch {}
+    delete state[name];
+    writeState(state);
+  }
+  process.exit(0);
+}
+
+if (cmd === 'start') {
+  const script = args[1];
+  const name = args[indexOfValue(args, '--name')] || path.basename(script);
+  const cwd = args[indexOfValue(args, '--cwd')] || process.cwd();
+  const interpreter = args[indexOfValue(args, '--interpreter')] || '';
+  const dash = args.indexOf('--');
+  const childArgs = dash >= 0 ? args.slice(dash + 1) : [];
+
+  let launchCmd = script;
+  let launchArgs = childArgs;
+  if (interpreter && interpreter !== 'none') {
+    launchCmd = interpreter === 'node' ? process.execPath : interpreter;
+    launchArgs = [script, ...childArgs];
+  }
+
+  const supervisor = spawn(process.execPath, [
+    __filename,
+    '__qa_pm2_supervise',
+    statePath,
+    name,
+    cwd,
+    launchCmd,
+    JSON.stringify(launchArgs),
+  ], {
+    detached: true,
+    env: process.env,
+    stdio: 'ignore',
+  });
+  state[name] = {
+    name,
+    pid: supervisor.pid,
+    script,
+    status: 'online',
+    exit_code: null,
+    started_at: Date.now(),
+  };
+  writeState(state);
+  process.stdout.write(`[qa-pm2] started ${name}\n`);
+  supervisor.unref();
+  process.exit(0);
+}
+
+if (cmd === 'restart') {
+  process.stdout.write('[qa-pm2] restart noop\n');
+  process.exit(0);
+}
+
+process.stdout.write('qa-pm2 mock\n');

@@ -1,0 +1,25 @@
+FROM node:25-bookworm-slim
+
+WORKDIR /app
+
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=1338
+ENV HOSTNAME=0.0.0.0
+ENV TAMTAM_ROOT=/app
+ENV TAMTAM_DB_PATH=/qa/data/tamtam-qa.db
+ENV TAMTAM_BASE_URL=http://localhost:1338
+ENV PATH=/app/scripts/qa-mocks:/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+RUN npm install -g pnpm@10.33.0
+
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --prod=false
+
+COPY . .
+RUN TAMTAM_DB_PATH=:memory: pnpm build
+
+ENV NODE_ENV=production
+
+EXPOSE 1338
+
+CMD ["sh", "-c", "node scripts/qa-seed.mjs && next start --port 1338 --hostname 0.0.0.0"]

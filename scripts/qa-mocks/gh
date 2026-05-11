@@ -1,0 +1,36 @@
+#!/usr/bin/env node
+/* eslint-env node */
+
+const args = process.argv.slice(2);
+
+function out(value) {
+  process.stdout.write(typeof value === 'string' ? value : JSON.stringify(value));
+  process.stdout.write('\n');
+}
+
+if (args.includes('--version')) {
+  out('gh version qa-mock');
+} else if (args[0] === 'repo' && args[1] === 'view') {
+  if (args.includes('--jq') || args.includes('-q')) out('qa/mock-repo');
+  else out({ nameWithOwner: 'qa/mock-repo' });
+} else if (args[0] === 'pr' && args[1] === 'list') {
+  out([{ number: 12, title: 'QA release pipeline smoke', url: 'https://github.com/qa/mock-repo/pull/12', headRefName: 'feature/qa-dashboard', body: '- [ ] QA acceptance item' }]);
+} else if (args[0] === 'pr' && args[1] === 'view') {
+  out({ number: 12, url: 'https://github.com/qa/mock-repo/pull/12', headRefName: 'feature/qa-dashboard', mergeStateStatus: 'CLEAN', reviewDecision: 'APPROVED', statusCheckRollup: [] });
+} else if (args[0] === 'pr' && args[1] === 'create') {
+  out('https://github.com/qa/mock-repo/pull/12');
+} else if (args[0] === 'pr' && args[1] === 'diff') {
+  out('diff --git a/src/index.ts b/src/index.ts\n+qa change');
+} else if (args[0] === 'issue' && args[1] === 'list') {
+  out([{ number: 34, title: 'Exercise terminal QA shim', url: 'https://github.com/qa/mock-repo/issues/34', state: 'OPEN', labels: [{ name: 'tamtam' }] }]);
+} else if (args[0] === 'issue' && args[1] === 'view') {
+  out({ number: 34, title: 'Exercise terminal QA shim', state: 'OPEN', body: '- [ ] QA acceptance item' });
+} else if (args[0] === 'issue' && (args[1] === 'create' || args[1] === 'edit' || args[1] === 'close')) {
+  out('https://github.com/qa/mock-repo/issues/35');
+} else if (args[0] === 'label' && args[1] === 'list') {
+  out([{ name: 'tamtam' }, { name: 'review-followup' }, { name: 'priority-medium' }]);
+} else if (args[0] === 'run' && args[1] === 'view') {
+  out('QA failed log line\nQA mocked run output');
+} else {
+  out({});
+}

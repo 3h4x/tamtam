@@ -1,0 +1,23 @@
+services:
+  tamtam-qa:
+    build:
+      context: .
+      dockerfile: Dockerfile.qa
+    ports:
+      - "1338:1338"
+    environment:
+      NODE_ENV: production
+      PORT: "1338"
+      HOSTNAME: 0.0.0.0
+      TAMTAM_ROOT: /app
+      TAMTAM_DB_PATH: /qa/data/tamtam-qa.db
+      TAMTAM_BASE_URL: http://localhost:1338
+      TAMTAM_QA_MODE: "1"
+      CLAUDE_BIN: /app/scripts/qa-shim.js
+      SHIM_INACTIVITY_TIMEOUT_MS: "120000"
+      PATH: /app/scripts/qa-mocks:/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    volumes:
+      - tamtam-qa-data:/qa
+
+volumes:
+  tamtam-qa-data:

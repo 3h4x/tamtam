@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "next dev --port 1337 --hostname 127.0.0.1",
+    "dev:qa": "docker compose -f docker-compose.qa.yml up --build",
     "rebuild": "pnpm build && pnpm start",
     "predev:profile": "pm2 delete tamtam 2>/dev/null; lsof -ti:1337 | xargs kill -9 2>/dev/null; rm -f .next/dev/trace-turbopack; true",
     "dev:profile": "NEXT_TURBOPACK_TRACING=1 pm2 start 'next dev --port 1337 --hostname 127.0.0.1' --name tamtam --cwd . --time --update-env && echo '\\n[dev:profile] reproduce the slow state, then `pnpm stop` to flush the trace to .next/dev/trace-turbopack — view via `npx next internal trace .next/dev/trace-turbopack` then open https://trace.nextjs.org/\\n' && pm2 logs tamtam",

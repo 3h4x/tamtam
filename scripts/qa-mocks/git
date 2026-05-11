@@ -1,0 +1,102 @@
+#!/usr/bin/env node
+/* eslint-env node */
+
+const fs = require('fs');
+const path = require('path');
+
+let args = process.argv.slice(2);
+let cwd = process.cwd();
+if (args[0] === '-C') {
+  cwd = args[1] || cwd;
+  args = args.slice(2);
+}
+
+function state() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(cwd, '.qa-state.json'), 'utf8'));
+  } catch {
+    return { name: path.basename(cwd), branch: 'main', github: `qa/${path.basename(cwd)}`, changes: '' };
+  }
+}
+
+function out(text = '') {
+  process.stdout.write(text);
+  if (text && !text.endsWith('\n')) process.stdout.write('\n');
+}
+
+function changeEntries() {
+  return String(s.changes || '')
+    .split('\n')
+    .map((line) => {
+      if (!line.trim()) return null;
+      if (line.startsWith('?? ')) return { status: '??', path: line.slice(3).trim(), untracked: true };
+      const status = line.slice(0, 2);
+      const filePath = line.slice(3).trim();
+      if (!filePath) return null;
+      return { status, path: filePath, untracked: false };
+    })
+    .filter(Boolean);
+}
+
+function trackedEntries() {
+  return changeEntries().filter((entry) => !entry.untracked);
+}
+
+function untrackedEntries() {
+  return changeEntries().filter((entry) => entry.untracked);
+}
+
+function statusLetter(entry) {
+  const raw = String(entry.status || '').replace(/\s/g, '');
+  return raw[0] || 'M';
+}
+
+function numstatFor(filePath) {
+  const base = path.basename(filePath);
+  const additions = Math.max(1, Math.min(12, base.length));
+  const deletions = filePath.endsWith('.md') ? 0 : 1;
+  return `${additions}\t${deletions}\t${filePath}`;
+}
+
+function porcelainV2Status() {
+  const branch = s.branch || 'main';
+  const ahead = branch === 'main' ? 1 : 3;
+  const lines = [
+    `# branch.oid abc123qaabc123qaabc123qaabc123qaabc123qa`,
+    `# branch.head ${branch}`,
+    `# branch.upstream origin/${branch}`,
+    `# branch.ab +${ahead} -0`,
+  ];
+  for (const entry of trackedEntries()) {
+    const xy = entry.status.padEnd(2, ' ');
+    lines.push(`1 ${xy} N... 100644 100644 100644 abc123qa abc123qa ${entry.path}`);
+  }
+  for (const entry of untrackedEntries()) {
+    lines.push(`? ${entry.path}`);
+  }
+  return lines.join('\n');
+}
+
+const s = state();
+const cmd = args[0] || '';
+const rest = args.slice(1);
+
+if (cmd === 'status' && rest.includes('--porcelain=v2')) out(porcelainV2Status());
+else if (cmd === 'status') out(s.changes || '');
+else if (cmd === 'rev-parse' && rest.includes('--abbrev-ref')) out(s.branch || 'main');
+else if (cmd === 'rev-parse') out('abc123qaabc123qaabc123qaabc123qaabc123qa');
+else if (cmd === 'symbolic-ref' && rest.includes('--short')) out('origin/main');
+else if (cmd === 'symbolic-ref') out('refs/remotes/origin/main');
+else if (cmd === 'branch' && rest.includes('--show-current')) out(s.branch || 'main');
+else if (cmd === 'remote' && rest[0] === 'get-url') out(`https://github.com/${s.github}.git`);
+else if (cmd === 'rev-list' && rest.includes('--count')) out(s.branch === 'main' ? '1' : '3');
+else if (cmd === 'ls-files' && rest.includes('--others')) out(untrackedEntries().map((entry) => entry.path).join('\n'));
+else if (cmd === 'diff' && rest.includes('--no-index') && rest.includes('--numstat')) out(numstatFor(rest[rest.length - 1] || 'untracked.txt'));
+else if (cmd === 'diff' && rest.includes('--name-status')) out(trackedEntries().map((entry) => `${statusLetter(entry)}\t${entry.path}`).join('\n'));
+else if (cmd === 'diff' && rest.includes('--numstat')) out(trackedEntries().map((entry) => numstatFor(entry.path)).join('\n'));
+else if (cmd === 'diff' && rest.includes('--stat')) out(' src/index.ts | 4 ++--\n package.json | 2 +-\n 2 files changed, 3 insertions(+), 3 deletions(-)\n');
+else if (cmd === 'diff') out('diff --git a/src/index.ts b/src/index.ts\n@@ -1 +1 @@\n-export const oldValue = true;\n+export const qaValue = true;\n');
+else if (cmd === 'add' || cmd === 'commit' || cmd === 'push' || cmd === 'fetch' || cmd === 'checkout' || cmd === 'pull' || cmd === 'update-ref' || cmd === 'merge-base') out('');
+else if (cmd === 'show') out('pipeline:\n  test_command: pnpm test\n');
+else if (cmd === 'ls-tree') out('config.yml\n');
+else out('');

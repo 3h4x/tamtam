@@ -1,0 +1,13 @@
+node_modules
+.next
+data
+.git
+.claude/worktrees
+.pnpm-store
+.profiles
+.playwright-mcp
+test-results
+*.cpuprofile
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
