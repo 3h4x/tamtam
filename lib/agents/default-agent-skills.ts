@@ -213,8 +213,9 @@ Do NOT PATCH any settings. Surface proposals only — the user applies them in t
 
 ## 1. Resolve target URL
 - Project name = current repo directory name (the folder containing \`.git\`).
-- \`curl -s "http://localhost:1337/api/projects/by-project/<name>/config"\` and read the \`website\` field.
-- If empty, print \`QA_NO_WEBSITE\` and stop. Do not guess a URL.
+- \`curl -s "http://localhost:1337/api/projects/by-project/<name>/config"\` and read both \`qa_url\` and \`website\`.
+- Prefer \`qa_url\` (explicit QA target, may be \`http://localhost:<port>\` for a locally-spun stack started by the agent's prerequisite); otherwise use \`website\` (public URL).
+- If both are empty, print \`QA_NO_TARGET\` and stop. Do not guess a URL.
 
 ## 2. Explore
 - \`mcp__plugin_playwright_playwright__browser_navigate\` to the website root, then walk 3–6 primary routes (home, key feature pages, auth/dashboard if any).
@@ -271,7 +272,8 @@ const KNOWN_DEFAULT_CONTENT_HASHES: Record<string, string[]> = {
   // 'e7496058060e8bd4' = pre-git-free-guard default.
   'agent-review-tuner': ['f156455212bb6bfc', 'e7496058060e8bd4'],
   // '5274a9f8d37e5b19' = first shipped QA draft with unprefixed browser_* tool names.
-  'agent-qa': ['5274a9f8d37e5b19'],
+  // 'da3105d7820a7360' = pre-qa-url default (website-only resolution).
+  'agent-qa': ['5274a9f8d37e5b19', 'da3105d7820a7360'],
   // 'd2b9ebcdd7b0de6c' = pre-git-free-guard default.
   'agent-senior-fullstack': ['ab7344ee6a0a7a21', 'd2b9ebcdd7b0de6c'],
 };

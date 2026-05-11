@@ -36,6 +36,8 @@ export interface ConfigTabProps {
   setCommitStyleInput: (v: string) => void
   websiteInput: string
   setWebsiteInput: (v: string) => void
+  qaUrlInput: string
+  setQaUrlInput: (v: string) => void
 
   editActions: CustomAction[]
   setEditActions: (v: CustomAction[]) => void
@@ -77,6 +79,8 @@ export function ConfigTab({
   setCommitStyleInput,
   websiteInput,
   setWebsiteInput,
+  qaUrlInput,
+  setQaUrlInput,
   editActions,
   setEditActions,
   anyDirty,
@@ -143,21 +147,42 @@ export function ConfigTab({
         </div>
       </div>
 
-      {/* Website */}
+      {/* Website + QA target */}
       <div className="bg-bg-secondary rounded-md border border-border">
         <div className="px-4 py-2 border-b border-border flex items-baseline gap-3">
           <h3 className="text-sm font-semibold text-text-primary">Website</h3>
-          <p className="text-xs text-text-tertiary">Public URL the QA agent will browse for bugs</p>
+          <p className="text-xs text-text-tertiary">Public/production URL — used by the QA agent when no explicit QA target is set</p>
         </div>
-        <div className="px-4 py-3">
-          <input
-            id="project-website"
-            type="text"
-            className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
-            value={websiteInput}
-            onChange={(e) => setWebsiteInput(e.target.value)}
-            placeholder="https://example.com"
-          />
+        <div className="px-4 py-3 space-y-3">
+          <div>
+            <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="project-website">
+              Website
+            </label>
+            <input
+              id="project-website"
+              type="text"
+              className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
+              value={websiteInput}
+              onChange={(e) => setWebsiteInput(e.target.value)}
+              placeholder="https://example.com"
+            />
+          </div>
+          <div>
+            <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="project-qa-url">
+              QA URL <span className="text-text-tertiary font-normal">(overrides Website for QA)</span>
+            </label>
+            <input
+              id="project-qa-url"
+              type="text"
+              className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
+              value={qaUrlInput}
+              onChange={(e) => setQaUrlInput(e.target.value)}
+              placeholder="http://localhost:1338"
+            />
+            <p className="text-xs text-text-tertiary mt-1">
+              Explicit target for the QA agent. Use a local URL (e.g. a docker-compose stack started by the agent's prerequisite) when you don't want to QA the live site.
+            </p>
+          </div>
         </div>
       </div>
 

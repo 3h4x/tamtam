@@ -84,6 +84,7 @@ export function ProjectDetailPage({
   const [fixPromptAddendumInput, setFixPromptAddendumInput] = useState('')
   const [commitStyleInput, setCommitStyleInput] = useState('')
   const [websiteInput, setWebsiteInput] = useState('')
+  const [qaUrlInput, setQaUrlInput] = useState('')
   const [configSaving, setConfigSaving] = useState(false)
   const [configSaved, setConfigSaved] = useState(false)
 
@@ -188,6 +189,7 @@ export function ProjectDetailPage({
     setFixPromptAddendumInput(data.fix_prompt_addendum ?? '')
     setCommitStyleInput(data.commit_style ?? '')
     setWebsiteInput(data.website ?? '')
+    setQaUrlInput(data.qa_url ?? '')
   }
 
   const handleCustomAction = async (actionName: string) => {
@@ -475,6 +477,7 @@ export function ProjectDetailPage({
     fix_prompt_addendum: fixPromptAddendumInput,
     commit_style: commitStyleInput,
     website: websiteInput,
+    qa_url: qaUrlInput,
   }
 
   const handleSaveConfig = async () => {
@@ -507,7 +510,8 @@ export function ProjectDetailPage({
     configInputs.review_prompt_addendum !== (config.review_prompt_addendum ?? '') ||
     configInputs.fix_prompt_addendum !== (config.fix_prompt_addendum ?? '') ||
     configInputs.commit_style !== (config.commit_style ?? '') ||
-    configInputs.website !== (config.website ?? '')
+    configInputs.website !== (config.website ?? '') ||
+    configInputs.qa_url !== (config.qa_url ?? '')
   )
 
   const actionsDirty = JSON.stringify(editActions) !== JSON.stringify(customActions)
@@ -722,6 +726,8 @@ export function ProjectDetailPage({
             setCommitStyleInput={setCommitStyleInput}
             websiteInput={websiteInput}
             setWebsiteInput={setWebsiteInput}
+            qaUrlInput={qaUrlInput}
+            setQaUrlInput={setQaUrlInput}
             editActions={editActions}
             setEditActions={setEditActions}
             anyDirty={anyDirty}

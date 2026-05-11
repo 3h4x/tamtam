@@ -27,6 +27,7 @@ export const projects = sqliteTable('projects', {
   reviewPromptAddendum: text('review_prompt_addendum'),
   fixPromptAddendum: text('fix_prompt_addendum'),
   website: text('website'),
+  qaUrl: text('qa_url'),
 });
 
 export const jobs = sqliteTable('jobs', {

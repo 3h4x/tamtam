@@ -312,6 +312,8 @@ These live on the `projects` table row, accessed via `GET/PATCH /api/projects/by
 | `autoPushEnabled` | boolean | `false` | During a Release pipeline run, automatically push after commit without requiring manual confirmation. Also enables pipeline chaining (test→review→fix→push) outside of a formal Release run |
 | `testCronEnabled` | boolean | `false` | Scheduled test runs |
 | `testCronSchedule` | string | `''` | Cron interval for scheduled tests |
+| `website` | string | `''` | Public URL the QA agent browses when no explicit QA target is configured |
+| `qaUrl` | string | `''` | Explicit QA target URL that takes precedence over `website` |
 | `customActions` | JSON | `[]` | Per-project buttons (name, command, color) shown in the UI |
 
 The same config endpoint also exposes file-backed team-contract values from `.tamtam/config.yml`. `commit_style` is written under `commits.commit_style`; when present it overrides the global `settings.commit_style` for auto-generated commit messages in that project, and an empty value removes the project override.
