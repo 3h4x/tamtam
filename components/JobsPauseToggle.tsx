@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { errMsg } from '@/lib/shared/types'
 import { fmtAbsolute } from '@/lib/shared/format-date'
 import { dispatchJobsPausedChanged } from '@/lib/shared/jobs-paused-events'
+import { dispatchSettingsChanged, subscribeToSettingsChanged } from '@/lib/shared/settings-events'
 
 interface QuotaWindow { utilization: number; resetsAt: string | null; msUntilReset: number | null }
 interface SchedulerThrottle {
@@ -21,18 +22,31 @@ interface QuotaSnapshot {
 
 export function JobsPauseToggle() {
   const [jobsPaused, setJobsPaused] = useState(false)
+  const [budgetGateEnabled, setBudgetGateEnabled] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [autoThrottle, setAutoThrottle] = useState<SchedulerThrottle | null>(null)
+  const [quotaRefreshSeq, setQuotaRefreshSeq] = useState(0)
 
   useEffect(() => {
     let live = true
+    const applySettings = (
+      settings: Record<string, string | undefined>,
+      { merge }: { merge: boolean },
+    ) => {
+      if (!merge || 'jobs_paused' in settings) {
+        setJobsPaused(settings.jobs_paused === 'true')
+      }
+      if (!merge || 'budget_block_runs_enabled' in settings) {
+        setBudgetGateEnabled(settings.budget_block_runs_enabled === 'true')
+      }
+    }
     const load = async () => {
       try {
         const res = await fetch('/api/settings')
         const data = await res.json()
         if (!live) return
-        setJobsPaused(data.settings?.jobs_paused === 'true')
+        applySettings(data.settings ?? {}, { merge: false })
       } catch {
         if (live) setJobsPaused(false)
       } finally {
@@ -40,7 +54,15 @@ export function JobsPauseToggle() {
       }
     }
     void load()
-    return () => { live = false }
+    const unsubscribe = subscribeToSettingsChanged((settings) => {
+      if (!live) return
+      applySettings(settings, { merge: true })
+      setQuotaRefreshSeq((seq) => seq + 1)
+    })
+    return () => {
+      live = false
+      unsubscribe()
+    }
   }, [])
 
   useEffect(() => {
@@ -56,7 +78,7 @@ export function JobsPauseToggle() {
         // The server now computes the multi-provider verdict so we don't
         // light up "scheduled paused" when one provider is over but a sibling
         // (e.g. Codex) still has weekly headroom.
-        if (!snap.gateEnabled) { setAutoThrottle(null); return }
+        if (!budgetGateEnabled || !snap.gateEnabled) { setAutoThrottle(null); return }
         setAutoThrottle(snap.schedulerThrottle ?? null)
       } catch {
         // ignore — fail open
@@ -65,7 +87,7 @@ export function JobsPauseToggle() {
     void loadQuota()
     const id = setInterval(loadQuota, 60_000)
     return () => { live = false; clearInterval(id) }
-  }, [])
+  }, [budgetGateEnabled, quotaRefreshSeq])
 
   const toggle = useCallback(async () => {
     if (saving) return
@@ -82,6 +104,11 @@ export function JobsPauseToggle() {
         const data = await res.json().catch(() => ({}))
         throw new Error(data.detail || res.statusText)
       }
+      const data = await res.json().catch(() => ({}))
+      dispatchSettingsChanged(data.settings ?? {
+        jobs_paused: next ? 'true' : 'false',
+        budget_block_runs_enabled: budgetGateEnabled ? 'true' : 'false',
+      })
       dispatchJobsPausedChanged(next)
     } catch (e: unknown) {
       setJobsPaused(!next)
@@ -89,7 +116,7 @@ export function JobsPauseToggle() {
     } finally {
       setSaving(false)
     }
-  }, [jobsPaused, saving])
+  }, [budgetGateEnabled, jobsPaused, saving])
 
   // Three visible states:
   //   1. jobs_paused=true (manual pause) → "jobs paused"

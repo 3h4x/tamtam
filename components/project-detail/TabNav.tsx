@@ -17,6 +17,7 @@ export interface TabNavProps {
 
 export function TabNav({ projectName, activeTab, totalChanges, issueCount, runningCount = 0, onSetTab }: TabNavProps) {
   const router = useRouter()
+  const issueBadgeCount = issueCount ? issueCount.prs + issueCount.issues : 0
 
   const tabClass = (tab: Tab) =>
     `relative shrink-0 px-3 py-1.5 text-sm cursor-pointer transition-colors focus:outline-none focus-visible:text-text-primary ${
@@ -50,10 +51,17 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, runni
       <button className={tabClass('terminal')} onClick={handleTerminalClick}>
         Terminal
       </button>
-      <button className={tabClass('changes')} onClick={() => onSetTab('changes')}>
+      <button
+        className={tabClass('changes')}
+        onClick={() => onSetTab('changes')}
+        aria-label={totalChanges > 0 ? `Changes, ${totalChanges} pending` : 'Changes'}
+      >
         Changes
         {totalChanges > 0 && (
-          <span className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full bg-accent-light text-accent font-medium tabular-nums">
+          <span
+            className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full bg-accent-light text-accent font-medium tabular-nums"
+            aria-hidden="true"
+          >
             {totalChanges}
           </span>
         )}
@@ -67,12 +75,19 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, runni
       <button className={tabClass('agents')} onClick={() => onSetTab('agents')}>
         Agents
       </button>
-      <button className={tabClass('issues')} onClick={() => onSetTab('issues')}>
+      <button
+        className={tabClass('issues')}
+        onClick={() => onSetTab('issues')}
+        aria-label={issueBadgeCount > 0 ? `Issues and pull requests, ${issueBadgeCount} open` : 'Issues and pull requests'}
+      >
         <span className="sm:hidden">Issues</span>
         <span className="hidden sm:inline">Issues / PRs</span>
-        {issueCount && (issueCount.prs + issueCount.issues) > 0 && (
-          <span className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full bg-accent-light text-accent font-medium tabular-nums">
-            {issueCount.prs + issueCount.issues}
+        {issueBadgeCount > 0 && (
+          <span
+            className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full bg-accent-light text-accent font-medium tabular-nums"
+            aria-hidden="true"
+          >
+            {issueBadgeCount}
           </span>
         )}
       </button>

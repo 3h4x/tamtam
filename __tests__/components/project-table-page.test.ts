@@ -6,6 +6,7 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { ProjectTablePage } from '@/components/ProjectTablePage'
 import type { FleetHealth } from '@/hooks/useProjectHealth'
+import { dispatchSettingsChanged } from '@/lib/shared/settings-events'
 
 const push = vi.fn()
 
@@ -73,9 +74,21 @@ describe('ProjectTablePage', () => {
     reviewProject.mockReset()
     fetchJobs.mockResolvedValue({ jobs: [] })
     fetchAgents.mockResolvedValue({ agents: [] })
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ internal: { entries: [], paused: false } }),
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/settings') {
+        return {
+          ok: true,
+          json: async () => ({ settings: { budget_block_runs_enabled: 'false' } }),
+        }
+      }
+      if (url === '/api/agents/scheduler-health') {
+        return {
+          ok: true,
+          json: async () => ({ internal: { entries: [], paused: false } }),
+        }
+      }
+      return { ok: false, json: async () => ({}) }
     }))
   })
 
@@ -180,6 +193,12 @@ describe('ProjectTablePage', () => {
           }),
         }
       }
+      if (url === '/api/settings') {
+        return {
+          ok: true,
+          json: async () => ({ settings: { budget_block_runs_enabled: 'true' } }),
+        }
+      }
       if (url === '/api/usage/quota') {
         return {
           ok: true,
@@ -253,6 +272,12 @@ describe('ProjectTablePage', () => {
           }),
         }
       }
+      if (url === '/api/settings') {
+        return {
+          ok: true,
+          json: async () => ({ settings: { budget_block_runs_enabled: 'true' } }),
+        }
+      }
       if (url === '/api/usage/quota') {
         return {
           ok: true,
@@ -292,6 +317,176 @@ describe('ProjectTablePage', () => {
       expect(container.textContent).toContain('acme/widgets')
       expect(container.textContent).toContain('now')
       expect(container.textContent).not.toContain('scheduled paused')
+    })
+
+    unmount()
+  })
+
+  it('reacts to budget gate changes after initial render without remounting', async () => {
+    const nextFireMs = Date.now() + 10_000
+    let budgetGateEnabled = false
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/agents/scheduler-health') {
+        return {
+          ok: true,
+          json: async () => ({
+            internal: {
+              paused: false,
+              entries: [{
+                agentId: 'agent-1',
+                project: 'acme/widgets',
+                name: 'nightly',
+                schedule: '1h',
+                enabled: true,
+                nextFireMs,
+                lastFireMs: null,
+              }],
+            },
+          }),
+        }
+      }
+      if (url === '/api/settings') {
+        return {
+          ok: true,
+          json: async () => ({ settings: { budget_block_runs_enabled: budgetGateEnabled ? 'true' : 'false' } }),
+        }
+      }
+      if (url === '/api/usage/quota') {
+        return {
+          ok: true,
+          json: async () => ({
+            gateEnabled: true,
+            sevenDay: {
+              utilization: 20,
+              resetsAt: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString(),
+              msUntilReset: 6 * 24 * 60 * 60 * 1000,
+            },
+            schedulerThrottle: {
+              reason: '7d burn rate too high: 20% used, projected 140%',
+              projectedPct: 140,
+              worstProvider: 'claude',
+              resumesAtMs: Date.now() + 60_000,
+            },
+          }),
+        }
+      }
+      return { ok: false, json: async () => ({}) }
+    }))
+
+    const fleet = createFleetHealth([
+      {
+        project: 'acme/widgets',
+        status: 'healthy',
+        tasks: [],
+        totalChanges: 0,
+        unpushed: 0,
+        unreviewedCount: 0,
+        lastRunAgo: null,
+      },
+    ])
+
+    const { container, unmount } = renderProjectTablePage({
+      fleet,
+      issueCounts: {},
+      loading: false,
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('acme/widgets')
+      expect(container.textContent).toContain('now')
+      expect(container.textContent).not.toContain('scheduled paused')
+    })
+
+    budgetGateEnabled = true
+    dispatchSettingsChanged({ budget_block_runs_enabled: 'true' })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('scheduled paused')
+      expect(container.textContent).not.toContain('⏸ paused')
+    })
+
+    unmount()
+  })
+
+  it('does not clear the budget-gated scheduled state when an event only updates jobs_paused', async () => {
+    const nextFireMs = Date.now() + 10_000
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/agents/scheduler-health') {
+        return {
+          ok: true,
+          json: async () => ({
+            internal: {
+              paused: false,
+              entries: [{
+                agentId: 'agent-1',
+                project: 'acme/widgets',
+                name: 'nightly',
+                schedule: '1h',
+                enabled: true,
+                nextFireMs,
+                lastFireMs: null,
+              }],
+            },
+          }),
+        }
+      }
+      if (url === '/api/settings') {
+        return {
+          ok: true,
+          json: async () => ({ settings: { budget_block_runs_enabled: 'true' } }),
+        }
+      }
+      if (url === '/api/usage/quota') {
+        return {
+          ok: true,
+          json: async () => ({
+            gateEnabled: true,
+            sevenDay: {
+              utilization: 20,
+              resetsAt: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString(),
+              msUntilReset: 6 * 24 * 60 * 60 * 1000,
+            },
+            schedulerThrottle: {
+              reason: '7d burn rate too high: 20% used, projected 140%',
+              projectedPct: 140,
+              worstProvider: 'claude',
+              resumesAtMs: Date.now() + 60_000,
+            },
+          }),
+        }
+      }
+      return { ok: false, json: async () => ({}) }
+    }))
+
+    const fleet = createFleetHealth([
+      {
+        project: 'acme/widgets',
+        status: 'healthy',
+        tasks: [],
+        totalChanges: 0,
+        unpushed: 0,
+        unreviewedCount: 0,
+        lastRunAgo: null,
+      },
+    ])
+
+    const { container, unmount } = renderProjectTablePage({
+      fleet,
+      issueCounts: {},
+      loading: false,
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('scheduled paused')
+    })
+
+    dispatchSettingsChanged({ jobs_paused: 'true' })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('scheduled paused')
+      expect(container.textContent).not.toContain('⏸ paused')
     })
 
     unmount()
