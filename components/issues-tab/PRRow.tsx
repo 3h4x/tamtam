@@ -208,9 +208,9 @@ export function PRRow({
               }`}>{reviewLabel}</span>
             )}
           </div>
-          {(pr.labels.length > 0 || gates || (ciRollup && ciBadgeClass)) && (
+          {((pr.labels?.length ?? 0) > 0 || gates || (ciRollup && ciBadgeClass)) && (
             <div className="flex flex-wrap items-center gap-1 text-xs text-text-tertiary">
-              {pr.labels.length > 0 && <Labels labels={pr.labels} limit={4} />}
+              {(pr.labels?.length ?? 0) > 0 && <Labels labels={pr.labels} limit={4} />}
               {gates && (
                 <>
                   <GateBadge label="tests" state={gates.tests} title={`TamTam tests: ${gates.tests}`} />

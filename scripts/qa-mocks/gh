@@ -14,7 +14,8 @@ if (args.includes('--version')) {
   if (args.includes('--jq') || args.includes('-q')) out('qa/mock-repo');
   else out({ nameWithOwner: 'qa/mock-repo' });
 } else if (args[0] === 'pr' && args[1] === 'list') {
-  out([{ number: 12, title: 'QA release pipeline smoke', url: 'https://github.com/qa/mock-repo/pull/12', headRefName: 'feature/qa-dashboard', body: '- [ ] QA acceptance item' }]);
+  const now = new Date().toISOString();
+  out([{ number: 12, title: 'QA release pipeline smoke', url: 'https://github.com/qa/mock-repo/pull/12', state: 'OPEN', headRefName: 'feature/qa-dashboard', baseRefName: 'main', author: { login: 'qa-bot' }, createdAt: now, updatedAt: now, isDraft: false, reviewDecision: null, labels: [], body: '- [ ] QA acceptance item', statusCheckRollup: [] }]);
 } else if (args[0] === 'pr' && args[1] === 'view') {
   out({ number: 12, url: 'https://github.com/qa/mock-repo/pull/12', headRefName: 'feature/qa-dashboard', mergeStateStatus: 'CLEAN', reviewDecision: 'APPROVED', statusCheckRollup: [] });
 } else if (args[0] === 'pr' && args[1] === 'create') {
@@ -22,7 +23,7 @@ if (args.includes('--version')) {
 } else if (args[0] === 'pr' && args[1] === 'diff') {
   out('diff --git a/src/index.ts b/src/index.ts\n+qa change');
 } else if (args[0] === 'issue' && args[1] === 'list') {
-  out([{ number: 34, title: 'Exercise terminal QA shim', url: 'https://github.com/qa/mock-repo/issues/34', state: 'OPEN', labels: [{ name: 'tamtam' }] }]);
+  out([{ number: 34, title: 'Exercise terminal QA shim', url: 'https://github.com/qa/mock-repo/issues/34', state: 'OPEN', author: { login: 'qa-bot' }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), assignees: [], labels: [{ name: 'tamtam', color: '0075ca' }], body: '' }]);
 } else if (args[0] === 'issue' && args[1] === 'view') {
   out({ number: 34, title: 'Exercise terminal QA shim', state: 'OPEN', body: '- [ ] QA acceptance item' });
 } else if (args[0] === 'issue' && (args[1] === 'create' || args[1] === 'edit' || args[1] === 'close')) {
