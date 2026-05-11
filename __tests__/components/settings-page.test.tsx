@@ -6,6 +6,7 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { SettingsPage } from '@/components/SettingsPage'
 import { TrustedGithubUsersField } from '@/components/settings/TrustedGithubUsersField'
+import { SETTINGS_CHANGED_EVENT } from '@/lib/shared/settings-events'
 
 const push = vi.fn()
 
@@ -123,10 +124,12 @@ function setInputValue(input: HTMLInputElement, value: string) {
 
 describe('SettingsPage', () => {
   beforeEach(() => {
+    vi.useFakeTimers()
     push.mockReset()
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
     document.body.innerHTML = ''
@@ -194,6 +197,66 @@ describe('SettingsPage', () => {
     )
     expect(patchCall).toBeTruthy()
     expect((patchCall?.[1] as RequestInit).body).toContain('"review_fix_max_iterations":"03"')
+
+    unmount()
+  })
+
+  it('dispatches settings-changed with canonical settings after a successful save', async () => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input === '/api/settings' && !init) {
+        return makeResponse({
+          settings: {
+            claude_provider: 'claude',
+            cli_enabled_providers: 'claude',
+            review_fix_max_iterations: '3',
+          },
+        })
+      }
+      if (input === '/api/settings' && init?.method === 'PATCH') {
+        return makeResponse({
+          status: 'ok',
+          settings: {
+            claude_provider: 'claude',
+            cli_enabled_providers: 'claude',
+            review_fix_max_iterations: '5',
+          },
+        })
+      }
+      if (input === '/api/config/projects') {
+        return makeResponse({ projects: [] })
+      }
+      throw new Error(`Unexpected fetch: ${input}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
+
+    const { container, unmount } = renderSettingsPage()
+
+    await vi.waitFor(() => {
+      expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('3')
+    })
+
+    flushSync(() => {
+      setInputValue(findInputByLabel(container, 'Review Fix Loop Iterations'), '5')
+    })
+
+    await vi.waitFor(() => {
+      expect(getSaveButton(container).disabled).toBe(false)
+    })
+
+    getSaveButton(container).click()
+    await vi.runAllTimersAsync()
+
+    const settingsEvents = dispatchSpy.mock.calls
+      .map(([event]) => event)
+      .filter((event): event is CustomEvent => event instanceof CustomEvent && event.type === SETTINGS_CHANGED_EVENT)
+
+    expect(settingsEvents).toHaveLength(1)
+    expect(settingsEvents[0].detail.settings).toMatchObject({
+      review_fix_max_iterations: '5',
+      claude_provider: 'claude',
+      cli_enabled_providers: 'claude',
+    })
 
     unmount()
   })
@@ -278,6 +341,53 @@ describe('SettingsPage', () => {
       expect(findInputByValue(container, 'octocat')).toBeTruthy()
       expect(findInputByValue(container, 'hubot')).toBeTruthy()
       expect(getSaveButton(container).disabled).toBe(true)
+    })
+
+    unmount()
+  })
+
+  it('does not dispatch settings-changed when save fails', async () => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input === '/api/settings' && !init) {
+        return makeResponse({
+          settings: {
+            claude_provider: 'claude',
+            cli_enabled_providers: 'claude',
+            review_fix_max_iterations: '3',
+          },
+        })
+      }
+      if (input === '/api/settings' && init?.method === 'PATCH') {
+        return makeResponse({ detail: 'write failed' }, false)
+      }
+      if (input === '/api/config/projects') {
+        return makeResponse({ projects: [] })
+      }
+      throw new Error(`Unexpected fetch: ${input}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
+
+    const { container, unmount } = renderSettingsPage()
+
+    await vi.waitFor(() => {
+      expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('3')
+    })
+
+    flushSync(() => {
+      setInputValue(findInputByLabel(container, 'Review Fix Loop Iterations'), '4')
+    })
+
+    getSaveButton(container).click()
+    await vi.runAllTimersAsync()
+
+    const settingsEvents = dispatchSpy.mock.calls
+      .map(([event]) => event)
+      .filter((event): event is CustomEvent => event instanceof CustomEvent && event.type === SETTINGS_CHANGED_EVENT)
+
+    expect(settingsEvents).toHaveLength(0)
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Failed to save: write failed')
     })
 
     unmount()
