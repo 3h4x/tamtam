@@ -44,6 +44,7 @@ describe('probeJobStatus', () => {
   let getJobStatusMock: ReturnType<typeof vi.fn>;
   let getJobPidMock: ReturnType<typeof vi.fn>;
   let saveToDbMock: ReturnType<typeof vi.fn>;
+  let getJobCancellationSignalMock: ReturnType<typeof vi.fn>;
   let probeJobStatus: typeof import('@/lib/jobs/probe').probeJobStatus;
 
   beforeEach(async () => {
@@ -55,7 +56,11 @@ describe('probeJobStatus', () => {
     getJobStatusMock = vi.fn().mockResolvedValue({ status: 'running', exitCode: null });
     getJobPidMock = vi.fn().mockResolvedValue(null);
     saveToDbMock = vi.fn();
+    getJobCancellationSignalMock = vi.fn().mockReturnValue(null);
 
+    vi.doMock('@/lib/jobs/cancellation', () => ({
+      getJobCancellationSignal: getJobCancellationSignalMock,
+    }));
     vi.doMock('@/lib/jobs/lifecycle', () => ({
       markDone: markDoneMock,
       reconcileStaleRelease: reconcileMock,
@@ -171,6 +176,24 @@ describe('probeJobStatus', () => {
     it('pid=0, age >= 30s, PM2 unknown → marks done -1', async () => {
       getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
       const job = makeJob({ kind: 'run', pid: 0, startedAt: Date.now() / 1000 - 60 });
+      const result = await probeJobStatus(job);
+      expect(result).toBe('done');
+      expect(markDoneMock).toHaveBeenCalledWith(job, -1);
+    });
+
+    it('pid=0, age >= 30s, PM2 unknown but route holds inline cancellation signal → still running', async () => {
+      getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
+      getJobCancellationSignalMock.mockReturnValue({ aborted: false } as AbortSignal);
+      const job = makeJob({ kind: 'agent:my-agent', pid: 0, startedAt: Date.now() / 1000 - 60 });
+      const result = await probeJobStatus(job);
+      expect(result).toBe('running');
+      expect(markDoneMock).not.toHaveBeenCalled();
+    });
+
+    it('pid=0, age >= 30s, PM2 unknown and inline signal already aborted → marks done -1', async () => {
+      getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
+      getJobCancellationSignalMock.mockReturnValue({ aborted: true } as AbortSignal);
+      const job = makeJob({ kind: 'agent:my-agent', pid: 0, startedAt: Date.now() / 1000 - 60 });
       const result = await probeJobStatus(job);
       expect(result).toBe('done');
       expect(markDoneMock).toHaveBeenCalledWith(job, -1);

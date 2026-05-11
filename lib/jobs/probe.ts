@@ -3,6 +3,7 @@ import { getJobStatus } from './pm2-jobs';
 import { saveToDb } from './storage';
 import type { JobData } from './types';
 import { isClaudeBackedJobKind } from './kinds';
+import { getJobCancellationSignal } from './cancellation';
 
 // Returns the exit code implied by the Claude result line in the job's log:
 //   0  if is_error: false (or the line can't be parsed)
@@ -98,7 +99,15 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
       await markDone(job, exitCode ?? -1);
       return 'done';
     }
-    // status === 'unknown' — pm2 truly has no record of the job. It's dead.
+    // status === 'unknown' — pm2 has no record. Before declaring dead, check
+    // whether a route handler is still managing this job inline (e.g. agent
+    // runs hold a cancellation signal while their prerequisite command is
+    // executing — `pnpm check` etc. routinely takes >30s, exceeding the
+    // pid-spawn grace). An un-aborted signal means the route is mid-prereq
+    // and will spawn into pm2 once it returns; killing it here would mutate
+    // the route's cached job reference and trip its post-prereq cancel check.
+    const inlineSignal = getJobCancellationSignal(job.id);
+    if (inlineSignal && !inlineSignal.aborted) return 'running';
     await markDone(job, -1);
     return 'done';
   }
