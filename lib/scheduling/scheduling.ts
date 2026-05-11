@@ -184,6 +184,8 @@ export function writeProjectFieldYaml(
     db.update(schema.projects).set({ fixPromptAddendum: value }).where(eq(schema.projects.name, projName)).run();
   } else if (fieldName === 'website') {
     db.update(schema.projects).set({ website: value }).where(eq(schema.projects.name, projName)).run();
+  } else if (fieldName === 'qa_url') {
+    db.update(schema.projects).set({ qaUrl: value }).where(eq(schema.projects.name, projName)).run();
   }
   return true;
 }

@@ -146,6 +146,7 @@ export interface ProjectConfig {
   fix_prompt_addendum?: string
   commit_style?: string
   website?: string
+  qa_url?: string
   last_push_error?: string | null
   last_push_at?: number | null
   file_config?: string[]

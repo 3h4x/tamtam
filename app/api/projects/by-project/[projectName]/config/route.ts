@@ -61,6 +61,7 @@ export async function GET(
     review_prompt_addendum: pipelinePrompts.reviewPromptAddendum ?? '',
     fix_prompt_addendum: pipelinePrompts.fixPromptAddendum ?? '',
     website: projectRow?.website ?? '',
+    qa_url: projectRow?.qaUrl ?? '',
     // Per-project commit style. File-only (team contract); empty string means
     // fall back to the global `commit_style` setting at commit-generation time.
     commit_style: fileConfig?.commit_style ?? '',
@@ -152,23 +153,28 @@ export async function PATCH(
   }
 
   // Per-project website URL the QA agent browses. DB-only metadata.
-  if (body.website !== undefined) {
+  // `website` = public/production URL. `qa_url` = explicit QA target that
+  // takes precedence (e.g. a locally-spun docker stack on localhost:1338).
+  // The QA skill reads qa_url first, falls back to website, stops if both
+  // are empty.
+  for (const field of ['website', 'qa_url'] as const) {
+    if (body[field] === undefined) continue;
     touched = true;
-    if (typeof body.website !== 'string') {
-      return NextResponse.json({ detail: 'website must be a string URL' }, { status: 400 });
+    if (typeof body[field] !== 'string') {
+      return NextResponse.json({ detail: `${field} must be a string URL` }, { status: 400 });
     }
-    const raw = body.website.trim();
+    const raw = (body[field] as string).trim();
     if (raw) {
       try {
         const u = new URL(raw);
         if (u.protocol !== 'http:' && u.protocol !== 'https:') {
-          return NextResponse.json({ detail: 'website must be http(s)' }, { status: 400 });
+          return NextResponse.json({ detail: `${field} must be http(s)` }, { status: 400 });
         }
       } catch {
-        return NextResponse.json({ detail: 'website must be a valid URL' }, { status: 400 });
+        return NextResponse.json({ detail: `${field} must be a valid URL` }, { status: 400 });
       }
     }
-    dbUpdates.push({ field: 'website', value: raw || null });
+    dbUpdates.push({ field, value: raw || null });
   }
 
   // Pipeline prompt addenda — DB-only. Each developer tunes locally; not
