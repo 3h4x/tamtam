@@ -1,11 +1,12 @@
 /* @vitest-environment jsdom */
 
 import React from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { TerminalToolbar } from '@/components/terminal/TerminalToolbar'
 import type { DocItem, SkillItem } from '@/lib/terminal/terminal-session-store'
+import { SETTINGS_CHANGED_EVENT } from '@/lib/shared/settings-events'
 
 vi.mock('next/link', () => ({
   default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) =>
@@ -95,6 +96,17 @@ function renderTerminalToolbar(overrides: Partial<React.ComponentProps<typeof Te
 }
 
 describe('TerminalToolbar', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+    document.body.innerHTML = ''
+  })
+
   it('shows the selected counts, overflow chip, and encoded release trace link', () => {
     const { container, unmount } = renderTerminalToolbar()
 
@@ -139,6 +151,58 @@ describe('TerminalToolbar', () => {
 
     expect(onToggleItem).toHaveBeenCalledWith(filteredItems[0])
     expect(onToggleDoc).toHaveBeenCalledWith(filteredDocs[0])
+    unmount()
+  })
+
+  it('calls onModelChange immediately and dispatches settings-changed after a successful model tier PATCH', async () => {
+    const onModelChange = vi.fn()
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'ok', settings: { default_model: 'smart', jobs_paused: 'false' } }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
+
+    const { container, unmount } = renderTerminalToolbar({ model: 'normal', onModelChange })
+
+    const smartButton = Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'Smart')
+    smartButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(onModelChange).toHaveBeenCalledWith('smart')
+
+    await vi.runAllTimersAsync()
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/settings', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ default_model: 'smart' }),
+    }))
+
+    const settingsEvents = dispatchSpy.mock.calls
+      .map(([event]) => event)
+      .filter((event): event is CustomEvent => event instanceof CustomEvent && event.type === SETTINGS_CHANGED_EVENT)
+    expect(settingsEvents).toHaveLength(1)
+    expect(settingsEvents[0].detail.settings).toMatchObject({ default_model: 'smart' })
+
+    unmount()
+  })
+
+  it('does not dispatch settings-changed when the model tier PATCH fails', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) })
+    vi.stubGlobal('fetch', fetchMock)
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
+
+    const { container, unmount } = renderTerminalToolbar({ model: 'normal', onModelChange: vi.fn() })
+
+    const fastButton = Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'Fast')
+    fastButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.runAllTimersAsync()
+
+    const settingsEvents = dispatchSpy.mock.calls
+      .map(([event]) => event)
+      .filter((event): event is CustomEvent => event instanceof CustomEvent && event.type === SETTINGS_CHANGED_EVENT)
+    expect(settingsEvents).toHaveLength(0)
+
     unmount()
   })
 })
