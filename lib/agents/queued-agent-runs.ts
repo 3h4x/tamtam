@@ -138,6 +138,32 @@ function shouldKeepQueuedRunOn202(parsed: QueueDrainResponse | null): boolean {
   return code === 'pipeline_lock' || code === 'pending_release';
 }
 
+function isTransientDrainTimeoutError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+
+  const code = (error as NodeJS.ErrnoException).code ?? '';
+  if (
+    error.name === 'AbortError' ||
+    code === 'ABORT_ERR' ||
+    code === 'ETIMEDOUT' ||
+    code === 'UND_ERR_HEADERS_TIMEOUT'
+  ) {
+    return true;
+  }
+
+  const cause = (error as { cause?: unknown }).cause;
+  if (!cause || typeof cause !== 'object') return false;
+
+  const causeError = cause as { name?: string; code?: string };
+  return (
+    causeError.name === 'AbortError' ||
+    causeError.name === 'HeadersTimeoutError' ||
+    causeError.code === 'ABORT_ERR' ||
+    causeError.code === 'ETIMEDOUT' ||
+    causeError.code === 'UND_ERR_HEADERS_TIMEOUT'
+  );
+}
+
 /**
  * Trigger all DB-queued agents for a project by calling their run endpoints.
  * Called after the release pipeline lock is released (or at boot for stale entries).
@@ -212,6 +238,11 @@ export async function drainQueuedAgentRunsForProject(project: string): Promise<v
         const body = await r.text().catch(() => '');
         console.warn(`[queued-agent-runs] transient failure for ${entry.agentName}/${project}: ${r.status} ${body.slice(0, 200)}`);
       } catch (e) {
+        if (isTransientDrainTimeoutError(e)) {
+          const message = e instanceof Error ? e.message : String(e);
+          console.warn(`[queued-agent-runs] transient timeout draining ${entry.agentName} for ${project}: ${message}`);
+          continue;
+        }
         console.error(`[queued-agent-runs] drain error for ${project}/${entry.agentName}:`, e);
       }
     }

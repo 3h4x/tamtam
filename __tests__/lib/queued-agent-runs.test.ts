@@ -408,6 +408,37 @@ describe('queued-agent-runs', () => {
     vi.unstubAllGlobals();
   });
 
+  it('keeps the DB row when replay times out before headers arrive', async () => {
+    enqueueQueuedAgentRun('myproject', {
+      project: 'myproject',
+      agentId: 'agent-1',
+      agentName: 'docs',
+      triggeredBy: 'manual',
+      prompt: 'run docs',
+      enqueuedAt: 1_000,
+    });
+    const timeoutError = Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('Headers Timeout Error'), {
+        name: 'HeadersTimeoutError',
+        code: 'UND_ERR_HEADERS_TIMEOUT',
+      }),
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(timeoutError));
+
+    await drainQueuedAgentRunsForProject('myproject');
+
+    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[queued-agent-runs] transient timeout draining docs for myproject: fetch failed',
+    );
+    expect(errorSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
   it('single-flights concurrent drains for the same project', async () => {
     enqueueQueuedAgentRun('myproject', {
       project: 'myproject',
