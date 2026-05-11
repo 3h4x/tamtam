@@ -6,7 +6,7 @@ export function getAgentMemoryDir(): string {
   return join(homedir(), '.cache', 'tamtam');
 }
 
-const MEMORY_MAX_CHARS = 1000;
+const MEMORY_MAX_CHARS = 2000;
 
 function sanitizeName(name: string): string {
   // Prevent path traversal: strip directory separators and leading dots.
@@ -45,10 +45,10 @@ Your memory file is at: ${memoryPath}
 ${memoryContents}
 </current_memory>
 
-At the end of your run, update the memory file at the path above to record what you did and what you should do next time. Use your Write or Edit tools to update it directly. Keep it compact — under ${MEMORY_MAX_CHARS} characters. Focus on actionable state:
+At the end of your run, rewrite the memory file at the path above (use the Write tool — replace its full contents, do NOT append). Keep it compact — under ${MEMORY_MAX_CHARS} characters; anything past that cap is silently truncated on the next read. Focus on actionable state:
 - What was completed this run (with dates/identifiers)
 - What is still pending (ordered by priority)
 - Key decisions or constraints to remember
 
-Do not summarize the run log. Write forward-looking notes for your future self so you never repeat completed work or lose track of what's next.`;
+Compaction: when the file approaches the cap, collapse older "completed" entries into a one-line summary so the pending list stays visible. Do not summarize the current run log verbatim — write forward-looking notes for your future self so you never repeat completed work or lose track of what's next.`;
 }
