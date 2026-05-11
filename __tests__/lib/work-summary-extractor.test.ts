@@ -91,4 +91,47 @@ describe('work-summary-extractor', () => {
       actionable: null,
     });
   });
+
+  it('suppresses text delta events while compacting state is active', () => {
+    const lines = [
+      JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Before compact.' } } }),
+      JSON.stringify({ type: 'system', subtype: 'status', status: 'compacting' }),
+      JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'HIDDEN compacted text.' } } }),
+      JSON.stringify({ type: 'system', subtype: 'status', status: 'done' }),
+      JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'After compact.' } } }),
+    ].join('\n');
+
+    const result = extractAssistantTextFromRawLog(lines);
+    expect(result).toContain('Before compact.');
+    expect(result).not.toContain('HIDDEN compacted text.');
+    expect(result).toContain('After compact.');
+  });
+
+  it('inserts a newline separator when a new text block starts after prior text has been emitted', () => {
+    // Simulates two separate content_block_start+delta sequences (e.g. after a tool call),
+    // which should be joined with a newline rather than run together.
+    const lines = [
+      JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'First block text.' } } }),
+      JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'text' } } }),
+      JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Second block text.' } } }),
+    ].join('\n');
+
+    const result = extractAssistantTextFromRawLog(lines);
+    expect(result).toBe('First block text.\nSecond block text.');
+  });
+
+  it('reports actionable as false when the report field says "no"', () => {
+    const text = extractAssistantTextFromRawLog(
+      log('TamTam Run Report\nSummary: Nothing new to test.\nActionable work: no\n')
+    );
+
+    expect(extractWorkSummary(text)).toEqual({
+      summary: 'Nothing new to test.',
+      actionable: false,
+    });
+  });
+
+  it('returns null summary when there is no assistant text', () => {
+    expect(extractWorkSummary('')).toEqual({ summary: null, actionable: null });
+  });
 });
