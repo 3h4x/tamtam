@@ -1,6 +1,6 @@
 ---
 model: normal
-schedule: 30m
+schedule: 15m
 skillIds: ["agent-qa"]
 prerequisiteCommand: "bash scripts/qa-stack-up.sh"
 ---

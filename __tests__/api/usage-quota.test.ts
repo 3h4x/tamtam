@@ -172,6 +172,34 @@ describe('GET /api/usage/quota', () => {
     });
   });
 
+  it('returns 200 with configured:false when provider is not configured (GET)', async () => {
+    const { ProviderNotConfiguredError } = await import('@/lib/usage/quota-types');
+    getQuotaForProviderMock.mockRejectedValue(
+      new ProviderNotConfiguredError('codex', 'No Codex rate-limit snapshot found in ~/.codex/sessions yet')
+    );
+
+    const { GET } = await import('@/app/api/usage/quota/route');
+    const res = await GET(new NextRequest('http://localhost/api/usage/quota?provider=codex'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.configured).toBe(false);
+    expect(body.error).toMatch(/No Codex rate-limit snapshot/);
+  });
+
+  it('returns 200 with configured:false when provider is not configured (POST)', async () => {
+    const { ProviderNotConfiguredError } = await import('@/lib/usage/quota-types');
+    getQuotaForProviderMock.mockRejectedValue(
+      new ProviderNotConfiguredError('claude', 'No Claude OAuth token available (keychain + ~/.claude/.credentials.json both missing)')
+    );
+
+    const { POST } = await import('@/app/api/usage/quota/route');
+    const res = await POST(new NextRequest('http://localhost/api/usage/quota?provider=claude', { method: 'POST' }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.configured).toBe(false);
+    expect(body.error).toMatch(/No Claude OAuth token/);
+  });
+
   it('passes explicit provider query through to the quota selector', async () => {
     const snapshot = {
       provider: 'codex',

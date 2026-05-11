@@ -1,7 +1,7 @@
 import { homedir } from 'os';
 import { readdir, stat, readFile } from 'fs/promises';
 import { join } from 'path';
-import type { QuotaSnapshot, QuotaWindow } from '@/lib/usage/quota-types';
+import { ProviderNotConfiguredError, type QuotaSnapshot, type QuotaWindow } from '@/lib/usage/quota-types';
 
 interface CacheState {
   snapshot: QuotaSnapshot | null;
@@ -229,7 +229,7 @@ export async function getCodexQuota(options: { force?: boolean } = {}): Promise<
       const rateLimits = await readLatestRateLimits();
       if (!rateLimits) {
         if (cache.snapshot) return { ...cache.snapshot, stale: true };
-        throw new Error('No Codex rate-limit snapshot found in ~/.codex/sessions yet');
+        throw new ProviderNotConfiguredError('codex', 'No Codex rate-limit snapshot found in ~/.codex/sessions yet');
       }
       const snapshot = buildSnapshot(rateLimits, Date.now(), false);
       cache.snapshot = snapshot;
