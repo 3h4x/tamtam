@@ -217,13 +217,23 @@ Do NOT PATCH any settings. Surface proposals only — the user applies them in t
 - Prefer \`qa_url\` (explicit QA target, may be \`http://localhost:<port>\` for a locally-spun stack started by the agent's prerequisite); otherwise use \`website\` (public URL).
 - If both are empty, print \`QA_NO_TARGET\` and stop. Do not guess a URL.
 
-## 2. Explore
-- \`mcp__plugin_playwright_playwright__browser_navigate\` to the target root, then walk 3–6 primary routes (home, key feature pages, auth/dashboard if any).
-- For each route: \`mcp__plugin_playwright_playwright__browser_snapshot\`, click the most prominent CTA / open one form, check \`mcp__plugin_playwright_playwright__browser_console_messages\` for errors. Screenshot anything visually broken with \`mcp__plugin_playwright_playwright__browser_take_screenshot\`.
-- Stop after ~10 navigations or when nothing new surfaces.
+## 2. Explore — go deep, not just wide
+A clean top-level sweep is not enough. Real bugs hide in nested routes, list-item detail pages, tabs, and interactive widgets. **Budget: up to 30 navigations** — use them.
+
+Crawl plan (BFS-ish):
+1. \`mcp__plugin_playwright_playwright__browser_navigate\` to the root, \`mcp__plugin_playwright_playwright__browser_snapshot\`, enumerate every nav/menu link and queue them.
+2. For each top-level route: snapshot, read \`mcp__plugin_playwright_playwright__browser_console_messages\`. Then **drill in**:
+   - If the page lists entities (projects, runs, jobs, issues, items, posts, users…), click into **at least one** detail page and exercise its tabs/sub-routes.
+   - If the page has tabs or sub-nav, visit **every** tab — don't stop at the default one.
+   - If the page has a form, open it, type something into the first field, and check console after submit/cancel.
+   - If the page shows live data (SSE, websockets, polling, charts), wait 2–3s with \`mcp__plugin_playwright_playwright__browser_wait_for\` and re-check console for runtime errors.
+3. Probe a few deliberately wrong inputs at edges: an invalid URL segment (\`…/does-not-exist\`), an empty required form, a malformed query param — confirm graceful handling, not a 500/blank page.
+4. Keep going until the budget is spent or you stop discovering new routes. Don't stop just because the home page looked clean.
+
+For anything visually broken: \`mcp__plugin_playwright_playwright__browser_take_screenshot\`. For anything that throws: copy the console line verbatim into the report.
 
 ## 3. Triage
-Keep only: visible bugs, JS console errors, broken links, copy/UX errors, accessibility gaps, obvious feature gaps. Skip subjective taste calls and known good behavior. Cap findings at 5.
+Keep: visible bugs, JS console errors/warnings with a clear cause, broken links/404s on documented routes, hydration mismatches, copy/UX errors, accessibility gaps (missing labels, contrast, keyboard traps), obvious feature gaps. Skip subjective taste calls and known-good behavior. Cap findings at 8.
 
 ## 4. Fix up to 2 small issues yourself
 Pick at most **1–2** findings that are clearly safe and small. Examples that qualify:
@@ -242,7 +252,10 @@ For each fix:
 - Anything where the right fix isn't obvious from a single read of the surrounding code
 - Anything you'd want a human review for before shipping
 
-## 5. Report
+## 5. Clean up artifacts
+Playwright MCP drops screenshots, console dumps, page snapshots, and HTML reports at the repo root and under \`.playwright-mcp/\`, \`test-results/\`, \`playwright-report/\`. Track every artifact path you create during the run and delete them before reporting — do not leave any behind, do not reference them, do not save evidence as files. Findings live in the report text only. Delete only paths you created this run; never wildcard-delete unrelated files.
+
+## 6. Report
 Print a short summary at the end of your run:
 - Visited routes
 - **Fixes applied** (one line each, with file paths)
@@ -294,7 +307,9 @@ const KNOWN_DEFAULT_CONTENT_HASHES: Record<string, string[]> = {
   // '3c9e9a5582267ae0' = qa-url-aware default, before "fix 1–2 yourself" rewrite.
   // '439b9841a389174a' = "fix 1–2 yourself + hand rest to cto" default; cto handoff removed in next rev.
   //                      Same hash also covered the post-cto-removal "fix 1–2 yourself" default.
-  'agent-qa': ['5274a9f8d37e5b19', 'da3105d7820a7360', '3c9e9a5582267ae0', '439b9841a389174a'],
+  // '71c3483057adf226' = "walk 3–6 primary routes, ~10 nav cap" default; replaced by deeper-crawl version.
+  // 'f1367d01130a3a68' = short-lived deeper-crawl default with broad artifact cleanup commands.
+  'agent-qa': ['5274a9f8d37e5b19', 'da3105d7820a7360', '3c9e9a5582267ae0', '439b9841a389174a', '71c3483057adf226', 'f1367d01130a3a68'],
   // 'd2b9ebcdd7b0de6c' = pre-git-free-guard default.
   'agent-senior-fullstack': ['ab7344ee6a0a7a21', 'd2b9ebcdd7b0de6c'],
 };
@@ -344,7 +359,10 @@ export function seedDefaultSkills(): void {
         createdAt: now,
         updatedAt: now,
       }).run();
-    } else if (!existing.content || isUnmodifiedDefault(skill.id, existing.content)) {
+    } else {
+      // Default skills are not user-editable via /skills (see
+      // /api/skills/[skillId] PATCH/DELETE guards). Always overwrite content
+      // and description on boot so improvements roll out everywhere.
       db.update(schema.skills)
         .set({ content: skill.content, description: skill.description, updatedAt: now })
         .where(eq(schema.skills.id, skill.id))
@@ -353,3 +371,15 @@ export function seedDefaultSkills(): void {
   }
   backfillIssueCruncherPrerequisites();
 }
+
+const DEFAULT_SKILL_ID_SET: ReadonlySet<string> = new Set(
+  DEFAULT_AGENT_SKILLS.map(s => s.id),
+);
+
+export function isDefaultSkillId(id: string): boolean {
+  return DEFAULT_SKILL_ID_SET.has(id);
+}
+
+// Kept exported for callers that referenced it historically; currently unused
+// internally now that defaults are always re-applied on boot.
+void isUnmodifiedDefault;

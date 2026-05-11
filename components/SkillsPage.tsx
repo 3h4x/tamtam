@@ -378,7 +378,6 @@ export function SkillsPage() {
                   else next.add(skill.id)
                   return next
                 })}
-                onEdit={() => openEditSkill(skill)}
               />
             ))}
           </div>

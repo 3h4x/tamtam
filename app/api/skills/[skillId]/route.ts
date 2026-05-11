@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
+import { isDefaultSkillId } from '@/lib/agents/default-agent-skills';
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ skillId: string }> }
@@ -17,6 +18,10 @@ export async function PATCH(
 ) {
   const { skillId } = await params;
 
+  if (isDefaultSkillId(skillId)) {
+    return NextResponse.json({ detail: 'default skills are read-only' }, { status: 403 });
+  }
+
   const existing = db.select().from(schema.skills).where(eq(schema.skills.id, skillId)).get();
   if (!existing) return NextResponse.json({ detail: 'not found' }, { status: 404 });
 
@@ -32,10 +37,13 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ skillId: string }> }
 ) {
   const { skillId } = await params;
+  if (isDefaultSkillId(skillId)) {
+    return NextResponse.json({ detail: 'default skills are read-only' }, { status: 403 });
+  }
   db.delete(schema.skills).where(eq(schema.skills.id, skillId)).run();
   return NextResponse.json({ status: 'deleted' });
 }

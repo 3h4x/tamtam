@@ -22,7 +22,7 @@ Steps are pluggable per project. The **🚀 Release** button triggers the pipeli
 - **Database**: Drizzle ORM + better-sqlite3, WAL mode, default DB at `data/db/tamtam.db` (gitignored; override with `TAMTAM_DB_PATH`)
 - **Streaming**: SSE via route handlers for real-time run output
 - **Styling**: Tailwind CSS v4
-- **Agent providers**: Claude-compatible CLI shims for Claude, Gemini, LM Studio, Codex, and custom backends
+- **Agent providers**: Claude-compatible CLI shims for Claude, Gemini, LM Studio, Codex, and custom providers
 - **Skills**: `skills/` submodule (claude-skills) — file-based skills; user-defined skills in `data/skills/`
 - **Testing**: vitest + Playwright (e2e)
 - **Package Manager**: pnpm

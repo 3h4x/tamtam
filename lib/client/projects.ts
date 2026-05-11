@@ -148,7 +148,7 @@ export async function testProject(projectName: string): Promise<{ status: string
 }
 
 export async function fetchIssuesAndPRs(projectName: string, forceRefresh = false): Promise<IssuesResponse> {
-  const url = `${API_BASE}/by-project/${projectName}/issues${forceRefresh ? '?refresh=1' : ''}`
+  const url = `${API_BASE}/by-project/${projectName}/issues?full=1${forceRefresh ? '&refresh=1' : ''}`
   const response = await fetch(url)
   if (!response.ok) {
     throw new Error(`Failed to fetch issues: ${response.statusText}`)
