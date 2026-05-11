@@ -359,6 +359,7 @@ export function SkillsPage() {
           <div className="flex items-center gap-3 mb-1 px-4">
             <input
               type="checkbox"
+              aria-label="Select all recommended skills"
               checked={recommendedAllChecked}
               ref={el => { if (el) el.indeterminate = !recommendedAllChecked && recommendedSomeChecked }}
               onChange={() => toggleAll(recommended)}
@@ -390,6 +391,7 @@ export function SkillsPage() {
           {custom.length > 0 && (
             <input
               type="checkbox"
+              aria-label="Select all custom skills"
               checked={customAllChecked}
               ref={el => { if (el) el.indeterminate = !customAllChecked && customSomeChecked }}
               onChange={() => toggleAll(custom)}
@@ -557,8 +559,9 @@ function SkillEditor({
       </div>
 
       <div>
-        <label className="block mb-1 text-sm font-medium text-text-primary">Name</label>
+        <label htmlFor="skill-name" className="block mb-1 text-sm font-medium text-text-primary">Name</label>
         <input
+          id="skill-name"
           ref={nameRef}
           type="text"
           className="w-full px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
@@ -569,8 +572,9 @@ function SkillEditor({
       </div>
 
       <div>
-        <label className="block mb-1 text-sm font-medium text-text-primary">Description</label>
+        <label htmlFor="skill-description" className="block mb-1 text-sm font-medium text-text-primary">Description</label>
         <input
+          id="skill-description"
           type="text"
           className="w-full px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
           value={description}
@@ -580,8 +584,9 @@ function SkillEditor({
       </div>
 
       <div className="flex flex-col min-h-0">
-        <label className="block mb-1 text-sm font-medium text-text-primary">Prompt Content</label>
+        <label htmlFor="skill-content" className="block mb-1 text-sm font-medium text-text-primary">Prompt Content</label>
         <textarea
+          id="skill-content"
           className="w-full px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary font-mono resize-y focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors h-[60vh] min-h-[240px]"
           value={content}
           onChange={(e) => setContent(e.target.value)}

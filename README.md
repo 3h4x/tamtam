@@ -96,7 +96,7 @@ LOKI_URL=...           # Loki base URL for log monitoring (default: http://local
 Skills are reusable instruction blocks injected into agent prompts. Two sources:
 
 - **DB-backed** — create and edit via `/skills`
-- **File-based** — auto-scanned from `skills/docs/skills/` (the `claude-skills` submodule) and `data/skills/`; any `.md` file in a category subdirectory, with optional YAML frontmatter (`title`, `description`)
+- **File-based** — auto-scanned from `skills/docs/skills/` (vendored curated library) and `data/skills/`; any `.md` file in a category subdirectory, with optional YAML frontmatter (`title`, `description`)
 
 Agents are built by selecting a model, writing a prompt, and attaching any number of skills and project docs. Agents can also pin a provider or prerequisite command. At run time, attached content is prepended to the prompt before the configured provider sees it.
 

@@ -23,7 +23,7 @@ Steps are pluggable per project. The **🚀 Release** button triggers the pipeli
 - **Streaming**: SSE via route handlers for real-time run output
 - **Styling**: Tailwind CSS v4
 - **Agent providers**: Claude-compatible CLI shims for Claude, Gemini, LM Studio, Codex, and custom providers
-- **Skills**: `skills/` submodule (claude-skills) — file-based skills; user-defined skills in `data/skills/`
+- **Skills**: vendored file-based skills under `skills/docs/skills/` (engineering, product, marketing, leadership, business, delivery, research); user-defined skills in `data/skills/`
 - **Testing**: vitest + Playwright (e2e)
 - **Package Manager**: pnpm
 - **Release**: semantic-release on push to master (GitHub releases only, no npm)
@@ -56,7 +56,7 @@ TamTam runs in **production mode** (`next start`) under PM2 — no HMR. After an
 - `hooks/` — Custom React hooks
 - `lib/` — Business logic and client helpers, organised into domain folders: `pipeline/`, `scheduling/`, `git/`, `jobs/` (`job-storage` compatibility barrel), `terminal/`, `agents/`, `skills/`, `recommendations/`, `shared/`, `usage/`, `db/` (`index.ts` domain barrel), `github/`, `client/`. `lib/client-api.ts` is the only top-level barrel.
 - `scripts/` — server startup, job runners, CLI shims (`pm2-start.sh`, `job-runner.js`, `claude-shim.js`, `gemini-shim.js`, `lmstudio-shim.js`, `codex-shim.js`, `shim-utils.js`)
-- `skills/` — claude-skills submodule
+- `skills/` — vendored file-based skill library (curated, hand-picked from upstream `claude-skills` then trimmed); not a submodule
 - `data/` — SQLite database (gitignored)
 - `__tests__/` — vitest unit tests
 - `e2e/` — Playwright integration tests
