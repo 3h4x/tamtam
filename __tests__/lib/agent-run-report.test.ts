@@ -208,4 +208,34 @@ describe('finalizeAgentRunReport', () => {
     expect(job.modifiedFiles).toBe('[]');
     expect(execMock).not.toHaveBeenCalled();
   });
+
+  it('stamps ghIssueNumber from summary when the issue-cruncher agent has no prior issue reference', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob({ kind: 'agent:issue-cruncher', ghIssueNumber: null });
+
+    await finalizeAgentRunReport(
+      job,
+      log('TamTam Run Report\nSummary: Worked issue `#70`, fixed the root cause.\nActionable work: yes\n'),
+    );
+
+    expect(job.ghIssueNumber).toBe(70);
+  });
+
+  it('does not overwrite an existing ghIssueNumber on an issue-cruncher run', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob({ kind: 'agent:issue-cruncher', ghIssueNumber: 5 });
+
+    await finalizeAgentRunReport(
+      job,
+      log('TamTam Run Report\nSummary: Worked issue `#70`, fixed the root cause.\nActionable work: yes\n'),
+    );
+
+    expect(job.ghIssueNumber).toBe(5);
+  });
 });
