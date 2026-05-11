@@ -238,4 +238,30 @@ describe('finalizeAgentRunReport', () => {
 
     expect(job.ghIssueNumber).toBe(5);
   });
+
+  it('records work summary for issue-triggered plain runs without schedule backoff', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'M\tsrc/issues/fix.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob({
+      kind: 'run',
+      ghIssueNumber: 42,
+      contextMeta: JSON.stringify({
+        agent: { id: 'agent-1', name: 'tests', schedule: '2h', triggeredBy: 'schedule' },
+        baseline: { head: 'abc123', status: '', dirty: false },
+      }),
+    });
+
+    await finalizeAgentRunReport(
+      job,
+      log('TamTam Run Report\nSummary: Fixed the issue path and added coverage.\nFiles changed: src/issues/fix.ts\nActionable work: no\n'),
+    );
+
+    expect(job.workSummary).toBe('Fixed the issue path and added coverage.');
+    expect(JSON.parse(job.modifiedFiles ?? '[]')).toEqual([
+      { path: 'src/issues/fix.ts', status: 'M', confidence: 'high' },
+    ]);
+    expect(upsertRecommendationMock).not.toHaveBeenCalled();
+  });
 });
