@@ -55,17 +55,28 @@ describe('POST /api/settings/board-resync', () => {
     POST = mod.POST;
   });
 
-  afterEach(() => vi.resetModules());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.resetModules();
+  });
+
+  async function postAndFlush(url = 'http://localhost/api/settings/board-resync') {
+    const request = new NextRequest(url, { method: 'POST' });
+    const responsePromise = POST(request);
+    await vi.runAllTimersAsync();
+    return responsePromise;
+  }
 
   it('returns 409 when board sync is disabled', async () => {
+    vi.useFakeTimers();
     getSettingsMock.mockReturnValue({ github_board_sync_enabled: false });
-    const req = new NextRequest('http://localhost/api/settings/board-resync', { method: 'POST' });
-    const res = await POST(req);
+    const res = await postAndFlush();
     expect(res.status).toBe(409);
     expect(syncMock).not.toHaveBeenCalled();
   });
 
   it('resyncs jobs within the default window and skips pipeline children', async () => {
+    vi.useFakeTimers();
     listJobsMock.mockReturnValue([
       makeJob({ id: 'agent-1', kind: 'agent:cto' }),
       makeJob({ id: 'release-1', kind: 'release' }),
@@ -75,8 +86,7 @@ describe('POST /api/settings/board-resync', () => {
       makeJob({ id: 'run-1', kind: 'run' }),
     ]);
 
-    const req = new NextRequest('http://localhost/api/settings/board-resync', { method: 'POST' });
-    const res = await POST(req);
+    const res = await postAndFlush();
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.ok).toBe(true);
@@ -94,6 +104,7 @@ describe('POST /api/settings/board-resync', () => {
   });
 
   it('stops early when a rate-limit error is hit', async () => {
+    vi.useFakeTimers();
     listJobsMock.mockReturnValue([
       makeJob({ id: 'a' }),
       makeJob({ id: 'b' }),
@@ -104,8 +115,7 @@ describe('POST /api/settings/board-resync', () => {
       if (job.id === 'c') throw new Error('GitHub board sync skipped: rate-limit cooldown active');
     });
 
-    const req = new NextRequest('http://localhost/api/settings/board-resync', { method: 'POST' });
-    const data = await (await POST(req)).json();
+    const data = await (await postAndFlush()).json();
     expect(data.resynced).toBe(2);
     expect(data.failed).toBe(0);
     expect(data.rateLimited).toBe(true);
@@ -114,6 +124,7 @@ describe('POST /api/settings/board-resync', () => {
   });
 
   it('stops early when GitHub abuse detection asks for backoff', async () => {
+    vi.useFakeTimers();
     listJobsMock.mockReturnValue([
       makeJob({ id: 'a' }),
       makeJob({ id: 'b' }),
@@ -124,8 +135,7 @@ describe('POST /api/settings/board-resync', () => {
       if (job.id === 'c') throw new Error('GraphQL error: abuse detection mechanism triggered');
     });
 
-    const req = new NextRequest('http://localhost/api/settings/board-resync', { method: 'POST' });
-    const data = await (await POST(req)).json();
+    const data = await (await postAndFlush()).json();
     expect(data.resynced).toBe(2);
     expect(data.failed).toBe(0);
     expect(data.rateLimited).toBe(true);
@@ -133,6 +143,7 @@ describe('POST /api/settings/board-resync', () => {
   });
 
   it('counts failures without aborting the loop', async () => {
+    vi.useFakeTimers();
     listJobsMock.mockReturnValue([
       makeJob({ id: 'a' }),
       makeJob({ id: 'b' }),
@@ -142,8 +153,7 @@ describe('POST /api/settings/board-resync', () => {
       if (job.id === 'b') throw new Error('parse failure');
     });
 
-    const req = new NextRequest('http://localhost/api/settings/board-resync', { method: 'POST' });
-    const res = await POST(req);
+    const res = await postAndFlush();
     const data = await res.json();
     expect(data.resynced).toBe(2);
     expect(data.failed).toBe(1);
@@ -151,18 +161,32 @@ describe('POST /api/settings/board-resync', () => {
   });
 
   it('respects the days query parameter and clamps to 90', async () => {
+    vi.useFakeTimers();
     listJobsMock.mockReturnValue([]);
-    const req1 = new NextRequest('http://localhost/api/settings/board-resync?days=14', { method: 'POST' });
-    const data1 = await (await POST(req1)).json();
+    const data1 = await (await postAndFlush('http://localhost/api/settings/board-resync?days=14')).json();
     expect(data1.days).toBe(14);
 
-    const req2 = new NextRequest('http://localhost/api/settings/board-resync?days=500', { method: 'POST' });
-    const data2 = await (await POST(req2)).json();
+    const data2 = await (await postAndFlush('http://localhost/api/settings/board-resync?days=500')).json();
     expect(data2.days).toBe(90);
 
-    const req3 = new NextRequest('http://localhost/api/settings/board-resync?days=0', { method: 'POST' });
-    const data3 = await (await POST(req3)).json();
+    const data3 = await (await postAndFlush('http://localhost/api/settings/board-resync?days=0')).json();
     expect(data3.days).toBe(7);
+  });
+
+  it('respects the limit query parameter and processes newest jobs first', async () => {
+    vi.useFakeTimers();
+    listJobsMock.mockReturnValue([
+      makeJob({ id: 'oldest', startedAt: NOW_S - 90 }),
+      makeJob({ id: 'newest', startedAt: NOW_S - 10 }),
+      makeJob({ id: 'middle', startedAt: NOW_S - 40 }),
+    ]);
+
+    const data = await (await postAndFlush('http://localhost/api/settings/board-resync?limit=2')).json();
+
+    expect(data.limit).toBe(2);
+    expect(data.scanned).toBe(2);
+    expect(data.resynced).toBe(2);
+    expect(syncMock.mock.calls.map(([job]) => (job as JobData).id)).toEqual(['newest', 'middle']);
   });
 });
 
