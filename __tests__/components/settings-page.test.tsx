@@ -238,8 +238,10 @@ describe('SettingsPage', () => {
     })
 
     await vi.waitFor(() => {
-      expect(getSaveButton(container).disabled).toBe(true)
+      expect(findTrustedGithubUserInputs(container)).toHaveLength(2)
+      expect(findTrustedGithubUserInputs(container).some((node) => node.value === '')).toBe(true)
       expect(container.textContent).toContain('Trusted GitHub users cannot be empty.')
+      expect(getSaveButton(container).disabled).toBe(true)
     })
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true, bubbles: true }))
@@ -253,6 +255,7 @@ describe('SettingsPage', () => {
     })
 
     await vi.waitFor(() => {
+      expect(findTrustedGithubUserInputs(container).every((node) => node.value.trim().length > 0)).toBe(true)
       expect(container.textContent).not.toContain('Trusted GitHub users cannot be empty.')
       expect(getSaveButton(container).disabled).toBe(false)
     })

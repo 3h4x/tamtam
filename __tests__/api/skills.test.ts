@@ -67,6 +67,7 @@ describe('skills API', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.resetModules();
   });
 
@@ -171,15 +172,18 @@ describe('skills API', () => {
     });
 
     it('generates unique skill IDs', async () => {
+      vi.spyOn(Date, 'now')
+        .mockReturnValueOnce(1000)
+        .mockReturnValueOnce(1000)
+        .mockReturnValueOnce(2000)
+        .mockReturnValueOnce(2000);
+
       const req1 = new NextRequest('http://localhost/api/skills', {
         method: 'POST',
         body: JSON.stringify({ name: 'Skill 1' }),
       });
       const res1 = await skillsPOST(req1);
       const data1 = await res1.json();
-
-      // Wait to ensure different timestamp
-      await new Promise((r) => setTimeout(r, 2));
 
       const req2 = new NextRequest('http://localhost/api/skills', {
         method: 'POST',
@@ -299,6 +303,37 @@ describe('skills API', () => {
       expect(data.skill.description).toBe('New description');
     });
 
+    it('trims updated name and description values', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.skills)
+        .values({
+          id: 'skill-123',
+          name: 'Name',
+          description: 'Description',
+          content: 'Content',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const request = new NextRequest('http://localhost/api/skills/skill-123', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: '  Updated Name  ',
+          description: '  Updated description  ',
+        }),
+      });
+
+      const response = await skillDetailPATCH(request, {
+        params: Promise.resolve({ skillId: 'skill-123' }),
+      });
+
+      const data = await response.json();
+      expect(data.skill.name).toBe('Updated Name');
+      expect(data.skill.description).toBe('Updated description');
+    });
+
     it('updates skill content', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
@@ -324,6 +359,33 @@ describe('skills API', () => {
 
       const data = await response.json();
       expect(data.skill.content).toBe('New content');
+    });
+
+    it('preserves content whitespace when updating content', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.skills)
+        .values({
+          id: 'skill-123',
+          name: 'Name',
+          description: 'Description',
+          content: 'Old content',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const request = new NextRequest('http://localhost/api/skills/skill-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ content: '  keep surrounding whitespace  ' }),
+      });
+
+      const response = await skillDetailPATCH(request, {
+        params: Promise.resolve({ skillId: 'skill-123' }),
+      });
+
+      const data = await response.json();
+      expect(data.skill.content).toBe('  keep surrounding whitespace  ');
     });
 
     it('updates updatedAt timestamp', async () => {
