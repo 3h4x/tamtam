@@ -226,14 +226,19 @@ Do NOT PATCH any settings. Surface proposals only — the user applies them in t
 Keep only: visible bugs, JS console errors, broken links, copy/UX errors, accessibility gaps, obvious feature gaps. Skip subjective taste calls and known good behavior. Cap findings at 5.
 
 ## 4. Fix up to 2 small issues yourself
-Pick at most **1–2** findings that are clearly safe and small (typo, missing alt text, dead link, single CSS/copy tweak, an obvious null-guard). For each:
+Pick at most **1–2** findings that are clearly safe and small. Examples that qualify:
+- Typo, missing alt text, dead link, single CSS/copy tweak, an obvious null-guard
+- A console warning with an obvious local fix (chart minWidth/minHeight, missing key prop, prop typo) — **do not** treat these as "cosmetic" if the fix is one line in one file
+- A route that 404s but is **documented** in CLAUDE.md / README as if it exists → **delete that documentation reference** (do NOT scaffold the missing feature — that's the hard-stop "too large" case). The fix is a doc edit, not a new page.
+
+For each fix:
 - Edit the source files directly. Keep the diff minimal — one concern per fix, no opportunistic refactors.
-- Re-verify with Playwright that the fix landed (re-navigate / re-snapshot the affected page).
+- Re-verify with Playwright (for code changes) or re-read the file (for doc edits) to confirm the fix landed.
 - Do not run \`git\` commands — TamTam's release pipeline handles version control. Just leave the changes uncommitted in the working tree.
 
 **Hard stop conditions — do NOT fix, just report:**
 - Anything touching auth, payments, db schema, migrations, infra, or contracts
-- Anything requiring more than ~30 lines of code change or touching >2 files
+- Anything requiring more than ~30 lines of code change or touching >2 files (scaffolding a missing feature/route lands here — fix the docs instead per §4)
 - Anything where the right fix isn't obvious from a single read of the surrounding code
 - Anything you'd want a human review for before shipping
 
@@ -288,6 +293,7 @@ const KNOWN_DEFAULT_CONTENT_HASHES: Record<string, string[]> = {
   // 'da3105d7820a7360' = pre-qa-url default (website-only resolution).
   // '3c9e9a5582267ae0' = qa-url-aware default, before "fix 1–2 yourself" rewrite.
   // '439b9841a389174a' = "fix 1–2 yourself + hand rest to cto" default; cto handoff removed in next rev.
+  //                      Same hash also covered the post-cto-removal "fix 1–2 yourself" default.
   'agent-qa': ['5274a9f8d37e5b19', 'da3105d7820a7360', '3c9e9a5582267ae0', '439b9841a389174a'],
   // 'd2b9ebcdd7b0de6c' = pre-git-free-guard default.
   'agent-senior-fullstack': ['ab7344ee6a0a7a21', 'd2b9ebcdd7b0de6c'],

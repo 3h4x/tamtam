@@ -401,4 +401,46 @@ describe('PipelineStrip', () => {
 
     unmount()
   })
+
+  it('treats abort-pending release responses as accepted aborts', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        status: 'abort_pending',
+        detail: 'Timed out waiting for push to stop cleanly',
+        release_id: 'release-1',
+        killed_job_id: null,
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container, onRefresh, unmount } = renderStrip({
+      projectJobs: [
+        buildJob({ id: 'release-1', kind: 'release', started_at: 90, status: 'running', finished_at: null, exit_code: null }),
+        buildJob({ id: 'push-1', kind: 'push', started_at: 100, status: 'running', finished_at: null, exit_code: null, release_id: 'release-1' }),
+      ],
+    })
+
+    const abortButton = Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'abort')
+    if (!(abortButton instanceof HTMLButtonElement)) throw new Error('abort button not found')
+    flushSync(() => {
+      abortButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    const confirmButton = Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'yes')
+    if (!(confirmButton instanceof HTMLButtonElement)) throw new Error('confirm button not found')
+    flushSync(() => {
+      confirmButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/projects/by-project/acme%2Fwidgets/release/abort', { method: 'POST' })
+      expect(toastMock).toHaveBeenCalledWith('Pipeline abort pending', 'info')
+      expect(onRefresh).toHaveBeenCalled()
+    })
+    expect(toastMock).not.toHaveBeenCalledWith('No active pipeline', 'info')
+
+    unmount()
+  })
 })

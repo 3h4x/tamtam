@@ -156,4 +156,21 @@ describe('claude-quota', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(b).toBe(a);
   });
+
+  it('returns a static healthy snapshot in QA mode without hitting the network', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    process.env.TAMTAM_QA_MODE = '1';
+    try {
+      const { getClaudeQuota } = await import('@/lib/usage/claude-quota');
+      const snap = await getClaudeQuota();
+      expect(snap.fiveHour.utilization).toBe(0);
+      expect(snap.sevenDay.utilization).toBe(0);
+      expect(snap.stale).toBe(false);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(execMock).not.toHaveBeenCalled();
+      expect(readFileMock).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.TAMTAM_QA_MODE;
+    }
+  });
 });

@@ -87,6 +87,14 @@ function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
   return button
 }
 
+function makeResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
+  return {
+    ok,
+    status,
+    json: async () => body,
+  }
+}
+
 describe('ProjectRunsTab release actions', () => {
   beforeEach(() => {
     fetchJobsMock.mockResolvedValue({
@@ -114,6 +122,7 @@ describe('ProjectRunsTab release actions', () => {
     releaseProjectMock.mockReset()
     pushProjectMock.mockReset()
     syncJobBoardMock.mockReset()
+    vi.unstubAllGlobals()
     document.body.innerHTML = ''
   })
 
@@ -251,6 +260,160 @@ describe('ProjectRunsTab release actions', () => {
     })
 
     vi.unstubAllGlobals()
+    unmount()
+  })
+
+  it('aborts a running release through the release abort endpoint', async () => {
+    const fetchMock = vi.fn(async () => makeResponse({ status: 'aborted' }))
+    vi.stubGlobal('fetch', fetchMock)
+    fetchJobsMock.mockResolvedValue({
+      jobs: [
+        makeJob({ id: 'running-release', kind: 'release', started_at: 100, finished_at: null, status: 'running', exit_code: null }),
+        makeJob({ id: 'running-test', kind: 'test', started_at: 110, finished_at: null, status: 'running', exit_code: null, release_id: 'running-release', parent_job_id: 'running-release' }),
+      ],
+      pendingReleaseProjects: [],
+    })
+
+    const { container, unmount } = renderTab()
+
+    await vi.waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(buttonByText(container, 'Stop')).toBeInstanceOf(HTMLButtonElement)
+    })
+
+    buttonByText(container, 'Stop').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/projects/by-project/alpha/release/abort', { method: 'POST' })
+    })
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/jobs/running-release', expect.anything())
+
+    unmount()
+  })
+
+  it('treats abort-pending release responses as accepted stops', async () => {
+    const fetchMock = vi.fn(async () => makeResponse({
+      status: 'abort_pending',
+      detail: 'Timed out waiting for commit to stop cleanly',
+      release_id: 'running-release',
+      killed_job_id: null,
+    }, false, 409))
+    vi.stubGlobal('fetch', fetchMock)
+    fetchJobsMock.mockResolvedValue({
+      jobs: [
+        makeJob({ id: 'running-release', kind: 'release', started_at: 100, finished_at: null, status: 'running', exit_code: null }),
+        makeJob({ id: 'running-commit', kind: 'commit', started_at: 110, finished_at: null, status: 'running', exit_code: null, release_id: 'running-release', parent_job_id: 'running-release' }),
+      ],
+      pendingReleaseProjects: [],
+    })
+
+    const { container, unmount } = renderTab()
+
+    await vi.waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(buttonByText(container, 'Stop')).toBeInstanceOf(HTMLButtonElement)
+    })
+
+    buttonByText(container, 'Stop').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/projects/by-project/alpha/release/abort', { method: 'POST' })
+      expect(buttonByText(container, 'abort pending')).toBeInstanceOf(HTMLButtonElement)
+    })
+    expect(container.textContent).not.toContain('failed')
+    expect(fetchJobsMock).toHaveBeenCalledTimes(2)
+
+    unmount()
+  })
+
+  it('aborts a running release from a flat pipeline-child kind filter', async () => {
+    const fetchMock = vi.fn(async () => makeResponse({ status: 'aborted' }))
+    vi.stubGlobal('fetch', fetchMock)
+    fetchJobsMock.mockResolvedValue({
+      jobs: [
+        makeJob({ id: 'running-release', kind: 'release', started_at: 100, finished_at: null, status: 'running', exit_code: null }),
+        makeJob({ id: 'running-test', kind: 'test', started_at: 110, finished_at: null, status: 'running', exit_code: null, release_id: 'running-release', parent_job_id: 'running-release' }),
+      ],
+      pendingReleaseProjects: [],
+    })
+
+    const { container, unmount } = renderTab()
+
+    await vi.waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(buttonByText(container, 'test')).toBeInstanceOf(HTMLButtonElement)
+    })
+
+    buttonByText(container, 'test').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Test run')
+      expect(buttonByText(container, 'Stop')).toBeInstanceOf(HTMLButtonElement)
+    })
+
+    buttonByText(container, 'Stop').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/projects/by-project/alpha/release/abort', { method: 'POST' })
+    })
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/jobs/running-test', expect.anything())
+
+    unmount()
+  })
+
+  it('cancels a normal running job through the job delete endpoint', async () => {
+    const fetchMock = vi.fn(async () => makeResponse({ status: 'cancelled' }))
+    vi.stubGlobal('fetch', fetchMock)
+    fetchJobsMock.mockResolvedValue({
+      jobs: [
+        makeJob({ id: 'running-review', kind: 'review', started_at: 100, finished_at: null, status: 'running', exit_code: null }),
+      ],
+      pendingReleaseProjects: [],
+    })
+
+    const { container, unmount } = renderTab()
+
+    await vi.waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(buttonByText(container, 'Stop')).toBeInstanceOf(HTMLButtonElement)
+    })
+
+    buttonByText(container, 'Stop').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/jobs/running-review', { method: 'DELETE' })
+    })
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/projects/by-project/alpha/release/abort', expect.anything())
+
+    unmount()
+  })
+
+  it('aborts an attached running release instead of deleting the finished parent job', async () => {
+    const fetchMock = vi.fn(async () => makeResponse({ status: 'aborted' }))
+    vi.stubGlobal('fetch', fetchMock)
+    fetchJobsMock.mockResolvedValue({
+      jobs: [
+        makeJob({ id: 'agent-run', kind: 'agent:ship', started_at: 100, finished_at: 110, status: 'done', exit_code: 0 }),
+        makeJob({ id: 'nested-release', kind: 'release', started_at: 120, finished_at: null, status: 'running', exit_code: null, parent_job_id: 'agent-run' }),
+        makeJob({ id: 'nested-test', kind: 'test', started_at: 130, finished_at: null, status: 'running', exit_code: null, release_id: 'nested-release', parent_job_id: 'nested-release' }),
+      ],
+      pendingReleaseProjects: [],
+    })
+
+    const { container, unmount } = renderTab()
+
+    await vi.waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(buttonByText(container, 'Stop')).toBeInstanceOf(HTMLButtonElement)
+    })
+
+    buttonByText(container, 'Stop').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/projects/by-project/alpha/release/abort', { method: 'POST' })
+    })
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/jobs/agent-run', expect.anything())
+
     unmount()
   })
 

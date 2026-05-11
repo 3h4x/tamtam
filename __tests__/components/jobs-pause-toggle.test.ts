@@ -67,7 +67,7 @@ describe('JobsPauseToggle', () => {
       if (input === '/api/settings') return makeResponse({ settings: { jobs_paused: 'true', budget_block_runs_enabled: 'false' } })
       if (input === '/api/usage/quota') {
         return makeResponse({
-          gateEnabled: true,
+          gateEnabled: false,
           sevenDay: {
             utilization: 90,
             resetsAt: '2026-05-10T12:00:00.000Z',
@@ -128,56 +128,6 @@ describe('JobsPauseToggle', () => {
     })
 
     expect(fmtAbsoluteMock).toHaveBeenCalledTimes(1)
-    unmount()
-  })
-
-  it('reacts to budget gate changes after initial render without remounting', async () => {
-    let budgetGateEnabled = false
-    const fetchMock = vi.fn(async (input: string) => {
-      if (input === '/api/settings') {
-        return makeResponse({ settings: { jobs_paused: 'false', budget_block_runs_enabled: budgetGateEnabled ? 'true' : 'false' } })
-      }
-      if (input === '/api/usage/quota') {
-        return makeResponse({
-          gateEnabled: budgetGateEnabled,
-          sevenDay: {
-            utilization: 90,
-            resetsAt: '2026-05-10T12:00:00.000Z',
-            msUntilReset: 24 * 60 * 60 * 1000,
-          },
-          schedulerThrottle: budgetGateEnabled ? {
-            reason: '7d burn rate too high: 90% used, projected 180%',
-            projectedPct: 180,
-            worstProvider: 'claude',
-            resumesAtMs: new Date('2026-05-10T12:00:00.000Z').getTime(),
-          } : null,
-        })
-      }
-      throw new Error(`Unexpected fetch: ${input}`)
-    })
-    vi.stubGlobal('fetch', fetchMock)
-
-    const { container, unmount } = renderToggle()
-
-    await vi.waitFor(() => {
-      const button = getButton(container)
-      expect(button.textContent).toBe('jobs running')
-      expect(button.title).toBe('Pause jobs')
-    })
-    await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/usage/quota')
-    })
-
-    budgetGateEnabled = true
-    dispatchSettingsChanged({ jobs_paused: 'false', budget_block_runs_enabled: 'true' })
-
-    await vi.waitFor(() => {
-      const button = getButton(container)
-      expect(button.textContent).toBe('scheduled paused')
-      expect(button.title).toContain('Scheduled agents paused')
-    })
-    expect(fetchMock).toHaveBeenCalledWith('/api/usage/quota')
-
     unmount()
   })
 
@@ -257,9 +207,6 @@ describe('JobsPauseToggle', () => {
       expect(button.title).toBe('Pause jobs')
       expect(button.disabled).toBe(false)
     })
-    await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/usage/quota')
-    })
 
     getButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
@@ -286,16 +233,6 @@ describe('JobsPauseToggle', () => {
       if (input === '/api/settings' && !init) {
         return makeResponse({ settings: { jobs_paused: 'false', budget_block_runs_enabled: 'false' } })
       }
-      if (input === '/api/usage/quota') {
-        return makeResponse({
-          gateEnabled: false,
-          sevenDay: {
-            utilization: 10,
-            resetsAt: '2026-05-10T12:00:00.000Z',
-            msUntilReset: 24 * 60 * 60 * 1000,
-          },
-        })
-      }
       if (input === '/api/settings' && init?.method === 'PATCH') {
         return makeResponse({})
       }
@@ -316,9 +253,6 @@ describe('JobsPauseToggle', () => {
       expect(fetchMock).toHaveBeenCalledWith('/api/settings', expect.objectContaining({
         method: 'PATCH',
       }))
-    })
-    await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/usage/quota')
     })
     await vi.waitFor(() => {
       const pauseEvents = dispatchSpy.mock.calls

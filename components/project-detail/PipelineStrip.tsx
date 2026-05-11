@@ -209,9 +209,14 @@ export function PipelineStrip({
     setAborting(true)
     try {
       const res = await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/release/abort`, { method: 'POST' })
-      const data = await res.json() as { status: string }
+      const data = await res.json() as { status: string; detail?: string }
+      if (res.ok === false && data.status !== 'abort_pending') {
+        throw new Error(data.detail || `HTTP ${res.status}`)
+      }
       if (data.status === 'aborted') {
         toast('Pipeline aborted', 'success')
+      } else if (data.status === 'abort_pending') {
+        toast('Pipeline abort pending', 'info')
       } else {
         toast('No active pipeline', 'info')
       }
@@ -506,7 +511,14 @@ export function PipelineStrip({
     prState = 'skipped'
     prHint = 'no PR — pushed directly to default branch'
   }
-  const showPrChip = !!pushJob && (!!prInfo || prState === 'pending' || prState === 'failed')
+  // On the default branch the release pushes directly — no PR is opened, so
+  // the `pr` chip is permanently irrelevant. Hide it regardless of push state.
+  // Off the default branch (or when branch context is unknown) keep the chip
+  // visible while a PR is pending/failed/known so the user can see the slot.
+  const onDefaultBranch = config?.file_config_is_default_branch === true
+  const showPrChip = !onDefaultBranch
+    && !!pushJob
+    && (!!prInfo || prState === 'pending' || prState === 'failed')
 
   const prWaitState = stateOf(prWaitJob)
   const prWaitHint = prWaitJob?.status === 'running'
