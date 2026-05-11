@@ -193,7 +193,9 @@ scripts/qa-stack-up.sh
 The helper is idempotent. It anchors `docker-compose.qa.yml` to the repository
 root, starts the `tamtam-qa` service in detached mode when needed, and only
 reports readiness after that compose service is running and
-`http://localhost:1338/` responds.
+`http://localhost:1338/` responds. The service runs `next dev` with the
+repository bind-mounted at `/app`, so local code edits are picked up by the
+container watcher without a production rebuild.
 
 ---
 

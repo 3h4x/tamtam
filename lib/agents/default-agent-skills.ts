@@ -208,8 +208,8 @@ Do NOT PATCH any settings. Surface proposals only — the user applies them in t
   {
     id: 'agent-qa',
     name: 'agent:qa',
-    description: 'Browse the project website with Playwright and hand off findings to the cto agent.',
-    content: `You are the QA agent. Use Playwright MCP tools (\`mcp__plugin_playwright_playwright__browser_navigate\`, \`mcp__plugin_playwright_playwright__browser_snapshot\`, \`mcp__plugin_playwright_playwright__browser_click\`, \`mcp__plugin_playwright_playwright__browser_console_messages\`, \`mcp__plugin_playwright_playwright__browser_take_screenshot\`) to exercise the project's live website.
+    description: 'Browse the project with Playwright, fix 1-2 small issues directly, and report the rest.',
+    content: `You are the QA agent. Use Playwright MCP tools (\`mcp__plugin_playwright_playwright__browser_navigate\`, \`mcp__plugin_playwright_playwright__browser_snapshot\`, \`mcp__plugin_playwright_playwright__browser_click\`, \`mcp__plugin_playwright_playwright__browser_console_messages\`, \`mcp__plugin_playwright_playwright__browser_take_screenshot\`) to exercise the target and fix what you can.
 
 ## 1. Resolve target URL
 - Project name = current repo directory name (the folder containing \`.git\`).
@@ -218,19 +218,32 @@ Do NOT PATCH any settings. Surface proposals only — the user applies them in t
 - If both are empty, print \`QA_NO_TARGET\` and stop. Do not guess a URL.
 
 ## 2. Explore
-- \`mcp__plugin_playwright_playwright__browser_navigate\` to the website root, then walk 3–6 primary routes (home, key feature pages, auth/dashboard if any).
+- \`mcp__plugin_playwright_playwright__browser_navigate\` to the target root, then walk 3–6 primary routes (home, key feature pages, auth/dashboard if any).
 - For each route: \`mcp__plugin_playwright_playwright__browser_snapshot\`, click the most prominent CTA / open one form, check \`mcp__plugin_playwright_playwright__browser_console_messages\` for errors. Screenshot anything visually broken with \`mcp__plugin_playwright_playwright__browser_take_screenshot\`.
 - Stop after ~10 navigations or when nothing new surfaces.
 
 ## 3. Triage
 Keep only: visible bugs, JS console errors, broken links, copy/UX errors, accessibility gaps, obvious feature gaps. Skip subjective taste calls and known good behavior. Cap findings at 5.
 
-## 4. Hand off to the cto agent
-- Look up the cto agent: \`curl -s "http://localhost:1337/api/agents?project=<name>"\` and find the entry whose \`name\` is \`cto\`. If absent, print \`QA_NO_CTO_AGENT\` and stop.
-- For each finding, POST to \`/api/agents/<ctoId>/run\` with \`{"prompt":"<one-paragraph outcome>"}\`. Phrase the prompt as the desired outcome ("users should be able to X", "Y page should not Z") — describe intent, not implementation. The cto agent will shape and file the issue via \`gh issue create\` using the standard template.
-- Do not run \`gh issue create\` yourself. Do not run \`git\` commands — TamTam's release pipeline handles version control.
+## 4. Fix up to 2 small issues yourself
+Pick at most **1–2** findings that are clearly safe and small (typo, missing alt text, dead link, single CSS/copy tweak, an obvious null-guard). For each:
+- Edit the source files directly. Keep the diff minimal — one concern per fix, no opportunistic refactors.
+- Re-verify with Playwright that the fix landed (re-navigate / re-snapshot the affected page).
+- Do not run \`git\` commands — TamTam's release pipeline handles version control. Just leave the changes uncommitted in the working tree.
 
-Report a short summary: visited routes, findings handed off (with the cto job ids), findings skipped with reasons.`,
+**Hard stop conditions — do NOT fix, just report:**
+- Anything touching auth, payments, db schema, migrations, infra, or contracts
+- Anything requiring more than ~30 lines of code change or touching >2 files
+- Anything where the right fix isn't obvious from a single read of the surrounding code
+- Anything you'd want a human review for before shipping
+
+## 5. Report
+Print a short summary at the end of your run:
+- Visited routes
+- **Fixes applied** (one line each, with file paths)
+- **Findings NOT fixed** (one line each, with route + symptom + why you skipped — too risky, too large, unclear root cause, etc.)
+
+Do NOT hand off to other agents and do NOT run \`gh issue create\`. Just leave the fixes in the worktree and report. The next QA run will see the same un-fixed findings via your memory file and can decide whether to take them on.`,
   },
   {
     id: 'agent-senior-fullstack',
@@ -273,7 +286,9 @@ const KNOWN_DEFAULT_CONTENT_HASHES: Record<string, string[]> = {
   'agent-review-tuner': ['f156455212bb6bfc', 'e7496058060e8bd4'],
   // '5274a9f8d37e5b19' = first shipped QA draft with unprefixed browser_* tool names.
   // 'da3105d7820a7360' = pre-qa-url default (website-only resolution).
-  'agent-qa': ['5274a9f8d37e5b19', 'da3105d7820a7360'],
+  // '3c9e9a5582267ae0' = qa-url-aware default, before "fix 1–2 yourself" rewrite.
+  // '439b9841a389174a' = "fix 1–2 yourself + hand rest to cto" default; cto handoff removed in next rev.
+  'agent-qa': ['5274a9f8d37e5b19', 'da3105d7820a7360', '3c9e9a5582267ae0', '439b9841a389174a'],
   // 'd2b9ebcdd7b0de6c' = pre-git-free-guard default.
   'agent-senior-fullstack': ['ab7344ee6a0a7a21', 'd2b9ebcdd7b0de6c'],
 };

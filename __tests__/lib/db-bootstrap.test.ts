@@ -126,4 +126,35 @@ describe('db bootstrap migrations', () => {
 
     expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(['doc_paths', 'provider']));
   });
+
+  it('backfills qa_url onto legacy projects tables', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tamtam-db-bootstrap-'));
+    const dbPath = join(dir, 'tamtam.db');
+    const sqlite = new Database(dbPath);
+    sqlite.exec(`
+      CREATE TABLE settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      CREATE TABLE projects (
+        name TEXT PRIMARY KEY,
+        path TEXT NOT NULL,
+        enabled INTEGER DEFAULT 0,
+        github TEXT,
+        priority TEXT,
+        custom_actions TEXT,
+        website TEXT
+      );
+    `);
+    sqlite.close();
+    process.env.TAMTAM_DB_PATH = dbPath;
+
+    await import('@/lib/db');
+
+    const migrated = new Database(dbPath, { readonly: true });
+    const columns = migrated.prepare('PRAGMA table_info(projects)').all() as Array<{ name: string }>;
+    migrated.close();
+
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(['website', 'qa_url']));
+  });
 });

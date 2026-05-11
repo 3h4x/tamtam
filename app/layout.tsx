@@ -5,6 +5,10 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'TamTam',
   description: 'Project Management Dashboard',
+  icons: {
+    icon: '/logo.png',
+    apple: '/logo.png',
+  },
 };
 
 export default function RootLayout({
