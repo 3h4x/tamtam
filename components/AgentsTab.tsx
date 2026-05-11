@@ -37,6 +37,19 @@ function scheduleToMinutes(schedule: string | null | undefined): number {
   return Number.MAX_SAFE_INTEGER
 }
 
+function formatNextFire(nextFireMs: number): string {
+  const diffMs = nextFireMs - Date.now()
+  if (diffMs <= 0) return 'due now'
+  const diffMin = Math.round(diffMs / 60000)
+  if (diffMin < 1) return 'in <1m'
+  if (diffMin < 60) return `in ${diffMin}m`
+  const h = Math.floor(diffMin / 60)
+  const m = diffMin % 60
+  if (h < 24) return m ? `in ${h}h ${m}m` : `in ${h}h`
+  const d = Math.floor(h / 24)
+  return `in ${d}d ${h % 24}h`
+}
+
 export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
   const agentRunsBlocked = false
   const blockedReason = ''
@@ -222,12 +235,17 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
       sortValue: r => r.schedulerEntry?.nextFireMs ?? Number.MAX_SAFE_INTEGER,
       render: r => {
         if (!r.agent.schedule || !r.agent.enabled) return <span className="text-text-tertiary text-xs">—</span>
+        const nextMs = r.schedulerEntry?.nextFireMs
+        if (nextMs) return <span className="text-xs text-text-secondary font-mono">{formatNextFire(nextMs)}</span>
         const display = nextFireDisplay(r.agent.schedule, r.agent.id)
-        return display ? (
-          <span className="text-xs text-text-secondary font-mono">{display}</span>
-        ) : (
-          <span className="text-text-tertiary text-xs">—</span>
-        )
+        if (display) return <span className="text-xs text-text-secondary font-mono">{display.replace(/^next\s+/, '')}</span>
+        if (r.lastRun) {
+          const mins = scheduleToMinutes(r.agent.schedule)
+          if (mins < Number.MAX_SAFE_INTEGER) {
+            return <span className="text-xs text-text-secondary font-mono">{formatNextFire(r.lastRun.ts * 1000 + mins * 60000)}</span>
+          }
+        }
+        return <span className="text-text-tertiary text-xs">—</span>
       },
     },
     {
