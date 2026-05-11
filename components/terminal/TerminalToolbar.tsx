@@ -4,6 +4,7 @@ import React, { useRef, useEffect } from 'react'
 import Link from 'next/link'
 import type { SkillItem, DocItem } from '@/lib/terminal/terminal-session-store'
 import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, type ModelTier } from '@/lib/agents/model-aliases'
+import { dispatchSettingsChanged } from '@/lib/shared/settings-events'
 
 function CountBadge({ count }: { count: number }) {
   return (
@@ -276,11 +277,17 @@ export function TerminalToolbar({
                   className={`toolbar-tab${model === m ? ' active' : ''}`}
                   onClick={async () => {
                     onModelChange(m)
-                    await fetch('/api/settings', {
+                    const response = await fetch('/api/settings', {
                       method: 'PATCH',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ default_model: m }),
                     }).catch(() => {})
+                    const payload = response && 'ok' in response && response.ok
+                      ? await response.json().catch(() => null)
+                      : null
+                    if (payload?.settings) {
+                      dispatchSettingsChanged(payload.settings)
+                    }
                   }}
                   title={`${MODEL_LABELS[m]} — ${MODEL_DESCRIPTIONS[m]}`}
                 >

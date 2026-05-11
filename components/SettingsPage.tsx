@@ -13,6 +13,7 @@ import type { NotificationsSettings } from '@/components/settings/NotificationsT
 import { CliTab } from '@/components/settings/CliTab'
 import type { CliTabSettings } from '@/components/settings/CliTab'
 import { TrustedGithubUsersField } from '@/components/settings/TrustedGithubUsersField'
+import { dispatchSettingsChanged } from '@/lib/shared/settings-events'
 import { parseEnabledProviders } from '@/lib/usage/cli-providers'
 
 interface SettingsMap {
@@ -207,6 +208,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
       const canonical = mergeLoadedSettings(data.settings)
       setSettings(canonical)
       setSavedSettings(canonical)
+      dispatchSettingsChanged({ ...canonical })
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
       loadProjects()

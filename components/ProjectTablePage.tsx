@@ -10,6 +10,7 @@ import { getAggregateCi, getCiFailedUrl } from '@/lib/shared/statusConstants'
 import { LoadingState } from '@/components/LoadingState'
 import { ProjectLogo } from '@/components/ProjectLogo'
 import { useToast } from '@/components/Toast'
+import { subscribeToSettingsChanged } from '@/lib/shared/settings-events'
 
 type SortKey = 'project' | 'status' | 'changes' | 'last_run' | 'next_run' | 'ci'
 type SortDir = 'asc' | 'desc'
@@ -193,7 +194,9 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
   const [agentsByProject, setAgentsByProject] = useState<Record<string, Agent[]>>({})
   const [schedulerByProject, setSchedulerByProject] = useState<Record<string, SchedulerEntry[]>>({})
   const [schedulerPaused, setSchedulerPaused] = useState(false)
+  const [budgetGateEnabled, setBudgetGateEnabled] = useState(false)
   const [scheduledThrottlePaused, setScheduledThrottlePaused] = useState(false)
+  const [quotaRefreshSeq, setQuotaRefreshSeq] = useState(0)
   const [sortKey, setSortKey] = useState<SortKey>('project')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [sortReady, setSortReady] = useState(false)
@@ -239,21 +242,59 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
 
   useEffect(() => {
     let active = true
+    const applySettings = (
+      settings: Record<string, string | undefined>,
+      { merge }: { merge: boolean },
+    ) => {
+      if (merge && !('budget_block_runs_enabled' in settings)) return
+      const enabled = settings.budget_block_runs_enabled === 'true'
+      setBudgetGateEnabled(enabled)
+      if (!enabled) setScheduledThrottlePaused(false)
+    }
+    const loadSettings = async () => {
+      try {
+        const response = await fetch('/api/settings')
+        if (!response.ok) return
+        const data = await response.json()
+        if (!active) return
+        applySettings(data.settings ?? {}, { merge: false })
+      } catch {
+        if (active) applySettings({}, { merge: false })
+      }
+    }
+    const unsubscribe = subscribeToSettingsChanged((settings) => {
+      if (!active) return
+      applySettings(settings, { merge: true })
+      setQuotaRefreshSeq((seq) => seq + 1)
+    })
+    void loadSettings()
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    let interval: ReturnType<typeof setInterval> | null = null
     const load = async () => {
       try {
         const r = await fetch('/api/usage/quota')
         if (!r.ok) return
         const data = (await r.json()) as QuotaSnapshot
         if (!active) return
-        setScheduledThrottlePaused(!!data.gateEnabled && data.schedulerThrottle != null)
+        setScheduledThrottlePaused(budgetGateEnabled && !!data.gateEnabled && data.schedulerThrottle != null)
       } catch {
         if (active) setScheduledThrottlePaused(false)
       }
     }
-    load()
-    const interval = setInterval(load, 60000)
-    return () => { active = false; clearInterval(interval) }
-  }, [])
+    void load()
+    interval = setInterval(load, 60000)
+    return () => {
+      active = false
+      if (interval) clearInterval(interval)
+    }
+  }, [budgetGateEnabled, quotaRefreshSeq])
 
   useEffect(() => {
     if (!sortReady) return

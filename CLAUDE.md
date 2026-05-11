@@ -30,6 +30,7 @@ Steps are pluggable per project. The **🚀 Release** button triggers the pipeli
 
 ## Commands
 - `pnpm dev` — `next dev` foreground on port 1337 (HMR enabled, no PM2). Local debugging only.
+- `pnpm dev:qa` — deterministic Docker QA environment on port 1338 with mocked `git`/`gh`/`pm2`/provider shims and an isolated DB/workspace. It runs `next dev` inside Docker with the repo bind-mounted, so ordinary source edits are picked up without rebuilding the QA image. Use when you need a reproducible browser or API target without touching the main PM2 server.
 - `pnpm start` — start (or idempotently restart) production server via PM2 on port 1337. Self-heals if a previous orphan is squatting on the port. Canonical way to run TamTam.
 - `pnpm run rebuild` / `pnpm restart` — build then restart under PM2. `pnpm run rebuild` expands to `pnpm build && pnpm start`; `pnpm restart` expands to `pnpm build && bash scripts/pm2-start.sh`. Canonical post-edit command. (Note: bare `pnpm rebuild` triggers pnpm's native-deps rebuild instead — use `pnpm run rebuild`.)
 - `pnpm stop` — stop the PM2 server.
@@ -116,6 +117,8 @@ See `docs/API.md` for the full route reference. New routes must be documented th
 
 ## Definition of Done for UI/Frontend Changes
 - Server must be running (`pnpm start`, or `pnpm rebuild` if a build is needed) before testing
+- For deterministic QA flows that should not depend on the live PM2 app or real provider/tooling side-effects, prefer `pnpm dev:qa` on port `1338`; it runs against mocked integrations and an isolated workspace/DB.
+- Do not rebuild or recreate the QA container for routine code edits. Because `pnpm dev:qa` bind-mounts the repo and runs `next dev`, changes should appear via the watcher. Recreate the stack only when Docker config, dependencies, or other container-level inputs change.
 - Use Playwright MCP (`mcp__plugin_playwright_playwright__*`) to navigate to the relevant page and screenshot it. Chrome DevTools MCP is unreliable in this environment — prefer Playwright.
 - Test the golden path and key edge cases visually; check for regressions in adjacent features
 - Do NOT claim frontend work complete without the Playwright screenshot step
@@ -134,6 +137,7 @@ See `docs/API.md` for the full route reference. New routes must be documented th
 - GitHub owner fallback configurable via `GITHUB_OWNER` env or Settings UI.
 - Issue-driven runs auto-checkout `fix/issue-<n>-<slug>` (via `issue-branch` route from TerminalTab); after merge the working copy is returned to the default branch.
 - Outbound webhook notifications (`lib/shared/notifications.ts`): Slack, Discord, ntfy, or generic JSON POST; HMAC-SHA256 signed when `notification_webhook_secret` is set; events: `release_success`, `release_fail`, `release_aborted`, `fix_loop_exhausted`, `review_do_not_ship`, `agent_run_fail`, `budget_blocked`. `TAMTAM_BASE_URL` sets log link base.
+- Project QA targets are DB-backed: `website` is the public/production URL, while `qa_url` is an explicit QA override for browser automation or the built-in QA agent. When both exist, always prefer `qa_url`; if neither exists, QA flows should stop or ask for configuration rather than inventing a target.
 - Log/row retention (`lib/jobs/retention.ts`): `pruneProjectLogs` after each run (`log_retention_count` / `log_retention_days`, defaults 200 / 30); `runNightlyCleanup` deletes finished `jobs` rows older than `job_row_retention_days` (default 180); called once at startup then every 24h from `instrumentation-node.ts`.
 - **Global job pause + budget gates** (`lib/shared/job-control.ts`): when `jobs_paused` is `true`, all pipeline routes return HTTP 409 and the internal scheduler pauses. When `budget_block_runs_enabled` is on and active quota exceeds `budget_block_at_pct`, job starts return HTTP 429. Pause state is module-level; `syncJobsPauseState` is called on settings write and on boot.
 - Background recovery loops: `instrumentation-node.ts` schedules `runProbeSweep` every 30s, `drainStaleQueuedAgentRuns` every 30s, a 30s recovery reconcile sweep, a 5m auto-resume sweep, and a 60s budget-recovery ticker — the probe sweep detects providers that hang after the final result event and resolves them via `probeJobStatus`, while the recovery tickers drain queued agent/release work once blockers clear.

@@ -106,6 +106,8 @@ describe('TabNav', () => {
     expect(container.textContent).toContain('3')
     expect(container.querySelector('[title="2 running"]')).toBeTruthy()
     expect(container.textContent).toContain('5')
+    expect(container.querySelector('button[aria-label="Changes, 3 pending"]')).toBeTruthy()
+    expect(container.querySelector('button[aria-label="Issues and pull requests, 5 open"]')).toBeTruthy()
 
     unmount()
   })
