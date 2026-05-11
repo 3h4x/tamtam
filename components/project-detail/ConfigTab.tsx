@@ -3,6 +3,28 @@
 import type { ProjectConfig, CustomAction } from '@/lib/client-api'
 import { getPipelineSteps, type StepToggleContext } from '@/lib/pipeline/pipeline-steps'
 
+const DEFAULT_ACTION_COLOR = '#2563eb'
+const LEGACY_ACTION_COLORS: Record<string, string> = {
+  blue: '#2563eb',
+  green: '#16a34a',
+  red: '#dc2626',
+  yellow: '#ca8a04',
+  orange: '#ea580c',
+  purple: '#9333ea',
+  gray: '#6b7280',
+  grey: '#6b7280',
+}
+
+export function normalizeActionColorForPicker(color?: string): string {
+  const value = color?.trim()
+  if (!value) return DEFAULT_ACTION_COLOR
+  if (/^#[0-9a-f]{6}$/i.test(value)) return value
+  if (/^#[0-9a-f]{3}$/i.test(value)) {
+    return `#${value[1]}${value[1]}${value[2]}${value[2]}${value[3]}${value[3]}`.toLowerCase()
+  }
+  return LEGACY_ACTION_COLORS[value.toLowerCase()] || DEFAULT_ACTION_COLOR
+}
+
 export interface ConfigTabProps {
   config: ProjectConfig | null
   configLoading: boolean
@@ -431,7 +453,7 @@ export function ConfigTab({
           </div>
           <button
             className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover cursor-pointer transition-colors"
-            onClick={() => setEditActions([...editActions, { name: '', command: '', color: '#2563eb' }])}
+            onClick={() => setEditActions([...editActions, { name: '', command: '', color: DEFAULT_ACTION_COLOR }])}
           >
             + Add Action
           </button>
@@ -475,7 +497,7 @@ export function ConfigTab({
                   <input
                     type="color"
                     className="w-10 h-8 p-0.5 bg-bg-primary border border-border rounded-md cursor-pointer"
-                    value={action.color || '#2563eb'}
+                    value={normalizeActionColorForPicker(action.color)}
                     onChange={(e) => {
                       const next = [...editActions]
                       next[i] = { ...next[i], color: e.target.value }
