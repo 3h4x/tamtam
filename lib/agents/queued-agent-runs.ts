@@ -161,6 +161,8 @@ export async function drainQueuedAgentRunsForProject(project: string): Promise<v
     for (const entry of queued) {
       try {
         const url = `${baseUrl}/api/agents/${encodeURIComponent(entry.agentId)}/run`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15_000);
         const r = await fetch(url, {
           method: 'POST',
           headers: {
@@ -168,7 +170,8 @@ export async function drainQueuedAgentRunsForProject(project: string): Promise<v
             'x-tamtam-trigger': entry.triggeredBy,
           },
           body: JSON.stringify({ prompt: entry.prompt }),
-        });
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timeout));
         if (r.ok || r.status === 202) {
           const raw = await r.text().catch(() => '');
           const parsed = parseQueueDrainResponse(raw);
