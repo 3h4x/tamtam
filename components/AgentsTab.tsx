@@ -199,8 +199,9 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
       label: 'Schedule',
       sortable: true,
       sortValue: r => {
+        if (!r.agent.enabled) return Number.MAX_SAFE_INTEGER
         const mins = scheduleToMinutes(r.agent.schedule)
-        if (mins === Number.MAX_SAFE_INTEGER) return Number.MAX_SAFE_INTEGER
+        if (mins === Number.MAX_SAFE_INTEGER) return Number.MAX_SAFE_INTEGER - 1
         const nextMs = r.schedulerEntry?.nextFireMs
         const nextMins = nextMs != null ? Math.max(0, (nextMs - Date.now()) / 60000) : 99999
         return mins * 100000 + Math.min(nextMins, 99999)
