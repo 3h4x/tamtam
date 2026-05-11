@@ -6,7 +6,8 @@ export const DATA_SKILLS_DIR = join(process.cwd(), 'data', 'skills');
 
 export const CODE_REVIEWER_SKILL = join(
   SKILLS_DIR,
-  'engineering-team',
-  'code-reviewer',
-  'SKILL.md'
+  'docs',
+  'skills',
+  'engineering',
+  'code-reviewer.md'
 );

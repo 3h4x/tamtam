@@ -841,3 +841,83 @@ describe('startProjectReview', () => {
     expect(prompt).not.toContain('Verified criteria');
   });
 });
+
+describe('startProjectReview — default skill path', () => {
+  afterEach(() => vi.resetModules());
+
+  it('loads the vendored code reviewer skill from the default path', async () => {
+    vi.resetModules();
+    const startJobMock = vi.fn().mockResolvedValue(9999);
+    const existsSyncMock = vi.fn((path: string) =>
+      path.endsWith('/skills/docs/skills/engineering/code-reviewer.md')
+    );
+    const readFileSyncMock = vi.fn().mockReturnValue('Vendored reviewer skill body.');
+
+    vi.doMock('@/lib/shared/shell', () => ({
+      exec: vi.fn()
+        .mockResolvedValueOnce({ exitCode: 0, stdout: ' M lib/foo.ts', stderr: '' })
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '1 file changed', stderr: '' })
+        .mockResolvedValueOnce({ exitCode: 0, stdout: 'diff --git a/lib/foo.ts\n+change\n', stderr: '' }),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      getProjectTestConfig: () => ({}),
+      getProjectPipelinePrompts: () => ({ reviewPromptAddendum: null, fixPromptAddendum: null }),
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: vi.fn().mockImplementation((project: string, kind: string) => ({
+        id: `${project}-${kind}-id`,
+        project,
+        kind,
+        pid: 0,
+        logPath: '',
+        prompt: null,
+        startedAt: 0,
+        finishedAt: null,
+        exitCode: null,
+        seen: false,
+      })),
+      updateJob: vi.fn(),
+      listJobs: vi.fn().mockReturnValue([]),
+      readLog: vi.fn().mockReturnValue(''),
+      readParsedLog: vi.fn().mockReturnValue(''),
+      probeJobStatus: vi.fn().mockResolvedValue('done'),
+    }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: () => ({ review_verdict_rules: '' }),
+      withBasePrompt: (s: string) => s,
+      getPermissionModeFlag: () => '--dangerously-skip-permissions',
+      getPipelineModel: () => 'sonnet',
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/skills/skills', async () => (
+      await vi.importActual<typeof import('@/lib/skills/skills')>('@/lib/skills/skills')
+    ));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
+    }));
+    vi.doMock('fs', () => ({
+      existsSync: existsSyncMock,
+      lstatSync: vi.fn(),
+      readFileSync: readFileSyncMock,
+      mkdirSync: vi.fn(),
+      appendFileSync: vi.fn(),
+    }));
+
+    const { startProjectReview } = await import('@/lib/pipeline/start-review');
+    const result = await startProjectReview('proj');
+
+    expect(result.ok).toBe(true);
+    expect(existsSyncMock).toHaveBeenCalledWith(expect.stringMatching(/skills\/docs\/skills\/engineering\/code-reviewer\.md$/));
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('Vendored reviewer skill body.');
+  });
+});

@@ -303,11 +303,13 @@ describe('loadReviewPrompt — skill file handling', () => {
     return Promise.resolve({ exitCode, stdout, stderr });
   }
 
-  async function setup(fileContent: string | null) {
+  async function setup(fileContent: string | null, options: { useDefaultSkillPath?: boolean } = {}) {
     vi.resetModules();
     execMock = vi.fn().mockResolvedValue(resp(0, 'diff --git a/foo.ts b/foo.ts'));
     startJobMock = vi.fn().mockResolvedValue(1234);
-    existsSyncMock = vi.fn().mockReturnValue(fileContent !== null);
+    existsSyncMock = options.useDefaultSkillPath
+      ? vi.fn((path: string) => fileContent !== null && path.endsWith('/skills/docs/skills/engineering/code-reviewer.md'))
+      : vi.fn().mockReturnValue(fileContent !== null);
     readFileSyncMock = vi.fn().mockReturnValue(fileContent ?? '');
 
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
@@ -332,7 +334,13 @@ describe('loadReviewPrompt — skill file handling', () => {
       withBasePrompt: (s: string) => s,
       getPermissionModeFlag: () => '',
     }));
-    vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/skill/code-reviewer.md' }));
+    if (options.useDefaultSkillPath) {
+      vi.doMock('@/lib/skills/skills', async () => (
+        await vi.importActual<typeof import('@/lib/skills/skills')>('@/lib/skills/skills')
+      ));
+    } else {
+      vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/skill/code-reviewer.md' }));
+    }
     vi.doMock('fs', () => ({ existsSync: existsSyncMock, readFileSync: readFileSyncMock, mkdirSync: vi.fn(), appendFileSync: vi.fn() }));
 
     ({ startPrReview } = await import('@/lib/pipeline/start-pr-review'));
@@ -345,6 +353,14 @@ describe('loadReviewPrompt — skill file handling', () => {
     await startPrReview('proj', 1, 'Title', 'feat/1', 'main');
     const prompt: string = startJobMock.mock.calls[0][2];
     expect(prompt).toContain('This is the review skill content.');
+  });
+
+  it('loads the vendored code reviewer skill from the default path', async () => {
+    await setup('Vendored reviewer skill body.', { useDefaultSkillPath: true });
+    await startPrReview('proj', 1, 'Title', 'feat/1', 'main');
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(existsSyncMock).toHaveBeenCalledWith(expect.stringMatching(/skills\/docs\/skills\/engineering\/code-reviewer\.md$/));
+    expect(prompt).toContain('Vendored reviewer skill body.');
   });
 
   it('strips YAML frontmatter when skill file starts with ---', async () => {
