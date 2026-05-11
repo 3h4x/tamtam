@@ -247,6 +247,7 @@ export function ConfigTab({
               {testCronEnabledInput && (
                 <input
                   type="text"
+                  aria-label="Schedule interval"
                   className="ml-2 w-28 px-2 py-1 text-xs bg-bg-tertiary border border-border rounded text-text-primary font-mono"
                   value={testCronScheduleInput}
                   onChange={(e) => setTestCronScheduleInput(e.target.value)}
@@ -474,6 +475,7 @@ export function ConfigTab({
                 <div key={i} className="grid items-center gap-2" style={{ gridTemplateColumns: '9rem 1fr 2.5rem 2rem' }}>
                   <input
                     type="text"
+                    aria-label={`Action ${i + 1} label`}
                     className="px-2.5 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
                     value={action.name}
                     onChange={(e) => {
@@ -485,6 +487,7 @@ export function ConfigTab({
                   />
                   <input
                     type="text"
+                    aria-label={`Action ${i + 1} command`}
                     className="px-2.5 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
                     value={action.command}
                     onChange={(e) => {
