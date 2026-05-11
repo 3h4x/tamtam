@@ -282,6 +282,14 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_snapshot');
     expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_console_messages');
     expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_take_screenshot');
+    expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_wait_for');
+    expect(skill!.content).not.toMatch(/`browser_[^`]+`/);
+    expect(skill!.content).toContain('Clean up artifacts');
+    expect(skill!.content).toContain('Track every artifact path you create during the run');
+    expect(skill!.content).not.toContain('rm -f ./*.png');
+    expect(skill!.content).not.toContain('rm -rf ./.playwright-mcp ./test-results ./playwright-report');
+    expect(skill!.content).not.toContain('rm -rf ./test-results');
+    expect(skill!.content).not.toContain('rm -rf ./playwright-report');
     expect(skill!.content).toContain('/api/projects/by-project/<name>/config');
     expect(skill!.content).toContain('QA_NO_TARGET');
     // Agent fixes 1–2 small issues itself, reports the rest. No cto handoff.
@@ -338,7 +346,7 @@ describe('seedDefaultSkills', () => {
     expect(allIds.length).toBe(countAfterFirst + 1);
   });
 
-  it('skips inserting a skill that already exists with content', () => {
+  it('overwrites content and description on existing default skills (defaults are read-only)', () => {
     const now = Date.now() / 1000;
     testDb.db.insert(schema.skills).values({
       id: 'agent-cto',
@@ -352,9 +360,12 @@ describe('seedDefaultSkills', () => {
     seedFn();
 
     const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-cto');
+    // name is not part of the seed payload, so any prior value (including a
+    // pre-existing customisation from before the read-only switch) survives.
     expect(skill!.name).toBe('custom-name');
-    expect(skill!.content).toBe('custom-content');
-    expect(skill!.description).toBe('custom-desc');
+    expect(skill!.content).not.toBe('custom-content');
+    expect(skill!.content).toContain('CTO');
+    expect(skill!.description).not.toBe('custom-desc');
   });
 
   it('updates content and description for a skill that exists with empty content', () => {
@@ -768,7 +779,69 @@ Report a short summary: visited routes, findings handed off (with the cto job id
     expect(skill!.content).not.toContain('Use Playwright MCP tools (`browser_navigate`');
   });
 
-  it('preserves a user-customised skill (hash does not match a known default)', () => {
+  it('overwrites the qa-url-aware agent-qa default via known hash', () => {
+    const now = Date.now() / 1000;
+    const previousDefault = `You are the QA agent. Use Playwright MCP tools (\`mcp__plugin_playwright_playwright__browser_navigate\`, \`mcp__plugin_playwright_playwright__browser_snapshot\`, \`mcp__plugin_playwright_playwright__browser_click\`, \`mcp__plugin_playwright_playwright__browser_console_messages\`, \`mcp__plugin_playwright_playwright__browser_take_screenshot\`) to exercise the target and fix what you can.
+
+## 1. Resolve target URL
+- Project name = current repo directory name (the folder containing \`.git\`).
+- \`curl -s "http://localhost:1337/api/projects/by-project/<name>/config"\` and read both \`qa_url\` and \`website\`.
+- Prefer \`qa_url\` (explicit QA target, may be \`http://localhost:<port>\` for a locally-spun stack started by the agent's prerequisite); otherwise use \`website\` (public URL).
+- If both are empty, print \`QA_NO_TARGET\` and stop. Do not guess a URL.
+
+## 2. Explore
+- \`mcp__plugin_playwright_playwright__browser_navigate\` to the target root, then walk 3–6 primary routes (home, key feature pages, auth/dashboard if any).
+- For each route: \`mcp__plugin_playwright_playwright__browser_snapshot\`, click the most prominent CTA / open one form, check \`mcp__plugin_playwright_playwright__browser_console_messages\` for errors. Screenshot anything visually broken with \`mcp__plugin_playwright_playwright__browser_take_screenshot\`.
+- Stop after ~10 navigations or when nothing new surfaces.
+
+## 3. Triage
+Keep only: visible bugs, JS console errors, broken links, copy/UX errors, accessibility gaps, obvious feature gaps. Skip subjective taste calls and known good behavior. Cap findings at 5.
+
+## 4. Fix up to 2 small issues yourself
+Pick at most **1–2** findings that are clearly safe and small. Examples that qualify:
+- Typo, missing alt text, dead link, single CSS/copy tweak, an obvious null-guard
+- A console warning with an obvious local fix (chart minWidth/minHeight, missing key prop, prop typo) — **do not** treat these as "cosmetic" if the fix is one line in one file
+- A route that 404s but is **documented** in CLAUDE.md / README as if it exists → **delete that documentation reference** (do NOT scaffold the missing feature — that's the hard-stop "too large" case). The fix is a doc edit, not a new page.
+
+For each fix:
+- Edit the source files directly. Keep the diff minimal — one concern per fix, no opportunistic refactors.
+- Re-verify with Playwright (for code changes) or re-read the file (for doc edits) to confirm the fix landed.
+- Do not run \`git\` commands — TamTam's release pipeline handles version control. Just leave the changes uncommitted in the working tree.
+
+**Hard stop conditions — do NOT fix, just report:**
+- Anything touching auth, payments, db schema, migrations, infra, or contracts
+- Anything requiring more than ~30 lines of code change or touching >2 files (scaffolding a missing feature/route lands here — fix the docs instead per §4)
+- Anything where the right fix isn't obvious from a single read of the surrounding code
+- Anything you'd want a human review for before shipping
+
+## 5. Report
+Print a short summary at the end of your run:
+- Visited routes
+- **Fixes applied** (one line each, with file paths)
+- **Findings NOT fixed** (one line each, with route + symptom + why you skipped — too risky, too large, unclear root cause, etc.)
+
+Do NOT hand off to other agents and do NOT run \`gh issue create\`. Just leave the fixes in the worktree and report. The next QA run will see the same un-fixed findings via your memory file and can decide whether to take them on.`;
+
+    expect(sha256Prefix(previousDefault)).toBe('71c3483057adf226');
+
+    testDb.db.insert(schema.skills).values({
+      id: 'agent-qa',
+      name: 'agent:qa',
+      description: 'old',
+      content: previousDefault,
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+
+    seedFn();
+
+    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-qa');
+    expect(skill!.content).not.toBe(previousDefault);
+    expect(skill!.content).toContain('Explore — go deep, not just wide');
+    expect(skill!.content).toContain('Budget: up to 30 navigations');
+  });
+
+  it('overwrites a previously customised default skill (defaults are read-only)', () => {
     const now = Date.now() / 1000;
     const customised = 'You are the CTO. My custom instructions go here.';
     testDb.db.insert(schema.skills).values({
@@ -783,10 +856,10 @@ Report a short summary: visited routes, findings handed off (with the cto job id
     seedFn();
 
     const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-cto');
-    expect(skill!.content).toBe(customised);
+    expect(skill!.content).not.toBe(customised);
   });
 
-  it('does not modify updatedAt for skills that already have content', () => {
+  it('refreshes updatedAt every boot for default skills (always re-applied)', () => {
     const oldTime = 1_000_000;
     testDb.db.insert(schema.skills).values({
       id: 'agent-cto',
@@ -800,7 +873,7 @@ Report a short summary: visited routes, findings handed off (with the cto job id
     seedFn();
 
     const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-cto');
-    expect(skill!.updatedAt).toBe(oldTime);
+    expect(skill!.updatedAt).toBeGreaterThan(oldTime);
   });
 
   it('sets updatedAt to a recent timestamp when backfilling empty content', () => {

@@ -283,8 +283,8 @@ for (const project of projects) {
   upsertIssues.run(
     project.name,
     project.github,
-    JSON.stringify([{ number: 12, title: 'QA release pipeline smoke', url: `https://github.com/${project.github}/pull/12`, state: 'OPEN', headRefName: project.branch }]),
-    JSON.stringify([{ number: 34, title: 'Exercise terminal QA shim', url: `https://github.com/${project.github}/issues/34`, state: 'OPEN', labels: [{ name: 'tamtam' }] }]),
+    JSON.stringify([{ number: 12, title: 'QA release pipeline smoke', url: `https://github.com/${project.github}/pull/12`, state: 'OPEN', headRefName: project.branch, baseRefName: 'main', author: { login: 'qa-bot' }, createdAt: new Date(Date.now() - 3600000).toISOString(), updatedAt: new Date(Date.now() - 1800000).toISOString(), isDraft: false, reviewDecision: null, labels: [], body: '', statusCheckRollup: null }]),
+    JSON.stringify([{ number: 34, title: 'Exercise terminal QA shim', url: `https://github.com/${project.github}/issues/34`, state: 'OPEN', author: { login: 'qa-bot' }, createdAt: new Date(Date.now() - 7200000).toISOString(), updatedAt: new Date(Date.now() - 3600000).toISOString(), assignees: [], labels: [{ name: 'tamtam', color: '0075ca' }], body: '' }]),
     now,
   );
 }

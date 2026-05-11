@@ -572,7 +572,7 @@ describe('issue and PR client helpers', () => {
     const { fetchIssuesAndPRs } = await getClientApi();
 
     await expect(fetchIssuesAndPRs('myproj', true)).resolves.toEqual({ issues: [], pullRequests: [] });
-    expect((fetchMock.mock.calls[0] as [string])[0]).toContain('/by-project/myproj/issues?refresh=1');
+    expect((fetchMock.mock.calls[0] as [string])[0]).toContain('/by-project/myproj/issues?full=1&refresh=1');
 
     stubFetch(false, {}, 503, 'Service Unavailable');
     await expect(fetchIssuesAndPRs('myproj')).rejects.toThrow('Failed to fetch issues: Service Unavailable');

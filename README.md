@@ -76,8 +76,8 @@ Bare `/settings` redirects to `/settings/general`, and legacy `/jobs` redirects 
 | Pipeline behavior, commit/review rules, and model overrides | `/settings/pipeline` |
 | Project enablement | `/settings/projects` |
 | Agent templates | `/settings/templates` |
-| Per-project test commands | `/project/[name]/config` |
-| Custom actions | `/project/[name]/config` |
+| Per-project test commands | `/project/[name]/config` (Config tab) |
+| Custom actions | `/project/[name]/config` (Config tab) |
 | Notifications | `/settings/notifications` |
 | Database backup | `/settings/database` |
 
@@ -130,6 +130,6 @@ API routes are covered by vitest tests in `__tests__/api/`, often with combined 
 - Most CLI calls (git, gh, pm2, launchctl) go through `lib/shared/shell.ts`; a few specialized helpers use direct `child_process` spawning when they need tighter process control.
 - `lib/shared/project-data.ts` assembles project state with a 10s TTL cache
 - `instrumentation-node.ts` handles boot-time recovery, the 30s probe sweep, the 30s queued-agent recovery sweep, the 30s recovery reconcile sweep, the 5m auto-resume sweep, the 60s budget-recovery drain ticker, and nightly retention cleanup after startup
-- Project detail tabs live at `/project/[name]` and `/project/[name]/[tab]`
+- Project detail tabs live at `/project/[name]` and `/project/[name]/[tab]` (`overview`, `config`, `history`, `terminal`, `changes`, `issues`, `docs`, `agents`)
 - Streaming uses the selected provider's `stream-json` output → PM2 log file → `fs.watch` → NDJSON parser → SSE
 - See `docs/STREAMING.md` for the full terminal streaming architecture
