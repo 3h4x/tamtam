@@ -59,14 +59,14 @@ describe('readAgentMemory', () => {
     expect(result).toContain('Do thing B');
   });
 
-  it('truncates memory file contents to 1000 chars', () => {
+  it('truncates memory file contents to 2000 chars', () => {
     const memDir = join(tmpDir, 'agent-memory', 'proj');
     mkdirSync(memDir, { recursive: true });
     const longContent = 'x'.repeat(5000);
     writeFileSync(join(memDir, 'agent.md'), longContent);
     const result = readAgentMemory(tmpDir, 'proj', 'agent');
     expect(result).not.toBeNull();
-    expect(result!.length).toBe(1000);
+    expect(result!.length).toBe(2000);
   });
 });
 
@@ -105,10 +105,11 @@ describe('buildMemoryBlock', () => {
     expect(block).not.toContain('(empty');
   });
 
-  it('instructs agent to update the memory file', () => {
+  it('instructs agent to rewrite the memory file with the Write tool (no appending)', () => {
     const block = buildMemoryBlock('/path/to/memory.md', null);
-    expect(block).toContain('update the memory file');
-    expect(block).toContain('Write or Edit tools');
+    expect(block).toContain('rewrite the memory file');
+    expect(block).toContain('Write tool');
+    expect(block).toMatch(/do NOT append/);
   });
 
   it('mentions char limit', () => {

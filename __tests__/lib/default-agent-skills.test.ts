@@ -284,7 +284,10 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_take_screenshot');
     expect(skill!.content).toContain('/api/projects/by-project/<name>/config');
     expect(skill!.content).toContain('QA_NO_TARGET');
-    expect(skill!.content).toContain('QA_NO_CTO_AGENT');
+    // Agent fixes 1–2 small issues itself, reports the rest. No cto handoff.
+    expect(skill!.content).toMatch(/Fix up to 2/);
+    expect(skill!.content).toMatch(/Hard stop conditions/);
+    expect(skill!.content).not.toMatch(/cto agent|QA_NO_CTO/);
   });
 
   it('inserts agent-readme-sync with correct fields', () => {

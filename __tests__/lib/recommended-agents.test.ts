@@ -32,5 +32,8 @@ describe('RECOMMENDED_AGENTS', () => {
       featured: true,
       skillIds: ['agent-qa'],
     })
+    expect(agent?.description).toMatch(/fixes 1-2 small safe issues/i)
+    expect(agent?.description).toMatch(/reports the rest/i)
+    expect(agent?.description).not.toMatch(/cto|hand.?off|GitHub issue/i)
   })
 })

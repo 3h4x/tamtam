@@ -56,7 +56,7 @@ pnpm mcp:http <tool> [json_args]  # call local TamTam HTTP endpoints via .tamtam
 
 > `pnpm dev` is for active local debugging only — it runs foreground without PM2 and must not be left running as the long-lived server.
 
-> `pnpm dev:qa` builds `Dockerfile.qa` and starts a seeded TamTam instance at `http://localhost:1338`. It uses mocked `git`, `gh`, `pm2`, and provider shims plus an isolated SQLite database and workspace under the Compose volume.
+> `pnpm dev:qa` starts a seeded TamTam instance at `http://localhost:1338` with `next dev` inside Docker. The working tree is bind-mounted, so code edits are picked up by the dev watcher without rebuilding the image. It uses mocked `git`, `gh`, `pm2`, and provider shims plus an isolated SQLite database and workspace under Compose volumes.
 
 > `pnpm mcp:http` uses the sibling `mcp-http-tools` checkout by default; set `MCP_HTTP_TOOLS_DIR` if that repo lives elsewhere.
 

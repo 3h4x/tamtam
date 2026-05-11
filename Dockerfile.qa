@@ -15,11 +15,6 @@ RUN npm install -g pnpm@10.33.0
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --prod=false
 
-COPY . .
-RUN TAMTAM_DB_PATH=:memory: pnpm build
-
-ENV NODE_ENV=production
-
 EXPOSE 1338
 
-CMD ["sh", "-c", "node scripts/qa-seed.mjs && next start --port 1338 --hostname 0.0.0.0"]
+CMD ["sh", "-c", "pnpm install --frozen-lockfile --prod=false --config.confirm-modules-purge=false && node scripts/qa-seed.mjs && next dev --port 1338 --hostname 0.0.0.0"]

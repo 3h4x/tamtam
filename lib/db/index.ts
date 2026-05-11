@@ -126,6 +126,9 @@ try {
 try {
   sqlite.exec('ALTER TABLE projects ADD COLUMN website TEXT');
 } catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN qa_url TEXT');
+} catch {}
 
 // Migrate: add enabled column to agents if missing
 try {

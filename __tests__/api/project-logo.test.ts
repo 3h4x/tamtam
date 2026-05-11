@@ -12,7 +12,7 @@ describe('GET /api/projects/by-project/[projectName]/logo', () => {
     projectRoot = mkdtempSync(join(tmpdir(), 'tamtam-project-logo-'))
 
     vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn((projectName: string) => projectName === 'demo' ? projectRoot : null),
+      resolveProjectPath: vi.fn((projectName: string) => ['demo', 'r&d"'].includes(projectName) ? projectRoot : null),
     }))
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/logo/route')
@@ -55,10 +55,22 @@ describe('GET /api/projects/by-project/[projectName]/logo', () => {
     await expect(res.text()).resolves.toContain('<svg')
   })
 
-  it('returns 404 when no supported local logo is present', async () => {
+  it('returns a placeholder logo when no supported local logo is present', async () => {
     const res = await GET({} as Parameters<typeof GET>[0], { params: Promise.resolve({ projectName: 'demo' }) })
 
-    expect(res.status).toBe(404)
-    await expect(res.json()).resolves.toEqual({ detail: 'logo not found' })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Content-Type')).toBe('image/svg+xml')
+    await expect(res.text()).resolves.toContain('<svg')
+  })
+
+  it('does not interpolate project names into the placeholder SVG', async () => {
+    const projectName = 'r&d"'
+    const res = await GET({} as Parameters<typeof GET>[0], { params: Promise.resolve({ projectName }) })
+    const svg = await res.text()
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Content-Type')).toBe('image/svg+xml')
+    expect(svg).toContain('aria-label="Project logo"')
+    expect(svg).not.toContain(projectName)
   })
 })

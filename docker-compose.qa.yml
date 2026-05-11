@@ -6,7 +6,9 @@ services:
     ports:
       - "1338:1338"
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
+      NEXT_TELEMETRY_DISABLED: "1"
+      WATCHPACK_POLLING: "true"
       PORT: "1338"
       HOSTNAME: 0.0.0.0
       TAMTAM_ROOT: /app
@@ -17,7 +19,12 @@ services:
       SHIM_INACTIVITY_TIMEOUT_MS: "120000"
       PATH: /app/scripts/qa-mocks:/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
+      - .:/app
+      - tamtam-qa-node-modules:/app/node_modules
+      - tamtam-qa-next:/app/.next
       - tamtam-qa-data:/qa
 
 volumes:
   tamtam-qa-data:
+  tamtam-qa-node-modules:
+  tamtam-qa-next:

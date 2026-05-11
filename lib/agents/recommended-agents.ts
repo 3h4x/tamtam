@@ -110,7 +110,7 @@ export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
   },
   {
     name: 'qa',
-    description: 'Browses the project website with Playwright, clicks through the UI, and hands off bugs / errors / UX issues to the cto agent to file as GitHub issues.',
+    description: 'Browses the configured QA target with Playwright, fixes 1-2 small safe issues directly, and reports the rest.',
     model: 'normal',
     schedule: '24h',
     runner: 'pm2',
