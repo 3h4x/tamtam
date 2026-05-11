@@ -165,6 +165,17 @@ describe('probeJobStatus', () => {
       expect(saveToDbMock).toHaveBeenCalledWith(job);
     });
 
+    it('pid=0, age >= 30s, PM2 kind running with pid backfill failure → still running', async () => {
+      getJobStatusMock.mockResolvedValue({ status: 'running', exitCode: null });
+      getJobPidMock.mockRejectedValue(new Error('pm2 lookup failed'));
+      const job = makeJob({ kind: 'review', pid: 0, startedAt: Date.now() / 1000 - 60 });
+      const result = await probeJobStatus(job);
+      expect(result).toBe('running');
+      expect(job.pid).toBe(0);
+      expect(saveToDbMock).not.toHaveBeenCalled();
+      expect(markDoneMock).not.toHaveBeenCalled();
+    });
+
     it('pid=0, age >= 30s, PM2 kind done → marks done with exit code', async () => {
       getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
       const job = makeJob({ kind: 'review', pid: 0, startedAt: Date.now() / 1000 - 60 });
@@ -231,6 +242,15 @@ describe('probeJobStatus', () => {
     it('claude kind with timestamp-prefixed result line → parses correctly', async () => {
       const logPath = join(tempDir, 'job4.log');
       writeFileSync(logPath, `2024-01-15T10:00:00Z: {"type":"result","is_error":false}\n`);
+      const job = makeJob({ kind: 'fix', pid: 1234, logPath });
+      const result = await probeJobStatus(job);
+      expect(result).toBe('done');
+      expect(markDoneMock).toHaveBeenCalledWith(job, 0);
+    });
+
+    it("claude kind with malformed result line → treats parse failure as success", async () => {
+      const logPath = join(tempDir, 'job4b.log');
+      writeFileSync(logPath, `{"type":"result","is_error":false\n`);
       const job = makeJob({ kind: 'fix', pid: 1234, logPath });
       const result = await probeJobStatus(job);
       expect(result).toBe('done');
