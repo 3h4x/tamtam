@@ -44,7 +44,8 @@ function createTestDb() {
       last_push_at REAL,
       review_prompt_addendum TEXT,
       fix_prompt_addendum TEXT,
-      website TEXT
+      website TEXT,
+      qa_url TEXT
     );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };

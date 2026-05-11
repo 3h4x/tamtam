@@ -283,7 +283,7 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_console_messages');
     expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_take_screenshot');
     expect(skill!.content).toContain('/api/projects/by-project/<name>/config');
-    expect(skill!.content).toContain('QA_NO_WEBSITE');
+    expect(skill!.content).toContain('QA_NO_TARGET');
     expect(skill!.content).toContain('QA_NO_CTO_AGENT');
   });
 
