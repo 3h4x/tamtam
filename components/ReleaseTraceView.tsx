@@ -150,7 +150,7 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
       <div className="max-w-3xl mx-auto p-6">
         <ErrorState
           message={error}
-          hint={`Release id ${releaseId.slice(-12)}`}
+          hint={`Release id ${releaseId}`}
         />
       </div>
     )
