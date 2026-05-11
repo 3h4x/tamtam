@@ -229,8 +229,7 @@ describe('ReleaseTraceView', () => {
 
     await vi.waitFor(() => {
       expect(container.textContent).toContain('Release not found')
-      expect(container.textContent).toContain('Release id')
-      expect(container.textContent).toContain('sing-release')
+      expect(container.textContent).toContain('Release id missing-release')
     })
 
     unmount()
