@@ -1042,6 +1042,49 @@ describe('project board integration', () => {
     expect(storedMeta.itemId).toBe('ITEM_PR_FALLBACK');
   });
 
+  it('falls back to draft creation when item-add succeeds with an unparseable payload', async () => {
+    const job = makeJob({
+      id: 'run-issue-unparseable-add',
+      kind: 'run',
+      prompt: 'Fix issue 123',
+      ghIssueNumber: 123,
+      ghIssueRepo: '3h4x/tamtam',
+    });
+
+    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    resolveProjectPathMock.mockReturnValue('/tmp/repo');
+    getJobMock.mockImplementation((id: string) => (id === 'run-issue-unparseable-add' ? job : null));
+
+    const calls: string[][] = [];
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'git') return { exitCode: 0, stdout: 'main\n', stderr: '' };
+      if (args[0] === 'project' && args[1] === 'item-list') {
+        return { exitCode: 0, stdout: JSON.stringify({ items: [] }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-add') {
+        return { exitCode: 0, stdout: JSON.stringify({ item: null }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-create') {
+        return { exitCode: 0, stdout: JSON.stringify({ id: 'DI_FROM_FALLBACK' }), stderr: '' };
+      }
+      if (args[0] === 'project' && args[1] === 'item-edit') {
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true }), stderr: '' };
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
+    await syncJobToProjectBoard(job, 'manual', { requireConfigured: true });
+
+    const addCalls = calls.filter((entry) => entry[1] === 'project' && entry[2] === 'item-add');
+    expect(addCalls).toHaveLength(1);
+    const createCalls = calls.filter((entry) => entry[1] === 'project' && entry[2] === 'item-create');
+    expect(createCalls).toHaveLength(1);
+    const storedMeta = JSON.parse(job.contextMeta ?? '{}').githubBoard;
+    expect(storedMeta.itemId).toBe('DI_FROM_FALLBACK');
+  });
+
   it('recovers from a deleted board card by clearing the stored itemId and re-creating', async () => {
     const job = makeJob({
       id: 'run-deleted-card',
