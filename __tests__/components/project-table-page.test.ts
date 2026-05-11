@@ -97,6 +97,49 @@ describe('ProjectTablePage', () => {
     document.body.innerHTML = ''
   })
 
+  it('renders when localStorage is unavailable or malformed', async () => {
+    const localStorageDescriptor = Object.getOwnPropertyDescriptor(window, 'localStorage')
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        setItem: vi.fn(() => {
+          throw new Error('storage blocked')
+        }),
+      },
+    })
+
+    const fleet = createFleetHealth([
+      {
+        project: 'acme/widgets',
+        status: 'healthy',
+        tasks: [],
+        totalChanges: 0,
+        unpushed: 0,
+        unreviewedCount: 0,
+        lastRunAgo: null,
+      },
+    ])
+
+    let unmount: (() => void) | null = null
+    try {
+      const rendered = renderProjectTablePage({
+        fleet,
+        issueCounts: {},
+        loading: false,
+      })
+      unmount = rendered.unmount
+
+      await vi.waitFor(() => {
+        expect(rendered.container.textContent).toContain('acme/widgets')
+      })
+    } finally {
+      unmount?.()
+      if (localStorageDescriptor) {
+        Object.defineProperty(window, 'localStorage', localStorageDescriptor)
+      }
+    }
+  })
+
   it('shows a skeleton before sort hydration and during refreshes', async () => {
     const fleet = createFleetHealth([])
     const { container, rerender, unmount } = renderProjectTablePage({

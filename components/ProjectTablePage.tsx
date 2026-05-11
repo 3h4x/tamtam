@@ -15,6 +15,38 @@ import { subscribeToSettingsChanged } from '@/lib/shared/settings-events'
 type SortKey = 'project' | 'status' | 'changes' | 'last_run' | 'next_run' | 'ci'
 type SortDir = 'asc' | 'desc'
 
+const PROJECT_SORT_KEY_STORAGE = 'tamtam.projects.sortKey'
+const PROJECT_SORT_DIR_STORAGE = 'tamtam.projects.sortDir'
+const sortKeys = new Set<SortKey>(['project', 'status', 'changes', 'last_run', 'next_run', 'ci'])
+
+function getProjectSortStorage(): Storage | null {
+  if (typeof window === 'undefined') return null
+
+  try {
+    const storage = window.localStorage
+    if (!storage || typeof storage.getItem !== 'function' || typeof storage.setItem !== 'function') return null
+    return storage
+  } catch {
+    return null
+  }
+}
+
+function readProjectSortSetting(key: string): string | null {
+  try {
+    return getProjectSortStorage()?.getItem(key) ?? null
+  } catch {
+    return null
+  }
+}
+
+function writeProjectSortSetting(key: string, value: string) {
+  try {
+    getProjectSortStorage()?.setItem(key, value)
+  } catch {
+    // Sorting still works without persistence when storage is unavailable.
+  }
+}
+
 interface SchedulerEntry {
   agentId: string
   project: string
@@ -202,11 +234,11 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
   const [sortReady, setSortReady] = useState(false)
 
   useEffect(() => {
-    const savedKey = window.localStorage.getItem('tamtam.projects.sortKey')
-    const savedDir = window.localStorage.getItem('tamtam.projects.sortDir')
+    const savedKey = readProjectSortSetting(PROJECT_SORT_KEY_STORAGE)
+    const savedDir = readProjectSortSetting(PROJECT_SORT_DIR_STORAGE)
 
-    if (savedKey === 'project' || savedKey === 'status' || savedKey === 'changes' || savedKey === 'last_run' || savedKey === 'next_run' || savedKey === 'ci') {
-      setSortKey(savedKey)
+    if (savedKey && sortKeys.has(savedKey as SortKey)) {
+      setSortKey(savedKey as SortKey)
     }
     if (savedDir === 'asc' || savedDir === 'desc') {
       setSortDir(savedDir)
@@ -304,12 +336,12 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
 
   useEffect(() => {
     if (!sortReady) return
-    window.localStorage.setItem('tamtam.projects.sortKey', sortKey)
+    writeProjectSortSetting(PROJECT_SORT_KEY_STORAGE, sortKey)
   }, [sortKey, sortReady])
 
   useEffect(() => {
     if (!sortReady) return
-    window.localStorage.setItem('tamtam.projects.sortDir', sortDir)
+    writeProjectSortSetting(PROJECT_SORT_DIR_STORAGE, sortDir)
   }, [sortDir, sortReady])
 
   useEffect(() => {
