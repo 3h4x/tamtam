@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getQuotaForProvider, clearQuotaCache } from '@/lib/usage/quota';
+import { ProviderNotConfiguredError } from '@/lib/usage/quota-types';
 import { getSettings } from '@/lib/shared/config';
 import {
   scheduledBurnRateBlockedAcrossProviders,
@@ -23,6 +24,7 @@ function quotaErrorMessage(e: unknown): string {
   return msg;
 }
 
+
 export async function GET(request: NextRequest) {
   try {
     const snapshot = await getQuotaForProvider(providerFromRequest(request));
@@ -30,6 +32,9 @@ export async function GET(request: NextRequest) {
     const throttle = scheduledBurnRateBlockedAcrossProviders();
     return NextResponse.json({ ...snapshot, gateEnabled: gateEnabled(), schedulerThrottle: throttle });
   } catch (e) {
+    if (e instanceof ProviderNotConfiguredError) {
+      return NextResponse.json({ configured: false, error: quotaErrorMessage(e) });
+    }
     return NextResponse.json(
       { error: quotaErrorMessage(e) },
       { status: 502 }
@@ -45,6 +50,9 @@ export async function POST(request: NextRequest) {
     const throttle = scheduledBurnRateBlockedAcrossProviders();
     return NextResponse.json({ ...snapshot, gateEnabled: gateEnabled(), schedulerThrottle: throttle });
   } catch (e) {
+    if (e instanceof ProviderNotConfiguredError) {
+      return NextResponse.json({ configured: false, error: quotaErrorMessage(e) });
+    }
     return NextResponse.json(
       { error: quotaErrorMessage(e) },
       { status: 502 }

@@ -281,8 +281,9 @@ export function QuotaWidget({
       try {
         const query = provider === 'active' ? '' : `?provider=${provider}`
         const res = await fetch(`/api/usage/quota${query}`)
-        if (!res.ok) throw new Error((await res.json())?.error ?? `HTTP ${res.status}`)
-        return { snapshot: (await res.json()) as QuotaSnapshot, error: null }
+        const body = await res.json().catch(() => ({})) as Record<string, unknown>
+        if (!res.ok || body?.configured === false) throw new Error(String(body?.error ?? `HTTP ${res.status}`))
+        return { snapshot: body as unknown as QuotaSnapshot, error: null }
       } catch (e: unknown) {
         return {
           snapshot: null,

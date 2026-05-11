@@ -21,3 +21,12 @@ export interface QuotaSnapshot {
   fetchedAt: number;
   stale: boolean;
 }
+
+export class ProviderNotConfiguredError extends Error {
+  readonly provider: 'claude' | 'codex';
+  constructor(provider: 'claude' | 'codex', message: string) {
+    super(message);
+    this.name = 'ProviderNotConfiguredError';
+    this.provider = provider;
+  }
+}

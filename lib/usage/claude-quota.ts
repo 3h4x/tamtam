@@ -2,7 +2,7 @@ import { homedir } from 'os';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { exec } from '@/lib/shared/shell';
-import type { QuotaSnapshot, QuotaWindow } from '@/lib/usage/quota-types';
+import { ProviderNotConfiguredError, type QuotaSnapshot, type QuotaWindow } from '@/lib/usage/quota-types';
 
 interface CacheState {
   snapshot: QuotaSnapshot | null;
@@ -173,7 +173,7 @@ export async function getClaudeQuota(options: { force?: boolean } = {}): Promise
       const token = await readOauthToken();
       if (!token) {
         if (cache.snapshot) return { ...cache.snapshot, stale: true };
-        throw new Error('No Claude OAuth token available (keychain + ~/.claude/.credentials.json both missing)');
+        throw new ProviderNotConfiguredError('claude', 'No Claude OAuth token available (keychain + ~/.claude/.credentials.json both missing)');
       }
 
       const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
