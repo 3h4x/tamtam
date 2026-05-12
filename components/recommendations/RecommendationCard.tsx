@@ -30,6 +30,7 @@ export function RecommendationCard({
   showProjectLink,
 }: RecommendationCardProps) {
   const acceptable = AUTO_APPLICABLE_RECOMMENDATION_TYPES.has(item.type)
+  const actionLabel = item.title.trim() || typeLabel(item.type)
   return (
     <div className="border-b border-border last:border-b-0 p-3">
       <div className="flex items-start justify-between gap-3">
@@ -67,6 +68,7 @@ export function RecommendationCard({
               className="rounded bg-accent px-2 py-1 text-xs font-medium text-bg-primary hover:bg-accent/90 disabled:opacity-50"
               disabled={busy}
               onClick={onAccept}
+              aria-label={`Accept recommendation: ${actionLabel} (${item.project})`}
               title="Apply the suggested change automatically"
             >
               {busy ? 'applying…' : 'Accept'}
@@ -77,6 +79,7 @@ export function RecommendationCard({
             className="rounded border border-border bg-bg-tertiary px-2 py-1 text-xs text-text-secondary hover:text-text-primary disabled:opacity-50"
             disabled={busy}
             onClick={onDismiss}
+            aria-label={`Dismiss recommendation: ${actionLabel} (${item.project})`}
           >
             dismiss
           </button>
