@@ -229,4 +229,200 @@ describe('JobsPage', () => {
     expect(container.textContent).not.toContain('Board')
     unmount()
   })
+
+  it('shows the final resumed review step on release rows', async () => {
+    fetchJobsMock.mockResolvedValue({
+      jobs: [
+        {
+          id: 'release-1',
+          project: 'acme/widgets',
+          kind: 'release',
+          prompt: null,
+          pid: 1,
+          log_path: '/tmp/release-1.log',
+          status: 'done',
+          exit_code: 0,
+          started_at: 100,
+          finished_at: 250,
+          seen: true,
+        },
+        {
+          id: 'test-1',
+          project: 'acme/widgets',
+          kind: 'test',
+          prompt: null,
+          pid: 2,
+          log_path: '/tmp/test-1.log',
+          status: 'done',
+          exit_code: 0,
+          started_at: 110,
+          finished_at: 120,
+          seen: true,
+          parent_job_id: 'release-1',
+        },
+        {
+          id: 'review-1',
+          project: 'acme/widgets',
+          kind: 'review',
+          prompt: null,
+          pid: 3,
+          log_path: '/tmp/review-1.log',
+          status: 'done',
+          exit_code: 0,
+          started_at: 130,
+          finished_at: 140,
+          seen: true,
+          session_id: 'review-session',
+          verdict: 'NEEDS ATTENTION',
+          parent_job_id: 'test-1',
+        },
+        {
+          id: 'fix-1',
+          project: 'acme/widgets',
+          kind: 'fix',
+          prompt: null,
+          pid: 4,
+          log_path: '/tmp/fix-1.log',
+          status: 'done',
+          exit_code: 0,
+          started_at: 180,
+          finished_at: 200,
+          seen: true,
+          parent_job_id: 'review-1',
+        },
+        {
+          id: 'review-2',
+          project: 'acme/widgets',
+          kind: 'review',
+          prompt: null,
+          pid: 5,
+          log_path: '/tmp/review-2.log',
+          status: 'done',
+          exit_code: 0,
+          started_at: 230,
+          finished_at: 240,
+          seen: true,
+          session_id: 'review-session',
+          verdict: 'LGTM',
+          parent_job_id: 'fix-1',
+        },
+      ],
+      total: 5,
+      pendingReleaseProjects: [],
+    })
+
+    const { container, unmount } = renderJobsPage()
+
+    await vi.waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 200 })
+      expect(container.textContent).toContain('completed through review')
+    })
+
+    unmount()
+  })
+
+  it('expands resumed release steps in latest-activity order', async () => {
+    fetchJobsMock.mockResolvedValue({
+      jobs: [
+        {
+          id: 'release-1',
+          project: 'acme/widgets',
+          kind: 'release',
+          prompt: null,
+          pid: 1,
+          log_path: '/tmp/release-1.log',
+          status: 'done',
+          exit_code: 0,
+          started_at: 100,
+          finished_at: 250,
+          seen: true,
+        },
+        {
+          id: 'test-1',
+          project: 'acme/widgets',
+          kind: 'test',
+          prompt: null,
+          pid: 2,
+          log_path: '/tmp/test-1.log',
+          status: 'done',
+          exit_code: 0,
+          started_at: 110,
+          finished_at: 120,
+          seen: true,
+          parent_job_id: 'release-1',
+        },
+        {
+          id: 'review-1',
+          project: 'acme/widgets',
+          kind: 'review',
+          prompt: null,
+          pid: 3,
+          log_path: '/tmp/review-1.log',
+          status: 'done',
+          exit_code: 0,
+          started_at: 130,
+          finished_at: 140,
+          seen: true,
+          session_id: 'review-session',
+          verdict: 'NEEDS ATTENTION',
+          parent_job_id: 'test-1',
+        },
+        {
+          id: 'fix-1',
+          project: 'acme/widgets',
+          kind: 'fix',
+          prompt: null,
+          pid: 4,
+          log_path: '/tmp/fix-1.log',
+          status: 'done',
+          exit_code: 0,
+          started_at: 180,
+          finished_at: 200,
+          seen: true,
+          parent_job_id: 'review-1',
+        },
+        {
+          id: 'review-2',
+          project: 'acme/widgets',
+          kind: 'review',
+          prompt: null,
+          pid: 5,
+          log_path: '/tmp/review-2.log',
+          status: 'done',
+          exit_code: 0,
+          started_at: 230,
+          finished_at: 240,
+          seen: true,
+          session_id: 'review-session',
+          verdict: 'LGTM',
+          parent_job_id: 'fix-1',
+        },
+      ],
+      total: 5,
+      pendingReleaseProjects: [],
+    })
+
+    const { container, unmount } = renderJobsPage()
+
+    await vi.waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 200 })
+      expect(container.textContent).toContain('Release pipeline')
+    })
+
+    const expandButton = Array.from(container.querySelectorAll('button')).find((node) => node.getAttribute('title') === 'Expand steps')
+    if (!(expandButton instanceof HTMLButtonElement)) throw new Error('expand button not found')
+    expandButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      const text = container.textContent ?? ''
+      const testIndex = text.indexOf('Test run')
+      const fixIndex = text.indexOf('Auto-fix')
+      const reviewIndex = text.lastIndexOf('Code review')
+      expect(testIndex).toBeGreaterThanOrEqual(0)
+      expect(fixIndex).toBeGreaterThan(testIndex)
+      expect(reviewIndex).toBeGreaterThan(fixIndex)
+    })
+
+    unmount()
+  })
 })

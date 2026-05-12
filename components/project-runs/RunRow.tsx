@@ -22,6 +22,7 @@ export interface RunRowProps {
   expanded?: boolean
   onToggleExpand?: () => void
   summary?: string | null
+  progressLabel?: string | null
   actions?: React.ReactNode
   // Depth in the chain tree. 0 = top-level row, 1 = direct child of release,
   // 2 = grandchild (e.g. review under test), etc. Drives left padding and
@@ -120,7 +121,7 @@ function RowStateBadge({
   )
 }
 
-export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summary, actions, depth = 0, children }: RunRowProps) {
+export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summary, progressLabel, actions, depth = 0, children }: RunRowProps) {
   const isRunning = e.status === 'running'
   const effectiveRunning = entryIsRunning(e)
   const effectiveNeedsAttention = entryNeedsAttention(e)
@@ -139,6 +140,8 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
   const fileCount = modifiedFileCount(e.modifiedFiles)
   const durationLabel = formatDuration(e.startedAt, e.finishedAt)
   const startedLabel = formatAgo(e.startedAt)
+  const runSummary = (effectiveRunning ? null : e.workSummary)?.trim() || null
+  const liveDetail = (effectiveRunning ? (e.workSummary ?? e.subtitle) : null)?.trim() || null
   const statusBadge = (
     <RowStateBadge
       isRunning={effectiveRunning}
@@ -222,6 +225,31 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
               <div className="text-sm text-text-primary font-medium truncate group-hover:text-accent">
                 {e.title}
               </div>
+              {(progressLabel || runSummary || liveDetail || summary) && (
+                <div className="mt-1.5 space-y-1.5">
+                  {progressLabel && (
+                    <div className="flex items-center gap-2 text-[11px] font-mono text-accent">
+                      <span className="uppercase tracking-wider text-text-tertiary">step</span>
+                      <span>{progressLabel}</span>
+                    </div>
+                  )}
+                  {runSummary && (
+                    <div className="rounded-md border border-border bg-bg-primary/60 px-2 py-1.5 text-sm leading-5 text-text-secondary">
+                      {runSummary}
+                    </div>
+                  )}
+                  {!runSummary && liveDetail && (
+                    <div className="rounded-md border border-border bg-bg-primary/50 px-2 py-1 text-xs leading-5 text-text-secondary">
+                      {liveDetail}
+                    </div>
+                  )}
+                  {summary && (
+                    <div className="rounded-md border border-border bg-bg-primary/50 px-2 py-1 text-xs font-mono leading-5 text-text-secondary">
+                      {summary}
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                 {statusBadge}
                 {verdictBadge}
@@ -262,12 +290,8 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
             {e.turns > 1 && <span className="font-mono">{e.turns} turns</span>}
             {e.model && <MetaChip label="model" value={e.model} tone="accent" />}
             {e.navSessionId && <MetaChip label="session" value={`#${e.navSessionId.slice(0, 8)}`} />}
-            {summary && <span className="font-mono text-text-secondary">{summary}</span>}
             {e.releaseOutcome && !summary && <span className="font-mono text-text-secondary">{e.releaseOutcome.label}</span>}
             {e.subtitle && !summary && <span className="italic truncate">{e.subtitle}</span>}
-            {e.workSummary && e.bucket === 'agent' && (
-              <span className="text-text-secondary truncate">{e.workSummary}</span>
-            )}
             {fileCount > 0 && e.bucket === 'agent' && (
               <span className="font-mono rounded bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-secondary border border-border">
                 {fileCount} file{fileCount === 1 ? '' : 's'}

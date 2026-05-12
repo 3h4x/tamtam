@@ -10,6 +10,7 @@ import {
   dayLabel,
   entryNeedsAttention,
   groupReleaseChildren,
+  flattenReleaseChildren,
   flattenPipelineSteps,
 } from '@/components/project-runs/utils';
 import type { Entry } from '@/components/project-runs/utils';
@@ -575,5 +576,39 @@ describe('flattenPipelineSteps', () => {
     const result = flattenPipelineSteps([fix, push], 3);
     expect(result[0].depth).toBe(4);  // fix at baseDepth+1 = 4
     expect(result[1].depth).toBe(3);  // push at baseDepth = 3
+  });
+});
+
+describe('flattenReleaseChildren', () => {
+  it('orders merged review sessions by latest activity while keeping fixes indented', () => {
+    const test = {
+      ...makeStepEntry('test-1', 'test', 1000),
+      startedAt: 1000,
+      lastActivityAt: 1010,
+      finishedAt: 1010,
+    };
+    const review = {
+      ...makeStepEntry('review-1', 'review', 1020),
+      startedAt: 1020,
+      lastActivityAt: 1230,
+      finishedAt: 1240,
+      turns: 2,
+      _jobIds: ['review-1', 'review-2'],
+    };
+    const fix = {
+      ...makeStepEntry('fix-1', 'fix', 1180),
+      startedAt: 1180,
+      lastActivityAt: 1200,
+      finishedAt: 1200,
+      parentJobId: 'review-1',
+    };
+
+    const result = flattenReleaseChildren([test, review, fix], 1);
+
+    expect(result).toEqual([
+      { entry: test, depth: 1 },
+      { entry: fix, depth: 2 },
+      { entry: review, depth: 1 },
+    ]);
   });
 });

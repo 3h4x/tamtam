@@ -97,6 +97,50 @@ describe('RunRow', () => {
     unmount()
   })
 
+  it('renders finished run summaries in the main row body', () => {
+    const entry = makeEntry({
+      bucket: 'run',
+      kind: 'run',
+      title: 'Ship the release fix',
+      workSummary: 'Updated the pipeline view and stored a concise run report.',
+      subtitle: 'Initial prompt',
+      navSessionId: 'session-12345678',
+    })
+
+    const { container, unmount } = renderRow({
+      entry,
+      onClick: vi.fn(),
+    })
+
+    expect(container.textContent).toContain('Updated the pipeline view and stored a concise run report.')
+    unmount()
+  })
+
+  it('renders release progress labels above pipeline summaries', () => {
+    const entry = makeEntry({
+      kind: 'release',
+      bucket: 'release',
+      title: 'Release pipeline',
+      subtitle: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      navSessionId: null,
+      model: null,
+    })
+
+    const { container, unmount } = renderRow({
+      entry,
+      onClick: vi.fn(),
+      progressLabel: 'now: review',
+      summary: 'test ✓ · review …',
+    })
+
+    expect(container.textContent).toContain('stepnow: review')
+    expect(container.textContent).toContain('test ✓ · review …')
+    unmount()
+  })
+
   it('labels the metadata chip as started instead of live or last', () => {
     const entry = makeEntry({
       status: 'running',

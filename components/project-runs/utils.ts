@@ -718,7 +718,7 @@ export function buildReleaseSummary(children: Entry[], release?: Entry): string 
     return '(no steps)'
   }
   const parts: string[] = []
-  const sorted = [...children].sort((a, b) => a.startedAt - b.startedAt)
+  const sorted = sortPipelineEntriesByActivity(children)
   for (const c of sorted) {
     const name = c.kind === 'mark-dod' ? 'dod' : c.kind
     let mark = '…'
@@ -737,6 +737,72 @@ export function buildReleaseSummary(children: Entry[], release?: Entry): string 
   return parts.join(' · ')
 }
 
+function pipelineStepLabel(kind: string): string {
+  if (kind === 'mark-dod') return 'dod'
+  if (kind === 'pr-wait') return 'pr wait'
+  return kind
+}
+
+function sortPipelineEntriesByActivity(children: Entry[]): Entry[] {
+  return [...children].sort((a, b) => {
+    if (a.lastActivityAt !== b.lastActivityAt) return a.lastActivityAt - b.lastActivityAt
+    if (a.startedAt !== b.startedAt) return a.startedAt - b.startedAt
+    return 0
+  })
+}
+
+function releaseStepDepth(entry: Entry, baseDepth: number): number {
+  return entry.kind === 'fix' || entry.kind === 'fix-push'
+    ? baseDepth + 1
+    : baseDepth
+}
+
+export function buildReleaseProgressLabel(children: Entry[], release?: Entry): string | null {
+  if (children.length === 0) {
+    if (release?.status === 'running') return 'starting release'
+    if (release?.status === 'aborted') return 'release cancelled'
+    if (release?.status === 'done' && release.exitCode !== null && release.exitCode !== 0) {
+      return 'blocked before first step'
+    }
+    return null
+  }
+
+  const sorted = sortPipelineEntriesByActivity(children)
+  const running = [...sorted].reverse().find((child) => child.status === 'running')
+  if (running) return `now: ${pipelineStepLabel(running.kind)}`
+
+  const last = sorted[sorted.length - 1]
+  const lastLabel = pipelineStepLabel(last.kind)
+  if (release?.status === 'aborted') {
+    return last.status === 'aborted' ? `cancelled at ${lastLabel}` : `cancelled after ${lastLabel}`
+  }
+  if (last.status === 'aborted') return `cancelled at ${lastLabel}`
+
+  if (last.kind === 'review') {
+    if (last.verdict === 'LGTM') {
+      if (release?.status === 'done' && release.exitCode === 0) return 'completed through review'
+      return 'review passed'
+    }
+    if (last.verdict === 'NEEDS ATTENTION' || last.verdict === 'DO NOT SHIP') {
+      return 'stopped at review'
+    }
+    if (last.status === 'done' && last.exitCode === 0) return 'waiting for review verdict'
+  }
+
+  if (last.exitCode !== null && last.exitCode !== 0) return `failed at ${lastLabel}`
+  if (release?.status === 'running') return `waiting after ${lastLabel}`
+  if (release?.status === 'done' && release.exitCode === 0) return `completed through ${lastLabel}`
+  if (release && entryNeedsAttention(release)) return `stopped at ${lastLabel}`
+  return `last step: ${lastLabel}`
+}
+
+export function flattenReleaseChildren(children: Entry[], baseDepth: number): Array<{ entry: Entry; depth: number }> {
+  return sortPipelineEntriesByActivity(children).map((entry) => ({
+    entry,
+    depth: releaseStepDepth(entry, baseDepth),
+  }))
+}
+
 // Flatten the pipeline chain tree into a linear {entry, depth} list. Main
 // pipeline steps (test/review/commit/push/mark-dod/pr-wait) all appear at
 // `baseDepth`. fix/fix-push appear at baseDepth+1 so they read as an
@@ -747,8 +813,7 @@ export function flattenPipelineSteps(roots: Entry[], baseDepth: number): Array<{
   const result: Array<{ entry: Entry; depth: number }> = []
   const walk = (nodes: Entry[], stepDepth: number) => {
     for (const node of nodes) {
-      const isFix = node.kind === 'fix' || node.kind === 'fix-push'
-      result.push({ entry: node, depth: isFix ? stepDepth + 1 : stepDepth })
+      result.push({ entry: node, depth: releaseStepDepth(node, stepDepth) })
       walk(node.chainedChildren ?? [], baseDepth)
     }
   }
