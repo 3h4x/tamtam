@@ -57,22 +57,22 @@ export function ToolbarDropdown<V extends string>({
       <div className="relative">
         <button
           type="button"
-          className={`toolbar-tab${open ? ' active' : ''}`}
+          className={`toolbar-tab toolbar-dropdown-trigger${open ? ' active' : ''}`}
           onClick={() => !disabled && setOpen(v => !v)}
           disabled={disabled}
           title={disabled ? disabledTitle : current?.description || current?.label}
           aria-haspopup="listbox"
           aria-expanded={open}
         >
-          <span className="lowercase">{current?.label ?? value}</span>
+          <span className="lowercase leading-none">{current?.label ?? value}</span>
           <svg
-            width="8"
-            height="8"
-            viewBox="0 0 8 8"
+            width="9"
+            height="9"
+            viewBox="0 0 10 10"
             aria-hidden="true"
-            className="text-text-tertiary/70 shrink-0"
+            className="text-text-tertiary/80 shrink-0 translate-y-px"
           >
-            <path d="M1.5 3 L4 5.5 L6.5 3" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M2.5 4 L5 6.5 L7.5 4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
         {open && (
