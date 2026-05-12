@@ -258,7 +258,7 @@ export function QuotaWidget({
   providers = [...BUDGET_SUBSCRIPTION_PROVIDERS],
   warnAt = 80,
   blockAt = 95,
-  refreshSeconds = 60,
+  refreshSeconds = 300,
   compact = false,
 }: {
   providers?: BudgetSubscriptionProvider[]

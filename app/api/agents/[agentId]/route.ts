@@ -4,6 +4,8 @@ import { db, schema } from '@/lib/db';
 import { installAgentSchedule, uninstallAgentSchedule } from '@/lib/scheduling/agent-scheduler';
 import { errMsg } from '@/lib/shared/types';
 import { clearAgentsCache, normalizeAgent } from '@/lib/agents/agents-cache';
+import { findAgentNameConflict } from '@/lib/agents/agent-conflicts';
+import { normalizeAgentNameInput } from '@/lib/agents/agent-name';
 import { parseFileAgentId, loadFileAgent, writeFileAgent, deleteFileAgent } from '@/lib/agents/tamtam-file-agents';
 import { setFileAgentOverride, deleteFileAgentOverride } from '@/lib/agents/file-agent-overrides';
 import { resolveProjectPath } from '@/lib/shared/project-data';
@@ -119,9 +121,25 @@ export async function PATCH(
   const oldName = existing.name;
   const oldProject = existing.project;
   const oldRunner = existing.runner;
+  let nextName = existing.name;
+
+  if (body.name !== undefined) {
+    const parsedName = normalizeAgentNameInput(body.name);
+    if (parsedName.error) {
+      return NextResponse.json({ detail: parsedName.error }, { status: 400 });
+    }
+    nextName = parsedName.name!;
+    const conflict = findAgentNameConflict(existing.project, nextName, {
+      excludeDbAgentId: existing.id,
+      excludeFileAgentName: existing.name,
+    });
+    if (conflict) {
+      return NextResponse.json({ detail: `agent '${nextName}' already exists for ${existing.project}` }, { status: 409 });
+    }
+  }
 
   const updates: Record<string, unknown> = { updatedAt: Date.now() / 1000 };
-  if (body.name !== undefined) updates.name = body.name.trim();
+  if (body.name !== undefined) updates.name = nextName;
   if (body.skillIds !== undefined) updates.skillIds = JSON.stringify(body.skillIds);
   if (body.docPaths !== undefined) updates.docPaths = JSON.stringify(body.docPaths);
   if (body.model !== undefined) updates.model = parsedModel ?? 'normal';
@@ -143,6 +161,9 @@ export async function PATCH(
     const projPath = resolveProjectPath(agent.project);
     if (projPath) {
       try {
+        if (oldName !== agent.name) {
+          deleteFileAgent(projPath, oldName);
+        }
         const skillIds: string[] = JSON.parse(agent.skillIds || '[]');
         writeFileAgent(projPath, agent.project, agent.name, {
           prompt: agent.prompt,

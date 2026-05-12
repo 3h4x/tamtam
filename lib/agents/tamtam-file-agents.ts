@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { getBranchContext, gitLsTreeSync, gitShowSync } from '@/lib/git/git-branch';
 import { getFileAgentOverride } from '@/lib/agents/file-agent-overrides';
+import { canonicalAgentNameKey, canonicalizeAgentName, getAgentNameValidationError } from '@/lib/agents/agent-name';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { normalizeStoredPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
@@ -215,8 +216,10 @@ export function loadFileAgent(
   projectName: string,
   agentName: string
 ): FileAgent | null {
+  const canonicalAgentName = canonicalizeAgentName(agentName);
+  if (getAgentNameValidationError(canonicalAgentName)) return null;
   const ctx = getBranchContext(projectPath);
-  const filePath = join(projectPath, '.tamtam', 'agents', `${agentName}.md`);
+  const filePath = join(projectPath, '.tamtam', 'agents', `${canonicalAgentName}.md`);
   const now = Date.now() / 1000;
 
   if (!ctx.isDefaultBranch) {
@@ -225,17 +228,17 @@ export function loadFileAgent(
     const content = gitShowSync(
       projectPath,
       `origin/${ctx.defaultBranch}`,
-      `.tamtam/agents/${agentName}.md`
+      `.tamtam/agents/${canonicalAgentName}.md`
     );
     if (content === null) return null;
-    return buildFileAgent(filePath, agentName, projectName, content, now);
+    return buildFileAgent(filePath, canonicalAgentName, projectName, content, now);
   }
 
   if (!existsSync(filePath)) return null;
 
   try {
     const content = readFileSync(filePath, 'utf-8');
-    return buildFileAgent(filePath, agentName, projectName, content, now);
+    return buildFileAgent(filePath, canonicalAgentName, projectName, content, now);
   } catch {
     return null;
   }
@@ -252,9 +255,12 @@ export function writeFileAgent(
   agentName: string,
   updates: FileAgentUpdates
 ): FileAgent {
+  const canonicalAgentName = canonicalizeAgentName(agentName);
+  const nameError = getAgentNameValidationError(canonicalAgentName);
+  if (nameError) throw new Error(nameError);
   const dir = join(projectPath, '.tamtam', 'agents');
   mkdirSync(dir, { recursive: true });
-  const filePath = join(dir, `${agentName}.md`);
+  const filePath = join(dir, `${canonicalAgentName}.md`);
 
   // Load current values from the working-tree file (if it exists) to preserve unset fields.
   // We intentionally read from disk here even on a feature branch, because the user may have
@@ -263,7 +269,7 @@ export function writeFileAgent(
     ? (() => {
         try {
           const content = readFileSync(filePath, 'utf-8');
-          return buildFileAgent(filePath, agentName, projectName, content, Date.now() / 1000);
+          return buildFileAgent(filePath, canonicalAgentName, projectName, content, Date.now() / 1000);
         } catch {
           return null;
         }
@@ -272,7 +278,7 @@ export function writeFileAgent(
   // On feature branches the effective agent may come from origin/<default>
   // even when the working-tree file does not exist yet. Fall back to that
   // view so provider-only metadata edits don't wipe the committed prompt.
-  const current = currentFromDisk ?? loadFileAgent(projectPath, projectName, agentName);
+  const current = currentFromDisk ?? loadFileAgent(projectPath, projectName, canonicalAgentName);
 
   const model = normalizeModelInput(updates.model ?? current?.model, 'normal');
   const rawSchedule = updates.schedule !== undefined ? updates.schedule : (current?.schedule ?? null);
@@ -292,14 +298,57 @@ export function writeFileAgent(
   const content = serializeAgent(provider, model, schedule, skillIds, runner, enabled, prompt, prerequisiteCommand);
   writeFileSync(filePath, content);
 
-  return buildFileAgent(filePath, agentName, projectName, content, Date.now() / 1000);
+  return buildFileAgent(filePath, canonicalAgentName, projectName, content, Date.now() / 1000);
+}
+
+/**
+ * Rename .tamtam/agents/<oldName>.md to <newName>.md after applying updates.
+ * Uses a two-step temp rename for case-only renames so case-insensitive
+ * filesystems do not delete or alias the just-written file.
+ */
+export function renameFileAgent(
+  projectPath: string,
+  projectName: string,
+  oldName: string,
+  newName: string,
+  updates: FileAgentUpdates
+): FileAgent {
+  const canonicalOldName = canonicalizeAgentName(oldName);
+  const canonicalNewName = canonicalizeAgentName(newName);
+  const nameError = getAgentNameValidationError(canonicalNewName);
+  if (nameError) throw new Error(nameError);
+
+  const updated = writeFileAgent(projectPath, projectName, canonicalOldName, updates);
+  if (canonicalOldName === canonicalNewName) return updated;
+
+  const dir = join(projectPath, '.tamtam', 'agents');
+  const oldPath = join(dir, `${canonicalOldName}.md`);
+  const newPath = join(dir, `${canonicalNewName}.md`);
+
+  if (!existsSync(oldPath)) {
+    throw new Error(`agent '${canonicalOldName}' not found`);
+  }
+  if (canonicalAgentNameKey(canonicalOldName) === canonicalAgentNameKey(canonicalNewName)) {
+    const tempPath = join(dir, `.${canonicalOldName}.rename-${process.pid}-${Date.now()}.md`);
+    renameSync(oldPath, tempPath);
+    renameSync(tempPath, newPath);
+  } else {
+    if (existsSync(newPath)) {
+      throw new Error(`agent '${canonicalNewName}' already exists`);
+    }
+    renameSync(oldPath, newPath);
+  }
+
+  const content = readFileSync(newPath, 'utf-8');
+  return buildFileAgent(newPath, canonicalNewName, projectName, content, Date.now() / 1000);
 }
 
 /**
  * Delete .tamtam/agents/<name>.md. No-op if the file doesn't exist.
  */
 export function deleteFileAgent(projectPath: string, agentName: string): void {
-  const filePath = join(projectPath, '.tamtam', 'agents', `${agentName}.md`);
+  const canonicalAgentName = canonicalizeAgentName(agentName);
+  const filePath = join(projectPath, '.tamtam', 'agents', `${canonicalAgentName}.md`);
   if (existsSync(filePath)) {
     try { unlinkSync(filePath); } catch {}
   }

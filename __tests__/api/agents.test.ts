@@ -65,9 +65,12 @@ describe('agents API', () => {
   let DELETE: any;
   let installAgentScheduleMock: ReturnType<typeof vi.fn>;
   let uninstallAgentScheduleMock: ReturnType<typeof vi.fn>;
+  let scanFileAgentsMock: ReturnType<typeof vi.fn>;
+  let renameFileAgentMock: ReturnType<typeof vi.fn>;
   let parseFileAgentIdMock: ReturnType<typeof vi.fn>;
   let loadFileAgentMock: ReturnType<typeof vi.fn>;
   let writeFileAgentMock: ReturnType<typeof vi.fn>;
+  let deleteFileAgentMock: ReturnType<typeof vi.fn>;
   let setFileAgentOverrideMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
 
@@ -96,6 +99,7 @@ describe('agents API', () => {
 
     vi.doMock('@/lib/agents/tamtam-file-agents', () => ({
       scanFileAgents: vi.fn().mockReturnValue([]),
+      renameFileAgent: vi.fn().mockReturnValue(null),
       loadFileAgent: vi.fn().mockReturnValue(null),
       parseFileAgentId: vi.fn().mockReturnValue(null),
       writeFileAgent: vi.fn().mockReturnValue(null),
@@ -109,9 +113,12 @@ describe('agents API', () => {
 
     // Capture mock function references so individual tests can override return values
     const fileAgentsMod = await import('@/lib/agents/tamtam-file-agents');
+    scanFileAgentsMock = fileAgentsMod.scanFileAgents as ReturnType<typeof vi.fn>;
+    renameFileAgentMock = fileAgentsMod.renameFileAgent as ReturnType<typeof vi.fn>;
     parseFileAgentIdMock = fileAgentsMod.parseFileAgentId as ReturnType<typeof vi.fn>;
     loadFileAgentMock = fileAgentsMod.loadFileAgent as ReturnType<typeof vi.fn>;
     writeFileAgentMock = fileAgentsMod.writeFileAgent as ReturnType<typeof vi.fn>;
+    deleteFileAgentMock = fileAgentsMod.deleteFileAgent as ReturnType<typeof vi.fn>;
     const fileAgentOverridesMod = await import('@/lib/agents/file-agent-overrides');
     setFileAgentOverrideMock = fileAgentOverridesMod.setFileAgentOverride as ReturnType<typeof vi.fn>;
     const projectDataMod = await import('@/lib/shared/project-data');
@@ -346,6 +353,20 @@ describe('agents API', () => {
       expect(data.detail).toContain('required');
     });
 
+    it('rejects unsafe agent names on create', async () => {
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'bad/name', project: 'proj1' }),
+      });
+
+      const response = await POST(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('slashes'),
+      });
+    });
+
     it('trims whitespace from name and project', async () => {
       const request = new NextRequest('http://localhost/api/agents', {
         method: 'POST',
@@ -357,6 +378,130 @@ describe('agents API', () => {
 
       expect(data.agent.name).toBe('Agent');
       expect(data.agent.project).toBe('proj1');
+    });
+
+    it('rejects duplicate agent names within the same project', async () => {
+      const now = Date.now() / 1000;
+      testDb.db.insert(schema.agents).values({
+        id: 'agent-existing',
+        name: 'Agent',
+        project: 'proj1',
+        skillIds: '[]',
+        model: 'normal',
+        prompt: '',
+        schedule: null,
+        runner: 'pm2',
+        createdAt: now,
+        updatedAt: now,
+      }).run();
+
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: ' Agent ', project: 'proj1' }),
+      });
+
+      const response = await POST(request);
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('already exists'),
+      });
+    });
+
+    it('rejects case-only duplicate agent names within the same project', async () => {
+      const now = Date.now() / 1000;
+      testDb.db.insert(schema.agents).values({
+        id: 'agent-existing',
+        name: 'Agent',
+        project: 'proj1',
+        skillIds: '[]',
+        model: 'normal',
+        prompt: '',
+        schedule: null,
+        runner: 'pm2',
+        createdAt: now,
+        updatedAt: now,
+      }).run();
+
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'agent', project: 'proj1' }),
+      });
+
+      const response = await POST(request);
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('already exists'),
+      });
+    });
+
+    it('rejects duplicate names when a file agent already exists for the project', async () => {
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/proj1');
+      scanFileAgentsMock.mockReturnValueOnce([{
+        id: 'file:proj1:Agent',
+        name: 'Agent',
+        project: 'proj1',
+        skillIds: [],
+        docPaths: [],
+        model: 'normal',
+        prompt: '',
+        schedule: null,
+        runner: 'pm2',
+        enabled: true,
+        provider: null,
+        prerequisiteCommand: null,
+        createdAt: 0,
+        updatedAt: 0,
+        source: 'file' as const,
+        filePath: '/path/to/proj1/.tamtam/agents/Agent.md',
+      }]);
+
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Agent', project: 'proj1' }),
+      });
+
+      const response = await POST(request);
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('already exists'),
+      });
+    });
+
+    it('rejects case-only duplicates when a file agent already exists for the project', async () => {
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/proj1');
+      scanFileAgentsMock.mockReturnValueOnce([{
+        id: 'file:proj1:Agent',
+        name: 'Agent',
+        project: 'proj1',
+        skillIds: [],
+        docPaths: [],
+        model: 'normal',
+        prompt: '',
+        schedule: null,
+        runner: 'pm2',
+        enabled: true,
+        provider: null,
+        prerequisiteCommand: null,
+        createdAt: 0,
+        updatedAt: 0,
+        source: 'file' as const,
+        filePath: '/path/to/proj1/.tamtam/agents/Agent.md',
+      }]);
+
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'agent', project: 'proj1' }),
+      });
+
+      const response = await POST(request);
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('already exists'),
+      });
     });
 
     it('uses default model and runner if not provided', async () => {
@@ -674,6 +819,227 @@ describe('agents API', () => {
       expect(response.status).toBe(200);
       const data = await response.json();
       expect(data.agent.name).toBe('New Name');
+    });
+
+    it('rejects unsafe agent names on update', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Old Name',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: '',
+          schedule: null,
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const response = await PATCH(new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'bad/name' }),
+      }), {
+        params: Promise.resolve({ agentId: 'agent-123' }),
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('slashes'),
+      });
+    });
+
+    it('rejects duplicate agent names on update', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Old Name',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: '',
+          schedule: null,
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-456',
+          name: 'Taken',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: '',
+          schedule: null,
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const response = await PATCH(new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ name: ' Taken ' }),
+      }), {
+        params: Promise.resolve({ agentId: 'agent-123' }),
+      });
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('already exists'),
+      });
+    });
+
+    it('rejects case-only duplicate agent names on update', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Old Name',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: '',
+          schedule: null,
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-456',
+          name: 'Taken',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: '',
+          schedule: null,
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const response = await PATCH(new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'taken' }),
+      }), {
+        params: Promise.resolve({ agentId: 'agent-123' }),
+      });
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('already exists'),
+      });
+    });
+
+    it('rejects names that collide with file agents on update', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Old Name',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: '',
+          schedule: null,
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/proj1');
+      scanFileAgentsMock.mockReturnValueOnce([{
+        id: 'file:proj1:Taken',
+        name: 'Taken',
+        project: 'proj1',
+        skillIds: [],
+        docPaths: [],
+        model: 'normal',
+        prompt: '',
+        schedule: null,
+        runner: 'pm2',
+        enabled: true,
+        provider: null,
+        prerequisiteCommand: null,
+        createdAt: 0,
+        updatedAt: 0,
+        source: 'file' as const,
+        filePath: '/path/to/proj1/.tamtam/agents/Taken.md',
+      }]);
+
+      const response = await PATCH(new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'Taken' }),
+      }), {
+        params: Promise.resolve({ agentId: 'agent-123' }),
+      });
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('already exists'),
+      });
+    });
+
+    it('rejects case-only names that collide with file agents on update', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      db.insert(schema.agents)
+        .values({
+          id: 'agent-123',
+          name: 'Old Name',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: '',
+          schedule: null,
+          runner: 'pm2',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/proj1');
+      scanFileAgentsMock.mockReturnValueOnce([{
+        id: 'file:proj1:Taken',
+        name: 'Taken',
+        project: 'proj1',
+        skillIds: [],
+        docPaths: [],
+        model: 'normal',
+        prompt: '',
+        schedule: null,
+        runner: 'pm2',
+        enabled: true,
+        provider: null,
+        prerequisiteCommand: null,
+        createdAt: 0,
+        updatedAt: 0,
+        source: 'file' as const,
+        filePath: '/path/to/proj1/.tamtam/agents/Taken.md',
+      }]);
+
+      const response = await PATCH(new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'taken' }),
+      }), {
+        params: Promise.resolve({ agentId: 'agent-123' }),
+      });
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('already exists'),
+      });
     });
 
     it('updates agent model and prompt', async () => {
@@ -1460,6 +1826,17 @@ describe('agents API', () => {
       expect(res.status).toBe(400);
     });
 
+    it('rejects unsafe lookup names by project+name', async () => {
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'bad/name', prompt: 'x' }),
+      }));
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('slashes'),
+      });
+    });
+
     it('returns 404 when no agent matches project+name', async () => {
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
         method: 'PATCH',
@@ -1477,6 +1854,150 @@ describe('agents API', () => {
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.agent.prompt).toBe('improved prompt');
+    });
+
+    it('looks up DB agents by project+name case-insensitively', async () => {
+      seedAgent(testDb.db);
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'self', prompt: 'improved prompt' }),
+      }));
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.agent.prompt).toBe('improved prompt');
+      expect(data.agent.name).toBe('Self');
+    });
+
+    it('renames DB agents with currentName + name', async () => {
+      seedAgent(testDb.db);
+      resolveProjectPathMock.mockReturnValue('/path/to/myproj');
+
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', currentName: 'Self', name: 'Renamed', prompt: 'improved prompt' }),
+      }));
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.agent.name).toBe('Renamed');
+      expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'Renamed', expect.anything());
+    });
+
+    it('renames file agents with currentName + name', async () => {
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      scanFileAgentsMock.mockReturnValueOnce([{
+        id: 'file:myproj:Self',
+        name: 'Self',
+        project: 'myproj',
+        skillIds: [],
+        docPaths: [],
+        model: 'normal',
+        prompt: 'original prompt',
+        schedule: null,
+        runner: 'pm2',
+        enabled: true,
+        provider: null,
+        prerequisiteCommand: null,
+        createdAt: 0,
+        updatedAt: 0,
+        source: 'file' as const,
+        filePath: '/path/to/myproj/.tamtam/agents/Self.md',
+      }]);
+      renameFileAgentMock.mockReturnValueOnce({
+        id: 'file:myproj:Renamed',
+        name: 'Renamed',
+        project: 'myproj',
+        skillIds: [],
+        docPaths: [],
+        model: 'normal',
+        prompt: 'renamed prompt',
+        schedule: null,
+        runner: 'pm2',
+        enabled: true,
+        provider: null,
+        prerequisiteCommand: null,
+        createdAt: 0,
+        updatedAt: 0,
+        source: 'file' as const,
+        filePath: '/path/to/myproj/.tamtam/agents/Renamed.md',
+      });
+
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', currentName: 'Self', name: 'Renamed', prompt: 'renamed prompt' }),
+      }));
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.agent.name).toBe('Renamed');
+      expect(renameFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'Self', 'Renamed', expect.anything());
+    });
+
+    it('renames file agents safely when only the case changes', async () => {
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      scanFileAgentsMock.mockReturnValueOnce([{
+        id: 'file:myproj:Self',
+        name: 'Self',
+        project: 'myproj',
+        skillIds: [],
+        docPaths: [],
+        model: 'normal',
+        prompt: 'original prompt',
+        schedule: null,
+        runner: 'pm2',
+        enabled: true,
+        provider: null,
+        prerequisiteCommand: null,
+        createdAt: 0,
+        updatedAt: 0,
+        source: 'file' as const,
+        filePath: '/path/to/myproj/.tamtam/agents/Self.md',
+      }]);
+      renameFileAgentMock.mockReturnValueOnce({
+        id: 'file:myproj:self',
+        name: 'self',
+        project: 'myproj',
+        skillIds: [],
+        docPaths: [],
+        model: 'normal',
+        prompt: 'renamed prompt',
+        schedule: null,
+        runner: 'pm2',
+        enabled: true,
+        provider: null,
+        prerequisiteCommand: null,
+        createdAt: 0,
+        updatedAt: 0,
+        source: 'file' as const,
+        filePath: '/path/to/myproj/.tamtam/agents/self.md',
+      });
+
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', currentName: 'Self', name: 'self', prompt: 'renamed prompt' }),
+      }));
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.agent.name).toBe('self');
+      expect(renameFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'Self', 'self', expect.anything());
+      expect(writeFileAgentMock).not.toHaveBeenCalled();
+      expect(deleteFileAgentMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects case-only rename conflicts by project+name', async () => {
+      seedAgent(testDb.db);
+      seedAgent(testDb.db, { id: 'agent-other', name: 'Taken' });
+
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', currentName: 'Self', name: 'taken' }),
+      }));
+
+      expect(res.status).toBe(409);
+      await expect(res.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('already exists'),
+      });
     });
 
     it('updates prerequisiteCommand by project+name for DB agents', async () => {
@@ -1679,7 +2200,7 @@ describe('agents API', () => {
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
       resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
-      loadFileAgentMock.mockReturnValueOnce(fakeAgent);
+      scanFileAgentsMock.mockReturnValueOnce([fakeAgent]);
       writeFileAgentMock.mockReturnValueOnce(fakeAgent);
 
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
@@ -1702,7 +2223,7 @@ describe('agents API', () => {
       };
       const updatedAgent = { ...existingAgent, prerequisiteCommand: 'echo fresh' };
       resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
-      loadFileAgentMock.mockReturnValueOnce(existingAgent);
+      scanFileAgentsMock.mockReturnValueOnce([existingAgent]);
       writeFileAgentMock.mockReturnValueOnce(updatedAgent);
 
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
@@ -1718,12 +2239,12 @@ describe('agents API', () => {
       const data = await res.json();
       expect(data.agent.prerequisiteCommand).toBe('echo fresh');
       expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'my-agent', {
-        prompt: undefined,
-        model: undefined,
-        schedule: undefined,
-        skillIds: undefined,
-        runner: undefined,
-        enabled: undefined,
+        prompt: 'updated',
+        model: 'sonnet',
+        schedule: null,
+        skillIds: [],
+        runner: 'pm2',
+        enabled: true,
         provider: undefined,
         prerequisiteCommand: 'echo fresh',
       });
@@ -1739,7 +2260,7 @@ describe('agents API', () => {
       };
       const updatedAgent = { ...existingAgent, prerequisiteCommand: null };
       resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
-      loadFileAgentMock.mockReturnValueOnce(existingAgent);
+      scanFileAgentsMock.mockReturnValueOnce([existingAgent]);
       writeFileAgentMock.mockReturnValueOnce(updatedAgent);
 
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
@@ -1755,12 +2276,12 @@ describe('agents API', () => {
       const data = await res.json();
       expect(data.agent.prerequisiteCommand).toBeNull();
       expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'my-agent', {
-        prompt: undefined,
-        model: undefined,
-        schedule: undefined,
-        skillIds: undefined,
-        runner: undefined,
-        enabled: undefined,
+        prompt: 'updated',
+        model: 'sonnet',
+        schedule: null,
+        skillIds: [],
+        runner: 'pm2',
+        enabled: true,
         provider: undefined,
         prerequisiteCommand: '',
       });
@@ -1776,7 +2297,7 @@ describe('agents API', () => {
       };
       const updatedAgent = { ...existingAgent, prerequisiteCommand: '' };
       resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
-      loadFileAgentMock.mockReturnValueOnce(existingAgent);
+      scanFileAgentsMock.mockReturnValueOnce([existingAgent]);
       writeFileAgentMock.mockReturnValueOnce(updatedAgent);
 
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
@@ -1792,12 +2313,12 @@ describe('agents API', () => {
       const data = await res.json();
       expect(data.agent.prerequisiteCommand).toBeNull();
       expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'my-agent', {
-        prompt: undefined,
-        model: undefined,
-        schedule: undefined,
-        skillIds: undefined,
-        runner: undefined,
-        enabled: undefined,
+        prompt: 'updated',
+        model: 'sonnet',
+        schedule: null,
+        skillIds: ['agent-issue-cruncher'],
+        runner: 'pm2',
+        enabled: true,
         provider: undefined,
         prerequisiteCommand: '',
       });
@@ -1812,7 +2333,7 @@ describe('agents API', () => {
       };
       const updatedAgent = { ...existingAgent, prompt: 'updated' };
       resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
-      loadFileAgentMock.mockReturnValueOnce(existingAgent);
+      scanFileAgentsMock.mockReturnValueOnce([existingAgent]);
       writeFileAgentMock.mockReturnValueOnce(updatedAgent);
 
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
@@ -1823,11 +2344,11 @@ describe('agents API', () => {
       expect(res.status).toBe(200);
       expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'my-agent', {
         prompt: 'updated',
-        model: undefined,
-        schedule: undefined,
-        skillIds: undefined,
-        runner: undefined,
-        enabled: undefined,
+        model: 'sonnet',
+        schedule: '2h',
+        skillIds: [],
+        runner: 'pm2',
+        enabled: true,
         provider: undefined,
         prerequisiteCommand: undefined,
       });
@@ -1888,7 +2409,7 @@ describe('agents API', () => {
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
       resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
-      loadFileAgentMock.mockReturnValueOnce(fakeAgent);
+      scanFileAgentsMock.mockReturnValueOnce([fakeAgent]);
 
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
         method: 'PATCH',
@@ -1903,7 +2424,7 @@ describe('agents API', () => {
 
     it('returns 404 when no DB agent and no file agent found', async () => {
       resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
-      // loadFileAgent returns null by default — no file agent either
+      // scanFileAgents returns [] by default — no file agent either
 
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
         method: 'PATCH',
@@ -1920,7 +2441,7 @@ describe('agents API', () => {
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
       resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
-      loadFileAgentMock.mockReturnValueOnce(fakeAgent);
+      scanFileAgentsMock.mockReturnValueOnce([fakeAgent]);
       writeFileAgentMock.mockReturnValueOnce(fakeAgent);
 
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {

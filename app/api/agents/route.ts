@@ -3,6 +3,8 @@ import { db, schema } from '@/lib/db';
 import { installAgentSchedule } from '@/lib/scheduling/agent-scheduler';
 import { errMsg } from '@/lib/shared/types';
 import { getAllAgentsCached, clearAgentsCache, normalizeAgent } from '@/lib/agents/agents-cache';
+import { findAgentNameConflict } from '@/lib/agents/agent-conflicts';
+import { canonicalAgentNameKey, normalizeAgentNameInput } from '@/lib/agents/agent-name';
 import { scanFileAgents, writeFileAgent, type FileAgent } from '@/lib/agents/tamtam-file-agents';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { listEnabledProjects } from '@/lib/shared/enabled-projects';
@@ -53,13 +55,13 @@ export async function GET(request: NextRequest) {
 
   // Merge file-based agents (.tamtam/agents/*.md). DB agents take precedence
   // over file agents with the same project+name.
-  const dbKeys = new Set(normalized.map(a => `${a.project}:${a.name}`));
+  const dbKeys = new Set(normalized.map(a => `${a.project}:${canonicalAgentNameKey(a.name)}`));
   if (project) {
     const projPath = resolveProjectPath(project);
     if (projPath) {
       for (const fa of scanFileAgents(projPath, project)) {
         if (name && fa.name !== name) continue;
-        if (!dbKeys.has(`${fa.project}:${fa.name}`)) normalized.push(withEffectivePrerequisite(fa));
+        if (!dbKeys.has(`${fa.project}:${canonicalAgentNameKey(fa.name)}`)) normalized.push(withEffectivePrerequisite(fa));
       }
     }
   } else {
@@ -68,7 +70,7 @@ export async function GET(request: NextRequest) {
     // for 10 s to avoid filesystem hits on every request.
     for (const fa of getAllFileAgentsCached()) {
       if (name && fa.name !== name) continue;
-      if (!dbKeys.has(`${fa.project}:${fa.name}`)) normalized.push(withEffectivePrerequisite(fa));
+      if (!dbKeys.has(`${fa.project}:${canonicalAgentNameKey(fa.name)}`)) normalized.push(withEffectivePrerequisite(fa));
     }
   }
 
@@ -80,13 +82,19 @@ export async function POST(request: NextRequest) {
   const { name, project, skillIds, docPaths, model, prompt, schedule, runner, enabled } = body;
   const provider = isCliProvider(body.provider) ? body.provider : null;
 
-  if (!name?.trim()) {
-    return NextResponse.json({ detail: 'name is required' }, { status: 400 });
-  }
   if (!project?.trim()) {
     return NextResponse.json({ detail: 'project is required' }, { status: 400 });
   }
+  const parsedName = normalizeAgentNameInput(name);
+  if (parsedName.error) {
+    return NextResponse.json({ detail: parsedName.error }, { status: 400 });
+  }
   const projectName = project.trim();
+  const agentName = parsedName.name!;
+  const conflict = findAgentNameConflict(projectName, agentName);
+  if (conflict) {
+    return NextResponse.json({ detail: `agent '${agentName}' already exists for ${projectName}` }, { status: 409 });
+  }
   const skillIdsList = skillIds || [];
   const parsedPrerequisiteCommand = parsePrerequisiteCommandInput(body.prerequisiteCommand);
   const prerequisiteCommand = parsedPrerequisiteCommand !== undefined
@@ -109,7 +117,7 @@ export async function POST(request: NextRequest) {
   const id = `agent-${Date.now()}`;
   const agent = {
     id,
-    name: name.trim(),
+    name: agentName,
     project: projectName,
     skillIds: JSON.stringify(skillIdsList),
     docPaths: JSON.stringify(docPaths || []),

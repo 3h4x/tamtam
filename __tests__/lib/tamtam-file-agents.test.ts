@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { scanFileAgents, loadFileAgent, parseFileAgentId, writeFileAgent } from '@/lib/agents/tamtam-file-agents';
+import { scanFileAgents, loadFileAgent, parseFileAgentId, renameFileAgent, writeFileAgent } from '@/lib/agents/tamtam-file-agents';
 
 function makeTmpDir(): string {
   const dir = join(tmpdir(), `tamtam-test-${Date.now()}`);
@@ -339,6 +339,45 @@ Original prompt.`);
     const content = readFileSync(join(tmpDir, '.tamtam', 'agents', 'provider-agent.md'), 'utf-8');
     expect(content).toContain('provider: codex');
     expect(loadFileAgent(tmpDir, 'proj', 'provider-agent')!.provider).toBe('codex');
+  });
+});
+
+describe('renameFileAgent', () => {
+  let tmpDir: string;
+
+  beforeEach(() => { tmpDir = makeTmpDir(); });
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('renames a file-backed agent and preserves updated content', () => {
+    writeAgent(tmpDir, 'Self', `---
+model: normal
+---
+Original prompt.`);
+
+    const updated = renameFileAgent(tmpDir, 'proj', 'Self', 'Renamed', {
+      prompt: 'Renamed prompt.',
+    });
+    const files = readdirSync(join(tmpDir, '.tamtam', 'agents')).sort();
+
+    expect(updated.name).toBe('Renamed');
+    expect(files).toEqual(['Renamed.md']);
+    expect(loadFileAgent(tmpDir, 'proj', 'Renamed')!.prompt).toBe('Renamed prompt.');
+  });
+
+  it('handles case-only renames without deleting the agent file', () => {
+    writeAgent(tmpDir, 'Self', `---
+model: normal
+---
+Original prompt.`);
+
+    const updated = renameFileAgent(tmpDir, 'proj', 'Self', 'self', {
+      prompt: 'Case-only rename prompt.',
+    });
+    const files = readdirSync(join(tmpDir, '.tamtam', 'agents')).sort();
+
+    expect(updated.name).toBe('self');
+    expect(files).toEqual(['self.md']);
+    expect(loadFileAgent(tmpDir, 'proj', 'self')!.prompt).toBe('Case-only rename prompt.');
   });
 });
 

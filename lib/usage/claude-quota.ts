@@ -12,10 +12,10 @@ interface CacheState {
   inFlight: Promise<QuotaSnapshot> | null;
 }
 
-const TTL_MS = 180_000;
+const TTL_MS = 600_000;
 const FETCH_TIMEOUT_MS = 5_000;
-const BASE_RATE_LIMIT_BACKOFF_MS = 30_000;
-const MAX_RATE_LIMIT_BACKOFF_MS = 30 * 60_000;
+const BASE_RATE_LIMIT_BACKOFF_MS = 5 * 60_000;
+const MAX_RATE_LIMIT_BACKOFF_MS = 60 * 60_000;
 
 const globalAny = globalThis as unknown as { __tamtamQuota?: CacheState };
 function getCache(): CacheState {

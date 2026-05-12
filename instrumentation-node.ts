@@ -514,7 +514,7 @@ export async function registerNode(): Promise<void> {
   void autoResumeStuck();
   setInterval(autoResumeStuck, 5 * 60 * 1000);
 
-  // Quota drain ticker: every 60s, refresh the cached subscription quota and,
+  // Quota drain ticker: every 5 min, refresh the cached subscription quota and,
   // if we're below the block threshold, drain any releases or DB-queued agent
   // fires that were deferred while the 5h window was full.
   const { prefetchQuota, peekQuotaCache } = await import('@/lib/usage/quota');
@@ -533,5 +533,5 @@ export async function registerNode(): Promise<void> {
       await drainQueuedWorkAfterBudgetRecovery();
     }
     lastDrainPct = pct;
-  }, 60_000);
+  }, 300_000);
 }
