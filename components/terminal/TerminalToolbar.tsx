@@ -177,7 +177,7 @@ export function TerminalToolbar({
                   {selectedItems.length > 0 && <CountBadge count={selectedItems.length} />}
                 </button>
                 {showSkillPicker && (
-                  <div className="absolute top-full right-0 mt-1 w-96 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden">
+                  <div className="absolute top-full right-0 mt-1 w-96 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden whitespace-normal">
                     <input
                       ref={skillSearchRef}
                       type="text"
@@ -247,7 +247,7 @@ export function TerminalToolbar({
                   {selectedDocs.length > 0 && <CountBadge count={selectedDocs.length} />}
                 </button>
                 {showDocsPicker && (
-                  <div className="absolute top-full right-0 mt-1 w-72 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden">
+                  <div className="absolute top-full right-0 mt-1 w-72 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden whitespace-normal">
                     <input
                       ref={docsSearchRef}
                       type="text"
