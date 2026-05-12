@@ -44,6 +44,8 @@ export function ProjectDetailPage({
   const activeTab: Tab = params.sessionId
     ? 'terminal'
     : VALID_TABS.includes(params.tab as Tab) ? (params.tab as Tab) : 'overview'
+  const project = fleet.projects.find(p => p.project === name)
+  const projectId = project?.project
   const setActiveTab = (tab: Tab) => {
     router.push(tab === 'overview' ? buildProjectPath(name) : buildProjectPath(name, tab))
   }
@@ -93,9 +95,16 @@ export function ProjectDetailPage({
   const [actionsSaving, setActionsSaving] = useState(false)
   const [actionsSaved, setActionsSaved] = useState(false)
   const [actionsLoaded, setActionsLoaded] = useState(false)
+  const [releasing, setReleasing] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [pushing, setPushing] = useState(false)
+  const [pulling, setPulling] = useState(false)
+  const [pullResult, setPullResult] = useState<string | null>(null)
+  const [pullDiverged, setPullDiverged] = useState(false)
+  const [behindCount, setBehindCount] = useState(0)
 
   useEffect(() => {
-    if (!name) return
+    if (!name || !projectId) return
     let active = true
     const poll = async () => {
       try {
@@ -109,13 +118,13 @@ export function ProjectDetailPage({
     poll()
     const interval = setInterval(poll, 5000)
     return () => { active = false; clearInterval(interval) }
-  }, [name])
+  }, [name, projectId])
 
   // Load custom actions
   useEffect(() => {
-    if (!name) return
+    if (!name || !projectId) return
     fetchCustomActions(name).then((data) => setCustomActions(data.actions)).catch(() => {})
-  }, [name])
+  }, [name, projectId])
 
   // Load board URL for the optional "Board ↗" header chip
   useEffect(() => {
@@ -149,7 +158,7 @@ export function ProjectDetailPage({
 
   // Poll issues/PRs + current/default branch together
   useEffect(() => {
-    if (!name) return
+    if (!name || !projectId) return
     let active = true
     const poll = async () => {
       const [issuesRes, branchRes] = await Promise.allSettled([
@@ -171,7 +180,7 @@ export function ProjectDetailPage({
     poll()
     const interval = setInterval(poll, 10000)
     return () => { active = false; clearInterval(interval) }
-  }, [name])
+  }, [name, projectId])
 
   const applyConfigData = (data: ProjectConfig) => {
     setConfig(data)
@@ -216,7 +225,7 @@ export function ProjectDetailPage({
 
   // Load config when the overview or config tab is active
   useEffect(() => {
-    if ((activeTab !== 'config' && activeTab !== 'overview' && activeTab !== 'terminal') || !name) return
+    if ((activeTab !== 'config' && activeTab !== 'overview' && activeTab !== 'terminal') || !name || !projectId) return
     let active = true
     setConfigLoading(true)
     Promise.all([
@@ -235,10 +244,18 @@ export function ProjectDetailPage({
       .catch(() => { /* ignore */ })
       .finally(() => { if (active) setConfigLoading(false) })
     return () => { active = false }
-  }, [activeTab, name])
+  }, [activeTab, name, projectId])
 
-
-  const project = fleet.projects.find(p => p.project === name)
+  useEffect(() => {
+    if (!name || !projectId) return
+    let active = true
+    const refresh = () => {
+      fetchBehind(name).then((r) => { if (active) setBehindCount(r.behind) }).catch(() => {})
+    }
+    refresh()
+    const interval = setInterval(refresh, 60000)
+    return () => { active = false; clearInterval(interval) }
+  }, [name, projectId])
 
   if (!project) {
     return (
@@ -280,25 +297,6 @@ export function ProjectDetailPage({
   const releaseRunning = running.some(j => j.kind === 'release')
   const runningJobs = (releaseRunning ? running.filter(j => !RELEASE_CHILD_KINDS.has(j.kind)) : running)
     .sort((a, b) => (b.started_at || 0) - (a.started_at || 0))
-
-  const [releasing, setReleasing] = useState(false)
-  const [testing, setTesting] = useState(false)
-  const [pushing, setPushing] = useState(false)
-  const [pulling, setPulling] = useState(false)
-  const [pullResult, setPullResult] = useState<string | null>(null)
-  const [pullDiverged, setPullDiverged] = useState(false)
-  const [behindCount, setBehindCount] = useState(0)
-
-  useEffect(() => {
-    if (!name) return
-    let active = true
-    const refresh = () => {
-      fetchBehind(name).then((r) => { if (active) setBehindCount(r.behind) }).catch(() => {})
-    }
-    refresh()
-    const interval = setInterval(refresh, 60000)
-    return () => { active = false; clearInterval(interval) }
-  }, [name])
 
   const handlePull = async (strategy: 'ff-only' | 'merge' | 'rebase' = 'ff-only') => {
     if (!name || pulling) return
