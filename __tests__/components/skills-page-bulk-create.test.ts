@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { buildSkillListItems, partitionSkillItemsForBulkCreate } from '@/components/skills-page/skill-items'
+import {
+  buildSkillListItems,
+  partitionSkillItemsForBulkCreate,
+  isRecommendedSkill,
+  displaySkillName,
+  categoryLabel,
+  itemSearchText,
+  toAgentName,
+} from '@/components/skills-page/skill-items'
 import type { Persona, Skill } from '@/lib/client-api'
 
 function skill(id: string, name: string): Skill {
@@ -127,5 +135,61 @@ describe('partitionSkillItemsForBulkCreate', () => {
     const { toCreate, toSkip } = partitionSkillItemsForBulkCreate([...dbAgentItems, ...personaItems], existing)
     expect(toCreate).toHaveLength(0)
     expect(toSkip).toHaveLength(3)
+  })
+})
+
+describe('isRecommendedSkill', () => {
+  it('returns true when id starts with "agent-"', () => {
+    expect(isRecommendedSkill(skill('agent-review', 'agent:review'))).toBe(true)
+  })
+
+  it('returns false when id does not start with "agent-"', () => {
+    expect(isRecommendedSkill(skill('custom-1', 'my-skill'))).toBe(false)
+  })
+})
+
+describe('displaySkillName', () => {
+  it('strips "agent:" prefix from agent skill names', () => {
+    expect(displaySkillName(skill('agent-review', 'agent:review'))).toBe('review')
+  })
+
+  it('returns the name unchanged when it lacks the "agent:" prefix', () => {
+    expect(displaySkillName(skill('custom-1', 'my-skill'))).toBe('my-skill')
+  })
+})
+
+describe('categoryLabel', () => {
+  it('converts hyphens to spaces and title-cases each word', () => {
+    expect(categoryLabel('code-review')).toBe('Code Review')
+  })
+
+  it('handles single word categories', () => {
+    expect(categoryLabel('agents')).toBe('Agents')
+  })
+
+  it('title-cases every hyphen-separated token, including short ones like "ci" and "cd"', () => {
+    expect(categoryLabel('ci-cd')).toBe('Ci Cd')
+  })
+})
+
+describe('itemSearchText', () => {
+  it('concatenates name, description, category, and id in lowercase', () => {
+    const { dbAgentItems } = buildSkillListItems([skill('agent-qa', 'agent:QA')], [])
+    const text = itemSearchText(dbAgentItems[0])
+    expect(text).toContain('qa')
+    expect(text).toContain('agents')
+    expect(text).toContain('agent-qa')
+  })
+})
+
+describe('toAgentName', () => {
+  it('returns the display skill name for DB items', () => {
+    const { dbAgentItems } = buildSkillListItems([skill('agent-blog', 'agent:blog')], [])
+    expect(toAgentName(dbAgentItems[0])).toBe('blog')
+  })
+
+  it('returns the persona name for file items', () => {
+    const { personaItems } = buildSkillListItems([], [persona('engineering/reviewer', 'Code Reviewer')])
+    expect(toAgentName(personaItems[0])).toBe('Code Reviewer')
   })
 })
