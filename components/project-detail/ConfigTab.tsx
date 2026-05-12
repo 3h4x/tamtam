@@ -144,7 +144,7 @@ export function ConfigTab({
             <span className="text-text-tertiary">overrides: {config.file_config.join(', ')}</span>
             {config.file_config_is_default_branch === false && config.current_branch && (
               <span className="text-amber-400 truncate">
-                · showing <span className="font-mono">{config.file_config_branch}</span>
+                · showing <span className="font-mono">{config.file_config_branch}</span>{' '}
                 (on <span className="font-mono">{config.current_branch}</span>) — effective after merge
               </span>
             )}
@@ -413,7 +413,7 @@ export function ConfigTab({
           <div>
             <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="commit-style">
               Commit message style
-              <span className="ml-2 text-text-tertiary font-normal">.tamtam/config.yml</span>
+              <span aria-hidden="true" className="ml-2 text-text-tertiary font-normal">.tamtam/config.yml</span>
             </label>
             <textarea
               id="commit-style"
