@@ -6,6 +6,21 @@ import type { SkillItem, DocItem } from '@/lib/terminal/terminal-session-store'
 import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, type ModelTier } from '@/lib/agents/model-aliases'
 import { dispatchSettingsChanged } from '@/lib/shared/settings-events'
 import { CLI_PROVIDERS, type CliProvider } from '@/lib/usage/cli-providers'
+import { ToolbarDropdown, type ToolbarDropdownOption } from './ToolbarDropdown'
+
+const PROVIDER_LABELS: Record<CliProvider, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  gemini: 'Gemini',
+  lmstudio: 'LM Studio',
+}
+
+const PROVIDER_DESCRIPTIONS: Record<CliProvider, string> = {
+  claude: 'Anthropic Claude CLI',
+  codex: 'OpenAI Codex CLI',
+  gemini: 'Google Gemini CLI',
+  lmstudio: 'Local LM Studio',
+}
 
 function CountBadge({ count }: { count: number }) {
   return (
@@ -275,59 +290,47 @@ export function TerminalToolbar({
               </div>
             </div>
 
-            {/* MODEL group */}
-            <div className="toolbar-group">
-              <span className="toolbar-label">model</span>
-              {MODEL_TIERS.map((m) => (
-                <button
-                  key={m}
-                  className={`toolbar-tab${model === m ? ' active' : ''}`}
-                  onClick={async () => {
-                    onModelChange(m)
-                    const response = await fetch('/api/settings', {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ default_model: m }),
-                    }).catch(() => {})
-                    const payload = response && 'ok' in response && response.ok
-                      ? await response.json().catch(() => null)
-                      : null
-                    if (payload?.settings) {
-                      dispatchSettingsChanged(payload.settings)
-                    }
-                  }}
-                  title={`${MODEL_LABELS[m]} — ${MODEL_DESCRIPTIONS[m]}`}
-                >
-                  {MODEL_LABELS[m]}
-                </button>
-              ))}
-            </div>
-            <div className="toolbar-group">
-              <span className="toolbar-label">provider</span>
-              <button
-                className={`toolbar-tab${provider === null ? ' active' : ''}`}
-                onClick={() => onProviderChange(null)}
-                disabled={providerLocked}
-                title={providerLocked
-                  ? 'This session is locked to its original provider until you start a new session.'
-                  : 'Let TamTam choose any healthy enabled provider'}
-              >
-                any
-              </button>
-              {CLI_PROVIDERS.map((cliProvider) => (
-                <button
-                  key={cliProvider}
-                  className={`toolbar-tab${provider === cliProvider ? ' active' : ''}`}
-                  onClick={() => onProviderChange(cliProvider)}
-                  disabled={providerLocked}
-                  title={providerLocked
-                    ? 'This session is locked to its original provider until you start a new session.'
-                    : `Require ${cliProvider} for the next new run`}
-                >
-                  {cliProvider}
-                </button>
-              ))}
-            </div>
+            {/* MODEL dropdown */}
+            <ToolbarDropdown<ModelTier>
+              label="model"
+              value={model}
+              options={MODEL_TIERS.map((m): ToolbarDropdownOption<ModelTier> => ({
+                value: m,
+                label: MODEL_LABELS[m],
+                description: MODEL_DESCRIPTIONS[m],
+              }))}
+              onChange={async (m) => {
+                onModelChange(m)
+                const response = await fetch('/api/settings', {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ default_model: m }),
+                }).catch(() => {})
+                const payload = response && 'ok' in response && response.ok
+                  ? await response.json().catch(() => null)
+                  : null
+                if (payload?.settings) {
+                  dispatchSettingsChanged(payload.settings)
+                }
+              }}
+            />
+
+            {/* PROVIDER dropdown */}
+            <ToolbarDropdown<CliProvider | 'any'>
+              label="provider"
+              value={provider ?? 'any'}
+              disabled={providerLocked}
+              disabledTitle="This session is locked to its original provider until you start a new session."
+              options={[
+                { value: 'any', label: 'Any', description: 'Let TamTam choose any healthy enabled provider' },
+                ...CLI_PROVIDERS.map((p): ToolbarDropdownOption<CliProvider | 'any'> => ({
+                  value: p,
+                  label: PROVIDER_LABELS[p],
+                  description: PROVIDER_DESCRIPTIONS[p],
+                })),
+              ]}
+              onChange={(v) => onProviderChange(v === 'any' ? null : v)}
+            />
           </div>
 
           {/* Selected pills */}

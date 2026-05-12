@@ -168,7 +168,14 @@ describe('TerminalToolbar', () => {
 
     const { container, unmount } = renderTerminalToolbar({ model: 'normal', onModelChange })
 
-    const smartButton = Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'Smart')
+    const modelTrigger = Array.from(container.querySelectorAll('button[aria-haspopup="listbox"]'))
+      .find(b => b.textContent?.includes('Normal'))
+    flushSync(() => {
+      modelTrigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    const smartButton = Array.from(container.querySelectorAll('button[role="option"]'))
+      .find(b => b.textContent?.includes('Smart'))
     smartButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     expect(onModelChange).toHaveBeenCalledWith('smart')
@@ -196,7 +203,14 @@ describe('TerminalToolbar', () => {
 
     const { container, unmount } = renderTerminalToolbar({ model: 'normal', onModelChange: vi.fn() })
 
-    const fastButton = Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'Fast')
+    const modelTrigger = Array.from(container.querySelectorAll('button[aria-haspopup="listbox"]'))
+      .find(b => b.textContent?.includes('Normal'))
+    flushSync(() => {
+      modelTrigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    const fastButton = Array.from(container.querySelectorAll('button[role="option"]'))
+      .find(b => b.textContent?.includes('Fast'))
     fastButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     await vi.runAllTimersAsync()
