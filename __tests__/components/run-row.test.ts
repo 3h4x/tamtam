@@ -136,8 +136,33 @@ describe('RunRow', () => {
       summary: 'test ✓ · review …',
     })
 
-    expect(container.textContent).toContain('stepnow: review')
-    expect(container.textContent).toContain('test ✓ · review …')
+    expect(container.textContent).toContain('step: now: review')
+    expect(container.textContent).toContain('test ✓')
+    expect(container.textContent).toContain('review …')
+    unmount()
+  })
+
+  it('renders repeated pipeline summary chips without collapsing duplicates', () => {
+    const entry = makeEntry({
+      kind: 'release',
+      bucket: 'release',
+      title: 'Release pipeline',
+      subtitle: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      navSessionId: null,
+      model: null,
+    })
+
+    const { container, unmount } = renderRow({
+      entry,
+      onClick: vi.fn(),
+      summary: 'test ✓ · fix ✓ · review LGTM · fix ✓',
+    })
+
+    const fixChips = Array.from(container.querySelectorAll('span')).filter((node) => node.textContent === 'fix ✓')
+    expect(fixChips).toHaveLength(2)
     unmount()
   })
 
