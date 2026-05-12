@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { runProject } from '@/lib/client-api'
 import { terminalStore, type SkillItem, type DocItem } from '@/lib/terminal/terminal-session-store'
 import type { ModelTier } from '@/lib/agents/model-aliases'
+import type { CliProvider } from '@/lib/usage/cli-providers'
 
 interface SubmitDeps {
   projectName: string
@@ -12,6 +13,7 @@ interface SubmitDeps {
   selectedItems: SkillItem[]
   selectedDocs: DocItem[]
   model: ModelTier
+  selectedProvider: CliProvider | null
   issueContextRef: React.RefObject<{ number: number; repo: string; title: string } | null>
   draftBeforeHistoryRef: React.MutableRefObject<string>
   setInput: (v: string) => void
@@ -25,7 +27,7 @@ interface SubmitDeps {
 export function useHandleSubmit(deps: SubmitDeps) {
   const {
     projectName, streaming, input, pendingImages, pendingImageUrls,
-    selectedItems, selectedDocs, model, issueContextRef, draftBeforeHistoryRef,
+    selectedItems, selectedDocs, model, selectedProvider, issueContextRef, draftBeforeHistoryRef,
     setInput, setPendingImages, setPendingImageUrls, setPromptHistory,
     setHistoryIdx, setMessageQueue,
   } = deps
@@ -117,7 +119,9 @@ export function useHandleSubmit(deps: SubmitDeps) {
         resumeSessionId: sessionId || undefined,
         // When resuming, pin to the originating provider — session IDs are
         // not portable across CLIs (codex rollouts ≠ claude sessions).
-        provider: sessionId && cur.sessionProvider ? cur.sessionProvider : undefined,
+        provider: sessionId && cur.sessionProvider
+          ? cur.sessionProvider
+          : selectedProvider ?? undefined,
         contextMeta: contextMetaStr,
         userPrompt: text,
         ghIssueNumber: issueCtx?.number ?? undefined,
@@ -133,7 +137,7 @@ export function useHandleSubmit(deps: SubmitDeps) {
     }
   }, [
     projectName, streaming, input, pendingImages, pendingImageUrls,
-    selectedItems, selectedDocs, model, issueContextRef, draftBeforeHistoryRef,
+    selectedItems, selectedDocs, model, selectedProvider, issueContextRef, draftBeforeHistoryRef,
     setInput, setPendingImages, setPendingImageUrls, setPromptHistory,
     setHistoryIdx, setMessageQueue,
   ])

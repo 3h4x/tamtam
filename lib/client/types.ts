@@ -264,6 +264,7 @@ export interface Agent {
   schedule: string | null
   runner: string
   enabled: boolean
+  provider?: string | null
   prerequisiteCommand?: string | null
   createdAt: number
   updatedAt: number

@@ -616,6 +616,29 @@ describe('queued-agent-runs', () => {
     vi.unstubAllGlobals();
   });
 
+  it('drops the DB row when replay hits a strict-provider disabled 409', async () => {
+    enqueueQueuedAgentRun('myproject', {
+      project: 'myproject',
+      agentId: 'agent-1',
+      agentName: 'docs',
+      triggeredBy: 'schedule',
+      prompt: 'run docs',
+      enqueuedAt: 1_000,
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      text: vi.fn().mockResolvedValue(JSON.stringify({
+        detail: "Selected provider 'claude' is not enabled. Pick another provider or enable it in Settings → CLI.",
+      })),
+    }));
+
+    await drainQueuedAgentRunsForProject('myproject');
+
+    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
+    vi.unstubAllGlobals();
+  });
+
   it('drops the DB row when replay hits a terminal no-schedule 409', async () => {
     enqueueQueuedAgentRun('myproject', {
       project: 'myproject',

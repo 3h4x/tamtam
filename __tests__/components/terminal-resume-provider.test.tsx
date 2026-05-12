@@ -6,6 +6,7 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { useTerminalBootstrap } from '@/components/terminal/useTerminalBootstrap'
 import { useHandleSubmit } from '@/components/terminal/useHandleSubmit'
+import { useSessionManager } from '@/components/terminal/useSessionManager'
 import { terminalStore } from '@/lib/terminal/terminal-session-store'
 
 const { replaceMock, runProjectMock } = vi.hoisted(() => ({
@@ -116,6 +117,7 @@ function SubmitHarness({ onReady }: { onReady: (submit: (text?: string) => Promi
     selectedItems: [],
     selectedDocs: [],
     model: 'fast',
+    selectedProvider: 'claude',
     issueContextRef: { current: null },
     draftBeforeHistoryRef: { current: '' },
     setInput: vi.fn(),
@@ -129,6 +131,20 @@ function SubmitHarness({ onReady }: { onReady: (submit: (text?: string) => Promi
   useEffect(() => {
     onReady(handleSubmit)
   }, [handleSubmit, onReady])
+
+  return null
+}
+
+function SessionManagerHarness({
+  onReady,
+}: {
+  onReady: (restoreSession: ReturnType<typeof useSessionManager>['restoreSession']) => void
+}) {
+  const { restoreSession } = useSessionManager('proj')
+
+  useEffect(() => {
+    onReady(restoreSession)
+  }, [onReady, restoreSession])
 
   return null
 }
@@ -186,6 +202,122 @@ describe('pending continue-issue resume provider', () => {
     expect(startStreamMock).toHaveBeenCalledWith('proj', 'job-123')
 
     unmount()
+  })
+
+  it('passes the selected provider for a new terminal run', async () => {
+    runProjectMock.mockResolvedValue({ status: 'started', job_id: 'job-456', pid: 999 })
+
+    let submit: ((text?: string) => Promise<void>) | undefined
+    const { unmount } = renderElement(<SubmitHarness onReady={(handler) => { submit = handler }} />)
+
+    await vi.waitFor(() => {
+      expect(submit).toBeTypeOf('function')
+    })
+    const submitFn = submit
+    if (typeof submitFn !== 'function') throw new Error('submit handler not ready')
+    await submitFn('use claude for this')
+
+    expect(runProjectMock).toHaveBeenCalledWith('proj', 'use claude for this', expect.objectContaining({
+      provider: 'claude',
+      resumeSessionId: undefined,
+    }))
+
+    unmount()
+  })
+
+  it('restores provider locking from the recent sessions flow for non-run session kinds', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/jobs?project=proj') {
+        return {
+          ok: true,
+          json: async () => ({
+            jobs: [
+              {
+                id: 'review-old',
+                kind: 'review',
+                status: 'done',
+                session_id: 'sess-review-codex',
+                started_at: 100,
+                finished_at: 120,
+                exit_code: 0,
+                user_prompt: 'first review prompt',
+                prompt: null,
+                context_meta: null,
+                provider: 'codex',
+              },
+              {
+                id: 'review-new',
+                kind: 'review',
+                status: 'done',
+                session_id: 'sess-review-codex',
+                started_at: 200,
+                finished_at: 220,
+                exit_code: 0,
+                user_prompt: 'second review prompt',
+                prompt: null,
+                context_meta: null,
+                provider: 'codex',
+              },
+            ],
+          }),
+        }
+      }
+      if (url === '/api/jobs/review-old') {
+        return {
+          ok: true,
+          json: async () => ({ log: 'review reply 1', log_pruned: false }),
+        }
+      }
+      if (url === '/api/jobs/review-new') {
+        return {
+          ok: true,
+          json: async () => ({ log: 'review reply 2', log_pruned: false }),
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+
+    let restoreSession: ReturnType<typeof useSessionManager>['restoreSession'] | undefined
+    const manager = renderElement(<SessionManagerHarness onReady={(handler) => { restoreSession = handler }} />)
+
+    await vi.waitFor(() => {
+      expect(restoreSession).toBeTypeOf('function')
+    })
+    const restore = restoreSession
+    if (typeof restore !== 'function') throw new Error('restoreSession not ready')
+    await restore({
+      id: 'review-new',
+      prompt: 'first review prompt',
+      startedAt: 200,
+      finishedAt: 220,
+      sessionId: 'sess-review-codex',
+      exitCode: 0,
+    })
+
+    await vi.waitFor(() => {
+      expect(terminalStore.get('proj').sessionProvider).toBe('codex')
+      expect(terminalStore.get('proj').claudeSessionId).toBe('sess-review-codex')
+    })
+
+    runProjectMock.mockResolvedValue({ status: 'started', job_id: 'job-789', pid: 999 })
+    let submit: ((text?: string) => Promise<void>) | undefined
+    const submitHarness = renderElement(<SubmitHarness onReady={(handler) => { submit = handler }} />)
+
+    await vi.waitFor(() => {
+      expect(submit).toBeTypeOf('function')
+    })
+    const submitFn = submit
+    if (typeof submitFn !== 'function') throw new Error('submit handler not ready')
+    await submitFn('continue restored review')
+
+    expect(runProjectMock).toHaveBeenCalledWith('proj', 'continue restored review', expect.objectContaining({
+      resumeSessionId: 'sess-review-codex',
+      provider: 'codex',
+    }))
+
+    submitHarness.unmount()
+    manager.unmount()
   })
 
   it('aborts auto-submit when issue-branch checkout fails and records the error', async () => {

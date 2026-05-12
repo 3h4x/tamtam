@@ -196,6 +196,11 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
           <span className={`font-medium text-text-primary ${!r.agent.enabled ? 'opacity-50' : ''}`}>
             {r.agent.name}
           </span>
+          {r.agent.provider && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-accent/25 bg-accent/10 text-accent font-mono" title="Required provider for this agent">
+              {r.agent.provider}
+            </span>
+          )}
           {r.agent.source === 'file' && (
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-tertiary border border-border" title=".tamtam/agents/">
               file

@@ -330,12 +330,13 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   const { logDir } = getImproveConfig();
   const gate = await checkCliStartGate('start an agent run', {
     preferred: agent.provider ?? null,
+    strictPreferred: !!agent.provider,
     requestedModel,
     respectJobsPaused: triggeredBy === 'schedule',
   });
   if (!gate.ok) {
     const gateCode =
-      gate.status === 409 ? 'jobs_paused' :
+      gate.status === 409 && gate.detail.includes('Jobs are paused globally') ? 'jobs_paused' :
       gate.status === 429 ? 'providers_over_budget' :
       undefined;
     return {

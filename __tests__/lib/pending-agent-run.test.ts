@@ -386,6 +386,21 @@ describe('drainNextAgentRun', () => {
     expect(listQueuedAgents('p1').map((e) => e.agentId)).toEqual(['b']);
   });
 
+  it('drops the head on terminal 409 when a strict provider is disabled', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        detail: "Selected provider 'claude' is not enabled. Pick another provider or enable it in Settings → CLI.",
+      }, 409)
+    );
+
+    enqueueAgentRun('p1', { agentId: 'a', agentName: 'A', triggeredBy: 'schedule', prompt: '', enqueuedAt: 1 });
+    enqueueAgentRun('p1', { agentId: 'b', agentName: 'B', triggeredBy: 'schedule', prompt: '', enqueuedAt: 2 });
+
+    await drainNextAgentRun('p1');
+
+    expect(listQueuedAgents('p1').map((e) => e.agentId)).toEqual(['b']);
+  });
+
   it('keeps the head when 409 reports jobs_paused and drains it after retrying later', async () => {
     fetchSpy
       .mockResolvedValueOnce(

@@ -125,6 +125,7 @@ describe('AgentEditor', () => {
         schedule: null,
         runner: 'pm2',
         enabled: true,
+        provider: null,
         prerequisiteCommand: null,
       })
     })

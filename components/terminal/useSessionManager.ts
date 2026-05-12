@@ -15,25 +15,27 @@ interface JobDict {
   user_prompt: string | null
   prompt: string | null
   context_meta: string | null
+  provider?: string | null
 }
 
 interface JobDetail {
   session_id?: string | null
   context_meta?: string | null
+  provider?: string | null
 }
 
 export function useSessionManager(projectName: string) {
   const router = useRouter()
   const [sessions, setSessions] = useState<SessionItem[]>([])
   const [loadingSessions, setLoadingSessions] = useState(false)
+  const isSessionKind = (k: string) =>
+    k === 'run' || ['review', 'fix', 'fix-ci'].includes(k) || k.startsWith('agent:')
 
   const loadSessions = async () => {
     setLoadingSessions(true)
     try {
       const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
       const data = await res.json()
-      const isSessionKind = (k: string) =>
-        k === 'run' || k.startsWith('agent:')
       const jobs: JobDict[] = (data.jobs ?? [])
         .filter((j: JobDict) => isSessionKind(j.kind) && j.session_id)
         .sort((a: JobDict, b: JobDict) => b.started_at - a.started_at)
@@ -72,10 +74,11 @@ export function useSessionManager(projectName: string) {
         const listData = await listRes.json()
         const jobs: JobDict[] = listData.jobs ?? []
         const matches = jobs
-          .filter(j => j.session_id === session.sessionId && j.kind === 'run')
+          .filter(j => j.session_id === session.sessionId && isSessionKind(j.kind))
           .sort((a, b) => a.started_at - b.started_at)
         if (matches.length > 0) {
           const firstMatch = matches[0]
+          const sessionProvider = matches.find(m => typeof m.provider === 'string' && m.provider)?.provider ?? null
           let loadedSkills: SkillItem[] = []
           let loadedDocs: DocItem[] = []
           if (firstMatch.context_meta) {
@@ -108,6 +111,7 @@ export function useSessionManager(projectName: string) {
               history: entries,
               claudeSessionId: session.sessionId,
               sessionKey: session.sessionId!,
+              sessionProvider,
               selectedItems: loadedSkills,
               selectedDocs: loadedDocs,
               restoredFor: session.sessionId,
@@ -123,6 +127,7 @@ export function useSessionManager(projectName: string) {
               history: entries,
               claudeSessionId: session.sessionId,
               sessionKey: session.sessionId!,
+              sessionProvider,
               selectedItems: loadedSkills,
               selectedDocs: loadedDocs,
               restoredFor: session.sessionId,
@@ -138,16 +143,19 @@ export function useSessionManager(projectName: string) {
     if (isStillRunning) {
       let passthrough = false
       let liveSessionId = session.sessionId
+      let sessionProvider: string | null = null
       try {
         const res = await fetch(`/api/jobs/${encodeURIComponent(session.id)}`)
         const data = await res.json() as JobDetail
         passthrough = hasPrerequisiteContext(data.context_meta)
         liveSessionId = data.session_id ?? liveSessionId
+        sessionProvider = data.provider ?? null
       } catch {}
       terminalStore.reset(projectName)
       terminalStore.update(projectName, () => ({
         claudeSessionId: liveSessionId,
         sessionKey: liveSessionId || 'new',
+        sessionProvider,
         history: session.prompt ? [{ role: 'user', text: session.prompt }] : [],
       }))
       terminalStore.startStream(projectName, session.id, false, passthrough)
@@ -173,6 +181,7 @@ export function useSessionManager(projectName: string) {
         history: entries,
         claudeSessionId: session.sessionId || null,
         sessionKey: session.sessionId || 'new',
+        sessionProvider: data.provider ?? null,
         selectedItems: loadedSkills,
         selectedDocs: loadedDocs,
       }))

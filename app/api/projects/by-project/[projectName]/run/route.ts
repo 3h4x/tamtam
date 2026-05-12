@@ -119,11 +119,12 @@ export async function POST(
   // per-CLI (codex rollouts ≠ claude sessions ≠ gemini threads), so a
   // cross-provider resume yields a cryptic "no rollout / session not found"
   // error from whichever CLI was picked by the budget gate.
-  const preferredProvider = resumeSessionId && pinnedProvider && isCliProvider(pinnedProvider)
+  const preferredProvider = pinnedProvider && isCliProvider(pinnedProvider)
     ? pinnedProvider
     : undefined;
   const gate = await checkCliStartGate('start a terminal run', {
     preferred: preferredProvider,
+    strictPreferred: !!preferredProvider,
     requestedModel: model,
     respectJobsPaused: false,
   });

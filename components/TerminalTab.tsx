@@ -18,6 +18,7 @@ import { useSessionManager } from '@/components/terminal/useSessionManager'
 import { useHandleSubmit } from '@/components/terminal/useHandleSubmit'
 import { useTerminalBootstrap } from '@/components/terminal/useTerminalBootstrap'
 import { MODEL_TIERS, normalizeModelInput, type ModelTier } from '@/lib/agents/model-aliases'
+import { type CliProvider } from '@/lib/usage/cli-providers'
 
 // Exported for unit testing — determines whether a job kind uses Claude's
 // stream-json output format (parsed path) vs raw log output.
@@ -120,6 +121,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   // Purely local UI state
   const [input, setInput] = useState('')
   const [model, setModel] = useState<ModelTier>('fast')
+  const [selectedProvider, setSelectedProvider] = useState<CliProvider | null>(null)
   const [spinnerFrame, setSpinnerFrame] = useState(0)
   const [showThinking, setShowThinking] = useState(false)
   const [pendingImages, setPendingImages] = useState<File[]>([])
@@ -396,7 +398,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
 
   const { handleSubmit } = useHandleSubmit({
     projectName, streaming, input, pendingImages, pendingImageUrls,
-    selectedItems, selectedDocs, model, issueContextRef, draftBeforeHistoryRef,
+    selectedItems, selectedDocs, model, selectedProvider, issueContextRef, draftBeforeHistoryRef,
     setInput, setPendingImages, setPendingImageUrls, setPromptHistory,
     setHistoryIdx, setMessageQueue,
   })
@@ -543,6 +545,8 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           docsSearch={docsSearch}
           showDocsPicker={showDocsPicker}
           model={model}
+          provider={claudeSessionId && state.sessionProvider ? (state.sessionProvider as CliProvider) : selectedProvider}
+          providerLocked={!!(claudeSessionId && state.sessionProvider)}
           filteredItems={filteredItems}
           filteredDocs={filteredDocs}
           onNewSession={handleNewSession}
@@ -555,6 +559,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           onDocsSearchChange={setDocsSearch}
           onToggleDocsPicker={() => setShowDocsPicker(s => !s)}
           onModelChange={setModel}
+          onProviderChange={setSelectedProvider}
         />
 
         {/* Sessions panel */}
