@@ -284,6 +284,10 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_take_screenshot');
     expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_wait_for');
     expect(skill!.content).not.toMatch(/`browser_[^`]+`/);
+    expect(skill!.content).not.toContain('Read `.tamtam/agents/<this-agent-name>.md` in the working tree');
+    expect(skill!.content).not.toMatch(/read\s+`?\.tamtam\/agents/i);
+    expect(skill!.content).toContain('Do not read `.tamtam/` files directly');
+    expect(skill!.content).toContain('branch-aware config layer');
     expect(skill!.content).toContain('Clean up artifacts');
     expect(skill!.content).toContain('Track every artifact path you create during the run');
     expect(skill!.content).not.toContain('rm -f ./*.png');

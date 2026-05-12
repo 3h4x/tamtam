@@ -92,7 +92,7 @@ export function JobsPauseToggle() {
       }
     }
     void loadQuota()
-    const id = setInterval(loadQuota, 60_000)
+    const id = setInterval(loadQuota, 300_000)
     return () => { live = false; clearInterval(id) }
   }, [budgetGateEnabled, quotaRefreshSeq])
 

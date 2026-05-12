@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { installAgentSchedule, uninstallAgentSchedule } from '@/lib/scheduling/agent-scheduler';
 import { errMsg } from '@/lib/shared/types';
 import { clearAgentsCache, normalizeAgent } from '@/lib/agents/agents-cache';
-import { loadFileAgent, writeFileAgent } from '@/lib/agents/tamtam-file-agents';
+import { findAgentNameConflict } from '@/lib/agents/agent-conflicts';
+import { canonicalAgentNameKey, normalizeAgentNameInput } from '@/lib/agents/agent-name';
+import { deleteFileAgent, renameFileAgent, scanFileAgents, writeFileAgent } from '@/lib/agents/tamtam-file-agents';
+import { deleteFileAgentOverride, getFileAgentOverride, setFileAgentOverride } from '@/lib/agents/file-agent-overrides';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
@@ -24,18 +27,39 @@ function withEffectivePrerequisite<T extends { project: string; skillIds: string
   };
 }
 
+function findDbAgentByProjectAndName(project: string, name: string) {
+  const targetKey = canonicalAgentNameKey(name);
+  return db
+    .select()
+    .from(schema.agents)
+    .where(eq(schema.agents.project, project))
+    .all()
+    .find((agent) => canonicalAgentNameKey(agent.name) === targetKey) ?? null;
+}
+
 // PATCH /api/agents/by-name
 // Lets an agent update itself by project+name without knowing its UUID.
 // Works for both DB agents and file-based agents (.tamtam/agents/*.md).
-// Body: { project, name, ...fields } — same fields as PATCH /api/agents/[id]
+// Body: { project, name, ...fields } or { project, currentName, name, ...fields } for rename.
 export async function PATCH(request: NextRequest) {
   const body = await request.json();
-  const { project, name, ...fields } = body;
+  const { project, currentName, name, ...fields } = body;
   const provider = fields.provider === null ? null : (isCliProvider(fields.provider) ? fields.provider : undefined);
   const prerequisiteCommand = parsePrerequisiteCommandInput(fields.prerequisiteCommand);
 
-  if (!project?.trim() || !name?.trim()) {
+  if (!project?.trim()) {
     return NextResponse.json({ detail: 'project and name are required' }, { status: 400 });
+  }
+  const projectName = project.trim();
+  const lookupRawName = typeof currentName === 'string' ? currentName : name;
+  const parsedLookupName = normalizeAgentNameInput(lookupRawName);
+  if (parsedLookupName.error) return NextResponse.json({ detail: parsedLookupName.error }, { status: 400 });
+  const lookupName = parsedLookupName.name!;
+  let requestedName: string | null = null;
+  if (typeof currentName === 'string' && name !== undefined) {
+    const parsedUpdatedName = normalizeAgentNameInput(name);
+    if (parsedUpdatedName.error) return NextResponse.json({ detail: parsedUpdatedName.error }, { status: 400 });
+    requestedName = parsedUpdatedName.name!;
   }
   const { model: parsedModel, error: modelError } = parseOptionalKnownModelInput(fields.model, 'normal');
   if (modelError) return NextResponse.json({ detail: modelError }, { status: 400 });
@@ -45,14 +69,21 @@ export async function PATCH(request: NextRequest) {
   if (parsedSchedule.error) return NextResponse.json({ detail: parsedSchedule.error }, { status: 400 });
 
   // Try DB agent first
-  const existing = db
-    .select()
-    .from(schema.agents)
-    .where(and(eq(schema.agents.project, project.trim()), eq(schema.agents.name, name.trim())))
-    .get();
+  const existing = findDbAgentByProjectAndName(projectName, lookupName);
 
   if (existing) {
+    const nextName = requestedName ?? existing.name;
+    if (requestedName !== null) {
+      const conflict = findAgentNameConflict(projectName, nextName, {
+        excludeDbAgentId: existing.id,
+        excludeFileAgentName: existing.name,
+      });
+      if (conflict) {
+        return NextResponse.json({ detail: `agent '${nextName}' already exists for ${projectName}` }, { status: 409 });
+      }
+    }
     const updates: Record<string, unknown> = { updatedAt: Date.now() / 1000 };
+    if (requestedName !== null) updates.name = nextName;
     if (fields.skillIds !== undefined) updates.skillIds = JSON.stringify(fields.skillIds);
     if (fields.model !== undefined) updates.model = parsedModel ?? 'normal';
     if (fields.prompt !== undefined) updates.prompt = fields.prompt;
@@ -72,19 +103,22 @@ export async function PATCH(request: NextRequest) {
       const projPath = resolveProjectPath(agent.project);
       if (projPath) {
         try {
+          if (existing.name !== agent.name) {
+            deleteFileAgent(projPath, existing.name);
+          }
           const skillIds: string[] = JSON.parse(agent.skillIds || '[]');
           writeFileAgent(projPath, agent.project, agent.name, {
             prompt: agent.prompt,
             model: agent.model,
-          schedule: agent.schedule,
-          skillIds,
-          runner: agent.runner,
-          enabled: agent.enabled,
-          provider: agent.provider,
-          prerequisiteCommand: agent.prerequisiteCommand,
-        });
-      } catch { /* non-fatal */ }
-    }
+            schedule: agent.schedule,
+            skillIds,
+            runner: agent.runner,
+            enabled: agent.enabled,
+            provider: agent.provider,
+            prerequisiteCommand: agent.prerequisiteCommand,
+          });
+        } catch { /* non-fatal */ }
+      }
       try {
         const hasSkills = JSON.parse(agent.skillIds || '[]').length > 0;
         if (agent.schedule && agent.enabled && (agent.prompt || hasSkills)) {
@@ -101,21 +135,42 @@ export async function PATCH(request: NextRequest) {
   }
 
   // Fall back to file agent
-  const projPath = resolveProjectPath(project.trim());
+  const projPath = resolveProjectPath(projectName);
   if (projPath) {
-    const fileAgent = loadFileAgent(projPath, project.trim(), name.trim());
+    const fileAgent = scanFileAgents(projPath, projectName)
+      .find((agent) => canonicalAgentNameKey(agent.name) === canonicalAgentNameKey(lookupName)) ?? null;
     if (fileAgent) {
       try {
-        const updated = writeFileAgent(projPath, project.trim(), name.trim(), {
-          prompt: fields.prompt,
-          model: parsedModel ?? undefined,
-          schedule: fields.schedule !== undefined ? parsedSchedule.schedule : undefined,
-          skillIds: fields.skillIds,
-          runner: fields.runner,
-          enabled: fields.enabled,
-          provider,
-          prerequisiteCommand,
-        });
+        const nextName = requestedName ?? fileAgent.name;
+        if (requestedName !== null) {
+          const conflict = findAgentNameConflict(projectName, nextName, {
+            excludeFileAgentName: fileAgent.name,
+          });
+          if (conflict) {
+            return NextResponse.json({ detail: `agent '${nextName}' already exists for ${projectName}` }, { status: 409 });
+          }
+        }
+
+        const override = getFileAgentOverride(projectName, fileAgent.name);
+        const fileUpdates = {
+          prompt: fields.prompt !== undefined ? fields.prompt : fileAgent.prompt,
+          model: fields.model !== undefined ? (parsedModel ?? undefined) : fileAgent.model,
+          schedule: fields.schedule !== undefined ? parsedSchedule.schedule : fileAgent.schedule,
+          skillIds: fields.skillIds !== undefined ? fields.skillIds : fileAgent.skillIds,
+          runner: fields.runner !== undefined ? fields.runner : fileAgent.runner,
+          enabled: fields.enabled !== undefined ? fields.enabled : fileAgent.enabled,
+          provider: provider !== undefined ? provider : fileAgent.provider,
+          prerequisiteCommand: fields.prerequisiteCommand !== undefined ? prerequisiteCommand : fileAgent.prerequisiteCommand,
+        };
+        const updated = fileAgent.name !== nextName
+          ? renameFileAgent(projPath, projectName, fileAgent.name, nextName, fileUpdates)
+          : writeFileAgent(projPath, projectName, nextName, fileUpdates);
+        if (fileAgent.name !== nextName) {
+          if (override) {
+            setFileAgentOverride(projectName, nextName, override);
+            deleteFileAgentOverride(projectName, fileAgent.name);
+          }
+        }
         try {
           if (updated.schedule && updated.enabled && (updated.prompt || updated.skillIds.length > 0)) {
             await installAgentSchedule(updated.id, updated.schedule, updated.prompt, updated.runner, updated.project, updated.name);

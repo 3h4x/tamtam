@@ -327,7 +327,7 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
       }
     }
     void load()
-    interval = setInterval(load, 60000)
+    interval = setInterval(load, 300000)
     return () => {
       active = false
       if (interval) clearInterval(interval)
