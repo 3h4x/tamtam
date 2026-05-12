@@ -254,13 +254,19 @@ html.privacy-mode [data-private] {
 
 /* Grouped control container (ATTACH, MODEL) */
 .toolbar-group {
-  display: inline-flex;
-  align-items: baseline;
-  height: 24px;
+  display: inline-block;
+  line-height: 24px;
+  white-space: nowrap;
   padding: 0 0.25rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: var(--color-bg-primary);
+}
+.toolbar-group > * {
+  vertical-align: baseline;
+}
+.toolbar-group > div {
+  display: inline-block;
 }
 
 /* Eyebrow label — inside a group or standalone before buttons */

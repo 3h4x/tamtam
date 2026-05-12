@@ -77,7 +77,7 @@ export function ToolbarDropdown<V extends string>({
         </button>
         {open && (
           <div
-            className={`absolute top-full mt-1 ${align === 'right' ? 'right-0' : 'left-0'} ${width} bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden`}
+            className={`absolute top-full mt-1 ${align === 'right' ? 'right-0' : 'left-0'} ${width} bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden whitespace-normal`}
             role="listbox"
           >
             {options.map(opt => {
@@ -88,7 +88,7 @@ export function ToolbarDropdown<V extends string>({
                   type="button"
                   role="option"
                   aria-selected={selected}
-                  className={`w-full border-none px-3 py-2 text-left cursor-pointer font-mono transition-colors ${
+                  className={`block w-full border-none px-3 py-2 text-left cursor-pointer font-mono transition-colors ${
                     selected
                       ? 'bg-accent/10 hover:bg-accent/15 text-accent'
                       : 'hover:bg-bg-tertiary bg-transparent text-text-primary'
