@@ -404,6 +404,60 @@ describe('resume-stuck-release helpers', () => {
       }));
     });
 
+    it('finds only the newest qualifying orphan per project and skips projects with newer pipeline activity', async () => {
+      const now = Date.now() / 1000;
+      listJobsMock.mockReturnValue([
+        makeAgentJob({
+          id: 'agent-old',
+          project: 'proj-a',
+          startedAt: now - 300,
+          finishedAt: now - 240,
+        }),
+        makeAgentJob({
+          id: 'agent-new',
+          project: 'proj-a',
+          startedAt: now - 180,
+          finishedAt: now - 120,
+        }),
+        makeAgentJob({
+          id: 'agent-blocked',
+          project: 'proj-b',
+          startedAt: now - 200,
+          finishedAt: now - 150,
+        }),
+        makeJob({
+          id: 'push-after-agent',
+          kind: 'push',
+          project: 'proj-b',
+          releaseId: 'release-b',
+          startedAt: now - 100,
+          finishedAt: now - 90,
+          exitCode: 0,
+        }),
+        makeAgentJob({
+          id: 'agent-ok',
+          project: 'proj-c',
+          startedAt: now - 110,
+          finishedAt: now - 100,
+        }),
+      ]);
+
+      const { findOrphanedAgentRuns } = await import('@/lib/pipeline/resume-stuck-release');
+
+      expect(findOrphanedAgentRuns()).toEqual([
+        {
+          jobId: 'agent-ok',
+          project: 'proj-c',
+          finishedAt: now - 100,
+        },
+        {
+          jobId: 'agent-new',
+          project: 'proj-a',
+          finishedAt: now - 120,
+        },
+      ]);
+    });
+
     it('does not consume an attempt when wantsAutoShip is false', async () => {
       getProjectTestConfigMock.mockReturnValue({
         releaseAfterRun: false,
