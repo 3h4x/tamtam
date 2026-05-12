@@ -23,6 +23,59 @@ function splitSummary(summary: string | null | undefined): string[] {
     .filter(Boolean)
 }
 
+const SUMMARY_SECTION_LABELS = [
+  'Summary:',
+  'Files changed:',
+  'Actionable work:',
+  'Fixes applied:',
+  'Findings NOT fixed:',
+  'Verification completed:',
+  'UX verdict per flow:',
+]
+
+const SUMMARY_SECTION_PATTERN = SUMMARY_SECTION_LABELS
+  .map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  .join('|')
+
+const STRUCTURED_SUMMARY_RE = new RegExp(
+  `(?:^|\\n)\\s*(?:[-*]\\s+)?(?:\\*\\*)?(?:${SUMMARY_SECTION_PATTERN})(?:\\*\\*)?\\s*`,
+  'i',
+)
+
+const INLINE_SECTION_RE = new RegExp(`\\s+(?=(?:${SUMMARY_SECTION_PATTERN}))`, 'g')
+
+function formatRunSummaryText(value: string | null | undefined): string | null {
+  if (!value) return null
+
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (!STRUCTURED_SUMMARY_RE.test(trimmed)) return trimmed
+
+  let text = value
+    .replace(/\r\n?/g, '\n')
+    .replace(/^\s*---+\s*$/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(new RegExp(`^\\s*[-*]\\s+(?=(?:${SUMMARY_SECTION_PATTERN}))`, 'gm'), '')
+
+  text = text.replace(INLINE_SECTION_RE, '\n')
+
+  for (const label of SUMMARY_SECTION_LABELS) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    text = text.replace(new RegExp(`${escaped}\\s*`, 'g'), `${label}\n`)
+  }
+
+  text = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+
+  return text || null
+}
+
 export interface RunRowProps {
   entry: Entry
   onClick: () => void
@@ -148,8 +201,10 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
   const fileCount = modifiedFileCount(e.modifiedFiles)
   const durationLabel = formatDuration(e.startedAt, e.finishedAt)
   const startedLabel = formatAgo(e.startedAt)
-  const runSummary = (effectiveRunning ? null : e.workSummary)?.trim() || null
-  const liveDetail = (effectiveRunning ? (e.workSummary ?? e.subtitle) : null)?.trim() || null
+  const runSummary = effectiveRunning ? null : formatRunSummaryText(e.workSummary)
+  const liveDetail = effectiveRunning
+    ? (e.workSummary ? formatRunSummaryText(e.workSummary) : e.subtitle?.trim() || null)
+    : null
   const summaryParts = splitSummary(summary)
   const statusBadge = (
     <RowStateBadge
@@ -252,12 +307,12 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
               {(runSummary || liveDetail || summaryParts.length > 0) && (
                 <div className="mt-2 space-y-2">
                   {runSummary && (
-                    <div className="rounded-md border border-border bg-bg-primary/40 px-2.5 py-2 text-sm leading-5 text-text-secondary">
+                    <div className="whitespace-pre-line rounded-md border border-border bg-bg-primary/40 px-2.5 py-2 text-sm leading-5 text-text-secondary">
                       {runSummary}
                     </div>
                   )}
                   {!runSummary && liveDetail && (
-                    <div className="rounded-md border border-border bg-bg-primary/30 px-2 py-1.5 text-xs leading-5 text-text-secondary">
+                    <div className="whitespace-pre-line rounded-md border border-border bg-bg-primary/30 px-2 py-1.5 text-xs leading-5 text-text-secondary">
                       {liveDetail}
                     </div>
                   )}
