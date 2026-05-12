@@ -182,6 +182,25 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     });
   });
 
+  it('rejects a resumed terminal run when the original provider cannot be reused', async () => {
+    checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'codex' });
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({
+        prompt: 'follow up',
+        provider: 'claude',
+        resumeSessionId: 'sess-123',
+      }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.detail).toContain('original session ran on claude');
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
   it('returns 409 with blocking_job_id when another project job is already running', async () => {
     findBlockingRunningJobMock.mockResolvedValue(makeJob({ id: 'run-123', kind: 'review' }));
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
@@ -286,6 +305,33 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
       detail: expect.stringContaining('Invalid model'),
     });
     expect(startJobMock).not.toHaveBeenCalled();
+  });
+
+  it('accepts attachment-only multipart runs and injects the saved file path into the prompt', async () => {
+    const form = new FormData();
+    form.set('file', new File(['hello world'], 'notes.txt', { type: 'text/plain' }));
+    const originalCwd = process.cwd();
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: form,
+    });
+
+    let res = new Response(null, { status: 500 });
+    try {
+      process.chdir(tempDir);
+      res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    } finally {
+      process.chdir(originalCwd);
+    }
+
+    expect(res.status).toBe(200);
+    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    expect(fullPrompt).toContain('See the attached files.');
+    expect(fullPrompt).toContain('Attached files (read them to see their content):');
+    expect(fullPrompt).toContain(join(tempDir, 'data', 'attachments'));
+    expect(fullPrompt).not.toContain(join(originalCwd, 'data', 'attachments'));
+    expect(fullPrompt).toMatch(/data\/attachments\/[a-f0-9]{8}\.txt/);
   });
 
   it('calls createJob and updateJob', async () => {
