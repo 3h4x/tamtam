@@ -115,23 +115,31 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
   }, [])
 
   useEffect(() => {
+    let shouldPoll = true
+
     const load = async () => {
       try {
         const res = await fetch(
           `/api/projects/by-project/${encodeURIComponent(projectName)}/release/${encodeURIComponent(releaseId)}`,
         )
         if (!res.ok) {
+          shouldPoll = false
           setError(res.status === 404 ? 'Release not found' : `Error ${res.status}`)
           return
         }
         setTrace(await res.json())
       } catch {
+        shouldPoll = false
         setError('Failed to load release trace')
       }
     }
     load()
     // Poll while running
     const id = setInterval(async () => {
+      if (!shouldPoll) {
+        clearInterval(id)
+        return
+      }
       try {
         const res = await fetch(
           `/api/projects/by-project/${encodeURIComponent(projectName)}/release/${encodeURIComponent(releaseId)}`,
