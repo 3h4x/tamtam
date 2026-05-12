@@ -123,4 +123,36 @@ describe('recovery-drain', () => {
     expect(drainQueuedAgentRunsForProject).toHaveBeenCalledWith('proj-b');
     expect(errorSpy).toHaveBeenCalledWith('[test-recovery] drain failed for proj-a:', expect.any(Error));
   });
+
+  it('drains unlocked queued-agent projects once each and keeps going after failures', async () => {
+    const getPendingRelease = vi.fn().mockImplementation((project: string) => project === 'proj-b');
+    const getLock = vi.fn().mockImplementation((project: string) => (
+      project === 'proj-c'
+        ? { project: 'proj-c', lockedByJobId: 'release-1', acquiredAt: 1000 }
+        : null
+    ));
+    const drainQueuedAgentRunsForProject = vi.fn().mockImplementation(async (project: string) => {
+      if (project === 'proj-a') throw new Error('boom');
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    vi.doMock('@/lib/pipeline/pending-release', () => ({
+      getPendingRelease,
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      getLock,
+    }));
+    vi.doMock('@/lib/agents/queued-agent-runs', () => ({
+      drainQueuedAgentRunsForProject,
+      listQueuedAgentRunProjects: vi.fn().mockReturnValue(['proj-a', 'proj-b', 'proj-c', 'proj-d', 'proj-d', '']),
+    }));
+
+    const { drainUnlockedQueuedAgentRuns } = await import('@/lib/pipeline/recovery-drain');
+    await drainUnlockedQueuedAgentRuns('[test-queued]');
+
+    expect(drainQueuedAgentRunsForProject).toHaveBeenCalledTimes(2);
+    expect(drainQueuedAgentRunsForProject).toHaveBeenNthCalledWith(1, 'proj-a');
+    expect(drainQueuedAgentRunsForProject).toHaveBeenNthCalledWith(2, 'proj-d');
+    expect(errorSpy).toHaveBeenCalledWith('[test-queued] drain failed for proj-a:', expect.any(Error));
+  });
 });
