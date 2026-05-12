@@ -472,6 +472,126 @@ describe('queued-agent-runs', () => {
     vi.unstubAllGlobals();
   });
 
+  it('keeps the DB row on transient 409 already_starting', async () => {
+    enqueueQueuedAgentRun('myproject', {
+      project: 'myproject',
+      agentId: 'agent-1',
+      agentName: 'docs',
+      triggeredBy: 'manual',
+      prompt: 'run docs',
+      enqueuedAt: 1_000,
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      text: vi.fn().mockResolvedValue(JSON.stringify({
+        code: 'already_starting',
+        detail: 'Agent is already starting',
+      })),
+    }));
+
+    await drainQueuedAgentRunsForProject('myproject');
+
+    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps the DB row on transient 409 jobs_paused code', async () => {
+    enqueueQueuedAgentRun('myproject', {
+      project: 'myproject',
+      agentId: 'agent-1',
+      agentName: 'docs',
+      triggeredBy: 'manual',
+      prompt: 'run docs',
+      enqueuedAt: 1_000,
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      text: vi.fn().mockResolvedValue(JSON.stringify({
+        code: 'jobs_paused',
+        detail: 'Jobs are paused globally. Turn the switch back on in Settings.',
+      })),
+    }));
+
+    await drainQueuedAgentRunsForProject('myproject');
+
+    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps the DB row on transient 409 issue_branch code', async () => {
+    enqueueQueuedAgentRun('myproject', {
+      project: 'myproject',
+      agentId: 'agent-1',
+      agentName: 'docs',
+      triggeredBy: 'manual',
+      prompt: 'run docs',
+      enqueuedAt: 1_000,
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      text: vi.fn().mockResolvedValue(JSON.stringify({
+        code: 'issue_branch',
+        detail: 'Cannot run agent while on an issue branch',
+      })),
+    }));
+
+    await drainQueuedAgentRunsForProject('myproject');
+
+    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps the DB row when 409 detail string includes "Jobs are paused globally" without a code', async () => {
+    enqueueQueuedAgentRun('myproject', {
+      project: 'myproject',
+      agentId: 'agent-1',
+      agentName: 'docs',
+      triggeredBy: 'manual',
+      prompt: 'run docs',
+      enqueuedAt: 1_000,
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      text: vi.fn().mockResolvedValue(JSON.stringify({
+        detail: 'Jobs are paused globally. Turn the switch back on in Settings.',
+      })),
+    }));
+
+    await drainQueuedAgentRunsForProject('myproject');
+
+    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps the DB row when replay throws an AbortError (15s timeout)', async () => {
+    enqueueQueuedAgentRun('myproject', {
+      project: 'myproject',
+      agentId: 'agent-1',
+      agentName: 'docs',
+      triggeredBy: 'manual',
+      prompt: 'run docs',
+      enqueuedAt: 1_000,
+    });
+    const abortError = Object.assign(new Error('The operation was aborted'), {
+      name: 'AbortError',
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(abortError));
+
+    await drainQueuedAgentRunsForProject('myproject');
+
+    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    expect(errorSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
   it('drops the DB row when replay hits a terminal disabled-agent 409', async () => {
     enqueueQueuedAgentRun('myproject', {
       project: 'myproject',
