@@ -62,6 +62,8 @@ function renderTerminalToolbar(overrides: Partial<React.ComponentProps<typeof Te
       docsSearch: '',
       showDocsPicker: false,
       model: 'normal',
+      provider: 'claude',
+      providerLocked: false,
       filteredItems,
       filteredDocs,
       onNewSession: vi.fn(),
@@ -74,6 +76,7 @@ function renderTerminalToolbar(overrides: Partial<React.ComponentProps<typeof Te
       onDocsSearchChange: vi.fn(),
       onToggleDocsPicker,
       onModelChange: vi.fn(),
+      onProviderChange: vi.fn(),
       ...overrides,
     }))
   })

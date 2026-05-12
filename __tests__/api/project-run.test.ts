@@ -166,6 +166,22 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     expect(startJobMock).not.toHaveBeenCalled();
   });
 
+  it('treats an explicit terminal provider as required instead of falling back', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'run my agent', provider: 'claude' }),
+    });
+
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    expect(checkCliStartGateMock).toHaveBeenCalledWith('start a terminal run', {
+      preferred: 'claude',
+      strictPreferred: true,
+      requestedModel: 'fast',
+      respectJobsPaused: false,
+    });
+  });
+
   it('returns 409 with blocking_job_id when another project job is already running', async () => {
     findBlockingRunningJobMock.mockResolvedValue(makeJob({ id: 'run-123', kind: 'review' }));
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
@@ -292,6 +308,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
 
     expect(checkCliStartGateMock).toHaveBeenCalledWith('start a terminal run', {
       preferred: undefined,
+      strictPreferred: false,
       requestedModel: 'fast',
       respectJobsPaused: false,
     });

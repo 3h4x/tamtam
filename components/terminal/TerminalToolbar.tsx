@@ -5,6 +5,7 @@ import Link from 'next/link'
 import type { SkillItem, DocItem } from '@/lib/terminal/terminal-session-store'
 import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, type ModelTier } from '@/lib/agents/model-aliases'
 import { dispatchSettingsChanged } from '@/lib/shared/settings-events'
+import { CLI_PROVIDERS, type CliProvider } from '@/lib/usage/cli-providers'
 
 function CountBadge({ count }: { count: number }) {
   return (
@@ -31,6 +32,8 @@ interface TerminalToolbarProps {
   docsSearch: string
   showDocsPicker: boolean
   model: ModelTier
+  provider: CliProvider | null
+  providerLocked: boolean
   filteredItems: SkillItem[]
   filteredDocs: DocItem[]
   onNewSession: () => void
@@ -43,6 +46,7 @@ interface TerminalToolbarProps {
   onDocsSearchChange: (v: string) => void
   onToggleDocsPicker: () => void
   onModelChange: (m: ModelTier) => void
+  onProviderChange: (provider: CliProvider | null) => void
 }
 
 export function TerminalToolbar({
@@ -62,6 +66,8 @@ export function TerminalToolbar({
   docsSearch,
   showDocsPicker,
   model,
+  provider,
+  providerLocked,
   filteredItems,
   filteredDocs,
   onNewSession,
@@ -74,6 +80,7 @@ export function TerminalToolbar({
   onDocsSearchChange,
   onToggleDocsPicker,
   onModelChange,
+  onProviderChange,
 }: TerminalToolbarProps) {
   const skillSearchRef = useRef<HTMLInputElement>(null)
   const docsSearchRef = useRef<HTMLInputElement>(null)
@@ -130,7 +137,7 @@ export function TerminalToolbar({
           </div>
         </div>
 
-        {/* Right: thinking + ATTACH + MODEL */}
+        {/* Right: thinking + ATTACH + MODEL + PROVIDER */}
         <div className="flex flex-wrap items-start justify-end gap-x-2 gap-y-1.5">
           <div className="flex flex-wrap items-center justify-end gap-1.5">
             <button
@@ -292,6 +299,32 @@ export function TerminalToolbar({
                   title={`${MODEL_LABELS[m]} — ${MODEL_DESCRIPTIONS[m]}`}
                 >
                   {MODEL_LABELS[m]}
+                </button>
+              ))}
+            </div>
+            <div className="toolbar-group">
+              <span className="toolbar-label">provider</span>
+              <button
+                className={`toolbar-tab${provider === null ? ' active' : ''}`}
+                onClick={() => onProviderChange(null)}
+                disabled={providerLocked}
+                title={providerLocked
+                  ? 'This session is locked to its original provider until you start a new session.'
+                  : 'Let TamTam choose any healthy enabled provider'}
+              >
+                any
+              </button>
+              {CLI_PROVIDERS.map((cliProvider) => (
+                <button
+                  key={cliProvider}
+                  className={`toolbar-tab${provider === cliProvider ? ' active' : ''}`}
+                  onClick={() => onProviderChange(cliProvider)}
+                  disabled={providerLocked}
+                  title={providerLocked
+                    ? 'This session is locked to its original provider until you start a new session.'
+                    : `Require ${cliProvider} for the next new run`}
+                >
+                  {cliProvider}
                 </button>
               ))}
             </div>

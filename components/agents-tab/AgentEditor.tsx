@@ -8,6 +8,7 @@ import { useToast } from '@/components/Toast'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, normalizeModelInput } from '@/lib/agents/model-aliases'
 import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher'
+import { CLI_PROVIDERS, type CliProvider } from '@/lib/usage/cli-providers'
 
 const MODELS = [...MODEL_TIERS]
 const RUNNERS = ['pm2', 'launchctl']
@@ -22,6 +23,7 @@ export interface AgentEditorSavePayload {
   schedule: string | null
   runner: string
   enabled: boolean
+  provider: CliProvider | null
   prerequisiteCommand: string | null
 }
 
@@ -59,6 +61,7 @@ export function AgentEditor({
   const [availableDocs, setAvailableDocs] = useState<ProjectDoc[]>([])
   const [contextTab, setContextTab] = useState<'skills' | 'docs'>('skills')
   const [model, setModel] = useState(normalizeModelInput(agent?.model || template?.model, 'normal'))
+  const [provider, setProvider] = useState<CliProvider | null>((agent?.provider as CliProvider | null | undefined) ?? null)
   const [schedule, setSchedule] = useState(agent?.schedule || template?.schedule || '')
   const [runner, setRunner] = useState(agent?.runner || template?.runner || 'pm2')
   const [enabled, setEnabled] = useState<boolean>(agent ? agent.enabled : true)
@@ -96,6 +99,7 @@ export function AgentEditor({
     setSelectedSkills(src.skillIds || [])
     setSelectedDocPaths((agent?.docPaths) || [])
     setModel(normalizeModelInput(src.model, 'normal'))
+    setProvider((agent?.provider as CliProvider | null | undefined) ?? null)
     setSchedule(src.schedule || '')
     setRunner(src.runner || 'pm2')
     if (agent) setEnabled(agent.enabled)
@@ -128,7 +132,7 @@ export function AgentEditor({
     if (!name.trim() || saving) return
     setSaving(true)
     try {
-      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, docPaths: selectedDocPaths, model, schedule: schedule || null, runner, enabled, prerequisiteCommand: prerequisiteCommand.trim() || null })
+      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, docPaths: selectedDocPaths, model, schedule: schedule || null, runner, enabled, provider, prerequisiteCommand: prerequisiteCommand.trim() || null })
     } catch {}
     setSaving(false)
   }
@@ -174,7 +178,7 @@ export function AgentEditor({
         </div>
       </div>
 
-      {/* Row 1: Name + Model */}
+      {/* Row 1: Name + Model + Provider */}
       <div className="flex gap-4 items-end flex-wrap">
         <div className="flex-1 min-w-[200px]">
           <label htmlFor="agent-name" className="block mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Name</label>
@@ -209,6 +213,41 @@ export function AgentEditor({
                   onClick={() => setModel(m)}
                 >
                   {label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+        <div className="shrink-0">
+          <div className="mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Provider</div>
+          <div className="flex gap-px p-0.5 rounded-lg bg-bg-secondary border border-border">
+            <button
+              type="button"
+              className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-all whitespace-nowrap ${
+                provider === null
+                  ? 'bg-accent text-white shadow-sm'
+                  : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
+              }`}
+              onClick={() => setProvider(null)}
+              title="Let TamTam choose any healthy enabled provider at run time"
+            >
+              any
+            </button>
+            {CLI_PROVIDERS.map((cliProvider) => {
+              const selected = provider === cliProvider
+              return (
+                <button
+                  key={cliProvider}
+                  type="button"
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-all whitespace-nowrap ${
+                    selected
+                      ? 'bg-accent text-white shadow-sm'
+                      : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
+                  }`}
+                  onClick={() => setProvider(cliProvider)}
+                  title={`Require ${cliProvider} for this agent. If it is unavailable or over budget, the run will not start.`}
+                >
+                  {cliProvider}
                 </button>
               )
             })}

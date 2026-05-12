@@ -291,7 +291,12 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
   // First step's parent is the release meta job, not whatever triggered the
   // release (agent run, manual click). Switching the AsyncLocalStorage parent
   // here makes the chain read as: agent → release → test → review → commit → push.
-  return runWithParent(releaseJobId, async () => {
+  //
+  // If the first step fails to start (or throws), finalize the release row and
+  // release the pipeline lock here — otherwise the release sits in `running`
+  // with no children until either boot recovery or the 4h bash-monitor timeout
+  // reaps it.
+  const result: ReleaseResult = await Promise.resolve(runWithParent(releaseJobId, async (): Promise<ReleaseResult> => {
     // No uncommitted changes — run tests first (if configured + not disabled) to
     // verify committed code before review/push. Completion hook handles test→review
     // when local commits are ahead of upstream.
@@ -346,7 +351,32 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
     const r = await startProjectReview(projectName);
     if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
     return { ok: true, step: 'review' as const, jobId: r.jobId, releaseJobId, message: 'Running review' };
-  });
+  })).catch((err: unknown): ReleaseResult => ({
+    ok: false,
+    status: 500,
+    detail: `release first-step launch threw: ${err instanceof Error ? err.message : String(err)}`,
+  }));
+
+  if (!result.ok) {
+    // First step failed to start (or threw). Without cleanup the release row
+    // stays `running`, the pipeline lock stays held, and the PM2 bash monitor
+    // keeps polling for `# release finished` until it times out (~4h). Append
+    // the finalizer marker so the monitor exits cleanly, mark the release
+    // done, and release the lock — mirroring boot recovery.
+    try {
+      const releaseJob = getJob(releaseJobId);
+      if (releaseJob && releaseJob.finishedAt === null) {
+        const { finalizeReleaseJob } = await import('@/lib/jobs/lifecycle');
+        await finalizeReleaseJob(releaseJob, 1);
+      } else {
+        releaseLock(projectName, releaseJobId);
+      }
+    } catch (e) {
+      console.log(`[release] cleanup after first-step failure threw for ${projectName}:`, e);
+      try { releaseLock(projectName, releaseJobId); } catch {}
+    }
+  }
+  return result;
 }
 
 // Returns true when the project's most recent finished review is LGTM AND

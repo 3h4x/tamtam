@@ -43,6 +43,7 @@ function SubmitHarnessInner({
   selectedItems = [],
   selectedDocs = [],
   model = 'fast',
+  selectedProvider = null,
   issueContext = null,
   draftBeforeHistory = '',
   setInput = vi.fn<SetInput>(),
@@ -60,6 +61,7 @@ function SubmitHarnessInner({
   selectedItems?: Array<{ id: string; name: string; description: string; content?: string; source: 'db' | 'file' }>
   selectedDocs?: Array<{ name: string; content: string }>
   model?: 'fast' | 'normal' | 'smart'
+  selectedProvider?: 'claude' | 'codex' | 'gemini' | 'lmstudio' | null
   issueContext?: { number: number; repo: string; title: string } | null
   draftBeforeHistory?: string
   setInput?: SetInput
@@ -78,6 +80,7 @@ function SubmitHarnessInner({
     selectedItems,
     selectedDocs,
     model,
+    selectedProvider,
     issueContextRef: { current: issueContext },
     draftBeforeHistoryRef: { current: draftBeforeHistory },
     setInput,

@@ -11,6 +11,8 @@ export interface ResolveProviderOptions {
   parentJobId?: string | null;
   /** Agent's stored preference, or explicit override from a route handler. */
   preferred?: string | null;
+  /** When true, do not fall back to another provider if `preferred` cannot run. */
+  strictPreferred?: boolean;
   /** Semantic model tier for this launch, when known up front. */
   requestedModel?: ModelTier | null;
   /** Skip quota fetch + picker; useful in tests. */
@@ -25,6 +27,15 @@ export type CliStartGateResult =
 
 export const ALL_PROVIDERS_BLOCKED_DETAIL =
   'All enabled CLI providers are over budget. Adjust block threshold or wait for the window to reset.';
+
+function enabledProvidersFromSettings(settings: ReturnType<typeof getSettings>): CliProvider[] {
+  const rawEnabled = (settings.cli_enabled_providers ?? null) as CliProvider[] | null;
+  return rawEnabled && rawEnabled.length > 0
+    ? rawEnabled
+    : isCliProvider(settings.claude_provider)
+      ? [settings.claude_provider as CliProvider]
+      : ['claude' as CliProvider];
+}
 
 /**
  * Resolve which CLI provider should run a job. Order of precedence:
@@ -52,12 +63,7 @@ export async function resolveProviderForRun(
   const settings = getSettings();
   // Tolerate older / mocked settings that omit the new cli_enabled_providers
   // key — fall back to the legacy `claude_provider` if present, else claude.
-  const rawEnabled = (settings.cli_enabled_providers ?? null) as CliProvider[] | null;
-  const enabled = rawEnabled && rawEnabled.length > 0
-    ? rawEnabled
-    : isCliProvider(settings.claude_provider)
-      ? [settings.claude_provider as CliProvider]
-      : ['claude' as CliProvider];
+  const enabled = enabledProvidersFromSettings(settings);
 
   if (enabled.length === 0) {
     return { provider: opts.fallback ?? 'claude' };
@@ -103,6 +109,30 @@ export async function checkCliStartGate(
     if (paused) {
       return { ok: false, status: paused.status, detail: paused.detail };
     }
+  }
+  if (opts.strictPreferred && opts.preferred && isCliProvider(opts.preferred)) {
+    const settings = getSettings();
+    const enabled = enabledProvidersFromSettings(settings);
+    const preferred = opts.preferred;
+    if (!enabled.includes(preferred)) {
+      return {
+        ok: false,
+        status: 409,
+        detail: `Selected provider '${preferred}' is not enabled. Pick another provider or enable it in Settings → CLI.`,
+      };
+    }
+    if (settings.budget_block_runs_enabled) {
+      const snapshots = await getQuotaSnapshots([preferred]);
+      const utilization = hardGateUtilizationFor(snapshots.get(preferred) ?? null);
+      if (utilization >= (settings.budget_block_at_pct ?? 95)) {
+        return {
+          ok: false,
+          status: 429,
+          detail: `Selected provider '${preferred}' is over budget right now. Pick another provider or wait for its quota window to reset.`,
+        };
+      }
+    }
+    return { ok: true, provider: preferred };
   }
   const picked = await resolveProviderForRun(opts);
   if (!picked.provider) {

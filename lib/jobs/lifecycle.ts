@@ -546,7 +546,7 @@ export async function reconcileStaleRelease(job: JobData): Promise<void> {
   }
 }
 
-async function finalizeReleaseJob(release: JobData, exitCode: number): Promise<void> {
+export async function finalizeReleaseJob(release: JobData, exitCode: number): Promise<void> {
   if (release.finishedAt !== null) return;
   try {
     if (release.logPath) {

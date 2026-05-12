@@ -104,6 +104,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     }));
     vi.doMock('@/lib/usage/resolve-provider', () => ({ checkCliStartGate: checkCliStartGateMock }));
     vi.doMock('@/lib/pipeline/pending-release', () => ({ setPendingRelease: setPendingReleaseMock }));
+    vi.doMock('@/lib/jobs/lifecycle', () => ({ finalizeReleaseJob: vi.fn().mockResolvedValue(undefined) }));
 
     ({ startRelease } = await import('@/lib/pipeline/start-release'));
   });
@@ -163,6 +164,34 @@ describe('startRelease — release pipeline entry decision tree', () => {
       expect(r.detail).toBe('Failed to create release job');
       expect(r.retryable).toBe(true);
     }
+  });
+
+  it('finalizes the release row and releases the lock when the first step fails to start', async () => {
+    detectTestCommandMock.mockReturnValue('pnpm test');
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'));
+    startProjectTestMock.mockResolvedValue({ ok: false, status: 500, detail: 'test launch failed' });
+    // After createReleaseJob updates the freshly-minted release, the cleanup
+    // path looks it up to call finalizeReleaseJob.
+    getJobMock.mockImplementation((id: string) =>
+      id === 'proj-release-rel-id'
+        ? { id, project: 'proj', kind: 'release', finishedAt: null, logPath: '/tmp/x.log' }
+        : null,
+    );
+
+    const r = await startRelease('proj');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(500);
+      expect(r.detail).toBe('test launch failed');
+    }
+    const { finalizeReleaseJob } = await import('@/lib/jobs/lifecycle');
+    expect(finalizeReleaseJob).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'proj-release-rel-id', kind: 'release' }),
+      1,
+    );
   });
 
   it('uses sourceJobId as the parent for a new release when it belongs to the project', async () => {

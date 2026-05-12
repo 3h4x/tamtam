@@ -211,6 +211,47 @@ describe('resolveProviderForRun', () => {
     expect(result).toEqual({ ok: true, provider: 'codex' });
   });
 
+  it('blocks a strict preferred provider when it is disabled', async () => {
+    getSettingsMock.mockReturnValue({
+      cli_enabled_providers: ['codex'],
+      claude_provider: 'codex',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: false,
+    });
+    const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
+    const result = await checkCliStartGate('start an agent run', {
+      preferred: 'claude',
+      strictPreferred: true,
+    });
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      detail: "Selected provider 'claude' is not enabled. Pick another provider or enable it in Settings → CLI.",
+    });
+  });
+
+  it('blocks a strict preferred provider when it is over budget', async () => {
+    getSettingsMock.mockReturnValue({
+      cli_enabled_providers: ['claude', 'codex'],
+      claude_provider: 'claude',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: true,
+    });
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['claude', { fiveHour: { utilization: 99 } }],
+    ]));
+    const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
+    const result = await checkCliStartGate('start an agent run', {
+      preferred: 'claude',
+      strictPreferred: true,
+    });
+    expect(result).toEqual({
+      ok: false,
+      status: 429,
+      detail: "Selected provider 'claude' is over budget right now. Pick another provider or wait for its quota window to reset.",
+    });
+  });
+
   it('blocks the start gate when one provider is over budget and the sibling quota-aware snapshot is missing', async () => {
     getSettingsMock.mockReturnValue({
       cli_enabled_providers: ['claude', 'codex'],

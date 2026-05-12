@@ -747,9 +747,8 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(projPath).toBe('/path/to/proj');
   });
 
-  it('passes the agent provider as a soft preference and can fall back to a healthier CLI', async () => {
+  it('treats the agent provider as required when one is configured', async () => {
     insertAgent({ provider: 'claude' });
-    checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'codex' });
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'run tests' }),
@@ -759,11 +758,31 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     expect(checkCliStartGateMock).toHaveBeenCalledWith('start an agent run', {
       preferred: 'claude',
+      strictPreferred: true,
       requestedModel: 'normal',
       respectJobsPaused: false,
     });
-    const [, cmd] = startJobMock.mock.calls[0];
-    expect(cmd).toContain('/scripts/codex-shim.js');
+  });
+
+  it('does not mislabel a disabled required provider as jobs_paused', async () => {
+    insertAgent({ provider: 'claude' });
+    checkCliStartGateMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      detail: "Selected provider 'claude' is not enabled. Pick another provider or enable it in Settings → CLI.",
+    });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'run tests' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.code).toBeUndefined();
+    expect(data.detail).toContain("Selected provider 'claude' is not enabled");
+    expect(startJobMock).not.toHaveBeenCalled();
   });
 
   it('sanitizes an invalid stored model before building the command', async () => {
@@ -1652,7 +1671,7 @@ describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
     const data = await res.json();
     expect(res.status).toBe(429);
     expect(data.code).toBe('providers_over_budget');
-    expect(data.detail).toContain('All enabled CLI providers are over budget');
+    expect(data.detail).toContain("Selected provider 'claude' is over budget right now");
     expect(startJobMock).not.toHaveBeenCalled();
   });
 });
