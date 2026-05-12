@@ -107,7 +107,7 @@ Current notable entries:
 
 - `docs-claude` is marked `essential` because TamTam depends on project-specific Claude guidance being present and current.
 - `manage-agents` is marked `featured` because it maintains the project's broader agent fleet.
-- `issue-cruncher` is marked `featured` and manual-only because it is a high-leverage entry point into TamTam's core issue-to-release workflow: pick a ready GitHub issue, implement it on an issue branch, then hand off to the existing release pipeline.
+- `issue-cruncher` is marked `featured` and manual-only because it is a high-leverage entry point into TamTam's core issue-to-release workflow: pick a ready GitHub issue, close stale or unverifiable ones by default during validation, implement actionable work on an issue branch, then hand off to the existing release pipeline.
 - `qa` is marked `featured` because it browses the project's configured `qa_url` when present, otherwise the configured `website`, uses Playwright MCP tools in the `mcp__plugin_playwright_playwright__*` namespace to look for UI bugs, fixes at most 1-2 small safe findings directly, and reports anything larger, risky, or unclear. It stops early with `QA_NO_TARGET` when the project has neither URL configured; it does not hand off to other agents or create GitHub issues.
 
 When changing this catalog:
@@ -279,7 +279,7 @@ Artifact: /Users/me/logs/agent-…-job.prereq.txt
 
 This lets you build agents that react to fresh runtime state — e.g. a "test-speed watcher" that runs `pnpm test`, sees the duration, and proposes optimizations when the suite slows down. Output is truncated to ~64 KiB per stream in the prompt block; the full artifact file is always written.
 
-Built-in `issue-cruncher` agents default to `curl -fsS "http://localhost:1337/api/projects/by-project/<project>/issues?trusted_only=1"` when the prerequisite is missing, so the agent reads only trusted issue bodies from the local API instead of calling `gh issue list` directly. New DB-backed issue-cruncher agents get that command on creation, existing DB-backed ones are backfilled on startup, and the run path still applies the same fallback defensively for older legacy rows that truly lack a stored prerequisite. An explicit clear (`null` / empty string via the agent API) stays cleared and suppresses the default.
+Built-in `issue-cruncher` agents default to `curl -fsS "http://localhost:1337/api/projects/by-project/<project>/issues?trusted_only=1"` when the prerequisite is missing, so the agent reads only trusted issue bodies from the local API instead of calling `gh issue list` directly. During validation, the shipped prompt closes stale, unverifiable, or no-longer-actionable issues as `not planned` by default; it reserves `needs-info` for recently active authors when one specific missing detail would unblock implementation. New DB-backed issue-cruncher agents get that command on creation, existing DB-backed ones are backfilled on startup, and the run path still applies the same fallback defensively for older legacy rows that truly lack a stored prerequisite. An explicit clear (`null` / empty string via the agent API) stays cleared and suppresses the default.
 
 Behaviour:
 - The agent is spawned regardless of the prerequisite's exit code. Failures are surfaced through the prompt block (`Exit code: <n>`) so the agent can analyse them.
