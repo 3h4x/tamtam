@@ -215,12 +215,13 @@ describe('ReleaseTraceView', () => {
   })
 
   it('renders a not-found error when the release trace endpoint returns 404', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+    const fetchMock = vi.fn(async (input: string) => {
       if (input === '/api/settings') {
         return makeResponse({ settings: {} })
       }
       return makeResponse({}, { ok: false, status: 404 })
-    }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
 
     const { container, unmount } = renderView({
       projectName: 'alpha',
@@ -231,6 +232,13 @@ describe('ReleaseTraceView', () => {
       expect(container.textContent).toContain('Release not found')
       expect(container.textContent).toContain('Release id missing-release')
     })
+
+    await vi.advanceTimersByTimeAsync(12000)
+
+    const releaseCalls = fetchMock.mock.calls.filter(([input]) =>
+      typeof input === 'string' && input.includes('/api/projects/by-project/alpha/release/missing-release')
+    ).length
+    expect(releaseCalls).toBe(1)
 
     unmount()
   })
