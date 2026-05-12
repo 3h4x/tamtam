@@ -45,6 +45,7 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
                 {rec.description && <span className="text-xs text-text-tertiary truncate hidden sm:block">{rec.description}</span>}
               </div>
               <button
+                aria-label={`Add ${rec.name} agent`}
                 className="px-3 py-1.5 text-xs border border-status-warning/50 rounded-md text-status-warning hover:bg-status-warning/10 transition-colors cursor-pointer shrink-0"
                 onClick={() => onAddAgent(rec)}
               >
@@ -68,6 +69,7 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
                 {rec.description && <span className="text-xs text-text-tertiary truncate hidden sm:block">{rec.description}</span>}
               </div>
               <button
+                aria-label={`Add ${rec.name} agent`}
                 className="px-3 py-1.5 text-xs border border-accent/50 rounded-md text-accent hover:bg-accent/10 transition-colors cursor-pointer shrink-0"
                 onClick={() => onAddAgent(rec)}
               >
@@ -94,6 +96,7 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
                   {rec.description && <span className="text-xs text-text-tertiary truncate hidden sm:block">{rec.description}</span>}
                 </div>
                 <button
+                  aria-label={`Add ${rec.name} agent`}
                   className="px-3 py-1.5 text-xs border border-border rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors cursor-pointer shrink-0"
                   onClick={() => onAddAgent(rec)}
                 >
