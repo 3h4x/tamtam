@@ -1,6 +1,8 @@
 ---
 model: smart
+schedule: 1h
 skillIds: ["agent-issue-cruncher"]
-prerequisiteCommand: "curl -fsS \"http://localhost:1337/api/projects/by-project/$(basename \"$(git rev-parse --show-toplevel)\")/issues?trusted_only=1\" | jq '{ repo, issues: [.issues[] | { number, title, labels: [.labels[].name], assignees: [.assignees[].login], url, author: .author.login, body }] }'"
+prerequisiteCommand: "curl -fsS \"http://localhost:1337/api/projects/by-project/tamtam/issues?trusted_only=1\""
 ---
+
 

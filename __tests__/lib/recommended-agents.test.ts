@@ -16,6 +16,9 @@ describe('RECOMMENDED_AGENTS', () => {
       featured: true,
       skillIds: ['agent-issue-cruncher'],
     })
+    expect(agent?.description).toMatch(/closes stale or unverifiable issues by default/i)
+    expect(agent?.description).toMatch(/needs-info only for recently active authors/i)
+    expect(agent?.description).not.toMatch(/needs-info instead of guessing/i)
   })
 
   it('marks docs-claude as essential', () => {

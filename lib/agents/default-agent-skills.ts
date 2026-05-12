@@ -96,7 +96,16 @@ Dev-only CVEs are lower priority. Note breaking changes on major bumps. Don't ru
 
 ## 3. Validate before branching
 - Skim every file path, function, and symbol the issue references. If anything named in the issue does not exist in the repo, or the reproduction cannot be followed, the issue is not ready.
-- When not ready: comment on the issue explaining exactly what's missing, add the \`needs-info\` label with \`gh issue edit <n> --add-label needs-info\` (create it first with \`gh label create needs-info --color FBCA04\` if needed), switch back to the default branch via \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/checkout-default" -H 'Content-Type: application/json' -d '{}'\`, fast-forward it via \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/changes" -H 'Content-Type: application/json' -d '{"strategy":"ff-only"}'\`, print \`ISSUE_NEEDS_INFO <n>\`, and stop. Do not create a fix branch.
+- **Default to closing, not waiting.** Most stale/wrong issues will never get updated. Close them and move on — the author can reopen with new info if it still matters. The only reason to keep an issue open with \`needs-info\` is when you have direct evidence the author is actively iterating (recent comment from them within the last 7 days). Otherwise: close.
+- **Close as \`not planned\`** when any of these hold:
+  - The cited file path, function, line range, assertion text, or symbol does not match the current repo (code was already changed, refactored, or removed).
+  - The described bug cannot be reproduced against current \`HEAD\` (feature now behaves correctly, error no longer appears).
+  - The issue references a branch, PR, or commit that no longer exists or has already landed.
+  - The issue is older than 30 days with no author activity and the described symptom is unverifiable today.
+  - The acceptance criteria are too vague to ever finish ("make it better", "improve UX") with no concrete deliverable.
+  Command: \`gh issue close <n> --reason "not planned" --comment "<one-paragraph explanation: what you verified, why this is no longer actionable, and an explicit invitation to reopen with a fresh repro on current \`HEAD\` if the problem still exists>"\`. Then switch back to the default branch via \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/checkout-default" -H 'Content-Type: application/json' -d '{}'\`, fast-forward it via \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/changes" -H 'Content-Type: application/json' -d '{"strategy":"ff-only"}'\`, print \`ISSUE_CLOSED <n>\`, and stop.
+- **Only use \`needs-info\` (keep open)** when the issue is plausibly real and the author has commented within the last 7 days, but a specific missing detail (a stack trace line, a reproduction step, a chosen option from two viable approaches) would unblock you. Comment with the exact question, add the label via \`gh issue edit <n> --add-label needs-info\` (create it first with \`gh label create needs-info --color FBCA04\` if needed), return to the default branch as above, print \`ISSUE_NEEDS_INFO <n>\`, and stop. Do not use this path as a polite stall — if you'd just be hoping for a response, close instead.
+- Never create a fix branch for an issue that fails validation.
 
 ## 4. Do the work
 - Comment on the issue announcing start.
@@ -315,7 +324,9 @@ const KNOWN_DEFAULT_CONTENT_HASHES: Record<string, string[]> = {
   'agent-blog': ['b020ce4f0b6c4d7a', '28c8aeb8eccdfd92'],
   // '169e64a32796f5f6' = pre-git-free-guard default.
   'agent-ci-monitor': ['4ca89e530c8eaf95', '169e64a32796f5f6'],
-  'agent-issue-cruncher': ['362c85f7fe916df8', '2753dcc26f2f434c', '554fcf2c7671a896'],
+  // '5d8ac42a81259715' = pre-aggressive-close default. "When not ready" only
+  // added needs-info; current revision close-as-not-planned by default.
+  'agent-issue-cruncher': ['362c85f7fe916df8', '2753dcc26f2f434c', '554fcf2c7671a896', '5d8ac42a81259715'],
   'agent-release-ready': ['4677689a0e0667df', 'a0ea7848cdb1310d'],
   // '4048125c52cd7b0f' = pre-git-free-guard default.
   'agent-gha-audit': ['f8250345bd7da948', '4048125c52cd7b0f'],

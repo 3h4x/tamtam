@@ -18,7 +18,7 @@ export interface RecommendedAgentTemplate {
 export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
   {
     name: 'issue-cruncher',
-    description: 'Picks a ready-to-go GitHub issue, implements it, and hands off to the release pipeline. Flags ill-formed issues with needs-info instead of guessing.',
+    description: 'Picks a ready-to-go GitHub issue, implements it, and hands off to the release pipeline. Closes stale or unverifiable issues by default, and uses needs-info only for recently active authors with a specific unblocker.',
     model: 'normal',
     schedule: '',
     runner: 'pm2',
