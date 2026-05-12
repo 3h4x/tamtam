@@ -1,4 +1,3 @@
-// tamtam
 import { notFound } from 'next/navigation'
 import { ProjectPageShell } from '@/components/project-detail/ProjectPageShell'
 
