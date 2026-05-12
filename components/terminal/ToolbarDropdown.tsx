@@ -70,7 +70,7 @@ export function ToolbarDropdown<V extends string>({
             height="9"
             viewBox="0 0 10 10"
             aria-hidden="true"
-            className="text-text-tertiary/80 shrink-0 translate-y-px"
+            className="text-text-tertiary/80 shrink-0"
           >
             <path d="M2.5 4 L5 6.5 L7.5 4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
