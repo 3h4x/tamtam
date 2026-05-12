@@ -15,6 +15,14 @@ function modifiedFileCount(raw: string | null): number {
   }
 }
 
+function splitSummary(summary: string | null | undefined): string[] {
+  if (!summary) return []
+  return summary
+    .split('·')
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
+
 export interface RunRowProps {
   entry: Entry
   onClick: () => void
@@ -142,6 +150,7 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
   const startedLabel = formatAgo(e.startedAt)
   const runSummary = (effectiveRunning ? null : e.workSummary)?.trim() || null
   const liveDetail = (effectiveRunning ? (e.workSummary ?? e.subtitle) : null)?.trim() || null
+  const summaryParts = splitSummary(summary)
   const statusBadge = (
     <RowStateBadge
       isRunning={effectiveRunning}
@@ -225,41 +234,47 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
               <div className="text-sm text-text-primary font-medium truncate group-hover:text-accent">
                 {e.title}
               </div>
-              {(progressLabel || runSummary || liveDetail || summary) && (
-                <div className="mt-1.5 space-y-1.5">
-                  {progressLabel && (
-                    <div className="flex items-center gap-2 text-[11px] font-mono text-accent">
-                      <span className="uppercase tracking-wider text-text-tertiary">step</span>
-                      <span>{progressLabel}</span>
-                    </div>
-                  )}
-                  {runSummary && (
-                    <div className="rounded-md border border-border bg-bg-primary/60 px-2 py-1.5 text-sm leading-5 text-text-secondary">
-                      {runSummary}
-                    </div>
-                  )}
-                  {!runSummary && liveDetail && (
-                    <div className="rounded-md border border-border bg-bg-primary/50 px-2 py-1 text-xs leading-5 text-text-secondary">
-                      {liveDetail}
-                    </div>
-                  )}
-                  {summary && (
-                    <div className="rounded-md border border-border bg-bg-primary/50 px-2 py-1 text-xs font-mono leading-5 text-text-secondary">
-                      {summary}
-                    </div>
-                  )}
-                </div>
-              )}
               <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                 {statusBadge}
                 {verdictBadge}
                 {releaseBadge}
+                {progressLabel && (
+                  <span className="inline-flex items-center rounded-full border border-accent/25 bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium font-mono text-accent">
+                    step: {progressLabel}
+                  </span>
+                )}
                 {e.logPruned && (
                   <span className="inline-flex items-center rounded-full bg-text-tertiary/15 px-1.5 py-0.5 text-[10px] font-medium text-text-tertiary" title="Log file deleted by retention policy">
                     pruned
                   </span>
                 )}
               </div>
+              {(runSummary || liveDetail || summaryParts.length > 0) && (
+                <div className="mt-2 space-y-2">
+                  {runSummary && (
+                    <div className="rounded-md border border-border bg-bg-primary/40 px-2.5 py-2 text-sm leading-5 text-text-secondary">
+                      {runSummary}
+                    </div>
+                  )}
+                  {!runSummary && liveDetail && (
+                    <div className="rounded-md border border-border bg-bg-primary/30 px-2 py-1.5 text-xs leading-5 text-text-secondary">
+                      {liveDetail}
+                    </div>
+                  )}
+                  {summaryParts.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {summaryParts.map((part, index) => (
+                        <span
+                          key={`${index}:${part}`}
+                          className="rounded-md border border-border bg-bg-primary/40 px-2 py-1 text-[11px] font-mono leading-5 text-text-secondary"
+                        >
+                          {part}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="shrink-0 text-right">
               <div className="font-mono text-sm font-semibold tabular-nums text-text-primary">
