@@ -116,6 +116,78 @@ describe('RunRow', () => {
     unmount()
   })
 
+  it('formats markdown-ish run summaries into readable multiline text', () => {
+    const entry = makeEntry({
+      bucket: 'agent',
+      kind: 'agent:issue-cruncher',
+      title: 'issue-cruncher',
+      workSummary: '- **Summary:** Implemented issue `#32`.\n- **Files changed:** `src/lib/audit.ts`, `app/[site]/page.tsx`\n- **Actionable work:** yes',
+      subtitle: null,
+      navSessionId: null,
+      model: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+    })
+
+    const { container, unmount } = renderRow({
+      entry,
+      onClick: vi.fn(),
+    })
+
+    expect(container.textContent).toContain('Summary:')
+    expect(container.textContent).toContain('Implemented issue #32.')
+    expect(container.textContent).toContain('Files changed:')
+    expect(container.textContent).toContain('src/lib/audit.ts')
+    expect(container.textContent).toContain('Actionable work:')
+    expect(container.textContent).not.toContain('**')
+    expect(container.textContent).not.toContain('`')
+    expect(container.textContent).not.toContain('\n-')
+    unmount()
+  })
+
+  it('preserves freeform prose summaries instead of turning punctuation into bullets', () => {
+    const entry = makeEntry({
+      bucket: 'run',
+      kind: 'run',
+      title: 'Ship the release fix',
+      workSummary: 'Fix is in `src/foo.ts` - no further work needed.',
+      subtitle: null,
+      navSessionId: 'session-12345678',
+      model: null,
+    })
+
+    const { container, unmount } = renderRow({
+      entry,
+      onClick: vi.fn(),
+    })
+
+    expect(container.textContent).toContain('Fix is in `src/foo.ts` - no further work needed.')
+    expect(container.textContent).not.toContain('Fix is in `src/foo.ts`- no further work needed.')
+    unmount()
+  })
+
+  it('preserves running prompt subtitles even when they start with report labels', () => {
+    const entry = makeEntry({
+      bucket: 'review',
+      kind: 'review',
+      status: 'running',
+      finishedAt: null,
+      exitCode: null,
+      workSummary: null,
+      subtitle: 'Summary: repro in `src/foo.ts` with user prompt context only.',
+    })
+
+    const { container, unmount } = renderRow({
+      entry,
+      onClick: vi.fn(),
+    })
+
+    expect(container.textContent).toContain('Summary: repro in `src/foo.ts` with user prompt context only.')
+    expect(container.textContent).not.toContain('Summary:repro in src/foo.ts with user prompt context only.')
+    unmount()
+  })
+
   it('renders release progress labels above pipeline summaries', () => {
     const entry = makeEntry({
       kind: 'release',
