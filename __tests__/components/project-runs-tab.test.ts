@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildEntries, entryNeedsAttention, groupReleaseChildren } from '../../components/project-runs/utils'
+import { buildEntries, buildReleaseProgressLabel, entryNeedsAttention, groupReleaseChildren } from '../../components/project-runs/utils'
 import type { JobInfo } from '../../lib/client-api'
 
 function job({
@@ -191,5 +191,52 @@ describe('buildEntries session grouping', () => {
     expect(grouped[0].kind).toBe('release')
     expect(grouped[0].failureLabel).toBeNull()
     expect(grouped[0].exitCode).toBe(0)
+  })
+
+  it('reports the currently running release step', () => {
+    const grouped = groupReleaseChildren(buildEntries([
+      job({ id: 'release-1', kind: 'release', started_at: 100, status: 'running', finished_at: null, exit_code: null }),
+      job({ id: 'test-1', kind: 'test', started_at: 110, finished_at: 120, parent_job_id: 'release-1' }),
+      job({ id: 'review-1', kind: 'review', started_at: 130, status: 'running', finished_at: null, exit_code: null, parent_job_id: 'test-1' }),
+    ]))
+
+    expect(grouped).toHaveLength(1)
+    expect(buildReleaseProgressLabel(grouped[0].children ?? [], grouped[0])).toBe('now: review')
+  })
+
+  it('reports the final successful release step when the pipeline is done', () => {
+    const grouped = groupReleaseChildren(buildEntries([
+      job({ id: 'release-1', kind: 'release', started_at: 100, finished_at: 170 }),
+      job({ id: 'test-1', kind: 'test', started_at: 110, finished_at: 120, parent_job_id: 'release-1' }),
+      job({ id: 'review-1', kind: 'review', started_at: 130, finished_at: 140, parent_job_id: 'test-1', verdict: 'LGTM' }),
+      job({ id: 'push-1', kind: 'push', started_at: 150, finished_at: 160, parent_job_id: 'review-1' }),
+    ]))
+
+    expect(grouped).toHaveLength(1)
+    expect(buildReleaseProgressLabel(grouped[0].children ?? [], grouped[0])).toBe('completed through push')
+  })
+
+  it('orders merged review sessions by their latest activity instead of first turn', () => {
+    const grouped = groupReleaseChildren(buildEntries([
+      job({ id: 'release-1', kind: 'release', started_at: 100, finished_at: 260 }),
+      job({ id: 'test-1', kind: 'test', started_at: 110, finished_at: 120, parent_job_id: 'release-1' }),
+      job({ id: 'review-1', kind: 'review', started_at: 130, finished_at: 140, session_id: 'R1', parent_job_id: 'test-1', verdict: 'NEEDS ATTENTION' }),
+      job({ id: 'fix-1', kind: 'fix', started_at: 180, finished_at: 200, parent_job_id: 'review-1' }),
+      job({ id: 'review-2', kind: 'review', started_at: 230, finished_at: 240, session_id: 'R1', parent_job_id: 'fix-1', verdict: 'LGTM' }),
+    ]))
+
+    expect(grouped).toHaveLength(1)
+    expect(buildReleaseProgressLabel(grouped[0].children ?? [], grouped[0])).toBe('completed through review')
+  })
+
+  it('reports cancelled releases even after earlier steps completed', () => {
+    const grouped = groupReleaseChildren(buildEntries([
+      job({ id: 'release-1', kind: 'release', started_at: 100, status: 'aborted', finished_at: 170, exit_code: -3 }),
+      job({ id: 'test-1', kind: 'test', started_at: 110, finished_at: 120, parent_job_id: 'release-1' }),
+      job({ id: 'review-1', kind: 'review', started_at: 130, finished_at: 140, parent_job_id: 'test-1', verdict: 'LGTM' }),
+    ]))
+
+    expect(grouped).toHaveLength(1)
+    expect(buildReleaseProgressLabel(grouped[0].children ?? [], grouped[0])).toBe('cancelled after review')
   })
 })

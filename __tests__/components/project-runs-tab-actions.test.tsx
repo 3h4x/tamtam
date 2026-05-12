@@ -208,6 +208,62 @@ describe('ProjectRunsTab release actions', () => {
     unmount()
   })
 
+  it('shows cancelled release progress after completed steps', async () => {
+    fetchJobsMock.mockResolvedValue({
+      jobs: [
+        makeJob({ id: 'release-aborted', kind: 'release', started_at: 100, finished_at: 170, status: 'aborted', exit_code: -3 }),
+        makeJob({ id: 'test-1', kind: 'test', started_at: 110, finished_at: 120, parent_job_id: 'release-aborted' }),
+        makeJob({ id: 'review-1', kind: 'review', started_at: 130, finished_at: 140, parent_job_id: 'test-1', verdict: 'LGTM' }),
+      ],
+      pendingReleaseProjects: [],
+    })
+
+    const { container, unmount } = renderTab()
+
+    await vi.waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(container.textContent).toContain('cancelled after review')
+    })
+
+    unmount()
+  })
+
+  it('expands resumed release steps in latest-activity order', async () => {
+    fetchJobsMock.mockResolvedValue({
+      jobs: [
+        makeJob({ id: 'release-1', kind: 'release', started_at: 100, finished_at: 250, exit_code: 0 }),
+        makeJob({ id: 'test-1', kind: 'test', started_at: 110, finished_at: 120, parent_job_id: 'release-1' }),
+        makeJob({ id: 'review-1', kind: 'review', started_at: 130, finished_at: 140, parent_job_id: 'test-1', session_id: 'review-session', verdict: 'NEEDS ATTENTION' }),
+        makeJob({ id: 'fix-1', kind: 'fix', started_at: 180, finished_at: 200, parent_job_id: 'review-1' }),
+        makeJob({ id: 'review-2', kind: 'review', started_at: 230, finished_at: 240, parent_job_id: 'fix-1', session_id: 'review-session', verdict: 'LGTM' }),
+      ],
+      pendingReleaseProjects: [],
+    })
+
+    const { container, unmount } = renderTab()
+
+    await vi.waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(container.textContent).toContain('Release pipeline')
+    })
+
+    const expandButton = Array.from(container.querySelectorAll('button')).find((node) => node.getAttribute('title') === 'Expand steps')
+    if (!(expandButton instanceof HTMLButtonElement)) throw new Error('expand button not found')
+    expandButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      const text = container.textContent ?? ''
+      const testIndex = text.indexOf('Test run')
+      const fixIndex = text.indexOf('Auto-fix')
+      const reviewIndex = text.lastIndexOf('Code review')
+      expect(testIndex).toBeGreaterThanOrEqual(0)
+      expect(fixIndex).toBeGreaterThan(testIndex)
+      expect(reviewIndex).toBeGreaterThan(fixIndex)
+    })
+
+    unmount()
+  })
+
   it('shows retry commit for the newest release when its commit step failed', async () => {
     fetchJobsMock.mockResolvedValue({
       jobs: [

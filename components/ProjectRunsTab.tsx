@@ -13,7 +13,8 @@ import {
   buildEntries,
   groupReleaseChildren,
   buildReleaseSummary,
-  flattenPipelineSteps,
+  buildReleaseProgressLabel,
+  flattenReleaseChildren,
   KIND_LABEL,
   entryIsRunning,
   entryNeedsAttention,
@@ -51,8 +52,11 @@ function renderChain(
   const summary = node.kind === 'release'
     ? buildReleaseSummary(node.children ?? [], node)
     : null
+  const progressLabel = node.kind === 'release'
+    ? buildReleaseProgressLabel(node.children ?? [], node)
+    : null
   const pipelineFlat = node.kind === 'release'
-    ? flattenPipelineSteps(node.chainedChildren ?? [], depth + 1)
+    ? flattenReleaseChildren(node.children ?? [], depth + 1)
     : []
   return (
     <Fragment key={node.key}>
@@ -61,6 +65,7 @@ function renderChain(
         onClick={() => navigate(node)}
         depth={depth}
         summary={summary}
+        progressLabel={progressLabel}
         actions={actionsFor(node)}
       />
       {node.kind === 'release'
@@ -575,6 +580,11 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
                     : ownedRelease
                       ? buildReleaseSummary(ownedRelease.children ?? [], ownedRelease)
                       : null
+                  const rowProgressLabel = isReleaseParent
+                    ? buildReleaseProgressLabel(e.children ?? [], e)
+                    : ownedRelease
+                      ? buildReleaseProgressLabel(ownedRelease.children ?? [], ownedRelease)
+                      : null
                   return (
                     <RunRow
                       key={e.key}
@@ -584,6 +594,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
                       expanded={isExpanded}
                       onToggleExpand={() => toggleExpanded(e.key)}
                       summary={rowSummary}
+                      progressLabel={rowProgressLabel}
                       actions={releaseActionsFor(e)}
                     >
                       {isExpandable && isExpanded && (
@@ -593,12 +604,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
                               For agent/run rows that own a nested release: use renderChain
                               so the release itself shows at depth 1 with its steps below it. */}
                           {isReleaseParent
-                            ? flattenPipelineSteps(
-                                e.chainedChildren && e.chainedChildren.length > 0
-                                  ? e.chainedChildren
-                                  : (e.children ?? []).map(c => ({ ...c, chainedChildren: undefined })),
-                                1
-                              ).map(({ entry, depth: d }) => (
+                            ? flattenReleaseChildren(e.children ?? [], 1).map(({ entry, depth: d }) => (
                                 <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
                               ))
                             : (e.chainedChildren ?? []).map((root) => renderChain(root, 1, navigate, releaseActionsFor))

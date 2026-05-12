@@ -9,7 +9,8 @@ import {
   buildEntries,
   groupReleaseChildren,
   buildReleaseSummary,
-  flattenPipelineSteps,
+  buildReleaseProgressLabel,
+  flattenReleaseChildren,
   dayKey,
   dayLabel,
   formatTokens,
@@ -38,12 +39,15 @@ function renderChain(node: Entry, depth: number, navigate: (e: Entry) => void): 
   const summary = node.kind === 'release'
     ? buildReleaseSummary(node.children ?? [], node)
     : null
+  const progressLabel = node.kind === 'release'
+    ? buildReleaseProgressLabel(node.children ?? [], node)
+    : null
   const pipelineFlat = node.kind === 'release'
-    ? flattenPipelineSteps(node.chainedChildren ?? [], depth + 1)
+    ? flattenReleaseChildren(node.children ?? [], depth + 1)
     : []
   return (
     <Fragment key={node.key}>
-      <RunRow entry={node} onClick={() => navigate(node)} depth={depth} summary={summary} />
+      <RunRow entry={node} onClick={() => navigate(node)} depth={depth} summary={summary} progressLabel={progressLabel} />
       {node.kind === 'release'
         ? pipelineFlat.map(({ entry, depth: d }) => (
             <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
@@ -340,6 +344,11 @@ export function JobsPage() {
                     : ownedRelease
                       ? buildReleaseSummary(ownedRelease.children ?? [], ownedRelease)
                       : null
+                  const rowProgressLabel = isReleaseParent
+                    ? buildReleaseProgressLabel(e.children ?? [], e)
+                    : ownedRelease
+                      ? buildReleaseProgressLabel(ownedRelease.children ?? [], ownedRelease)
+                      : null
                   return (
                     <RunRow
                       key={e.key}
@@ -356,16 +365,12 @@ export function JobsPage() {
                         })
                       }}
                       summary={rowSummary}
+                      progressLabel={rowProgressLabel}
                     >
                       {isExpandable && isExpanded && (
                         <div className="bg-bg-primary/40">
                           {isReleaseParent
-                            ? flattenPipelineSteps(
-                                e.chainedChildren && e.chainedChildren.length > 0
-                                  ? e.chainedChildren
-                                  : (e.children ?? []).map(c => ({ ...c, chainedChildren: undefined })),
-                                1
-                              ).map(({ entry, depth: d }) => (
+                            ? flattenReleaseChildren(e.children ?? [], 1).map(({ entry, depth: d }) => (
                                 <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
                               ))
                             : e.chainedChildren?.map((c) => renderChain(c, 1, navigate))
