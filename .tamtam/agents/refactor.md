@@ -1,6 +1,8 @@
 ---
 model: normal
-schedule: 4h
+schedule: 30m
+skillIds: ["persona:engineering/frontend"]
+prerequisiteCommand: ""
 ---
 
 Find the oldest-last-edited source file in ~/workspace/tamtam and decide the right action.
