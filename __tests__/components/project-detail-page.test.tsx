@@ -253,6 +253,14 @@ function renderPage(fleet: FleetHealth = buildFleet()) {
   return {
     container,
     onRefresh,
+    rerender: (nextFleet: FleetHealth) => {
+      flushSync(() => {
+        root.render(React.createElement(ProjectDetailPage, {
+          fleet: nextFleet,
+          onRefresh,
+        }))
+      })
+    },
     unmount: () => {
       root.unmount()
       container.remove()
@@ -337,6 +345,52 @@ describe('ProjectDetailPage', () => {
     await vi.waitFor(() => {
       expect(tabNavPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ activeTab: 'overview' }))
       expect(container.querySelector('[data-testid="overview-tab"]')?.textContent).toBe('acme/widgets')
+    })
+
+    unmount()
+  })
+
+  it('does not start project-specific polling when the project is missing', async () => {
+    const { container, unmount } = renderPage({
+      ...buildFleet(),
+      projects: [],
+      healthyCount: 0,
+      totalChanges: 0,
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Project "acme/widgets" not found.')
+    })
+
+    expect(fetchJobsMock).not.toHaveBeenCalled()
+    expect(fetchCustomActionsMock).not.toHaveBeenCalled()
+    expect(fetchProjectConfigMock).not.toHaveBeenCalled()
+    expect(fetchBehindMock).not.toHaveBeenCalled()
+    expect(fetchIssuesAndPRsMock).not.toHaveBeenCalled()
+    expect(fetchBranchMock).not.toHaveBeenCalled()
+
+    unmount()
+  })
+
+  it('starts project-specific polling when a missing project appears later', async () => {
+    const { container, rerender, unmount } = renderPage({
+      ...buildFleet(),
+      projects: [],
+      healthyCount: 0,
+      totalChanges: 0,
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Project "acme/widgets" not found.')
+    })
+    expect(fetchJobsMock).not.toHaveBeenCalled()
+
+    rerender(buildFleet())
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="overview-tab"]')?.textContent).toBe('acme/widgets')
+      expect(fetchJobsMock).toHaveBeenCalledWith('acme/widgets')
+      expect(fetchBehindMock).toHaveBeenCalledWith('acme/widgets')
     })
 
     unmount()
