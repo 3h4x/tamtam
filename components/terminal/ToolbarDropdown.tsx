@@ -64,8 +64,16 @@ export function ToolbarDropdown<V extends string>({
           aria-haspopup="listbox"
           aria-expanded={open}
         >
-          <span>{current?.label ?? value}</span>
-          <span className="text-[8px] leading-none text-text-tertiary/70">▾</span>
+          <span className="lowercase">{current?.label ?? value}</span>
+          <svg
+            width="8"
+            height="8"
+            viewBox="0 0 8 8"
+            aria-hidden="true"
+            className="text-text-tertiary/70 shrink-0"
+          >
+            <path d="M1.5 3 L4 5.5 L6.5 3" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </button>
         {open && (
           <div
