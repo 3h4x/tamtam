@@ -11,17 +11,17 @@ function expandHome(p: string): string {
 
 function scanGitRepos(workspacePath: string): { name: string; path: string }[] {
   const expanded = expandHome(workspacePath);
-  if (!existsSync(expanded)) return [];
+  if (!existsSync(/*turbopackIgnore: true*/ expanded)) return [];
 
   const repos: { name: string; path: string }[] = [];
   const skipDirs = new Set(['node_modules', '.next', '.git', 'dist', 'build', '.venv', '__pycache__']);
 
   try {
-    const entries = readdirSync(expanded, { withFileTypes: true });
+    const entries = readdirSync(/*turbopackIgnore: true*/ expanded, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith('.') || skipDirs.has(entry.name)) continue;
       const dirPath = join(expanded, entry.name);
-      if (existsSync(join(dirPath, '.git'))) {
+      if (existsSync(/*turbopackIgnore: true*/ join(dirPath, '.git'))) {
         repos.push({ name: entry.name, path: dirPath });
       }
     }
@@ -33,7 +33,6 @@ function scanGitRepos(workspacePath: string): { name: string; path: string }[] {
 }
 
 export async function GET() {
-  // Get workspace path from settings
   const setting = db
     .select()
     .from(schema.settings)
@@ -41,14 +40,11 @@ export async function GET() {
     .get();
   const workspacePath = setting?.value || '';
 
-  // Get currently saved projects from DB
   const savedProjects = db.select().from(schema.projects).all();
   const savedMap = new Map(savedProjects.map((p) => [p.name, p]));
 
-  // Scan workspace for git repos
   const discovered = workspacePath ? scanGitRepos(workspacePath) : [];
 
-  // Merge: discovered repos + their saved state
   const projects = discovered.map((repo) => {
     const saved = savedMap.get(repo.name);
     let customActions: { name: string; command: string }[] = [];
