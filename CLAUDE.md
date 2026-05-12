@@ -30,7 +30,7 @@ Steps are pluggable per project. The **🚀 Release** button triggers the pipeli
 
 ## Commands
 - `pnpm dev` — `next dev` foreground on port 1337 (HMR enabled, no PM2). Local debugging only.
-- `pnpm dev:qa` — deterministic Docker QA environment on port 1338 with mocked `git`/`gh`/`pm2`/provider shims and an isolated DB/workspace. It runs `next dev` inside Docker with the repo bind-mounted, so ordinary source edits are picked up without rebuilding the QA image. Use when you need a reproducible browser or API target without touching the main PM2 server.
+- `pnpm dev:qa` — deterministic Docker QA environment on port 1338 with mocked `git`/`gh`/`pm2`/provider shims and an isolated DB/workspace. The script runs `docker compose -f docker-compose.qa.yml up --build`; inside the container it runs `next dev` with the repo bind-mounted, so ordinary source edits are still picked up without needing to rerun the command for every change. Use when you need a reproducible browser or API target without touching the main PM2 server.
 - `pnpm start` — start (or idempotently restart) production server via PM2 on port 1337. Self-heals if a previous orphan is squatting on the port. Canonical way to run TamTam.
 - `pnpm run rebuild` / `pnpm restart` — build then restart under PM2. `pnpm run rebuild` expands to `pnpm build && pnpm start`; `pnpm restart` expands to `pnpm build && bash scripts/pm2-start.sh`. Canonical post-edit command. (Note: bare `pnpm rebuild` triggers pnpm's native-deps rebuild instead — use `pnpm run rebuild`.)
 - `pnpm stop` — stop the PM2 server.
