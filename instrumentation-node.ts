@@ -454,6 +454,22 @@ export async function registerNode(): Promise<void> {
   // Runs once at boot in addition to the 30-second interval below.
   void runProbeSweep();
 
+  // Start Ollama via PM2 when retrieval is enabled
+  try {
+    const { getSettings: _getCfg } = await import('@/lib/shared/config');
+    const _cfg = _getCfg();
+    if (_cfg.retrieval_enabled) {
+      const { ensureOllamaRunning } = await import('@/lib/agents/retrieval/ollama-lifecycle');
+      void ensureOllamaRunning({
+        ollamaUrl: _cfg.retrieval_ollama_url,
+        embeddingModel: _cfg.retrieval_embedding_model,
+        manageOllama: _cfg.retrieval_manage_ollama,
+      }).catch((err) => console.warn('[retrieval] Ollama lifecycle error:', err));
+    }
+  } catch (err) {
+    console.warn('[retrieval] boot check failed:', err);
+  }
+
   if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
 
   // Nightly DB cleanup: delete job rows older than job_row_retention_days.

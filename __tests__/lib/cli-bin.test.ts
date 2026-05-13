@@ -68,6 +68,12 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     budget_block_at_pct: 95,
     budget_warn_at_pct: 80,
     notification_on_budget_blocked: false,
+    retrieval_enabled: false,
+    retrieval_ollama_url: 'http://localhost:11434',
+    retrieval_embedding_model: 'nomic-embed-text',
+    retrieval_context_limit: 5,
+    retrieval_score_threshold: 0.8,
+    retrieval_manage_ollama: true,
     ...overrides,
   };
 }

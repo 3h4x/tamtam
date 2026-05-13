@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema';
 import { join, dirname } from 'path';
 import { mkdirSync } from 'fs';
+import * as sqliteVec from 'sqlite-vec';
 
 const dbPath = process.env.TAMTAM_DB_PATH ?? join(process.cwd(), 'data', 'db', 'tamtam.db');
 const dbDir = dirname(dbPath);
@@ -329,6 +330,18 @@ try {
   sqlite.prepare("DELETE FROM settings WHERE key IN ('fix_ci_max_retries', 'fix_ci_retry_window_seconds', 'fix_ci_fast_crash_ms')").run();
 } catch {}
 
+// Load sqlite-vec extension and create vec_chunks virtual table (graceful degradation if unavailable).
+// retrieval_records and retrieval_chunks are Drizzle-managed via migration 0021; only vec_chunks
+// lives here because Drizzle has no virtual-table support.
+try {
+  sqliteVec.load(sqlite);
+  sqlite.prepare(
+    'CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(embedding FLOAT[768], +chunk_id TEXT)'
+  ).run();
+} catch (err) {
+  console.warn('[db] sqlite-vec unavailable, retrieval disabled:', err);
+}
+
 // Project/agent recommendations generated from completed runs.
 sqlite.exec(`
   CREATE TABLE IF NOT EXISTS recommendations (
@@ -349,4 +362,4 @@ sqlite.exec(`
 `);
 
 export const db = drizzle(sqlite, { schema });
-export { schema };
+export { schema, sqlite };
