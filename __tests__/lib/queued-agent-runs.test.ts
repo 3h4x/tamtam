@@ -610,6 +610,9 @@ describe('queued-agent-runs', () => {
     await drainQueuedAgentRunsForProject('myproject');
 
     expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[queued-agent-runs] transient timeout draining docs for myproject: The operation was aborted',
+    );
     expect(errorSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
     errorSpy.mockRestore();
