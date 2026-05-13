@@ -280,7 +280,13 @@ export async function PATCH(request: NextRequest) {
   if (cliEnabledEntry) {
     const syncedProvider = firstEnabledProvider(cliEnabledEntry.value);
     if (claudeProviderEntry) {
+      if (claudeProviderEntry.value === 'custom' && syncedProvider === 'claude') {
+        // `cli_enabled_providers` cannot encode the legacy custom-provider
+        // state, so a GET→PATCH round-trip for an unrelated save must not
+        // silently downgrade it back to plain Claude routing.
+      } else {
       claudeProviderEntry.value = syncedProvider;
+      }
     } else {
       serializedEntries.push({
         key: 'claude_provider',
