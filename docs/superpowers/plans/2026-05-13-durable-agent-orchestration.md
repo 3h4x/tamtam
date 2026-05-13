@@ -341,8 +341,6 @@ If the goal is durable orchestration sooner, the simpler path is to make the cur
 
 That directly addresses TamTam's actual pain points without a new backend or orchestration runtime.
 
-<<<<<<< HEAD
-=======
 ## Follow-up: What If Postgres Is Acceptable?
 
 Reviewed on 2026-05-13 after operator indicated willingness to run Postgres.
@@ -429,7 +427,6 @@ That trade takes on three hard problems to solve one medium one. Not recommended
 - **Want Workflow's real strengths and willing to run Postgres:** Postgres + `world-postgres` + PM2 + Workflow owning the pipeline state machine. Bounded by `durable_agent_workflows_enabled` flag, rolled out in phases per the migration plan.
 - **Avoid:** custom SQLite world, replacing PM2's CLI-spawn role, or bounded "intake only" Workflow adoption — each pays significant cost for marginal gain.
 
->>>>>>> 9a3bad9 (fix(agents): guard missing pending run state)
 ## Conclusion
 
 `workflow` is promising, but it is not the simplest next step for TamTam.

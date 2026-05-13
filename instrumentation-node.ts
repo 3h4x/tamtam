@@ -472,6 +472,20 @@ export async function registerNode(): Promise<void> {
 
   if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
 
+  // Start workflow world (Postgres-backed durable orchestration) when enabled.
+  // Graceful degradation: if the world fails to start (missing env, bad URL),
+  // TamTam continues without durable workflows — the flag simply stays false.
+  try {
+    const { getSettings: _cfg } = await import('@/lib/shared/config');
+    if (_cfg().durable_agent_workflows_enabled && process.env.WORKFLOW_TARGET_WORLD) {
+      const { getWorld } = await import('workflow/runtime');
+      await getWorld().start?.();
+      console.log('[workflow] Postgres world started');
+    }
+  } catch (err) {
+    console.warn('[workflow] world failed to start — durable workflows disabled:', err);
+  }
+
   // Nightly DB cleanup: delete job rows older than job_row_retention_days.
   // Run once at startup (catches drift from long downtimes) then every 24 h.
   const runCleanup = async () => {

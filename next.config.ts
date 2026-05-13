@@ -1,7 +1,8 @@
 import type { NextConfig } from 'next';
+import { withWorkflow } from 'workflow/next';
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ['better-sqlite3', 'sqlite-vec'],
+  serverExternalPackages: ['better-sqlite3', 'sqlite-vec', 'pg', 'graphile-worker'],
 };
 
-export default nextConfig;
+export default withWorkflow(nextConfig);

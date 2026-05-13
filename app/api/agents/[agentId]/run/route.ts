@@ -33,6 +33,7 @@ import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { redactSecrets } from '@/lib/shared/log-redaction';
 import { isSqliteVecAvailable } from '@/lib/db/sqlite-vec';
+import { runAgentIntakeWorkflow } from '@/lib/agents/intake-workflow';
 
 /**
  * `readOnly: true` is for agents whose declared task does not edit the local
@@ -398,6 +399,51 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     skillIds: allSkillIds,
     prerequisiteCommand: agent.prerequisiteCommand,
   });
+
+  // Durable workflow path: read-only runs with no prerequisite command and the
+  // feature flag enabled go through the workflow intake. The workflow owns
+  // prompt composition and PM2 spawn; everything after spawn (lifecycle,
+  // streaming, completion hooks) is unchanged.
+  if (readOnly && !prereqCmd && settings.durable_agent_workflows_enabled) {
+    try {
+      const { start } = await import('workflow/api');
+      await start(runAgentIntakeWorkflow, [{
+        jobId: job.id,
+        agentId: agent.id,
+        agentName: agent.name,
+        project: agent.project,
+        projPath,
+        skillIds: allSkillIds,
+        docPaths: docPathsParsed,
+        model: agent.model ?? null,
+        taskPrompt,
+        triggeredBy,
+        provider,
+        logPath,
+        baseContextMeta: initialContextMeta,
+      }]);
+    } catch (e: unknown) {
+      appendRedactedFileSync(/*turbopackIgnore: true*/ logPath, `\n# workflow: failed to enqueue: ${errMsg(e)}\n`);
+      job.finishedAt = Date.now() / 1000;
+      job.exitCode = -1;
+      updateJob(job);
+      await markDone(job, -1);
+      return {
+        response: NextResponse.json({ detail: `Workflow failed to enqueue: ${errMsg(e)}` }, { status: 500 }),
+        startedJob: false,
+      };
+    }
+    return {
+      response: NextResponse.json({
+        status: 'started',
+        job_id: job.id,
+        pid: 0,
+        agent: agent.name,
+        via: 'workflow',
+      }),
+      startedJob: true,
+    };
+  }
 
   let prerequisiteResult: { command: string; exitCode: number; durationMs: number; stdout: string; stderr: string } | null = null;
 

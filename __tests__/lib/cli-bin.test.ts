@@ -74,6 +74,7 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     retrieval_context_limit: 5,
     retrieval_score_threshold: 0.8,
     retrieval_manage_ollama: true,
+    durable_agent_workflows_enabled: false,
     ...overrides,
   };
 }
