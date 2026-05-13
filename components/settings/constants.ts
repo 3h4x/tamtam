@@ -1,4 +1,4 @@
-export type SettingsFieldKey = 'workspace_path' | 'github_owner' | 'trusted_github_users' | 'claude_provider' | 'claude_bin' | 'lmstudio_model' | 'log_dir' | 'frequency' | 'daytime' | 'weekends' | 'launchagent_prefix' | 'base_prompt' | 'default_model' | 'permission_mode' | 'commit_style' | 'review_verdict_rules' | 'review_fix_max_iterations' |'agent_templates' | 'log_retention_count' | 'log_retention_days' | 'job_row_retention_days' | 'notification_webhook_url' | 'notification_webhook_secret' | 'notification_on_release_success' | 'notification_on_release_fail' | 'notification_on_release_aborted' | 'notification_on_fix_loop_exhausted' | 'notification_on_review_do_not_ship' | 'notification_on_agent_run_fail' | 'pipeline_model_review' | 'pipeline_model_fix' | 'pipeline_model_dod' | 'pipeline_model_commit' | 'dirty_worktree_block_threshold' | 'incremental_review_enabled'
+export type SettingsFieldKey = 'workspace_path' | 'github_owner' | 'trusted_github_users' | 'claude_provider' | 'claude_bin' | 'lmstudio_model' | 'log_dir' | 'frequency' | 'daytime' | 'weekends' | 'launchagent_prefix' | 'base_prompt' | 'default_model' | 'permission_mode' | 'commit_style' | 'review_verdict_rules' | 'review_fix_max_iterations' |'agent_templates' | 'log_retention_count' | 'log_retention_days' | 'job_row_retention_days' | 'notification_webhook_url' | 'notification_webhook_secret' | 'notification_on_release_success' | 'notification_on_release_fail' | 'notification_on_release_aborted' | 'notification_on_fix_loop_exhausted' | 'notification_on_review_do_not_ship' | 'notification_on_agent_run_fail' | 'notification_throttle_window_seconds' | 'notification_throttle_overrides' | 'pipeline_model_review' | 'pipeline_model_fix' | 'pipeline_model_dod' | 'pipeline_model_commit' | 'dirty_worktree_block_threshold' | 'incremental_review_enabled'
 
 export interface FieldDef {
   label: string
@@ -185,6 +185,18 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     group: 'notifications' as never,
     span: 1,
   },
+  notification_throttle_window_seconds: {
+    label: 'Notification Throttle Window',
+    help: 'Not used in FIELDS; handled by NotificationsTab',
+    group: 'notifications' as never,
+    span: 1,
+  },
+  notification_throttle_overrides: {
+    label: 'Notification Throttle Overrides',
+    help: 'Not used in FIELDS; handled by NotificationsTab',
+    group: 'notifications' as never,
+    span: 1,
+  },
   pipeline_model_review: {
     label: 'Review Tier',
     help: 'Capability tier used for code review. "Default" uses the workspace Default Model Tier.',
@@ -257,6 +269,8 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   notification_on_fix_loop_exhausted: 'false',
   notification_on_review_do_not_ship: 'false',
   notification_on_agent_run_fail: 'false',
+  notification_throttle_window_seconds: '900',
+  notification_throttle_overrides: '{"release_fail":0,"release_aborted":0}',
   pipeline_model_review: '',
   pipeline_model_fix: '',
   pipeline_model_dod: '',

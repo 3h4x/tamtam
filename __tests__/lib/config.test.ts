@@ -105,6 +105,8 @@ describe('config', () => {
         notification_on_review_do_not_ship: false,
         notification_on_agent_run_fail: false,
         notification_on_budget_blocked: false,
+        notification_throttle_window_seconds: 900,
+        notification_throttle_overrides: { release_fail: 0, release_aborted: 0 },
         budget_block_runs_enabled: false,
         budget_subscription_providers: ['claude', 'codex'],
         budget_block_at_pct: 95,

@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import * as schema from '@/lib/db/schema';
 
 type Settings = {
   notification_webhook_url: string;
@@ -8,6 +11,10 @@ type Settings = {
   notification_on_fix_loop_exhausted: boolean;
   notification_on_review_do_not_ship: boolean;
   notification_on_agent_run_fail: boolean;
+  notification_on_release_aborted: boolean;
+  notification_on_budget_blocked: boolean;
+  notification_throttle_window_seconds: number;
+  notification_throttle_overrides: Record<string, number>;
 };
 
 function defaultSettings(overrides: Partial<Settings> = {}): Settings {
@@ -19,8 +26,25 @@ function defaultSettings(overrides: Partial<Settings> = {}): Settings {
     notification_on_fix_loop_exhausted: false,
     notification_on_review_do_not_ship: false,
     notification_on_agent_run_fail: false,
+    notification_on_release_aborted: false,
+    notification_on_budget_blocked: false,
+    notification_throttle_window_seconds: 900,
+    notification_throttle_overrides: { release_fail: 0, release_aborted: 0 },
     ...overrides,
   };
+}
+
+function createTestDb() {
+  const sqlite = new Database(':memory:');
+  sqlite.pragma('journal_mode = WAL');
+  sqlite.exec(`
+    CREATE TABLE notification_throttle (
+      key TEXT PRIMARY KEY,
+      last_sent_at INTEGER NOT NULL,
+      suppressed_count INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+  return { sqlite, db: drizzle(sqlite, { schema }) };
 }
 
 const SLACK_URL = 'https://hooks.slack.com/services/T000/B000/xxx';
@@ -30,11 +54,17 @@ const GENERIC_URL = 'https://ntfy.sh/my-topic';
 describe('lib/notifications', () => {
   let mockGetSettings: ReturnType<typeof vi.fn>;
   let mockFetch: ReturnType<typeof vi.fn>;
+  let testDb: ReturnType<typeof createTestDb>;
 
   beforeEach(async () => {
     vi.resetModules();
+    testDb = createTestDb();
     mockGetSettings = vi.fn().mockReturnValue(defaultSettings());
     vi.doMock('@/lib/shared/config', () => ({ getSettings: mockGetSettings }));
+    vi.doMock('@/lib/db', () => ({
+      db: testDb.db,
+      schema,
+    }));
     mockFetch = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', mockFetch);
   });
@@ -44,9 +74,11 @@ describe('lib/notifications', () => {
     vi.resetModules();
   });
 
-  // Helper to flush the microtask / promise queue so fire-and-forget calls land
+  // Helper to flush the microtask / promise queue so fire-and-forget calls land.
   async function flush() {
-    await new Promise<void>((r) => setTimeout(r, 10));
+    for (let i = 0; i < 10; i += 1) {
+      await Promise.resolve();
+    }
   }
 
   describe('notify()', () => {
@@ -168,6 +200,261 @@ describe('lib/notifications', () => {
       const body = JSON.parse(opts.body);
       expect(body.timestamp).toBeGreaterThanOrEqual(before);
     });
+
+    it('suppresses duplicate agent failures with the same key inside the throttle window', async () => {
+      mockGetSettings.mockReturnValue(
+        defaultSettings({
+          notification_webhook_url: GENERIC_URL,
+          notification_on_agent_run_fail: true,
+          notification_throttle_window_seconds: 900,
+        }),
+      );
+      const { notify } = await import('@/lib/shared/notifications');
+
+      await notify({ event: 'agent_run_fail', project: 'p', agent: 'qa', job_id: 'j1', status: 'failed', timestamp: 1000 });
+      await notify({ event: 'agent_run_fail', project: 'p', agent: 'qa', job_id: 'j2', status: 'failed', timestamp: 2000 });
+      await flush();
+
+      expect(mockFetch).toHaveBeenCalledOnce();
+      const row = testDb.sqlite
+        .prepare('SELECT * FROM notification_throttle WHERE key = ?')
+        .get('agent_run_fail:p:qa') as { suppressed_count: number } | undefined;
+      expect(row?.suppressed_count).toBe(1);
+    });
+
+    it('always sends release_fail when the default override disables throttling', async () => {
+      mockGetSettings.mockReturnValue(
+        defaultSettings({
+          notification_webhook_url: GENERIC_URL,
+          notification_on_release_fail: true,
+        }),
+      );
+      const { notify } = await import('@/lib/shared/notifications');
+
+      await notify({ event: 'release_fail', project: 'p', job_id: 'j1', status: 'failed', timestamp: 1000 });
+      await notify({ event: 'release_fail', project: 'p', job_id: 'j2', status: 'failed', timestamp: 2000 });
+      await flush();
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not leak throttleKeySuffix in generic webhook payloads', async () => {
+      mockGetSettings.mockReturnValue(
+        defaultSettings({
+          notification_webhook_url: GENERIC_URL,
+          notification_on_budget_blocked: true,
+        }),
+      );
+      const { notify } = await import('@/lib/shared/notifications');
+
+      await notify({
+        event: 'budget_blocked',
+        project: 'tamtam',
+        job_id: '-',
+        status: 'failed',
+        message: 'quota blocked',
+        throttleKeySuffix: 'budget:5h:2099-01-01T00:00:00Z',
+        timestamp: 1000,
+      });
+      await flush();
+
+      const [, opts] = mockFetch.mock.calls[0];
+      const body = JSON.parse(opts.body);
+      expect(body.throttleKeySuffix).toBeUndefined();
+      expect(body.event).toBe('budget_blocked');
+    });
+
+    it('sends budget-blocked alerts for different throttle identities inside the same window', async () => {
+      mockGetSettings.mockReturnValue(
+        defaultSettings({
+          notification_webhook_url: GENERIC_URL,
+          notification_on_budget_blocked: true,
+        }),
+      );
+      const { notify } = await import('@/lib/shared/notifications');
+
+      await notify({
+        event: 'budget_blocked',
+        project: 'tamtam',
+        job_id: '-',
+        status: 'failed',
+        message: 'first window',
+        throttleKeySuffix: 'budget:5h:2099-01-01T00:00:00Z',
+        timestamp: 1000,
+      });
+      await notify({
+        event: 'budget_blocked',
+        project: 'tamtam',
+        job_id: '-',
+        status: 'failed',
+        message: 'second window',
+        throttleKeySuffix: 'budget:5h:2099-01-01T01:00:00Z',
+        timestamp: 2000,
+      });
+      await flush();
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      const rows = testDb.sqlite
+        .prepare('SELECT key FROM notification_throttle ORDER BY key')
+        .all() as Array<{ key: string }>;
+      expect(rows.map((row) => row.key)).toEqual([
+        'budget_blocked:tamtam:budget:5h:2099-01-01T00:00:00Z',
+        'budget_blocked:tamtam:budget:5h:2099-01-01T01:00:00Z',
+      ]);
+    });
+
+    it('still suppresses budget-blocked repeats for the same throttle identity', async () => {
+      mockGetSettings.mockReturnValue(
+        defaultSettings({
+          notification_webhook_url: GENERIC_URL,
+          notification_on_budget_blocked: true,
+        }),
+      );
+      const { notify } = await import('@/lib/shared/notifications');
+
+      await notify({
+        event: 'budget_blocked',
+        project: 'tamtam',
+        job_id: '-',
+        status: 'failed',
+        message: 'same window',
+        throttleKeySuffix: 'budget:5h:2099-01-01T00:00:00Z',
+        timestamp: 1000,
+      });
+      await notify({
+        event: 'budget_blocked',
+        project: 'tamtam',
+        job_id: '-',
+        status: 'failed',
+        message: 'same window retry',
+        throttleKeySuffix: 'budget:5h:2099-01-01T00:00:00Z',
+        timestamp: 2000,
+      });
+      await flush();
+
+      expect(mockFetch).toHaveBeenCalledOnce();
+      const row = testDb.sqlite
+        .prepare('SELECT * FROM notification_throttle WHERE key = ?')
+        .get('budget_blocked:tamtam:budget:5h:2099-01-01T00:00:00Z') as { suppressed_count: number } | undefined;
+      expect(row?.suppressed_count).toBe(1);
+    });
+
+    it('includes suppressedSince when sending after the throttle window expires', async () => {
+      mockGetSettings.mockReturnValue(
+        defaultSettings({
+          notification_webhook_url: GENERIC_URL,
+          notification_on_agent_run_fail: true,
+          notification_throttle_window_seconds: 10,
+        }),
+      );
+      const { notify } = await import('@/lib/shared/notifications');
+
+      await notify({ event: 'agent_run_fail', project: 'p', agent: 'qa', job_id: 'j1', status: 'failed', timestamp: 1000 });
+      await notify({ event: 'agent_run_fail', project: 'p', agent: 'qa', job_id: 'j2', status: 'failed', timestamp: 2000 });
+      await notify({ event: 'agent_run_fail', project: 'p', agent: 'qa', job_id: 'j3', status: 'failed', timestamp: 12_000 });
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      await flush();
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      const [, opts] = mockFetch.mock.calls[1];
+      const body = JSON.parse(opts.body);
+      expect(body.suppressedSince).toBe(1);
+      expect(body.message).toContain('1 more notification suppressed since the last alert.');
+    });
+
+    it('does not create a throttle row when the first throttled delivery fails', async () => {
+      vi.useFakeTimers();
+      mockFetch.mockRejectedValue(new Error('network down'));
+      mockGetSettings.mockReturnValue(
+        defaultSettings({
+          notification_webhook_url: GENERIC_URL,
+          notification_on_release_success: true,
+        }),
+      );
+      const { notify } = await import('@/lib/shared/notifications');
+
+      await notify({ event: 'release_success', project: 'p', job_id: 'j1', status: 'success', timestamp: 1000 });
+      await vi.runAllTimersAsync();
+      await flush();
+
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      const row = testDb.sqlite
+        .prepare('SELECT * FROM notification_throttle WHERE key = ?')
+        .get('release_success:p:release');
+      expect(row).toBeUndefined();
+      vi.useRealTimers();
+    });
+
+    it('keeps the last delivered throttle state when a resend after the window fails', async () => {
+      vi.useFakeTimers();
+      mockGetSettings.mockReturnValue(
+        defaultSettings({
+          notification_webhook_url: GENERIC_URL,
+          notification_on_agent_run_fail: true,
+          notification_throttle_window_seconds: 10,
+        }),
+      );
+      const { notify } = await import('@/lib/shared/notifications');
+
+      await notify({ event: 'agent_run_fail', project: 'p', agent: 'qa', job_id: 'j1', status: 'failed', timestamp: 1000 });
+      await flush();
+
+      mockFetch.mockResolvedValue({ ok: true });
+      await notify({ event: 'agent_run_fail', project: 'p', agent: 'qa', job_id: 'j2', status: 'failed', timestamp: 2000 });
+      await flush();
+
+      mockFetch.mockReset();
+      mockFetch.mockRejectedValue(new Error('network down'));
+      await notify({ event: 'agent_run_fail', project: 'p', agent: 'qa', job_id: 'j3', status: 'failed', timestamp: 12_000 });
+      await vi.runAllTimersAsync();
+      await flush();
+
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      const row = testDb.sqlite
+        .prepare('SELECT * FROM notification_throttle WHERE key = ?')
+        .get('agent_run_fail:p:qa') as { last_sent_at: number; suppressed_count: number } | undefined;
+      expect(row).toMatchObject({ key: 'agent_run_fail:p:qa', last_sent_at: 1000, suppressed_count: 1 });
+      vi.useRealTimers();
+    });
+
+    it('retries with the accumulated suppressed count after a failed resend eventually succeeds', async () => {
+      vi.useFakeTimers();
+      mockGetSettings.mockReturnValue(
+        defaultSettings({
+          notification_webhook_url: GENERIC_URL,
+          notification_on_agent_run_fail: true,
+          notification_throttle_window_seconds: 10,
+        }),
+      );
+      const { notify } = await import('@/lib/shared/notifications');
+
+      await notify({ event: 'agent_run_fail', project: 'p', agent: 'qa', job_id: 'j1', status: 'failed', timestamp: 1000 });
+      await flush();
+
+      await notify({ event: 'agent_run_fail', project: 'p', agent: 'qa', job_id: 'j2', status: 'failed', timestamp: 2000 });
+      await flush();
+
+      mockFetch.mockReset();
+      mockFetch.mockRejectedValue(new Error('network down'));
+      await notify({ event: 'agent_run_fail', project: 'p', agent: 'qa', job_id: 'j3', status: 'failed', timestamp: 12_000 });
+      await vi.runAllTimersAsync();
+      await flush();
+
+      mockFetch.mockReset();
+      mockFetch.mockResolvedValue({ ok: true });
+      await notify({ event: 'agent_run_fail', project: 'p', agent: 'qa', job_id: 'j4', status: 'failed', timestamp: 13_000 });
+      await flush();
+
+      expect(mockFetch).toHaveBeenCalledOnce();
+      const [, opts] = mockFetch.mock.calls[0];
+      const body = JSON.parse(opts.body);
+      expect(body.suppressedSince).toBe(1);
+      const row = testDb.sqlite
+        .prepare('SELECT * FROM notification_throttle WHERE key = ?')
+        .get('agent_run_fail:p:qa') as { last_sent_at: number; suppressed_count: number } | undefined;
+      expect(row).toMatchObject({ key: 'agent_run_fail:p:qa', last_sent_at: 13_000, suppressed_count: 0 });
+      vi.useRealTimers();
+    });
   });
 
   describe('adapter selection (detectWebhookType)', () => {
@@ -218,6 +505,7 @@ describe('lib/notifications', () => {
           notification_webhook_url: GENERIC_URL,
           notification_webhook_secret: 'testsecret',
           notification_on_release_success: true,
+          notification_throttle_overrides: { release_success: 0, release_fail: 0, release_aborted: 0 },
         }),
       );
       const { notify } = await import('@/lib/shared/notifications');
@@ -240,7 +528,12 @@ describe('lib/notifications', () => {
       const payload = { event: 'release_success' as const, project: 'p', job_id: 'j', status: 'success' as const, timestamp: 42 };
 
       mockGetSettings.mockReturnValue(
-        defaultSettings({ notification_webhook_url: GENERIC_URL, notification_webhook_secret: 'secret1', notification_on_release_success: true }),
+        defaultSettings({
+          notification_webhook_url: GENERIC_URL,
+          notification_webhook_secret: 'secret1',
+          notification_on_release_success: true,
+          notification_throttle_overrides: { release_success: 0, release_fail: 0, release_aborted: 0 },
+        }),
       );
       await notify({ ...payload });
       await flush();
@@ -248,7 +541,12 @@ describe('lib/notifications', () => {
 
       mockFetch.mockClear();
       mockGetSettings.mockReturnValue(
-        defaultSettings({ notification_webhook_url: GENERIC_URL, notification_webhook_secret: 'secret2', notification_on_release_success: true }),
+        defaultSettings({
+          notification_webhook_url: GENERIC_URL,
+          notification_webhook_secret: 'secret2',
+          notification_on_release_success: true,
+          notification_throttle_overrides: { release_success: 0, release_fail: 0, release_aborted: 0 },
+        }),
       );
       await notify({ ...payload });
       await flush();

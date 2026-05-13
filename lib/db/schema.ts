@@ -145,3 +145,9 @@ export const queuedAgentRuns = sqliteTable('queued_agent_runs', {
 }, (t) => ({
   projectAgentUniq: uniqueIndex('queued_agent_runs_project_agent').on(t.project, t.agentId),
 }));
+
+export const notificationThrottle = sqliteTable('notification_throttle', {
+  key: text('key').primaryKey(),
+  lastSentAt: integer('last_sent_at').notNull(),
+  suppressedCount: integer('suppressed_count').notNull().default(0),
+});

@@ -52,6 +52,8 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     notification_on_fix_loop_exhausted: false,
     notification_on_review_do_not_ship: false,
     notification_on_agent_run_fail: false,
+    notification_throttle_window_seconds: 900,
+    notification_throttle_overrides: { release_fail: 0, release_aborted: 0 },
     pipeline_model_review: '',
     pipeline_model_fix: '',
     pipeline_model_dod: '',

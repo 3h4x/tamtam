@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import * as schema from '@/lib/db/schema';
 
 function makeJsonResponse(data: unknown, status = 200) {
   return Promise.resolve({
@@ -20,12 +23,37 @@ function makeRequest(url = 'http://localhost/api/monitoring') {
   return new Request(url);
 }
 
+function createTestDb() {
+  const sqlite = new Database(':memory:');
+  sqlite.pragma('journal_mode = WAL');
+  sqlite.exec(`
+    CREATE TABLE notification_throttle (
+      key TEXT PRIMARY KEY,
+      last_sent_at INTEGER NOT NULL,
+      suppressed_count INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+  return { sqlite, db: drizzle(sqlite, { schema }) };
+}
+
 describe('GET /api/monitoring', () => {
   let GET: any;
   let fetchSpy: ReturnType<typeof vi.fn>;
+  let testDb: ReturnType<typeof createTestDb>;
 
   beforeEach(async () => {
     vi.resetModules();
+    testDb = createTestDb();
+    vi.doMock('@/lib/db', () => ({
+      db: testDb.db,
+      schema,
+    }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: () => ({
+        notification_throttle_window_seconds: 900,
+        notification_throttle_overrides: { release_fail: 0, release_aborted: 0 },
+      }),
+    }));
     fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
     const mod = await import('@/app/api/monitoring/route');
@@ -47,6 +75,12 @@ describe('GET /api/monitoring', () => {
     expect(data.loki.status).toBe('unavailable');
     expect(data.hasIssues).toBe(false);
     expect(typeof data.fetchedAt).toBe('number');
+    expect(data.notificationThrottle).toEqual({
+      windowSeconds: 900,
+      overrides: { release_fail: 0, release_aborted: 0 },
+      suppressedTotal: 0,
+      entries: [],
+    });
   });
 
   it('returns ok with no issues when all services up and no alerts', async () => {
@@ -200,6 +234,38 @@ describe('GET /api/monitoring', () => {
     const data = await res.json();
     expect(data.windowMs).toBe(60 * 60 * 1000);
     expect(typeof data.fetchedAt).toBe('number');
+  });
+
+  it('includes notification throttle rows ordered by suppressed count', async () => {
+    testDb.sqlite.prepare('INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES (?, ?, ?)').run('agent_run_fail:p:qa', 1000, 2);
+    testDb.sqlite.prepare('INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES (?, ?, ?)').run('review_do_not_ship:p:review', 2000, 5);
+    testDb.sqlite.prepare('INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES (?, ?, ?)').run('release_success:p:release', 3000, 0);
+    fetchSpy.mockRejectedValue(new Error('connection refused'));
+
+    const res = await GET(makeRequest());
+    const data = await res.json();
+
+    expect(data.notificationThrottle.suppressedTotal).toBe(7);
+    expect(data.notificationThrottle.entries.map((entry: { key: string }) => entry.key)).toEqual([
+      'review_do_not_ship:p:review',
+      'agent_run_fail:p:qa',
+    ]);
+  });
+
+  it('reports suppressedTotal across all rows while limiting entries to the top 20', async () => {
+    const insert = testDb.sqlite.prepare('INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES (?, ?, ?)');
+    for (let i = 1; i <= 25; i += 1) {
+      insert.run(`agent_run_fail:p:agent-${i}`, i * 1000, i);
+    }
+    fetchSpy.mockRejectedValue(new Error('connection refused'));
+
+    const res = await GET(makeRequest());
+    const data = await res.json();
+
+    expect(data.notificationThrottle.suppressedTotal).toBe(325);
+    expect(data.notificationThrottle.entries).toHaveLength(20);
+    expect(data.notificationThrottle.entries[0].key).toBe('agent_run_fail:p:agent-25');
+    expect(data.notificationThrottle.entries[19].key).toBe('agent_run_fail:p:agent-6');
   });
 
   it('loki queries exclude info/debug/trace log levels', async () => {

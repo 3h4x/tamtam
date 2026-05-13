@@ -110,6 +110,8 @@ const SETTING_KEYS = [
   'notification_on_review_do_not_ship',
   'notification_on_agent_run_fail',
   'notification_on_budget_blocked',
+  'notification_throttle_window_seconds',
+  'notification_throttle_overrides',
   'budget_block_runs_enabled',
   'budget_subscription_providers',
   'budget_block_at_pct',
@@ -219,6 +221,30 @@ function validateAndSerializeSettingValue(
 
   if (key === 'review_fix_max_iterations') {
     return parsePositiveIntegerSetting(value, 'review_fix_max_iterations');
+  }
+
+  if (key === 'notification_throttle_window_seconds') {
+    return parsePositiveIntegerSetting(value, 'notification_throttle_window_seconds');
+  }
+
+  if (key === 'notification_throttle_overrides') {
+    try {
+      const parsed = JSON.parse(String(value));
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return { value: null, error: 'notification_throttle_overrides must be a JSON object.' };
+      }
+      const normalized: Record<string, number> = {};
+      for (const [event, seconds] of Object.entries(parsed)) {
+        const n = typeof seconds === 'number' ? seconds : Number.parseInt(String(seconds), 10);
+        if (!Number.isFinite(n) || n < 0) {
+          return { value: null, error: 'notification_throttle_overrides values must be non-negative seconds.' };
+        }
+        normalized[event] = n;
+      }
+      return { value: JSON.stringify(normalized), error: null };
+    } catch {
+      return { value: null, error: 'notification_throttle_overrides must be valid JSON.' };
+    }
   }
 
   if (key === 'trusted_github_users') {
