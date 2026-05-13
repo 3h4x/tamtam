@@ -610,6 +610,34 @@ export function ProjectDetailPage({
               Board ↗
             </a>
           )}
+          <button
+            type="button"
+            onClick={async () => {
+              const next = !config?.paused
+              try {
+                const res = await fetch(`/api/projects/by-project/${encodeURIComponent(name)}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ paused: next }),
+                })
+                if (!res.ok) throw new Error(`HTTP ${res.status}`)
+                applyConfigData(await fetchProjectConfig(name))
+                toast(next ? `${name} paused — automated runs blocked` : `${name} resumed`, 'success')
+              } catch (err) {
+                toast(err instanceof Error ? err.message : 'Failed to toggle pause', 'error')
+              }
+            }}
+            className={
+              config?.paused
+                ? 'inline-flex items-center gap-1 rounded-full border border-status-warning/40 bg-status-warning/10 px-2 py-0.5 text-xs text-status-warning hover:bg-status-warning/20 transition-colors'
+                : 'inline-flex items-center gap-1 rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-xs text-text-secondary hover:text-accent hover:border-accent/40 transition-colors'
+            }
+            title={config?.paused
+              ? 'Project is paused — scheduled agents, agent API runs, and releases are blocked. Manual terminal sessions still work. Click to resume.'
+              : 'Pause this project: blocks scheduled agents, agent API runs, and releases without affecting other projects.'}
+          >
+            {config?.paused ? '⏸ Paused' : 'Pause'}
+          </button>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <ProjectActions

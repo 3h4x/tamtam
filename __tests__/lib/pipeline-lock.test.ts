@@ -55,7 +55,8 @@ function createTestDb() {
       enabled INTEGER DEFAULT 1,
       website TEXT,
       qa_url TEXT,
-      archived INTEGER NOT NULL DEFAULT 0
+      archived INTEGER NOT NULL DEFAULT 0,
+      paused INTEGER NOT NULL DEFAULT 0
     );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };

@@ -18,6 +18,7 @@ import { errMsg } from '@/lib/shared/types';
 import { exec } from '@/lib/shared/shell';
 import { getDirtyFileCount } from '@/lib/git/dirty-worktree';
 import { parseFileAgentId, loadFileAgent } from '@/lib/agents/tamtam-file-agents';
+import { isProjectPaused } from '@/lib/shared/enabled-projects';
 import { getAgentMemoryDir, getAgentMemoryPath, readAgentMemory, ensureAgentMemoryDir, buildMemoryBlock } from '@/lib/agents/agent-memory';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { enqueueAgentRun, tryClaimAgentStartSlot, releaseAgentStartSlot, drainNextAgentRun } from '@/lib/agents/pending-agent-run';
@@ -72,6 +73,16 @@ export async function POST(
   }
   if (!agent.schedule && isScheduled) {
     return NextResponse.json({ code: 'no_schedule', detail: `Agent '${agent.name}' has no schedule — ignoring scheduled trigger` }, { status: 409 });
+  }
+
+  // Per-project pause toggle: blocks every agent run for this project
+  // (scheduled and manual API calls). Manual /project/[name]/terminal sessions
+  // bypass this — they go through the streaming routes, not /api/agents.
+  if (isProjectPaused(agent.project)) {
+    return NextResponse.json(
+      { code: 'project_paused', detail: `Project '${agent.project}' is paused — agent runs are blocked. Resume on the project page to continue.` },
+      { status: 409 },
+    );
   }
 
   const body = await request.json();

@@ -30,7 +30,7 @@ import {
 } from '@/lib/shared/job-control';
 import { getDirtyFileCount } from '@/lib/git/dirty-worktree';
 import { resolveProjectPath } from '@/lib/shared/project-data';
-import { isProjectArchived } from '@/lib/shared/enabled-projects';
+import { isProjectArchived, isProjectPaused } from '@/lib/shared/enabled-projects';
 import { getSettings } from '@/lib/shared/config';
 import { db, schema } from '@/lib/db';
 import { eq, and, isNotNull, desc } from 'drizzle-orm';
@@ -192,6 +192,22 @@ async function fire(entry: ScheduleEntry): Promise<void> {
     }
   } catch {
     // Archive probe failure shouldn't block runs — fall through.
+  }
+
+  // Per-project pause toggle: silences automated agent fires for one repo
+  // without freezing the whole queue. Manual /project/[name]/terminal runs
+  // remain allowed — only this scheduled path is gated here.
+  try {
+    if (isProjectPaused(entry.project)) {
+      entry.skippedCount += 1;
+      entry.lastSkippedReason = 'project paused';
+      console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — project paused`);
+      armNext(entry);
+      shouldRearm = false;
+      return;
+    }
+  } catch {
+    // Pause probe failure shouldn't block runs — fall through.
   }
 
   // Warm quota-aware provider caches before consulting the synchronous

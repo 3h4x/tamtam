@@ -141,6 +141,13 @@
       "when": 1778653028243,
       "tag": "0019_graceful_wendell_rand",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1778656709158,
+      "tag": "0020_premium_katie_power",
+      "breakpoints": true
     }
   ]
 }

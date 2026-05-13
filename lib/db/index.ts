@@ -132,6 +132,9 @@ try {
 try {
   sqlite.exec('ALTER TABLE projects ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
 } catch {}
+try {
+  sqlite.exec('ALTER TABLE projects ADD COLUMN paused INTEGER NOT NULL DEFAULT 0');
+} catch {}
 
 // Migrate: add enabled column to agents if missing
 try {
