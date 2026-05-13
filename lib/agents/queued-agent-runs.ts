@@ -243,6 +243,8 @@ export async function drainQueuedAgentRunsForProject(project: string): Promise<v
       } catch (e) {
         if (isTransientDrainTimeoutError(e)) {
           const message = e instanceof Error ? e.message : String(e);
+          // Timeout here just means the replay did not acknowledge within the
+          // grace window; keep the row and retry on the next drain.
           console.warn(`[queued-agent-runs] transient timeout draining ${entry.agentName} for ${project}: ${message}`);
           continue;
         }
