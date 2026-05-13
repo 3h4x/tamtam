@@ -1,0 +1,17 @@
+{
+  "description": "Issue-linked release creates and stays on the derived feature branch",
+  "steps": [
+    {
+      "label": "run",
+      "text": "Prepared issue context."
+    },
+    {
+      "label": "review",
+      "text": "The implementation looks good.\n\nVerdict: LGTM"
+    },
+    {
+      "label": "commit-message",
+      "text": "fix: land issue-linked release"
+    }
+  ]
+}

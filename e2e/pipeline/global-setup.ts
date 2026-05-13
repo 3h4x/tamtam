@@ -47,6 +47,10 @@ const PROJECTS = [
   'push-failure-runs-expand',
   'agent-prereq-terminal',
   'issue-cruncher-prereq',
+  'pr-workflow-auto-merge',
+  'pr-workflow-reuse-existing-pr',
+  'issue-release-auto-branch',
+  'issue-release-zombie-branch-recovery',
 ];
 
 export default async function globalSetup(): Promise<void> {
@@ -68,9 +72,14 @@ export default async function globalSetup(): Promise<void> {
       join(SHIM_DIR, project, 'git-state.json'),
       JSON.stringify({ committed: false, pushed: false }),
     );
+    writeFileSync(join(SHIM_DIR, project, 'git-branch'), 'master');
+    writeFileSync(join(SHIM_DIR, project, 'git-merged-branches.json'), JSON.stringify([]));
     writeFileSync(join(SHIM_DIR, project, 'git-calls.jsonl'), '');
     writeFileSync(join(SHIM_DIR, project, 'counter'), '0');
     writeFileSync(join(SHIM_DIR, project, 'git-failures.json'), JSON.stringify({}));
+    writeFileSync(join(SHIM_DIR, project, 'gh-open-pr.json'), JSON.stringify(null));
+    writeFileSync(join(SHIM_DIR, project, 'gh-pr-statuses.json'), JSON.stringify([]));
+    writeFileSync(join(SHIM_DIR, project, 'gh-pr-status-index'), '0');
   }
 
   // Make shim binaries executable (they may have lost the bit after clone).

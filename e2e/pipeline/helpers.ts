@@ -28,10 +28,15 @@ export function resetShimState(project: string): void {
   const dir = join(SHIM_DIR, project);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'git-state.json'), JSON.stringify({ committed: false, pushed: false }));
+  writeFileSync(join(dir, 'git-branch'), 'master');
+  writeFileSync(join(dir, 'git-merged-branches.json'), JSON.stringify([]));
   writeFileSync(join(dir, 'git-calls.jsonl'), '');
   writeFileSync(join(dir, 'counter'), '0');
   writeFileSync(join(dir, 'timing.json'), JSON.stringify({}));
   writeFileSync(join(dir, 'git-failures.json'), JSON.stringify({}));
+  writeFileSync(join(dir, 'gh-open-pr.json'), JSON.stringify(null));
+  writeFileSync(join(dir, 'gh-pr-statuses.json'), JSON.stringify([]));
+  writeFileSync(join(dir, 'gh-pr-status-index'), '0');
 }
 
 export function writeGitTiming(
@@ -45,11 +50,66 @@ export function writeGitTiming(
 
 export function writeGitFailures(
   project: string,
-  failures: Partial<Record<'add' | 'commit' | 'push', { exitCode?: number; stderr?: string; stdout?: string }>>,
+  failures: Partial<Record<
+    'add' | 'checkout' | 'commit' | 'push',
+    { exitCode?: number; stderr?: string; stdout?: string; matchArgs?: string[]; once?: boolean }
+  >>,
 ): void {
   const dir = join(SHIM_DIR, project);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'git-failures.json'), JSON.stringify(failures));
+}
+
+export function writeGitBranch(project: string, branch: string): void {
+  const dir = join(SHIM_DIR, project);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'git-branch'), branch);
+}
+
+export function readGitBranch(project: string): string {
+  const branchFile = join(SHIM_DIR, project, 'git-branch');
+  try {
+    return readFileSync(branchFile, 'utf-8').trim() || 'master';
+  } catch {
+    return 'master';
+  }
+}
+
+export function writeGitMergedBranches(project: string, branches: string[]): void {
+  const dir = join(SHIM_DIR, project);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'git-merged-branches.json'), JSON.stringify(branches));
+}
+
+export function writeGhPrStatuses(
+  project: string,
+  statuses: Array<{
+    state: string;
+    mergeable: string;
+    statusCheckRollup: Array<Record<string, unknown>>;
+  }>,
+): void {
+  const dir = join(SHIM_DIR, project);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'gh-pr-statuses.json'), JSON.stringify(statuses));
+  writeFileSync(join(dir, 'gh-pr-status-index'), '0');
+}
+
+export function writeGhOpenPr(
+  project: string,
+  pr: {
+    url: string;
+    number?: number;
+    headBranch?: string;
+    title?: string;
+    body?: string;
+    state?: string;
+    author?: { login: string };
+  } | null,
+): void {
+  const dir = join(SHIM_DIR, project);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'gh-open-pr.json'), JSON.stringify(pr));
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +120,7 @@ export interface ShimCall {
   args: string[];
   ts: number;
   cmd?: string;
+  result?: string;
 }
 
 export interface ShimState {
@@ -95,7 +156,7 @@ export function readShimState(project: string): ShimState {
 export async function enableProject(
   request: APIRequestContext,
   project: string,
-  opts: { testsDisabled?: boolean; autoPushEnabled?: boolean } = {},
+  opts: { testsDisabled?: boolean; autoPushEnabled?: boolean; autoPrMergeEnabled?: boolean } = {},
 ): Promise<void> {
   // Step 1: register (or update) the project in the DB with its path.
   // PATCH /api/config/projects expects { name, path, enabled } — must include path or
@@ -111,9 +172,9 @@ export async function enableProject(
     data: {
       tests_disabled: opts.testsDisabled ?? true,
       auto_push_enabled: opts.autoPushEnabled ?? false,
+      auto_pr_merge_enabled: opts.autoPrMergeEnabled ?? false,
       review_disabled: false,
       auto_commit_enabled: false,
-      pr_workflow_enabled: false,
     },
   });
 }
