@@ -25,6 +25,7 @@ const PROJECTS = [
   'history-live-abort',
   'codex-shim',
   'review-cap-exhaustion',
+  'fix-loop-cap-do-not-ship',
   'review-failure',
   'runs-failure-dns',
   'runs-abort-cancel',
