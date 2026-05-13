@@ -38,7 +38,7 @@ describe('instrumentation', () => {
     vi.resetModules();
   });
 
-  function mockDeps(agents: unknown[]) {
+  function mockDeps(agents: unknown[], options: { abortActiveRelease?: ReturnType<typeof vi.fn> } = {}) {
     const chainedDb = makeChainedDb(agents);
     const dbMock = { db: { select: chainedDb.select }, schema: { agents: { schedule: 'schedule', enabled: 'enabled' } } };
     const internalSchedulerMock = {
@@ -47,6 +47,7 @@ describe('instrumentation', () => {
       resumeInternalScheduler: vi.fn(),
     };
     const noopExec = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+    const abortActiveRelease = options.abortActiveRelease ?? vi.fn().mockResolvedValue({ status: 'aborted', httpStatus: 200 });
     vi.doMock('@/lib/db', () => dbMock);
     vi.doMock('./lib/db', () => dbMock);
     vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerMock);
@@ -56,8 +57,8 @@ describe('instrumentation', () => {
     }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: noopExec }));
     vi.doMock('./lib/shared/shell', () => ({ exec: noopExec }));
-    vi.doMock('@/lib/pipeline/release-abort', () => ({ abortActiveRelease: vi.fn().mockResolvedValue({ status: 'aborted', httpStatus: 200 }) }));
-    vi.doMock('./lib/pipeline/release-abort', () => ({ abortActiveRelease: vi.fn().mockResolvedValue({ status: 'aborted', httpStatus: 200 }) }));
+    vi.doMock('@/lib/pipeline/release-abort', () => ({ abortActiveRelease }));
+    vi.doMock('./lib/pipeline/release-abort', () => ({ abortActiveRelease }));
     vi.doMock('drizzle-orm', () => ({ isNotNull: vi.fn(v => v), eq: vi.fn((_a, b) => b), and: vi.fn((...args) => args) }));
   }
 
@@ -665,9 +666,7 @@ describe('instrumentation', () => {
         releaseDeadlineAt: Date.now() - 1000,
       };
       mockJobStorage([releaseJob], { reconcileStaleRelease, pipelineStepKinds: new Set() });
-      mockDeps([]);
-      vi.doMock('@/lib/pipeline/release-abort', () => ({ abortActiveRelease }));
-      vi.doMock('./lib/pipeline/release-abort', () => ({ abortActiveRelease }));
+      mockDeps([], { abortActiveRelease });
 
       const { runProbeSweep } = await import('@/instrumentation-node');
       await runProbeSweep();
@@ -698,9 +697,7 @@ describe('instrumentation', () => {
         releaseDeadlineAt: Date.now() - 1000,
       };
       mockJobStorage([activeRelease, expiredRelease], { pipelineStepKinds: new Set() });
-      mockDeps([]);
-      vi.doMock('@/lib/pipeline/release-abort', () => ({ abortActiveRelease }));
-      vi.doMock('./lib/pipeline/release-abort', () => ({ abortActiveRelease }));
+      mockDeps([], { abortActiveRelease });
 
       const { runProbeSweep } = await import('@/instrumentation-node');
       await runProbeSweep();
@@ -744,9 +741,7 @@ describe('instrumentation', () => {
         reconcileStaleRelease,
         pipelineStepKinds: new Set(['review']),
       });
-      mockDeps([]);
-      vi.doMock('@/lib/pipeline/release-abort', () => ({ abortActiveRelease }));
-      vi.doMock('./lib/pipeline/release-abort', () => ({ abortActiveRelease }));
+      mockDeps([], { abortActiveRelease });
 
       const { runProbeSweep } = await import('@/instrumentation-node');
       await runProbeSweep();
