@@ -19,13 +19,13 @@ async function waitForState(
   name: string,
   predicate: (entry: { status?: string; exit_code?: number | null } | undefined) => boolean,
 ) {
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + 2000;
   while (Date.now() < deadline) {
     if (existsSync(statePath)) {
       const state = JSON.parse(readFileSync(statePath, 'utf-8'));
       if (predicate(state[name])) return state[name];
     }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    await new Promise((resolveWait) => setTimeout(resolveWait, 5));
   }
   throw new Error(`Timed out waiting for ${name} in ${statePath}`);
 }
@@ -73,15 +73,17 @@ describe('scripts/qa-mocks/pm2', () => {
   });
 
   it('returns from start while a direct executable is still running', async () => {
+    const marker = join(dir, 'long-monitor-done.txt');
     const script = join(dir, 'long-monitor.sh');
-    writeFileSync(script, '#!/bin/bash\nsleep 2\nexit 0\n');
+    writeFileSync(script, `#!/bin/bash\nsleep 1\necho done > ${JSON.stringify(marker)}\nexit 0\n`);
     chmodSync(script, 0o755);
 
     const startedAt = Date.now();
     const started = runPm2(['start', script, '--name', 'long-release-monitor'], statePath, dir);
 
     expect(started.status).toBe(0);
-    expect(Date.now() - startedAt).toBeLessThan(1000);
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(existsSync(marker)).toBe(false);
     const jlist = runPm2(['jlist'], statePath, dir);
     expect(jlist.status).toBe(0);
     expect(JSON.parse(jlist.stdout)[0]).toMatchObject({

@@ -1,12 +1,64 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 
-// 1ms poll (not 0 — parseInt('0') || 30_000 = 30_000 since 0 is falsy)
-process.env.TAMTAM_PR_WAIT_POLL_MS = '1';
-process.env.TAMTAM_PR_WAIT_TIMEOUT_MS = '5000';
-process.env.TAMTAM_PR_WAIT_NO_CHECKS_GRACE_MS = '0';
-// Allow the first empty-rollup poll to merge in tests that don't care about
-// CI registration timing. Production default still keeps a 90s grace window.
-process.env.TAMTAM_PR_WAIT_NO_CHECKS_MIN_POLLS = '1';
+const DEFAULT_PR_WAIT_ENV = vi.hoisted(() => {
+  // 1ms poll (not 0 — parseInt('0') || 30_000 = 30_000 since 0 is falsy)
+  process.env.TAMTAM_PR_WAIT_POLL_MS = '1';
+  process.env.TAMTAM_PR_WAIT_TIMEOUT_MS = '5000';
+  process.env.TAMTAM_PR_WAIT_NO_CHECKS_GRACE_MS = '0';
+  // Allow the first empty-rollup poll to merge in tests that don't care about
+  // CI registration timing. Production default still keeps a 90s grace window.
+  process.env.TAMTAM_PR_WAIT_NO_CHECKS_MIN_POLLS = '1';
+
+  return {
+    pollMs: '1',
+    timeoutMs: '5000',
+    noChecksGraceMs: '0',
+    noChecksMinPolls: '1',
+  };
+});
+
+const impls = vi.hoisted(() => {
+  const f = () => vi.fn() as unknown;
+  return {
+    resolveProjectPath: f(),
+    exec: f(),
+    createJob: f(),
+    markDone: f(),
+    updateJob: f(),
+    getJob: f(),
+    startMarkDod: f(),
+  };
+});
+
+function invokeMock<T>(mock: unknown, ...args: unknown[]): T {
+  return (mock as (...innerArgs: unknown[]) => T)(...args);
+}
+
+vi.mock('@/lib/shared/project-data', () => ({
+  resolveProjectPath: (...args: unknown[]) => invokeMock(impls.resolveProjectPath, ...args),
+}));
+vi.mock('@/lib/shared/shell', () => ({
+  exec: (...args: unknown[]) => invokeMock(impls.exec, ...args),
+}));
+vi.mock('@/lib/scheduling/scheduling', () => ({
+  getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs' }),
+}));
+vi.mock('@/lib/jobs/job-storage', () => ({
+  createJob: (...args: unknown[]) => invokeMock(impls.createJob, ...args),
+  markDone: (...args: unknown[]) => invokeMock(impls.markDone, ...args),
+  updateJob: (...args: unknown[]) => invokeMock(impls.updateJob, ...args),
+  getJob: (...args: unknown[]) => invokeMock(impls.getJob, ...args),
+}));
+vi.mock('@/lib/pipeline/start-mark-dod', () => ({
+  startMarkDod: (...args: unknown[]) => invokeMock(impls.startMarkDod, ...args),
+}));
+
+const originalWaitFor = vi.waitFor.bind(vi);
+
+async function importFreshStartPrWait() {
+  vi.resetModules();
+  return import('@/lib/pipeline/start-pr-wait');
+}
 
 describe('launchPrWait', () => {
   let launchPrWait: typeof import('@/lib/pipeline/start-pr-wait').launchPrWait;
@@ -17,9 +69,20 @@ describe('launchPrWait', () => {
   let getJobMock: ReturnType<typeof vi.fn>;
   let startMarkDodMock: ReturnType<typeof vi.fn>;
 
-  beforeEach(async () => {
-    vi.resetModules();
+  beforeAll(() => {
+    (vi as typeof vi & { waitFor: typeof vi.waitFor }).waitFor = ((callback, options) =>
+      originalWaitFor(callback, { interval: 1, ...((options ?? {}) as object) })) as typeof vi.waitFor;
+  });
 
+  afterAll(() => {
+    (vi as typeof vi & { waitFor: typeof vi.waitFor }).waitFor = originalWaitFor;
+  });
+
+  beforeEach(async () => {
+    process.env.TAMTAM_PR_WAIT_POLL_MS = DEFAULT_PR_WAIT_ENV.pollMs;
+    process.env.TAMTAM_PR_WAIT_TIMEOUT_MS = DEFAULT_PR_WAIT_ENV.timeoutMs;
+    process.env.TAMTAM_PR_WAIT_NO_CHECKS_GRACE_MS = DEFAULT_PR_WAIT_ENV.noChecksGraceMs;
+    process.env.TAMTAM_PR_WAIT_NO_CHECKS_MIN_POLLS = DEFAULT_PR_WAIT_ENV.noChecksMinPolls;
     execMock = vi.fn();
     createJobMock = vi.fn().mockImplementation((project: string, kind: string, pid: number, logPath: string) => ({
       id: `${project}-${kind}-test`, project, kind, pid, logPath,
@@ -31,29 +94,15 @@ describe('launchPrWait', () => {
     updateJobMock = vi.fn();
     getJobMock = vi.fn().mockReturnValue(null);
     startMarkDodMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'dod-1', issueNumber: 42, verified: 2, total: 2, changed: true });
+    impls.resolveProjectPath = vi.fn().mockReturnValue('/path/to/proj');
+    impls.exec = execMock;
+    impls.createJob = createJobMock;
+    impls.markDone = markDoneMock;
+    impls.updateJob = updateJobMock;
+    impls.getJob = getJobMock;
+    impls.startMarkDod = startMarkDodMock;
 
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs' }),
-    }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: createJobMock,
-      markDone: markDoneMock,
-      updateJob: updateJobMock,
-      getJob: getJobMock,
-    }));
-    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({
-      startMarkDod: startMarkDodMock,
-    }));
-
-    ({ launchPrWait } = await import('@/lib/pipeline/start-pr-wait'));
-  });
-
-  afterEach(() => {
-    vi.resetModules();
+    ({ launchPrWait } = await importFreshStartPrWait());
   });
 
   function resp(exitCode: number, stdout = '', stderr = '') {
@@ -72,30 +121,20 @@ describe('launchPrWait', () => {
   }
 
   it('returns error when project not found', async () => {
-    vi.resetModules();
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs' }) }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: createJobMock,
-      markDone: markDoneMock,
-      updateJob: updateJobMock,
-      getJob: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
-    const { launchPrWait: launchPrWait2 } = await import('@/lib/pipeline/start-pr-wait');
+    impls.resolveProjectPath = vi.fn().mockReturnValue(null);
+    const { launchPrWait: launchPrWait2 } = await importFreshStartPrWait();
     const r = launchPrWait2('missing-proj', 1, 'owner/repo', 'https://github.com/owner/repo/pull/1');
     expect(r).toEqual({ error: 'project not found' });
   });
 
   it('returns jobId immediately (fire-and-forget)', () => {
+    execMock.mockImplementation(() => new Promise(() => {}));
     const r = launchPrWait('myproj', 42, 'owner/myrepo', 'https://github.com/owner/myrepo/pull/42');
     expect(r).toHaveProperty('jobId');
   });
 
   it('creates a pr-wait job with kind pr-wait', () => {
+    execMock.mockImplementation(() => new Promise(() => {}));
     launchPrWait('myproj', 42, 'owner/myrepo', 'https://github.com/owner/myrepo/pull/42');
     expect(createJobMock).toHaveBeenCalledWith(
       'myproj',
@@ -108,6 +147,7 @@ describe('launchPrWait', () => {
   });
 
   it('persists prNumber/prRepo/prUrl in contextMeta for resumability', () => {
+    execMock.mockImplementation(() => new Promise(() => {}));
     launchPrWait('myproj', 42, 'owner/myrepo', 'https://github.com/owner/myrepo/pull/42');
     const call = createJobMock.mock.calls[0];
     const meta = JSON.parse(call[5] as string);
@@ -156,21 +196,9 @@ describe('launchPrWait', () => {
 
   it('does NOT merge on the first poll when checks: none (regression: race with CI registration)', async () => {
     // Require 3 consecutive empty-rollup polls before merging.
-    vi.resetModules();
     process.env.TAMTAM_PR_WAIT_NO_CHECKS_MIN_POLLS = '3';
     process.env.TAMTAM_PR_WAIT_NO_CHECKS_GRACE_MS = '0';
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs' }),
-    }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: createJobMock, markDone: markDoneMock, updateJob: updateJobMock,
-    }));
-    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
-    const { launchPrWait: lpw } = await import('@/lib/pipeline/start-pr-wait');
+    const { launchPrWait: lpw } = await importFreshStartPrWait();
 
     // First two polls: empty rollup — must NOT merge yet.
     // Third poll: empty rollup — now allowed to merge.
@@ -209,23 +237,11 @@ describe('launchPrWait', () => {
   it('does NOT merge before the default 90s empty-rollup grace elapses', async () => {
     vi.useFakeTimers();
     try {
-      vi.resetModules();
       delete process.env.TAMTAM_PR_WAIT_POLL_MS;
       process.env.TAMTAM_PR_WAIT_TIMEOUT_MS = '200000';
       delete process.env.TAMTAM_PR_WAIT_NO_CHECKS_GRACE_MS;
       delete process.env.TAMTAM_PR_WAIT_NO_CHECKS_MIN_POLLS;
-      vi.doMock('@/lib/shared/project-data', () => ({
-        resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
-      }));
-      vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-      vi.doMock('@/lib/scheduling/scheduling', () => ({
-        getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs' }),
-      }));
-      vi.doMock('@/lib/jobs/job-storage', () => ({
-        createJob: createJobMock, markDone: markDoneMock, updateJob: updateJobMock,
-      }));
-      vi.doMock('@/lib/pipeline/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
-      const { launchPrWait: lpw } = await import('@/lib/pipeline/start-pr-wait');
+      const { launchPrWait: lpw } = await importFreshStartPrWait();
 
       execMock
         .mockResolvedValueOnce(resp(0, JSON.stringify({
@@ -764,35 +780,20 @@ describe('launchPrWait', () => {
     let markDoneT: ReturnType<typeof vi.fn>;
 
     beforeEach(async () => {
-      vi.resetModules();
       process.env.TAMTAM_PR_WAIT_TIMEOUT_MS = '10'; // override to trigger timeout quickly
 
       execT = vi.fn();
       markDoneT = vi.fn().mockResolvedValue(undefined);
-
-      vi.doMock('@/lib/shared/project-data', () => ({
-        resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+      impls.exec = execT;
+      impls.createJob = vi.fn().mockImplementation((project: string, kind: string) => ({
+        id: `${project}-${kind}-timeout`, project, kind, pid: process.pid, logPath: '',
+        prompt: null, startedAt: Date.now() / 1000, finishedAt: null, exitCode: null, seen: false,
       }));
-      vi.doMock('@/lib/shared/shell', () => ({ exec: execT }));
-      vi.doMock('@/lib/scheduling/scheduling', () => ({
-        getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs' }),
-      }));
-      vi.doMock('@/lib/jobs/job-storage', () => ({
-        createJob: vi.fn().mockImplementation((project: string, kind: string) => ({
-          id: `${project}-${kind}-timeout`, project, kind, pid: process.pid, logPath: '',
-          prompt: null, startedAt: Date.now() / 1000, finishedAt: null, exitCode: null, seen: false,
-        })),
-        markDone: markDoneT,
-        updateJob: vi.fn(),
-      }));
-      vi.doMock('@/lib/pipeline/start-mark-dod', () => ({ startMarkDod: vi.fn() }));
+      impls.markDone = markDoneT;
+      impls.updateJob = vi.fn();
+      impls.startMarkDod = vi.fn();
 
-      ({ launchPrWait: launchPrWaitT } = await import('@/lib/pipeline/start-pr-wait'));
-    });
-
-    afterEach(() => {
-      vi.resetModules();
-      process.env.TAMTAM_PR_WAIT_TIMEOUT_MS = '5000';
+      ({ launchPrWait: launchPrWaitT } = await importFreshStartPrWait());
     });
 
     it('marks job done with exit 1 when deadline is exceeded before PR merges', async () => {
@@ -820,27 +821,24 @@ describe('resumePrWait', () => {
   let updateJobMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
-    vi.resetModules();
+    process.env.TAMTAM_PR_WAIT_POLL_MS = DEFAULT_PR_WAIT_ENV.pollMs;
+    process.env.TAMTAM_PR_WAIT_TIMEOUT_MS = DEFAULT_PR_WAIT_ENV.timeoutMs;
+    process.env.TAMTAM_PR_WAIT_NO_CHECKS_GRACE_MS = DEFAULT_PR_WAIT_ENV.noChecksGraceMs;
+    process.env.TAMTAM_PR_WAIT_NO_CHECKS_MIN_POLLS = DEFAULT_PR_WAIT_ENV.noChecksMinPolls;
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: JSON.stringify({ state: 'MERGED', mergeable: 'MERGEABLE', statusCheckRollup: [] }), stderr: '' });
     getJobMock = vi.fn();
     markDoneMock = vi.fn().mockResolvedValue(undefined);
     updateJobMock = vi.fn();
+    impls.resolveProjectPath = vi.fn().mockReturnValue('/path/to/proj');
+    impls.exec = execMock;
+    impls.createJob = vi.fn();
+    impls.markDone = markDoneMock;
+    impls.updateJob = updateJobMock;
+    impls.getJob = getJobMock;
+    impls.startMarkDod = vi.fn().mockResolvedValue({ ok: true, verified: 0, total: 0, changed: false });
 
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: () => '/path/to/proj' }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir: '/tmp/tamtam-test-logs' }) }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: vi.fn(),
-      markDone: markDoneMock,
-      updateJob: updateJobMock,
-      getJob: getJobMock,
-    }));
-    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({ startMarkDod: vi.fn().mockResolvedValue({ ok: true, verified: 0, total: 0, changed: false }) }));
-
-    ({ resumePrWait } = await import('@/lib/pipeline/start-pr-wait'));
+    ({ resumePrWait } = await importFreshStartPrWait());
   });
-
-  afterEach(() => { vi.resetModules(); });
 
   it('returns error when job is not found', () => {
     getJobMock.mockReturnValue(null);
@@ -886,9 +884,12 @@ describe('resumePrWait', () => {
       const call = execMock.mock.calls.find(c => c[0] === 'gh');
       expect(call?.[1]).toContain('7');
     }, { timeout: 2000 });
+    await vi.waitFor(() => {
+      expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'myproj-pr-wait-resume' }), 0);
+    }, { timeout: 3000 });
   });
 
-  it('canonicalizes legacy stale pid rows to inline pid=0 before resuming', () => {
+  it('canonicalizes legacy stale pid rows to inline pid=0 before resuming', async () => {
     const job = {
       id: 'legacy-pr-wait',
       project: 'myproj',
@@ -908,5 +909,8 @@ describe('resumePrWait', () => {
       id: 'legacy-pr-wait',
       pid: 0,
     }));
+    await vi.waitFor(() => {
+      expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'legacy-pr-wait' }), 0);
+    }, { timeout: 3000 });
   });
 });
