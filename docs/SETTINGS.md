@@ -204,6 +204,23 @@ Semantic retrieval layer — embeds agent run reports plus project-scoped knowle
 
 When enabled, TamTam starts Ollama via PM2 (`ollama-serve`) on boot if not already reachable, pulls `nomic-embed-text` if not installed, and indexes completed agent run reports automatically. Use `POST /api/projects/[schedId]/retrieval/reindex` to refresh the project corpus on demand; that route reports whether sources were missing or stale before the refresh. Freshness behavior is source-specific: completed agent runs are indexed when they finish, while project docs, DB-backed skills, and synthesized project config are refreshed on explicit reindex against the current file/DB snapshot. At prompt time, TamTam records retrieval diagnostics on the run (`results`, `empty_corpus`, `no_results`, `below_threshold`, or `embed_failed`) so ineffective retrieval can be distinguished from a healthy hit. If the optional native `sqlite-vec` module is not installed in the current environment, retrieval stays unavailable at runtime: agent prompts skip retrieval context, completed runs are not marked as indexed, and the reindex route returns `503 { code: 'sqlite_vec_unavailable' }` instead of failing mid-request.
 
+### Durable Agent Workflows
+
+Phase-1 durable intake for agent runs, backed by the `workflow` package and a Postgres world. When enabled, **read-only agent runs with no prerequisite command** go through a two-step durable workflow (`composePromptStep` → `startAgentStep`) rather than the direct route path. The workflow state is persisted to Postgres so prompt composition and PM2 spawn are retried automatically on transient failures or server restarts. Everything after PM2 spawn (lifecycle hooks, SSE streaming, completion detection) is unchanged.
+
+Requires: Postgres 17+ accessible to the TamTam process, with env vars set in `.env.local`:
+```
+WORKFLOW_TARGET_WORLD=@workflow/world-postgres
+WORKFLOW_POSTGRES_URL=postgres://user@host:5432/tamtam_workflow
+```
+Run `workflow-postgres-setup` (from `@workflow/world-postgres`) once to create the schema in `tamtam_workflow`.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `durable_agent_workflows_enabled` | bool | `false` | Master gate — off by default; enable after Postgres is provisioned |
+
+The Postgres world worker starts automatically on TamTam boot when the flag is `true` and `WORKFLOW_TARGET_WORLD` is set. Run history and job rows remain SQLite-backed; only workflow execution state (runs, steps) lives in Postgres.
+
 ### Subscription Budget
 
 Live subscription quota (5-hour rolling + 7-day weekly window) is surfaced on `/stats` and Settings → Budget. For the `claude` provider, TamTam fetches `https://api.anthropic.com/api/oauth/usage` using the OAuth token from the macOS Keychain (`security find-generic-password -s "Claude Code-credentials" -w`) or `~/.claude/.credentials.json` and caches the snapshot for 600 s. The background budget-recovery ticker refreshes that cache every 300 s before checking whether queued work can resume. For the `codex` provider, TamTam reads the latest local Codex `token_count.rate_limits` event from `~/.codex/sessions/**/*.jsonl`, matching the windows shown by Codex `/status`.
