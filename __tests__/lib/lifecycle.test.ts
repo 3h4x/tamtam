@@ -1457,12 +1457,10 @@ describe('concurrent step finalization guard', () => {
     await markDoneFn(reviewJob, 1);
 
     // Release should NOT be finalized — the guard defers to the still-running test
-    const relRow = testDb.db
-      .select({ finishedAt: schema.jobs.finishedAt })
-      .from(schema.jobs)
-      .where(eq(schema.jobs.id, 'rel-1'))
-      .get();
-    expect(relRow?.finishedAt).toBeNull();
+    const relRow = testDb.sqlite
+      .prepare('SELECT finished_at FROM jobs WHERE id = ?')
+      .get('rel-1') as { finished_at: number | null } | undefined;
+    expect(relRow?.finished_at).toBeNull();
   });
 
   it('finalizes the release when no other step is running', async () => {
@@ -1483,12 +1481,10 @@ describe('concurrent step finalization guard', () => {
     await markDoneFn(reviewJob, 1);
 
     // Release SHOULD be finalized since no sibling is running
-    const relRow = testDb.db
-      .select({ finishedAt: schema.jobs.finishedAt })
-      .from(schema.jobs)
-      .where(eq(schema.jobs.id, 'rel-2'))
-      .get();
-    expect(relRow?.finishedAt).not.toBeNull();
+    const relRow = testDb.sqlite
+      .prepare('SELECT finished_at FROM jobs WHERE id = ?')
+      .get('rel-2') as { finished_at: number | null } | undefined;
+    expect(relRow?.finished_at).not.toBeNull();
   });
 
   it('does not count a finished sibling step as "still running"', async () => {
@@ -1510,12 +1506,10 @@ describe('concurrent step finalization guard', () => {
     await markDoneFn(reviewJob, 1);
 
     // Finished sibling should NOT block finalization
-    const relRow = testDb.db
-      .select({ finishedAt: schema.jobs.finishedAt })
-      .from(schema.jobs)
-      .where(eq(schema.jobs.id, 'rel-3'))
-      .get();
-    expect(relRow?.finishedAt).not.toBeNull();
+    const relRow = testDb.sqlite
+      .prepare('SELECT finished_at FROM jobs WHERE id = ?')
+      .get('rel-3') as { finished_at: number | null } | undefined;
+    expect(relRow?.finished_at).not.toBeNull();
   });
 });
 
@@ -2002,11 +1996,9 @@ describe('auto-mark seen on completion', () => {
     const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
     await markDoneFn(job, exitCode);
-    const row = testDb.db
-      .select({ seen: schema.jobs.seen })
-      .from(schema.jobs)
-      .where(eq(schema.jobs.id, job.id))
-      .get();
+    const row = testDb.sqlite
+      .prepare('SELECT seen FROM jobs WHERE id = ?')
+      .get(job.id) as { seen: number | boolean } | undefined;
     return !!row?.seen;
   }
 

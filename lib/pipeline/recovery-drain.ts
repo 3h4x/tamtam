@@ -14,7 +14,7 @@ export async function drainQueuedAgentsForProjectIfClear(
   logPrefix = '[recovery]',
 ): Promise<void> {
   const { getPendingRelease } = await import('./pending-release');
-  if (getPendingRelease(project)) {
+  if (await getPendingRelease(project)) {
     console.log(`${logPrefix} keeping queued agents behind pending release for ${project}`);
     return;
   }
@@ -32,7 +32,7 @@ export async function drainProjectRecoveryWork(
 ): Promise<void> {
   const { drainPendingRelease, getPendingRelease } = await import('./pending-release');
   await drainPendingRelease(project);
-  if (getPendingRelease(project)) {
+  if (await getPendingRelease(project)) {
     console.log(`${logPrefix} release still pending for ${project}; leaving queued agents deferred`);
     return;
   }
@@ -43,7 +43,7 @@ export async function drainAllRecoveryWork(logPrefix = '[recovery]'): Promise<vo
   const { listPendingReleaseProjects } = await import('./pending-release');
   const { listQueuedAgentRunProjects } = await import('@/lib/agents/queued-agent-runs');
   const projects = uniqueProjects([
-    ...listPendingReleaseProjects(),
+    ...(await listPendingReleaseProjects()),
     ...(await listQueuedAgentRunProjects()),
   ]);
   for (const project of projects) {

@@ -202,13 +202,13 @@ describe('writePriorityYaml', () => {
 
   it('returns false when project does not exist', async () => {
     const { writePriorityYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('nonexistent', null, 'high')).toBe(false);
+    expect(await fn('nonexistent', null, 'high')).toBe(false);
   });
 
   it('updates priority for existing project', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
     const { writePriorityYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('proj1', null, 'high')).toBe(true);
+    expect(await fn('proj1', null, 'high')).toBe(true);
     const row = testDb.db.select().from(schema.projects).get();
     expect(row?.priority).toBe('high');
   });
@@ -216,7 +216,7 @@ describe('writePriorityYaml', () => {
   it('clears priority when null is passed', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, priority: 'critical' }).run();
     const { writePriorityYaml: fn } = await import('@/lib/scheduling/scheduling');
-    fn('proj1', null, null);
+    await fn('proj1', null, null);
     const row = testDb.db.select().from(schema.projects).get();
     expect(row?.priority).toBeNull();
   });
@@ -249,13 +249,13 @@ describe('writeProjectFieldYaml', () => {
 
   it('returns false when project does not exist', async () => {
     const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('nonexistent', 'github', 'owner/repo')).toBe(false);
+    expect(await fn('nonexistent', 'github', 'owner/repo')).toBe(false);
   });
 
   it('updates github field', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
     const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('proj1', 'github', 'owner/proj1')).toBe(true);
+    expect(await fn('proj1', 'github', 'owner/proj1')).toBe(true);
     const row = testDb.db.select().from(schema.projects).get();
     expect(row?.github).toBe('owner/proj1');
   });
@@ -263,7 +263,7 @@ describe('writeProjectFieldYaml', () => {
   it('updates priority field', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
     const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('proj1', 'priority', 'critical')).toBe(true);
+    expect(await fn('proj1', 'priority', 'critical')).toBe(true);
     const row = testDb.db.select().from(schema.projects).get();
     expect(row?.priority).toBe('critical');
   });
@@ -271,13 +271,13 @@ describe('writeProjectFieldYaml', () => {
   it('returns true for unknown field (no-op)', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
     const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('proj1', 'unknown_field', 'value')).toBe(true);
+    expect(await fn('proj1', 'unknown_field', 'value')).toBe(true);
   });
 
   it('sets tests_disabled=true when value is "1"', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
     const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('proj1', 'tests_disabled', '1')).toBe(true);
+    expect(await fn('proj1', 'tests_disabled', '1')).toBe(true);
     const row = testDb.db.select().from(schema.projects).get();
     expect(row?.testsDisabled).toBe(true);
   });
@@ -285,7 +285,7 @@ describe('writeProjectFieldYaml', () => {
   it('clears tests_disabled when value is "0"', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, testsDisabled: true }).run();
     const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('proj1', 'tests_disabled', '0')).toBe(true);
+    expect(await fn('proj1', 'tests_disabled', '0')).toBe(true);
     const row = testDb.db.select().from(schema.projects).get();
     expect(row?.testsDisabled).toBeFalsy();
   });
@@ -293,7 +293,7 @@ describe('writeProjectFieldYaml', () => {
   it('sets review_disabled=true when value is "1"', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
     const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('proj1', 'review_disabled', '1')).toBe(true);
+    expect(await fn('proj1', 'review_disabled', '1')).toBe(true);
     const row = testDb.db.select().from(schema.projects).get();
     expect(row?.reviewDisabled).toBe(true);
   });
@@ -301,7 +301,7 @@ describe('writeProjectFieldYaml', () => {
   it('clears review_disabled when value is "0"', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, reviewDisabled: true }).run();
     const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('proj1', 'review_disabled', '0')).toBe(true);
+    expect(await fn('proj1', 'review_disabled', '0')).toBe(true);
     const row = testDb.db.select().from(schema.projects).get();
     expect(row?.reviewDisabled).toBeFalsy();
   });
@@ -332,41 +332,41 @@ describe('getProjectTestConfig — testsDisabled / reviewDisabled', () => {
 
   it('returns null for unknown project', async () => {
     const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('ghost')).toBeNull();
+    expect(await fn('ghost')).toBeNull();
   });
 
   it('defaults testsDisabled to false when column is NULL', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
     const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    const cfg = await fn('proj1');
     expect(cfg?.testsDisabled).toBe(false);
   });
 
   it('returns testsDisabled=true when column is set', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, testsDisabled: true }).run();
     const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    const cfg = await fn('proj1');
     expect(cfg?.testsDisabled).toBe(true);
   });
 
   it('defaults reviewDisabled to false when column is NULL', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
     const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    const cfg = await fn('proj1');
     expect(cfg?.reviewDisabled).toBe(false);
   });
 
   it('returns reviewDisabled=true when column is set', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, reviewDisabled: true }).run();
     const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    const cfg = await fn('proj1');
     expect(cfg?.reviewDisabled).toBe(true);
   });
 
   it('returns both flags independently — testsDisabled=true, reviewDisabled=false', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, testsDisabled: true, reviewDisabled: false }).run();
     const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    const cfg = await fn('proj1');
     expect(cfg?.testsDisabled).toBe(true);
     expect(cfg?.reviewDisabled).toBe(false);
   });
@@ -374,35 +374,35 @@ describe('getProjectTestConfig — testsDisabled / reviewDisabled', () => {
   it('defaults issueAutoBranch to true when column is NULL', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
     const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    const cfg = await fn('proj1');
     expect(cfg?.issueAutoBranch).toBe(true);
   });
 
   it('returns issueAutoBranch=false when explicitly set to false', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, issueAutoBranch: false }).run();
     const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    const cfg = await fn('proj1');
     expect(cfg?.issueAutoBranch).toBe(false);
   });
 
   it('returns issueAutoBranch=true when explicitly set to true', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, issueAutoBranch: true }).run();
     const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    const cfg = await fn('proj1');
     expect(cfg?.issueAutoBranch).toBe(true);
   });
 
   it('defaults autoPushEnabled to false when column is NULL', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
     const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    const cfg = await fn('proj1');
     expect(cfg?.autoPushEnabled).toBe(false);
   });
 
   it('returns autoPushEnabled=true when set', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, autoPushEnabled: true }).run();
     const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    const cfg = await fn('proj1');
     expect(cfg?.autoPushEnabled).toBe(true);
   });
 
@@ -507,13 +507,13 @@ describe('setProjectPushResult / getProjectPushResult', () => {
 
   it('getProjectPushResult returns null for unknown project', async () => {
     const { getProjectPushResult } = await import('@/lib/scheduling/scheduling');
-    expect(getProjectPushResult('no-such-project')).toBeNull();
+    expect(await getProjectPushResult('no-such-project')).toBeNull();
   });
 
   it('getProjectPushResult returns null error and null timestamp when project has no push history', async () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
     const { getProjectPushResult } = await import('@/lib/scheduling/scheduling');
-    const result = getProjectPushResult('proj1');
+    const result = await getProjectPushResult('proj1');
     expect(result).not.toBeNull();
     expect(result!.lastPushError).toBeNull();
     expect(result!.lastPushAt).toBeNull();
@@ -523,7 +523,7 @@ describe('setProjectPushResult / getProjectPushResult', () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
     const { setProjectPushResult, getProjectPushResult } = await import('@/lib/scheduling/scheduling');
     setProjectPushResult('proj1', null);
-    const result = getProjectPushResult('proj1');
+    const result = await getProjectPushResult('proj1');
     expect(result!.lastPushError).toBeNull();
     expect(result!.lastPushAt).toBeGreaterThan(0);
   });
@@ -532,7 +532,7 @@ describe('setProjectPushResult / getProjectPushResult', () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
     const { setProjectPushResult, getProjectPushResult } = await import('@/lib/scheduling/scheduling');
     setProjectPushResult('proj1', 'Push failed: remote rejected');
-    const result = getProjectPushResult('proj1');
+    const result = await getProjectPushResult('proj1');
     expect(result!.lastPushError).toBe('Push failed: remote rejected');
     expect(result!.lastPushAt).toBeGreaterThan(0);
   });
@@ -542,7 +542,7 @@ describe('setProjectPushResult / getProjectPushResult', () => {
     const { setProjectPushResult, getProjectPushResult } = await import('@/lib/scheduling/scheduling');
     setProjectPushResult('proj1', 'previous error');
     setProjectPushResult('proj1', null);
-    const result = getProjectPushResult('proj1');
+    const result = await getProjectPushResult('proj1');
     expect(result!.lastPushError).toBeNull();
   });
 
@@ -550,15 +550,15 @@ describe('setProjectPushResult / getProjectPushResult', () => {
     testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
     const { setProjectPushResult, getProjectPushResult } = await import('@/lib/scheduling/scheduling');
     setProjectPushResult('proj1', null);
-    const first = getProjectPushResult('proj1')!.lastPushAt!;
+    const first = (await getProjectPushResult('proj1'))!.lastPushAt!;
     setProjectPushResult('proj1', null);
-    const second = getProjectPushResult('proj1')!.lastPushAt!;
+    const second = (await getProjectPushResult('proj1'))!.lastPushAt!;
     expect(second).toBeGreaterThanOrEqual(first);
   });
 
   it('setProjectPushResult is a no-op for unknown project', async () => {
     const { setProjectPushResult, getProjectPushResult } = await import('@/lib/scheduling/scheduling');
     expect(() => setProjectPushResult('ghost', 'err')).not.toThrow();
-    expect(getProjectPushResult('ghost')).toBeNull();
+    expect(await getProjectPushResult('ghost')).toBeNull();
   });
 });

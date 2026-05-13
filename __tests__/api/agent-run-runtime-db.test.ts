@@ -28,7 +28,7 @@ describe('POST /api/agents/{agentId}/run runtime DB bootstrap', () => {
     }));
 
     const { db, schema } = await import('@/lib/db');
-    db.insert(schema.agents).values({
+    await db.insert(schema.agents).values({
       id: 'agent-1',
       name: 'Docs',
       project: 'proj1',
@@ -42,7 +42,7 @@ describe('POST /api/agents/{agentId}/run runtime DB bootstrap', () => {
       provider: null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-    }).run();
+    }).execute();
 
     const { POST } = await import('@/app/api/agents/[agentId]/run/route');
     const { listQueuedAgentRunsForProject } = await import('@/lib/agents/queued-agent-runs');

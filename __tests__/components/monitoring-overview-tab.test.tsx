@@ -42,14 +42,6 @@ function buildMonitoringData(overrides: Partial<MonitoringData> = {}): Monitorin
         skippedRunningRows: 0,
         errorCount: 0,
         lastError: null,
-        sqliteMaintenance: {
-          status: 'completed',
-          startedAt: 1_700_000_000,
-          finishedAt: 1_700_000_010,
-          activeJobs: 0,
-          checkpointRan: true,
-          vacuumRan: true,
-        },
       },
       lastProjectLogCleanup: {
         type: 'project_logs',
@@ -165,15 +157,6 @@ describe('Monitoring OverviewTab', () => {
           skippedRunningRows: 0,
           errorCount: 0,
           lastError: null,
-          sqliteMaintenance: {
-            status: 'failed',
-            startedAt: 1_700_000_000,
-            finishedAt: 1_700_000_010,
-            activeJobs: 0,
-            checkpointRan: true,
-            vacuumRan: false,
-            error: 'SQLITE_BUSY',
-          },
         },
         lastProjectLogCleanup: {
           type: 'project_logs',
@@ -222,14 +205,6 @@ describe('Monitoring OverviewTab', () => {
           skippedRunningRows: 0,
           errorCount: 0,
           lastError: null,
-          sqliteMaintenance: {
-            status: 'completed',
-            startedAt: 1_700_000_000,
-            finishedAt: 1_700_000_010,
-            activeJobs: 0,
-            checkpointRan: true,
-            vacuumRan: true,
-          },
         },
         lastProjectLogCleanup: {
           type: 'project_logs',

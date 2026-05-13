@@ -121,7 +121,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0))
       .mockImplementationOnce(() => resp(0, 'abc1234'));
 
-    const result = launchProjectPush('proj', { parentJobId: 'release-123' });
+    const result = await launchProjectPush('proj', { parentJobId: 'release-123' });
 
     expect(result).toEqual({ jobId: 'proj-push-test-id' });
     await vi.waitFor(() => {
@@ -152,7 +152,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0))
       .mockImplementationOnce(() => resp(0));
 
-    const result = launchProjectPush('proj', { parentJobId: 'release-123' });
+    const result = await launchProjectPush('proj', { parentJobId: 'release-123' });
 
     expect(result).toEqual({ jobId: 'proj-push-test-id' });
     await vi.waitFor(() => {
@@ -171,11 +171,11 @@ describe('startProjectPush — push result tracking', () => {
     }));
   });
 
-  it('launchProjectPush still blocks unrelated manual pushes while another release holds the lock', () => {
+  it('launchProjectPush still blocks unrelated manual pushes while another release holds the lock', async () => {
     getLockMock.mockReturnValue({ project: 'proj', lockedByJobId: 'release-123', acquiredAt: Date.now() / 1000 });
     isLockOwnedByActiveReleaseMock.mockReturnValue(true);
 
-    const result = launchProjectPush('proj');
+    const result = await launchProjectPush('proj');
 
     expect(result).toEqual({
       error: 'Pipeline is running for proj — wait for it to finish before pushing manually',
@@ -185,12 +185,12 @@ describe('startProjectPush — push result tracking', () => {
     expect(createJobMock).not.toHaveBeenCalled();
   });
 
-  it('rejects a stale release-linked retry before creating a push job', () => {
+  it('rejects a stale release-linked retry before creating a push job', async () => {
     getLockMock.mockReturnValue({ project: 'proj', lockedByJobId: 'release-active', acquiredAt: Date.now() / 1000 });
     isLockOwnedByActiveReleaseMock.mockReturnValue(true);
     getJobMock.mockReturnValue({ id: 'release-stale', project: 'proj', kind: 'release', finishedAt: Date.now() / 1000 });
 
-    const result = launchProjectPush('proj', { parentJobId: 'release-stale' });
+    const result = await launchProjectPush('proj', { parentJobId: 'release-stale' });
 
     expect(result).toEqual({
       error: 'Release-linked push retry is only allowed for the active release on proj',
@@ -200,7 +200,7 @@ describe('startProjectPush — push result tracking', () => {
     expect(checkCliStartGateMock).not.toHaveBeenCalled();
   });
 
-  it('rejects a release-linked retry when the latest linked step is not a failed push', () => {
+  it('rejects a release-linked retry when the latest linked step is not a failed push', async () => {
     getLockMock.mockReturnValue({ project: 'proj', lockedByJobId: 'release-123', acquiredAt: Date.now() / 1000 });
     isLockOwnedByActiveReleaseMock.mockReturnValue(true);
     getJobMock.mockReturnValue({ id: 'release-123', project: 'proj', kind: 'release', finishedAt: null });
@@ -209,7 +209,7 @@ describe('startProjectPush — push result tracking', () => {
       { id: 'push-failed-older', project: 'proj', kind: 'push', startedAt: 200, finishedAt: 210, exitCode: 1, releaseId: 'release-123' },
     ]);
 
-    const result = launchProjectPush('proj', { parentJobId: 'release-123' });
+    const result = await launchProjectPush('proj', { parentJobId: 'release-123' });
 
     expect(result).toEqual({
       error: 'Release-linked push retry is only allowed when the latest step is a failed push for proj',
@@ -1642,9 +1642,9 @@ describe('launchProjectPush — fire-and-forget', () => {
 
   afterEach(() => { vi.resetModules(); });
 
-  it('returns 409 error when a pipeline lock is already held', () => {
+  it('returns 409 error when a pipeline lock is already held', async () => {
     getLockMock.mockReturnValue({ project: 'proj', lockedByJobId: 'release-123', acquiredAt: Date.now() / 1000 });
-    const result = launchProjectPush('proj');
+    const result = await launchProjectPush('proj');
     expect('error' in result).toBe(true);
     if ('error' in result) {
       expect(result.status).toBe(409);
@@ -1655,7 +1655,7 @@ describe('launchProjectPush — fire-and-forget', () => {
 
   it('acquires the pipeline lock for standalone pushes', async () => {
     execMock.mockResolvedValue(resp(0));
-    launchProjectPush('proj');
+    await launchProjectPush('proj');
     await flush();
     await flush();
     expect(acquireLockMock).toHaveBeenCalled();
@@ -1664,7 +1664,7 @@ describe('launchProjectPush — fire-and-forget', () => {
   it('aborts the push when async acquireLock loses the race', async () => {
     execMock.mockResolvedValue(resp(0));
     acquireLockMock.mockResolvedValueOnce({ acquired: false, lock: { project: 'proj', lockedByJobId: 'release-99', acquiredAt: Date.now() / 1000 }, blockingJobId: 'release-99' });
-    const result = launchProjectPush('proj');
+    const result = await launchProjectPush('proj');
     expect('jobId' in result).toBe(true);
     await flush();
     await flush();
@@ -1678,16 +1678,16 @@ describe('launchProjectPush — fire-and-forget', () => {
     expect(lastMarkDone[1]).toBe(1);
   });
 
-  it('returns error object immediately when project path cannot be resolved', () => {
+  it('returns error object immediately when project path cannot be resolved', async () => {
     resolveProjectPathMock.mockReturnValue(null);
-    const result = launchProjectPush('nonexistent');
+    const result = await launchProjectPush('nonexistent');
     expect(result).toEqual({ error: 'project not found' });
     expect(createJobMock).not.toHaveBeenCalled();
   });
 
-  it('returns jobId synchronously when project exists', () => {
+  it('returns jobId when project exists', async () => {
     execMock.mockResolvedValue(resp(0));
-    const result = launchProjectPush('proj');
+    const result = await launchProjectPush('proj');
     expect('jobId' in result).toBe(true);
     if ('jobId' in result) {
       expect(typeof result.jobId).toBe('string');
@@ -1695,9 +1695,9 @@ describe('launchProjectPush — fire-and-forget', () => {
     }
   });
 
-  it('creates a job and updates it with logPath before returning', () => {
+  it('creates a job and updates it with logPath before returning', async () => {
     execMock.mockResolvedValue(resp(0));
-    launchProjectPush('proj');
+    await launchProjectPush('proj');
     expect(createJobMock).toHaveBeenCalled();
     const [cjProject, cjKind, cjPid, cjLog] = createJobMock.mock.calls[0];
     expect(cjProject).toBe('proj');
@@ -1709,9 +1709,9 @@ describe('launchProjectPush — fire-and-forget', () => {
     expect(updatedJob.logPath).toMatch(/\.log$/);
   });
 
-  it('job ID in return value matches the created job ID', () => {
+  it('job ID in return value matches the created job ID', async () => {
     execMock.mockResolvedValue(resp(0));
-    const result = launchProjectPush('proj');
+    const result = await launchProjectPush('proj');
     if ('jobId' in result) {
       const createdJobId = createJobMock.mock.results[0].value.id;
       expect(result.jobId).toBe(createdJobId);
@@ -1723,7 +1723,7 @@ describe('launchProjectPush — fire-and-forget', () => {
       .mockImplementationOnce(() => resp(0, '', ''))         // git push
       .mockImplementationOnce(() => resp(0, 'abc1234'));     // git rev-parse HEAD
 
-    launchProjectPush('proj');
+    await launchProjectPush('proj');
     await flush();
     await flush();
 
@@ -1736,7 +1736,7 @@ describe('launchProjectPush — fire-and-forget', () => {
     execMock
       .mockImplementationOnce(() => resp(1, '', 'remote: rejected'));  // git push fails
 
-    launchProjectPush('proj');
+    await launchProjectPush('proj');
     await flush();
     await flush();
 
@@ -1745,18 +1745,18 @@ describe('launchProjectPush — fire-and-forget', () => {
     expect(exitCode).toBe(1);
   });
 
-  it('writes a start header to the log file immediately', () => {
+  it('writes a start header to the log file immediately', async () => {
     execMock.mockResolvedValue(resp(0));
-    launchProjectPush('proj');
+    await launchProjectPush('proj');
     expect(appendFileSyncMock).toHaveBeenCalled();
     const firstWrite: string = appendFileSyncMock.mock.calls[0][1];
     expect(firstWrite).toContain('push start');
     expect(firstWrite).toContain('/path/to/proj');
   });
 
-  it('creates logDir with recursive mkdirSync', () => {
+  it('creates logDir with recursive mkdirSync', async () => {
     execMock.mockResolvedValue(resp(0));
-    launchProjectPush('proj');
+    await launchProjectPush('proj');
     expect(mkdirSyncMock).toHaveBeenCalledWith('/tmp/test-logs', { recursive: true });
   });
 });
@@ -1996,13 +1996,13 @@ describe('validateReleaseLinkedCommitRetry', () => {
 
   it('returns ok with null parent when no releaseId is given', async () => {
     const { validateReleaseLinkedCommitRetry } = await import('@/lib/pipeline/start-push');
-    expect(validateReleaseLinkedCommitRetry('proj', null)).toEqual({ ok: true, parentJobId: null, releaseLinkedRetry: false });
+    expect(await validateReleaseLinkedCommitRetry('proj', null)).toEqual({ ok: true, parentJobId: null, releaseLinkedRetry: false });
   });
 
   it('rejects 404 when the release id does not exist', async () => {
     getJobMock.mockReturnValue(null);
     const { validateReleaseLinkedCommitRetry } = await import('@/lib/pipeline/start-push');
-    const r = validateReleaseLinkedCommitRetry('proj', 'missing');
+    const r = await validateReleaseLinkedCommitRetry('proj', 'missing');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(404);
   });
@@ -2013,7 +2013,7 @@ describe('validateReleaseLinkedCommitRetry', () => {
     getJobMock.mockReturnValue(older);
     listJobsMock.mockReturnValue([older, newer]);
     const { validateReleaseLinkedCommitRetry } = await import('@/lib/pipeline/start-push');
-    const r = validateReleaseLinkedCommitRetry('proj', 'older');
+    const r = await validateReleaseLinkedCommitRetry('proj', 'older');
     expect(r.ok).toBe(false);
     if (!r.ok) { expect(r.status).toBe(409); expect(r.detail).toContain('latest release'); }
   });
@@ -2026,7 +2026,7 @@ describe('validateReleaseLinkedCommitRetry', () => {
       makeStep('push', { releaseId: 'rel', startedAt: 1500, exitCode: 1 }),
     ]);
     const { validateReleaseLinkedCommitRetry } = await import('@/lib/pipeline/start-push');
-    const r = validateReleaseLinkedCommitRetry('proj', 'rel');
+    const r = await validateReleaseLinkedCommitRetry('proj', 'rel');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.detail).toContain('failed commit');
   });
@@ -2042,7 +2042,7 @@ describe('validateReleaseLinkedCommitRetry', () => {
       failedCommit,
     ]);
     const { validateReleaseLinkedCommitRetry } = await import('@/lib/pipeline/start-push');
-    const r = validateReleaseLinkedCommitRetry('proj', 'rel');
+    const r = await validateReleaseLinkedCommitRetry('proj', 'rel');
     expect(r).toEqual({ ok: true, parentJobId: 'rel', releaseLinkedRetry: true });
   });
 
@@ -2052,7 +2052,7 @@ describe('validateReleaseLinkedCommitRetry', () => {
     listJobsMock.mockReturnValue([release]);
     getLockMock.mockReturnValue({ lockedByJobId: 'other-release-job' });
     const { validateReleaseLinkedCommitRetry } = await import('@/lib/pipeline/start-push');
-    const r = validateReleaseLinkedCommitRetry('proj', 'rel');
+    const r = await validateReleaseLinkedCommitRetry('proj', 'rel');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.detail).toContain('Pipeline is running');
   });

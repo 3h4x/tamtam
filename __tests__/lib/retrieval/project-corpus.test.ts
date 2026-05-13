@@ -110,18 +110,18 @@ describe('collectProjectRetrievalSources', () => {
       join(projectPath, '.tamtam', 'agents', 'qa.md'),
       `---\nskillIds: ["skill-from-file"]\n---\n\nRun checks.\n`
     );
-    testDb.db.insert(schema.skills).values([
+    await testDb.db.insert(schema.skills).values([
       { id: 'skill-from-file', name: 'File Skill', description: '', content: 'from file', createdAt: now, updatedAt: now },
       { id: 'skill-from-override', name: 'Override Skill', description: '', content: 'from override', createdAt: now, updatedAt: now },
-    ]).run();
-    testDb.db.insert(schema.settings).values({
+    ]).execute();
+    await testDb.db.insert(schema.settings).values({
       key: 'agent_override:myproject:qa',
       value: JSON.stringify({ skillIds: ['skill-from-override'] }),
-    }).run();
-    testDb.db.insert(schema.projects).values({ name: 'myproject', path: projectPath, enabled: true }).run();
+    }).execute();
+    await testDb.db.insert(schema.projects).values({ name: 'myproject', path: projectPath, enabled: true }).execute();
 
     const { collectProjectRetrievalSources } = await importSubject();
-    const sources = collectProjectRetrievalSources('myproject', projectPath);
+    const sources = await collectProjectRetrievalSources('myproject', projectPath);
 
     expect(sources.filter((source) => source.sourceKind === 'skill').map((source) => source.sourceId)).toEqual([
       'skill-from-override',
@@ -134,12 +134,12 @@ describe('collectProjectRetrievalSources', () => {
       join(projectPath, '.tamtam', 'agents', 'qa.md'),
       `---\nskillIds: ["skill-from-file"]\n---\n\nRun checks.\n`
     );
-    testDb.db.insert(schema.skills).values([
+    await testDb.db.insert(schema.skills).values([
       { id: 'skill-from-db', name: 'DB Skill', description: '', content: 'from db', createdAt: now, updatedAt: now },
       { id: 'skill-from-file', name: 'File Skill', description: '', content: 'from file', createdAt: now, updatedAt: now },
       { id: 'skill-from-other-file-agent', name: 'Other File Skill', description: '', content: 'from other file agent', createdAt: now, updatedAt: now },
-    ]).run();
-    testDb.db.insert(schema.agents).values({
+    ]).execute();
+    await testDb.db.insert(schema.agents).values({
       id: 'agent-1',
       name: 'qa',
       project: 'myproject',
@@ -154,15 +154,15 @@ describe('collectProjectRetrievalSources', () => {
       prerequisiteCommand: null,
       createdAt: now,
       updatedAt: now,
-    }).run();
+    }).execute();
     writeFileSync(
       join(projectPath, '.tamtam', 'agents', 'docs.md'),
       `---\nskillIds: ["skill-from-other-file-agent"]\n---\n\nSync docs.\n`
     );
-    testDb.db.insert(schema.projects).values({ name: 'myproject', path: projectPath, enabled: true }).run();
+    await testDb.db.insert(schema.projects).values({ name: 'myproject', path: projectPath, enabled: true }).execute();
 
     const { collectProjectRetrievalSources } = await importSubject();
-    const sources = collectProjectRetrievalSources('myproject', projectPath);
+    const sources = await collectProjectRetrievalSources('myproject', projectPath);
 
     expect(sources.filter((source) => source.sourceKind === 'skill').map((source) => source.sourceId).sort()).toEqual([
       'skill-from-db',
@@ -182,10 +182,10 @@ describe('collectProjectRetrievalSources', () => {
       return [readmePath, fileAgentPath];
     });
     getBranchContextMock.mockReturnValue({ isDefaultBranch: false, defaultBranch: 'master' });
-    testDb.db.insert(schema.projects).values({ name: 'myproject', path: projectPath, enabled: true }).run();
+    await testDb.db.insert(schema.projects).values({ name: 'myproject', path: projectPath, enabled: true }).execute();
 
     const { collectProjectRetrievalSources } = await importSubject();
-    const sources = collectProjectRetrievalSources('myproject', projectPath);
+    const sources = await collectProjectRetrievalSources('myproject', projectPath);
 
     expect(listProjectDocumentsMock).toHaveBeenCalledWith(projectPath, { includeAgentDocs: false });
     expect(
