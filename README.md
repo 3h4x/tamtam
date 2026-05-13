@@ -62,7 +62,7 @@ pnpm mcp:http <tool> [json_args]  # call local TamTam HTTP endpoints via .tamtam
 
 ## Configuration
 
-Runtime config lives in the SQLite database by default (`data/db/tamtam.db`, override with `TAMTAM_DB_PATH`). Shared per-project settings can also be committed in `.tamtam/config.yml`, and file-agent prompts can live in `.tamtam/agents/*.md`.
+Runtime config, including notification throttle state, lives in the SQLite database by default (`data/db/tamtam.db`, override with `TAMTAM_DB_PATH`). Shared per-project settings can also be committed in `.tamtam/config.yml`, and file-agent prompts can live in `.tamtam/agents/*.md`.
 
 The Settings area is split across `/settings/general`, `/settings/cli`, `/settings/pipeline`, `/settings/notifications`, `/settings/projects`, `/settings/templates`, and `/settings/database`.
 Bare `/settings` redirects to `/settings/general`, and legacy `/jobs` redirects to `/runs`.
