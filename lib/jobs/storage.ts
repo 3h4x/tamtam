@@ -58,6 +58,7 @@ export function loadFromDb(): void {
         model: row.model ?? null,
         releaseId: row.releaseId ?? null,
         abortedAt: row.abortedAt ?? null,
+        releaseDeadlineAt: row.releaseDeadlineAt ?? null,
         promptBytes: row.promptBytes ?? null,
         workSummary: row.workSummary ?? null,
         modifiedFiles: row.modifiedFiles ?? null,
@@ -103,6 +104,7 @@ export function saveToDb(job: JobData): void {
         model: job.model ?? null,
         releaseId: job.releaseId ?? null,
         abortedAt: job.abortedAt ?? null,
+        releaseDeadlineAt: job.releaseDeadlineAt ?? null,
         promptBytes: job.promptBytes ?? null,
         workSummary: job.workSummary ?? null,
         modifiedFiles: job.modifiedFiles ?? null,
@@ -134,6 +136,7 @@ export function saveToDb(job: JobData): void {
           model: job.model ?? null,
           releaseId: job.releaseId ?? null,
           abortedAt: job.abortedAt ?? null,
+          releaseDeadlineAt: job.releaseDeadlineAt ?? null,
           promptBytes: job.promptBytes ?? null,
           workSummary: job.workSummary ?? null,
           modifiedFiles: job.modifiedFiles ?? null,
@@ -214,6 +217,7 @@ export function createJob(
     ghIssueRepo: ghIssueRepo ?? null,
     ghIssueTitle: ghIssueTitle ?? null,
     releaseId: autoReleaseId,
+    releaseDeadlineAt: null,
     workSummary: null,
     modifiedFiles: null,
     provider: provider ?? null,
@@ -270,6 +274,7 @@ export function getJob(jobId: string): JobData | null {
     model: row.model ?? null,
     releaseId: row.releaseId ?? null,
     abortedAt: row.abortedAt ?? null,
+    releaseDeadlineAt: row.releaseDeadlineAt ?? null,
     promptBytes: row.promptBytes ?? null,
     workSummary: row.workSummary ?? null,
     modifiedFiles: row.modifiedFiles ?? null,
@@ -349,6 +354,7 @@ export function jobToDict(job: JobData): Record<string, unknown> {
   d.log_pruned = job.logPruned ?? false;
   d.release_id = job.releaseId ?? null;
   d.parent_job_id = job.parentJobId ?? null;
+  d.release_deadline_at = job.releaseDeadlineAt ?? null;
   d.prompt_bytes = job.promptBytes ?? null;
   d.work_summary = job.workSummary ?? null;
   d.modified_files = job.modifiedFiles ?? null;

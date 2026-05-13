@@ -61,6 +61,7 @@ export const jobs = sqliteTable('jobs', {
   model: text('model'),
   releaseId: text('release_id'),
   abortedAt: real('aborted_at'),
+  releaseDeadlineAt: integer('release_deadline_at'),
   promptBytes: integer('prompt_bytes'),
   workSummary: text('work_summary'),
   modifiedFiles: text('modified_files'),

@@ -74,6 +74,9 @@ Audit trail for every run, review, fix, test, push, agent execution.
 | `contextMeta` | TEXT | — | nullable; JSON `{ skills, docs }` for terminal sessions |
 | `userPrompt` | TEXT | — | nullable; user-supplied prompt override |
 | `parentJobId` | TEXT | — | nullable; parent job in pipeline chain |
+| `releaseId` | TEXT | — | nullable; parent release meta-job id for pipeline children |
+| `abortedAt` | REAL | — | nullable; Unix timestamp (seconds) when a job/release was cancelled |
+| `releaseDeadlineAt` | INTEGER | — | nullable; Unix timestamp (milliseconds) when a release meta-job should be auto-aborted |
 | `workSummary` | TEXT | — | nullable; concise agent-reported outcome summary |
 | `modifiedFiles` | TEXT | — | nullable; JSON array of files changed by an agent run |
 

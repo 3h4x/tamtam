@@ -31,6 +31,8 @@ export interface ConfigTabProps {
 
   testCommandInput: string
   setTestCommandInput: (v: string) => void
+  releaseTimeoutMinutesInput: string
+  setReleaseTimeoutMinutesInput: (v: string) => void
   testCronEnabledInput: boolean
   setTestCronEnabledInput: (v: boolean) => void
   testCronScheduleInput: string
@@ -75,6 +77,8 @@ export function ConfigTab({
   configLoading,
   testCommandInput,
   setTestCommandInput,
+  releaseTimeoutMinutesInput,
+  setReleaseTimeoutMinutesInput,
   testCronEnabledInput,
   setTestCronEnabledInput,
   testCronScheduleInput,
@@ -231,6 +235,24 @@ export function ConfigTab({
               Detected: <code className="bg-bg-tertiary px-1 rounded">{config.detected_test_command || 'none'}</code>
               {' · '}
               Effective: <code className="bg-bg-tertiary px-1 rounded text-accent">{config.effective_test_command || 'none'}</code>
+            </p>
+          </div>
+          <div>
+            <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="release-timeout-minutes">
+              Release timeout (minutes)
+              <span aria-hidden="true" className="ml-2 text-text-tertiary font-normal">.tamtam/config.yml</span>
+            </label>
+            <input
+              id="release-timeout-minutes"
+              type="text"
+              inputMode="numeric"
+              className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
+              value={releaseTimeoutMinutesInput}
+              onChange={(e) => setReleaseTimeoutMinutesInput(e.target.value)}
+              placeholder="60"
+            />
+            <p className="text-xs text-text-tertiary mt-1">
+              Team-wide wall-clock budget for Release runs. Empty = use the global pipeline setting.
             </p>
           </div>
 

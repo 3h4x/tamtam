@@ -38,7 +38,7 @@ describe('instrumentation', () => {
     vi.resetModules();
   });
 
-  function mockDeps(agents: unknown[]) {
+  function mockDeps(agents: unknown[], options: { abortActiveRelease?: ReturnType<typeof vi.fn> } = {}) {
     const chainedDb = makeChainedDb(agents);
     const dbMock = { db: { select: chainedDb.select }, schema: { agents: { schedule: 'schedule', enabled: 'enabled' } } };
     const internalSchedulerMock = {
@@ -47,6 +47,7 @@ describe('instrumentation', () => {
       resumeInternalScheduler: vi.fn(),
     };
     const noopExec = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+    const abortActiveRelease = options.abortActiveRelease ?? vi.fn().mockResolvedValue({ status: 'aborted', httpStatus: 200 });
     vi.doMock('@/lib/db', () => dbMock);
     vi.doMock('./lib/db', () => dbMock);
     vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerMock);
@@ -56,6 +57,8 @@ describe('instrumentation', () => {
     }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: noopExec }));
     vi.doMock('./lib/shared/shell', () => ({ exec: noopExec }));
+    vi.doMock('@/lib/pipeline/release-abort', () => ({ abortActiveRelease }));
+    vi.doMock('./lib/pipeline/release-abort', () => ({ abortActiveRelease }));
     vi.doMock('drizzle-orm', () => ({ isNotNull: vi.fn(v => v), eq: vi.fn((_a, b) => b), and: vi.fn((...args) => args) }));
   }
 
@@ -497,10 +500,16 @@ describe('instrumentation', () => {
   describe('runProbeSweep()', () => {
     function mockJobStorage(
       jobs: unknown[],
-      probeJobStatus = vi.fn().mockResolvedValue(undefined),
-      reconcileStaleRelease = vi.fn().mockResolvedValue(undefined),
+      options: {
+        probeJobStatus?: ReturnType<typeof vi.fn>;
+        reconcileStaleRelease?: ReturnType<typeof vi.fn>;
+        pipelineStepKinds?: Set<string>;
+      } = {},
     ) {
-      vi.doMock('@/lib/jobs/job-storage', () => ({ listJobs: () => jobs, probeJobStatus, reconcileStaleRelease, PIPELINE_STEP_KINDS: new Set(['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod']) }));
+      const probeJobStatus = options.probeJobStatus ?? vi.fn().mockResolvedValue(undefined);
+      const reconcileStaleRelease = options.reconcileStaleRelease ?? vi.fn().mockResolvedValue(undefined);
+      const pipelineStepKinds = options.pipelineStepKinds ?? new Set(['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod']);
+      vi.doMock('@/lib/jobs/job-storage', () => ({ listJobs: () => jobs, probeJobStatus, reconcileStaleRelease, PIPELINE_STEP_KINDS: pipelineStepKinds }));
       return { probeJobStatus, reconcileStaleRelease };
     }
 
@@ -561,7 +570,7 @@ describe('instrumentation', () => {
       const probeJobStatus = vi.fn()
         .mockRejectedValueOnce(new Error('probe failed'))
         .mockResolvedValue(undefined);
-      mockJobStorage([makeJob('run'), makeJob('review')], probeJobStatus);
+      mockJobStorage([makeJob('run'), makeJob('review')], { probeJobStatus });
       mockDeps([]);
 
       const { runProbeSweep } = await import('@/instrumentation-node');
@@ -636,6 +645,109 @@ describe('instrumentation', () => {
       await runProbeSweep();
 
       expect(reconcileStaleRelease).not.toHaveBeenCalled();
+    });
+
+    it('aborts expired release jobs before reconciling stale releases', async () => {
+      const abortActiveRelease = vi.fn().mockResolvedValue({ status: 'aborted', httpStatus: 200 });
+      const reconcileStaleRelease = vi.fn().mockResolvedValue(undefined);
+      const releaseJob: {
+        id: string;
+        kind: string;
+        finishedAt: number | null;
+        project: string;
+        startedAt: number;
+        releaseDeadlineAt: number;
+      } = {
+        id: 'job-release',
+        kind: 'release',
+        finishedAt: null,
+        project: 'my-project',
+        startedAt: 1000,
+        releaseDeadlineAt: Date.now() - 1000,
+      };
+      mockJobStorage([releaseJob], { reconcileStaleRelease, pipelineStepKinds: new Set() });
+      mockDeps([], { abortActiveRelease });
+
+      const { runProbeSweep } = await import('@/instrumentation-node');
+      await runProbeSweep();
+
+      expect(abortActiveRelease).toHaveBeenCalledWith('my-project', {
+        reason: 'wall_clock_timeout',
+        targetReleaseId: 'job-release',
+      });
+      expect(reconcileStaleRelease).not.toHaveBeenCalled();
+    });
+
+    it('passes the specific expired release id when multiple releases exist for one project', async () => {
+      const abortActiveRelease = vi.fn().mockResolvedValue({ status: 'aborted', httpStatus: 200 });
+      const activeRelease = {
+        id: 'job-release-active',
+        kind: 'release',
+        finishedAt: null,
+        project: 'my-project',
+        startedAt: 2000,
+        releaseDeadlineAt: Date.now() + 60_000,
+      };
+      const expiredRelease = {
+        id: 'job-release-expired',
+        kind: 'release',
+        finishedAt: null,
+        project: 'my-project',
+        startedAt: 1000,
+        releaseDeadlineAt: Date.now() - 1000,
+      };
+      mockJobStorage([activeRelease, expiredRelease], { pipelineStepKinds: new Set() });
+      mockDeps([], { abortActiveRelease });
+
+      const { runProbeSweep } = await import('@/instrumentation-node');
+      await runProbeSweep();
+
+      expect(abortActiveRelease).toHaveBeenCalledTimes(1);
+      expect(abortActiveRelease).toHaveBeenCalledWith('my-project', {
+        reason: 'wall_clock_timeout',
+        targetReleaseId: 'job-release-expired',
+      });
+    });
+
+    it('reconciles expired releases with completed child steps before timeout aborting', async () => {
+      const abortActiveRelease = vi.fn().mockResolvedValue({ status: 'aborted', httpStatus: 200 });
+      const reconcileStaleRelease = vi.fn().mockImplementation(async (step) => {
+        releaseJob.finishedAt = 3000;
+        expect(step.id).toBe('review-1');
+      });
+      const releaseJob: {
+        id: string;
+        kind: string;
+        finishedAt: number | null;
+        project: string;
+        startedAt: number;
+        releaseDeadlineAt: number;
+      } = {
+        id: 'job-release',
+        kind: 'release',
+        finishedAt: null,
+        project: 'my-project',
+        startedAt: 1000,
+        releaseDeadlineAt: Date.now() - 1000,
+      };
+      const completedReview = {
+        id: 'review-1',
+        kind: 'review',
+        finishedAt: 2000,
+        project: 'my-project',
+        startedAt: 1500,
+      };
+      mockJobStorage([releaseJob, completedReview], {
+        reconcileStaleRelease,
+        pipelineStepKinds: new Set(['review']),
+      });
+      mockDeps([], { abortActiveRelease });
+
+      const { runProbeSweep } = await import('@/instrumentation-node');
+      await runProbeSweep();
+
+      expect(reconcileStaleRelease).toHaveBeenCalledWith(completedReview);
+      expect(abortActiveRelease).not.toHaveBeenCalled();
     });
   });
 

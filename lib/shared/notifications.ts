@@ -22,6 +22,7 @@ export interface NotificationPayload {
   cost_usd?: number;
   log_url?: string;
   message?: string;
+  reason?: string;
   suppressedSince?: number;
   throttleKeySuffix?: string;
   timestamp: number;

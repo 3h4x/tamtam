@@ -291,6 +291,11 @@ try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN aborted_at REAL');
 } catch {}
 
+// Migrate: add release_deadline_at to jobs — unix ms wall-clock deadline for release meta-jobs
+try {
+  sqlite.exec('ALTER TABLE jobs ADD COLUMN release_deadline_at INTEGER');
+} catch {}
+
 // Migrate: add verdict to jobs — cached LGTM/NEEDS ATTENTION/DO NOT SHIP from review logs
 try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN verdict TEXT');

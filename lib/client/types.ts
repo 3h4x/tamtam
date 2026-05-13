@@ -131,6 +131,7 @@ export interface ChangeDiffResponse {
 export interface ProjectConfig {
   project: string
   test_command: string
+  release_timeout_minutes?: number | null
   detected_test_command: string
   effective_test_command: string
   test_cron_enabled: boolean

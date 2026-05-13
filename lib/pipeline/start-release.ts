@@ -17,6 +17,7 @@ import { hasFreshLgtm, hasLocalCommitsAhead } from './release-state';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import type { IssueContext } from './release-context';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
+import { computeReleaseDeadlineAt } from './release-timeout';
 
 const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push', 'pr-wait', 'mark-dod', 'release']);
 
@@ -68,6 +69,7 @@ async function resolveReleaseIssueContext(
 // giving the release job a real pid and PM2-managed lifecycle.
 async function createReleaseJob(
   projectName: string,
+  projectPath: string,
   parentJobId?: string | null,
   issueContext?: IssueContext | null,
 ): Promise<{ id: string; releaseId: string; logPath: string } | null> {
@@ -76,6 +78,7 @@ async function createReleaseJob(
     mkdirSync(logDir, { recursive: true });
 
     const job = createJob(projectName, 'release', 0, '', undefined, undefined, undefined, undefined, undefined, undefined, parentJobId);
+    job.releaseDeadlineAt = computeReleaseDeadlineAt(projectPath);
     const logPath = join(logDir, `${job.id}.log`);
     const scriptPath = join(logDir, `${job.id}.sh`);
     const monitorLogPath = join(logDir, `${job.id}.monitor.log`);
@@ -269,7 +272,7 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
     return { ok: false, status: 409, detail: `Pipeline already running for ${projectName}`, blockingJobId: earlyLock.blockingJobId };
   }
 
-  const release = await createReleaseJob(projectName, parentJobId, issueContext);
+  const release = await createReleaseJob(projectName, projPath, parentJobId, issueContext);
   if (!release) {
     releaseLock(projectName, placeholderId);
     return { ok: false, status: 500, detail: 'Failed to create release job', retryable: true };
