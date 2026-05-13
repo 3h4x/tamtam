@@ -7,8 +7,10 @@ import type { CliProvider } from '@/lib/usage/cli-providers';
 import type { QuotaSnapshot } from '@/lib/usage/quota-types';
 
 const isProjectArchivedMock = vi.fn().mockReturnValue(false);
+const isProjectPausedMock = vi.fn().mockReturnValue(false);
 vi.mock('@/lib/shared/enabled-projects', () => ({
   isProjectArchived: (...args: unknown[]) => isProjectArchivedMock(...args),
+  isProjectPaused: (...args: unknown[]) => isProjectPausedMock(...args),
 }));
 
 describe('startRelease — release pipeline entry decision tree', () => {
@@ -137,6 +139,18 @@ describe('startRelease — release pipeline entry decision tree', () => {
     if (!r.ok) {
       expect(r.status).toBe(409);
       expect(r.detail).toBe('project archived');
+    }
+    expect(createJobMock).not.toHaveBeenCalled();
+    expect(startProjectTestMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 when the project is paused', async () => {
+    isProjectPausedMock.mockReturnValueOnce(true);
+    const r = await startRelease('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(409);
+      expect(r.detail).toBe('project paused');
     }
     expect(createJobMock).not.toHaveBeenCalled();
     expect(startProjectTestMock).not.toHaveBeenCalled();

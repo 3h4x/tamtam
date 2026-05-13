@@ -9,10 +9,19 @@ export async function PATCH(
   { params }: { params: Promise<{ projectName: string }> }
 ) {
   const { projectName } = await params;
-  const body = await request.json().catch(() => ({})) as { archived?: unknown };
+  const body = await request.json().catch(() => ({})) as { archived?: unknown; paused?: unknown };
 
-  if (typeof body.archived !== 'boolean') {
+  const hasArchived = body.archived !== undefined;
+  const hasPaused = body.paused !== undefined;
+
+  if (!hasArchived && !hasPaused) {
+    return NextResponse.json({ detail: 'archived or paused boolean required' }, { status: 400 });
+  }
+  if (hasArchived && typeof body.archived !== 'boolean') {
     return NextResponse.json({ detail: 'archived must be a boolean' }, { status: 400 });
+  }
+  if (hasPaused && typeof body.paused !== 'boolean') {
+    return NextResponse.json({ detail: 'paused must be a boolean' }, { status: 400 });
   }
 
   const row = db
@@ -24,14 +33,18 @@ export async function PATCH(
     return NextResponse.json({ detail: 'project not found' }, { status: 404 });
   }
 
+  const updates: { archived?: boolean; paused?: boolean } = {};
+  if (hasArchived) updates.archived = body.archived as boolean;
+  if (hasPaused) updates.paused = body.paused as boolean;
+
   db.update(schema.projects)
-    .set({ archived: body.archived })
+    .set(updates)
     .where(eq(schema.projects.name, projectName))
     .run();
 
   clearProjectDataCache();
 
-  if (body.archived) {
+  if (hasArchived && body.archived) {
     // Drop any scheduled agent timers belonging to this project so the
     // archive takes effect without waiting for the next scheduler reload.
     const agents = db
@@ -42,5 +55,9 @@ export async function PATCH(
     for (const a of agents) removeAgentSchedule(a.id);
   }
 
-  return NextResponse.json({ project: projectName, archived: body.archived });
+  return NextResponse.json({
+    project: projectName,
+    archived: hasArchived ? body.archived : !!row.archived,
+    paused: hasPaused ? body.paused : !!row.paused,
+  });
 }

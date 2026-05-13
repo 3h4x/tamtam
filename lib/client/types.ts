@@ -147,6 +147,7 @@ export interface ProjectConfig {
   commit_style?: string
   website?: string
   qa_url?: string
+  paused?: boolean
   last_push_error?: string | null
   last_push_at?: number | null
   file_config?: string[]

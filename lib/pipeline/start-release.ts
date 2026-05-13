@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, writeFileSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { resolveProjectPath } from '@/lib/shared/project-data';
-import { isProjectArchived } from '@/lib/shared/enabled-projects';
+import { isProjectArchived, isProjectPaused } from '@/lib/shared/enabled-projects';
 import { startProjectTest, detectTestCommand } from './start-test';
 import { startProjectReview } from './start-review';
 import { startProjectPush } from './start-push';
@@ -208,6 +208,9 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
   if (isProjectArchived(projectName)) {
     return { ok: false, status: 409, detail: 'project archived' };
+  }
+  if (isProjectPaused(projectName)) {
+    return { ok: false, status: 409, detail: 'project paused' };
   }
   const sourceJob = options.sourceJobId ? getJob(options.sourceJobId) : null;
   const parentJobId = sourceJob?.project === projectName ? sourceJob.id : null;

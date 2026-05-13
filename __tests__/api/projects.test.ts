@@ -31,7 +31,8 @@ function createArchiveTestDb() {
       fix_prompt_addendum TEXT,
       website TEXT,
       qa_url TEXT,
-      archived INTEGER NOT NULL DEFAULT 0
+      archived INTEGER NOT NULL DEFAULT 0,
+      paused INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE agents (
       id TEXT PRIMARY KEY,
@@ -453,7 +454,7 @@ describe('PATCH /api/projects/by-project/[projectName]', () => {
     const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data).toEqual({ project: 'proj1', archived: true });
+    expect(data).toEqual({ project: 'proj1', archived: true, paused: false });
     expect(archivedFlag('proj1')).toBe(1);
     expect(clearProjectDataCacheMock).toHaveBeenCalled();
     expect(removeAgentScheduleMock).toHaveBeenCalledWith('a1');
@@ -469,7 +470,7 @@ describe('PATCH /api/projects/by-project/[projectName]', () => {
     const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data).toEqual({ project: 'proj1', archived: false });
+    expect(data).toEqual({ project: 'proj1', archived: false, paused: false });
     expect(archivedFlag('proj1')).toBe(0);
     expect(clearProjectDataCacheMock).toHaveBeenCalled();
     expect(removeAgentScheduleMock).not.toHaveBeenCalled();
