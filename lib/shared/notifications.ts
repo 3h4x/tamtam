@@ -1,4 +1,6 @@
 import { createHmac } from 'crypto';
+import { eq } from 'drizzle-orm';
+import { db, schema } from '@/lib/db';
 import { getSettings } from '@/lib/shared/config';
 
 export type NotificationEvent =
@@ -20,6 +22,8 @@ export interface NotificationPayload {
   cost_usd?: number;
   log_url?: string;
   message?: string;
+  suppressedSince?: number;
+  throttleKeySuffix?: string;
   timestamp: number;
 }
 
@@ -28,6 +32,8 @@ interface NotificationConfig {
   webhook_secret: string;
   enabled: boolean;
 }
+
+const notificationQueues = new Map<string, Promise<void>>();
 
 function getNotificationConfig(event: NotificationEvent): NotificationConfig {
   const settings = getSettings();
@@ -71,6 +77,121 @@ function detectWebhookType(url: string): 'slack' | 'discord' | 'generic' {
   if (url.includes('hooks.slack.com')) return 'slack';
   if (url.includes('discord.com/api/webhooks')) return 'discord';
   return 'generic';
+}
+
+function throttleSubject(payload: NotificationPayload): string {
+  if (payload.agent) return payload.agent;
+  switch (payload.event) {
+    case 'agent_run_fail': return 'agent';
+    case 'review_do_not_ship': return 'review';
+    case 'fix_loop_exhausted': return 'fix';
+    case 'budget_blocked': return 'budget';
+    default: return 'release';
+  }
+}
+
+function throttleKey(payload: NotificationPayload): string {
+  if (payload.throttleKeySuffix) {
+    return `${payload.event}:${payload.project}:${payload.throttleKeySuffix}`;
+  }
+  return `${payload.event}:${payload.project}:${throttleSubject(payload)}`;
+}
+
+function throttleWindowMs(payload: NotificationPayload, settings: ReturnType<typeof getSettings>): number {
+  const override = settings.notification_throttle_overrides[payload.event];
+  const seconds = override ?? settings.notification_throttle_window_seconds;
+  return Math.max(0, seconds) * 1000;
+}
+
+function withSuppressedMessage(payload: NotificationPayload, suppressedSince: number): NotificationPayload {
+  if (suppressedSince <= 0) return payload;
+  const suffix = `${suppressedSince} more notification${suppressedSince === 1 ? '' : 's'} suppressed since the last alert.`;
+  return {
+    ...payload,
+    suppressedSince,
+    message: payload.message ? `${payload.message}\n\n${suffix}` : suffix,
+  };
+}
+
+type ThrottleSendState =
+  | {
+      key: string;
+      now: number;
+      kind: 'insert';
+    }
+  | {
+      key: string;
+      now: number;
+      kind: 'update';
+    };
+
+function shouldSend(
+  payload: NotificationPayload,
+): { send: boolean; payload: NotificationPayload; state: ThrottleSendState | null } {
+  const settings = getSettings();
+  const windowMs = throttleWindowMs(payload, settings);
+  if (windowMs <= 0) return { send: true, payload, state: null };
+
+  const now = payload.timestamp || Date.now();
+  const key = throttleKey(payload);
+  const existing = db.select()
+    .from(schema.notificationThrottle)
+    .where(eq(schema.notificationThrottle.key, key))
+    .get();
+
+  if (!existing) {
+    return {
+      send: true,
+      payload,
+      state: { key, now, kind: 'insert' },
+    };
+  }
+
+  if (now - existing.lastSentAt < windowMs) {
+    db.update(schema.notificationThrottle)
+      .set({ suppressedCount: existing.suppressedCount + 1 })
+      .where(eq(schema.notificationThrottle.key, key))
+      .run();
+    return { send: false, payload, state: null };
+  }
+
+  return {
+    send: true,
+    payload: withSuppressedMessage(payload, existing.suppressedCount),
+    state: { key, now, kind: 'update' },
+  };
+}
+
+function markThrottleDelivered(state: ThrottleSendState | null) {
+  if (!state) return;
+  if (state.kind === 'insert') {
+    db.insert(schema.notificationThrottle)
+      .values({ key: state.key, lastSentAt: state.now, suppressedCount: 0 })
+      .run();
+    return;
+  }
+  db.update(schema.notificationThrottle)
+    .set({ lastSentAt: state.now, suppressedCount: 0 })
+    .where(eq(schema.notificationThrottle.key, state.key))
+    .run();
+}
+
+function enqueueNotification(key: string, task: () => Promise<void>) {
+  const previous = notificationQueues.get(key) ?? Promise.resolve();
+  const next = previous
+    .catch(() => {})
+    .then(task)
+    .finally(() => {
+      if (notificationQueues.get(key) === next) {
+        notificationQueues.delete(key);
+      }
+    });
+  notificationQueues.set(key, next);
+}
+
+function toGenericBody(payload: NotificationPayload): Record<string, unknown> {
+  const { throttleKeySuffix: _throttleKeySuffix, ...body } = payload;
+  return body as unknown as Record<string, unknown>;
 }
 
 function formatSlackMessage(payload: NotificationPayload): Record<string, unknown> {
@@ -179,24 +300,37 @@ export async function notify(payload: NotificationPayload): Promise<void> {
   if (!config.enabled || !config.webhook_url) {
     return;
   }
+  const queuedPayload = { ...payload };
+  const queueKey = throttleKey(queuedPayload);
 
-  const webhookType = detectWebhookType(config.webhook_url);
-  let body: Record<string, unknown>;
+  // Never block pipeline progress — work is serialized per throttle key in the
+  // background so the persisted throttle state still tracks delivered alerts.
+  enqueueNotification(queueKey, async () => {
+    const throttle = shouldSend(queuedPayload);
+    if (!throttle.send) return;
+    const resolvedPayload = throttle.payload;
+    const webhookType = detectWebhookType(config.webhook_url);
+    let body: Record<string, unknown>;
 
-  if (webhookType === 'slack') {
-    body = formatSlackMessage(payload);
-  } else if (webhookType === 'discord') {
-    body = formatDiscordMessage(payload);
-  } else {
-    body = payload as unknown as Record<string, unknown>;
-  }
+    if (webhookType === 'slack') {
+      body = formatSlackMessage(resolvedPayload);
+    } else if (webhookType === 'discord') {
+      body = formatDiscordMessage(resolvedPayload);
+    } else {
+      body = toGenericBody(resolvedPayload);
+    }
 
-  const bodyJson = JSON.stringify(body);
-  const signature = config.webhook_secret ? signPayload(bodyJson, config.webhook_secret) : undefined;
+    const bodyJson = JSON.stringify(body);
+    const signature = config.webhook_secret ? signPayload(bodyJson, config.webhook_secret) : undefined;
 
-  // Never block pipeline progress — fire and forget
-  postWebhook(config.webhook_url, body, signature).catch((e) => {
-    console.error(`[notifications] failed to send ${payload.event} notification:`, e);
+    try {
+      const delivered = await postWebhook(config.webhook_url, body, signature);
+      if (delivered) {
+        markThrottleDelivered(throttle.state);
+      }
+    } catch (e) {
+      console.error(`[notifications] failed to send ${resolvedPayload.event} notification:`, e);
+    }
   });
 }
 
@@ -222,7 +356,7 @@ export async function sendTestNotification(webhookUrl: string, webhookSecret: st
   } else if (webhookType === 'discord') {
     body = formatDiscordMessage(payload);
   } else {
-    body = payload as unknown as Record<string, unknown>;
+    body = toGenericBody(payload);
   }
 
   const bodyJson = JSON.stringify(body);

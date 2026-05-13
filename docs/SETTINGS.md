@@ -126,11 +126,15 @@ Outbound webhooks for release pipeline events. Never blocks pipeline progress â€
 | `notification_on_review_do_not_ship` | boolean | `false` | Notify when a code review verdict is "DO NOT SHIP". |
 | `notification_on_agent_run_fail` | boolean | `false` | Notify when an agent run fails. |
 | `notification_on_budget_blocked` | boolean | `false` | Notify when a run is refused because the selected agent subscription budget threshold is exceeded. |
+| `notification_throttle_window_seconds` | number | `900` | Suppress repeated webhook notifications with the same event/project/agent key for this many seconds. |
+| `notification_throttle_overrides` | JSON object | `{ "release_fail": 0, "release_aborted": 0 }` | Per-event throttle windows in seconds. Set an event to `0` to always send. |
 
 **Payload format:** 
 - **Slack**: Formatted as block kit with event, project, status, verdict (if review), cost (if available), and a log link.
 - **Discord**: Embedded message with event details and a timestamp.
-- **Generic**: JSON POST with `{ event, project, job_id, status, verdict?, agent?, cost_usd?, log_url?, timestamp }`. The full event union is documented in the later **Payload shape** section below.
+- **Generic**: JSON POST with `{ event, project, job_id, status, verdict?, agent?, cost_usd?, log_url?, suppressedSince?, timestamp }`. The full event union is documented in the later **Payload shape** section below.
+
+When a throttled event is finally sent after suppressed repeats, the payload includes `suppressedSince` and the human message includes the suppressed count.
 
 **Test notification:** Use the "Send Test" button in the Notifications tab to verify webhook connectivity before enabling production events.
 
@@ -178,6 +182,8 @@ Outbound webhook fired when the release pipeline reaches a terminal state. Suppo
 | `notification_on_review_do_not_ship` | boolean | `false` | Fire when a review returns a DO NOT SHIP verdict |
 | `notification_on_agent_run_fail` | boolean | `false` | Fire when any scheduled agent job exits non-zero |
 | `notification_on_budget_blocked` | boolean | `false` | Fire when a run is refused because the selected agent subscription budget threshold is exceeded (debounced once per window+resetsAt) |
+| `notification_throttle_window_seconds` | number | `900` | Suppress repeated webhook notifications with the same event/project/agent key for this many seconds |
+| `notification_throttle_overrides` | JSON object | `{ "release_fail": 0, "release_aborted": 0 }` | Per-event throttle windows in seconds; `0` always sends |
 
 ### Subscription Budget
 
@@ -291,6 +297,7 @@ notification_webhook_secret, notification_on_release_success,
 notification_on_release_fail, notification_on_release_aborted,
 notification_on_fix_loop_exhausted, notification_on_review_do_not_ship,
 notification_on_agent_run_fail, notification_on_budget_blocked,
+notification_throttle_window_seconds, notification_throttle_overrides,
 budget_block_runs_enabled, budget_subscription_providers,
 budget_block_at_pct, budget_warn_at_pct, pipeline_model_review,
 pipeline_model_fix, pipeline_model_dod, pipeline_model_commit,

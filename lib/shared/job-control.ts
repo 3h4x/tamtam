@@ -121,6 +121,7 @@ function fireBudgetBlockedNotification(
     job_id: '-',
     status: 'failed',
     message: `Subscription quota gate tripped: ${window} at ${utilization.toFixed(0)}% blocked attempt to ${action}. Resets ${resetsAt ?? 'unknown'}.`,
+    throttleKeySuffix: `budget:${key}`,
     timestamp: now,
   });
 }

@@ -173,6 +173,16 @@ sqlite.exec(`
     ON queued_agent_runs (project, agent_id);
 `);
 
+// Per-notification dedupe state. Kept in SQLite so flapping webhook
+// suppression survives server restarts.
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS notification_throttle (
+    key TEXT PRIMARY KEY,
+    last_sent_at INTEGER NOT NULL,
+    suppressed_count INTEGER NOT NULL DEFAULT 0
+  );
+`);
+
 // Migrate: add token/duration/session columns to jobs if missing
 try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN duration_ms INTEGER');

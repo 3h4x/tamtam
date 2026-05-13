@@ -23,6 +23,12 @@ export interface MonitoringData {
     errors: LogLine[]
     warnings: LogLine[]
   }
+  notificationThrottle: {
+    windowSeconds: number
+    overrides: Record<string, number>
+    suppressedTotal: number
+    entries: Array<{ key: string; lastSentAt: number; suppressedCount: number }>
+  }
   hasIssues: boolean
   fetchedAt: number
   windowMs: number

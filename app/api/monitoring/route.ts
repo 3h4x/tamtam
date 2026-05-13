@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server'
+import { db, schema } from '@/lib/db'
+import { getSettings } from '@/lib/shared/config'
 
 const PROMETHEUS_URL = process.env.PROMETHEUS_URL ?? 'http://localhost:9090'
 const LOKI_URL = process.env.LOKI_URL ?? 'http://localhost:3100'
@@ -95,9 +97,24 @@ export async function GET(request: Request) {
   ])
 
   const downServices = prometheus.services.filter(s => s.value?.[1] === '0')
+  const settings = getSettings()
+  const throttledNotifications = db.select()
+    .from(schema.notificationThrottle)
+    .all()
+  const suppressedTotal = throttledNotifications.reduce((sum, row) => sum + row.suppressedCount, 0)
+  const topThrottledNotifications = throttledNotifications
+    .filter((row) => row.suppressedCount > 0)
+    .sort((a, b) => b.suppressedCount - a.suppressedCount || b.lastSentAt - a.lastSentAt)
+    .slice(0, 20)
+  const notificationThrottle = {
+    windowSeconds: settings.notification_throttle_window_seconds,
+    overrides: settings.notification_throttle_overrides,
+    suppressedTotal,
+    entries: topThrottledNotifications,
+  }
   const hasIssues =
     (prometheus.status === 'ok' && (prometheus.alerts.length > 0 || downServices.length > 0)) ||
     (loki.status === 'ok' && loki.errors.length > 0)
 
-  return NextResponse.json({ prometheus, loki, hasIssues, fetchedAt: now, windowMs, config: { prometheusUrl: PROMETHEUS_URL, lokiUrl: LOKI_URL } })
+  return NextResponse.json({ prometheus, loki, notificationThrottle, hasIssues, fetchedAt: now, windowMs, config: { prometheusUrl: PROMETHEUS_URL, lokiUrl: LOKI_URL } })
 }

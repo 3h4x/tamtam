@@ -63,6 +63,8 @@ interface SettingsMap {
   notification_on_review_do_not_ship: string
   notification_on_agent_run_fail: string
   notification_on_budget_blocked: string
+  notification_throttle_window_seconds: string
+  notification_throttle_overrides: string
   budget_block_runs_enabled: string
   budget_subscription_providers: string
   budget_block_at_pct: string
@@ -94,6 +96,8 @@ const SETTINGS_DEFAULTS: SettingsMap = {
   cli_default_model_lmstudio: 'normal',
   jobs_paused: 'false',
   notification_on_budget_blocked: 'false',
+  notification_throttle_window_seconds: '900',
+  notification_throttle_overrides: '{"release_fail":0,"release_aborted":0}',
   budget_block_runs_enabled: 'false',
   budget_subscription_providers: 'claude,codex',
   budget_block_at_pct: '95',
