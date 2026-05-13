@@ -22,6 +22,41 @@ function createDbWithSettings(rows: Array<{ key: string; value: string }>) {
   return dbPath;
 }
 
+function getTableColumns(sqlite: Database.Database, table: string) {
+  return sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+}
+
+function getMigrationRows(sqlite: Database.Database, limit?: number) {
+  const limitClause = typeof limit === 'number' ? `LIMIT ${limit}` : '';
+  return sqlite.prepare(`
+    SELECT hash, created_at
+    FROM __drizzle_migrations
+    ORDER BY created_at ASC
+    ${limitClause}
+  `).all() as Array<{ hash: string; created_at: number }>;
+}
+
+function seedMigrationRows(sqlite: Database.Database, rows: Array<{ hash: string; created_at: number }>) {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS "__drizzle_migrations" (
+      id SERIAL PRIMARY KEY,
+      hash text NOT NULL,
+      created_at numeric
+    )
+  `);
+  const insertMigration = sqlite.prepare(`
+    INSERT INTO "__drizzle_migrations" (hash, created_at)
+    VALUES (?, ?)
+  `);
+  for (const row of rows) {
+    insertMigration.run(row.hash, row.created_at);
+  }
+}
+
+function getColumnNames(sqlite: Database.Database, table: string) {
+  return getTableColumns(sqlite, table).map((column) => column.name);
+}
+
 describe('db bootstrap migrations', () => {
   afterEach(() => {
     delete process.env.TAMTAM_DB_PATH;
@@ -94,7 +129,48 @@ describe('db bootstrap migrations', () => {
     expect(queuedIndex?.name).toBe('queued_agent_runs_project_agent');
   });
 
-  it('keeps runtime-bootstrapped schema compatible with the numbered migrations', async () => {
+  it('keeps a runtime-bootstrapped schema without a migration ledger compatible with the standalone migration wrapper', async () => {
+    const dbPath = createDbWithSettings([]);
+    process.env.TAMTAM_DB_PATH = dbPath;
+
+    await import('@/lib/db');
+
+    const { migrateDb } = await import('../../scripts/db-migrate.js') as {
+      migrateDb: (options: { dbPath: string; migrationsFolder: string }) => void;
+    };
+
+    expect(() => migrateDb({
+      dbPath,
+      migrationsFolder: join(process.cwd(), 'lib', 'db', 'migrations'),
+    })).not.toThrow();
+
+    const sqlite = new Database(dbPath, { readonly: true });
+    try {
+      const migrationRows = sqlite.prepare(`
+        SELECT hash, created_at
+        FROM __drizzle_migrations
+        ORDER BY created_at ASC
+      `).all() as Array<{ hash: string; created_at: number }>;
+      const retrievalChunks = sqlite.prepare(`
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'retrieval_chunks'
+      `).get() as { name: string } | undefined;
+      const ollamaUsage = sqlite.prepare(`
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'ollama_usage'
+      `).get() as { name: string } | undefined;
+
+      expect(migrationRows).toHaveLength(24);
+      expect(retrievalChunks?.name).toBe('retrieval_chunks');
+      expect(ollamaUsage?.name).toBe('ollama_usage');
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('keeps a partially recorded runtime-bootstrapped schema compatible with the standalone migration wrapper', async () => {
     const dbPath = createDbWithSettings([]);
     process.env.TAMTAM_DB_PATH = dbPath;
 
@@ -102,55 +178,231 @@ describe('db bootstrap migrations', () => {
 
     const migratedDir = mkdtempSync(join(tmpdir(), 'tamtam-db-bootstrap-migrate-'));
     const migratedDbPath = join(migratedDir, 'baseline.db');
+    const { migrateDb } = await import('../../scripts/db-migrate.js') as {
+      migrateDb: (options: { dbPath: string; migrationsFolder: string }) => void;
+    };
+      migrateDb({ dbPath: migratedDbPath, migrationsFolder: join(process.cwd(), 'lib', 'db', 'migrations') });
     const migratedSqlite = new Database(migratedDbPath);
     try {
-      migrate(drizzle(migratedSqlite), { migrationsFolder: join(process.cwd(), 'lib', 'db', 'migrations') });
-      const previousMigrationRows = migratedSqlite.prepare(`
-        SELECT hash, created_at
-        FROM __drizzle_migrations
-        ORDER BY created_at ASC
-        LIMIT 19
-      `).all() as Array<{ hash: string; created_at: number }>;
+      const previousMigrationRows = getMigrationRows(migratedSqlite, 19);
       migratedSqlite.close();
 
       const sqlite = new Database(dbPath);
       try {
-        sqlite.exec(`
-          CREATE TABLE IF NOT EXISTS "__drizzle_migrations" (
-            id SERIAL PRIMARY KEY,
-            hash text NOT NULL,
-            created_at numeric
-          )
-        `);
-        const insertMigration = sqlite.prepare(`
-          INSERT INTO "__drizzle_migrations" (hash, created_at)
-          VALUES (?, ?)
-        `);
-        for (const row of previousMigrationRows) {
-          insertMigration.run(row.hash, row.created_at);
-        }
+        seedMigrationRows(sqlite, previousMigrationRows);
+      } finally {
+        sqlite.close();
+      }
 
-        expect(() =>
-          migrate(drizzle(sqlite), { migrationsFolder: join(process.cwd(), 'lib', 'db', 'migrations') })
-        ).not.toThrow();
+      expect(() => migrateDb({
+        dbPath,
+        migrationsFolder: join(process.cwd(), 'lib', 'db', 'migrations'),
+      })).not.toThrow();
 
-        const maintenanceStatus = sqlite.prepare(`
+      const migratedRuntimeSqlite = new Database(dbPath);
+      try {
+        const maintenanceStatus = migratedRuntimeSqlite.prepare(`
           SELECT name
           FROM sqlite_master
           WHERE type = 'table' AND name = 'maintenance_status'
         `).get() as { name: string } | undefined;
-        const jobsColumns = sqlite.prepare('PRAGMA table_info(jobs)').all() as Array<{ name: string }>;
+        const jobsColumns = migratedRuntimeSqlite.prepare('PRAGMA table_info(jobs)').all() as Array<{ name: string }>;
 
         expect(maintenanceStatus?.name).toBe('maintenance_status');
         expect(jobsColumns.map((column) => column.name)).toContain('release_deadline_at');
       } finally {
-        sqlite.close();
+        migratedRuntimeSqlite.close();
       }
     } finally {
       try {
         migratedSqlite.close();
       } catch {}
     }
+  });
+
+  it('keeps a runtime-bootstrapped schema with a ledger that predates recommendations compatible with the standalone migration wrapper', async () => {
+    const dbPath = createDbWithSettings([]);
+    process.env.TAMTAM_DB_PATH = dbPath;
+
+    await import('@/lib/db');
+
+    const migratedDir = mkdtempSync(join(tmpdir(), 'tamtam-db-bootstrap-migrate-'));
+    const migratedDbPath = join(migratedDir, 'baseline.db');
+    const { migrateDb } = await import('../../scripts/db-migrate.js') as {
+      migrateDb: (options: { dbPath: string; migrationsFolder: string }) => void;
+    };
+    migrateDb({ dbPath: migratedDbPath, migrationsFolder: join(process.cwd(), 'lib', 'db', 'migrations') });
+
+    const migratedSqlite = new Database(migratedDbPath);
+    try {
+      const previousMigrationRows = getMigrationRows(migratedSqlite, 6);
+      migratedSqlite.close();
+
+      const sqlite = new Database(dbPath);
+      try {
+        seedMigrationRows(sqlite, previousMigrationRows);
+      } finally {
+        sqlite.close();
+      }
+
+      expect(() => migrateDb({
+        dbPath,
+        migrationsFolder: join(process.cwd(), 'lib', 'db', 'migrations'),
+      })).not.toThrow();
+
+      const directDir = mkdtempSync(join(tmpdir(), 'tamtam-db-bootstrap-direct-pre-recommendations-'));
+      const directDbPath = join(directDir, 'tamtam.db');
+      const directSqlite = new Database(directDbPath);
+      try {
+        migrate(drizzle(directSqlite), { migrationsFolder: join(process.cwd(), 'lib', 'db', 'migrations') });
+
+        const migratedRuntimeSqlite = new Database(dbPath, { readonly: true });
+        try {
+          expect(getColumnNames(migratedRuntimeSqlite, 'jobs').sort()).toEqual(
+            getColumnNames(directSqlite, 'jobs').sort()
+          );
+          expect(getMigrationRows(migratedRuntimeSqlite)).toHaveLength(24);
+        } finally {
+          migratedRuntimeSqlite.close();
+        }
+      } finally {
+        directSqlite.close();
+      }
+    } finally {
+      try {
+        migratedSqlite.close();
+      } catch {}
+    }
+  });
+
+  it('keeps a runtime-bootstrapped schema with a ledger that predates prerequisite_command and qa_url compatible with the standalone migration wrapper', async () => {
+    const dbPath = createDbWithSettings([]);
+    process.env.TAMTAM_DB_PATH = dbPath;
+
+    await import('@/lib/db');
+
+    const migratedDir = mkdtempSync(join(tmpdir(), 'tamtam-db-bootstrap-migrate-'));
+    const migratedDbPath = join(migratedDir, 'baseline.db');
+    const { migrateDb } = await import('../../scripts/db-migrate.js') as {
+      migrateDb: (options: { dbPath: string; migrationsFolder: string }) => void;
+    };
+    migrateDb({ dbPath: migratedDbPath, migrationsFolder: join(process.cwd(), 'lib', 'db', 'migrations') });
+
+    const migratedSqlite = new Database(migratedDbPath);
+    try {
+      const previousMigrationRows = getMigrationRows(migratedSqlite, 11);
+      migratedSqlite.close();
+
+      const sqlite = new Database(dbPath);
+      try {
+        seedMigrationRows(sqlite, previousMigrationRows);
+      } finally {
+        sqlite.close();
+      }
+
+      expect(() => migrateDb({
+        dbPath,
+        migrationsFolder: join(process.cwd(), 'lib', 'db', 'migrations'),
+      })).not.toThrow();
+
+      const directDir = mkdtempSync(join(tmpdir(), 'tamtam-db-bootstrap-direct-pre-prereq-'));
+      const directDbPath = join(directDir, 'tamtam.db');
+      const directSqlite = new Database(directDbPath);
+      try {
+        migrate(drizzle(directSqlite), { migrationsFolder: join(process.cwd(), 'lib', 'db', 'migrations') });
+
+        const migratedRuntimeSqlite = new Database(dbPath, { readonly: true });
+        try {
+          expect(getColumnNames(migratedRuntimeSqlite, 'projects').sort()).toEqual(
+            getColumnNames(directSqlite, 'projects').sort()
+          );
+          expect(getColumnNames(migratedRuntimeSqlite, 'agents').sort()).toEqual(
+            getColumnNames(directSqlite, 'agents').sort()
+          );
+          expect(getMigrationRows(migratedRuntimeSqlite)).toHaveLength(24);
+        } finally {
+          migratedRuntimeSqlite.close();
+        }
+      } finally {
+        directSqlite.close();
+      }
+    } finally {
+      try {
+        migratedSqlite.close();
+      } catch {}
+    }
+  });
+
+  it('rebuilds legacy runtime-bootstrapped projects tables before seeding a migration baseline', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tamtam-db-bootstrap-legacy-projects-'));
+    const dbPath = join(dir, 'tamtam.db');
+    const sqlite = new Database(dbPath);
+    sqlite.exec(`
+      CREATE TABLE settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      CREATE TABLE projects (
+        name TEXT PRIMARY KEY,
+        path TEXT NOT NULL,
+        enabled INTEGER DEFAULT 0,
+        github TEXT,
+        priority TEXT,
+        custom_actions TEXT,
+        test_command TEXT,
+        tests_disabled INTEGER DEFAULT 0,
+        review_disabled INTEGER DEFAULT 0,
+        test_cron_enabled INTEGER DEFAULT 0,
+        test_cron_schedule TEXT,
+        auto_commit_enabled INTEGER DEFAULT 0,
+        auto_push_enabled INTEGER DEFAULT 0,
+        auto_pr_merge_enabled INTEGER DEFAULT 0,
+        release_after_run INTEGER DEFAULT 0,
+        pr_workflow_enabled INTEGER DEFAULT 0,
+        issue_auto_branch INTEGER DEFAULT 1,
+        last_push_error TEXT,
+        last_push_at REAL
+      );
+    `);
+    sqlite.close();
+    process.env.TAMTAM_DB_PATH = dbPath;
+
+    await import('@/lib/db');
+
+    const { migrateDb } = await import('../../scripts/db-migrate.js') as {
+      migrateDb: (options: { dbPath: string; migrationsFolder: string }) => void;
+    };
+
+    expect(() => migrateDb({
+      dbPath,
+      migrationsFolder: join(process.cwd(), 'lib', 'db', 'migrations'),
+    })).not.toThrow();
+
+    const directDir = mkdtempSync(join(tmpdir(), 'tamtam-db-bootstrap-direct-projects-'));
+    const directDbPath = join(directDir, 'tamtam.db');
+      const directSqlite = new Database(directDbPath);
+      try {
+        migrate(drizzle(directSqlite), { migrationsFolder: join(process.cwd(), 'lib', 'db', 'migrations') });
+        const expectedProjectsColumns = getColumnNames(directSqlite, 'projects').sort();
+
+        const migratedSqlite = new Database(dbPath, { readonly: true });
+        try {
+          const projectsColumns = getColumnNames(migratedSqlite, 'projects').sort();
+          const migrationRows = migratedSqlite.prepare(`
+            SELECT hash, created_at
+            FROM __drizzle_migrations
+            ORDER BY created_at ASC
+          `).all() as Array<{ hash: string; created_at: number }>;
+
+          expect(projectsColumns).toEqual(expectedProjectsColumns);
+          expect(projectsColumns).not.toContain('pr_workflow_enabled');
+          expect(migrationRows).toHaveLength(24);
+        } finally {
+          migratedSqlite.close();
+        }
+      } finally {
+        directSqlite.close();
+      }
   });
 
   it('backfills doc_paths and provider columns onto legacy agents tables', async () => {
@@ -182,7 +434,7 @@ describe('db bootstrap migrations', () => {
     await import('@/lib/db');
 
     const migrated = new Database(dbPath, { readonly: true });
-    const columns = migrated.prepare('PRAGMA table_info(agents)').all() as Array<{ name: string }>;
+    const columns = getTableColumns(migrated, 'agents');
     migrated.close();
 
     expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(['doc_paths', 'provider']));
@@ -213,7 +465,7 @@ describe('db bootstrap migrations', () => {
     await import('@/lib/db');
 
     const migrated = new Database(dbPath, { readonly: true });
-    const columns = migrated.prepare('PRAGMA table_info(projects)').all() as Array<{ name: string }>;
+    const columns = getTableColumns(migrated, 'projects');
     migrated.close();
 
     expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(['website', 'qa_url']));
