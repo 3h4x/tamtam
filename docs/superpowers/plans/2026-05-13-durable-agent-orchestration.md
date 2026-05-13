@@ -341,6 +341,95 @@ If the goal is durable orchestration sooner, the simpler path is to make the cur
 
 That directly addresses TamTam's actual pain points without a new backend or orchestration runtime.
 
+<<<<<<< HEAD
+=======
+## Follow-up: What If Postgres Is Acceptable?
+
+Reviewed on 2026-05-13 after operator indicated willingness to run Postgres.
+
+Accepting Postgres removes the storage blocker but does not remove the architectural mismatches. Six concerns survive the storage decision:
+
+1. **PM2 stays for the actual CLI run.** The agent process is a long-lived CLI (`claude`, `codex`, …) spawned by `scripts/job-runner.js` under PM2, with log files tailed via `fs.watch` + NDJSON parser, streamed over SSE, and reaped by `lib/jobs/lifecycle.ts`. A Workflow step can decide to spawn the PM2 job, but PM2 + log files + SSE + lifecycle still own everything after spawn. Net effect: two orchestration systems instead of one.
+2. **Lifecycle/completion logic stays.** Verdict extraction, fix/review loops, recommendation side effects, and release chaining live in `lib/jobs/lifecycle.ts` and fire on PM2 process exit. Migrating them to Workflow steps is a rewrite of the entire pipeline state machine, not just intake.
+3. **Streaming/SSE stays.** `/api/streaming/[jobId]` is wired to the log-file tailer. Workflow has no equivalent primitive for token-by-token CLI output streaming.
+4. **Policy gates stay.** Budget throttling, global/project pause, issue-branch lock, dirty-worktree skip, release-lock skip, and stable next-fire anchoring remain TamTam-specific. Workflow's timer primitive does not subsume them; they just move into workflow functions.
+5. **Two queues stay unless Workflow owns all queueing.** In-memory per-project agent queue (`pending-agent-run.ts`) and DB-backed release-lock queue (`queued-agent-runs.ts`) have different semantics. Partial adoption leaves both in place plus Workflow's own queue.
+6. **Restart recovery splits across two databases.** Today recovery is one SQLite DB. After: in-flight PM2 jobs still recovered by TamTam, intake-side state recovered by Workflow in Postgres. That is worse than today until Workflow owns the whole lifecycle.
+
+### What the bounded intake slice actually buys
+
+The first slice in the migration plan puts Workflow in charge of only the ~50 ms between `POST /api/agents/[id]/run` and PM2 spawn. The route already creates the `jobs` row synchronously before that interval, so the durability win is "retry the prompt-composition step", which rarely fails and is user-retryable today.
+
+Adoption cost for that win: a young dependency (`workflow` ~350k weekly downloads, repo created 2025-10-23, below the >1M / >1yr bar), Postgres + `graphile-worker` to operate, a migration + dual-write period, and ongoing cognitive overhead of two orchestration models.
+
+### Where Postgres + Workflow does pay off
+
+If the goal is committed adoption rather than a bounded experiment, the version that justifies the trade is:
+
+- Postgres + first-party `@workflow/world-postgres`
+- keep PM2 for both Next.js server supervision and CLI job spawning
+- put Workflow in charge of the **pipeline state machine** — replace `lib/jobs/lifecycle.ts` chaining and `lib/pipeline/` orchestration with workflow functions
+- keep streaming, log tailing, SSE, and cancellation as-is
+
+That uses Workflow's actual strengths (durable multi-step workflows, retries-as-code, version pinning) on the part of TamTam that is genuinely a state machine, without owning a custom world or rewriting process supervision. It is also the scope at which durable pause/resume and step-level observability become real, visible wins instead of cosmetic.
+
+## Follow-up: Can We Drop PM2? Can We Write Our Own World?
+
+Reviewed on 2026-05-13.
+
+### Dropping PM2
+
+PM2 in TamTam does three distinct jobs. Workflow can replace at most one of them.
+
+1. **Supervises the Next.js server (`pnpm start`).** Workflow runs durable functions, not web servers. Replacing PM2 here means systemd, Docker, or similar — not Workflow. So PM2-or-equivalent stays for the server itself.
+2. **Spawns one-shot CLI jobs.** This could move into a Workflow step calling `child_process.spawn` directly, but the rewrite covers:
+   - log capture (currently PM2 writes `~/.pm2/logs/<id>-out.log` consumed by the file tailer)
+   - keeping the CLI child alive across Workflow-worker restarts (PM2 does this for free; raw spawn orphans or kills the child)
+   - PID tracking and the `SAFE_PID_FLOOR`-guarded SIGKILL cleanup in `lib/jobs/lifecycle.ts`
+   - cancellation API (today `pm2 delete <id>`)
+   - rerun-from-prompt-file
+   - SSE tailing still works (watches files, not PM2 state) only if the new spawner writes the same files PM2 writes today
+3. **Crash supervision.** If the Workflow worker dies mid-step while a CLI child is running, PM2 today keeps the child alive. A Workflow step's `spawn` either orphans it or takes it down with the worker. The fix is a separate supervisor — which is what PM2 already is.
+
+Net: PM2's job-runner role is replaceable by code, but the replacement is non-trivial process supervision with weaker guarantees than PM2 gives for free. The server-supervision and crash-supervision roles are not replaceable by Workflow at all.
+
+### Writing our own Workflow world
+
+Technically feasible. The world interface is a defined contract (storage + queue + timers); the Postgres world is `pg` + `graphile-worker` + `drizzle-orm`, and the Turso community world proves the interface is reachable from outside Vercel.
+
+A SQLite-backed world would need to provide:
+
+- **Durable step state** — workflow executions, step checkpoints, inputs/outputs per step. Straightforward in SQLite.
+- **Durable timers** — sleep/until-date wakes with restart recovery. Polling loop or `setTimeout` + reinstall on boot.
+- **Job dispatch queue** — the hard part. `graphile-worker` exists because durable leased job dispatch (visibility timeouts, retry-with-backoff, fair scheduling, multiple workers) is genuinely non-trivial. SQLite has no equivalent off-the-shelf; you would hand-roll a leased queue (`UPDATE … RETURNING` with `leased_until`, retry on `SQLITE_BUSY`) or vendor and harden something like `better-queue-sqlite`.
+- **Concurrency model** — SQLite WAL serializes writes; multiple workers contending for jobs need careful locking.
+
+Risks beyond raw effort:
+
+- The world API is not a stable public extension point. Vercel treats it as semi-internal; minor Workflow upgrades can break a custom world. The Turso world has remained at `0.2.2` with one maintainer for months, which is a signal of the maintenance burden.
+- All bugs in the durable layer become TamTam's bugs, and durable-orchestration bugs (lost steps, duplicated steps, stuck timers) are the worst kind to debug.
+- Workflow's version-pinning feature has to be implemented correctly in the world or one of the main reasons to adopt Workflow goes away.
+
+Realistic effort to reach production-grade parity with `world-postgres`: 4–8 focused weeks of work plus ongoing maintenance.
+
+### Compound scope: write own world *and* drop PM2 *and* migrate to Postgres-or-SQLite
+
+This is the maximalist version: replace PM2's job role with native spawn, write a SQLite world to avoid Postgres, and put Workflow in charge of orchestration. Stacked cost:
+
+- a new orchestration framework (still young)
+- a homegrown world to maintain forever, or Postgres anyway
+- a rewrite of job spawning, supervision, lifecycle, and cancellation
+- still need a separate process supervisor for the Next.js server
+
+That trade takes on three hard problems to solve one medium one. Not recommended.
+
+### Decision tree
+
+- **Want durable orchestration with minimum disruption:** persist the pending-agent queue and make "starting" a durable state in SQLite. Keep PM2. Keep Postgres-free. (See "Better Near-Term Work Without `workflow`".)
+- **Want Workflow's real strengths and willing to run Postgres:** Postgres + `world-postgres` + PM2 + Workflow owning the pipeline state machine. Bounded by `durable_agent_workflows_enabled` flag, rolled out in phases per the migration plan.
+- **Avoid:** custom SQLite world, replacing PM2's CLI-spawn role, or bounded "intake only" Workflow adoption — each pays significant cost for marginal gain.
+
+>>>>>>> 9a3bad9 (fix(agents): guard missing pending run state)
 ## Conclusion
 
 `workflow` is promising, but it is not the simplest next step for TamTam.
