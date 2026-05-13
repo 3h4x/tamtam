@@ -121,6 +121,18 @@ Persisted dedupe state for outbound webhook throttling.
 
 ---
 
+### `maintenance_status`
+
+Persisted latest-status records for server maintenance tasks. Values are JSON payloads so narrowly scoped maintenance subsystems can evolve their summary shape without a schema change.
+
+| Column | Type | Default | Notes |
+|--------|------|---------|-------|
+| `key` | TEXT | — | PRIMARY KEY; retention uses `retention:project-logs:last` and `retention:nightly:last` |
+| `value` | TEXT | — | JSON summary payload |
+| `updatedAt` | REAL | — | Unix timestamp (seconds) when the summary was written |
+
+---
+
 ### `agents`
 
 Configuration for scheduled automated agents.
@@ -222,6 +234,7 @@ db.select().from(schema.jobs).where(eq(schema.jobs.project, name)).all()
 | Global config (workspace path, Claude bin, verdict rules…) | `settings` | `key` |
 | Project metadata + per-project pipeline flags | `projects` | `name` |
 | Every run / review / fix / push / agent execution | `jobs` | `id` |
+| Latest maintenance telemetry | `maintenance_status` | `key` |
 | Project recommendations from agent/scheduler signals | `recommendations` | `id` |
 | Reusable prompt blocks | `skills` | `id` |
 | Scheduled automation configs | `agents` | `id` |

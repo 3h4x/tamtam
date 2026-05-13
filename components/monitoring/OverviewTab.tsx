@@ -10,6 +10,37 @@ function StatusDot({ ok }: { ok: boolean }) {
   )
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function formatNightlyCleanupLine(data: MonitoringData['retention']['lastNightlyCleanup']): string {
+  if (!data) return 'No nightly cleanup recorded'
+  const base = `${data.status} · ${data.rowsDeleted} rows`
+  const sqlite = `SQLite ${data.sqliteMaintenance.status}`
+  const error = data.lastError ? ` · ${data.lastError}` : data.sqliteMaintenance.error ? ` · ${data.sqliteMaintenance.error}` : ''
+  return `${base}, ${sqlite}${error}`
+}
+
+function formatProjectLogCleanupLine(data: MonitoringData['retention']['lastProjectLogCleanup']): string {
+  if (!data) return 'No project log prune recorded'
+  const base = `${data.status} · ${data.logFilesDeleted} files, ${formatBytes(data.bytesReclaimed)}`
+  return data.lastError ? `${base} · ${data.lastError}` : base
+}
+
+function getRetentionStatus(retention: MonitoringData['retention']): 'ok' | 'issue' | 'unavailable' {
+  const nightlyCleanup = retention.lastNightlyCleanup
+  const projectLogCleanup = retention.lastProjectLogCleanup
+
+  if (!nightlyCleanup && !projectLogCleanup) return 'unavailable'
+  if (nightlyCleanup?.status === 'failed') return 'issue'
+  if (nightlyCleanup?.sqliteMaintenance.status === 'failed') return 'issue'
+  if (projectLogCleanup?.status === 'failed') return 'issue'
+  return 'ok'
+}
+
 export function OverviewTab({
   data,
   pm2Logs,
@@ -24,6 +55,15 @@ export function OverviewTab({
   const pm2ErrorCount = pm2Logs?.entries.filter(e => e.level === 'error').length ?? 0
   const pm2WarnCount  = pm2Logs?.entries.filter(e => e.level === 'warn').length ?? 0
   const throttle = data.notificationThrottle
+  const retention = data.retention
+  const nightlyCleanup = retention.lastNightlyCleanup
+  const projectLogCleanup = retention.lastProjectLogCleanup
+  const nightlyCleanupTime = nightlyCleanup
+    ? new Date(nightlyCleanup.finishedAt * 1000).toLocaleString()
+    : null
+  const nightlyCleanupTouched = formatNightlyCleanupLine(nightlyCleanup)
+  const projectLogCleanupTouched = formatProjectLogCleanupLine(projectLogCleanup)
+  const cleanupStatus = getRetentionStatus(retention)
 
   const sections = [
     {
@@ -68,6 +108,17 @@ export function OverviewTab({
           : 'No suppressed alerts pending',
       ],
     },
+    {
+      title: 'Retention',
+      status: cleanupStatus,
+      lines: [
+        `Logs ${retention.policy.logRetentionCount} runs / ${retention.policy.logRetentionDays}d`,
+        `Rows ${retention.policy.jobRowRetentionDays}d`,
+        nightlyCleanupTime ? `Nightly ${nightlyCleanupTime}` : nightlyCleanupTouched,
+        nightlyCleanupTime ? nightlyCleanupTouched : null,
+        projectLogCleanupTouched,
+      ].filter(Boolean) as string[],
+    },
   ] as const
 
   const statusIcon = (s: string) =>
@@ -79,7 +130,7 @@ export function OverviewTab({
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         {sections.map(sec => (
           <div key={sec.title} className={`rounded-lg border p-4 flex flex-col gap-2 ${statusCls(sec.status)}`}>
             <div className="flex items-center justify-between gap-2">

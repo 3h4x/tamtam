@@ -91,7 +91,7 @@ GitHub board cards carry four TEXT custom fields provisioned by `ensureProjectBo
 ## Health / Monitoring / Stats
 
 - `/api/health` — Health check (GET)
-- `/api/monitoring` — Prometheus + Loki status aggregation plus notification throttle state (GET); env: `PROMETHEUS_URL`, `LOKI_URL`
+- `/api/monitoring` — Prometheus + Loki status aggregation plus notification throttle state and separate retention telemetry for the latest nightly row cleanup and per-project log pruning summaries (GET); env: `PROMETHEUS_URL`, `LOKI_URL`
 - `/api/monitoring/pm2-logs` — Tail tamtam PM2 log files (error + out from `~/.pm2/logs/`), last 64 KB; `?limit=` (max 500), `?out=0` to suppress stdout (GET)
 - `/api/stats/usage` — Token usage per project and per agent kind (GET, `?window=24h|7d|30d|all`)
 - `/api/stats/pipeline` — Pipeline health metrics: verdict distribution, recovery-loop stats (`fix` and `fix-push`, attributed by `releaseId` when present and otherwise by the enclosing release window), step durations for the synthetic trigger `agent` step plus `release`, `test`, `review`, `fix`, `commit`, `push`, `pr-wait`, `fix-push`, and `mark-dod` (each with `avg`, `median`, `p95`, `count`, and optional `avgCostUsd` when cost data exists), successful-release duration stats (`mttr.avg`, `mttr.median`, `mttr.p95`, `mttr.count`, optional `mttr.avgCostUsd`), per-project breakdown, and active recovery-budget config snapshot (`maxStepIterations`, `maxFixPushAttempts`, `stepWindowSeconds`; sourced from the same helper as runtime enforcement) (GET, `?window=...`, `?project=`; 60s cache)
