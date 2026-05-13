@@ -38,7 +38,7 @@ const NAV_ITEMS: NavItem[] = [
 export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
   const pathname = usePathname()
   const { theme } = useTheme()
-  const logoSrc = theme === 'dark' ? '/logo.png' : '/logo-light.png'
+  const logoSrc = theme === 'dark' ? '/logo-light.png' : '/logo.png'
 
   // Open-recommendation count across all projects, polled on a 60s cadence
   // (same pattern as JobsPauseToggle). The chip is hidden when count is 0
