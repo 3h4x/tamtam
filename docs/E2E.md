@@ -36,10 +36,16 @@ e2e/pipeline/
   scenarios/
     happy-path.json         # Steps for the happy-path spec
     review-needs-attention.json
+    issue-release-auto-branch.json
+    pr-workflow-auto-merge.json
   global-setup.ts           # Playwright globalSetup — creates temp dirs, configures server
   helpers.ts                # writeScenario, resetShimState, readShimCalls, waitForPipeline…
   happy-path.spec.ts        # review LGTM → commit → push
   review-needs-attention.spec.ts  # NEEDS ATTENTION → fix → LGTM → commit → push
+  issue-release-auto-branch.spec.ts # issue-linked release creates a feature branch before commit
+  issue-release-zombie-branch-recovery.spec.ts # issue-linked release deletes and recreates a merged zombie branch
+  pr-workflow-auto-merge.spec.ts  # feature branch push → PR wait → merge → DoD
+  pr-workflow-reuse-existing-pr.spec.ts # feature branch push reuses an existing PR before auto-merge
 ```
 
 ---
@@ -114,11 +120,101 @@ Each test project gets its own subdirectory under the shim-state root:
   scenario.json      # current scenario (written by helpers.ts writeScenario)
   counter            # current Claude call index (incremented by claude-shim.js)
   git-state.json     # { committed: false, pushed: false }
+  git-branch         # current branch returned by the git shim
+  git-merged-branches.json # scripted `git branch --merged <base>` output
+  git-failures.json  # one-shot or persistent scripted command failures
+  gh-open-pr.json    # scripted existing PR metadata for `gh pr view` / `gh pr list`
+  gh-pr-statuses.json # scripted PR statusCheckRollup responses for pr-wait
+  gh-pr-status-index # next scripted PR status response index
   git-calls.jsonl    # JSONL log of every git invocation
 ```
 
 Call `resetShimState(project)` from `helpers.ts` in `beforeAll` to wipe and
 reinitialize this directory before each test run.
+
+## PR Workflow shim knobs
+
+Use `writeGitBranch(project, '<feature-branch>')` to make the git shim report a
+non-default branch. Release pushes from a non-default branch exercise the PR
+Workflow path: `gh pr create`, `pr-wait`, `gh pr merge`, post-merge checkout
+back to `master`, then `mark-dod`.
+
+Use `writeGhPrStatuses(project, statuses)` to script the `gh pr view --json
+state,mergeable,statusCheckRollup` responses consumed by `start-pr-wait`.
+Each poll advances one entry and then repeats the last entry. A pending then
+passing sequence looks like:
+
+```typescript
+writeGhPrStatuses(project, [
+  {
+    state: 'OPEN',
+    mergeable: 'MERGEABLE',
+    statusCheckRollup: [{ name: 'CI', status: 'IN_PROGRESS', conclusion: null }],
+  },
+  {
+    state: 'OPEN',
+    mergeable: 'MERGEABLE',
+    statusCheckRollup: [{ name: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+  },
+]);
+```
+
+The gh shim records PR status polls with `result: "checks:<status>"` in
+`git-calls.jsonl`, so specs can prove `gh pr merge` was invoked only after a
+passing check response. PR body and issue checkbox updates remain mocked: the
+default PR body is empty, so post-merge `mark-dod` records a successful no-op
+unless the test overrides the shim behavior.
+
+Use `writeGhOpenPr(project, pr)` to script an already-open PR for the current
+feature branch. That drives both production reuse paths:
+
+- `createGenericPR(...)` → `gh pr view --json url`
+- `createIssuePR(...)` → `gh pr list --head <branch> --json url`
+
+Example:
+
+```typescript
+writeGhOpenPr(project, {
+  number: 7,
+  url: 'https://github.com/test/repo/pull/7',
+  headBranch: 'feature/reuse-existing-pr',
+  title: 'Existing PR',
+  body: '',
+  state: 'OPEN',
+  author: { login: 'trusted-user' },
+});
+```
+
+If the shim handles a `gh pr create`, it also persists that PR into
+`gh-open-pr.json`, so later release attempts on the same branch can reuse it
+without extra setup.
+
+Use `writeGitMergedBranches(project, branches)` when a test needs the git shim
+to report pre-merged local refs for `git branch --merged <defaultBranch>`.
+This is mainly for zombie-branch recovery flows that must distinguish
+"branch already exists locally" from "branch exists and is already merged, so
+delete it and recreate a fresh branch".
+
+Use `writeGitFailures(project, failures)` to force the git shim down fallback
+paths. Checkout failures accept `matchArgs` and `once`, so a test can fail only
+the first `git checkout -b <branch>` attempt and then allow the retry or plain
+checkout fallback:
+
+```typescript
+writeGitFailures(project, {
+  checkout: {
+    exitCode: 128,
+    stderr: 'branch already exists',
+    matchArgs: ['-b', 'fix/issue-42-test-issue'],
+    once: true,
+  },
+});
+```
+
+That pairs with `writeGitMergedBranches(...)` for the real `start-commit`
+zombie-branch path: first `checkout -b` fails, `git branch --merged` reports
+the stale ref, TamTam deletes it with `git branch -D`, then retries
+`checkout -b`.
 
 ---
 

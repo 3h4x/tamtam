@@ -54,6 +54,37 @@ function readFailures() {
   }
 }
 
+function writeFailures(failures) {
+  try {
+    fs.mkdirSync(projectShimDir, { recursive: true });
+    fs.writeFileSync(path.join(projectShimDir, 'git-failures.json'), JSON.stringify(failures));
+  } catch { /* best-effort */ }
+}
+
+function readBranch() {
+  try {
+    return fs.readFileSync(path.join(projectShimDir, 'git-branch'), 'utf-8').trim() || 'master';
+  } catch {
+    return 'master';
+  }
+}
+
+function readMergedBranches() {
+  try {
+    const value = JSON.parse(fs.readFileSync(path.join(projectShimDir, 'git-merged-branches.json'), 'utf-8'));
+    return Array.isArray(value) ? value.filter(branch => typeof branch === 'string' && branch.trim()) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeBranch(branch) {
+  try {
+    fs.mkdirSync(projectShimDir, { recursive: true });
+    fs.writeFileSync(path.join(projectShimDir, 'git-branch'), branch);
+  } catch { /* best-effort */ }
+}
+
 function maybeSleep(subcommand) {
   const ms = Number(readTimings()?.[subcommand] ?? 0);
   if (Number.isFinite(ms) && ms > 0) {
@@ -61,9 +92,16 @@ function maybeSleep(subcommand) {
   }
 }
 
-function maybeFail(subcommand) {
-  const failure = readFailures()?.[subcommand];
+function maybeFail(subcommand, commandArgs = []) {
+  const failures = readFailures();
+  const failure = failures?.[subcommand];
   if (!failure) return false;
+  const matchArgs = Array.isArray(failure.matchArgs) ? failure.matchArgs : [];
+  if (matchArgs.length > 0 && !matchArgs.every(arg => commandArgs.includes(arg))) return false;
+  if (failure.once === true) {
+    delete failures[subcommand];
+    writeFailures(failures);
+  }
   maybeSleep(subcommand);
   if (typeof failure.stdout === 'string' && failure.stdout.length > 0) out(failure.stdout);
   if (typeof failure.stderr === 'string' && failure.stderr.length > 0) process.stderr.write(failure.stderr);
@@ -157,8 +195,25 @@ if (sub === 'push') {
 }
 
 if (sub === 'branch') {
+  if (cmd[1] === '--show-current') {
+    out(readBranch() + '\n');
+    exit(0);
+  }
+  if (cmd[1] === '--merged') {
+    const mergedBranches = readMergedBranches();
+    if (mergedBranches.length > 0) {
+      out(mergedBranches.map(branch => `  ${branch}`).join('\n') + '\n');
+    }
+    exit(0);
+  }
+  if (cmd[1] === '-D') {
+    exit(0);
+  }
+  if (cmd[1] && !cmd[1].startsWith('-')) {
+    exit(0);
+  }
   // --show-current → current branch name
-  out('master\n');
+  out(readBranch() + '\n');
   exit(0);
 }
 
@@ -183,10 +238,17 @@ if (sub === 'rev-parse') {
     exit(0);
   }
   if (cmd.includes('--abbrev-ref') && cmd.includes('HEAD')) {
-    out('master\n');
+    out(readBranch() + '\n');
     exit(0);
   }
   out('abc1234567890abcdef\n');
+  exit(0);
+}
+
+if (sub === 'checkout') {
+  if (maybeFail('checkout', cmd.slice(1))) {}
+  const branch = cmd[1] === '-b' ? cmd[2] : cmd[1];
+  if (branch) writeBranch(branch);
   exit(0);
 }
 

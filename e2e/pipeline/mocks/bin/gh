@@ -18,15 +18,13 @@ const args = process.argv.slice(2);
 const projectName = path.basename(process.cwd());
 const projectShimDir = path.join(SHIM_DIR, projectName);
 
-function recordCall() {
+function recordCall(extra = {}) {
   try {
     fs.mkdirSync(projectShimDir, { recursive: true });
-    const entry = JSON.stringify({ cmd: 'gh', args, ts: Date.now() }) + '\n';
+    const entry = JSON.stringify({ cmd: 'gh', args, ts: Date.now(), ...extra }) + '\n';
     fs.appendFileSync(path.join(projectShimDir, 'git-calls.jsonl'), entry);
   } catch { /* best-effort */ }
 }
-
-recordCall();
 
 // Strip leading `-R <repo>` so the subcommand dispatch works for both
 // `gh issue create ...` and `gh -R owner/repo issue create ...` forms.
@@ -37,11 +35,101 @@ function strippedArgs() {
 const cmdArgs = strippedArgs();
 const sub = cmdArgs[0] ?? '';
 
+function readJsonFile(name, fallback) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(projectShimDir, name), 'utf-8'));
+  } catch {
+    return fallback;
+  }
+}
+
+function readIntFile(name, fallback) {
+  try {
+    const value = parseInt(fs.readFileSync(path.join(projectShimDir, name), 'utf-8').trim(), 10);
+    return Number.isFinite(value) ? value : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeTextFile(name, value) {
+  try {
+    fs.mkdirSync(projectShimDir, { recursive: true });
+    fs.writeFileSync(path.join(projectShimDir, name), String(value));
+  } catch { /* best-effort */ }
+}
+
+function readCurrentBranch() {
+  try {
+    return fs.readFileSync(path.join(projectShimDir, 'git-branch'), 'utf-8').trim() || 'master';
+  } catch {
+    return 'master';
+  }
+}
+
+function readOpenPr() {
+  const value = readJsonFile('gh-open-pr.json', null);
+  if (!value || typeof value !== 'object') return null;
+  const url = typeof value.url === 'string' ? value.url.trim() : '';
+  if (!url) return null;
+  return {
+    number: Number.isFinite(value.number) ? value.number : parseInt(url.split('/').pop() || '1', 10) || 1,
+    url,
+    headBranch: typeof value.headBranch === 'string' && value.headBranch.trim() ? value.headBranch.trim() : '',
+    title: typeof value.title === 'string' ? value.title : 'Test PR',
+    body: typeof value.body === 'string' ? value.body : '',
+    state: typeof value.state === 'string' ? value.state : 'OPEN',
+    author: value.author && typeof value.author.login === 'string'
+      ? { login: value.author.login }
+      : { login: 'trusted-user' },
+  };
+}
+
+function writeOpenPr(pr) {
+  try {
+    fs.mkdirSync(projectShimDir, { recursive: true });
+    fs.writeFileSync(path.join(projectShimDir, 'gh-open-pr.json'), JSON.stringify(pr));
+  } catch { /* best-effort */ }
+}
+
+function currentBranchMatchesOpenPr(pr) {
+  if (!pr?.headBranch) return true;
+  return pr.headBranch === readCurrentBranch();
+}
+
+function nextPrStatus() {
+  const statuses = readJsonFile('gh-pr-statuses.json', []);
+  if (!Array.isArray(statuses) || statuses.length === 0) {
+    return {
+      state: 'OPEN',
+      mergeable: 'MERGEABLE',
+      statusCheckRollup: [{ name: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+    };
+  }
+  const idx = readIntFile('gh-pr-status-index', 0);
+  const status = statuses[Math.min(idx, statuses.length - 1)];
+  writeTextFile('gh-pr-status-index', idx + 1);
+  return status;
+}
+
+recordCall();
+
 if (sub === 'pr') {
   const action = cmdArgs[1] ?? '';
   if (action === 'create') {
+    const currentBranch = readCurrentBranch();
+    const url = 'https://github.com/test/repo/pull/1';
+    writeOpenPr({
+      number: 1,
+      url,
+      headBranch: currentBranch,
+      title: 'Test PR',
+      body: '',
+      state: 'OPEN',
+      author: { login: 'trusted-user' },
+    });
     // Return a fake PR URL
-    process.stdout.write('https://github.com/test/repo/pull/1\n');
+    process.stdout.write(`${url}\n`);
     process.exit(0);
   }
   if (action === 'checks') {
@@ -54,7 +142,38 @@ if (sub === 'pr') {
     process.exit(0);
   }
   if (action === 'view') {
-    process.stdout.write(JSON.stringify({ number: 1, url: 'https://github.com/test/repo/pull/1', state: 'OPEN' }) + '\n');
+    const openPr = readOpenPr();
+    if (cmdArgs[2]?.startsWith('--')) {
+      if (openPr && currentBranchMatchesOpenPr(openPr)) {
+        process.stdout.write(JSON.stringify({ url: openPr.url }) + '\n');
+        process.exit(0);
+      }
+      process.stderr.write('no pull requests found for branch\n');
+      process.exit(1);
+    }
+    if (cmdArgs.some(arg => arg.includes('statusCheckRollup'))) {
+      const status = nextPrStatus();
+      recordCall({ result: `checks:${status.statusCheckRollup?.[0]?.status ?? status.statusCheckRollup?.[0]?.state ?? 'none'}` });
+      process.stdout.write(JSON.stringify(status) + '\n');
+      process.exit(0);
+    }
+    process.stdout.write(JSON.stringify({
+      number: openPr?.number ?? 1,
+      url: openPr?.url ?? 'https://github.com/test/repo/pull/1',
+      state: openPr?.state ?? 'OPEN',
+      title: openPr?.title ?? 'Test PR',
+      body: openPr?.body ?? '',
+      author: openPr?.author ?? { login: 'trusted-user' },
+    }) + '\n');
+    process.exit(0);
+  }
+  if (action === 'list') {
+    const openPr = readOpenPr();
+    const headIdx = cmdArgs.indexOf('--head');
+    const requestedHead = headIdx !== -1 ? (cmdArgs[headIdx + 1] ?? '') : '';
+    const matchesHead = openPr
+      && (!requestedHead || !openPr.headBranch || openPr.headBranch === requestedHead);
+    process.stdout.write(JSON.stringify(matchesHead ? [{ url: openPr.url }] : []) + '\n');
     process.exit(0);
   }
 }
@@ -85,7 +204,10 @@ if (sub === 'label') {
 if (sub === 'repo') {
   // Honor `-q .nameWithOwner` (used by review-exhaustion-fallback's detectRepo)
   // by emitting the bare value rather than the JSON envelope.
-  if (args.includes('-q') && args.includes('.nameWithOwner')) {
+  if (
+    (args.includes('-q') && args.includes('.nameWithOwner'))
+    || (args.includes('--jq') && args.includes('.nameWithOwner'))
+  ) {
     process.stdout.write('test/repo\n');
     process.exit(0);
   }

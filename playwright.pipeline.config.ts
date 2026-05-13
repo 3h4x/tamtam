@@ -30,6 +30,7 @@ export default defineConfig({
       TAMTAM_DB_PATH: `${E2E_BASE}/data/db/tamtam.db`,
       // Run the probe sweep every 500 ms so PM2 job completion is picked up quickly.
       TAMTAM_PROBE_INTERVAL_MS: '500',
+      TAMTAM_PR_WAIT_POLL_MS: '250',
       PORT: '1338',
       HOSTNAME: '127.0.0.1',
       // Prepend our shim bin dir so git/gh calls are intercepted.

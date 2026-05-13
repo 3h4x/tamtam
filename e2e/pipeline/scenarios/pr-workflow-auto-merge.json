@@ -1,0 +1,13 @@
+{
+  "description": "PR Workflow auto-merge waits for passing checks before merge",
+  "steps": [
+    {
+      "label": "review",
+      "text": "The implementation looks good.\n\nVerdict: LGTM"
+    },
+    {
+      "label": "commit-message",
+      "text": "feat: exercise pr workflow auto merge"
+    }
+  ]
+}
