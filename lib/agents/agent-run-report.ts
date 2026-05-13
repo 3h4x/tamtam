@@ -8,7 +8,8 @@ import { getSettings } from '@/lib/shared/config';
 import { db, schema, sqlite } from '@/lib/db';
 import { eq } from 'drizzle-orm';
 import { SqliteVecBackend } from '@/lib/agents/retrieval/sqlite-vec-backend';
-import { ingestAgentRun, hashContent } from '@/lib/agents/retrieval/ingestion';
+import { ingestAgentRun } from '@/lib/agents/retrieval/ingestion';
+import { isSqliteVecAvailable } from '@/lib/db/sqlite-vec';
 
 interface AgentContextMeta {
   agent?: { id?: string; name?: string; schedule?: string | null; triggeredBy?: string };
@@ -154,7 +155,7 @@ export async function finalizeAgentRunReport(job: JobData, rawLog: string): Prom
   void (async () => {
     try {
       const cfg = getSettings();
-      if (!cfg.retrieval_enabled || !job.workSummary) return;
+      if (!cfg.retrieval_enabled || !job.workSummary || !isSqliteVecAvailable()) return;
 
       const recordId = `${job.project}:agent_run:${job.id}`;
       const existing = db.select()
@@ -167,7 +168,7 @@ export async function finalizeAgentRunReport(job: JobData, rawLog: string): Prom
         ? (JSON.parse(job.modifiedFiles) as { path: string }[]).map((f) => f.path)
         : [];
 
-      const { contentHash, skipped } = await ingestAgentRun({
+      const { contentHash, skipped, stored } = await ingestAgentRun({
         backend,
         project: job.project,
         jobId: job.id,
@@ -182,7 +183,7 @@ export async function finalizeAgentRunReport(job: JobData, rawLog: string): Prom
         existingHash: existing?.contentHash ?? null,
       });
 
-      if (!skipped) {
+      if (!skipped && stored) {
         db.insert(schema.retrievalRecords)
           .values({
             id: recordId,

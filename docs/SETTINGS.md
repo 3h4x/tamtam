@@ -202,7 +202,7 @@ Semantic retrieval layer — embeds agent run reports and project docs into a lo
 | `retrieval_score_threshold` | float | `0.8` | Min similarity score to include a result |
 | `retrieval_manage_ollama` | bool | `true` | Whether TamTam starts Ollama via PM2 if not running |
 
-When enabled, TamTam starts Ollama via PM2 (`ollama-serve`) on boot if not already reachable, pulls `nomic-embed-text` if not installed, and indexes completed agent run reports automatically. Use `POST /api/projects/[name]/retrieval/reindex` to index project docs on demand.
+When enabled, TamTam starts Ollama via PM2 (`ollama-serve`) on boot if not already reachable, pulls `nomic-embed-text` if not installed, and indexes completed agent run reports automatically. Use `POST /api/projects/[schedId]/retrieval/reindex` to index project docs on demand. If the optional native `sqlite-vec` module is not installed in the current environment, retrieval stays unavailable at runtime: agent prompts skip retrieval context, completed runs are not marked as indexed, and the reindex route returns `503 { code: 'sqlite_vec_unavailable' }` instead of failing mid-request.
 
 ### Subscription Budget
 

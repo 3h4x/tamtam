@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { existsSync, readFileSync } from 'fs';
-import { globSync } from 'glob';
 import { getSettings } from '@/lib/shared/config';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { db, schema, sqlite } from '@/lib/db';
@@ -10,21 +9,27 @@ import { embedText } from '@/lib/agents/retrieval/ollama-embedder';
 import { chunkText } from '@/lib/agents/retrieval/chunker';
 import { hashContent } from '@/lib/agents/retrieval/ingestion';
 import type { SourceKind } from '@/lib/agents/retrieval/backend';
-
-const DOC_GLOBS = ['CLAUDE.md', 'README.md', 'docs/**/*.md', '.tamtam/agents/*.md'];
+import { listProjectDocuments } from '@/lib/shared/project-documents';
+import { getSqliteVecUnavailableDetail, isSqliteVecAvailable } from '@/lib/db/sqlite-vec';
 
 export async function POST(
   _req: Request,
-  { params }: { params: Promise<{ name: string }> }
+  { params }: { params: Promise<{ schedId: string }> }
 ): Promise<NextResponse> {
-  const { name } = await params;
+  const { schedId } = await params;
   const cfg = getSettings();
 
   if (!cfg.retrieval_enabled) {
     return NextResponse.json({ error: 'Retrieval is disabled' }, { status: 400 });
   }
+  if (!isSqliteVecAvailable()) {
+    return NextResponse.json(
+      { error: getSqliteVecUnavailableDetail(), code: 'sqlite_vec_unavailable' },
+      { status: 503 }
+    );
+  }
 
-  const projectPath = resolveProjectPath(name);
+  const projectPath = resolveProjectPath(schedId);
   if (!projectPath) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 });
   }
@@ -33,20 +38,14 @@ export async function POST(
   let totalChunks = 0;
 
   try {
-    const files = DOC_GLOBS.flatMap((pattern) =>
-      globSync(/*turbopackIgnore: true*/ pattern, {
-        cwd: /*turbopackIgnore: true*/ projectPath,
-        absolute: true,
-        nodir: true,
-      })
-    );
+    const files = listProjectDocuments(projectPath);
 
     for (const filePath of files) {
       if (!existsSync(/*turbopackIgnore: true*/ filePath)) continue;
       const text = readFileSync(/*turbopackIgnore: true*/ filePath, 'utf-8');
       const relPath = filePath.replace(projectPath + '/', '');
       const contentHash = hashContent(text);
-      const recordId = `${name}:project_doc:${relPath}`;
+      const recordId = `${schedId}:project_doc:${relPath}`;
 
       const existing = db.select()
         .from(schema.retrievalRecords)
@@ -59,8 +58,11 @@ export async function POST(
         chunks.map(async (chunk, i) => ({
           chunkId: `project_doc:${relPath}:${i}` as const,
           text: chunk,
-          embedding: await embedText(chunk, cfg.retrieval_ollama_url, cfg.retrieval_embedding_model),
-          project: name,
+          embedding: await embedText(chunk, cfg.retrieval_ollama_url, cfg.retrieval_embedding_model, {
+            project: schedId,
+            sourceKind: 'project_doc',
+          }),
+          project: schedId,
           sourceKind: 'project_doc' as SourceKind,
           sourceId: relPath,
           chunkIndex: i,
@@ -73,7 +75,7 @@ export async function POST(
       db.insert(schema.retrievalRecords)
         .values({
           id: recordId,
-          project: name,
+          project: schedId,
           sourceKind: 'project_doc',
           sourceId: relPath,
           chunkCount: chunks.length,

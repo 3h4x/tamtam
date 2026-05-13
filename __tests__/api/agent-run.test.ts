@@ -79,6 +79,8 @@ describe('POST /api/agents/{agentId}/run', () => {
   let getPendingReleaseMock: ReturnType<typeof vi.fn>;
   let drainPendingReleaseMock: ReturnType<typeof vi.fn>;
   let isProjectPausedMock: ReturnType<typeof vi.fn>;
+  let retrieveAgentContextMock: ReturnType<typeof vi.fn>;
+  let isSqliteVecAvailableMock: ReturnType<typeof vi.fn>;
   let tempSkillsDir: string;
   let logDirMock: string;
   let settingsMock: Record<string, unknown>;
@@ -153,6 +155,8 @@ describe('POST /api/agents/{agentId}/run', () => {
     getPendingReleaseMock = vi.fn().mockReturnValue(false);
     drainPendingReleaseMock = vi.fn().mockResolvedValue(undefined);
     isProjectPausedMock = vi.fn().mockReturnValue(false);
+    retrieveAgentContextMock = vi.fn().mockResolvedValue('## Retrieved Context\ncached context');
+    isSqliteVecAvailableMock = vi.fn().mockReturnValue(true);
     settingsMock = {
       workspace_path: '',
       github_owner: '',
@@ -171,7 +175,10 @@ describe('POST /api/agents/{agentId}/run', () => {
       dirty_worktree_block_threshold: 0,
     };
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema, sqlite: {} }));
+    vi.doMock('@/lib/db/sqlite-vec', () => ({
+      isSqliteVecAvailable: isSqliteVecAvailableMock,
+    }));
     vi.doMock('@/lib/agents/pending-agent-run', () => ({
       enqueueAgentRun: enqueueAgentRunMock,
       tryClaimAgentStartSlot: tryClaimAgentStartSlotMock,
@@ -239,6 +246,9 @@ describe('POST /api/agents/{agentId}/run', () => {
     vi.doMock('@/lib/usage/resolve-provider', () => ({
       checkCliStartGate: checkCliStartGateMock,
     }));
+    vi.doMock('@/lib/agents/retrieval/retriever', () => ({
+      retrieveAgentContext: retrieveAgentContextMock,
+    }));
     vi.doMock('@/lib/git/dirty-worktree', () => ({
       getDirtyFileCount: vi.fn().mockResolvedValue(0),
     }));
@@ -265,6 +275,26 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(res.status).toBe(404);
     const data = await res.json();
     expect(data.detail).toContain('agent not found');
+  });
+
+  it('skips retrieval context lookup when sqlite-vec is unavailable', async () => {
+    settingsMock.retrieval_enabled = true;
+    isSqliteVecAvailableMock.mockReturnValue(false);
+    insertAgent({ prompt: 'Review the project' });
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'inspect auth flow' }),
+      headers: { 'content-type': 'application/json' },
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const body = await res.json() as { status: string };
+
+    expect(res.status).toBe(200);
+    expect(body.status).toBe('started');
+    expect(retrieveAgentContextMock).not.toHaveBeenCalled();
+    expect(startJobMock).toHaveBeenCalledOnce();
   });
 
   it('returns 400 if prompt is missing', async () => {

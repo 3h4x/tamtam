@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema';
 import { join, dirname } from 'path';
 import { mkdirSync } from 'fs';
-import * as sqliteVec from 'sqlite-vec';
+import { loadSqliteVec } from './sqlite-vec';
 
 const dbPath = process.env.TAMTAM_DB_PATH ?? join(process.cwd(), 'data', 'db', 'tamtam.db');
 const dbDir = dirname(dbPath);
@@ -334,10 +334,13 @@ try {
 // retrieval_records and retrieval_chunks are Drizzle-managed via migration 0021; only vec_chunks
 // lives here because Drizzle has no virtual-table support.
 try {
-  sqliteVec.load(sqlite);
-  sqlite.prepare(
-    'CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(embedding FLOAT[768], +chunk_id TEXT)'
-  ).run();
+  if (loadSqliteVec(sqlite)) {
+    sqlite.prepare(
+      'CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(embedding FLOAT[768], +chunk_id TEXT)'
+    ).run();
+  } else {
+    console.warn('[db] sqlite-vec unavailable, retrieval disabled: module not installed');
+  }
 } catch (err) {
   console.warn('[db] sqlite-vec unavailable, retrieval disabled:', err);
 }

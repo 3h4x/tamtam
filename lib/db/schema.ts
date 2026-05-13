@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
 
 export const settings = sqliteTable('settings', {
   key: text('key').primaryKey(),
@@ -180,3 +180,19 @@ export const retrievalChunks = sqliteTable('retrieval_chunks', {
   text: text('text').notNull(),
   metadata: text('metadata').notNull(),
 });
+
+// One row per Ollama embedding call. `project` and `sourceKind` are null for
+// query-time embeddings (no indexed corpus context). `inputTokens` and
+// `durationMs` are pulled from the embed response (prompt_eval_count,
+// total_duration / 1e6).
+export const ollamaUsage = sqliteTable('ollama_usage', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  ts: real('ts').notNull(),
+  model: text('model').notNull(),
+  project: text('project'),
+  sourceKind: text('source_kind'),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  durationMs: integer('duration_ms').notNull().default(0),
+}, (t) => ({
+  tsIdx: index('ollama_usage_ts').on(t.ts),
+}));

@@ -35,7 +35,11 @@ describe('ingestAgentRun', () => {
     expect(mockEmbed).toHaveBeenCalledWith(
       expect.stringContaining('No issues found'),
       'http://localhost:11434',
-      'nomic-embed-text'
+      'nomic-embed-text',
+      expect.objectContaining({
+        project: 'myproject',
+        sourceKind: 'agent_run',
+      })
     );
     expect(mockBackend.upsertChunks).toHaveBeenCalledOnce();
     const [chunks] = mockBackend.upsertChunks.mock.calls[0] as [RetrievalChunk[]];
@@ -91,5 +95,31 @@ describe('ingestAgentRun', () => {
       embeddingModel: 'nomic-embed-text',
       existingHash: null,
     })).resolves.not.toThrow();
+  });
+
+  it('returns stored false when vector upsert fails', async () => {
+    mockBackend.upsertChunks.mockImplementationOnce(() => {
+      throw new Error('vec table missing');
+    });
+
+    const { ingestAgentRun } = await import('@/lib/agents/retrieval/ingestion');
+
+    await expect(ingestAgentRun({
+      backend: mockBackend,
+      project: 'myproject',
+      jobId: 'job-1',
+      agentId: 'agent-1',
+      agentName: 'review-agent',
+      workSummary: 'summary',
+      modifiedFiles: [],
+      exitCode: 0,
+      completedAt: 1234567890,
+      ollamaUrl: 'http://localhost:11434',
+      embeddingModel: 'nomic-embed-text',
+      existingHash: null,
+    })).resolves.toEqual(expect.objectContaining({
+      skipped: false,
+      stored: false,
+    }));
   });
 });

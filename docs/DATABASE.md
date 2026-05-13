@@ -205,6 +205,24 @@ Cache of GitHub PRs and issues per project.
 
 ---
 
+### `ollama_usage`
+
+Per-embedding telemetry for local Ollama `/api/embed` calls. Populated best-effort from the retrieval embedder and queried by `/api/stats/ollama`.
+
+| Column | Type | Default | Notes |
+|--------|------|---------|-------|
+| `id` | INTEGER | — | PRIMARY KEY AUTOINCREMENT |
+| `ts` | REAL | — | NOT NULL; Unix timestamp (seconds) |
+| `model` | TEXT | — | NOT NULL; embedding model name |
+| `project` | TEXT | — | nullable; owning project when known |
+| `sourceKind` | TEXT | — | nullable; `project_doc`, `agent_run`, `query`, or null when unavailable |
+| `inputTokens` | INTEGER | `0` | NOT NULL; Ollama-reported `prompt_eval_count` or estimated fallback |
+| `durationMs` | INTEGER | `0` | NOT NULL; Ollama-reported or wall-clock duration in milliseconds |
+
+Index: `ollama_usage_ts` on `ts` for windowed stats queries.
+
+---
+
 ## Key Patterns
 
 **Upsert** (used throughout `job-storage.ts`):
@@ -240,6 +258,7 @@ db.select().from(schema.jobs).where(eq(schema.jobs.project, name)).all()
 | Scheduled automation configs | `agents` | `id` |
 | GitHub CI status + release tag cache | `ghStatus` | `project` |
 | GitHub PRs + issues cache (5 min TTL) | `ghIssuesCache` | `project` |
+| Local Ollama embedding telemetry | `ollama_usage` | `id` |
 
 ### Backup and inspect
 

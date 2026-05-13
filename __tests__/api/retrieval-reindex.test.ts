@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockUpsert = vi.hoisted(() => vi.fn());
+const mockListProjectDocuments = vi.hoisted(() => vi.fn().mockReturnValue(['/tmp/workspace/myproject/README.md']));
+const mockIsSqliteVecAvailable = vi.hoisted(() => vi.fn().mockReturnValue(true));
 
 vi.mock('@/lib/shared/config', () => ({
   getSettings: vi.fn().mockReturnValue({
@@ -15,7 +17,12 @@ vi.mock('@/lib/agents/retrieval/ollama-embedder', () => ({
 }));
 
 vi.mock('@/lib/agents/retrieval/sqlite-vec-backend', () => ({
-  SqliteVecBackend: vi.fn().mockImplementation(function() {
+  SqliteVecBackend: vi.fn().mockImplementation(function(this: {
+    upsertChunks: typeof mockUpsert;
+    search: ReturnType<typeof vi.fn>;
+    deleteSource: ReturnType<typeof vi.fn>;
+    deleteProject: ReturnType<typeof vi.fn>;
+  }) {
     this.upsertChunks = mockUpsert;
     this.search = vi.fn();
     this.deleteSource = vi.fn();
@@ -40,30 +47,53 @@ vi.mock('@/lib/shared/project-data', () => ({
   resolveProjectPath: vi.fn().mockReturnValue('/tmp/workspace/myproject'),
 }));
 
-vi.mock('glob', () => ({ globSync: vi.fn().mockReturnValue(['/tmp/workspace/myproject/README.md']) }));
+vi.mock('@/lib/shared/project-documents', () => ({
+  listProjectDocuments: mockListProjectDocuments,
+}));
+vi.mock('@/lib/db/sqlite-vec', () => ({
+  isSqliteVecAvailable: mockIsSqliteVecAvailable,
+  getSqliteVecUnavailableDetail: vi.fn().mockReturnValue(
+    'Retrieval is unavailable: sqlite-vec is not installed in this environment'
+  ),
+}));
 vi.mock('fs', async (orig) => ({
   ...(await orig<typeof import('fs')>()),
   existsSync: vi.fn().mockReturnValue(true),
   readFileSync: vi.fn().mockReturnValue('# README\n\nProject docs here.'),
 }));
 
-describe('POST /api/projects/[name]/retrieval/reindex', () => {
-  beforeEach(() => { mockUpsert.mockClear(); });
+describe('POST /api/projects/[schedId]/retrieval/reindex', () => {
+  beforeEach(() => {
+    mockUpsert.mockClear();
+    mockListProjectDocuments.mockClear();
+    mockIsSqliteVecAvailable.mockReturnValue(true);
+  });
 
   it('returns 400 when retrieval is disabled', async () => {
     vi.resetModules();
     const { getSettings } = await import('@/lib/shared/config');
     vi.mocked(getSettings).mockReturnValueOnce({ retrieval_enabled: false } as ReturnType<typeof getSettings>);
-    const { POST } = await import('@/app/api/projects/[name]/retrieval/reindex/route');
-    const res = await POST(new Request('http://x', { method: 'POST' }), { params: Promise.resolve({ name: 'myproject' }) });
+    const { POST } = await import('@/app/api/projects/[schedId]/retrieval/reindex/route');
+    const res = await POST(new Request('http://x', { method: 'POST' }), { params: Promise.resolve({ schedId: 'myproject' }) });
     expect(res.status).toBe(400);
   });
 
   it('returns 200 with chunk count on success', async () => {
-    const { POST } = await import('@/app/api/projects/[name]/retrieval/reindex/route');
-    const res = await POST(new Request('http://x', { method: 'POST' }), { params: Promise.resolve({ name: 'myproject' }) });
+    const { POST } = await import('@/app/api/projects/[schedId]/retrieval/reindex/route');
+    const res = await POST(new Request('http://x', { method: 'POST' }), { params: Promise.resolve({ schedId: 'myproject' }) });
     expect(res.status).toBe(200);
     const body = await res.json() as { chunks: number };
     expect(typeof body.chunks).toBe('number');
+  });
+
+  it('returns 503 when sqlite-vec is unavailable', async () => {
+    mockIsSqliteVecAvailable.mockReturnValue(false);
+    const { POST } = await import('@/app/api/projects/[schedId]/retrieval/reindex/route');
+    const res = await POST(new Request('http://x', { method: 'POST' }), { params: Promise.resolve({ schedId: 'myproject' }) });
+    expect(res.status).toBe(503);
+    const body = await res.json() as { code: string };
+    expect(body.code).toBe('sqlite_vec_unavailable');
+    expect(mockListProjectDocuments).not.toHaveBeenCalled();
+    expect(mockUpsert).not.toHaveBeenCalled();
   });
 });

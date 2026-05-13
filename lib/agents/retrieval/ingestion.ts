@@ -34,7 +34,7 @@ export interface IngestAgentRunOpts {
 
 export async function ingestAgentRun(
   opts: IngestAgentRunOpts
-): Promise<{ contentHash: string; skipped: boolean }> {
+): Promise<{ contentHash: string; skipped: boolean; stored: boolean }> {
   const text = buildRunText({
     workSummary: opts.workSummary,
     modifiedFiles: opts.modifiedFiles,
@@ -44,7 +44,7 @@ export async function ingestAgentRun(
   const contentHash = hashContent(text);
 
   if (opts.existingHash === contentHash) {
-    return { contentHash, skipped: true };
+    return { contentHash, skipped: true, stored: false };
   }
 
   try {
@@ -53,7 +53,10 @@ export async function ingestAgentRun(
       chunks.map(async (chunk, i) => ({
         chunkId: `agent_run:${opts.jobId}:${i}` as const,
         text: chunk,
-        embedding: await embedText(chunk, opts.ollamaUrl, opts.embeddingModel),
+        embedding: await embedText(chunk, opts.ollamaUrl, opts.embeddingModel, {
+          project: opts.project,
+          sourceKind: 'agent_run',
+        }),
         project: opts.project,
         sourceKind: 'agent_run' as SourceKind,
         sourceId: opts.jobId,
@@ -68,9 +71,9 @@ export async function ingestAgentRun(
       }))
     );
     opts.backend.upsertChunks(embeddedChunks);
+    return { contentHash, skipped: false, stored: true };
   } catch (err) {
     console.warn('[retrieval] ingestAgentRun failed (best-effort):', err);
+    return { contentHash, skipped: false, stored: false };
   }
-
-  return { contentHash, skipped: false };
 }
