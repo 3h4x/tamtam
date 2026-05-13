@@ -8,6 +8,12 @@ import { formatAgo } from '@/lib/shared/format'
 import { Labels, CheckIcon, GateBadge } from '@/components/issues-tab/shared'
 import type { MergeMethod, PrGates } from '@/components/issues-tab/shared'
 
+function parseLinkedIssueNumber(body: string | null | undefined): string | null {
+  if (!body) return null
+  const match = body.match(/\b(?:close[sd]?|fixe?[sd]?|resolve[sd]?)\s+#(\d+)/i)
+  return match?.[1] ?? null
+}
+
 export function PRRow({
   pr,
   projectName,
@@ -41,7 +47,9 @@ export function PRRow({
       try {
         const repoMatch = pr.url.match(/github\.com\/([^/]+\/[^/]+)\//)
         const repo = repoMatch?.[1] ?? ''
-        const qs = new URLSearchParams({ body: pr.body ?? '', repo })
+        const linkedIssue = parseLinkedIssueNumber(pr.body)
+        const qs = new URLSearchParams({ repo })
+        if (linkedIssue) qs.set('issue', linkedIssue)
         const res = await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/pr-gates?${qs.toString()}`)
         if (!res.ok) return
         const data: PrGates = await res.json()
