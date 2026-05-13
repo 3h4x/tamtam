@@ -1,6 +1,13 @@
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { terminalStore, type TermEntry, type SkillItem, type DocItem } from '@/lib/terminal/terminal-session-store'
+import {
+  buildTerminalEntriesFromJobLog,
+  terminalExitEntry,
+  terminalStore,
+  type TermEntry,
+  type SkillItem,
+  type DocItem,
+} from '@/lib/terminal/terminal-session-store'
 import type { SessionItem } from './SessionsPanel'
 import { hasPrerequisiteContext } from './prerequisite-context'
 
@@ -100,8 +107,37 @@ export function useSessionManager(projectName: string) {
           completedMatches.forEach((m, i) => {
             const prompt = m.user_prompt || m.prompt
             if (prompt) entries.push({ role: 'user', text: prompt })
-            const log = logData[i]?.log
-            if (log) entries.push({ role: 'assistant', text: log })
+            const jobEntry = logData[i]
+            const log = jobEntry?.log
+            const exitCode = typeof jobEntry?.exit_code === 'number' ? jobEntry.exit_code : m.exit_code
+            const exitEntry = exitCode !== null && exitCode !== undefined
+              ? terminalExitEntry(exitCode)
+              : null
+            if (log) {
+              if (exitEntry?.text === 'cancelled') {
+                entries.push(...buildTerminalEntriesFromJobLog(log, {
+                  passthrough: hasPrerequisiteContext(m.context_meta),
+                }))
+                entries.push(exitEntry)
+              } else if (exitCode !== null && exitCode !== undefined && exitCode !== 0) {
+                entries.push({ role: 'error', text: 'claude run failed' })
+                entries.push(...buildTerminalEntriesFromJobLog(log, {
+                  passthrough: hasPrerequisiteContext(m.context_meta),
+                  fallbackRole: 'error',
+                }))
+              } else {
+                entries.push(...buildTerminalEntriesFromJobLog(log, {
+                  passthrough: hasPrerequisiteContext(m.context_meta),
+                }))
+              }
+            } else if (jobEntry?.log_pruned) {
+              entries.push({ role: 'status', text: 'Log file deleted by retention policy' })
+              if (exitEntry) {
+                entries.push(exitEntry)
+              }
+            } else if (exitEntry && exitCode !== 0) {
+              entries.push(exitEntry)
+            }
           })
           router.replace(`/project/${projectName}/terminal/${session.sessionId}`)
           if (lastIsRunning) {
@@ -166,7 +202,35 @@ export function useSessionManager(projectName: string) {
       const data = await res.json()
       const entries: TermEntry[] = []
       if (session.prompt) entries.push({ role: 'user', text: session.prompt })
-      if (data.log) entries.push({ role: 'assistant', text: data.log })
+      const exitCode = typeof data.exit_code === 'number' ? data.exit_code : session.exitCode
+      const exitEntry = exitCode !== null && exitCode !== undefined
+        ? terminalExitEntry(exitCode)
+        : null
+      if (data.log) {
+        if (exitEntry?.text === 'cancelled') {
+          entries.push(...buildTerminalEntriesFromJobLog(data.log, {
+            passthrough: hasPrerequisiteContext(data.context_meta),
+          }))
+          entries.push(exitEntry)
+        } else if (exitCode !== null && exitCode !== undefined && exitCode !== 0) {
+          entries.push({ role: 'error', text: 'claude run failed' })
+          entries.push(...buildTerminalEntriesFromJobLog(data.log, {
+            passthrough: hasPrerequisiteContext(data.context_meta),
+            fallbackRole: 'error',
+          }))
+        } else {
+          entries.push(...buildTerminalEntriesFromJobLog(data.log, {
+            passthrough: hasPrerequisiteContext(data.context_meta),
+          }))
+        }
+      } else if (data.log_pruned) {
+        entries.push({ role: 'status', text: 'Log file deleted by retention policy' })
+        if (exitEntry) {
+          entries.push(exitEntry)
+        }
+      } else if (exitEntry && exitCode !== 0) {
+        entries.push(exitEntry)
+      }
       let loadedSkills: SkillItem[] = []
       let loadedDocs: DocItem[] = []
       if (data.context_meta) {

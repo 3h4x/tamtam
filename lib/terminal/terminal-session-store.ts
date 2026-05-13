@@ -92,7 +92,14 @@ const emptyState = (): SessionState => ({
 
 type Listener = () => void
 
-type RecoveredBuffers = Pick<SessionState, 'history' | 'streamBuffer' | 'thinkingBuffer' | 'rawBuffer' | 'streamTools'>
+type RecoveredBuffers = Pick<SessionState, 'history' | 'streamBuffer' | 'thinkingBuffer' | 'rawBuffer' | 'streamTools'> & {
+  usedPlainTextFallback: boolean
+}
+
+interface BuildTerminalEntriesOptions {
+  passthrough?: boolean
+  fallbackRole?: Extract<TermEntry['role'], 'assistant' | 'error'>
+}
 
 export function terminalExitEntry(exitCode: number): Pick<TermEntry, 'role' | 'text'> {
   if (exitCode === 0) return { role: 'status', text: 'exit 0 — ok' }
@@ -100,42 +107,32 @@ export function terminalExitEntry(exitCode: number): Pick<TermEntry, 'role' | 't
   return { role: 'error', text: `exit ${exitCode}` }
 }
 
-function rebuildRecoveredBuffers(log: string, raw: boolean, passthrough: boolean): RecoveredBuffers {
-  if (!log) {
-    return {
-      history: [],
-      streamBuffer: '',
-      thinkingBuffer: '',
-      rawBuffer: '',
-      streamTools: [],
-    }
+function emptyRecoveredBuffers(): RecoveredBuffers {
+  return {
+    history: [],
+    streamBuffer: '',
+    thinkingBuffer: '',
+    rawBuffer: '',
+    streamTools: [],
+    usedPlainTextFallback: false,
   }
+}
 
-  if (raw) {
-    return {
-      history: [],
-      streamBuffer: '',
-      thinkingBuffer: '',
-      rawBuffer: log,
-      streamTools: [],
-    }
-  }
-
-  if (!passthrough) {
-    return {
-      history: [],
-      streamBuffer: log,
-      thinkingBuffer: '',
-      rawBuffer: '',
-      streamTools: [],
-    }
-  }
-
+function appendParsedEventsToBuffers(
+  log: string,
+  passthrough: boolean,
+): RecoveredBuffers {
   const history: TermEntry[] = []
   let streamBuffer = ''
   let thinkingBuffer = ''
   let rawBuffer = ''
   let streamTools: ToolEntry[] = []
+  let sawParsedEvent = false
+  let usedPlainTextFallback = false
+
+  const markParsed = () => {
+    sawParsedEvent = true
+  }
 
   const flushRaw = () => {
     if (!rawBuffer) return
@@ -154,24 +151,29 @@ function rebuildRecoveredBuffers(log: string, raw: boolean, passthrough: boolean
 
   const events = parseStreamLines(log, {
     state: createParseState(),
-    onRawLine: (line) => {
-      flushClaudeBuffers()
-      rawBuffer += `${line}\n`
-    },
+    onRawLine: passthrough
+      ? (line) => {
+          flushClaudeBuffers()
+          rawBuffer += `${line}\n`
+        }
+      : undefined,
   })
 
   for (const event of events) {
     if (event.type === 'text') {
+      markParsed()
       flushRaw()
       streamBuffer += event.text
       continue
     }
     if (event.type === 'thinking') {
+      markParsed()
       flushRaw()
       thinkingBuffer += event.text
       continue
     }
     if (event.type === 'tool_use') {
+      markParsed()
       flushRaw()
       if (streamBuffer) {
         history.push({ role: 'assistant', text: streamBuffer })
@@ -181,6 +183,7 @@ function rebuildRecoveredBuffers(log: string, raw: boolean, passthrough: boolean
       continue
     }
     if (event.type === 'tool_result') {
+      markParsed()
       if (streamTools.length === 0) continue
       const completed = { ...streamTools[streamTools.length - 1], result: event.content }
       history.push({ role: 'tool', text: '', tool: completed })
@@ -188,9 +191,19 @@ function rebuildRecoveredBuffers(log: string, raw: boolean, passthrough: boolean
       continue
     }
     if (event.type === 'compacting') {
+      markParsed()
       flushClaudeBuffers()
       history.push({ role: 'status', text: 'Compacting context…' })
+      continue
     }
+    if (event.type === 'done') {
+      markParsed()
+    }
+  }
+
+  if (!passthrough && !sawParsedEvent && log.trim()) {
+    streamBuffer = log
+    usedPlainTextFallback = true
   }
 
   return {
@@ -199,7 +212,47 @@ function rebuildRecoveredBuffers(log: string, raw: boolean, passthrough: boolean
     thinkingBuffer,
     rawBuffer,
     streamTools,
+    usedPlainTextFallback,
   }
+}
+
+function rebuildRecoveredBuffers(log: string, raw: boolean, passthrough: boolean): RecoveredBuffers {
+  if (!log) return emptyRecoveredBuffers()
+
+  if (raw) {
+    return {
+      history: [],
+      streamBuffer: '',
+      thinkingBuffer: '',
+      rawBuffer: log,
+      streamTools: [],
+      usedPlainTextFallback: false,
+    }
+  }
+
+  return appendParsedEventsToBuffers(log, passthrough)
+}
+
+function resolvedFallbackRole(
+  recovered: RecoveredBuffers,
+  fallbackRole: Extract<TermEntry['role'], 'assistant' | 'error'>,
+): Extract<TermEntry['role'], 'assistant' | 'error'> {
+  return recovered.usedPlainTextFallback ? fallbackRole : 'assistant'
+}
+
+export function buildTerminalEntriesFromJobLog(log: string, options: BuildTerminalEntriesOptions | boolean = false): TermEntry[] {
+  const normalized = typeof options === 'boolean'
+    ? { passthrough: options, fallbackRole: 'assistant' as const }
+    : { passthrough: options.passthrough ?? false, fallbackRole: options.fallbackRole ?? 'assistant' as const }
+  const recovered = rebuildRecoveredBuffers(log, false, normalized.passthrough)
+  const entries: TermEntry[] = [...recovered.history]
+  if (recovered.rawBuffer) entries.push({ role: 'raw', text: recovered.rawBuffer })
+  if (recovered.thinkingBuffer) entries.push({ role: 'thinking', text: recovered.thinkingBuffer })
+  for (const tool of recovered.streamTools) entries.push({ role: 'tool', text: '', tool })
+  if (recovered.streamBuffer) {
+    entries.push({ role: resolvedFallbackRole(recovered, normalized.fallbackRole), text: recovered.streamBuffer })
+  }
+  return entries
 }
 
 class TerminalStore {
@@ -371,8 +424,13 @@ class TerminalStore {
       if (recovered.rawBuffer) newEntries.push({ role: 'raw', text: recovered.rawBuffer })
       if (recovered.thinkingBuffer) newEntries.push({ role: 'thinking', text: recovered.thinkingBuffer })
       for (const tool of recovered.streamTools) newEntries.push({ role: 'tool', text: '', tool })
-      if (recovered.streamBuffer) newEntries.push({ role: 'assistant', text: recovered.streamBuffer })
       const exitCode = typeof payload.exit_code === 'number' ? payload.exit_code : null
+      if (recovered.streamBuffer) {
+        const role = exitCode !== null && exitCode !== 0
+          ? resolvedFallbackRole(recovered, 'error')
+          : resolvedFallbackRole(recovered, 'assistant')
+        newEntries.push({ role, text: recovered.streamBuffer })
+      }
       if (exitCode !== null) {
         newEntries.push(terminalExitEntry(exitCode))
       }

@@ -199,10 +199,140 @@ describe('claude-stream-parser', () => {
     expect(events).toEqual([{ type: 'thinking', text: 'hmm' }]);
   });
 
-  it('ignores assistant message events', () => {
+  it('extracts assistant message text when no stream deltas are present', () => {
     const line = '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hi"}]}}';
     const events = parseStreamLines(line);
-    expect(events).toEqual([]);
+    expect(events).toEqual([{ type: 'text', text: 'Hi' }]);
+  });
+
+  it('extracts every text block from a snapshot-only assistant message', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'First block' },
+          { type: 'text', text: 'Second block' },
+        ],
+      },
+    });
+    const events = parseStreamLines(line);
+    expect(events).toEqual([
+      { type: 'text', text: 'First block' },
+      { type: 'text', text: 'Second block' },
+    ]);
+  });
+
+  it('does not duplicate assistant snapshots after stream text deltas', () => {
+    const lines = [
+      '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}}',
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hi"}]}}',
+    ].join('\n');
+    const events = parseStreamLines(lines);
+    expect(events).toEqual([{ type: 'text', text: 'Hi' }]);
+  });
+
+  it('preserves later snapshot text blocks after streamed text already covered the first block', () => {
+    const lines = [
+      '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}',
+      '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"First block"}}}',
+      '{"type":"stream_event","event":{"type":"content_block_stop","index":0}}',
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"First block"},{"type":"text","text":"Second block"}]}}',
+    ].join('\n');
+    const events = parseStreamLines(lines);
+    expect(events).toEqual([
+      { type: 'text', text: 'First block' },
+      { type: 'text', text: 'Second block' },
+    ]);
+  });
+
+  it('does not duplicate assistant tool snapshots after streamed tool_use events', () => {
+    const lines = [
+      '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"Read"}}}',
+      '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"file_path\\":\\"README.md\\"}"}}}',
+      '{"type":"stream_event","event":{"type":"content_block_stop","index":0}}',
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"README.md"}}]}}',
+    ].join('\n');
+    const events = parseStreamLines(lines);
+    expect(events).toEqual([{ type: 'tool_use', name: 'Read', input: '{"file_path":"README.md"}' }]);
+  });
+
+  it('extracts every tool_use block from a snapshot-only assistant message', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', name: 'Read', input: { file_path: 'README.md' } },
+          { type: 'tool_use', name: 'Glob', input: { pattern: '*.md' } },
+        ],
+      },
+    });
+    const events = parseStreamLines(line);
+    expect(events).toEqual([
+      { type: 'tool_use', name: 'Read', input: '{"file_path":"README.md"}' },
+      { type: 'tool_use', name: 'Glob', input: '{"pattern":"*.md"}' },
+    ]);
+  });
+
+  it('preserves later snapshot tool_use blocks after a streamed tool_use already emitted', () => {
+    const lines = [
+      '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"Read"}}}',
+      '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"file_path\\":\\"README.md\\"}"}}}',
+      '{"type":"stream_event","event":{"type":"content_block_stop","index":0}}',
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"README.md"}},{"type":"tool_use","name":"Glob","input":{"pattern":"*.md"}}]}}',
+    ].join('\n');
+    const events = parseStreamLines(lines);
+    expect(events).toEqual([
+      { type: 'tool_use', name: 'Read', input: '{"file_path":"README.md"}' },
+      { type: 'tool_use', name: 'Glob', input: '{"pattern":"*.md"}' },
+    ]);
+  });
+
+  it('does not let streamed text from one assistant turn suppress a later snapshot-only assistant turn', () => {
+    const lines = [
+      '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}',
+      '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"First turn"}}}',
+      '{"type":"stream_event","event":{"type":"content_block_stop","index":0}}',
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"First turn"}]}}',
+      '{"type":"user","message":{"content":[{"type":"tool_result","content":[{"type":"text","text":"ok"}]}]}}',
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Second turn"}]}}',
+    ].join('\n');
+    const events = parseStreamLines(lines);
+    expect(events).toEqual([
+      { type: 'text', text: 'First turn' },
+      { type: 'tool_result', content: 'ok' },
+      { type: 'text', text: 'Second turn' },
+    ]);
+  });
+
+  it('does not let streamed tool_use from one assistant turn suppress a later snapshot-only tool_use turn', () => {
+    const lines = [
+      '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"Read"}}}',
+      '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"file_path\\":\\"README.md\\"}"}}}',
+      '{"type":"stream_event","event":{"type":"content_block_stop","index":0}}',
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"README.md"}}]}}',
+      '{"type":"user","message":{"content":[{"type":"tool_result","content":[{"type":"text","text":"contents"}]}]}}',
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Glob","input":{"pattern":"*.md"}}]}}',
+    ].join('\n');
+    const events = parseStreamLines(lines);
+    expect(events).toEqual([
+      { type: 'tool_use', name: 'Read', input: '{"file_path":"README.md"}' },
+      { type: 'tool_result', content: 'contents' },
+      { type: 'tool_use', name: 'Glob', input: '{"pattern":"*.md"}' },
+    ]);
+  });
+
+  it('extracts tool_use from assistant message snapshots', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', name: 'Read', input: { file_path: 'README.md' } }],
+      },
+    });
+    const events = parseStreamLines(line);
+    expect(events).toEqual([{ type: 'tool_use', name: 'Read', input: '{"file_path":"README.md"}' }]);
   });
 
   // Regression: the parser used to JSON.stringify any non-string tool_result
@@ -395,7 +525,18 @@ describe('claude-stream-parser', () => {
   describe('createParseState', () => {
     it('returns zeroed state', () => {
       const state = createParseState();
-      expect(state).toEqual({ currentToolName: '', currentToolInput: '', inToolUse: false, hasEmitted: false, isCompacting: false, lastTextTail: '' });
+      expect(state).toEqual({
+        currentToolName: '',
+        currentToolInput: '',
+        inToolUse: false,
+        inTextBlock: false,
+        countedCurrentTextBlock: false,
+        hasEmitted: false,
+        isCompacting: false,
+        lastTextTail: '',
+        streamedTextBlockCount: 0,
+        streamedToolUseCount: 0,
+      });
     });
 
     it('shared state accumulates tool input across multiple parseStreamLines calls', () => {
