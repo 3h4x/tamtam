@@ -2,22 +2,48 @@ import { NextRequest, NextResponse } from 'next/server';
 import Database from 'better-sqlite3';
 import { join } from 'path';
 import { errMsg } from '@/lib/shared/types';
+import { getSettings } from '@/lib/shared/config';
+import {
+  createBackupFilename,
+  getBackupDirectory,
+  getTamTamDbPath,
+  pruneBackupFiles,
+  removeBackupFileSet,
+  verifySqliteDatabase,
+} from '@/lib/db/backup';
 
 export async function POST(_request: NextRequest) {
-  const dbDir = join(process.cwd(), 'data', 'db');
-  const dbPath = join(dbDir, 'tamtam.db');
-
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const filename = `tamtam-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}.db`;
+  const dbPath = getTamTamDbPath();
+  const dbDir = getBackupDirectory(dbPath);
+  const filename = createBackupFilename();
   const backupPath = join(dbDir, filename);
+  let attemptedBackupWrite = false;
 
   try {
+    verifySqliteDatabase(dbPath);
     const source = new Database(dbPath, { readonly: true });
-    await source.backup(backupPath);
-    source.close();
-    return NextResponse.json({ status: 'ok', filename, path: backupPath });
+    try {
+      attemptedBackupWrite = true;
+      await source.backup(backupPath);
+    } finally {
+      source.close();
+    }
+    verifySqliteDatabase(backupPath);
+    const settings = getSettings();
+    const pruned = pruneBackupFiles(dbDir, {
+      keepRecent: settings.backup_retention_count,
+      keepWeekly: settings.backup_retention_weekly_count,
+      protectedNames: [filename],
+    });
+    return NextResponse.json({ status: 'ok', filename, path: backupPath, pruned });
   } catch (e: unknown) {
+    if (attemptedBackupWrite) {
+      try {
+        removeBackupFileSet(backupPath);
+      } catch {
+        // Best-effort cleanup: preserve the original backup error in the response.
+      }
+    }
     return NextResponse.json(
       { error: `Backup failed: ${errMsg(e)}` },
       { status: 500 }

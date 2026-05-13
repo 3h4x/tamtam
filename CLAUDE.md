@@ -217,6 +217,7 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 | `docs/STREAMING.md` | Job lifecycle + SSE streaming infrastructure | Touching terminal runs, log tailing, SSE endpoints, or NDJSON parsing |
 | `docs/PIPELINE.md` | Release pipeline state machine (test→review→fix→commit→push→dod→merge) | Modifying any pipeline step, completion hooks, or pipeline orchestration |
 | `docs/DATABASE.md` | Drizzle schema reference — all tables, columns, indices | Adding/changing DB tables, writing migrations, or working with `lib/db/` |
+| `docs/BACKUP.md` | SQLite backup, verification, restore, and retention runbook | Changing backup/restore behavior or operating database recovery |
 | `docs/SETTINGS.md` | All `settings` table keys, their types, and defaults | Adding a new setting, reading config in a new place, or changing defaults |
 | `docs/AGENT.md` | Agent concepts: skills composition, scheduling, runner lifecycle | Working on agents, the internal scheduler, or skill composition |
 | `docs/CACHING.md` | Layered TTL cache strategy (in-memory + SQLite) | Adding a new cache layer, changing TTLs, or debugging stale data |
