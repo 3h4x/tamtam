@@ -45,6 +45,11 @@ function createTestDb() {
       modified_files TEXT,
       provider TEXT
     );
+    CREATE TABLE IF NOT EXISTS maintenance_status (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at REAL NOT NULL
+    );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };
 }
@@ -74,6 +79,8 @@ describe('pruneProjectLogs', () => {
   let tempDir: string;
   let testDb: ReturnType<typeof createTestDb>;
   let pruneProjectLogs: typeof import('@/lib/jobs/retention').pruneProjectLogs;
+  let getLatestProjectLogRetentionSummary: typeof import('@/lib/jobs/retention').getLatestProjectLogRetentionSummary;
+  let getLatestNightlyRetentionSummary: typeof import('@/lib/jobs/retention').getLatestNightlyRetentionSummary;
 
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-retention-'));
@@ -82,6 +89,8 @@ describe('pruneProjectLogs', () => {
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     const mod = await import('@/lib/jobs/retention');
     pruneProjectLogs = mod.pruneProjectLogs;
+    getLatestProjectLogRetentionSummary = mod.getLatestProjectLogRetentionSummary;
+    getLatestNightlyRetentionSummary = mod.getLatestNightlyRetentionSummary;
   });
 
   afterEach(() => {
@@ -109,7 +118,7 @@ describe('pruneProjectLogs', () => {
       insertJob(`proj-job-${i}`, 'proj', now - (5 - i) * 100, now - (5 - i) * 50, p);
     }
 
-    pruneProjectLogs('proj', cfg);
+    const summary = pruneProjectLogs('proj', cfg);
 
     // Newest 3 (indices 2, 3, 4) should survive; oldest 2 (0, 1) pruned.
     expect(existsSync(logPaths[0])).toBe(false);
@@ -117,6 +126,19 @@ describe('pruneProjectLogs', () => {
     expect(existsSync(logPaths[2])).toBe(true);
     expect(existsSync(logPaths[3])).toBe(true);
     expect(existsSync(logPaths[4])).toBe(true);
+    expect(summary).toMatchObject({
+      type: 'project_logs',
+      project: 'proj',
+      status: 'completed',
+      rowsScanned: 5,
+      rowsEligible: 2,
+      rowsUpdated: 2,
+      logFilesDeleted: 2,
+      bytesReclaimed: 8,
+      errorCount: 0,
+    });
+    expect(getLatestProjectLogRetentionSummary()).toMatchObject({ type: 'project_logs', rowsUpdated: 2 });
+    expect(getLatestNightlyRetentionSummary()).toBeNull();
   });
 
   it('sets log_pruned=true on pruned rows', () => {
@@ -196,11 +218,12 @@ describe('pruneProjectLogs', () => {
       insertJob(`proj-job-${i}`, 'proj', now - (i + 1) * 100, now - (i + 1) * 50, p);
     }
 
-    pruneProjectLogs('proj', ageOnlyCfg);
+    const summary = pruneProjectLogs('proj', ageOnlyCfg);
 
     for (const p of paths) expect(existsSync(p)).toBe(true);
     const rows = testDb.db.select({ id: schema.jobs.id, logPruned: schema.jobs.logPruned }).from(schema.jobs).all();
     expect(rows.every(r => !r.logPruned)).toBe(true);
+    expect(summary.status).toBe('disabled');
   });
 
   it('only prunes logs for the given project', () => {
@@ -227,6 +250,8 @@ describe('pruneProjectLogs', () => {
 describe('runNightlyCleanup', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let runNightlyCleanup: typeof import('@/lib/jobs/retention').runNightlyCleanup;
+  let getLatestProjectLogRetentionSummary: typeof import('@/lib/jobs/retention').getLatestProjectLogRetentionSummary;
+  let getLatestNightlyRetentionSummary: typeof import('@/lib/jobs/retention').getLatestNightlyRetentionSummary;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -234,6 +259,8 @@ describe('runNightlyCleanup', () => {
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     const mod = await import('@/lib/jobs/retention');
     runNightlyCleanup = mod.runNightlyCleanup;
+    getLatestProjectLogRetentionSummary = mod.getLatestProjectLogRetentionSummary;
+    getLatestNightlyRetentionSummary = mod.getLatestNightlyRetentionSummary;
   });
 
   afterEach(() => {
@@ -255,20 +282,44 @@ describe('runNightlyCleanup', () => {
     insertJob('old-job', 'proj', now - 100 * 86400, now - 100 * 86400 + 60);
     insertJob('new-job', 'proj', now - 10, now);
 
-    runNightlyCleanup(cfg);
+    const summary = runNightlyCleanup(cfg);
 
     const rows = testDb.db.select({ id: schema.jobs.id }).from(schema.jobs).all();
     expect(rows.map(r => r.id)).toEqual(['new-job']);
+    expect(summary).toMatchObject({
+      type: 'nightly',
+      status: 'completed',
+      rowsScanned: 1,
+      rowsDeleted: 1,
+      skippedRunningRows: 0,
+      errorCount: 0,
+      sqliteMaintenance: {
+        status: 'completed',
+        checkpointRan: true,
+        vacuumRan: true,
+      },
+    });
+    expect(getLatestNightlyRetentionSummary()).toMatchObject({ type: 'nightly', rowsDeleted: 1 });
+    expect(getLatestProjectLogRetentionSummary()).toBeNull();
   });
 
   it('does not delete running jobs even if started long ago', () => {
     const now = Date.now() / 1000;
     insertJob('long-running', 'proj', now - 200 * 86400, null);
+    insertJob('old-job', 'proj', now - 100 * 86400, now - 100 * 86400 + 60);
 
-    runNightlyCleanup(cfg);
+    const summary = runNightlyCleanup(cfg);
 
     const rows = testDb.db.select({ id: schema.jobs.id }).from(schema.jobs).all();
     expect(rows.map(r => r.id)).toEqual(['long-running']);
+    expect(summary.skippedRunningRows).toBe(1);
+    expect(summary.sqliteMaintenance).toMatchObject({
+      status: 'skipped',
+      reason: 'active_jobs',
+      activeJobs: 1,
+      checkpointRan: false,
+      vacuumRan: false,
+    });
   });
 
   it('treats job_row_retention_days=0 as disabled (does not delete anything)', () => {
@@ -276,10 +327,12 @@ describe('runNightlyCleanup', () => {
     insertJob('very-old', 'proj', now - 1000 * 86400, now - 1000 * 86400 + 60);
     insertJob('old', 'proj', now - 100 * 86400, now - 100 * 86400 + 60);
 
-    runNightlyCleanup({ log_retention_count: 200, log_retention_days: 30, job_row_retention_days: 0 });
+    const summary = runNightlyCleanup({ log_retention_count: 200, log_retention_days: 30, job_row_retention_days: 0 });
 
     const rows = testDb.db.select({ id: schema.jobs.id }).from(schema.jobs).all();
     expect(rows.map(r => r.id).sort()).toEqual(['old', 'very-old']);
+    expect(summary.status).toBe('disabled');
+    expect(summary.sqliteMaintenance).toMatchObject({ status: 'skipped', reason: 'no_deleted_rows' });
   });
 
   it('does not delete rows within retention window', () => {
@@ -290,5 +343,35 @@ describe('runNightlyCleanup', () => {
 
     const rows = testDb.db.select({ id: schema.jobs.id }).from(schema.jobs).all();
     expect(rows.map(r => r.id)).toEqual(['recent-job']);
+  });
+
+  it('keeps nightly and project log summaries in separate maintenance records', async () => {
+    const now = Date.now() / 1000;
+    const tempDir = mkdtempSync(join(tmpdir(), 'tamtam-retention-cross-'));
+    const oldLogPath = join(tempDir, 'old.ndjson');
+    const newLogPath = join(tempDir, 'new.ndjson');
+    writeFileSync(oldLogPath, 'data');
+    writeFileSync(newLogPath, 'data');
+
+    try {
+      testDb.db.insert(schema.jobs).values(makeJob('proj-old-log', 'proj', now - 120, now - 60, oldLogPath)).run();
+      testDb.db.insert(schema.jobs).values(makeJob('proj-new-log', 'proj', now - 10, now, newLogPath)).run();
+      insertJob('old-row', 'proj', now - 100 * 86400, now - 100 * 86400 + 60);
+
+      const mod = await import('@/lib/jobs/retention');
+      mod.runNightlyCleanup(cfg);
+      mod.pruneProjectLogs('proj', { ...cfg, log_retention_count: 1, log_retention_days: 30 });
+
+      expect(mod.getLatestNightlyRetentionSummary()).toMatchObject({
+        type: 'nightly',
+        rowsDeleted: 1,
+      });
+      expect(mod.getLatestProjectLogRetentionSummary()).toMatchObject({
+        type: 'project_logs',
+        rowsUpdated: 1,
+      });
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });

@@ -32,6 +32,11 @@ function createTestDb() {
       last_sent_at INTEGER NOT NULL,
       suppressed_count INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE maintenance_status (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at REAL NOT NULL
+    );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };
 }
@@ -52,6 +57,9 @@ describe('GET /api/monitoring', () => {
       getSettings: () => ({
         notification_throttle_window_seconds: 900,
         notification_throttle_overrides: { release_fail: 0, release_aborted: 0 },
+        log_retention_count: 200,
+        log_retention_days: 30,
+        job_row_retention_days: 180,
       }),
     }));
     fetchSpy = vi.fn();
@@ -80,6 +88,15 @@ describe('GET /api/monitoring', () => {
       overrides: { release_fail: 0, release_aborted: 0 },
       suppressedTotal: 0,
       entries: [],
+    });
+    expect(data.retention).toEqual({
+      policy: {
+        logRetentionCount: 200,
+        logRetentionDays: 30,
+        jobRowRetentionDays: 180,
+      },
+      lastProjectLogCleanup: null,
+      lastNightlyCleanup: null,
     });
   });
 
@@ -266,6 +283,57 @@ describe('GET /api/monitoring', () => {
     expect(data.notificationThrottle.entries).toHaveLength(20);
     expect(data.notificationThrottle.entries[0].key).toBe('agent_run_fail:p:agent-25');
     expect(data.notificationThrottle.entries[19].key).toBe('agent_run_fail:p:agent-6');
+  });
+
+  it('includes separate persisted nightly and project log retention summaries', async () => {
+    const nightlySummary = {
+      type: 'nightly',
+      status: 'completed',
+      startedAt: 1700000000,
+      finishedAt: 1700000010,
+      rowsScanned: 4,
+      rowsDeleted: 3,
+      skippedRunningRows: 1,
+      errorCount: 0,
+      lastError: null,
+      sqliteMaintenance: {
+        status: 'completed',
+        startedAt: 1700000005,
+        finishedAt: 1700000010,
+        activeJobs: 0,
+        checkpointRan: true,
+        vacuumRan: true,
+      },
+    };
+    const projectLogSummary = {
+      type: 'project_logs',
+      project: 'proj',
+      status: 'completed',
+      startedAt: 1700000020,
+      finishedAt: 1700000030,
+      rowsScanned: 4,
+      rowsEligible: 2,
+      rowsUpdated: 2,
+      logFilesDeleted: 2,
+      bytesReclaimed: 4096,
+      skippedRunningRows: 0,
+      errorCount: 0,
+      lastError: null,
+    };
+    testDb.sqlite.prepare('INSERT INTO maintenance_status (key, value, updated_at) VALUES (?, ?, ?)').run('retention:nightly:last', JSON.stringify(nightlySummary), 1700000010);
+    testDb.sqlite.prepare('INSERT INTO maintenance_status (key, value, updated_at) VALUES (?, ?, ?)').run('retention:project-logs:last', JSON.stringify(projectLogSummary), 1700000030);
+    fetchSpy.mockRejectedValue(new Error('connection refused'));
+
+    const res = await GET(makeRequest());
+    const data = await res.json();
+
+    expect(data.retention.policy).toEqual({
+      logRetentionCount: 200,
+      logRetentionDays: 30,
+      jobRowRetentionDays: 180,
+    });
+    expect(data.retention.lastNightlyCleanup).toEqual(nightlySummary);
+    expect(data.retention.lastProjectLogCleanup).toEqual(projectLogSummary);
   });
 
   it('loki queries exclude info/debug/trace log levels', async () => {

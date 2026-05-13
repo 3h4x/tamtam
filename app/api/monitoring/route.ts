@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { getSettings } from '@/lib/shared/config'
+import {
+  getLatestNightlyRetentionSummary,
+  getLatestProjectLogRetentionSummary,
+} from '@/lib/jobs/retention'
 
 const PROMETHEUS_URL = process.env.PROMETHEUS_URL ?? 'http://localhost:9090'
 const LOKI_URL = process.env.LOKI_URL ?? 'http://localhost:3100'
@@ -112,9 +116,18 @@ export async function GET(request: Request) {
     suppressedTotal,
     entries: topThrottledNotifications,
   }
+  const retention = {
+    policy: {
+      logRetentionCount: settings.log_retention_count,
+      logRetentionDays: settings.log_retention_days,
+      jobRowRetentionDays: settings.job_row_retention_days,
+    },
+    lastProjectLogCleanup: getLatestProjectLogRetentionSummary(),
+    lastNightlyCleanup: getLatestNightlyRetentionSummary(),
+  }
   const hasIssues =
     (prometheus.status === 'ok' && (prometheus.alerts.length > 0 || downServices.length > 0)) ||
     (loki.status === 'ok' && loki.errors.length > 0)
 
-  return NextResponse.json({ prometheus, loki, notificationThrottle, hasIssues, fetchedAt: now, windowMs, config: { prometheusUrl: PROMETHEUS_URL, lokiUrl: LOKI_URL } })
+  return NextResponse.json({ prometheus, loki, notificationThrottle, retention, hasIssues, fetchedAt: now, windowMs, config: { prometheusUrl: PROMETHEUS_URL, lokiUrl: LOKI_URL } })
 }
