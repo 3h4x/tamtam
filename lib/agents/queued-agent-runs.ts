@@ -125,12 +125,15 @@ function shouldKeepQueuedRunOn409(parsed: QueueDrainResponse | null, raw: string
     code === 'already_running' ||
     code === 'already_starting' ||
     code === 'project_busy' ||
+    code === 'project_paused' ||
     code === 'jobs_paused' ||
     code === 'issue_branch'
   ) {
     return true;
   }
-  return (parsed?.detail ?? raw).includes('Jobs are paused globally');
+  const detail = parsed?.detail ?? raw;
+  return detail.includes('Jobs are paused globally')
+    || detail.includes('project paused');
 }
 
 function shouldKeepQueuedRunOn202(parsed: QueueDrainResponse | null): boolean {

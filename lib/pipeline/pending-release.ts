@@ -75,6 +75,7 @@ export function shouldKeepPendingRelease(result: { ok: boolean; status?: number;
   if (result.status !== 409) return false;
   const detail = result.detail ?? '';
   return detail.includes('Jobs are paused globally')
+    || detail.includes('project paused')
     || detail.includes('Pipeline already running')
     || detail.includes('Release pipeline already running');
 }

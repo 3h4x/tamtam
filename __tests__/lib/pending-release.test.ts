@@ -96,6 +96,17 @@ describe('pending-release queue', () => {
     expect(getPendingRelease('proj')).toBe(true);
   });
 
+  it('keeps the queue when drain hits a temporary project-pause block', async () => {
+    startReleaseMock.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      detail: 'project paused',
+    });
+    setPendingRelease('proj');
+    await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
+    expect(getPendingRelease('proj')).toBe(true);
+  });
+
   it('keeps the queue when drain returns a retryable startup failure', async () => {
     startReleaseMock.mockResolvedValueOnce({
       ok: false,
@@ -136,6 +147,9 @@ describe('pending-release queue', () => {
     });
     it('keeps the flag for "Pipeline already running" (409)', () => {
       expect(shouldKeepPendingRelease({ ok: false, status: 409, detail: 'Pipeline already running for proj' })).toBe(true);
+    });
+    it('keeps the flag for project paused (409)', () => {
+      expect(shouldKeepPendingRelease({ ok: false, status: 409, detail: 'project paused' })).toBe(true);
     });
     it('drops the flag for unrelated 409s', () => {
       expect(shouldKeepPendingRelease({ ok: false, status: 409, detail: 'something else' })).toBe(false);
