@@ -132,6 +132,7 @@ interface ProjectEntry {
   enabled: boolean
   github: string | null
   priority: string | null
+  archived: boolean
 }
 
 function mergeLoadedSettings(settings: Partial<SettingsMap> | undefined): SettingsMap {
@@ -257,8 +258,24 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
     setProjectsSaved(false)
   }
   const toggleAll = (enabled: boolean) => {
-    setProjects((prev) => prev.map((p) => ({ ...p, enabled })))
+    setProjects((prev) => prev.map((p) => (p.archived ? p : { ...p, enabled })))
     setProjectsSaved(false)
+  }
+  const setArchived = async (name: string, archived: boolean) => {
+    try {
+      const res = await fetch(`/api/projects/by-project/${encodeURIComponent(name)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ archived }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || res.statusText)
+      }
+      setProjects((prev) => prev.map((p) => (p.name === name ? { ...p, archived } : p)))
+    } catch (e: unknown) {
+      setError(`Failed to ${archived ? 'archive' : 'unarchive'} ${name}: ${errMsg(e)}`)
+    }
   }
 
   const saveProjects = async () => {
@@ -302,7 +319,9 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
     }
   }
 
-  const enabledCount = projects.filter((p) => p.enabled).length
+  const activeProjects   = projects.filter((p) => !p.archived)
+  const archivedProjects = projects.filter((p) =>  p.archived)
+  const enabledCount     = activeProjects.filter((p) => p.enabled).length
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
@@ -553,9 +572,9 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                   <p className="text-xs text-text-tertiary">
                     Git repositories in <code className="font-mono bg-bg-tertiary px-1 py-0.5 rounded">{settings.workspace_path}</code>
                   </p>
-                  {projects.length > 0 && (
+                  {activeProjects.length > 0 && (
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-accent/10 text-accent">
-                      {enabledCount}/{projects.length}
+                      {enabledCount}/{activeProjects.length}
                     </span>
                   )}
                 </div>
@@ -587,25 +606,35 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                 ) : (
                   <>
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1">
-                      {projects.map((proj) => (
-                        <label
+                      {activeProjects.map((proj) => (
+                        <div
                           key={proj.name}
-                          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-colors ${
+                          className={`group flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors ${
                             proj.enabled
                               ? 'bg-accent/8 border border-accent/20'
                               : 'border border-transparent hover:bg-bg-tertiary'
                           }`}
                         >
-                          <input
-                            type="checkbox"
-                            checked={proj.enabled}
-                            onChange={() => toggleProject(proj.name)}
-                            className="w-3.5 h-3.5 accent-accent rounded shrink-0"
-                          />
-                          <span className={`font-mono text-xs truncate ${proj.enabled ? 'text-text-primary font-medium' : 'text-text-secondary'}`}>
-                            {proj.name}
-                          </span>
-                        </label>
+                          <label className="flex items-center gap-2.5 flex-1 min-w-0 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={proj.enabled}
+                              onChange={() => toggleProject(proj.name)}
+                              className="w-3.5 h-3.5 accent-accent rounded shrink-0"
+                            />
+                            <span className={`font-mono text-xs truncate ${proj.enabled ? 'text-text-primary font-medium' : 'text-text-secondary'}`}>
+                              {proj.name}
+                            </span>
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setArchived(proj.name, true)}
+                            className="text-[10px] text-text-tertiary hover:text-text-primary opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Archive — hide from dashboards and scheduling"
+                          >
+                            Archive
+                          </button>
+                        </div>
                       ))}
                     </div>
 
@@ -621,6 +650,33 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                         {projectsSaving ? 'Saving…' : projectsSaved ? 'Saved!' : `Save (${enabledCount} enabled)`}
                       </button>
                     </div>
+
+                    {archivedProjects.length > 0 && (
+                      <details className="mt-4 pt-3 border-t border-border">
+                        <summary className="text-xs text-text-tertiary cursor-pointer hover:text-text-secondary select-none">
+                          Archived ({archivedProjects.length})
+                        </summary>
+                        <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1">
+                          {archivedProjects.map((proj) => (
+                            <div
+                              key={proj.name}
+                              className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-transparent hover:bg-bg-tertiary"
+                            >
+                              <span className="font-mono text-xs truncate text-text-tertiary line-through flex-1 min-w-0">
+                                {proj.name}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setArchived(proj.name, false)}
+                                className="text-[10px] text-text-secondary hover:text-text-primary"
+                              >
+                                Unarchive
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
                   </>
                 )}
               </div>

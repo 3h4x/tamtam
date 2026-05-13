@@ -127,6 +127,13 @@
       "when": 1778644106521,
       "tag": "0017_slimy_justin_hammer",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1778645765813,
+      "tag": "0018_green_rattler",
+      "breakpoints": true
     }
   ]
 }

@@ -57,6 +57,7 @@ export async function GET() {
       enabled: saved?.enabled ?? false,
       github: saved?.github ?? null,
       priority: saved?.priority ?? null,
+      archived: saved?.archived ?? false,
       custom_actions: customActions,
     };
   });

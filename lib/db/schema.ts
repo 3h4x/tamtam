@@ -28,6 +28,7 @@ export const projects = sqliteTable('projects', {
   fixPromptAddendum: text('fix_prompt_addendum'),
   website: text('website'),
   qaUrl: text('qa_url'),
+  archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
 });
 
 export const jobs = sqliteTable('jobs', {
