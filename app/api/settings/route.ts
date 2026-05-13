@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { getSettings, reloadConfig } from '@/lib/shared/config';
+import { getSettings, normalizePermissionMode, reloadConfig } from '@/lib/shared/config';
 import { syncJobsPauseState } from '@/lib/shared/job-control';
 import {
   encodeBudgetSubscriptionProviders,
@@ -153,6 +153,9 @@ function serializeSettingValue(key: string, value: unknown): string {
   if (key === 'default_model') {
     return normalizeModelInput(String(value), 'fast');
   }
+  if (key === 'permission_mode') {
+    return normalizePermissionMode(String(value));
+  }
   if (
     key === 'pipeline_model_review' ||
     key === 'pipeline_model_fix' ||
@@ -192,6 +195,15 @@ function validateAndSerializeSettingValue(
     const parsed = parseOptionalKnownModelInput(value, 'fast');
     if (parsed.error) return { value: null, error: parsed.error };
     return { value: parsed.model ?? 'fast', error: null };
+  }
+
+  if (key === 'permission_mode') {
+    const raw = String(value).trim();
+    if (!raw) return { value: null, error: null };
+    if (normalizePermissionMode(raw) !== raw) {
+      return { value: null, error: `permission_mode must be one of: acceptEdits, auto, bypassPermissions, default, dontAsk, plan.` };
+    }
+    return { value: raw, error: null };
   }
 
   if (

@@ -109,7 +109,7 @@ const DEFAULTS: TamTamConfig = {
   launchagent_prefix: 'com.tamtam',
   base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
   default_model: 'fast',
-  permission_mode: 'bypassPermissions',
+  permission_mode: 'acceptEdits',
   commit_style: 'Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Types: feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert.',
   review_verdict_rules: `Pragmatic verdict rules — the release pipeline needs to actually reach LGTM sometimes:
 - LGTM when the change is safe to ship. Cosmetic nits, dead imports, orphan state, style inconsistencies, or "consider…" / "nice-to-have" suggestions do NOT block LGTM — mention them as non-blocking notes if you must, but still say LGTM. The bar is: "would you merge this yourself?"
@@ -340,7 +340,14 @@ function parseJsonStringArray(v: string | undefined): string[] {
   }
 }
 
-const VALID_PERMISSION_MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'default', 'dontAsk', 'plan'] as const;
+export const VALID_PERMISSION_MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'default', 'dontAsk', 'plan'] as const;
+export type PermissionMode = (typeof VALID_PERMISSION_MODES)[number];
+
+export function normalizePermissionMode(value: string | undefined): PermissionMode {
+  return (VALID_PERMISSION_MODES as readonly string[]).includes(value ?? '')
+    ? value as PermissionMode
+    : DEFAULTS.permission_mode as PermissionMode;
+}
 
 /**
  * Resolve the Claude model to use for a specific pipeline step. Returns the
@@ -368,7 +375,7 @@ export function getPipelineModel(step: PipelineStepKind): string {
 /** Returns the --permission-mode flag string for the Claude CLI. */
 export function getPermissionModeFlag(): string {
   const { permission_mode } = getSettings();
-  const mode = (VALID_PERMISSION_MODES as readonly string[]).includes(permission_mode) ? permission_mode : 'bypassPermissions';
+  const mode = normalizePermissionMode(permission_mode);
   return `--permission-mode ${mode}`;
 }
 
