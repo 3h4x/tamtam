@@ -342,6 +342,159 @@ describe('drainNextAgentRun', () => {
     expect(listQueuedAgents('p1')).toEqual([]);
   });
 
+  it('drops the head after MAX_CONSECUTIVE_FAILURES 5xx replays (circuit breaker)', async () => {
+    // Five identical 500s should trip the breaker and dropHead. Without this,
+    // a route that fails fast (e.g. PM2 spawn EBADF) was re-fired by the
+    // lifecycle drain ~50/sec, producing thousands of dead jobs on a single
+    // queued entry.
+    fetchSpy.mockResolvedValue(jsonResponse({ detail: 'Failed to start' }, 500));
+
+    enqueueAgentRun('p1', { agentId: 'a', agentName: 'A', triggeredBy: 'schedule', prompt: '', enqueuedAt: 1 });
+
+    for (let i = 0; i < 5; i++) {
+      await drainNextAgentRun('p1');
+    }
+
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
+    expect(listQueuedAgents('p1')).toEqual([]);
+  });
+
+  it('resets the failure counter after a successful drain', async () => {
+    // Two 500s, then 200, then two more 500s should not trip the breaker —
+    // a successful drain clears the consecutive-failure count.
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ detail: 'fail' }, 500))
+      .mockResolvedValueOnce(jsonResponse({ detail: 'fail' }, 500))
+      .mockResolvedValueOnce(textResponse('', 200))
+      .mockResolvedValueOnce(jsonResponse({ detail: 'fail' }, 500))
+      .mockResolvedValueOnce(jsonResponse({ detail: 'fail' }, 500));
+
+    enqueueAgentRun('p1', { agentId: 'a', agentName: 'A', triggeredBy: 'schedule', prompt: '', enqueuedAt: 1 });
+    await drainNextAgentRun('p1');
+    await drainNextAgentRun('p1');
+    await drainNextAgentRun('p1'); // 200 → dropHead, clearAttempts
+    expect(listQueuedAgents('p1')).toEqual([]);
+
+    enqueueAgentRun('p1', { agentId: 'b', agentName: 'B', triggeredBy: 'schedule', prompt: '', enqueuedAt: 2 });
+    await drainNextAgentRun('p1');
+    await drainNextAgentRun('p1');
+    // Two failures < 5; head still queued.
+    expect(listQueuedAgents('p1').map((e) => e.agentId)).toEqual(['b']);
+  });
+
+  it('resets the breaker state when a queued same-agent entry is replaced', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ detail: 'fail' }, 500))
+      .mockResolvedValueOnce(jsonResponse({ detail: 'fail' }, 500))
+      .mockResolvedValueOnce(jsonResponse({ detail: 'fail' }, 500))
+      .mockResolvedValueOnce(jsonResponse({ detail: 'fail' }, 500))
+      .mockResolvedValueOnce(jsonResponse({ detail: 'fail' }, 500));
+
+    enqueueAgentRun('p1', { agentId: 'a', agentName: 'A', triggeredBy: 'schedule', prompt: 'first', enqueuedAt: 1 });
+    await drainNextAgentRun('p1');
+    await drainNextAgentRun('p1');
+    await drainNextAgentRun('p1');
+    await drainNextAgentRun('p1');
+
+    enqueueAgentRun('p1', { agentId: 'a', agentName: 'A', triggeredBy: 'manual', prompt: 'second', enqueuedAt: 2 });
+    await drainNextAgentRun('p1');
+
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
+    expect(listQueuedAgents('p1')).toEqual([
+      { agentId: 'a', agentName: 'A', triggeredBy: 'manual', prompt: 'second', enqueuedAt: 2 },
+    ]);
+  });
+
+  it('does not reset the head breaker state when a later queued agent is replaced', async () => {
+    fetchSpy.mockResolvedValue(jsonResponse({ detail: 'fail' }, 500));
+
+    enqueueAgentRun('p1', { agentId: 'a', agentName: 'A', triggeredBy: 'schedule', prompt: 'first', enqueuedAt: 1 });
+    enqueueAgentRun('p1', { agentId: 'b', agentName: 'B', triggeredBy: 'schedule', prompt: 'queued', enqueuedAt: 2 });
+
+    await drainNextAgentRun('p1');
+    await drainNextAgentRun('p1');
+    await drainNextAgentRun('p1');
+    await drainNextAgentRun('p1');
+
+    enqueueAgentRun('p1', { agentId: 'b', agentName: 'B', triggeredBy: 'manual', prompt: 'updated', enqueuedAt: 3 });
+    await drainNextAgentRun('p1');
+
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
+    expect(listQueuedAgents('p1')).toEqual([
+      { agentId: 'b', agentName: 'B', triggeredBy: 'manual', prompt: 'updated', enqueuedAt: 3 },
+    ]);
+  });
+
+  it('trips the circuit breaker when fetch itself throws repeatedly', async () => {
+    fetchSpy.mockRejectedValue(new Error('ECONNREFUSED'));
+
+    enqueueAgentRun('p1', { agentId: 'a', agentName: 'A', triggeredBy: 'schedule', prompt: '', enqueuedAt: 1 });
+
+    for (let i = 0; i < 5; i++) {
+      await drainNextAgentRun('p1');
+    }
+
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
+    expect(listQueuedAgents('p1')).toEqual([]);
+  });
+
+  it('refuses re-entrance while a drain is already in flight for the project', async () => {
+    // Simulates the runaway: the lifecycle hook calls drainNextAgentRun while
+    // the outer drain is still awaiting its fetch. The recursive call must
+    // bail without making a second POST or removing the head — otherwise a
+    // route returning 500 produces a tight ~50/sec re-fire loop.
+    let release: (v: Response) => void = () => {};
+    fetchSpy.mockReturnValueOnce(
+      new Promise<Response>((res) => {
+        release = res;
+      }),
+    );
+
+    enqueueAgentRun('p1', { agentId: 'a', agentName: 'A', triggeredBy: 'schedule', prompt: '', enqueuedAt: 1 });
+
+    const outer = drainNextAgentRun('p1');
+    // Re-entrant call while outer's fetch is still pending.
+    await drainNextAgentRun('p1');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(listQueuedAgents('p1').map((e) => e.agentId)).toEqual(['a']);
+
+    release(jsonResponse({ detail: 'fail' }, 500));
+    await outer;
+    // Failure was recorded but the head stays queued (1/5 attempts).
+    expect(listQueuedAgents('p1').map((e) => e.agentId)).toEqual(['a']);
+  });
+
+  it('does not drop a replaced head when an older in-flight drain hits the breaker', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ detail: 'fail' }, 500))
+      .mockResolvedValueOnce(jsonResponse({ detail: 'fail' }, 500))
+      .mockResolvedValueOnce(jsonResponse({ detail: 'fail' }, 500))
+      .mockResolvedValueOnce(jsonResponse({ detail: 'fail' }, 500));
+
+    enqueueAgentRun('p1', { agentId: 'a', agentName: 'A', triggeredBy: 'schedule', prompt: 'first', enqueuedAt: 1 });
+    await drainNextAgentRun('p1');
+    await drainNextAgentRun('p1');
+    await drainNextAgentRun('p1');
+    await drainNextAgentRun('p1');
+
+    let release: (v: Response) => void = () => {};
+    fetchSpy.mockReturnValueOnce(
+      new Promise<Response>((res) => {
+        release = res;
+      }),
+    );
+
+    const outer = drainNextAgentRun('p1');
+    enqueueAgentRun('p1', { agentId: 'a', agentName: 'A', triggeredBy: 'manual', prompt: 'second', enqueuedAt: 2 });
+
+    release(jsonResponse({ detail: 'fail' }, 500));
+    await outer;
+
+    expect(listQueuedAgents('p1')).toEqual([
+      { agentId: 'a', agentName: 'A', triggeredBy: 'manual', prompt: 'second', enqueuedAt: 2 },
+    ]);
+  });
+
   it('drops the head and lets a later valid entry drain when 409 reports agent_disabled', async () => {
     fetchSpy
       .mockResolvedValueOnce(
