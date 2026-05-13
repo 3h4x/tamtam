@@ -71,7 +71,12 @@ describe('job-control', () => {
           ? settings.cli_enabled_providers
           : [];
         if (enabled.length > 0) return enabled[0];
-        return settings?.claude_provider ?? 'claude';
+        return settings?.claude_provider === 'codex'
+          || settings?.claude_provider === 'gemini'
+          || settings?.claude_provider === 'lmstudio'
+          || settings?.claude_provider === 'claude'
+          ? settings.claude_provider
+          : 'claude';
       }),
     }));
     vi.doMock('@/lib/usage/quota', () => ({
@@ -502,6 +507,21 @@ describe('job-control', () => {
       expect(r!.status).toBe(429);
       expect(prefetchQuotaProvidersMock).toHaveBeenCalledWith(['codex']);
     });
+
+    it('treats a legacy custom provider as claude when cli_enabled_providers is missing', async () => {
+      getSettingsMock.mockReturnValue(makeSettings({
+        claude_provider: 'custom',
+        cli_enabled_providers: undefined,
+      }));
+      peekQuotaSnapshotsMock.mockReturnValue(new Map([
+        ['claude', { ...makeSnapshot(99, 40), provider: 'claude' }],
+      ]));
+      const { budgetBlockedAcrossProviders } = await import('@/lib/shared/job-control');
+      const r = budgetBlockedAcrossProviders('start scheduled agent');
+      expect(r).not.toBeNull();
+      expect(r!.status).toBe(429);
+      expect(prefetchQuotaProvidersMock).toHaveBeenCalledWith(['claude']);
+    });
   });
 
   describe('warmEnabledProviderSnapshots', () => {
@@ -510,6 +530,16 @@ describe('job-control', () => {
       const { warmEnabledProviderSnapshots } = await import('@/lib/shared/job-control');
       await warmEnabledProviderSnapshots({ force: true });
       expect(getQuotaSnapshotsMock).toHaveBeenCalledWith(['claude', 'codex'], { force: true });
+    });
+
+    it('falls back to claude when a legacy custom provider has no enabled set yet', async () => {
+      getSettingsMock.mockReturnValue(makeSettings({
+        claude_provider: 'custom',
+        cli_enabled_providers: undefined,
+      }));
+      const { warmEnabledProviderSnapshots } = await import('@/lib/shared/job-control');
+      await warmEnabledProviderSnapshots({ force: true });
+      expect(getQuotaSnapshotsMock).toHaveBeenCalledWith(['claude'], { force: true });
     });
   });
 });

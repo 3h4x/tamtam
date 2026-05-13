@@ -285,6 +285,20 @@ describe('GET /api/monitoring', () => {
     expect(data.notificationThrottle.entries[19].key).toBe('agent_run_fail:p:agent-6');
   });
 
+  it('breaks notification throttle ties by newest lastSentAt first', async () => {
+    testDb.sqlite.prepare('INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES (?, ?, ?)').run('agent_run_fail:p:older', 1000, 4);
+    testDb.sqlite.prepare('INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES (?, ?, ?)').run('agent_run_fail:p:newer', 2000, 4);
+    fetchSpy.mockRejectedValue(new Error('connection refused'));
+
+    const res = await GET(makeRequest());
+    const data = await res.json();
+
+    expect(data.notificationThrottle.entries.map((entry: { key: string }) => entry.key)).toEqual([
+      'agent_run_fail:p:newer',
+      'agent_run_fail:p:older',
+    ]);
+  });
+
   it('includes separate persisted nightly and project log retention summaries', async () => {
     const nightlySummary = {
       type: 'nightly',
