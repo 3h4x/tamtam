@@ -55,6 +55,7 @@ export function GlobalRecommendationsPage() {
     try {
       await updateRecommendation(item.project, item.id, 'dismissed')
       setItems((prev) => prev.filter((candidate) => candidate.id !== item.id))
+      window.dispatchEvent(new CustomEvent('tamtam:recommendations-changed'))
       try {
         await load()
       } catch (err) {
@@ -73,6 +74,7 @@ export function GlobalRecommendationsPage() {
     try {
       await applyRecommendation(item.project, item)
       setItems((prev) => prev.filter((candidate) => candidate.id !== item.id))
+      window.dispatchEvent(new CustomEvent('tamtam:recommendations-changed'))
       try {
         await load()
       } catch (err) {
