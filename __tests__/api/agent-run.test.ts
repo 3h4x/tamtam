@@ -962,6 +962,51 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(fullPrompt).toContain('analyze the output above');
   });
 
+  it('redacts prerequisite command secrets in the prompt, artifact, and context metadata', async () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'tamtam-agent-prereq-redaction-'));
+    logDirMock = join(tempRoot, 'logs');
+    resolveProjectPathMock.mockReturnValue('/tmp');
+    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'bash' && args[1] === 'SERVICE_TOKEN=runtime-secret-value curl https://user:supersecret@example.com/path') {
+        return {
+          stdout: 'token=ghp_abcdefghijklmnopqrstuvwxyz123456\n',
+          stderr: '',
+          exitCode: 0,
+        };
+      }
+      if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
+      if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+
+    try {
+      insertAgent({ prerequisiteCommand: 'SERVICE_TOKEN=runtime-secret-value curl https://user:supersecret@example.com/path' });
+      const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+        method: 'POST',
+        body: JSON.stringify({ prompt: 'inspect prereq' }),
+      });
+      await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+      const [, , fullPrompt] = startJobMock.mock.calls[0];
+      expect(fullPrompt).toContain('SERVICE_TOKEN=[REDACTED] curl https://user:[REDACTED]@example.com/path');
+      expect(fullPrompt).not.toContain('runtime-secret-value');
+      expect(fullPrompt).not.toContain('supersecret');
+
+      const artifactPath = join(logDirMock, 'test-job-id.prereq.txt');
+      const artifact = readFileSync(artifactPath, 'utf-8');
+      expect(artifact).toContain('command: SERVICE_TOKEN=[REDACTED] curl https://user:[REDACTED]@example.com/path');
+      expect(artifact).not.toContain('runtime-secret-value');
+      expect(artifact).not.toContain('supersecret');
+
+      const updatedJob = updateJobMock.mock.calls.at(-1)?.[0];
+      expect(updatedJob?.contextMeta).toBeTruthy();
+      const contextMeta = JSON.parse(updatedJob.contextMeta);
+      expect(contextMeta.prerequisite.command).toBe('SERVICE_TOKEN=[REDACTED] curl https://user:[REDACTED]@example.com/path');
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it('injects the trusted-only issue prerequisite for issue-cruncher agents without an explicit prerequisiteCommand', async () => {
     insertAgent({ name: 'Issue Cruncher', skillIds: '["agent-issue-cruncher"]' });
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {

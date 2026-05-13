@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { join } from 'path';
-import { openSync } from 'fs';
+import { join, resolve } from 'path';
+import { writeFileSync } from 'fs';
 import { spawn, type SpawnOptions } from 'child_process';
 import { homedir } from 'os';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { resolveProjectPath } from '@/lib/shared/project-data';
+import { shellQuote } from '@/lib/shared/shell';
 import { createJob, updateJob } from '@/lib/jobs/job-storage';
 import { getSettings } from '@/lib/shared/config';
 import { jobsPausedResult } from '@/lib/shared/job-control';
@@ -120,17 +121,26 @@ export async function POST(
 
   const { log_dir } = getSettings();
   const logDir = log_dir.startsWith('~') ? join(homedir(), log_dir.slice(2)) : log_dir;
+  const redactScriptPath = resolve(process.cwd(), 'scripts', 'redact-log-stream.js');
   const { mkdirSync } = await import('fs');
   mkdirSync(logDir, { recursive: true });
 
   const job = createJob(projectName, actionName, 0, '');
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
+  const bashCommand = [
+    '#!/bin/bash',
+    'set -o pipefail',
+    '{',
+    `  ${action.command}`,
+    `} 2>&1 | node ${shellQuote(redactScriptPath)} ${shellQuote(logPath)}`,
+    'exit ${PIPESTATUS[0]}',
+  ].join('\n');
+  writeFileSync(logPath, '');
 
-  const logFd = openSync(logPath, 'w');
-  const proc = spawn('bash', ['-c', action.command], {
+  const proc = spawn('bash', ['-lc', bashCommand], {
     cwd: projPath,
-    stdio: ['ignore', logFd, logFd] as SpawnOptions['stdio'],
+    stdio: 'ignore' as SpawnOptions['stdio'],
     env: {
       ...Object.fromEntries(
         Object.entries(process.env).filter(
@@ -144,11 +154,9 @@ export async function POST(
 
   job.pid = proc.pid ?? 0;
 
-  proc.on('exit', (code: number | null) => {
+  proc.on('close', (code: number | null) => {
     job.exitCode = code ?? -1;
     job.finishedAt = Date.now() / 1000;
-    const { closeSync } = require('fs');
-    try { closeSync(logFd); } catch {}
     updateJob(job);
   });
 

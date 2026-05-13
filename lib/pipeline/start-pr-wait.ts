@@ -1,9 +1,10 @@
-import { appendFileSync, mkdirSync } from 'fs';
+import { mkdirSync } from 'fs';
 import { join } from 'path';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { exec } from '@/lib/shared/shell';
 import { createJob, getJob, markDone, updateJob } from '@/lib/jobs/job-storage';
+import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import type { JobData } from '@/lib/jobs/types';
 
 export type PrWaitResult =
@@ -203,7 +204,7 @@ function runPrWaitLoop(
   _prUrl: string,
 ): void {
   const logPath = job.logPath ?? '';
-  const log = (s: string) => { try { appendFileSync(logPath, s); } catch {} };
+  const log = (s: string) => { try { appendRedactedFileSync(logPath, s); } catch {} };
 
   ;(async () => {
     try {
@@ -387,7 +388,7 @@ export function launchPrWait(
   job.logPath = logPath;
   updateJob(job);
 
-  try { appendFileSync(logPath, `# pr-wait start — ${new Date().toISOString()}\n# PR #${prNumber} ${prUrl}\n`); } catch {}
+  try { appendRedactedFileSync(logPath, `# pr-wait start — ${new Date().toISOString()}\n# PR #${prNumber} ${prUrl}\n`); } catch {}
 
   runPrWaitLoop(job, projPath, prNumber, prRepo, prUrl);
   return { jobId: job.id };
@@ -429,7 +430,7 @@ export function resumePrWait(jobId: string): { ok: true } | { ok: false; error: 
     updateJob(job);
   }
 
-  try { appendFileSync(job.logPath, `\n# pr-wait resumed after server restart — ${new Date().toISOString()}\n`); } catch {}
+  try { appendRedactedFileSync(job.logPath, `\n# pr-wait resumed after server restart — ${new Date().toISOString()}\n`); } catch {}
 
   runPrWaitLoop(job, projPath, meta.prNumber, meta.prRepo, meta.prUrl);
   return { ok: true };

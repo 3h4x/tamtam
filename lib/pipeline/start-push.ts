@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from 'fs';
+import { mkdirSync } from 'fs';
 import { join } from 'path';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/shared/project-data';
 import { invalidateProject } from '@/lib/shared/gh-status';
@@ -17,6 +17,7 @@ import { generateCommitMessage, findIssueContext, deriveIssueContextFromBranch }
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { createGenericPR, createIssuePR } from './pr-create';
 import { decidePrContext } from './pr-context';
+import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 
 export type PushResult =
   | { ok: true; commitSha: string; message: string; prUrl?: string; prNumber?: number; prRepo?: string }
@@ -212,7 +213,7 @@ export async function startProjectPush(
   }
 
   const append = (s: string) => {
-    try { appendFileSync(logPath, s); } catch {}
+    try { appendRedactedFileSync(logPath, s); } catch {}
   };
   append(`# push start — ${new Date().toISOString()}\n# repo: ${projPath}\n`);
 
@@ -287,7 +288,7 @@ export function launchProjectPush(
   const signal = registerJobCancellation(job.id);
 
   const append = (s: string) => {
-    try { appendFileSync(logPath, s); } catch {}
+    try { appendRedactedFileSync(logPath, s); } catch {}
   };
   append(`# push start — ${new Date().toISOString()}\n# repo: ${projPath}\n`);
 

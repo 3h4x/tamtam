@@ -25,6 +25,19 @@ describe('log-persistence', () => {
     expect(read).toEqual(frames);
   });
 
+  it('redacts secrets before storing frames', () => {
+    writeJobLogs('secret-job', [
+      {
+        type: 'stdout',
+        content: 'token=ghp_abcdefghijklmnopqrstuvwxyz123456 visible text',
+        timestamp: '2024-01-01T00:00:00Z',
+      },
+    ], tempDir);
+
+    const read = readJobLogs('secret-job', tempDir);
+    expect(read[0].content).toBe('token=[REDACTED] visible text');
+  });
+
   it('returns empty for missing job', () => {
     expect(readJobLogs('nonexistent', tempDir)).toEqual([]);
   });

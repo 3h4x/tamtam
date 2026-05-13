@@ -67,10 +67,17 @@ These layers are independent and complementary. Pinning stops the _registration_
 
 For issue-driven automation, TamTam now also gates issue selection before the LLM sees issue bodies: `GET /api/projects/by-project/[project]/issues?trusted_only=1` filters server-side to authors trusted by the union of global `trusted_github_users` and per-project `.tamtam/config.yml` `security.safe_users`. The default issue-cruncher agent consumes that trusted-only prerequisite output and must not call `gh issue list` directly.
 
+## Log Redaction
+
+TamTam redacts common credential shapes before job output is persisted to log files and before log content is returned by browser-facing log APIs, including SSE streaming and the project log viewer. The redaction layer covers GitHub tokens, OpenAI/Anthropic-style API keys, bearer tokens, key/value credential assignments, basic-auth URLs, Slack webhook URLs, Discord webhook URLs, and environment values whose variable names look credential-bearing. Prerequisite command strings are redacted anywhere they are persisted or forwarded alongside prerequisite output.
+
+This is a defensive last-mile filter, not a complete secret-management system. It cannot guarantee redaction for every proprietary token format, binary output, or a secret split across unusual stream chunk boundaries. Do not intentionally print secrets from custom actions, prerequisite commands, provider shims, or project test commands; prefer passing credentials through the environment and keeping command output credential-free.
+
 ### Implementation Files
 
 - `lib/git-branch.ts` — synchronous git helpers (`getBranchContext`, `gitShowSync`, `gitLsTreeSync`)
 - `lib/tamtam-file-config.ts` — `loadFileConfig` (branch-aware), `writeFileConfig`
 - `lib/tamtam-file-agents.ts` — `scanFileAgents`, `loadFileAgent` (both branch-aware)
+- `lib/shared/log-redaction.ts` — shared log redaction patterns and environment-value masking
 - `__tests__/lib/tamtam-file-config-branch.test.ts` — unit tests for config branch-pinning
 - `__tests__/lib/tamtam-file-agents-branch.test.ts` — unit tests for agent branch-pinning

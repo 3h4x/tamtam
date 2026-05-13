@@ -8,6 +8,7 @@ import {
   shouldSignalJobPid,
 } from '@/lib/jobs/cancellation';
 import { exec } from '@/lib/shared/shell';
+import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 
 export async function POST(
   _request: NextRequest,
@@ -51,8 +52,7 @@ export async function POST(
   updateJob(releaseJob);
   if (releaseJob.logPath) {
     try {
-      const { appendFileSync } = await import('fs');
-      appendFileSync(releaseJob.logPath, `\n# release aborted by user — ${new Date().toISOString()}\n`);
+      appendRedactedFileSync(releaseJob.logPath, `\n# release aborted by user — ${new Date().toISOString()}\n`);
     } catch {}
   }
 
