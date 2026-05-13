@@ -44,6 +44,8 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     log_retention_count: 200,
     log_retention_days: 30,
     job_row_retention_days: 180,
+    backup_retention_count: 14,
+    backup_retention_weekly_count: 8,
     notification_webhook_url: '',
     notification_webhook_secret: '',
     notification_on_release_success: false,

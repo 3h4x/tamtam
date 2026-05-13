@@ -32,6 +32,8 @@
     "lint": "eslint app components lib hooks",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:verify": "node scripts/db-verify.js",
+    "db:restore": "node scripts/db-restore.js",
     "prepare": "husky"
   },
   "keywords": [],

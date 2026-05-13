@@ -586,6 +586,44 @@ describe('settings API', () => {
       expect(row?.value).toBe('3');
     });
 
+    it('accepts zero-valued backup retention settings and returns them canonically', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          backup_retention_count: '0',
+          backup_retention_weekly_count: '00',
+        }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        status: 'ok',
+        settings: expect.objectContaining({
+          backup_retention_count: '0',
+          backup_retention_weekly_count: '0',
+        }),
+      });
+
+      const rows = Object.fromEntries(testDb.db.select().from(schema.settings).all().map((row) => [row.key, row.value]));
+      expect(rows.backup_retention_count).toBe('0');
+      expect(rows.backup_retention_weekly_count).toBe('0');
+    });
+
+    it('rejects negative backup retention settings', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ backup_retention_count: '-1' }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('backup_retention_count must be a non-negative integer'),
+      });
+      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
+    });
+
     it('rejects non-numeric review_fix_max_iterations values', async () => {
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',

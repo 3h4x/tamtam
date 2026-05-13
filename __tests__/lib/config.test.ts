@@ -96,6 +96,8 @@ describe('config', () => {
         log_retention_count: 200,
         log_retention_days: 30,
         job_row_retention_days: 180,
+        backup_retention_count: 14,
+        backup_retention_weekly_count: 8,
         notification_webhook_url: '',
         notification_webhook_secret: '',
         notification_on_release_success: false,
@@ -595,6 +597,50 @@ describe('config', () => {
     it('returns the default 3 when no DB row exists', () => {
       reloadConfig();
       expect(getSettings().review_fix_max_iterations).toBe(3);
+    });
+  });
+
+  describe('backup retention settings', () => {
+    it('returns backup retention defaults when no DB rows exist', () => {
+      reloadConfig();
+
+      const config = getSettings();
+
+      expect(config.backup_retention_count).toBe(14);
+      expect(config.backup_retention_weekly_count).toBe(8);
+    });
+
+    it('parses backup retention values from DB as integers', () => {
+      testDb.db.insert(schema.settings).values({ key: 'backup_retention_count', value: '21' }).run();
+      testDb.db.insert(schema.settings).values({ key: 'backup_retention_weekly_count', value: '12' }).run();
+      reloadConfig();
+
+      const config = getSettings();
+
+      expect(config.backup_retention_count).toBe(21);
+      expect(config.backup_retention_weekly_count).toBe(12);
+    });
+
+    it('preserves zero-valued backup retention settings from DB', () => {
+      testDb.db.insert(schema.settings).values({ key: 'backup_retention_count', value: '0' }).run();
+      testDb.db.insert(schema.settings).values({ key: 'backup_retention_weekly_count', value: '0' }).run();
+      reloadConfig();
+
+      const config = getSettings();
+
+      expect(config.backup_retention_count).toBe(0);
+      expect(config.backup_retention_weekly_count).toBe(0);
+    });
+
+    it('falls back to defaults when backup retention values are non-numeric', () => {
+      testDb.db.insert(schema.settings).values({ key: 'backup_retention_count', value: 'abc' }).run();
+      testDb.db.insert(schema.settings).values({ key: 'backup_retention_weekly_count', value: 'xyz' }).run();
+      reloadConfig();
+
+      const config = getSettings();
+
+      expect(config.backup_retention_count).toBe(14);
+      expect(config.backup_retention_weekly_count).toBe(8);
     });
   });
 
