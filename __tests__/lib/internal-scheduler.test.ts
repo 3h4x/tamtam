@@ -5,6 +5,11 @@ vi.mock('@/lib/shared/job-control', () => ({
   warmEnabledProviderSnapshots: vi.fn().mockResolvedValue(undefined),
 }));
 
+const isProjectArchivedMock = vi.fn().mockReturnValue(false);
+vi.mock('@/lib/shared/enabled-projects', () => ({
+  isProjectArchived: (...args: unknown[]) => isProjectArchivedMock(...args),
+}));
+
 import {
   computeNextFire,
   startInternalScheduler,
@@ -21,12 +26,14 @@ describe('internal-scheduler', () => {
   beforeEach(() => {
     stopInternalScheduler();
     vi.useFakeTimers();
+    isProjectArchivedMock.mockReturnValue(false);
   });
 
   afterEach(() => {
     stopInternalScheduler();
     vi.useRealTimers();
     vi.restoreAllMocks();
+    isProjectArchivedMock.mockReturnValue(false);
   });
 
   describe('computeNextFire', () => {
@@ -676,5 +683,24 @@ describe('internal-scheduler — budget skip', () => {
     expect(dump.entries[0].errorCount).toBe(1);
     expect(dump.entries[0].lastError).toContain('Unexpected conflict');
     expect(dump.entries[0].skippedCount).toBe(0);
+  });
+
+  describe('archived project gating', () => {
+    it('skips scheduled fires when the project is archived', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+      vi.stubGlobal('fetch', fetchMock);
+      setSchedulerBaseUrl('http://test');
+      isProjectArchivedMock.mockReturnValue(true);
+
+      upsertAgentSchedule({ id: 'a1', project: 'archived-proj', name: 'qa', schedule: '1m', prompt: 'go', enabled: true });
+
+      await vi.advanceTimersByTimeAsync(60_000 + 100);
+      for (let _i = 0; _i < 20; _i++) await Promise.resolve();
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      const dump = dumpInternalScheduler();
+      expect(dump.entries[0].skippedCount).toBeGreaterThanOrEqual(1);
+      expect(dump.entries[0].lastSkippedReason).toBe('project archived');
+    });
   });
 });

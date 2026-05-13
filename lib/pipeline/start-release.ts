@@ -2,6 +2,7 @@ import { appendFileSync, mkdirSync, writeFileSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { resolveProjectPath } from '@/lib/shared/project-data';
+import { isProjectArchived } from '@/lib/shared/enabled-projects';
 import { startProjectTest, detectTestCommand } from './start-test';
 import { startProjectReview } from './start-review';
 import { startProjectPush } from './start-push';
@@ -205,6 +206,9 @@ async function queueRelease(projectName: string, blockingJobId?: string): Promis
 export async function startRelease(projectName: string, options: StartReleaseOptions = {}): Promise<ReleaseResult> {
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
+  if (isProjectArchived(projectName)) {
+    return { ok: false, status: 409, detail: 'project archived' };
+  }
   const sourceJob = options.sourceJobId ? getJob(options.sourceJobId) : null;
   const parentJobId = sourceJob?.project === projectName ? sourceJob.id : null;
   const gate = await checkCliStartGate('start a release', { parentJobId });
