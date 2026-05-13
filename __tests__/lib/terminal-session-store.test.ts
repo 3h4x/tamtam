@@ -53,7 +53,7 @@ afterEach(() => {
 let _ctr = 0;
 const proj = () => `store-test-proj-${_ctr++}`;
 
-import { terminalStore } from '@/lib/terminal/terminal-session-store';
+import { buildTerminalEntriesFromJobLog, terminalStore } from '@/lib/terminal/terminal-session-store';
 
 describe('TerminalStore – pure state management', () => {
   it('get returns empty state for unknown project', () => {
@@ -485,6 +485,185 @@ describe('TerminalStore – startStream EventSource integration', () => {
     });
     fetchSpy.mockRestore();
     vi.useRealTimers();
+  });
+
+  it('onerror rebuilds normal stream-json output as terminal entries instead of raw NDJSON', async () => {
+    const p = proj();
+    vi.useFakeTimers();
+    const streamJsonLog = [
+      JSON.stringify({
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Readable answer' }] },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Read', input: { file_path: 'README.md' } }] },
+      }),
+      JSON.stringify({
+        type: 'user',
+        message: { content: [{ type: 'tool_result', content: [{ type: 'text', text: 'file contents' }] }] },
+      }),
+      JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        duration_ms: 10,
+        session_id: 'sess-json',
+      }),
+    ].join('\n');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        status: 'done',
+        finished_at: 123,
+        exit_code: 0,
+        session_id: 'sess-json',
+        log: streamJsonLog,
+      }),
+    } as Response);
+
+    terminalStore.update(p, () => ({
+      history: [{ role: 'user', text: 'prompt' }],
+    }));
+    terminalStore.startStream(p, 'job-json');
+    const es = esInstances[esInstances.length - 1];
+    es.emitError();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    const s = terminalStore.get(p);
+    expect(s.history).toEqual([
+      { role: 'user', text: 'prompt' },
+      { role: 'assistant', text: 'Readable answer' },
+      { role: 'tool', text: '', tool: { name: 'Read', input: '{"file_path":"README.md"}', result: 'file contents' } },
+      { role: 'status', text: 'exit 0 — ok' },
+    ]);
+    expect(s.history.some((e) => e.text.includes('"type":"assistant"'))).toBe(false);
+    terminalStore.reset(p);
+    fetchSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('buildTerminalEntriesFromJobLog parses saved stream-json transcripts', () => {
+    const log = [
+      JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Saved answer' } },
+      }),
+      JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        duration_ms: 10,
+        session_id: 'sess-saved',
+      }),
+    ].join('\n');
+
+    expect(buildTerminalEntriesFromJobLog(log)).toEqual([
+      { role: 'assistant', text: 'Saved answer' },
+    ]);
+  });
+
+  it('buildTerminalEntriesFromJobLog deduplicates streamed tool_use and assistant snapshots', () => {
+    const log = [
+      JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_start', content_block: { type: 'tool_use', name: 'Read' } },
+      }),
+      JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_delta', delta: { type: 'input_json_delta', partial_json: '{"file_path":"README.md"}' } },
+      }),
+      JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_stop' },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_use', name: 'Read', input: { file_path: 'README.md' } }],
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        message: { content: [{ type: 'tool_result', content: [{ type: 'text', text: 'contents' }] }] },
+      }),
+    ].join('\n');
+
+    expect(buildTerminalEntriesFromJobLog(log)).toEqual([
+      { role: 'tool', text: '', tool: { name: 'Read', input: '{"file_path":"README.md"}', result: 'contents' } },
+    ]);
+  });
+
+  it('buildTerminalEntriesFromJobLog preserves all blocks from snapshot-only transcripts', () => {
+    const log = [
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'First block' },
+            { type: 'text', text: 'Second block' },
+            { type: 'tool_use', name: 'Read', input: { file_path: 'README.md' } },
+            { type: 'tool_use', name: 'Glob', input: { pattern: '*.md' } },
+          ],
+        },
+      }),
+    ].join('\n');
+
+    expect(buildTerminalEntriesFromJobLog(log)).toEqual([
+      { role: 'assistant', text: 'First blockSecond block' },
+      { role: 'tool', text: '', tool: { name: 'Read', input: '{"file_path":"README.md"}' } },
+      { role: 'tool', text: '', tool: { name: 'Glob', input: '{"pattern":"*.md"}' } },
+    ]);
+  });
+
+  it('buildTerminalEntriesFromJobLog preserves later snapshot-only assistant turns after earlier streamed turns', () => {
+    const log = [
+      JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_start', content_block: { type: 'tool_use', name: 'Read' } },
+      }),
+      JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_delta', delta: { type: 'input_json_delta', partial_json: '{"file_path":"README.md"}' } },
+      }),
+      JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_stop' },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_use', name: 'Read', input: { file_path: 'README.md' } }],
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        message: {
+          content: [{ type: 'tool_result', content: [{ type: 'text', text: 'ok' }] }],
+        },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Second turn' }],
+        },
+      }),
+    ].join('\n');
+
+    expect(buildTerminalEntriesFromJobLog(log)).toEqual([
+      { role: 'tool', text: '', tool: { name: 'Read', input: '{"file_path":"README.md"}', result: 'ok' } },
+      { role: 'assistant', text: 'Second turn' },
+    ]);
+  });
+
+  it('buildTerminalEntriesFromJobLog renders plain-text fallbacks as error entries when requested', () => {
+    expect(buildTerminalEntriesFromJobLog('fatal: auth expired', { fallbackRole: 'error' })).toEqual([
+      { role: 'error', text: 'fatal: auth expired' },
+    ]);
   });
 
   it('onerror rebuilds passthrough release output with parsed assistant and raw sections intact', async () => {

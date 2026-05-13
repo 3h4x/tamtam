@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
+  buildTerminalEntriesFromJobLog,
   terminalExitEntry,
   terminalStore,
   type TermEntry,
@@ -184,13 +185,20 @@ export function useTerminalBootstrap({
             : null
           if (jobEntry?.log) {
             if (exitEntry?.text === 'cancelled') {
-              entries.push({ role: 'assistant', text: jobEntry.log })
+              entries.push(...buildTerminalEntriesFromJobLog(jobEntry.log, {
+                passthrough: hasPrerequisiteContext(m.context_meta),
+              }))
               entries.push(exitEntry)
             } else if (exitCode !== null && exitCode !== undefined && exitCode !== 0) {
               entries.push({ role: 'error', text: 'claude run failed' })
-              entries.push({ role: 'error', text: jobEntry.log })
+              entries.push(...buildTerminalEntriesFromJobLog(jobEntry.log, {
+                passthrough: hasPrerequisiteContext(m.context_meta),
+                fallbackRole: 'error',
+              }))
             } else {
-              entries.push({ role: 'assistant', text: jobEntry.log })
+              entries.push(...buildTerminalEntriesFromJobLog(jobEntry.log, {
+                passthrough: hasPrerequisiteContext(m.context_meta),
+              }))
             }
           } else if (jobEntry?.log_pruned) {
             entries.push({ role: 'status', text: 'Log file deleted by retention policy' })
