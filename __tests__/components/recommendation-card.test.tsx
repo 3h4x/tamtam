@@ -80,6 +80,54 @@ describe('RecommendationCard', () => {
     unmount()
   })
 
+  it('renders schedule recommendation reasoning when present', () => {
+    const { container, unmount } = renderCard({
+      item: makeRecommendation({
+        payload: {
+          currentSchedule: '1h',
+          recommendedSchedule: '8h',
+          reasoning: {
+            summary: 'No coverage gaps found.',
+            actionableWork: false,
+            filesChangedCount: 0,
+            currentSchedule: '1h',
+            recommendedSchedule: '8h',
+            confidence: 'high',
+            sourceJobId: 'job-42',
+          },
+        },
+      }),
+    })
+
+    expect(container.textContent).toContain('Why')
+    expect(container.textContent).toContain('summary')
+    expect(container.textContent).toContain('No coverage gaps found.')
+    expect(container.textContent).toContain('actionable work')
+    expect(container.textContent).toContain('no')
+    expect(container.textContent).toContain('files changed')
+    expect(container.textContent).toContain('cadence')
+    expect(container.textContent).toContain('1h → 8h')
+    expect(container.textContent).toContain('confidence')
+    expect(container.textContent).toContain('high')
+    expect(container.textContent).toContain('source job')
+    expect(container.textContent).toContain('job-42')
+
+    unmount()
+  })
+
+  it('renders older schedule recommendations without reasoning metadata', () => {
+    const { container, unmount } = renderCard({
+      item: makeRecommendation({ payload: { currentSchedule: '4h', recommendedSchedule: '8h' } }),
+    })
+
+    expect(container.textContent).toContain('current 4h / suggested 8h')
+    expect(container.textContent).not.toContain('Why')
+    expect(container.textContent).toContain('Accept')
+    expect(container.textContent).toContain('dismiss')
+
+    unmount()
+  })
+
   it('hides accept for non-auto-applicable recommendations and surfaces inline errors', () => {
     const { container, unmount } = renderCard({
       item: makeRecommendation({ type: 'some_future_type', payload: null }),
