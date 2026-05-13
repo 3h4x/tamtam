@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/lib/db/schema';
@@ -91,8 +91,11 @@ describe('job-storage', () => {
   let probeJobStatus: typeof import('@/lib/jobs/job-storage').probeJobStatus;
   let runWithParent: typeof import('@/lib/jobs/job-storage').runWithParent;
 
-  beforeEach(async () => {
+  beforeAll(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-job-test-'));
+  });
+
+  beforeEach(async () => {
 
     // Clear all mocks and modules
     vi.resetModules();
@@ -123,9 +126,10 @@ describe('job-storage', () => {
 
   afterEach(() => {
     vi.resetModules();
-    if (tempDir) {
-      rmSync(tempDir, { recursive: true, force: true });
-    }
+  });
+
+  afterAll(() => {
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   });
 
   describe('createJob', () => {
@@ -219,7 +223,7 @@ describe('job-storage', () => {
       const results: Array<{ id: string; parentJobId: string | null | undefined }> = [];
       await Promise.all([
         runWithParent('parent-A', async () => {
-          await new Promise((r) => setTimeout(r, 5));
+          await Promise.resolve();
           const job = createJob('proj', 'fix', 10, '/log');
           results.push({ id: job.id, parentJobId: job.parentJobId });
         }),

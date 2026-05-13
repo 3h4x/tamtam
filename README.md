@@ -38,7 +38,10 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 
 ## Getting started
 
+TamTam requires Node.js 24.x. The repo pins that version in [`.nvmrc`](.nvmrc) and enforces the same major via `package.json` `engines`.
+
 ```bash
+nvm use               # or install Node.js 24.x with your preferred version manager
 pnpm install
 pnpm run rebuild   # build + PM2-managed start/restart on :1337 (canonical after edits)
 ```
