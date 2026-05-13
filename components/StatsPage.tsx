@@ -3,7 +3,9 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import type { UsageResponse, ProjectUsageRow } from '@/app/api/stats/usage/route'
+import type { OllamaStatsResponse } from '@/app/api/stats/ollama/route'
 import { ErrorState } from './ErrorState'
+import { OllamaUsageCard } from './OllamaUsageCard'
 import { QuotaWidget } from './QuotaWidget'
 import {
   normalizeBudgetSubscriptionProviders,
@@ -88,6 +90,7 @@ function SortHeader({
 
 export function StatsPage() {
   const [data, setData] = useState<UsageResponse | null>(null)
+  const [ollama, setOllama] = useState<OllamaStatsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [window_, setWindow] = useState<Window>('30d')
@@ -109,6 +112,13 @@ export function StatsPage() {
       setError('Failed to load usage stats')
     } finally {
       setLoading(false)
+    }
+    // Ollama panel is supplementary — its failure should never blank the page.
+    try {
+      const res = await fetch(`/api/stats/ollama?window=${w}`)
+      setOllama(res.ok ? await res.json() : null)
+    } catch {
+      setOllama(null)
     }
   }, [])
 
@@ -375,6 +385,8 @@ export function StatsPage() {
           </div>
         </div>
       )}
+
+      {ollama && <OllamaUsageCard data={ollama} windowLabel={WINDOW_LABELS[window_]} />}
 
       <p className="text-xs text-text-tertiary">
         Costs are estimates based on a single rate card and do not account for per-model variation.

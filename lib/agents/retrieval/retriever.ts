@@ -35,7 +35,10 @@ export interface RetrieveAgentContextOpts {
 
 export async function retrieveAgentContext(opts: RetrieveAgentContextOpts): Promise<string | null> {
   try {
-    const embedding = await embedText(opts.taskPrompt, opts.ollamaUrl, opts.embeddingModel);
+    const embedding = await embedText(opts.taskPrompt, opts.ollamaUrl, opts.embeddingModel, {
+      project: opts.project,
+      sourceKind: 'query',
+    });
     const results = opts.backend.search({ embedding, project: opts.project, limit: opts.limit });
     const above = results.filter((r) => r.score >= opts.scoreThreshold);
     return buildRetrievedContextBlock(above);

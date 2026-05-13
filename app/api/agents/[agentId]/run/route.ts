@@ -32,6 +32,7 @@ import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { redactSecrets } from '@/lib/shared/log-redaction';
+import { isSqliteVecAvailable } from '@/lib/db/sqlite-vec';
 
 /**
  * `readOnly: true` is for agents whose declared task does not edit the local
@@ -573,7 +574,7 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     : (systemPrompt || taskPrompt);
 
   let retrievedContext: string | null = null;
-  if (settings.retrieval_enabled && taskPrompt) {
+  if (settings.retrieval_enabled && taskPrompt && isSqliteVecAvailable()) {
     retrievedContext = await retrieveAgentContext({
       backend: new SqliteVecBackend(sqlite),
       project: agent.project,

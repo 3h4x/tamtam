@@ -6,6 +6,7 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { StatsPage } from '@/components/StatsPage'
 import type { UsageResponse } from '@/app/api/stats/usage/route'
+import type { OllamaStatsResponse } from '@/app/api/stats/ollama/route'
 
 const { quotaWidgetMock } = vi.hoisted(() => ({
   quotaWidgetMock: vi.fn(
@@ -100,6 +101,50 @@ function makeUsageResponse(overrides: Partial<UsageResponse> = {}): UsageRespons
   }
 }
 
+function makeOllamaResponse(overrides: Partial<OllamaStatsResponse> = {}): OllamaStatsResponse {
+  return {
+    window: '30d',
+    generatedAt: new Date('2026-05-08T12:34:56Z').getTime(),
+    totals: {
+      calls: 3,
+      inputTokens: 600,
+      durationMs: 1200,
+      lastCallAt: Math.floor(new Date('2026-05-08T12:20:00Z').getTime() / 1000),
+    },
+    models: [
+      {
+        model: 'nomic-embed-text',
+        calls: 3,
+        inputTokens: 600,
+        durationMs: 1200,
+      },
+    ],
+    sources: [
+      {
+        sourceKind: 'agent_run',
+        calls: 2,
+        inputTokens: 400,
+        durationMs: 900,
+      },
+      {
+        sourceKind: 'query',
+        calls: 1,
+        inputTokens: 200,
+        durationMs: 300,
+      },
+    ],
+    projects: [
+      {
+        project: 'zeta',
+        calls: 3,
+        inputTokens: 600,
+        durationMs: 1200,
+      },
+    ],
+    ...overrides,
+  }
+}
+
 function renderStatsPage() {
   const container = document.createElement('div')
   document.body.appendChild(container)
@@ -161,6 +206,7 @@ describe('StatsPage', () => {
   it('loads usage data and applies budget settings to the quota widget', async () => {
     const fetchMock = vi.fn(async (input: string) => {
       if (input === '/api/stats/usage?window=30d') return makeResponse(makeUsageResponse())
+      if (input === '/api/stats/ollama?window=30d') return makeResponse(makeOllamaResponse())
       if (input === '/api/settings') {
         return makeResponse({
           settings: {
@@ -195,6 +241,9 @@ describe('StatsPage', () => {
       if (input === '/api/stats/usage?window=30d') {
         return makeResponse(makeUsageResponse())
       }
+      if (input === '/api/stats/ollama?window=30d') {
+        return makeResponse(makeOllamaResponse())
+      }
       if (input === '/api/stats/usage?window=7d') {
         return makeResponse(makeUsageResponse({
           window: '7d',
@@ -224,6 +273,9 @@ describe('StatsPage', () => {
           ],
         }))
       }
+      if (input === '/api/stats/ollama?window=7d') {
+        return makeResponse(makeOllamaResponse({ window: '7d' }))
+      }
       if (input === '/api/settings') return makeResponse({ settings: {} })
       throw new Error(`Unexpected fetch: ${input}`)
     })
@@ -239,6 +291,7 @@ describe('StatsPage', () => {
 
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/stats/usage?window=7d')
+      expect(fetchMock).toHaveBeenCalledWith('/api/stats/ollama?window=7d')
     })
 
     await vi.waitFor(() => {
@@ -258,6 +311,9 @@ describe('StatsPage', () => {
   it('shows the error state and retries the stats request', async () => {
     const fetchMock = vi.fn(async (input: string) => {
       if (input === '/api/settings') return makeResponse({ settings: {} })
+      if (input === '/api/stats/ollama?window=30d') {
+        return makeResponse(makeOllamaResponse())
+      }
       if (input === '/api/stats/usage?window=30d') {
         if (fetchMock.mock.calls.filter(([url]) => url === input).length === 1) {
           return makeResponse({ error: 'nope' }, false)

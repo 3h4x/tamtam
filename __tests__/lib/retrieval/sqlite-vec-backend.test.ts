@@ -1,13 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
-import * as sqliteVec from 'sqlite-vec';
 import { SqliteVecBackend } from '@/lib/agents/retrieval/sqlite-vec-backend';
+import { isSqliteVecAvailable, loadSqliteVec } from '@/lib/db/sqlite-vec';
 import type { RetrievalChunk } from '@/lib/agents/retrieval/backend';
 
 function createTestDb() {
   const db = new Database(':memory:');
   db.pragma('journal_mode = WAL');
-  sqliteVec.load(db);
+  if (!loadSqliteVec(db)) {
+    throw new Error('sqlite-vec is not available in this environment');
+  }
   db.prepare(
     'CREATE TABLE IF NOT EXISTS retrieval_chunks (' +
     'id INTEGER PRIMARY KEY AUTOINCREMENT,' +
@@ -26,6 +28,8 @@ function createTestDb() {
   return db;
 }
 
+const describeIfSqliteVec = isSqliteVecAvailable() ? describe : describe.skip;
+
 function makeChunk(overrides: Partial<RetrievalChunk> = {}): RetrievalChunk {
   return {
     chunkId: 'agent_run:job-1:0',
@@ -40,7 +44,7 @@ function makeChunk(overrides: Partial<RetrievalChunk> = {}): RetrievalChunk {
   };
 }
 
-describe('SqliteVecBackend', () => {
+describeIfSqliteVec('SqliteVecBackend', () => {
   let db: ReturnType<typeof createTestDb>;
   let backend: SqliteVecBackend;
 
