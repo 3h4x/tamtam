@@ -125,9 +125,14 @@ export async function GET(request: Request) {
     lastProjectLogCleanup: getLatestProjectLogRetentionSummary(),
     lastNightlyCleanup: getLatestNightlyRetentionSummary(),
   }
+  const retentionHasIssues =
+    retention.lastNightlyCleanup?.status === 'failed' ||
+    retention.lastNightlyCleanup?.sqliteMaintenance.status === 'failed' ||
+    retention.lastProjectLogCleanup?.status === 'failed'
   const hasIssues =
     (prometheus.status === 'ok' && (prometheus.alerts.length > 0 || downServices.length > 0)) ||
-    (loki.status === 'ok' && loki.errors.length > 0)
+    (loki.status === 'ok' && loki.errors.length > 0) ||
+    !!retentionHasIssues
 
   return NextResponse.json({ prometheus, loki, notificationThrottle, retention, hasIssues, fetchedAt: now, windowMs, config: { prometheusUrl: PROMETHEUS_URL, lokiUrl: LOKI_URL } })
 }

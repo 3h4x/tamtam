@@ -1,4 +1,3 @@
-// tamtam
 'use client'
 
 import { usePrivacyMode } from '@/hooks/usePrivacyMode'
