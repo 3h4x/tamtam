@@ -39,13 +39,20 @@ function sameQueueEntry(a: Pick<QueueEntry, 'agentId' | 'enqueuedAt'> | null | u
 
 function noteFailure(project: string, entry: Pick<QueueEntry, 'agentId' | 'enqueuedAt'>): number {
   const cur = attempts.get(project);
-  const failures = sameQueueEntry(cur, entry) ? cur.consecutiveFailures + 1 : 1;
+  const failures = cur && sameQueueEntry(cur, entry) ? cur.consecutiveFailures + 1 : 1;
   attempts.set(project, { ...entry, consecutiveFailures: failures });
   return failures;
 }
 
 function clearAttempts(project: string): void {
   attempts.delete(project);
+}
+
+function clearAttemptsForEntry(project: string, entry: Pick<QueueEntry, 'agentId' | 'enqueuedAt'>): void {
+  const cur = attempts.get(project);
+  if (sameQueueEntry(cur, entry)) {
+    attempts.delete(project);
+  }
 }
 
 // Synchronous per-project lock held while an agent run is being constructed
@@ -120,7 +127,7 @@ export function enqueueAgentRun(project: string, entry: QueueEntry): void {
   }
   const existing = q.findIndex((e) => e.agentId === entry.agentId);
   if (existing >= 0) {
-    clearAttempts(project);
+    clearAttemptsForEntry(project, q[existing]);
     q[existing] = entry;
     return;
   }
