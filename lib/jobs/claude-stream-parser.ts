@@ -11,13 +11,21 @@ type StreamEventField = {
   content_block?: { type?: string; name?: string };
 };
 
+type MessageContentBlock = {
+  type?: string;
+  text?: string;
+  name?: string;
+  input?: unknown;
+  content?: unknown;
+};
+
 type ParsedLine = {
   type?: string;
   event?: StreamEventField;
   subtype?: string;
   content?: unknown;
   output?: unknown;
-  message?: { content?: Array<{ type?: string; content?: unknown }> };
+  message?: { content?: MessageContentBlock[] };
   modelUsage?: Record<string, ModelUsage>;
   is_error?: boolean;
   result?: unknown;
@@ -65,6 +73,8 @@ export interface ParseState {
   currentToolName: string;
   currentToolInput: string;
   inToolUse: boolean;
+  inTextBlock: boolean;
+  countedCurrentTextBlock: boolean;
   hasEmitted: boolean;
   isCompacting: boolean;
   // Trailing characters of the last emitted text delta. Used to inject a
@@ -74,10 +84,28 @@ export interface ParseState {
   // --include-partial-messages emits each paragraph as its own delta with no
   // separator, which would otherwise concatenate into a wall of text.
   lastTextTail: string;
+  streamedTextBlockCount: number;
+  streamedToolUseCount: number;
+}
+
+function resetSnapshotDedupState(state: ParseState): void {
+  state.streamedTextBlockCount = 0;
+  state.streamedToolUseCount = 0;
 }
 
 export function createParseState(): ParseState {
-  return { currentToolName: '', currentToolInput: '', inToolUse: false, hasEmitted: false, isCompacting: false, lastTextTail: '' };
+  return {
+    currentToolName: '',
+    currentToolInput: '',
+    inToolUse: false,
+    inTextBlock: false,
+    countedCurrentTextBlock: false,
+    hasEmitted: false,
+    isCompacting: false,
+    lastTextTail: '',
+    streamedTextBlockCount: 0,
+    streamedToolUseCount: 0,
+  };
 }
 
 // Returns true when the gap between two consecutive text deltas should
@@ -161,6 +189,14 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
         evt?.delta?.type === 'text_delta' &&
         !state.isCompacting
       ) {
+        if (!state.inTextBlock) {
+          state.inTextBlock = true;
+          state.countedCurrentTextBlock = false;
+        }
+        if (!state.countedCurrentTextBlock) {
+          state.streamedTextBlockCount += 1;
+          state.countedCurrentTextBlock = true;
+        }
         const text = evt.delta.text ?? '';
         if (text && isParagraphBoundary(state.lastTextTail, text.slice(0, 4))) {
           push({ type: 'text', text: '\n\n' });
@@ -175,6 +211,8 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
         evt?.content_block?.type === 'tool_use'
       ) {
         state.inToolUse = true;
+        state.inTextBlock = false;
+        state.countedCurrentTextBlock = false;
         state.currentToolName = evt.content_block.name ?? '';
         state.currentToolInput = '';
         state.lastTextTail = '';
@@ -194,6 +232,10 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
         state.inToolUse = false;
         state.currentToolName = '';
         state.currentToolInput = '';
+        state.streamedToolUseCount += 1;
+      } else if (evt?.type === 'content_block_stop' && state.inTextBlock) {
+        state.inTextBlock = false;
+        state.countedCurrentTextBlock = false;
       }
 
       // New text block — add separator between content blocks. Uses
@@ -207,6 +249,13 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
         push({ type: 'text', text: '\n' });
         state.lastTextTail = '\n';
       }
+      if (
+        evt?.type === 'content_block_start' &&
+        evt?.content_block?.type === 'text'
+      ) {
+        state.inTextBlock = true;
+        state.countedCurrentTextBlock = false;
+      }
     }
 
     // Tool results from system events
@@ -214,14 +263,45 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
       parsed.type === 'system' &&
       parsed.subtype === 'tool_result'
     ) {
+      resetSnapshotDedupState(state);
       const content = parsed.content ?? parsed.output ?? '';
       if (content) {
         push({ type: 'tool_result', content: toolContentToString(content) });
       }
     }
 
+    // Assistant message snapshots are emitted by some Claude-compatible
+    // providers without token deltas. When stream_event text already exists,
+    // skip snapshots to avoid duplicating the same assistant response.
+    if (parsed.type === 'assistant' && parsed.message?.content) {
+      let skippedTextBlocks = 0;
+      let skippedToolUseBlocks = 0;
+      for (const block of Array.isArray(parsed.message.content) ? parsed.message.content : []) {
+        if (block.type === 'text') {
+          if (skippedTextBlocks < state.streamedTextBlockCount) {
+            skippedTextBlocks += 1;
+            continue;
+          }
+          push({ type: 'text', text: block.text ?? '' });
+        } else if (block.type === 'tool_use') {
+          if (skippedToolUseBlocks < state.streamedToolUseCount) {
+            skippedToolUseBlocks += 1;
+            continue;
+          }
+          const input = typeof block.input === 'string'
+            ? block.input
+            : block.input === undefined
+              ? ''
+              : JSON.stringify(block.input);
+          push({ type: 'tool_use', name: block.name ?? '', input });
+        }
+      }
+      resetSnapshotDedupState(state);
+    }
+
     // Tool results from user message events (Write, Edit, Bash, etc.)
     if (parsed.type === 'user' && parsed.message?.content) {
+      resetSnapshotDedupState(state);
       for (const block of Array.isArray(parsed.message.content) ? parsed.message.content : []) {
         if (block.type === 'tool_result' && block.content) {
           push({ type: 'tool_result', content: toolContentToString(block.content) });
@@ -266,6 +346,9 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
           model,
         },
       });
+      state.inTextBlock = false;
+      state.countedCurrentTextBlock = false;
+      resetSnapshotDedupState(state);
     }
   }
   return events;

@@ -421,4 +421,57 @@ describe('useSessionManager', () => {
 
     unmount()
   })
+
+  it('restores failed plain-text logs as error entries in the single-job fallback path', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/jobs/failed-1') {
+        return {
+          json: async () => ({
+            exit_code: 1,
+            log: 'fatal: auth expired',
+            context_meta: null,
+            log_pruned: false,
+          }),
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+
+    let controls:
+      | {
+        loadSessions: () => Promise<void>
+        restoreSession: (session: SessionItem) => Promise<void>
+        getSessions: () => SessionItem[]
+        isLoading: () => boolean
+      }
+      | undefined
+
+    const { unmount } = renderElement(
+      <SessionManagerHarness onReady={(value) => { controls = value }} />,
+    )
+
+    await vi.waitFor(() => {
+      expect(controls).toBeTruthy()
+    })
+
+    if (!controls) throw new Error('manager not ready')
+    await controls.restoreSession({
+      id: 'failed-1',
+      prompt: 'show failure',
+      startedAt: 300,
+      finishedAt: 330,
+      sessionId: 'sess-failed',
+      exitCode: 1,
+    })
+
+    const state = terminalStore.get('proj')
+    expect(state.history).toEqual<TermEntry[]>([
+      { role: 'user', text: 'show failure' },
+      { role: 'error', text: 'claude run failed' },
+      { role: 'error', text: 'fatal: auth expired' },
+    ])
+
+    unmount()
+  })
 })

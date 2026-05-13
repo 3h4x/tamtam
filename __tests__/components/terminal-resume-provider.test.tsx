@@ -441,6 +441,57 @@ describe('pending continue-issue resume provider', () => {
     unmount()
   })
 
+  it('renders failed plain-text restored sessions as error output instead of assistant replies', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/jobs?project=proj') {
+        return {
+          ok: true,
+          json: async () => ({
+            jobs: [{
+              id: 'review-failed',
+              kind: 'review',
+              status: 'done',
+              session_id: 'sess-failed',
+              started_at: 1_700_000_000,
+              finished_at: 1_700_000_100,
+              exit_code: 1,
+              user_prompt: 'review this',
+              prompt: null,
+              context_meta: null,
+              provider: 'claude',
+            }],
+          }),
+        }
+      }
+      if (url === '/api/jobs/review-failed') {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'review-failed',
+            exit_code: 1,
+            log: 'fatal: auth expired',
+            log_pruned: false,
+          }),
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+
+    const { unmount } = renderElement(<SessionBootstrapHarness sessionId="sess-failed" />)
+
+    await vi.waitFor(() => {
+      expect(terminalStore.get('proj').history).toEqual([
+        { role: 'user', text: 'review this' },
+        { role: 'error', text: 'claude run failed' },
+        { role: 'error', text: 'fatal: auth expired' },
+      ])
+    })
+
+    expect(startStreamMock).not.toHaveBeenCalled()
+    unmount()
+  })
+
   it('restores a running session even when context_meta is malformed', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
