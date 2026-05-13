@@ -16,27 +16,27 @@ describe('chunkText', () => {
     const text = 'a'.repeat(CHUNK_SIZE + CHUNK_OVERLAP + 100);
     const chunks = chunkText(text);
     expect(chunks.length).toBeGreaterThan(1);
-    for (let i = 0; i < chunks.length - 1; i++) {
-      expect(chunks[i].length).toBe(CHUNK_SIZE);
-    }
+    expect(chunks.every((chunk) => chunk.length <= CHUNK_SIZE)).toBe(true);
   });
 
-  it('adjacent chunks share CHUNK_OVERLAP characters', () => {
-    const text = 'x'.repeat(CHUNK_SIZE * 2);
+  it('keeps markdown headings attached to the following section when possible', () => {
+    const text = ['# Alpha', 'first section', '', '# Beta', 'second section'].join('\n');
     const chunks = chunkText(text);
-    expect(chunks.length).toBeGreaterThanOrEqual(2);
-    const tail = chunks[0].slice(-CHUNK_OVERLAP);
-    const head = chunks[1].slice(0, CHUNK_OVERLAP);
-    expect(tail).toBe(head);
+    expect(chunks).toEqual(['# Alpha\nfirst section\n\n# Beta\nsecond section']);
   });
 
-  it('covers entire input with no gaps', () => {
-    const text = 'abc'.repeat(1000);
+  it('splits oversized sections while preserving their heading', () => {
+    const text = `# Big Section\n\n${'x'.repeat(CHUNK_SIZE + 300)}`;
     const chunks = chunkText(text);
-    let reconstructed = chunks[0];
-    for (let i = 1; i < chunks.length; i++) {
-      reconstructed += chunks[i].slice(CHUNK_OVERLAP);
-    }
-    expect(reconstructed).toBe(text);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.startsWith('# Big Section'))).toBe(true);
+  });
+
+  it('prefers paragraph boundaries for medium-sized markdown sections', () => {
+    const paragraph = 'word '.repeat(120);
+    const text = ['# One', paragraph, '', '# Two', paragraph, '', '# Three', paragraph].join('\n');
+    const chunks = chunkText(text);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.includes('#'))).toBe(true);
   });
 });

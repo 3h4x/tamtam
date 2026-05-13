@@ -1,16 +1,34 @@
 import { NextResponse } from 'next/server';
-import { existsSync, readFileSync } from 'fs';
 import { getSettings } from '@/lib/shared/config';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { db, schema, sqlite } from '@/lib/db';
-import { eq } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { SqliteVecBackend } from '@/lib/agents/retrieval/sqlite-vec-backend';
-import { embedText } from '@/lib/agents/retrieval/ollama-embedder';
-import { chunkText } from '@/lib/agents/retrieval/chunker';
-import { hashContent } from '@/lib/agents/retrieval/ingestion';
-import type { SourceKind } from '@/lib/agents/retrieval/backend';
-import { listProjectDocuments } from '@/lib/shared/project-documents';
+import { hashContent, ingestSourceText } from '@/lib/agents/retrieval/ingestion';
 import { getSqliteVecUnavailableDetail, isSqliteVecAvailable } from '@/lib/db/sqlite-vec';
+import { collectProjectRetrievalSources } from '@/lib/agents/retrieval/project-corpus';
+
+function upsertRetrievalRecord(opts: {
+  id: string;
+  project: string;
+  sourceKind: string;
+  sourceId: string;
+  chunkCount: number;
+  contentHash: string;
+  indexedAt: number;
+}): void {
+  db.insert(schema.retrievalRecords)
+    .values(opts)
+    .onConflictDoUpdate({
+      target: schema.retrievalRecords.id,
+      set: {
+        contentHash: opts.contentHash,
+        indexedAt: opts.indexedAt,
+        chunkCount: opts.chunkCount,
+      },
+    })
+    .run();
+}
 
 export async function POST(
   _req: Request,
@@ -38,60 +56,99 @@ export async function POST(
   let totalChunks = 0;
 
   try {
-    const files = listProjectDocuments(projectPath);
+    const sources = collectProjectRetrievalSources(schedId, projectPath);
+    const sourceKinds = ['project_doc', 'skill', 'project_config'] as const;
+    const currentIds = new Set(sources.map((source) => source.recordId));
+    const existingRecords = db.select()
+      .from(schema.retrievalRecords)
+      .where(and(
+        eq(schema.retrievalRecords.project, schedId),
+        inArray(schema.retrievalRecords.sourceKind, [...sourceKinds])
+      ))
+      .all();
+    const existingById = new Map(existingRecords.map((record) => [record.id, record]));
 
-    for (const filePath of files) {
-      if (!existsSync(/*turbopackIgnore: true*/ filePath)) continue;
-      const text = readFileSync(/*turbopackIgnore: true*/ filePath, 'utf-8');
-      const relPath = filePath.replace(projectPath + '/', '');
-      const contentHash = hashContent(text);
-      const recordId = `${schedId}:project_doc:${relPath}`;
+    let missingCount = 0;
+    let staleCount = 0;
+    let indexedCount = 0;
+    let skippedCount = 0;
+    const sourceCounts: Record<string, number> = { project_doc: 0, skill: 0, project_config: 0 };
 
-      const existing = db.select()
-        .from(schema.retrievalRecords)
-        .where(eq(schema.retrievalRecords.id, recordId))
-        .get();
-      if (existing?.contentHash === contentHash) continue;
+    for (const source of sources) {
+      sourceCounts[source.sourceKind] = (sourceCounts[source.sourceKind] ?? 0) + 1;
+      const existing = existingById.get(source.recordId);
+      const contentHash = hashContent(source.text);
+      const timestampStale =
+        !!existing && source.updatedAt != null && existing.indexedAt < source.updatedAt;
+      const isMissing = !existing;
+      const isStale = !!existing && (existing.contentHash !== contentHash || timestampStale);
+      if (isMissing) missingCount += 1;
+      else if (isStale) staleCount += 1;
 
-      const chunks = chunkText(text);
-      const embeddedChunks = await Promise.all(
-        chunks.map(async (chunk, i) => ({
-          chunkId: `project_doc:${relPath}:${i}` as const,
-          text: chunk,
-          embedding: await embedText(chunk, cfg.retrieval_ollama_url, cfg.retrieval_embedding_model, {
+      const { chunkCount, skipped, stored, contentHash: storedHash } = await ingestSourceText({
+        backend,
+        project: schedId,
+        sourceKind: source.sourceKind,
+        sourceId: source.sourceId,
+        text: source.text,
+        metadata: source.metadata,
+        ollamaUrl: cfg.retrieval_ollama_url,
+        embeddingModel: cfg.retrieval_embedding_model,
+        existingHash: existing?.contentHash ?? null,
+      });
+      if (skipped) {
+        skippedCount += 1;
+        if (timestampStale && existing) {
+          upsertRetrievalRecord({
+            id: source.recordId,
             project: schedId,
-            sourceKind: 'project_doc',
-          }),
-          project: schedId,
-          sourceKind: 'project_doc' as SourceKind,
-          sourceId: relPath,
-          chunkIndex: i,
-          metadata: { filePath: relPath },
-        }))
-      );
-      backend.upsertChunks(embeddedChunks);
-      totalChunks += chunks.length;
+            sourceKind: source.sourceKind,
+            sourceId: source.sourceId,
+            chunkCount: existing.chunkCount,
+            contentHash: existing.contentHash,
+            indexedAt: Date.now() / 1000,
+          });
+        }
+        continue;
+      }
+      if (!stored) {
+        throw new Error(`Failed to index ${source.sourceKind}:${source.sourceId}`);
+      }
+      indexedCount += 1;
+      totalChunks += chunkCount;
 
-      db.insert(schema.retrievalRecords)
-        .values({
-          id: recordId,
-          project: schedId,
-          sourceKind: 'project_doc',
-          sourceId: relPath,
-          chunkCount: chunks.length,
-          contentHash,
-          indexedAt: Date.now() / 1000,
-        })
-        .onConflictDoUpdate({
-          target: schema.retrievalRecords.id,
-          set: { contentHash, indexedAt: Date.now() / 1000, chunkCount: chunks.length },
-        })
-        .run();
+      upsertRetrievalRecord({
+        id: source.recordId,
+        project: schedId,
+        sourceKind: source.sourceKind,
+        sourceId: source.sourceId,
+        chunkCount,
+        contentHash: storedHash,
+        indexedAt: Date.now() / 1000,
+      });
     }
+
+    for (const record of existingRecords) {
+      if (currentIds.has(record.id)) continue;
+      backend.deleteSource(schedId, record.sourceKind as 'project_doc' | 'skill' | 'project_config', record.sourceId);
+      db.delete(schema.retrievalRecords).where(eq(schema.retrievalRecords.id, record.id)).run();
+      staleCount += 1;
+    }
+
+    return NextResponse.json({
+      chunks: totalChunks,
+      indexedSources: indexedCount,
+      skippedSources: skippedCount,
+      diagnostics: {
+        status: sources.length > 0 ? 'ok' : 'warning',
+        reason: sources.length > 0 ? 'indexed' : 'empty_corpus',
+        missingSourcesBeforeReindex: missingCount,
+        staleSourcesBeforeReindex: staleCount,
+        sourceCounts,
+      },
+    });
   } catch (err) {
     console.error('[retrieval] reindex failed:', err);
     return NextResponse.json({ error: 'Reindex failed' }, { status: 500 });
   }
-
-  return NextResponse.json({ chunks: totalChunks });
 }

@@ -1,0 +1,161 @@
+import { existsSync, readFileSync, statSync } from 'fs';
+import { inArray, eq } from 'drizzle-orm';
+import { db, schema } from '@/lib/db';
+import { canonicalAgentNameKey } from '@/lib/agents/agent-name';
+import { scanFileAgents } from '@/lib/agents/tamtam-file-agents';
+import { listProjectDocuments } from '@/lib/shared/project-documents';
+import { getBranchContext } from '@/lib/git/git-branch';
+import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
+import type { SourceKind } from './backend';
+
+export interface ProjectRetrievalSource {
+  recordId: string;
+  sourceKind: SourceKind;
+  sourceId: string;
+  text: string;
+  metadata: Record<string, string>;
+  updatedAt: number | null;
+}
+
+function safeJsonArray(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function buildSkillText(skill: { name: string; description: string; content: string }): string {
+  return [
+    `# ${skill.name}`,
+    skill.description.trim() ? skill.description.trim() : '',
+    skill.content.trim(),
+  ].filter(Boolean).join('\n\n');
+}
+
+function buildProjectConfigText(projectPath: string, project: {
+  testCommand: string | null;
+  reviewPromptAddendum: string | null;
+  fixPromptAddendum: string | null;
+  qaUrl: string | null;
+  website: string | null;
+  customActions: string | null;
+} | undefined): string {
+  const fileConfig = loadFileConfig(projectPath);
+  const lines: string[] = ['# Project Configuration'];
+
+  if (fileConfig?.test_command?.trim()) {
+    lines.push(`Committed test command: ${fileConfig.test_command.trim()}`);
+  }
+  if (project?.testCommand?.trim()) {
+    lines.push(`Local test command override: ${project.testCommand.trim()}`);
+  }
+  if (project?.reviewPromptAddendum?.trim()) {
+    lines.push(`Review guidance:\n${project.reviewPromptAddendum.trim()}`);
+  }
+  if (project?.fixPromptAddendum?.trim()) {
+    lines.push(`Fix guidance:\n${project.fixPromptAddendum.trim()}`);
+  }
+  if (fileConfig?.commit_style?.trim()) {
+    lines.push(`Commit style:\n${fileConfig.commit_style.trim()}`);
+  }
+  if (project?.qaUrl?.trim()) {
+    lines.push(`QA URL: ${project.qaUrl.trim()}`);
+  }
+  if (project?.website?.trim()) {
+    lines.push(`Website: ${project.website.trim()}`);
+  }
+  if (fileConfig?.safe_users?.length) {
+    lines.push(`Trusted GitHub users: ${fileConfig.safe_users.join(', ')}`);
+  }
+  if (fileConfig?.custom_actions?.length) {
+    const actions = fileConfig.custom_actions.map((action) => `- ${action.name}: ${action.command}`);
+    lines.push(`Committed custom actions:\n${actions.join('\n')}`);
+  }
+  if (project?.customActions) {
+    try {
+      const actions = JSON.parse(project.customActions) as Array<{ name?: string; command?: string }>;
+      const valid = actions
+        .filter((action) => typeof action?.name === 'string' && typeof action?.command === 'string')
+        .map((action) => `- ${action.name}: ${action.command}`);
+      if (valid.length > 0) {
+        lines.push(`Local custom actions:\n${valid.join('\n')}`);
+      }
+    } catch {}
+  }
+
+  return lines.length > 1 ? lines.join('\n\n') : '';
+}
+
+function collectEffectiveProjectSkillIds(project: string, projectPath: string): string[] {
+  const agentRows = db.select({ name: schema.agents.name, skillIds: schema.agents.skillIds })
+    .from(schema.agents)
+    .where(eq(schema.agents.project, project))
+    .all();
+  const dbAgentKeys = new Set(agentRows.map((row) => canonicalAgentNameKey(row.name)));
+  const skillIds = agentRows.flatMap((row) => safeJsonArray(row.skillIds));
+
+  for (const agent of scanFileAgents(projectPath, project)) {
+    if (dbAgentKeys.has(canonicalAgentNameKey(agent.name))) continue;
+    skillIds.push(...agent.skillIds);
+  }
+
+  return Array.from(new Set(skillIds.filter((id) => !id.startsWith('persona:'))));
+}
+
+export function collectProjectRetrievalSources(project: string, projectPath: string): ProjectRetrievalSource[] {
+  const sources: ProjectRetrievalSource[] = [];
+  const branchContext = getBranchContext(projectPath);
+
+  for (const filePath of listProjectDocuments(projectPath, { includeAgentDocs: branchContext.isDefaultBranch })) {
+    if (!existsSync(/*turbopackIgnore: true*/ filePath)) continue;
+    const text = readFileSync(/*turbopackIgnore: true*/ filePath, 'utf-8');
+    if (!text.trim()) continue;
+    const sourceId = filePath.replace(projectPath + '/', '');
+    sources.push({
+      recordId: `${project}:project_doc:${sourceId}`,
+      sourceKind: 'project_doc',
+      sourceId,
+      text,
+      metadata: { filePath: sourceId },
+      updatedAt: statSync(/*turbopackIgnore: true*/ filePath).mtimeMs / 1000,
+    });
+  }
+
+  const dbSkillIds = collectEffectiveProjectSkillIds(project, projectPath);
+  if (dbSkillIds.length > 0) {
+    const skills = db.select().from(schema.skills).where(inArray(schema.skills.id, dbSkillIds)).all();
+    for (const skill of skills) {
+      const text = buildSkillText(skill);
+      if (!text.trim()) continue;
+      sources.push({
+        recordId: `${project}:skill:${skill.id}`,
+        sourceKind: 'skill',
+        sourceId: skill.id,
+        text,
+        metadata: {
+          skillId: skill.id,
+          skillTitle: skill.name,
+        },
+        updatedAt: skill.updatedAt,
+      });
+    }
+  }
+
+  const projectRow = db.select().from(schema.projects).where(eq(schema.projects.name, project)).get();
+  const configText = buildProjectConfigText(projectPath, projectRow);
+  if (configText.trim()) {
+    sources.push({
+      recordId: `${project}:project_config:current`,
+      sourceKind: 'project_config',
+      sourceId: 'current',
+      text: configText,
+      metadata: { label: 'project config' },
+      updatedAt: null,
+    });
+  }
+
+  return sources;
+}

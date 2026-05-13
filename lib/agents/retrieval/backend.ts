@@ -1,4 +1,4 @@
-export type SourceKind = 'agent_run' | 'project_doc' | 'skill';
+export type SourceKind = 'agent_run' | 'project_doc' | 'skill' | 'project_config';
 
 export interface RetrievalChunk {
   chunkId: string;        // `${sourceKind}:${sourceId}:${chunkIndex}` — deterministic
@@ -27,6 +27,7 @@ export interface RetrievalBackend {
     limit: number;
     sourceKinds?: SourceKind[];
   }): RetrievalResult[];
+  countProjectChunks(project: string, sourceKinds?: SourceKind[]): number;
   deleteSource(project: string, sourceKind: SourceKind, sourceId: string): void;
   deleteProject(project: string): void;
 }

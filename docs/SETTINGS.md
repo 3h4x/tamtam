@@ -191,7 +191,7 @@ Outbound webhook fired when the release pipeline reaches a terminal state. Suppo
 
 ### Retrieval
 
-Semantic retrieval layer — embeds agent run reports and project docs into a local vector store (`sqlite-vec`) and injects relevant context into agent prompts at run time. Embeddings are generated locally via Ollama (`nomic-embed-text`). Everything is off by default (`retrieval_enabled = false`).
+Semantic retrieval layer — embeds agent run reports plus project-scoped knowledge into a local vector store (`sqlite-vec`) and injects relevant context into agent prompts at run time. The corpus includes committed project docs, DB-backed skills referenced by that project's agents, and synthesized project config guidance. Embeddings are generated locally via Ollama (`nomic-embed-text`). Everything is off by default (`retrieval_enabled = false`).
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -202,7 +202,7 @@ Semantic retrieval layer — embeds agent run reports and project docs into a lo
 | `retrieval_score_threshold` | float | `0.8` | Min similarity score to include a result |
 | `retrieval_manage_ollama` | bool | `true` | Whether TamTam starts Ollama via PM2 if not running |
 
-When enabled, TamTam starts Ollama via PM2 (`ollama-serve`) on boot if not already reachable, pulls `nomic-embed-text` if not installed, and indexes completed agent run reports automatically. Use `POST /api/projects/[schedId]/retrieval/reindex` to index project docs on demand. If the optional native `sqlite-vec` module is not installed in the current environment, retrieval stays unavailable at runtime: agent prompts skip retrieval context, completed runs are not marked as indexed, and the reindex route returns `503 { code: 'sqlite_vec_unavailable' }` instead of failing mid-request.
+When enabled, TamTam starts Ollama via PM2 (`ollama-serve`) on boot if not already reachable, pulls `nomic-embed-text` if not installed, and indexes completed agent run reports automatically. Use `POST /api/projects/[schedId]/retrieval/reindex` to refresh the project corpus on demand; that route reports whether sources were missing or stale before the refresh. Freshness behavior is source-specific: completed agent runs are indexed when they finish, while project docs, DB-backed skills, and synthesized project config are refreshed on explicit reindex against the current file/DB snapshot. At prompt time, TamTam records retrieval diagnostics on the run (`results`, `empty_corpus`, `no_results`, `below_threshold`, or `embed_failed`) so ineffective retrieval can be distinguished from a healthy hit. If the optional native `sqlite-vec` module is not installed in the current environment, retrieval stays unavailable at runtime: agent prompts skip retrieval context, completed runs are not marked as indexed, and the reindex route returns `503 { code: 'sqlite_vec_unavailable' }` instead of failing mid-request.
 
 ### Subscription Budget
 

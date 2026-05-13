@@ -6,6 +6,10 @@ const DOCS_DIR = 'docs';
 const AGENTS_DIR = join('.tamtam', 'agents');
 const ROOT_DOCS = new Set(['CLAUDE.md', 'README.md']);
 
+export interface ListProjectDocumentsOptions {
+  includeAgentDocs?: boolean;
+}
+
 function toPosixPath(path: string): string {
   return path.split(sep).join('/');
 }
@@ -31,8 +35,12 @@ function walkMarkdownFiles(root: string, dir: string): string[] {
   }
 }
 
-export function listProjectDocuments(projectPath: string): string[] {
+export function listProjectDocuments(
+  projectPath: string,
+  opts: ListProjectDocumentsOptions = {}
+): string[] {
   const files = new Set<string>();
+  const includeAgentDocs = opts.includeAgentDocs ?? true;
 
   for (const fileName of ROOT_DOCS) {
     const fullPath = join(/*turbopackIgnore: true*/ projectPath, fileName);
@@ -47,8 +55,10 @@ export function listProjectDocuments(projectPath: string): string[] {
     files.add(filePath);
   }
 
-  for (const filePath of walkMarkdownFiles(projectPath, AGENTS_DIR)) {
-    files.add(filePath);
+  if (includeAgentDocs) {
+    for (const filePath of walkMarkdownFiles(projectPath, AGENTS_DIR)) {
+      files.add(filePath);
+    }
   }
 
   return Array.from(files).sort((a, b) =>
