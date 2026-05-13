@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { delimiter, join } from 'path';
@@ -91,11 +91,33 @@ process.exit(0);
   chmodSync(binPath, 0o755);
 }
 
-describe('scripts/db-restore.js', () => {
-  it('restores the backup via a staged swap on success', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'tamtam-db-restore-success-'));
+function runRestore(backupPath: string, env: NodeJS.ProcessEnv): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(process.execPath, ['scripts/db-restore.js', backupPath], {
+      cwd: repoRoot,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+    proc.on('error', reject);
+    proc.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
+}
 
-    try {
+async function withRestoreFixture(run: (dir: string) => Promise<void>): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), 'tamtam-db-restore-'));
+  try {
+    await run(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe('scripts/db-restore.js', () => {
+  it.concurrent('restores the backup via a staged swap on success', () => withRestoreFixture(async (dir) => {
       const dbPath = join(dir, 'data', 'tamtam.db');
       const backupPath = join(dir, 'backups', 'tamtam-backup.db');
       const binDir = join(dir, 'bin');
@@ -110,16 +132,12 @@ describe('scripts/db-restore.js', () => {
       createDb(dbPath, 'old');
       createDb(backupPath, 'new');
 
-      const result = spawnSync(process.execPath, ['scripts/db-restore.js', backupPath], {
-        cwd: repoRoot,
-        env: {
-          ...process.env,
-          TAMTAM_DB_PATH: dbPath,
-          PNPM_LOG_PATH: pnpmLogPath,
-          PNPM_START_COUNT_PATH: join(dir, 'start-count.txt'),
-          PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
-        },
-        encoding: 'utf-8',
+      const result = await runRestore(backupPath, {
+        ...process.env,
+        TAMTAM_DB_PATH: dbPath,
+        PNPM_LOG_PATH: pnpmLogPath,
+        PNPM_START_COUNT_PATH: join(dir, 'start-count.txt'),
+        PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
       });
 
       expect(result.status).toBe(0);
@@ -130,15 +148,9 @@ describe('scripts/db-restore.js', () => {
         'stop',
         'start',
       ]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    }));
 
-  it('rolls back the old database and restarts TamTam if the post-swap start fails', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'tamtam-db-restore-rollback-'));
-
-    try {
+  it.concurrent('rolls back the old database and restarts TamTam if the post-swap start fails', () => withRestoreFixture(async (dir) => {
       const dbPath = join(dir, 'data', 'tamtam.db');
       const backupPath = join(dir, 'backups', 'tamtam-backup.db');
       const binDir = join(dir, 'bin');
@@ -154,17 +166,13 @@ describe('scripts/db-restore.js', () => {
       createDb(dbPath, 'old');
       createDb(backupPath, 'new');
 
-      const result = spawnSync(process.execPath, ['scripts/db-restore.js', backupPath], {
-        cwd: repoRoot,
-        env: {
-          ...process.env,
-          TAMTAM_DB_PATH: dbPath,
-          PNPM_LOG_PATH: pnpmLogPath,
-          PNPM_START_COUNT_PATH: startCountPath,
-          PNPM_FAIL_FIRST_START: '1',
-          PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
-        },
-        encoding: 'utf-8',
+      const result = await runRestore(backupPath, {
+        ...process.env,
+        TAMTAM_DB_PATH: dbPath,
+        PNPM_LOG_PATH: pnpmLogPath,
+        PNPM_START_COUNT_PATH: startCountPath,
+        PNPM_FAIL_FIRST_START: '1',
+        PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
       });
 
       expect(result.status).toBe(1);
@@ -177,15 +185,9 @@ describe('scripts/db-restore.js', () => {
         'start',
       ]);
       expect(result.stderr).toContain('Database restore failed');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    }));
 
-  it('aborts before swapping the live database when pnpm stop fails', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'tamtam-db-restore-stop-fail-'));
-
-    try {
+  it.concurrent('aborts before swapping the live database when pnpm stop fails', () => withRestoreFixture(async (dir) => {
       const dbPath = join(dir, 'data', 'tamtam.db');
       const backupPath = join(dir, 'backups', 'tamtam-backup.db');
       const binDir = join(dir, 'bin');
@@ -200,16 +202,12 @@ describe('scripts/db-restore.js', () => {
       createDb(dbPath, 'old');
       createDb(backupPath, 'new');
 
-      const result = spawnSync(process.execPath, ['scripts/db-restore.js', backupPath], {
-        cwd: repoRoot,
-        env: {
-          ...process.env,
-          TAMTAM_DB_PATH: dbPath,
-          PNPM_LOG_PATH: pnpmLogPath,
-          PNPM_FAIL_STOP: '1',
-          PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
-        },
-        encoding: 'utf-8',
+      const result = await runRestore(backupPath, {
+        ...process.env,
+        TAMTAM_DB_PATH: dbPath,
+        PNPM_LOG_PATH: pnpmLogPath,
+        PNPM_FAIL_STOP: '1',
+        PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
       });
 
       expect(result.status).toBe(1);
@@ -220,15 +218,9 @@ describe('scripts/db-restore.js', () => {
         'stop',
       ]);
       expect(result.stderr).toContain('aborting restore before swapping the live database');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    }));
 
-  it('restores backup data that lives in the backup WAL sidecar', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'tamtam-db-restore-wal-'));
-
-    try {
+  it.concurrent('restores backup data that lives in the backup WAL sidecar', () => withRestoreFixture(async (dir) => {
       const dbPath = join(dir, 'data', 'tamtam.db');
       const backupPath = join(dir, 'backups', 'tamtam-backup.db');
       const binDir = join(dir, 'bin');
@@ -246,16 +238,12 @@ describe('scripts/db-restore.js', () => {
       try {
         expect(existsSync(`${backupPath}-wal`)).toBe(true);
 
-        const result = spawnSync(process.execPath, ['scripts/db-restore.js', backupPath], {
-          cwd: repoRoot,
-          env: {
-            ...process.env,
-            TAMTAM_DB_PATH: dbPath,
-            PNPM_LOG_PATH: pnpmLogPath,
-            PNPM_START_COUNT_PATH: join(dir, 'start-count.txt'),
-            PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
-          },
-          encoding: 'utf-8',
+        const result = await runRestore(backupPath, {
+          ...process.env,
+          TAMTAM_DB_PATH: dbPath,
+          PNPM_LOG_PATH: pnpmLogPath,
+          PNPM_START_COUNT_PATH: join(dir, 'start-count.txt'),
+          PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
         });
 
         expect(result.status).toBe(0);
@@ -264,8 +252,5 @@ describe('scripts/db-restore.js', () => {
       } finally {
         releaseWalFixture();
       }
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    }));
 });

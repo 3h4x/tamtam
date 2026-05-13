@@ -9,11 +9,24 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
   let projectRow: { website?: string | null; qaUrl?: string | null } | undefined;
+  let getImproveConfigValue: { projects: Record<string, unknown>; claudeBin: string; logDir: string };
+  let getProjectTestConfigValue: Record<string, unknown>;
+  let getProjectPipelinePromptsValue: { reviewPromptAddendum: string | null; fixPromptAddendum: string | null };
 
   beforeEach(async () => {
     vi.resetModules();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-config-test-'));
     projectRow = undefined;
+    getImproveConfigValue = { projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' };
+    getProjectTestConfigValue = {
+      testCommand: null,
+      testCronEnabled: false,
+      testCronSchedule: null,
+      autoCommitEnabled: false,
+      autoPushEnabled: false,
+      releaseAfterRun: false,
+    };
+    getProjectPipelinePromptsValue = { reviewPromptAddendum: null, fixPromptAddendum: null };
 
     resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
 
@@ -39,11 +52,11 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     }));
     vi.doMock('@/lib/shared/config', () => ({ reloadConfig: vi.fn() }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
+      getImproveConfig: vi.fn(() => getImproveConfigValue),
       writeProjectFieldYaml: vi.fn().mockReturnValue(true),
-      getProjectTestConfig: vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false }),
+      getProjectTestConfig: vi.fn(() => getProjectTestConfigValue),
       getProjectPushResult: vi.fn().mockReturnValue(null),
-      getProjectPipelinePrompts: vi.fn().mockReturnValue({ reviewPromptAddendum: null, fixPromptAddendum: null }),
+      getProjectPipelinePrompts: vi.fn(() => getProjectPipelinePromptsValue),
     }));
     vi.doMock('@/lib/scheduling/test-scheduler', () => ({
       installTestSchedule: vi.fn(),
@@ -148,21 +161,9 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
   });
 
   it('surfaces review/fix prompt addenda when set', async () => {
-    vi.resetModules();
-    resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
-    vi.doMock('@/lib/shared/config', () => ({ reloadConfig: vi.fn() }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
-      writeProjectFieldYaml: vi.fn().mockReturnValue(true),
-      getProjectTestConfig: vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null }),
-      getProjectPushResult: vi.fn().mockReturnValue(null),
-      getProjectPipelinePrompts: vi.fn().mockReturnValue({ reviewPromptAddendum: 'Be lenient.', fixPromptAddendum: 'Minimal diffs.' }),
-    }));
-    vi.doMock('@/lib/scheduling/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
-    const { GET: GET2 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
+    getProjectPipelinePromptsValue = { reviewPromptAddendum: 'Be lenient.', fixPromptAddendum: 'Minimal diffs.' };
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
-    const res = await GET2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     const data = await res.json();
     expect(data.review_prompt_addendum).toBe('Be lenient.');
     expect(data.fix_prompt_addendum).toBe('Minimal diffs.');
@@ -176,95 +177,52 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
   });
 
   it('surfaces issue_auto_branch=false when the per-project config flips it off', async () => {
-    vi.resetModules();
-    resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
-    vi.doMock('@/lib/shared/config', () => ({ reloadConfig: vi.fn() }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
-      writeProjectFieldYaml: vi.fn().mockReturnValue(true),
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        testCommand: null, testCronEnabled: false, testCronSchedule: null,
-        autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false, autoPrMergeEnabled: false,
-        issueAutoBranch: false,
-      }),
-      getProjectPushResult: vi.fn().mockReturnValue(null),
-      getProjectPipelinePrompts: vi.fn().mockReturnValue({ reviewPromptAddendum: null, fixPromptAddendum: null }),
-    }));
-    vi.doMock('@/lib/scheduling/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
-    const { GET: GET2 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
+    getProjectTestConfigValue = {
+      ...getProjectTestConfigValue,
+      autoPrMergeEnabled: false,
+      issueAutoBranch: false,
+    };
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
-    const res = await GET2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     const data = await res.json();
     expect(data.issue_auto_branch).toBe(false);
   });
 
   it('surfaces tests_disabled=true when config has it set', async () => {
-    vi.resetModules();
-    resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
-    vi.doMock('@/lib/shared/config', () => ({ reloadConfig: vi.fn() }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
-      writeProjectFieldYaml: vi.fn().mockReturnValue(true),
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        testCommand: null, testCronEnabled: false, testCronSchedule: null,
-        autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false,
-        testsDisabled: true, reviewDisabled: false,
-      }),
-      getProjectPushResult: vi.fn().mockReturnValue(null),
-      getProjectPipelinePrompts: vi.fn().mockReturnValue({ reviewPromptAddendum: null, fixPromptAddendum: null }),
-    }));
-    vi.doMock('@/lib/scheduling/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
-    const { GET: GET2 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
+    getProjectTestConfigValue = {
+      ...getProjectTestConfigValue,
+      testsDisabled: true,
+      reviewDisabled: false,
+    };
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
-    const res = await GET2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     const data = await res.json();
     expect(data.tests_disabled).toBe(true);
     expect(data.review_disabled).toBe(false);
   });
 
   it('surfaces review_disabled=true when config has it set', async () => {
-    vi.resetModules();
-    resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
-    vi.doMock('@/lib/shared/config', () => ({ reloadConfig: vi.fn() }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
-      writeProjectFieldYaml: vi.fn().mockReturnValue(true),
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        testCommand: null, testCronEnabled: false, testCronSchedule: null,
-        autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false,
-        testsDisabled: false, reviewDisabled: true,
-      }),
-      getProjectPushResult: vi.fn().mockReturnValue(null),
-      getProjectPipelinePrompts: vi.fn().mockReturnValue({ reviewPromptAddendum: null, fixPromptAddendum: null }),
-    }));
-    vi.doMock('@/lib/scheduling/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
-    const { GET: GET2 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
+    getProjectTestConfigValue = {
+      ...getProjectTestConfigValue,
+      testsDisabled: false,
+      reviewDisabled: true,
+    };
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
-    const res = await GET2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     const data = await res.json();
     expect(data.tests_disabled).toBe(false);
     expect(data.review_disabled).toBe(true);
   });
 
   it('returns auto_push_enabled from config when set', async () => {
-    vi.resetModules();
-    resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock, clearProjectDataCache: vi.fn() }));
-    vi.doMock('@/lib/shared/config', () => ({ reloadConfig: vi.fn() }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' }),
-      writeProjectFieldYaml: vi.fn().mockReturnValue(true),
-      getProjectTestConfig: vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoCommitEnabled: true, autoPushEnabled: true, releaseAfterRun: true }),
-      getProjectPushResult: vi.fn().mockReturnValue(null),
-      getProjectPipelinePrompts: vi.fn().mockReturnValue({ reviewPromptAddendum: null, fixPromptAddendum: null }),
-    }));
-    vi.doMock('@/lib/scheduling/test-scheduler', () => ({ installTestSchedule: vi.fn(), uninstallTestSchedule: vi.fn(), parseTestScheduleToCron: (s: string) => s }));
-    const { GET: GET2 } = await import('@/app/api/projects/by-project/[projectName]/config/route');
+    getProjectTestConfigValue = {
+      ...getProjectTestConfigValue,
+      autoCommitEnabled: true,
+      autoPushEnabled: true,
+      releaseAfterRun: true,
+    };
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
-    const res = await GET2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     const data = await res.json();
     expect(data.auto_commit_enabled).toBe(true);
     expect(data.auto_push_enabled).toBe(true);
@@ -329,36 +287,29 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     writeFileSync(join(tempDir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
     writeFileSync(join(tempDir, 'pnpm-lock.yaml'), '');
 
-    vi.resetModules();
-    // Mock with a configured test command
-    resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: resolveProjectPathMock,
-      clearProjectDataCache: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/config', () => ({ reloadConfig: vi.fn() }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({
-        projects: { 'proj1': { project: 'proj1', path: tempDir, test_command: 'custom test cmd', prompt: '', validate: false, persona: [], scheduler: null, github: null, priority: null } },
-        claudeBin: 'claude',
-        logDir: '/tmp/logs',
-      }),
-      writeProjectFieldYaml: vi.fn().mockReturnValue(true),
-      getProjectTestConfig: vi.fn().mockReturnValue({ testCommand: 'custom test cmd', testCronEnabled: false, testCronSchedule: null }),
-      getProjectPushResult: vi.fn().mockReturnValue(null),
-      getProjectPipelinePrompts: vi.fn().mockReturnValue({ reviewPromptAddendum: null, fixPromptAddendum: null }),
-    }));
-    vi.doMock('@/lib/scheduling/test-scheduler', () => ({
-      installTestSchedule: vi.fn(),
-      uninstallTestSchedule: vi.fn(),
-      parseTestScheduleToCron: (s: string) => s,
-    }));
-
-    const mod = await import('@/app/api/projects/by-project/[projectName]/config/route');
-    const GET2 = mod.GET;
-
+    getImproveConfigValue = {
+      ...getImproveConfigValue,
+      projects: {
+        proj1: {
+          project: 'proj1',
+          path: tempDir,
+          test_command: 'custom test cmd',
+          prompt: '',
+          validate: false,
+          persona: [],
+          scheduler: null,
+          github: null,
+          priority: null,
+        },
+      },
+    };
+    getProjectTestConfigValue = {
+      testCommand: 'custom test cmd',
+      testCronEnabled: false,
+      testCronSchedule: null,
+    };
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
-    const res = await GET2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     const data = await res.json();
     expect(data.test_command).toBe('custom test cmd');
     expect(data.effective_test_command).toBe('custom test cmd');

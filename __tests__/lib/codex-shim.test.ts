@@ -3,7 +3,7 @@ import { mkdtemp, writeFile, chmod, rm, readFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawn } from 'child_process';
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 const _require = createRequire(import.meta.url);
 const shim = _require(join(process.cwd(), 'scripts/codex-shim.js')) as {
@@ -12,8 +12,6 @@ const shim = _require(join(process.cwd(), 'scripts/codex-shim.js')) as {
   sandboxFor: (mode: string) => string;
   approvalFor: (mode: string) => string;
 };
-
-const tempDirs: string[] = [];
 
 function runNode(args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -44,11 +42,16 @@ async function waitForFile(path: string, timeoutMs = 1000): Promise<string> {
   throw new Error(`timed out waiting for ${path}`);
 }
 
-describe('codex-shim', () => {
-  afterEach(async () => {
-    await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
-  });
+async function withTempDir<T>(run: (dir: string) => Promise<T>): Promise<T> {
+  const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
+  try {
+    return await run(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
 
+describe('codex-shim', () => {
   it('maps bypassPermissions to Codex full approval and sandbox bypass', () => {
     const args = shim.permissionArgsFor('bypassPermissions');
     expect(args).toContain('--dangerously-bypass-approvals-and-sandbox');
@@ -84,9 +87,7 @@ describe('codex-shim', () => {
     expect(shim.resolveModel('haiku', { CODEX_HAIKU_MODEL: 'gpt-test-fast' })).toBe('gpt-test-fast');
   });
 
-  it('emits assistant text once and preserves the Codex session id', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
+  it.concurrent('emits assistant text once and preserves the Codex session id', () => withTempDir(async (dir) => {
     const fakeCodex = join(dir, 'codex');
     const sessionId = '019de76e-0ffe-7e43-9335-60c482aac2ea';
     await writeFile(fakeCodex, `#!/usr/bin/env node
@@ -130,11 +131,9 @@ for (const event of events) console.log(JSON.stringify(event));
       outputTokens: 3,
       cacheReadInputTokens: 4,
     });
-  });
+  }));
 
-  it('emits assistant response_item text without echoing prompt messages', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
+  it.concurrent('emits assistant response_item text without echoing prompt messages', () => withTempDir(async (dir) => {
     const fakeCodex = join(dir, 'codex');
     await writeFile(fakeCodex, `#!/usr/bin/env node
 const events = [
@@ -168,11 +167,9 @@ for (const event of events) console.log(JSON.stringify(event));
     expect(text).toBe('Verdict: LGTM');
     expect(text).not.toContain('DO NOT ECHO');
     expect(final.is_error).toBe(false);
-  });
+  }));
 
-  it('parses real Codex item.completed agent_message events', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
+  it.concurrent('parses real Codex item.completed agent_message events', () => withTempDir(async (dir) => {
     const fakeCodex = join(dir, 'codex');
     const sessionId = '019de81b-075a-7410-a6eb-0031655a589f';
     await writeFile(fakeCodex, `#!/usr/bin/env node
@@ -213,11 +210,9 @@ for (const event of events) console.log(JSON.stringify(event));
       outputTokens: 20,
       cacheReadInputTokens: 10112,
     });
-  });
+  }));
 
-  it('silently consumes Codex lifecycle events (item.started, turn.started, etc.) without echoing JSON', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
+  it.concurrent('silently consumes Codex lifecycle events (item.started, turn.started, etc.) without echoing JSON', () => withTempDir(async (dir) => {
     const fakeCodex = join(dir, 'codex');
     await writeFile(fakeCodex, `#!/usr/bin/env node
 const events = [
@@ -253,11 +248,9 @@ for (const event of events) console.log(JSON.stringify(event));
     expect(text).not.toContain('item.started');
     expect(text).not.toContain('turn.started');
     expect(text).not.toContain('command_execution');
-  });
+  }));
 
-  it('reports Codex cached input separately instead of double-counting it as full-price input', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
+  it.concurrent('reports Codex cached input separately instead of double-counting it as full-price input', () => withTempDir(async (dir) => {
     const fakeCodex = join(dir, 'codex');
     await writeFile(fakeCodex, `#!/usr/bin/env node
 const events = [
@@ -289,11 +282,9 @@ for (const event of events) console.log(JSON.stringify(event));
       outputTokens: 50,
       cacheReadInputTokens: 900,
     });
-  });
+  }));
 
-  it('fails stream-json runs that produce no assistant output', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
+  it.concurrent('fails stream-json runs that produce no assistant output', () => withTempDir(async (dir) => {
     const fakeCodex = join(dir, 'codex');
     await writeFile(fakeCodex, `#!/usr/bin/env node
 console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 10, output_tokens: 0 } } } }));
@@ -317,11 +308,9 @@ console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', 
 
     expect(final.is_error).toBe(true);
     expect(final.result).toBe('[codex-shim] codex produced no assistant output');
-  });
+  }));
 
-  it('passes through plain JSON assistant output in text mode', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
+  it.concurrent('passes through plain JSON assistant output in text mode', () => withTempDir(async (dir) => {
     const fakeCodex = join(dir, 'codex');
     await writeFile(fakeCodex, `#!/usr/bin/env node
 console.log(JSON.stringify({ results: [{ index: 1, text: 'criterion', verified: true }] }));
@@ -341,11 +330,9 @@ console.log(JSON.stringify({ results: [{ index: 1, text: 'criterion', verified: 
     expect(JSON.parse(result.stdout)).toEqual({
       results: [{ index: 1, text: 'criterion', verified: true }],
     });
-  });
+  }));
 
-  it('passes through JSON assistant output with protocol-looking keys in text mode', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
+  it.concurrent('passes through JSON assistant output with protocol-looking keys in text mode', () => withTempDir(async (dir) => {
     const fakeCodex = join(dir, 'codex');
     await writeFile(fakeCodex, `#!/usr/bin/env node
 console.log(JSON.stringify({
@@ -371,11 +358,9 @@ console.log(JSON.stringify({
       payload: { status: 'LGTM', item: { type: 'check', verified: true } },
       usage: { notes: 'assistant output, not Codex telemetry' },
     });
-  });
+  }));
 
-  it('emits a useful error when Codex exits non-zero without stderr', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
+  it.concurrent('emits a useful error when Codex exits non-zero without stderr', () => withTempDir(async (dir) => {
     const fakeCodex = join(dir, 'codex');
     await writeFile(fakeCodex, `#!/usr/bin/env node
 console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'working on it' } }));
@@ -400,11 +385,9 @@ process.exit(1);
 
     expect(final.is_error).toBe(true);
     expect(final.result).toContain('codex exited 1 after assistant output with no stderr');
-  });
+  }));
 
-  it('forwards termination signals to the Codex child process', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
+  it.concurrent('forwards termination signals to the Codex child process', () => withTempDir(async (dir) => {
     const fakeCodex = join(dir, 'codex');
     const readyFile = join(dir, 'ready');
     const signalFile = join(dir, 'signal');
@@ -454,11 +437,9 @@ setInterval(() => {}, 1000);
         // The child should already be gone.
       }
     }
-  });
+  }));
 
-  it('retries once when codex exits 1 with no stderr after streaming output (transient crash)', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
+  it.concurrent('retries once when codex exits 1 with no stderr after streaming output (transient crash)', () => withTempDir(async (dir) => {
     const fakeCodex = join(dir, 'codex');
     const attemptFile = join(dir, 'attempt');
     await writeFile(fakeCodex, `#!/usr/bin/env node
@@ -507,11 +488,9 @@ console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', 
     expect(text).toContain('retrying once');
     expect(text).toContain('recovered');
     expect(finals[0].duration_ms).toBeGreaterThanOrEqual(0);
-  });
+  }));
 
-  it('does not retry when codex exits 1 with stderr (real failure)', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
+  it.concurrent('does not retry when codex exits 1 with stderr (real failure)', () => withTempDir(async (dir) => {
     const fakeCodex = join(dir, 'codex');
     const attemptFile = join(dir, 'attempt');
     await writeFile(fakeCodex, `#!/usr/bin/env node
@@ -542,11 +521,9 @@ process.exit(1);
     const final = lines.find((l) => l.type === 'result');
     expect(final.is_error).toBe(true);
     expect(final.result).toContain('apply_patch verification failed');
-  });
+  }));
 
-  it('does not duplicate an already-streamed prefix when the retry restarts the answer', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
+  it.concurrent('does not duplicate an already-streamed prefix when the retry restarts the answer', () => withTempDir(async (dir) => {
     const fakeCodex = join(dir, 'codex');
     const attemptFile = join(dir, 'attempt');
     await writeFile(fakeCodex, `#!/usr/bin/env node
@@ -587,11 +564,9 @@ console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', 
     expect(text).toContain(' world');
     expect(text.match(/Hello/g)?.length).toBe(1);
     expect(text).not.toContain('HelloHello');
-  });
+  }));
 
-  it('exits 0 when the retry cleanly replays the exact same answer', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
+  it.concurrent('exits 0 when the retry cleanly replays the exact same answer', () => withTempDir(async (dir) => {
     const fakeCodex = join(dir, 'codex');
     const attemptFile = join(dir, 'attempt');
     await writeFile(fakeCodex, `#!/usr/bin/env node
@@ -632,5 +607,5 @@ console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', 
     expect(text).toContain('Hello');
     expect(text).toContain('retrying once');
     expect(text.match(/Hello/g)?.length).toBe(1);
-  });
+  }));
 });
