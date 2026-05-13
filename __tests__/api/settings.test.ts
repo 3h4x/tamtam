@@ -758,6 +758,16 @@ describe('settings API', () => {
       expect(JSON.parse(data.settings.github_board_status_option_ids)).toEqual(optionIds);
     });
 
+    it('round-trips github_board_custom_field_ids through GET', async () => {
+      const customFieldIds = { project: 'P', agent: 'A', kind: 'K', branch: 'B' };
+      testDb.db.insert(schema.settings).values({ key: 'github_board_custom_field_ids', value: JSON.stringify(customFieldIds) }).run();
+
+      const response = await GET();
+      const data = await response.json();
+
+      expect(JSON.parse(data.settings.github_board_custom_field_ids)).toEqual(customFieldIds);
+    });
+
     it('returns 502 when enabling GitHub board sync fails', async () => {
       ensureProjectBoardMock.mockRejectedValueOnce(new Error('missing project scope'));
       const request = new NextRequest('http://localhost/api/settings', {
@@ -772,6 +782,51 @@ describe('settings API', () => {
 
       expect(response.status).toBe(502);
       await expect(response.json()).resolves.toMatchObject({ detail: 'missing project scope' });
+    });
+
+    it('normalizes notification_throttle_overrides before persisting them', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          notification_throttle_overrides: JSON.stringify({
+            release_fail: '15',
+            release_aborted: 0,
+          }),
+        }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(200);
+      const row = testDb.db.select().from(schema.settings).all().find((r) => r.key === 'notification_throttle_overrides');
+      expect(row?.value).toBe(JSON.stringify({
+        release_fail: 15,
+        release_aborted: 0,
+      }));
+      await expect(response.json()).resolves.toMatchObject({
+        status: 'ok',
+        settings: expect.objectContaining({
+          notification_throttle_overrides: JSON.stringify({
+            release_fail: 15,
+            release_aborted: 0,
+          }),
+        }),
+      });
+    });
+
+    it('rejects non-object notification_throttle_overrides payloads', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          notification_throttle_overrides: JSON.stringify(['release_fail']),
+        }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: 'notification_throttle_overrides must be a JSON object.',
+      });
+      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
     });
   });
 
