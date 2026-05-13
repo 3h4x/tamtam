@@ -1,0 +1,33 @@
+{
+  "description": "Fix-loop cap: three DO NOT SHIP reviews each trigger a fix, then the review cap blocks the fourth review and the release stops before commit or push.",
+  "steps": [
+    {
+      "label": "review-1",
+      "text": "- Finding ID: dns-loop-one\n  Severity: high\n  Root cause: first blocking issue remains\n  Required fix: apply first guard\n\nVerdict: DO NOT SHIP"
+    },
+    {
+      "label": "fix-1",
+      "text": "Fix checklist:\n- Finding ID: dns-loop-one\n  Status: fixed\n  Files changed: src/index.js\n  Tests: not run in shim\n  Remaining risk: follow-up review required"
+    },
+    {
+      "label": "review-2",
+      "text": "- Finding ID: dns-loop-two\n  Severity: high\n  Root cause: second blocking issue remains\n  Required fix: apply second guard\n\nVerdict: DO NOT SHIP"
+    },
+    {
+      "label": "fix-2",
+      "text": "Fix checklist:\n- Finding ID: dns-loop-two\n  Status: fixed\n  Files changed: src/index.js\n  Tests: not run in shim\n  Remaining risk: follow-up review required"
+    },
+    {
+      "label": "review-3",
+      "text": "- Finding ID: dns-loop-three\n  Severity: high\n  Root cause: third blocking issue remains\n  Required fix: apply third guard\n\nVerdict: DO NOT SHIP"
+    },
+    {
+      "label": "fix-3",
+      "text": "Fix checklist:\n- Finding ID: dns-loop-three\n  Status: fixed\n  Files changed: src/index.js\n  Tests: not run in shim\n  Remaining risk: cap should block the next review"
+    },
+    {
+      "label": "review-4",
+      "text": "- Finding ID: dns-loop-four\n  Severity: high\n  Root cause: fourth blocking issue should never be reviewed\n  Required fix: this step must not run\n\nVerdict: DO NOT SHIP"
+    }
+  ]
+}
