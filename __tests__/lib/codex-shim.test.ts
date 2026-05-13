@@ -66,6 +66,16 @@ describe('codex-shim', () => {
     expect(args).toEqual(['-a', 'never', '--sandbox', 'workspace-write']);
   });
 
+  it('maps acceptEdits to workspace-write sandbox without approval prompts', () => {
+    const args = shim.permissionArgsFor('acceptEdits');
+    expect(args).toEqual(['-a', 'never', '--sandbox', 'workspace-write']);
+  });
+
+  it('maps default to workspace-write sandbox without approval prompts', () => {
+    const args = shim.permissionArgsFor('default');
+    expect(args).toEqual(['-a', 'never', '--sandbox', 'workspace-write']);
+  });
+
   it('resolves semantic tiers through the new env vars', () => {
     expect(shim.resolveModel('smart', { CODEX_SMART_MODEL: 'gpt-test-smart' })).toBe('gpt-test-smart');
   });

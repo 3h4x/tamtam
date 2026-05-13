@@ -66,14 +66,21 @@ export function SettingsField({
           {MODEL_TIERS.map((model) => <option key={model} value={model}>{MODEL_LABELS[model]}</option>)}
         </select>
       ) : fieldKey === 'permission_mode' ? (
-        <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
-          <option value="bypassPermissions">bypassPermissions</option>
-          <option value="acceptEdits">acceptEdits</option>
-          <option value="auto">auto</option>
-          <option value="dontAsk">dontAsk</option>
-          <option value="plan">plan</option>
-          <option value="default">default</option>
-        </select>
+        <>
+          <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
+            <option value="bypassPermissions">bypassPermissions</option>
+            <option value="acceptEdits">acceptEdits</option>
+            <option value="auto">auto</option>
+            <option value="dontAsk">dontAsk</option>
+            <option value="plan">plan</option>
+            <option value="default">default</option>
+          </select>
+          {value === 'auto' && (
+            <div className="mt-2 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs text-status-warning" role="alert">
+              <span className="font-medium">Warning:</span> auto preserves provider-native approval behavior. On CLIs that still prompt for write approval in headless mode, unattended jobs can block. Prefer acceptEdits for background runs.
+            </div>
+          )}
+        </>
       ) : (
         <input
           type="text"

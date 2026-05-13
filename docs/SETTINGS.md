@@ -92,7 +92,7 @@ Manual sync behavior:
 | `cli_default_model_codex` | string | `normal` | Per-provider default tier, normalized to `fast` / `normal` / `smart`; used by launch paths that do not receive an explicit model override |
 | `cli_default_model_gemini` | string | `normal` | Per-provider default tier, normalized to `fast` / `normal` / `smart`; used by launch paths that do not receive an explicit model override |
 | `cli_default_model_lmstudio` | string | `normal` | Per-provider default tier, normalized to `fast` / `normal` / `smart`; used by launch paths that do not receive an explicit model override |
-| `permission_mode` | string | `bypassPermissions` | Passed as `--permission-mode` flag. Allowed: `acceptEdits`, `auto`, `bypassPermissions`, `default`, `dontAsk`, `plan` — invalid values fall back to `bypassPermissions` |
+| `permission_mode` | string | `acceptEdits` | Passed as `--permission-mode` for headless CLI runs. Allowed: `acceptEdits`, `auto`, `bypassPermissions`, `default`, `dontAsk`, `plan`. Invalid values are rejected on write and normalized to `acceptEdits` on read. `acceptEdits` is the safe unattended default across the bundled Claude, Gemini, and Codex shims; `auto` preserves provider-native behavior and may still block unattended runs on CLIs that prompt for write approval |
 | `default_model` | string | `fast` | Pre-selected semantic tier in the terminal UI. Primary options: `fast`, `normal`, `smart`. Legacy `haiku`, `sonnet`, `opus` values are still accepted and normalized. |
 
 ### Scheduling

@@ -59,8 +59,18 @@ describe('gemini-shim approval mode mapping', () => {
     expect(geminiArgs[idx + 1]).toBe('yolo');
   });
 
+  it('maps acceptEdits → auto_edit', () => {
+    const { geminiArgs } = shim.parseShimArgs(['--permission-mode', 'acceptEdits'], {});
+    expect(geminiArgs[geminiArgs.indexOf('--approval-mode') + 1]).toBe('auto_edit');
+  });
+
   it('maps auto → auto_edit', () => {
     const { geminiArgs } = shim.parseShimArgs(['--permission-mode', 'auto'], {});
+    expect(geminiArgs[geminiArgs.indexOf('--approval-mode') + 1]).toBe('auto_edit');
+  });
+
+  it('maps dontAsk → auto_edit', () => {
+    const { geminiArgs } = shim.parseShimArgs(['--permission-mode', 'dontAsk'], {});
     expect(geminiArgs[geminiArgs.indexOf('--approval-mode') + 1]).toBe('auto_edit');
   });
 
@@ -71,7 +81,7 @@ describe('gemini-shim approval mode mapping', () => {
 
   it('maps default → default', () => {
     const { geminiArgs } = shim.parseShimArgs(['--permission-mode=default'], {});
-    expect(geminiArgs[geminiArgs.indexOf('--approval-mode') + 1]).toBe('default');
+    expect(geminiArgs[geminiArgs.indexOf('--approval-mode') + 1]).toBe('auto_edit');
   });
 
   it('consumes --output-format and does not forward it to gemini', () => {

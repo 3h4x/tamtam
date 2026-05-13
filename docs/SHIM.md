@@ -29,9 +29,11 @@ The shim takes incoming arguments designed for Claude and translates them to the
     *   `thinking` → `thinking`
 *   **Permission / Approval Modes:**
     *   `bypassPermissions` → `yolo`
+    *   `acceptEdits` → `auto_edit`
     *   `auto` → `auto_edit`
+    *   `dontAsk` → `auto_edit`
     *   `plan` → `plan`
-    *   `default` → `default`
+    *   `default` → `auto_edit`
 
 Other standard arguments like `--cwd` are passed through appropriately, and the `--output-format stream-json` flag is supplied to ensure the Gemini CLI outputs structured JSON lines.
 
@@ -95,7 +97,7 @@ Model aliases:
 
 Override with `CODEX_MODEL`, `CODEX_FAST_MODEL`, `CODEX_NORMAL_MODEL`, or `CODEX_SMART_MODEL`. Legacy `CODEX_HAIKU_MODEL`, `CODEX_SONNET_MODEL`, and `CODEX_OPUS_MODEL` still work as fallbacks.
 
-Permission mapping defaults to Codex `workspace-write` sandbox with `-a never` for non-interactive runs. `plan` uses `read-only`. Set `CODEX_DANGEROUS_BYPASS=1` only if you intentionally want TamTam's `bypassPermissions` mode to run Codex with `danger-full-access`.
+Permission mapping normalizes TamTam's headless modes to non-interactive Codex launches: `acceptEdits`, `auto`, `default`, and `dontAsk` all use `workspace-write` with `-a never`; `plan` uses `read-only`; `bypassPermissions` uses Codex's explicit full-bypass flag. Set `CODEX_DANGEROUS_BYPASS=1` only if you intentionally want TamTam's `bypassPermissions` mode to run Codex with `danger-full-access`.
 
 Manual usage:
 

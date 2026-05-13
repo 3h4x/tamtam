@@ -88,7 +88,7 @@ describe('config', () => {
         launchagent_prefix: 'com.tamtam',
         base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
         default_model: 'fast',
-        permission_mode: 'bypassPermissions',
+        permission_mode: 'acceptEdits',
         commit_style: 'Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Types: feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert.',
         review_verdict_rules: expect.stringContaining('Pragmatic verdict rules'),
         jobs_paused: false,
@@ -526,8 +526,8 @@ describe('config', () => {
   });
 
   describe('getPermissionModeFlag', () => {
-    it('returns default bypassPermissions flag when no setting in DB', () => {
-      expect(getPermissionModeFlag()).toBe('--permission-mode bypassPermissions');
+    it('returns default acceptEdits flag when no setting in DB', () => {
+      expect(getPermissionModeFlag()).toBe('--permission-mode acceptEdits');
     });
 
     it('returns flag for a valid mode stored in DB', () => {
@@ -536,10 +536,10 @@ describe('config', () => {
       expect(getPermissionModeFlag()).toBe('--permission-mode acceptEdits');
     });
 
-    it('falls back to bypassPermissions for an unrecognised mode', () => {
+    it('falls back to acceptEdits for an unrecognised mode', () => {
       testDb.db.insert(schema.settings).values({ key: 'permission_mode', value: 'dangerousMode' }).run();
       reloadConfig();
-      expect(getPermissionModeFlag()).toBe('--permission-mode bypassPermissions');
+      expect(getPermissionModeFlag()).toBe('--permission-mode acceptEdits');
     });
 
     it.each(['acceptEdits', 'auto', 'bypassPermissions', 'default', 'dontAsk', 'plan'])(
