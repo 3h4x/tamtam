@@ -23,6 +23,38 @@ const queues = new Map<string, QueueEntry[]>();
 const retryTimers = new Map<string, NodeJS.Timeout>();
 const TEMPORARY_DRAIN_RETRY_MS = 30_000;
 
+// Circuit breaker: drains that fail fast (e.g. PM2 spawn EBADF after FD
+// exhaustion) used to be re-fired by the lifecycle-hook drain at ~50/sec,
+// because nothing tracked that the same head had just failed. We now keep a
+// per-project attempt record so a hot loop of identical failures backs off
+// and eventually drops the head instead of producing thousands of dead jobs.
+const MAX_CONSECUTIVE_FAILURES = 5;
+const inFlight = new Set<string>();
+type AttemptRecord = { agentId: string; enqueuedAt: number; consecutiveFailures: number };
+const attempts = new Map<string, AttemptRecord>();
+
+function sameQueueEntry(a: Pick<QueueEntry, 'agentId' | 'enqueuedAt'> | null | undefined, b: Pick<QueueEntry, 'agentId' | 'enqueuedAt'> | null | undefined): boolean {
+  return !!a && !!b && a.agentId === b.agentId && a.enqueuedAt === b.enqueuedAt;
+}
+
+function noteFailure(project: string, entry: Pick<QueueEntry, 'agentId' | 'enqueuedAt'>): number {
+  const cur = attempts.get(project);
+  const failures = cur && sameQueueEntry(cur, entry) ? cur.consecutiveFailures + 1 : 1;
+  attempts.set(project, { ...entry, consecutiveFailures: failures });
+  return failures;
+}
+
+function clearAttempts(project: string): void {
+  attempts.delete(project);
+}
+
+function clearAttemptsForEntry(project: string, entry: Pick<QueueEntry, 'agentId' | 'enqueuedAt'>): void {
+  const cur = attempts.get(project);
+  if (sameQueueEntry(cur, entry)) {
+    attempts.delete(project);
+  }
+}
+
 // Synchronous per-project lock held while an agent run is being constructed
 // (after the listJobs() running-agent check, until createJob() lands the new
 // row in jobsCache). Without this, two concurrent POSTs both observe an
@@ -95,6 +127,7 @@ export function enqueueAgentRun(project: string, entry: QueueEntry): void {
   }
   const existing = q.findIndex((e) => e.agentId === entry.agentId);
   if (existing >= 0) {
+    clearAttemptsForEntry(project, q[existing]);
     q[existing] = entry;
     return;
   }
@@ -108,6 +141,7 @@ export function dequeueNextAgentRun(project: string): QueueEntry | null {
   if (q.length === 0) {
     queues.delete(project);
     clearDrainRetry(project);
+    clearAttempts(project);
   }
   return next;
 }
@@ -123,6 +157,7 @@ export function listQueuedProjects(): string[] {
 export function clearProjectQueue(project: string): void {
   queues.delete(project);
   clearDrainRetry(project);
+  clearAttempts(project);
 }
 
 export function clearAllQueues(): void {
@@ -132,6 +167,8 @@ export function clearAllQueues(): void {
     clearTimeout(timer);
   }
   retryTimers.clear();
+  attempts.clear();
+  inFlight.clear();
 }
 
 function clearDrainRetry(project: string): void {
@@ -155,6 +192,15 @@ function scheduleDrainRetry(project: string, delayMs = TEMPORARY_DRAIN_RETRY_MS)
 // route handler stays the single source of truth for prompt composition,
 // skill loading, gate checks, etc.
 export async function drainNextAgentRun(project: string): Promise<void> {
+  // Circuit breaker against re-entrant drains. The lifecycle hook fires
+  // drainNextAgentRun() on every agent finish, including the one this drain
+  // just spawned via fetch. Without this guard, a route that fails fast
+  // (e.g. PM2 spawn EBADF) calls markDone → completion hooks → drain →
+  // POST → markDone → … producing ~50 dead jobs/sec on the same queue head.
+  // Serializing per project lets the in-flight POST finish (and dropHead on
+  // success or scheduleDrainRetry on 5xx) before any other caller proceeds.
+  if (inFlight.has(project)) return;
+
   // A route still holds the synchronous "starting" critical section for this
   // project. Leave the queue intact and let that route drain after release so
   // we never drop a head entry on a transient 409 "already starting" reply.
@@ -168,10 +214,20 @@ export async function drainNextAgentRun(project: string): Promise<void> {
   const url = `${baseUrl}/api/agents/${encodeURIComponent(next.agentId)}/run`;
   const dropHead = () => {
     const head = queues.get(project)?.[0];
-    if (head?.agentId === next.agentId) {
+    if (sameQueueEntry(head, next)) {
       dequeueNextAgentRun(project);
     }
   };
+  const tripBreakerIfExhausted = (failures: number, reason: string): boolean => {
+    if (failures < MAX_CONSECUTIVE_FAILURES) return false;
+    console.warn(
+      `[pending-agent-run] circuit breaker tripped for ${next.agentName}/${project} after ${failures} consecutive failures (${reason}) — dropping head`,
+    );
+    dropHead();
+    clearAttempts(project);
+    return true;
+  };
+  inFlight.add(project);
   try {
     const r = await fetch(url, {
       method: 'POST',
@@ -189,6 +245,7 @@ export async function drainNextAgentRun(project: string): Promise<void> {
         // The DB queue now owns this run (survives restart). Drop the in-memory
         // head so we don't double-fire when release recovery replays it.
         dropHead();
+        clearAttempts(project);
         console.log(
           `[pending-agent-run] handed ${next.agentName} to DB queue (${parsed.code}) for ${project}`,
         );
@@ -204,6 +261,7 @@ export async function drainNextAgentRun(project: string): Promise<void> {
 
     if (r.ok) {
       dropHead();
+      clearAttempts(project);
       console.log(`[pending-agent-run] drained ${next.agentName} for ${project} (${r.status})`);
       return;
     }
@@ -235,6 +293,7 @@ export async function drainNextAgentRun(project: string): Promise<void> {
       // don't starve. The scheduler will re-fire eligible agents on its own
       // tick if/when conditions clear.
       dropHead();
+      clearAttempts(project);
       console.warn(
         `[pending-agent-run] dropping ${next.agentName} from queue for ${project}: ${r.status} ${code || 'unknown_409'} ${(parsed?.detail ?? raw).slice(0, 200)}`,
       );
@@ -255,6 +314,7 @@ export async function drainNextAgentRun(project: string): Promise<void> {
     if (r.status === 400 || r.status === 404) {
       const body = await r.text().catch(() => '');
       dropHead();
+      clearAttempts(project);
       console.warn(
         `[pending-agent-run] dropping ${next.agentName} from queue for ${project}: ${r.status} ${body.slice(0, 200)}`,
       );
@@ -262,12 +322,29 @@ export async function drainNextAgentRun(project: string): Promise<void> {
     }
 
     if (!r.ok) {
+      // 5xx (and any other unhandled non-success). Previously this branch
+      // logged and returned without rescheduling, so the next lifecycle
+      // drain re-fired the same head instantly — a route that fails fast
+      // (EBADF, OOM-spawn, transient handler crash) would churn ~50/sec.
+      // Now: count the failure, trip the breaker after the cap, and back
+      // off via the retry timer otherwise.
       const body = await r.text().catch(() => '');
+      const failures = noteFailure(project, next);
+      if (tripBreakerIfExhausted(failures, `HTTP ${r.status}`)) return;
+      scheduleDrainRetry(project);
       console.warn(
-        `[pending-agent-run] drain ${next.agentName} for ${project} failed: ${r.status} ${body.slice(0, 200)}`,
+        `[pending-agent-run] drain ${next.agentName} for ${project} failed: ${r.status} ${body.slice(0, 200)} (attempt ${failures}/${MAX_CONSECUTIVE_FAILURES})`,
       );
     }
   } catch (e) {
-    console.error(`[pending-agent-run] drain error for ${project}/${next.agentName}:`, e);
+    // Network-level failure (route unreachable, abort, fetch crash). Treat
+    // identically to 5xx: count, retry, trip after the cap.
+    const failures = noteFailure(project, next);
+    if (!tripBreakerIfExhausted(failures, 'fetch error')) {
+      scheduleDrainRetry(project);
+    }
+    console.error(`[pending-agent-run] drain error for ${project}/${next.agentName} (attempt ${failures}/${MAX_CONSECUTIVE_FAILURES}):`, e);
+  } finally {
+    inFlight.delete(project);
   }
 }
