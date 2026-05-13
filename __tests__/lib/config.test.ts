@@ -644,6 +644,31 @@ describe('config', () => {
     });
   });
 
+  describe('notification throttle settings', () => {
+    it('merges valid stored overrides with defaults and ignores invalid entries', () => {
+      testDb.db.insert(schema.settings).values({ key: 'notification_throttle_window_seconds', value: '120' }).run();
+      testDb.db.insert(schema.settings).values({
+        key: 'notification_throttle_overrides',
+        value: JSON.stringify({
+          release_fail: '15',
+          release_aborted: -1,
+          fix_loop_exhausted: 30,
+          review_do_not_ship: 'oops',
+        }),
+      }).run();
+      reloadConfig();
+
+      const config = getSettings();
+
+      expect(config.notification_throttle_window_seconds).toBe(120);
+      expect(config.notification_throttle_overrides).toEqual({
+        release_fail: 15,
+        release_aborted: 0,
+        fix_loop_exhausted: 30,
+      });
+    });
+  });
+
   describe('commit_style and review_verdict_rules', () => {
     it('returns default commit_style when not set', () => {
       const config = getSettings();
