@@ -178,6 +178,19 @@ describe('config', () => {
       expect(config.cli_bin_claude).toBe('/usr/bin/claude');
     });
 
+    it('keeps legacy custom provider routing while dropping stale shim binaries', () => {
+      const db = testDb.db;
+      db.insert(schema.settings).values({ key: 'claude_provider', value: 'custom' }).run();
+      db.insert(schema.settings).values({ key: 'claude_bin', value: '/opt/tamtam/scripts/gemini-shim.js' }).run();
+
+      const config = getSettings();
+
+      expect(config.claude_provider).toBe('custom');
+      expect(config.cli_enabled_providers).toEqual(['claude']);
+      expect(config.claude_bin).toBe('~/.local/bin/claude');
+      expect(config.cli_bin_claude).toBe('');
+    });
+
     it('canonicalizes legacy model aliases from settings', () => {
       const db = testDb.db;
       db.insert(schema.settings).values({ key: 'default_model', value: 'sonnet' }).run();

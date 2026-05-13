@@ -526,6 +526,30 @@ describe('settings API', () => {
       expect(rows.cli_bin_claude).toBe('/custom/claude');
     });
 
+    it('does not rewrite a legacy custom provider to claude on an unrelated save round-trip', async () => {
+      testDb.db.insert(schema.settings).values({ key: 'claude_provider', value: 'custom' }).run();
+      testDb.db.insert(schema.settings).values({ key: 'claude_bin', value: '/usr/local/bin/acme-cli' }).run();
+
+      const getResponse = await GET();
+      const loaded = await getResponse.json();
+
+      const patchRequest = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          ...loaded.settings,
+          github_owner: 'octocat',
+        }),
+      });
+      await PATCH(patchRequest);
+
+      const rows = Object.fromEntries(testDb.db.select().from(schema.settings).all().map((row) => [row.key, row.value]));
+      expect(rows.github_owner).toBe('octocat');
+      expect(rows.claude_provider).toBe('custom');
+      expect(rows.cli_enabled_providers).toBe('claude');
+      expect(rows.claude_bin).toBe('/usr/local/bin/acme-cli');
+      expect(rows.cli_bin_claude).toBe('/usr/local/bin/acme-cli');
+    });
+
     it('saves review_fix_max_iterations setting', async () => {
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',
