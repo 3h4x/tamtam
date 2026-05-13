@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { existsSync, readFileSync, appendFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { db, schema } from '@/lib/db';
 import { markReviewed, setReviewedRef, getCurrentBranch } from '@/lib/git/git-utils';
 import { parseStreamLines } from './claude-stream-parser';
@@ -33,6 +33,7 @@ import {
   parsePrContextMeta,
 } from '@/lib/pipeline/release-context';
 import { getJobKind, isAgentJobKind, isClaudeBackedJobKind } from '@/lib/jobs/kinds';
+import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 
 async function getProjectPipelineConfig(projectName: string): Promise<{ autoCommitEnabled: boolean; autoPushEnabled: boolean; releaseAfterRun: boolean; autoPrMergeEnabled: boolean }> {
   try {
@@ -366,7 +367,7 @@ function appendToReleaseLog(release: JobData, kind: string, job: JobData, extra?
     if (job.logPath && existsSync(job.logPath)) {
       try { body = readFileSync(job.logPath, 'utf-8'); } catch {}
     }
-    appendFileSync(release.logPath, header + body + (extra ? `\n${extra}\n` : ''));
+    appendRedactedFileSync(release.logPath, header + body + (extra ? `\n${extra}\n` : ''));
   } catch {}
 }
 
@@ -534,7 +535,7 @@ export async function reconcileStaleRelease(job: JobData): Promise<void> {
     finalExit = 1;
     persistReleaseStopReason(release, stopReason);
     if (release.logPath) {
-      try { appendFileSync(release.logPath, `\n# release stopped — ${stopReason}\n`); } catch {}
+      try { appendRedactedFileSync(release.logPath, `\n# release stopped — ${stopReason}\n`); } catch {}
     }
     reconcileRefireAttempts.delete(refireKey);
   }
@@ -550,7 +551,7 @@ export async function finalizeReleaseJob(release: JobData, exitCode: number): Pr
   if (release.finishedAt !== null) return;
   try {
     if (release.logPath) {
-      appendFileSync(release.logPath, `\n# release finished — exit ${exitCode} — ${new Date().toISOString()}\n`);
+      appendRedactedFileSync(release.logPath, `\n# release finished — exit ${exitCode} — ${new Date().toISOString()}\n`);
     }
   } catch {}
   await markDone(release, exitCode);
@@ -649,7 +650,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           if (unverified.length > 0) {
             const syntheticFindings = buildUnverifiedCriteriaFindings(unverified);
             if (job.logPath) {
-              try { appendFileSync(job.logPath, toStreamTextLine(syntheticFindings)); } catch {}
+              try { appendRedactedFileSync(job.logPath, toStreamTextLine(syntheticFindings)); } catch {}
             }
             earlyVerdict = 'NEEDS ATTENTION';
             console.log(`[release] review ${job.id} downgraded to NEEDS ATTENTION: ${unverified.length} unverified criteria`);
@@ -1297,7 +1298,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
       }
       if (releaseStopReason && release.logPath) {
         try {
-          appendFileSync(release.logPath, `\n# release stopped — ${releaseStopReason}\n`);
+          appendRedactedFileSync(release.logPath, `\n# release stopped — ${releaseStopReason}\n`);
         } catch {}
       }
       // Emit release success/fail notification before finalizing

@@ -5,6 +5,8 @@ import { homedir } from 'os';
 import { getJob, probeJobStatus } from '@/lib/jobs/job-storage';
 import { parseStreamLines, createParseState, type ParseState } from '@/lib/jobs/claude-stream-parser';
 import { errMsg } from '@/lib/shared/types';
+import { redactSecrets } from '@/lib/shared/log-redaction';
+import { readRedactedFileSync } from '@/lib/jobs/redacted-log-reader';
 
 function getLogPath(jobId: string): string {
   const job = getJob(jobId);
@@ -30,14 +32,15 @@ export async function GET(
 
       function sendRawLines(text: string) {
         if (!text) return;
+        const safeText = redactSecrets(text);
         // Use SSE multi-`data:` field syntax so embedded newlines are preserved
         // in the single reconstructed event.data on the browser side.
-        const payload = text.split('\n').map(l => `data: ${l}`).join('\n');
+        const payload = safeText.split('\n').map(l => `data: ${l}`).join('\n');
         controller.enqueue(encoder.encode(`${payload}\n\n`));
       }
 
       function sseEncode(data: string, event?: string): string {
-        const lines = data.split('\n').map(line => `data: ${line}`).join('\n');
+        const lines = redactSecrets(data).split('\n').map(line => `data: ${line}`).join('\n');
         return event ? `event: ${event}\n${lines}\n\n` : `${lines}\n\n`;
       }
 
@@ -134,7 +137,7 @@ export async function GET(
       function extractLogDetail(): string | null {
         try {
           if (!existsSync(/*turbopackIgnore: true*/ logPath)) return 'log file missing';
-          const content = readFileSync(/*turbopackIgnore: true*/ logPath, 'utf-8');
+          const content = readRedactedFileSync(logPath);
           if (!content.trim()) return 'log file empty — claude CLI exited without writing anything. Common causes: rate-limited (5-hour window), cold-start crash, or auth/session conflict with a concurrent run. Retrying usually works.';
           const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
           // If every non-empty line is a [tamtam] wrapper marker (the launch

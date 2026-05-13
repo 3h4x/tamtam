@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
-import { mkdirSync, writeFileSync, appendFileSync } from 'fs';
+import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { db, schema } from '@/lib/db';
 import { resolveProjectPath } from '@/lib/shared/project-data';
@@ -27,6 +27,8 @@ import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
+import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
+import { redactSecrets } from '@/lib/shared/log-redaction';
 
 /**
  * `readOnly: true` is for agents whose declared task does not edit the local
@@ -398,7 +400,7 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   if (prereqCmd) {
     const cancelSignal = registerJobCancellation(job.id);
     const startedAt = Date.now();
-    appendFileSync(/*turbopackIgnore: true*/ logPath,
+    appendRedactedFileSync(/*turbopackIgnore: true*/ logPath,
       `# prerequisite: ${prereqCmd}\n# cwd: ${projPath}\n# started: ${new Date().toISOString()}\n\n`);
     const result = await exec('bash', ['-c', prereqCmd], {
       cwd: projPath,
@@ -419,12 +421,12 @@ At the end of your run, include a short final section exactly named "TamTam Run 
       || job.finishedAt != null
       || job.abortedAt != null
       || job.exitCode === -2;
-    appendFileSync(/*turbopackIgnore: true*/ logPath,
+    appendRedactedFileSync(/*turbopackIgnore: true*/ logPath,
       `${result.stdout || ''}${result.stderr ? `\n--- stderr ---\n${result.stderr}` : ''}\n` +
       `# prerequisite finished — exit ${result.exitCode} in ${prerequisiteResult.durationMs}ms\n\n`);
 
     if (prerequisiteCancelled) {
-      appendFileSync(/*turbopackIgnore: true*/ logPath, `# prerequisite cancelled by user\n`);
+      appendRedactedFileSync(/*turbopackIgnore: true*/ logPath, `# prerequisite cancelled by user\n`);
       if (job.finishedAt === null) {
         job.finishedAt = Date.now() / 1000;
         job.exitCode = 130;
@@ -466,7 +468,7 @@ At the end of your run, include a short final section exactly named "TamTam Run 
         startedJob: false,
       };
     }
-    appendFileSync(/*turbopackIgnore: true*/ logPath, `\n# queued behind release pipeline lock — will run when lock releases\n`);
+    appendRedactedFileSync(/*turbopackIgnore: true*/ logPath, `\n# queued behind release pipeline lock — will run when lock releases\n`);
     job.finishedAt = Date.now() / 1000;
     job.exitCode = 0;
     updateJob(job);
@@ -492,7 +494,7 @@ At the end of your run, include a short final section exactly named "TamTam Run 
       (j) => !isAgentJobKind(j.kind) && j.id !== job.id,
     );
     if (postPrereqBlockingJob) {
-      appendFileSync(/*turbopackIgnore: true*/ logPath, `\n# blocked by ${postPrereqBlockingJob.kind} job ${postPrereqBlockingJob.id}\n`);
+      appendRedactedFileSync(/*turbopackIgnore: true*/ logPath, `\n# blocked by ${postPrereqBlockingJob.kind} job ${postPrereqBlockingJob.id}\n`);
       job.finishedAt = Date.now() / 1000;
       job.exitCode = 1;
       updateJob(job);
@@ -514,23 +516,24 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   let prerequisiteBlock = '';
   if (prerequisiteResult) {
     const artifactPath = join(logDir, `${job.id}.prereq.txt`);
+    const redactedCommand = redactSecrets(prerequisiteResult.command);
     const artifactBody =
       `# TamTam prerequisite artifact\n` +
-      `command: ${prerequisiteResult.command}\n` +
+      `command: ${redactedCommand}\n` +
       `exit_code: ${prerequisiteResult.exitCode}\n` +
       `duration_ms: ${prerequisiteResult.durationMs}\n` +
       `cwd: ${projPath}\n` +
-      `--- stdout ---\n${prerequisiteResult.stdout}\n--- stderr ---\n${prerequisiteResult.stderr}\n`;
+      `--- stdout ---\n${redactSecrets(prerequisiteResult.stdout)}\n--- stderr ---\n${redactSecrets(prerequisiteResult.stderr)}\n`;
     try {
       writeFileSync(/*turbopackIgnore: true*/ artifactPath, artifactBody);
     } catch (e) {
       console.error('[agent-run] failed to write prereq artifact:', errMsg(e));
     }
-    const truncatedStdout = truncate(prerequisiteResult.stdout, PREREQUISITE_OUTPUT_MAX);
-    const truncatedStderr = truncate(prerequisiteResult.stderr, PREREQUISITE_OUTPUT_MAX);
+    const truncatedStdout = truncate(redactSecrets(prerequisiteResult.stdout), PREREQUISITE_OUTPUT_MAX);
+    const truncatedStderr = truncate(redactSecrets(prerequisiteResult.stderr), PREREQUISITE_OUTPUT_MAX);
     prerequisiteBlock =
       `## Prerequisite Output\n` +
-      `Command: \`${prerequisiteResult.command}\`\n` +
+      `Command: \`${redactedCommand}\`\n` +
       `Exit code: ${prerequisiteResult.exitCode}\n` +
       `Duration: ${prerequisiteResult.durationMs} ms\n` +
       `Artifact: ${artifactPath}\n\n` +
@@ -539,7 +542,7 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     job.contextMeta = JSON.stringify({
       ...contextMeta,
       prerequisite: {
-        command: prerequisiteResult.command,
+        command: redactedCommand,
         exitCode: prerequisiteResult.exitCode,
         durationMs: prerequisiteResult.durationMs,
         artifactPath,
@@ -574,7 +577,7 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     job.finishedAt = Date.now() / 1000;
     job.exitCode = -1;
     updateJob(job);
-    appendFileSync(/*turbopackIgnore: true*/ logPath, `\n# failed to start agent: ${errMsg(e)}\n`);
+    appendRedactedFileSync(/*turbopackIgnore: true*/ logPath, `\n# failed to start agent: ${errMsg(e)}\n`);
     await markDone(job, -1);
     return {
       response: NextResponse.json({ detail: `Failed to start: ${errMsg(e)}` }, { status: 500 }),

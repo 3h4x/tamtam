@@ -23,6 +23,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { redactSecrets } = require('./log-redaction');
 
 const [, , jobId, logPath, promptPath, cmd, ...cmdArgs] = process.argv;
 
@@ -39,8 +40,12 @@ try {
   process.exit(2);
 }
 
+function logChunk(chunk) {
+  try { fs.writeSync(logFd, redactSecrets(Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk))); } catch { /* noop */ }
+}
+
 function logLine(line) {
-  try { fs.writeSync(logFd, line.endsWith('\n') ? line : `${line}\n`); } catch { /* noop */ }
+  logChunk(line.endsWith('\n') ? line : `${line}\n`);
 }
 
 function isJobsPaused() {
@@ -102,7 +107,7 @@ try {
   delete childEnv.PORT;
   delete childEnv.HOSTNAME;
   child = spawn(cmd, cmdArgs, {
-    stdio: ['pipe', logFd, logFd],
+    stdio: ['pipe', 'pipe', 'pipe'],
     env: childEnv,
   });
 } catch (err) {
@@ -110,6 +115,9 @@ try {
   try { fs.closeSync(logFd); } catch { /* noop */ }
   process.exit(127);
 }
+
+child.stdout.on('data', logChunk);
+child.stderr.on('data', logChunk);
 
 child.on('error', err => {
   // Fires for ENOENT etc. when the binary can't be located.

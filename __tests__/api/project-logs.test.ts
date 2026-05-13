@@ -80,6 +80,33 @@ describe('GET /api/projects/by-project/{projectName}/logs', () => {
     expect(data.logs[0].content).toBe('hello world');
   });
 
+  it('redacts secrets from small log files', async () => {
+    writeFileSync(join(logDir, 'proj1-run-001.log'), 'token=ghp_abcdefghijklmnopqrstuvwxyz123456\nordinary line\n');
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/logs');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+
+    expect(data.logs[0].content).toContain('token=[REDACTED]');
+    expect(data.logs[0].content).toContain('ordinary line');
+    expect(data.logs[0].content).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz123456');
+  });
+
+  it('redacts secrets from large tailed log files', async () => {
+    const prefix = 'a'.repeat(50_100);
+    writeFileSync(
+      join(logDir, 'proj1-run-001.log'),
+      `${prefix}\nurl=https://user:supersecret@example.com/path\n`
+    );
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/logs');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+
+    expect(data.logs[0].content).toContain('https://user:[REDACTED]@example.com/path');
+    expect(data.logs[0].content).not.toContain('supersecret');
+  });
+
   it('returns at most 5 log files', async () => {
     for (let i = 0; i < 8; i++) {
       writeFileSync(join(logDir, `proj1-run-00${i}.log`), `content ${i}`);

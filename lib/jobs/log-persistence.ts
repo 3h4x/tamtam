@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { redactLogFrame } from '@/lib/shared/log-redaction';
 
 export interface LogFrame {
   type: string;
@@ -18,7 +19,7 @@ function getLogsDir(baseDir?: string): string {
 export function writeJobLogs(jobId: string, frames: LogFrame[], baseDir?: string): void {
   const logsDir = getLogsDir(baseDir);
   const logFile = join(logsDir, `${jobId}.log`);
-  const content = frames.map((f) => JSON.stringify(f)).join('\n') + '\n';
+  const content = frames.map((f) => JSON.stringify(redactLogFrame(f))).join('\n') + '\n';
   writeFileSync(logFile, content);
 }
 

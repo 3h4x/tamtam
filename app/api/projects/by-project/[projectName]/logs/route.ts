@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
+import { existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
+import { readRedactedFileSync, readRedactedTailSync } from '@/lib/jobs/redacted-log-reader';
 
 export async function GET(
   _request: NextRequest,
@@ -24,15 +25,9 @@ export async function GET(
       const size = statSync(filepath).size;
       let content: string;
       if (size > 50_000) {
-        const buf = Buffer.alloc(50_000);
-        const fd = require('fs').openSync(filepath, 'r');
-        require('fs').readSync(fd, buf, 0, 50_000, size - 50_000);
-        require('fs').closeSync(fd);
-        content = buf.toString('utf-8');
-        const nl = content.indexOf('\n');
-        if (nl >= 0) content = content.slice(nl + 1);
+        content = readRedactedTailSync(filepath, 50_000);
       } else {
-        content = readFileSync(filepath, 'utf-8');
+        content = readRedactedFileSync(filepath);
       }
       logs.push({ filename: f, content });
     } catch {

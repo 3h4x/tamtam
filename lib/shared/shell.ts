@@ -16,6 +16,10 @@ const extraPaths = [
   '/usr/local/bin',
 ];
 
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 function enrichPath(): string {
   const current = process.env.PATH || '';
   const additions = extraPaths.filter((p) => !current.includes(p));

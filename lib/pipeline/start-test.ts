@@ -1,10 +1,11 @@
-import { existsSync, readFileSync, writeFileSync, chmodSync, mkdirSync, openSync, closeSync } from 'fs';
-import { join } from 'path';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { spawn, execSync } from 'child_process';
 import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/scheduling';
 import { currentParent } from '@/lib/jobs/parent-context';
 import { resolveProjectPath } from '@/lib/shared/project-data';
+import { shellQuote } from '@/lib/shared/shell';
 import { createJob, listJobs, probeJobStatus, updateJob, markDone } from '@/lib/jobs/job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
@@ -104,6 +105,7 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
   }
 
   const { logDir } = getImproveConfig();
+  const redactScriptPath = resolve(process.cwd(), 'scripts', 'redact-log-stream.js');
 
   const testCmd = detectTestCommand(projPath, projectName);
   if (!testCmd) {
@@ -117,22 +119,23 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
 
-  const scriptPath = join(logDir, `${job.id}.sh`);
-  writeFileSync(scriptPath, [
-    '#!/bin/bash',
-    `export PATH="${process.env.PATH || ''}"`,
-    `export HOME="${homedir()}"`,
-    `cd "${projPath}"`,
-    `echo "Running: ${testCmd}"`,
-    'echo "---"',
-    `${testCmd} 2>&1`,
-  ].join('\n'));
-  chmodSync(scriptPath, 0o755);
+  const bashCommand = [
+    'set -o pipefail',
+    `export PATH=${shellQuote(process.env.PATH || '')}`,
+    `export HOME=${shellQuote(homedir())}`,
+    `cd ${shellQuote(projPath)}`,
+    '{',
+    `  printf '%s\\n' ${shellQuote(`Running: ${testCmd}`)}`,
+    `  printf '%s\\n' ${shellQuote('---')}`,
+    `  ${testCmd}`,
+    `} 2>&1 | node ${shellQuote(redactScriptPath)} ${shellQuote(logPath)}`,
+    'exit ${PIPESTATUS[0]}',
+  ].join('\n');
 
-  const logFd = openSync(logPath, 'w');
-  const proc = spawn('bash', [scriptPath], {
+  writeFileSync(logPath, '');
+  const proc = spawn('bash', ['-lc', bashCommand], {
     cwd: projPath,
-    stdio: ['ignore', logFd, logFd],
+    stdio: 'ignore',
     detached: true,
   });
 
@@ -150,8 +153,7 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
     }
   }
 
-  proc.on('exit', (code) => {
-    try { closeSync(logFd); } catch {}
+  proc.on('close', (code) => {
     markDone(job, code ?? -1).catch((e) => {
       console.log(`[start-test] markDone failed for ${job.id}:`, e);
     });

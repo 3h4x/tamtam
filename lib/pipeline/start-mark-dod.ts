@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { resolveProjectPath } from '@/lib/shared/project-data';
@@ -11,6 +11,7 @@ import { getPermissionModeFlag, getPipelineModel, getSettings } from '@/lib/shar
 import { createJob, findActiveReleaseJob, markDone, updateJob } from '@/lib/jobs/job-storage';
 import { wrapIfUntrusted, withUntrustedPreamble } from '@/lib/shared/untrusted';
 import { startJob, getJobStatus, deleteJob } from '@/lib/jobs/pm2-jobs';
+import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { ensureBranchForCtx } from './mark-dod-branch';
 import {
   findLatestIssueRunContext,
@@ -153,7 +154,7 @@ export async function startMarkDod(
   // updateJob() much later in the flow — a user opening the job page early
   // sees an empty terminal even though the log file is being written.
   updateJob(job);
-  const log = (s: string) => { try { appendFileSync(logPath, s); } catch {} };
+  const log = (s: string) => { try { appendRedactedFileSync(logPath, s); } catch {} };
 
   const ctxLabel = isPr ? `PR` : `issue`;
   log(`# mark-dod start — ${new Date().toISOString()}\n# ${ctxLabel}: ${ctx.repo}#${ctx.number}\n`);
