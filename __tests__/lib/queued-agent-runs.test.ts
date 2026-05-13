@@ -424,17 +424,17 @@ describe('queued-agent-runs', () => {
       }),
     });
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(timeoutError));
 
     await drainQueuedAgentRunsForProject('myproject');
 
     expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
-    expect(warnSpy).toHaveBeenCalledWith(
+    expect(logSpy).toHaveBeenCalledWith(
       '[queued-agent-runs] transient timeout draining docs for myproject: fetch failed',
     );
     expect(errorSpy).not.toHaveBeenCalled();
-    warnSpy.mockRestore();
+    logSpy.mockRestore();
     errorSpy.mockRestore();
     vi.unstubAllGlobals();
   });
@@ -604,17 +604,17 @@ describe('queued-agent-runs', () => {
       name: 'AbortError',
     });
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(abortError));
 
     await drainQueuedAgentRunsForProject('myproject');
 
     expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
-    expect(warnSpy).toHaveBeenCalledWith(
+    expect(logSpy).toHaveBeenCalledWith(
       '[queued-agent-runs] transient timeout draining docs for myproject: The operation was aborted',
     );
     expect(errorSpy).not.toHaveBeenCalled();
-    warnSpy.mockRestore();
+    logSpy.mockRestore();
     errorSpy.mockRestore();
     vi.unstubAllGlobals();
   });
