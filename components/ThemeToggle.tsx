@@ -1,4 +1,3 @@
-// tamtam
 'use client'
 
 import { useTheme } from '@/hooks/useTheme'
