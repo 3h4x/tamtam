@@ -63,52 +63,50 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const cutoff = window === 'all' ? 0 : Date.now() / 1000 - WINDOWS[window];
   const filter = gte(schema.ollamaUsage.ts, cutoff);
 
-  const byModel = db
-    .select({
-      model: schema.ollamaUsage.model,
-      calls: sql<number>`count(*)`,
-      inputTokens: sql<number>`coalesce(sum(${schema.ollamaUsage.inputTokens}), 0)`,
-      durationMs: sql<number>`coalesce(sum(${schema.ollamaUsage.durationMs}), 0)`,
-    })
-    .from(schema.ollamaUsage)
-    .where(filter)
-    .groupBy(schema.ollamaUsage.model)
-    .all();
+  const [byModel, bySource, byProject, totalsRows] = await Promise.all([
+    db
+      .select({
+        model: schema.ollamaUsage.model,
+        calls: sql<number>`count(*)`,
+        inputTokens: sql<number>`coalesce(sum(${schema.ollamaUsage.inputTokens}), 0)`,
+        durationMs: sql<number>`coalesce(sum(${schema.ollamaUsage.durationMs}), 0)`,
+      })
+      .from(schema.ollamaUsage)
+      .where(filter)
+      .groupBy(schema.ollamaUsage.model),
+    db
+      .select({
+        sourceKind: sql<string | null>`${schema.ollamaUsage.sourceKind}`,
+        calls: sql<number>`count(*)`,
+        inputTokens: sql<number>`coalesce(sum(${schema.ollamaUsage.inputTokens}), 0)`,
+        durationMs: sql<number>`coalesce(sum(${schema.ollamaUsage.durationMs}), 0)`,
+      })
+      .from(schema.ollamaUsage)
+      .where(filter)
+      .groupBy(schema.ollamaUsage.sourceKind),
+    db
+      .select({
+        project: sql<string | null>`${schema.ollamaUsage.project}`,
+        calls: sql<number>`count(*)`,
+        inputTokens: sql<number>`coalesce(sum(${schema.ollamaUsage.inputTokens}), 0)`,
+        durationMs: sql<number>`coalesce(sum(${schema.ollamaUsage.durationMs}), 0)`,
+      })
+      .from(schema.ollamaUsage)
+      .where(filter)
+      .groupBy(schema.ollamaUsage.project),
+    db
+      .select({
+        calls: sql<number>`count(*)`,
+        inputTokens: sql<number>`coalesce(sum(${schema.ollamaUsage.inputTokens}), 0)`,
+        durationMs: sql<number>`coalesce(sum(${schema.ollamaUsage.durationMs}), 0)`,
+        lastCallAt: sql<number | null>`max(${schema.ollamaUsage.ts})`,
+      })
+      .from(schema.ollamaUsage)
+      .where(filter)
+      .limit(1),
+  ]);
 
-  const bySource = db
-    .select({
-      sourceKind: sql<string | null>`${schema.ollamaUsage.sourceKind}`,
-      calls: sql<number>`count(*)`,
-      inputTokens: sql<number>`coalesce(sum(${schema.ollamaUsage.inputTokens}), 0)`,
-      durationMs: sql<number>`coalesce(sum(${schema.ollamaUsage.durationMs}), 0)`,
-    })
-    .from(schema.ollamaUsage)
-    .where(filter)
-    .groupBy(schema.ollamaUsage.sourceKind)
-    .all();
-
-  const byProject = db
-    .select({
-      project: sql<string | null>`${schema.ollamaUsage.project}`,
-      calls: sql<number>`count(*)`,
-      inputTokens: sql<number>`coalesce(sum(${schema.ollamaUsage.inputTokens}), 0)`,
-      durationMs: sql<number>`coalesce(sum(${schema.ollamaUsage.durationMs}), 0)`,
-    })
-    .from(schema.ollamaUsage)
-    .where(filter)
-    .groupBy(schema.ollamaUsage.project)
-    .all();
-
-  const totalsRow = db
-    .select({
-      calls: sql<number>`count(*)`,
-      inputTokens: sql<number>`coalesce(sum(${schema.ollamaUsage.inputTokens}), 0)`,
-      durationMs: sql<number>`coalesce(sum(${schema.ollamaUsage.durationMs}), 0)`,
-      lastCallAt: sql<number | null>`max(${schema.ollamaUsage.ts})`,
-    })
-    .from(schema.ollamaUsage)
-    .where(filter)
-    .get();
+  const totalsRow = totalsRows[0] ?? null;
 
   const body: OllamaStatsResponse = {
     window,

@@ -40,9 +40,9 @@ import { eq, and, isNotNull, desc } from 'drizzle-orm';
 // the next fire is anchored on actual last-run, not on "now" — without this,
 // every Next.js restart resets each agent's clock and an overdue agent
 // silently gets pushed another full period into the future.
-function lookupLastFireMs(project: string, name: string): number | null {
+async function lookupLastFireMs(project: string, name: string): Promise<number | null> {
   try {
-    const row = db
+    const rows = await db
       .select({ finishedAt: schema.jobs.finishedAt })
       .from(schema.jobs)
       .where(and(
@@ -51,8 +51,8 @@ function lookupLastFireMs(project: string, name: string): number | null {
         isNotNull(schema.jobs.finishedAt),
       ))
       .orderBy(desc(schema.jobs.finishedAt))
-      .limit(1)
-      .get();
+      .limit(1);
+    const row = rows[0] ?? null;
     if (row?.finishedAt) return row.finishedAt * 1000;
   } catch {
     // jobs table may not exist in test environments
@@ -246,9 +246,10 @@ async function fire(entry: ScheduleEntry): Promise<void> {
   // edits — agent edits get included in the in-flight commit, or trigger a
   // cascade of re-reviews on top of the pipeline's own changes.
   try {
-    const lock = getLock(entry.project);
+    const lock = await getLock(entry.project);
     if (lock) {
-      const holderRow = db.select().from(schema.jobs).where(eq(schema.jobs.id, lock.lockedByJobId)).get();
+      const holderRows = await db.select().from(schema.jobs).where(eq(schema.jobs.id, lock.lockedByJobId)).limit(1);
+      const holderRow = holderRows[0] ?? null;
       if (holderRow && holderRow.finishedAt === null) {
         entry.skippedCount += 1;
         entry.lastSkippedReason = `release pipeline active: ${holderRow.kind} ${holderRow.id}`;
@@ -417,9 +418,30 @@ function armNext(entry: ScheduleEntry): void {
   // next slot after `fromMs`; if the agent is overdue, that slot is in the
   // past and we stagger the wake-up below to avoid a boot-time stampede.
   if (entry.fireCount === 0 && entry.lastFireMs == null) {
-    const dbLast = lookupLastFireMs(entry.project, entry.name);
-    if (dbLast) entry.lastFireMs = dbLast;
+    // lookupLastFireMs is async; resolve it and re-arm once the result is
+    // known. If the DB lookup fails or the entry has been removed by then,
+    // fall through to a plain "now" arm so the agent still fires.
+    void lookupLastFireMs(entry.project, entry.name).then((dbLast) => {
+      if (!entries.has(entry.agentId)) return; // removed while we awaited
+      if (dbLast && entry.lastFireMs == null) {
+        entry.lastFireMs = dbLast;
+      }
+      // Re-arm synchronously from the resolved value.
+      armNextSync(entry);
+    }).catch(() => {
+      if (!entries.has(entry.agentId)) return;
+      armNextSync(entry);
+    });
+    return;
   }
+  armNextSync(entry);
+}
+
+function armNextSync(entry: ScheduleEntry): void {
+  if (!entry.enabled) return;
+  if (getPaused()) return;
+  if (!entries.has(entry.agentId)) return;
+  if (entry.timer) clearTimeout(entry.timer);
   const fromMs = entry.lastFireMs ?? Date.now();
   entry.nextFireMs = computeNextFire(entry.schedule, entry.agentId, fromMs);
   const rawDelay = entry.nextFireMs - Date.now();

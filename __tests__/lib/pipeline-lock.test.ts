@@ -91,13 +91,13 @@ describe('pipeline-lock', () => {
   afterEach(() => { vi.resetModules(); });
 
   describe('getLock', () => {
-    it('returns null when no lock exists', () => {
-      expect(getLock('proj')).toBeNull();
+    it('returns null when no lock exists', async () => {
+      expect(await getLock('proj')).toBeNull();
     });
 
     it('returns lock data after acquiring', async () => {
       await acquireLock('proj', 'job-1');
-      const lock = getLock('proj');
+      const lock = await getLock('proj');
       expect(lock).not.toBeNull();
       expect(lock!.project).toBe('proj');
       expect(lock!.lockedByJobId).toBe('job-1');
@@ -106,7 +106,7 @@ describe('pipeline-lock', () => {
 
     it('returns null for a different project', async () => {
       await acquireLock('proj-a', 'job-1');
-      expect(getLock('proj-b')).toBeNull();
+      expect(await getLock('proj-b')).toBeNull();
     });
 
     it('self-heals: returns null when the holder job is already finished', async () => {
@@ -118,7 +118,7 @@ describe('pipeline-lock', () => {
         `INSERT INTO pipeline_locks (project, locked_by_job_id, acquired_at) VALUES ('proj', 'old-release', ${Date.now() / 1000 - 5})`
       );
       testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at, finished_at) VALUES ('old-release', 'proj', 'release', ${Date.now() / 1000 - 200}, ${Date.now() / 1000 - 10})`);
-      expect(getLock('proj')).toBeNull();
+      expect(await getLock('proj')).toBeNull();
     });
 
     it('self-heal keeps a pending release queued when the drain is pause-blocked', async () => {
@@ -142,7 +142,7 @@ describe('pipeline-lock', () => {
       testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at, finished_at) VALUES ('old-release', 'proj', 'release', ${Date.now() / 1000 - 200}, ${Date.now() / 1000 - 10})`);
       pendingMod.setPendingRelease('proj');
 
-      expect(mod2.getLock('proj')).toBeNull();
+      expect((await mod2.getLock('proj'))).toBeNull();
       await vi.waitFor(() => expect(pendingMod.getPendingRelease('proj')).toBe(true));
     });
 
@@ -167,7 +167,7 @@ describe('pipeline-lock', () => {
       testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at, finished_at) VALUES ('old-release', 'proj', 'release', ${Date.now() / 1000 - 200}, ${Date.now() / 1000 - 10})`);
       pendingMod.setPendingRelease('proj');
 
-      expect(mod2.getLock('proj')).toBeNull();
+      expect((await mod2.getLock('proj'))).toBeNull();
       await vi.waitFor(() => expect(pendingMod.getPendingRelease('proj')).toBe(true));
     });
 
@@ -192,7 +192,7 @@ describe('pipeline-lock', () => {
       testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at, finished_at) VALUES ('old-release', 'proj', 'release', ${Date.now() / 1000 - 200}, ${Date.now() / 1000 - 10})`);
       pendingMod.setPendingRelease('proj');
 
-      expect(mod2.getLock('proj')).toBeNull();
+      expect((await mod2.getLock('proj'))).toBeNull();
       await vi.waitFor(() => expect(pendingMod.getPendingRelease('proj')).toBe(true));
     });
 
@@ -201,7 +201,7 @@ describe('pipeline-lock', () => {
         `INSERT INTO pipeline_locks (project, locked_by_job_id, acquired_at) VALUES ('proj', 'live-release', ${Date.now() / 1000 - 5})`
       );
       testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at, finished_at) VALUES ('live-release', 'proj', 'release', ${Date.now() / 1000 - 200}, NULL)`);
-      const lock = getLock('proj');
+      const lock = await getLock('proj');
       expect(lock).not.toBeNull();
       expect(lock!.lockedByJobId).toBe('live-release');
     });
@@ -217,7 +217,7 @@ describe('pipeline-lock', () => {
 
     it('persists the lock so getLock returns it', async () => {
       await acquireLock('proj', 'job-1');
-      expect(getLock('proj')).not.toBeNull();
+      expect((await getLock('proj'))).not.toBeNull();
     });
 
     it('returns acquired:false when a fresh lock is held by another job', async () => {
@@ -294,13 +294,13 @@ describe('pipeline-lock', () => {
       await acquireLock('proj-a', 'job-a');
       const result = await acquireLock('proj-b', 'job-b');
       expect(result.acquired).toBe(true);
-      expect(getLock('proj-a')!.lockedByJobId).toBe('job-a');
+      expect((await getLock('proj-a'))!.lockedByJobId).toBe('job-a');
     });
 
     it('overwrites own lock when acquired again (idempotent upsert)', async () => {
       await acquireLock('proj', 'job-1');
       // Force-release first so we can re-acquire (simulating the upsert path)
-      releaseLock('proj', 'job-1');
+      await releaseLock('proj', 'job-1');
       const result = await acquireLock('proj', 'job-1');
       expect(result.acquired).toBe(true);
     });
@@ -309,28 +309,28 @@ describe('pipeline-lock', () => {
   describe('releaseLock', () => {
     it('releases lock when owned by the given job', async () => {
       await acquireLock('proj', 'job-1');
-      releaseLock('proj', 'job-1');
-      expect(getLock('proj')).toBeNull();
+      await releaseLock('proj', 'job-1');
+      expect(await getLock('proj')).toBeNull();
     });
 
     it('does nothing when a different job tries to release', async () => {
       await acquireLock('proj', 'job-1');
-      releaseLock('proj', 'job-2');
-      const lock = getLock('proj');
+      await releaseLock('proj', 'job-2');
+      const lock = await getLock('proj');
       expect(lock).not.toBeNull();
       expect(lock!.lockedByJobId).toBe('job-1');
     });
 
-    it('does not throw when no lock exists', () => {
-      expect(() => releaseLock('proj', 'job-1')).not.toThrow();
+    it('does not throw when no lock exists', async () => {
+      await expect(releaseLock('proj', 'job-1')).resolves.not.toThrow();
     });
 
     it('only releases the named project, not other projects', async () => {
       await acquireLock('proj-a', 'job-a');
       await acquireLock('proj-b', 'job-b');
-      releaseLock('proj-a', 'job-a');
-      expect(getLock('proj-a')).toBeNull();
-      expect(getLock('proj-b')).not.toBeNull();
+      await releaseLock('proj-a', 'job-a');
+      expect((await getLock('proj-a'))).toBeNull();
+      expect((await getLock('proj-b'))).not.toBeNull();
     });
 
     it('calls the ordered recovery drain for the project when the lock is released', async () => {
@@ -344,7 +344,7 @@ describe('pipeline-lock', () => {
       }));
       const mod2 = await import('@/lib/pipeline/pipeline-lock');
       await mod2.acquireLock('proj', 'job-drain');
-      mod2.releaseLock('proj', 'job-drain');
+      await mod2.releaseLock('proj', 'job-drain');
       // drain is async fire-and-forget — wait a microtask cycle
       await new Promise<void>((r) => setTimeout(r, 10));
       expect(drainMock).toHaveBeenCalledWith('proj', '[pipeline-lock]');
@@ -360,15 +360,15 @@ describe('pipeline-lock', () => {
       }));
       const mod2 = await import('@/lib/pipeline/pipeline-lock');
       await mod2.acquireLock('proj', 'job-owner');
-      mod2.releaseLock('proj', 'job-other');
+      await mod2.releaseLock('proj', 'job-other');
       await new Promise<void>((r) => setTimeout(r, 10));
       expect(drainMock).not.toHaveBeenCalled();
     });
   });
 
   describe('isLockOwnedByActiveRelease', () => {
-    it('returns false when no lock exists', () => {
-      expect(isLockOwnedByActiveRelease('proj')).toBe(false);
+    it('returns false when no lock exists', async () => {
+      expect((await isLockOwnedByActiveRelease('proj'))).toBe(false);
     });
 
     it('returns true when locked by an active (unfinished) release job', async () => {
@@ -376,7 +376,7 @@ describe('pipeline-lock', () => {
         `INSERT INTO jobs (id, project, kind, pid, started_at) VALUES ('release-1', 'proj', 'release', 0, ${Date.now() / 1000})`
       );
       await acquireLock('proj', 'release-1');
-      expect(isLockOwnedByActiveRelease('proj')).toBe(true);
+      expect((await isLockOwnedByActiveRelease('proj'))).toBe(true);
     });
 
     it('returns false when locked by a finished release job', async () => {
@@ -384,7 +384,7 @@ describe('pipeline-lock', () => {
         `INSERT INTO jobs (id, project, kind, pid, started_at, finished_at) VALUES ('release-1', 'proj', 'release', 0, ${Date.now() / 1000 - 60}, ${Date.now() / 1000})`
       );
       await acquireLock('proj', 'release-1');
-      expect(isLockOwnedByActiveRelease('proj')).toBe(false);
+      expect((await isLockOwnedByActiveRelease('proj'))).toBe(false);
     });
 
     it('returns false when locked by an active non-release job (test kind)', async () => {
@@ -392,7 +392,7 @@ describe('pipeline-lock', () => {
         `INSERT INTO jobs (id, project, kind, pid, started_at) VALUES ('test-1', 'proj', 'test', 0, ${Date.now() / 1000})`
       );
       await acquireLock('proj', 'test-1');
-      expect(isLockOwnedByActiveRelease('proj')).toBe(false);
+      expect((await isLockOwnedByActiveRelease('proj'))).toBe(false);
     });
 
     it('returns false when locked by an active non-release job (review kind)', async () => {
@@ -400,19 +400,19 @@ describe('pipeline-lock', () => {
         `INSERT INTO jobs (id, project, kind, pid, started_at) VALUES ('review-1', 'proj', 'review', 0, ${Date.now() / 1000})`
       );
       await acquireLock('proj', 'review-1');
-      expect(isLockOwnedByActiveRelease('proj')).toBe(false);
+      expect((await isLockOwnedByActiveRelease('proj'))).toBe(false);
     });
 
     it('returns false when lock references a job not in the db', async () => {
       await acquireLock('proj', 'unknown-job-id');
-      expect(isLockOwnedByActiveRelease('proj')).toBe(false);
+      expect((await isLockOwnedByActiveRelease('proj'))).toBe(false);
     });
   });
 
   describe('reassignLock', () => {
-    it('writes a new lock when none exists', () => {
+    it('writes a new lock when none exists', async () => {
       reassignLock('proj', 'new-job');
-      const lock = getLock('proj');
+      const lock = await getLock('proj');
       expect(lock).not.toBeNull();
       expect(lock!.lockedByJobId).toBe('new-job');
       expect(lock!.project).toBe('proj');
@@ -422,15 +422,15 @@ describe('pipeline-lock', () => {
       await acquireLock('proj', 'placeholder-id');
       testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at, finished_at) VALUES ('placeholder-id', 'proj', 'release', ${Date.now() / 1000}, NULL)`);
       reassignLock('proj', 'real-job-id');
-      const lock = getLock('proj');
+      const lock = await getLock('proj');
       expect(lock!.lockedByJobId).toBe('real-job-id');
     });
 
-    it('updates acquiredAt to current time', () => {
+    it('updates acquiredAt to current time', async () => {
       const before = Date.now() / 1000;
       reassignLock('proj', 'job-1');
       const after = Date.now() / 1000;
-      const lock = getLock('proj');
+      const lock = await getLock('proj');
       expect(lock!.acquiredAt).toBeGreaterThanOrEqual(before);
       expect(lock!.acquiredAt).toBeLessThanOrEqual(after);
     });
@@ -439,8 +439,8 @@ describe('pipeline-lock', () => {
       await acquireLock('proj-a', 'job-a');
       testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at) VALUES ('job-a', 'proj-a', 'release', ${Date.now() / 1000})`);
       reassignLock('proj-b', 'job-b');
-      expect(getLock('proj-a')!.lockedByJobId).toBe('job-a');
-      expect(getLock('proj-b')!.lockedByJobId).toBe('job-b');
+      expect((await getLock('proj-a'))!.lockedByJobId).toBe('job-a');
+      expect((await getLock('proj-b'))!.lockedByJobId).toBe('job-b');
     });
 
     it('can overwrite a placeholder id (the start-release early-lock pattern)', async () => {
@@ -449,7 +449,7 @@ describe('pipeline-lock', () => {
       // Simulate job row created after placeholder lock
       testDb.sqlite.exec(`INSERT INTO jobs (id, project, kind, started_at) VALUES ('real-release-id', 'proj', 'release', ${Date.now() / 1000})`);
       reassignLock('proj', 'real-release-id');
-      const lock = getLock('proj');
+      const lock = await getLock('proj');
       expect(lock!.lockedByJobId).toBe('real-release-id');
     });
   });

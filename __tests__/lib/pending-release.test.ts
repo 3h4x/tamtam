@@ -40,37 +40,44 @@ describe('pending-release queue', () => {
 
   afterEach(() => { vi.resetModules(); });
 
-  it('starts unset', () => {
-    expect(getPendingRelease('proj')).toBe(false);
+  it('starts unset', async () => {
+    expect(await getPendingRelease('proj')).toBe(false);
   });
 
-  it('set / get / clear roundtrip', () => {
+  it('set / get / clear roundtrip', async () => {
     setPendingRelease('proj');
-    expect(getPendingRelease('proj')).toBe(true);
+    // allow the fire-and-forget insert to settle
+    await new Promise(r => setTimeout(r, 20));
+    expect(await getPendingRelease('proj')).toBe(true);
     clearPendingRelease('proj');
-    expect(getPendingRelease('proj')).toBe(false);
+    await new Promise(r => setTimeout(r, 20));
+    expect(await getPendingRelease('proj')).toBe(false);
   });
 
-  it('idempotent: setting twice yields a single flag', () => {
+  it('idempotent: setting twice yields a single flag', async () => {
     setPendingRelease('proj');
     setPendingRelease('proj');
-    expect(listPendingReleaseProjects()).toEqual(['proj']);
+    await new Promise(r => setTimeout(r, 20));
+    expect(await listPendingReleaseProjects()).toEqual(['proj']);
   });
 
-  it('keeps multiple projects independent', () => {
+  it('keeps multiple projects independent', async () => {
     setPendingRelease('proj-a');
     setPendingRelease('proj-b');
-    expect(listPendingReleaseProjects().sort()).toEqual(['proj-a', 'proj-b']);
+    await new Promise(r => setTimeout(r, 20));
+    expect((await listPendingReleaseProjects()).sort()).toEqual(['proj-a', 'proj-b']);
     clearPendingRelease('proj-a');
-    expect(listPendingReleaseProjects()).toEqual(['proj-b']);
+    await new Promise(r => setTimeout(r, 20));
+    expect(await listPendingReleaseProjects()).toEqual(['proj-b']);
   });
 
   it('drain calls startRelease and clears the flag', async () => {
     setPendingRelease('proj');
+    await new Promise(r => setTimeout(r, 20));
     await drainPendingRelease('proj');
     expect(startReleaseMock).toHaveBeenCalledOnce();
     expect(startReleaseMock).toHaveBeenCalledWith('proj');
-    expect(getPendingRelease('proj')).toBe(false);
+    expect(await getPendingRelease('proj')).toBe(false);
   });
 
   it('drain is a no-op when no flag is set', async () => {
@@ -81,8 +88,9 @@ describe('pending-release queue', () => {
   it('drain swallows non-OK release results without surfacing them', async () => {
     startReleaseMock.mockResolvedValueOnce({ ok: false, status: 400, detail: 'Nothing to release' });
     setPendingRelease('proj');
+    await new Promise(r => setTimeout(r, 20));
     await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
-    expect(getPendingRelease('proj')).toBe(false);
+    expect(await getPendingRelease('proj')).toBe(false);
   });
 
   it('keeps the queue when drain hits a temporary global-pause block', async () => {
@@ -92,8 +100,9 @@ describe('pending-release queue', () => {
       detail: 'Jobs are paused globally. Turn the switch back on in Settings to start a release.',
     });
     setPendingRelease('proj');
+    await new Promise(r => setTimeout(r, 20));
     await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
-    expect(getPendingRelease('proj')).toBe(true);
+    expect(await getPendingRelease('proj')).toBe(true);
   });
 
   it('keeps the queue when drain hits a temporary project-pause block', async () => {
@@ -103,8 +112,9 @@ describe('pending-release queue', () => {
       detail: 'project paused',
     });
     setPendingRelease('proj');
+    await new Promise(r => setTimeout(r, 20));
     await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
-    expect(getPendingRelease('proj')).toBe(true);
+    expect(await getPendingRelease('proj')).toBe(true);
   });
 
   it('keeps the queue when drain returns a retryable startup failure', async () => {
@@ -115,15 +125,17 @@ describe('pending-release queue', () => {
       retryable: true,
     });
     setPendingRelease('proj');
+    await new Promise(r => setTimeout(r, 20));
     await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
-    expect(getPendingRelease('proj')).toBe(true);
+    expect(await getPendingRelease('proj')).toBe(true);
   });
 
   it('keeps the queue when drain throws before release start is confirmed', async () => {
     startReleaseMock.mockRejectedValueOnce(new Error('pm2 start failed'));
     setPendingRelease('proj');
+    await new Promise(r => setTimeout(r, 20));
     await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
-    expect(getPendingRelease('proj')).toBe(true);
+    expect(await getPendingRelease('proj')).toBe(true);
   });
 
   describe('shouldKeepPendingRelease', () => {

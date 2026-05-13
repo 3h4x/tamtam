@@ -61,7 +61,7 @@ function rowToDict(row: typeof schema.recommendations.$inferSelect): Recommendat
   };
 }
 
-export function upsertRecommendation(input: RecommendationInput): RecommendationRow | null {
+export async function upsertRecommendation(input: RecommendationInput): Promise<RecommendationRow | null> {
   const now = Date.now() / 1000;
   const idBase = [
     input.project,
@@ -70,7 +70,7 @@ export function upsertRecommendation(input: RecommendationInput): Recommendation
   ].join(':');
   const id = idBase.replace(/[^a-zA-Z0-9:_-]+/g, '-');
   try {
-    db.insert(schema.recommendations)
+    await db.insert(schema.recommendations)
       .values({
         id,
         project: input.project,
@@ -98,30 +98,29 @@ export function upsertRecommendation(input: RecommendationInput): Recommendation
           updatedAt: now,
         },
       })
-      .run();
-    const row = db.select().from(schema.recommendations).where(eq(schema.recommendations.id, id)).get();
-    return row ? rowToDict(row) : null;
+      .execute();
+    const rows = await db.select().from(schema.recommendations).where(eq(schema.recommendations.id, id)).limit(1);
+    return rows[0] ? rowToDict(rows[0]) : null;
   } catch (e) {
     console.error('[recommendations] failed to upsert recommendation:', e);
     return null;
   }
 }
 
-export function listRecommendations(project: string): RecommendationRow[] {
-  return db
+export async function listRecommendations(project: string): Promise<RecommendationRow[]> {
+  const rows = await db
     .select()
     .from(schema.recommendations)
     .where(eq(schema.recommendations.project, project))
-    .orderBy(desc(schema.recommendations.updatedAt))
-    .all()
-    .map(rowToDict);
+    .orderBy(desc(schema.recommendations.updatedAt));
+  return rows.map(rowToDict);
 }
 
-export function getRecommendation(project: string, id: string): RecommendationRow | null {
-  const row = db.select().from(schema.recommendations)
+export async function getRecommendation(project: string, id: string): Promise<RecommendationRow | null> {
+  const rows = await db.select().from(schema.recommendations)
     .where(and(eq(schema.recommendations.project, project), eq(schema.recommendations.id, id)))
-    .get();
-  return row ? rowToDict(row) : null;
+    .limit(1);
+  return rows[0] ? rowToDict(rows[0]) : null;
 }
 
 /**
@@ -129,12 +128,11 @@ export function getRecommendation(project: string, id: string): RecommendationRo
  * header chip + the cross-project recommendations page. Returns a sorted
  * `byProject` map (descending count) so the heaviest projects surface first.
  */
-export function summarizeOpenRecommendations(): { openCount: number; byProject: Record<string, number> } {
-  const rows = db
+export async function summarizeOpenRecommendations(): Promise<{ openCount: number; byProject: Record<string, number> }> {
+  const rows = await db
     .select()
     .from(schema.recommendations)
-    .where(eq(schema.recommendations.status, 'open'))
-    .all();
+    .where(eq(schema.recommendations.status, 'open'));
   const byProject: Record<string, number> = {};
   for (const row of rows) {
     byProject[row.project] = (byProject[row.project] ?? 0) + 1;
@@ -147,36 +145,32 @@ export function summarizeOpenRecommendations(): { openCount: number; byProject: 
  * the global `/recommendations` page so operators can triage from one
  * location instead of project-hopping.
  */
-export function listAllOpenRecommendations(): RecommendationRow[] {
-  return db
+export async function listAllOpenRecommendations(): Promise<RecommendationRow[]> {
+  const rows = await db
     .select()
     .from(schema.recommendations)
     .where(eq(schema.recommendations.status, 'open'))
-    .orderBy(desc(schema.recommendations.updatedAt))
-    .all()
-    .map(rowToDict);
+    .orderBy(desc(schema.recommendations.updatedAt));
+  return rows.map(rowToDict);
 }
 
-export function updateRecommendationStatus(project: string, id: string, status: RecommendationStatus): RecommendationRow | null {
+export async function updateRecommendationStatus(project: string, id: string, status: RecommendationStatus): Promise<RecommendationRow | null> {
   const now = Date.now() / 1000;
-  db.update(schema.recommendations)
+  await db.update(schema.recommendations)
     .set({ status, updatedAt: now })
     .where(and(eq(schema.recommendations.project, project), eq(schema.recommendations.id, id)))
-    .run();
-  const row = db.select().from(schema.recommendations)
-    .where(and(eq(schema.recommendations.project, project), eq(schema.recommendations.id, id)))
-    .get();
-  return row ? rowToDict(row) : null;
+    .execute();
+  return getRecommendation(project, id);
 }
 
-export function updateRecommendationStatusIfCurrent(
+export async function updateRecommendationStatusIfCurrent(
   project: string,
   id: string,
   currentStatus: RecommendationStatus,
   nextStatus: RecommendationStatus,
-): RecommendationRow | null {
+): Promise<RecommendationRow | null> {
   const now = Date.now() / 1000;
-  const result = db.update(schema.recommendations)
+  const result = await db.update(schema.recommendations)
     .set({ status: nextStatus, updatedAt: now })
     .where(
       and(
@@ -185,7 +179,7 @@ export function updateRecommendationStatusIfCurrent(
         eq(schema.recommendations.status, currentStatus),
       ),
     )
-    .run();
-  if (!result.changes) return null;
+    .execute();
+  if (!result.rowCount) return null;
   return getRecommendation(project, id);
 }

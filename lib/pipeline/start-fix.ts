@@ -40,7 +40,7 @@ export async function startFixFromJob(sourceJobId: string): Promise<StartFixResu
 
   let fixPromptAddendum: string | null = null;
   try {
-    fixPromptAddendum = getProjectPipelinePrompts(projectName).fixPromptAddendum;
+    fixPromptAddendum = (await getProjectPipelinePrompts(projectName)).fixPromptAddendum;
   } catch { /* test env without DB */ }
   const fixAddendum = fixPromptAddendum?.trim()
     ? `\n\n## Project-specific fix guidance\n${fixPromptAddendum.trim()}`

@@ -20,7 +20,7 @@ export type StartReviewResult =
   | { ok: true; jobId: string; pid: number; logPath: string }
   | { ok: false; status: number; detail: string; blockingJobId?: string };
 
-function loadReviewPrompt(projectName: string): string {
+async function loadReviewPrompt(projectName: string): Promise<string> {
   let content = '';
   if (existsSync(CODE_REVIEWER_SKILL)) {
     content = readFileSync(CODE_REVIEWER_SKILL, 'utf-8');
@@ -32,7 +32,7 @@ function loadReviewPrompt(projectName: string): string {
   const { review_verdict_rules } = getSettings();
   let reviewPromptAddendum: string | null = null;
   try {
-    reviewPromptAddendum = getProjectPipelinePrompts(projectName).reviewPromptAddendum;
+    reviewPromptAddendum = (await getProjectPipelinePrompts(projectName)).reviewPromptAddendum;
   } catch { /* test env without DB */ }
   const addendum = reviewPromptAddendum?.trim()
     ? '\n\n## Project-specific review guidance\n' + reviewPromptAddendum.trim()
@@ -266,7 +266,7 @@ export async function startProjectReview(
 ): Promise<StartReviewResult> {
   // Per-project off-switch — used when the agent prompt already performs review.
   try {
-    if (getProjectTestConfig(projectName)?.reviewDisabled) {
+    if ((await getProjectTestConfig(projectName))?.reviewDisabled) {
       return { ok: false, status: 400, detail: `Review is disabled for ${projectName}` };
     }
   } catch { /* ignore — test env without DB */ }
@@ -290,9 +290,9 @@ export async function startProjectReview(
 
   // Check for existing pipeline lock — but allow running under a parent
   // release job's lock (this step was kicked off by the release pipeline).
-  const underRelease = isLockOwnedByActiveRelease(projectName);
+  const underRelease = await isLockOwnedByActiveRelease(projectName);
   if (!underRelease) {
-    const lock = getLock(projectName);
+    const lock = await getLock(projectName);
     if (lock) {
       return { ok: false, status: 409, detail: `Pipeline is running for ${projectName}`, blockingJobId: lock.lockedByJobId };
     }
@@ -314,7 +314,7 @@ export async function startProjectReview(
   }
 
   const prompt = withBasePrompt(
-    loadReviewPrompt(projectName)
+    (await loadReviewPrompt(projectName))
       .replace('{project}', projectName)
       .replace('{path}', projPath)
       .replace('{review_scope}', scope.prompt)

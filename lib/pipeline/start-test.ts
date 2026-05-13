@@ -11,13 +11,13 @@ import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-loc
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 
-export function detectTestCommand(projPath: string, projectName?: string): string | null {
+export async function detectTestCommand(projPath: string, projectName?: string): Promise<string | null> {
   // Explicit off-switch — overrides user/auto-detected command. Wrapped in
   // try/catch so callers that mock only `getImproveConfig` don't crash on the
   // DB-backed `getProjectTestConfig` lookup.
   if (projectName) {
     try {
-      if (getProjectTestConfig(projectName)?.testsDisabled) return null;
+      if ((await getProjectTestConfig(projectName))?.testsDisabled) return null;
     } catch { /* ignore — test env without DB */ }
   }
   if (projectName) {
@@ -73,9 +73,9 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
 
   // Check for existing pipeline lock — but allow running under a parent
   // release job's lock (this step was kicked off by the release pipeline).
-  const underRelease = isLockOwnedByActiveRelease(projectName);
+  const underRelease = await isLockOwnedByActiveRelease(projectName);
   if (!underRelease) {
-    const lock = getLock(projectName);
+    const lock = await getLock(projectName);
     if (lock) {
       return { ok: false, status: 409, detail: `Pipeline is running for ${projectName}`, blockingJobId: lock.lockedByJobId };
     }
@@ -107,7 +107,7 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
   const { logDir } = getImproveConfig();
   const redactScriptPath = resolve(process.cwd(), 'scripts', 'redact-log-stream.js');
 
-  const testCmd = detectTestCommand(projPath, projectName);
+  const testCmd = await detectTestCommand(projPath, projectName);
   if (!testCmd) {
     return { ok: false, status: 400, detail: `Could not detect test command for ${projectName}` };
   }

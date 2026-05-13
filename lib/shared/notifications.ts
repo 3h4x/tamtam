@@ -125,19 +125,20 @@ type ThrottleSendState =
       kind: 'update';
     };
 
-function shouldSend(
+async function shouldSend(
   payload: NotificationPayload,
-): { send: boolean; payload: NotificationPayload; state: ThrottleSendState | null } {
+): Promise<{ send: boolean; payload: NotificationPayload; state: ThrottleSendState | null }> {
   const settings = getSettings();
   const windowMs = throttleWindowMs(payload, settings);
   if (windowMs <= 0) return { send: true, payload, state: null };
 
   const now = payload.timestamp || Date.now();
   const key = throttleKey(payload);
-  const existing = db.select()
+  const rows = await db.select()
     .from(schema.notificationThrottle)
     .where(eq(schema.notificationThrottle.key, key))
-    .get();
+    .limit(1);
+  const existing = rows[0] ?? null;
 
   if (!existing) {
     return {
@@ -148,10 +149,11 @@ function shouldSend(
   }
 
   if (now - existing.lastSentAt < windowMs) {
-    db.update(schema.notificationThrottle)
+    void db.update(schema.notificationThrottle)
       .set({ suppressedCount: existing.suppressedCount + 1 })
       .where(eq(schema.notificationThrottle.key, key))
-      .run();
+      .execute()
+      .catch((e) => console.error('[notifications] throttle suppress update failed:', e));
     return { send: false, payload, state: null };
   }
 
@@ -165,15 +167,17 @@ function shouldSend(
 function markThrottleDelivered(state: ThrottleSendState | null) {
   if (!state) return;
   if (state.kind === 'insert') {
-    db.insert(schema.notificationThrottle)
+    void db.insert(schema.notificationThrottle)
       .values({ key: state.key, lastSentAt: state.now, suppressedCount: 0 })
-      .run();
+      .execute()
+      .catch((e) => console.error('[notifications] throttle insert failed:', e));
     return;
   }
-  db.update(schema.notificationThrottle)
+  void db.update(schema.notificationThrottle)
     .set({ lastSentAt: state.now, suppressedCount: 0 })
     .where(eq(schema.notificationThrottle.key, state.key))
-    .run();
+    .execute()
+    .catch((e) => console.error('[notifications] throttle update failed:', e));
 }
 
 function enqueueNotification(key: string, task: () => Promise<void>) {
@@ -306,7 +310,7 @@ export async function notify(payload: NotificationPayload): Promise<void> {
   // Never block pipeline progress — work is serialized per throttle key in the
   // background so the persisted throttle state still tracks delivered alerts.
   enqueueNotification(queueKey, async () => {
-    const throttle = shouldSend(queuedPayload);
+    const throttle = await shouldSend(queuedPayload);
     if (!throttle.send) return;
     const resolvedPayload = throttle.payload;
     const webhookType = detectWebhookType(config.webhook_url);

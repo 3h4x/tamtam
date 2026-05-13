@@ -174,8 +174,8 @@ async function composePromptStep(
     const { appendRedactedFileSync } = await import('@/lib/jobs/redacted-log-writer');
     const { getJob, markDone } = await import('@/lib/jobs/job-storage');
 
-    if (isLockOwnedByActiveRelease(project)) {
-      const lock = getLock(project);
+    if (await isLockOwnedByActiveRelease(project)) {
+      const lock = await getLock(project);
       try {
         enqueueQueuedAgentRun(project, {
           project,
@@ -218,7 +218,7 @@ async function composePromptStep(
     }
   }
 
-  const composed = composeAgentSkills(projPath, skillIds, docPaths);
+  const composed = await composeAgentSkills(projPath, skillIds, docPaths);
 
   const [headR, statusR] = await Promise.all([
     exec('git', ['-C', projPath, 'rev-parse', 'HEAD'], { timeout: 5000 }),

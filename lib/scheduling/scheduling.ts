@@ -134,11 +134,7 @@ export async function writePriorityYaml(
     .limit(1);
   const existing = rows[0] ?? null;
   if (!existing) return false;
-  void db.update(schema.projects)
-    .set({ priority })
-    .where(eq(schema.projects.name, projName))
-    .execute()
-    .catch(e => console.error('[scheduling]', e));
+  void db.update(schema.projects).set({ priority }).where(eq(schema.projects.name, projName)).execute().catch(e => console.error('[scheduling]', e));
   return true;
 }
 
@@ -157,53 +153,54 @@ export async function writeProjectFieldYaml(
     .limit(1);
   const existing = rows[0] ?? null;
   if (!existing) return false;
-  const fire = (update: ReturnType<typeof db.update>) =>
-    void update.execute().catch(e => console.error('[scheduling]', e));
+  const w = eq(schema.projects.name, projName);
+  const run = (upd: Promise<unknown>) => void upd.catch(e => console.error('[scheduling]', e));
   if (fieldName === 'github') {
-    fire(db.update(schema.projects).set({ github: value }).where(eq(schema.projects.name, projName)));
+    run(db.update(schema.projects).set({ github: value }).where(w).execute());
   } else if (fieldName === 'priority') {
-    fire(db.update(schema.projects).set({ priority: value }).where(eq(schema.projects.name, projName)));
+    run(db.update(schema.projects).set({ priority: value }).where(w).execute());
   } else if (fieldName === 'test_command') {
-    fire(db.update(schema.projects).set({ testCommand: value }).where(eq(schema.projects.name, projName)));
+    run(db.update(schema.projects).set({ testCommand: value }).where(w).execute());
   } else if (fieldName === 'test_cron_schedule') {
-    fire(db.update(schema.projects).set({ testCronSchedule: value }).where(eq(schema.projects.name, projName)));
+    run(db.update(schema.projects).set({ testCronSchedule: value }).where(w).execute());
   } else if (fieldName === 'test_cron_enabled') {
-    fire(db.update(schema.projects).set({ testCronEnabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)));
+    run(db.update(schema.projects).set({ testCronEnabled: value === '1' || value === 'true' }).where(w).execute());
   } else if (fieldName === 'auto_commit_enabled') {
-    fire(db.update(schema.projects).set({ autoCommitEnabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)));
+    run(db.update(schema.projects).set({ autoCommitEnabled: value === '1' || value === 'true' }).where(w).execute());
   } else if (fieldName === 'auto_push_enabled') {
-    fire(db.update(schema.projects).set({ autoPushEnabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)));
+    run(db.update(schema.projects).set({ autoPushEnabled: value === '1' || value === 'true' }).where(w).execute());
   } else if (fieldName === 'auto_pr_merge_enabled') {
-    fire(db.update(schema.projects).set({ autoPrMergeEnabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)));
+    run(db.update(schema.projects).set({ autoPrMergeEnabled: value === '1' || value === 'true' }).where(w).execute());
   } else if (fieldName === 'release_after_run') {
-    fire(db.update(schema.projects).set({ releaseAfterRun: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)));
+    run(db.update(schema.projects).set({ releaseAfterRun: value === '1' || value === 'true' }).where(w).execute());
   } else if (fieldName === 'issue_auto_branch') {
-    fire(db.update(schema.projects).set({ issueAutoBranch: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)));
+    run(db.update(schema.projects).set({ issueAutoBranch: value === '1' || value === 'true' }).where(w).execute());
   } else if (fieldName === 'tests_disabled') {
-    fire(db.update(schema.projects).set({ testsDisabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)));
+    run(db.update(schema.projects).set({ testsDisabled: value === '1' || value === 'true' }).where(w).execute());
   } else if (fieldName === 'review_disabled') {
-    fire(db.update(schema.projects).set({ reviewDisabled: value === '1' || value === 'true' }).where(eq(schema.projects.name, projName)));
+    run(db.update(schema.projects).set({ reviewDisabled: value === '1' || value === 'true' }).where(w).execute());
   } else if (fieldName === 'review_prompt_addendum') {
-    fire(db.update(schema.projects).set({ reviewPromptAddendum: value }).where(eq(schema.projects.name, projName)));
+    run(db.update(schema.projects).set({ reviewPromptAddendum: value }).where(w).execute());
   } else if (fieldName === 'fix_prompt_addendum') {
-    fire(db.update(schema.projects).set({ fixPromptAddendum: value }).where(eq(schema.projects.name, projName)));
+    run(db.update(schema.projects).set({ fixPromptAddendum: value }).where(w).execute());
   } else if (fieldName === 'website') {
-    fire(db.update(schema.projects).set({ website: value }).where(eq(schema.projects.name, projName)));
+    run(db.update(schema.projects).set({ website: value }).where(w).execute());
   } else if (fieldName === 'qa_url') {
-    fire(db.update(schema.projects).set({ qaUrl: value }).where(eq(schema.projects.name, projName)));
+    run(db.update(schema.projects).set({ qaUrl: value }).where(w).execute());
   }
   return true;
 }
 
-export function getProjectPipelinePrompts(projName: string): {
+export async function getProjectPipelinePrompts(projName: string): Promise<{
   reviewPromptAddendum: string | null;
   fixPromptAddendum: string | null;
-} {
-  const row = db
+}> {
+  const rows = await db
     .select()
     .from(schema.projects)
     .where(eq(schema.projects.name, projName))
-    .get();
+    .limit(1);
+  const row = rows[0] ?? null;
   if (!row) return { reviewPromptAddendum: null, fixPromptAddendum: null };
   return {
     reviewPromptAddendum: row.reviewPromptAddendum ?? null,
@@ -212,24 +209,26 @@ export function getProjectPipelinePrompts(projName: string): {
 }
 
 export function setProjectPushResult(projName: string, error: string | null): void {
-  db
+  void db
     .update(schema.projects)
     .set({ lastPushError: error, lastPushAt: Date.now() / 1000 })
     .where(eq(schema.projects.name, projName))
-    .run();
+    .execute()
+    .catch(e => console.error('[scheduling]', e));
 }
 
-export function getProjectPushResult(projName: string): { lastPushError: string | null; lastPushAt: number | null } | null {
-  const row = db
+export async function getProjectPushResult(projName: string): Promise<{ lastPushError: string | null; lastPushAt: number | null } | null> {
+  const rows = await db
     .select()
     .from(schema.projects)
     .where(eq(schema.projects.name, projName))
-    .get();
+    .limit(1);
+  const row = rows[0] ?? null;
   if (!row) return null;
   return { lastPushError: row.lastPushError ?? null, lastPushAt: row.lastPushAt ?? null };
 }
 
-export function getProjectTestConfig(projName: string): {
+export async function getProjectTestConfig(projName: string): Promise<{
   testCommand: string | null;
   testCronEnabled: boolean;
   testCronSchedule: string | null;
@@ -240,12 +239,13 @@ export function getProjectTestConfig(projName: string): {
   issueAutoBranch: boolean;
   testsDisabled: boolean;
   reviewDisabled: boolean;
-} | null {
-  const row = db
+} | null> {
+  const rows = await db
     .select()
     .from(schema.projects)
     .where(eq(schema.projects.name, projName))
-    .get();
+    .limit(1);
+  const row = rows[0] ?? null;
   if (!row) return null;
   return {
     testCommand: row.testCommand ?? null,

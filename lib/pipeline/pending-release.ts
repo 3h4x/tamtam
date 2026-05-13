@@ -24,42 +24,38 @@ function keyFor(project: string): string {
 }
 
 export function setPendingRelease(project: string): void {
-  try {
-    db.insert(schema.settings)
-      .values({ key: keyFor(project), value: '1' })
-      .onConflictDoUpdate({ target: schema.settings.key, set: { value: '1' } })
-      .run();
-  } catch (e) {
-    console.error('[pending-release] failed to set flag for', project, e);
-  }
+  void db.insert(schema.settings)
+    .values({ key: keyFor(project), value: '1' })
+    .onConflictDoUpdate({ target: schema.settings.key, set: { value: '1' } })
+    .execute()
+    .catch((e) => {
+      console.error('[pending-release] failed to set flag for', project, e);
+    });
 }
 
-export function getPendingRelease(project: string): boolean {
+export async function getPendingRelease(project: string): Promise<boolean> {
   try {
-    const row = db
+    const rows = await db
       .select()
       .from(schema.settings)
       .where(eq(schema.settings.key, keyFor(project)))
-      .get();
-    return row?.value === '1';
+      .limit(1);
+    return rows[0]?.value === '1';
   } catch {
     return false;
   }
 }
 
 export function clearPendingRelease(project: string): void {
-  try {
-    db.delete(schema.settings).where(eq(schema.settings.key, keyFor(project))).run();
-  } catch { /* non-fatal */ }
+  void db.delete(schema.settings).where(eq(schema.settings.key, keyFor(project))).execute().catch(() => { /* non-fatal */ });
 }
 
-export function listPendingReleaseProjects(): string[] {
+export async function listPendingReleaseProjects(): Promise<string[]> {
   try {
-    const rows = db
+    const rows = await db
       .select()
       .from(schema.settings)
-      .where(like(schema.settings.key, `${PREFIX}%`))
-      .all();
+      .where(like(schema.settings.key, `${PREFIX}%`));
     return rows
       .filter((r) => r.value === '1')
       .map((r) => r.key.slice(PREFIX.length));
@@ -88,7 +84,7 @@ export function shouldKeepPendingRelease(result: { ok: boolean; status?: number;
 // indeterminate start failure (explicit retryable result or thrown error)
 // re-queues the release so the next recovery path can retry it.
 export async function drainPendingRelease(project: string): Promise<void> {
-  if (!getPendingRelease(project)) return;
+  if (!(await getPendingRelease(project))) return;
   clearPendingRelease(project);
   try {
     const { startRelease } = await import('@/lib/pipeline/start-release');

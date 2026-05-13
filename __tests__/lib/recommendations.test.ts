@@ -39,8 +39,8 @@ describe('recommendations storage', () => {
     ({ upsertRecommendation, listRecommendations, updateRecommendationStatus } = await import('@/lib/recommendations/recommendations'));
   });
 
-  it('upserts a recommendation with a stable sanitized id and parsed payload', () => {
-    const row = upsertRecommendation({
+  it('upserts a recommendation with a stable sanitized id and parsed payload', async () => {
+    const row = await upsertRecommendation({
       project: 'owner/repo name',
       sourceKind: 'agent:tests',
       sourceId: 'job-1',
@@ -61,8 +61,8 @@ describe('recommendations storage', () => {
     });
   });
 
-  it('updates an existing recommendation, reopens it, and preserves created_at ordering fields', () => {
-    const first = upsertRecommendation({
+  it('updates an existing recommendation, reopens it, and preserves created_at ordering fields', async () => {
+    const first = await upsertRecommendation({
       project: 'portal',
       sourceKind: 'agent:tests',
       agentId: 'agent-1',
@@ -72,10 +72,10 @@ describe('recommendations storage', () => {
       payload: { recommendedSchedule: '4h' },
     });
 
-    const updated = updateRecommendationStatus('portal', first!.id, 'dismissed');
+    const updated = await updateRecommendationStatus('portal', first!.id, 'dismissed');
     expect(updated?.status).toBe('dismissed');
 
-    const second = upsertRecommendation({
+    const second = await upsertRecommendation({
       project: 'portal',
       sourceKind: 'agent:tests',
       sourceId: 'job-2',
@@ -98,7 +98,7 @@ describe('recommendations storage', () => {
     expect(second!.updated_at).toBeGreaterThanOrEqual(first!.updated_at);
   });
 
-  it('lists newest recommendations first and drops invalid JSON payloads to null', () => {
+  it('lists newest recommendations first and drops invalid JSON payloads to null', async () => {
     testDb.db.insert(schema.recommendations).values([
       {
         id: 'rec-older',
@@ -126,14 +126,14 @@ describe('recommendations storage', () => {
       },
     ]).run();
 
-    const rows = listRecommendations('portal');
+    const rows = await listRecommendations('portal');
 
     expect(rows.map((row) => row.id)).toEqual(['rec-newer', 'rec-older']);
     expect(rows[0].payload).toEqual({ recommendedSchedule: '12h' });
     expect(rows[1].payload).toBeNull();
   });
 
-  it('returns null when updating a missing recommendation', () => {
-    expect(updateRecommendationStatus('portal', 'missing', 'applied')).toBeNull();
+  it('returns null when updating a missing recommendation', async () => {
+    expect(await updateRecommendationStatus('portal', 'missing', 'applied')).toBeNull();
   });
 });

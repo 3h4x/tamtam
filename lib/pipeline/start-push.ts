@@ -29,21 +29,21 @@ export type ReleaseRetryValidation =
   | { ok: true; parentJobId: string | null; releaseLinkedRetry: boolean }
   | { ok: false; status: number; detail: string };
 
-export function validateReleaseLinkedRetry(
+export async function validateReleaseLinkedRetry(
   projectName: string,
   parentJobId?: string | null,
-): ReleaseRetryValidation {
+): Promise<ReleaseRetryValidation> {
   const normalizedParentJobId = parentJobId ?? null;
   if (!normalizedParentJobId) {
     return { ok: true, parentJobId: null, releaseLinkedRetry: false };
   }
 
-  const lock = getLock(projectName);
+  const lock = await getLock(projectName);
   const release = getJob(normalizedParentJobId);
   if (
     !lock
     || lock.lockedByJobId !== normalizedParentJobId
-    || !isLockOwnedByActiveRelease(projectName)
+    || !(await isLockOwnedByActiveRelease(projectName))
     || !release
     || release.project !== projectName
     || release.kind !== 'release'
@@ -95,10 +95,10 @@ export function validateReleaseLinkedRetry(
  *   - latest pipeline step on that release must be a failed commit
  *   - no active pipeline lock (a release in flight blocks the retry — wait)
  */
-export function validateReleaseLinkedCommitRetry(
+export async function validateReleaseLinkedCommitRetry(
   projectName: string,
   parentJobId?: string | null,
-): ReleaseRetryValidation {
+): Promise<ReleaseRetryValidation> {
   const normalizedParentJobId = parentJobId ?? null;
   if (!normalizedParentJobId) {
     return { ok: true, parentJobId: null, releaseLinkedRetry: false };
@@ -108,7 +108,7 @@ export function validateReleaseLinkedCommitRetry(
     return { ok: false, status: 404, detail: `Release ${normalizedParentJobId} not found for ${projectName}` };
   }
   // Reject when a pipeline is running — let it finish before retrying.
-  const lock = getLock(projectName);
+  const lock = await getLock(projectName);
   if (lock && release.finishedAt === null && lock.lockedByJobId === normalizedParentJobId) {
     // Same active release — fall through to the strict validator's behaviour.
     return validateReleaseLinkedRetry(projectName, normalizedParentJobId);
@@ -161,9 +161,9 @@ export async function startProjectPush(
   const parentJobId = options.parentJobId ?? currentParent();
   // Check for existing pipeline lock — but allow running under a parent
   // release job's lock (this step was kicked off by the release pipeline).
-  const underRelease = isLockOwnedByActiveRelease(projectName);
+  const underRelease = await isLockOwnedByActiveRelease(projectName);
   if (!underRelease) {
-    const lock = getLock(projectName);
+    const lock = await getLock(projectName);
     if (lock) {
       setProjectPushResult(projectName, `Pipeline is running for ${projectName}`);
       return { ok: false, status: 409, detail: `Pipeline is running for ${projectName}`, blockingJobId: lock.lockedByJobId };
@@ -248,19 +248,19 @@ export async function startProjectPush(
   }
 }
 
-// Fire-and-forget variant: creates the job synchronously, runs push in the
-// background, and returns the job ID immediately so callers can stream output.
+// Fire-and-forget variant: creates the job, runs push in the
+// background, and returns the job ID so callers can stream output.
 // Standalone/manual launches are push-only. Explicit release-linked retries
 // must preserve the full push semantics so PR creation/context propagation
 // still happen before downstream hooks decide whether to start pr-wait/merge.
-export function launchProjectPush(
+export async function launchProjectPush(
   projectName: string,
   options: { parentJobId?: string | null } = {},
-): { jobId: string } | { error: string; status?: number } {
+): Promise<{ jobId: string } | { error: string; status?: number }> {
   const requestedParentJobId = options.parentJobId ?? currentParent();
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { error: 'project not found' };
-  const retryValidation = validateReleaseLinkedRetry(projectName, requestedParentJobId);
+  const retryValidation = await validateReleaseLinkedRetry(projectName, requestedParentJobId);
   if (!retryValidation.ok) {
     return { error: retryValidation.detail, status: retryValidation.status };
   }
@@ -270,11 +270,11 @@ export function launchProjectPush(
   // If a release pipeline is in flight, the auto-chain will push at the right
   // step. Letting the manual "Push" button race the release lets push run in
   // parallel with test/review/fix and clobbers ordering.
-  const lock = getLock(projectName);
+  const lock = await getLock(projectName);
   const underParentRelease = !!parentJobId
     && !!lock
     && lock.lockedByJobId === parentJobId
-    && isLockOwnedByActiveRelease(projectName);
+    && await isLockOwnedByActiveRelease(projectName);
   if (lock && !underParentRelease) {
     return { error: `Pipeline is running for ${projectName} — wait for it to finish before pushing manually`, status: 409 };
   }

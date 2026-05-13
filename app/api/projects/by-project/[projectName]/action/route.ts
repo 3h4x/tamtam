@@ -23,7 +23,7 @@ export interface CustomAction {
  * first so every teammate sees the same buttons. Fall back to the DB column
  * for projects that haven't migrated their actions to the file yet.
  */
-function getCustomActions(projectName: string): CustomAction[] {
+async function getCustomActions(projectName: string): Promise<CustomAction[]> {
   const projPath = resolveProjectPath(projectName);
   if (projPath) {
     // If the file declares custom_actions (even as an empty array), it is
@@ -31,11 +31,12 @@ function getCustomActions(projectName: string): CustomAction[] {
     const fileCfg = loadFileConfig(projPath);
     if (fileCfg?.custom_actions !== undefined) return fileCfg.custom_actions;
   }
-  const row = db
+  const rows = await db
     .select()
     .from(schema.projects)
     .where(eq(schema.projects.name, projectName))
-    .get();
+    .limit(1);
+  const row = rows[0];
   if (!row?.customActions) return [];
   try {
     return JSON.parse(row.customActions);
@@ -49,7 +50,7 @@ export async function GET(
   { params }: { params: Promise<{ projectName: string }> }
 ) {
   const { projectName } = await params;
-  return NextResponse.json({ actions: getCustomActions(projectName) });
+  return NextResponse.json({ actions: await getCustomActions(projectName) });
 }
 
 export async function PUT(
@@ -70,10 +71,10 @@ export async function PUT(
     }
   }
 
-  db.update(schema.projects)
+  await db.update(schema.projects)
     .set({ customActions: JSON.stringify(actions) })
     .where(eq(schema.projects.name, projectName))
-    .run();
+    .execute();
 
   // Mirror to .tamtam/config.yml so teammates pick up new buttons on pull.
   // DB write is the source of truth for performance/cache; the file is the
@@ -108,7 +109,7 @@ export async function POST(
     return NextResponse.json({ detail: paused.detail }, { status: paused.status });
   }
 
-  const actions = getCustomActions(projectName);
+  const actions = await getCustomActions(projectName);
   const action = actions.find((a) => a.name === actionName);
   if (!action) {
     return NextResponse.json({ detail: `action '${actionName}' not found` }, { status: 404 });

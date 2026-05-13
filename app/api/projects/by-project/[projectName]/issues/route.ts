@@ -71,11 +71,11 @@ export async function GET(
 
   // Check cache
   if (!forceRefresh) {
-    const cached = db
+    const cached = (await db
       .select()
       .from(schema.ghIssuesCache)
       .where(eq(schema.ghIssuesCache.project, projectName))
-      .get();
+      .limit(1))[0] ?? null;
 
     if (cached && Date.now() / 1000 - cached.fetchedAt < CACHE_TTL_S) {
       const cachedIssues = JSON.parse(cached.issues);
@@ -125,13 +125,13 @@ export async function GET(
 
   // Write to cache (only on success)
   if (!ghError) {
-    db.insert(schema.ghIssuesCache)
+    await db.insert(schema.ghIssuesCache)
       .values({ project: projectName, repo, prs: JSON.stringify(prs), issues: JSON.stringify(issues), fetchedAt })
       .onConflictDoUpdate({
         target: schema.ghIssuesCache.project,
         set: { repo, prs: JSON.stringify(prs), issues: JSON.stringify(issues), fetchedAt },
       })
-      .run();
+      .execute();
   }
 
   const filteredIssues = trustedOnly ? filterTrustedIssues(issues, projPath) : issues;
@@ -182,9 +182,9 @@ export async function POST(
       const errMsg = result.stderr.trim() || 'approve failed';
       return NextResponse.json({ detail: errMsg }, { status: 422 });
     }
-    db.delete(schema.ghIssuesCache)
+    await db.delete(schema.ghIssuesCache)
       .where(eq(schema.ghIssuesCache.project, projectName))
-      .run();
+      .execute();
     return NextResponse.json({ status: 'approved', pr: prNumber, repo });
   }
 
@@ -215,9 +215,9 @@ export async function POST(
   }
 
   // Invalidate cache so next GET fetches fresh data
-  db.delete(schema.ghIssuesCache)
+  await db.delete(schema.ghIssuesCache)
     .where(eq(schema.ghIssuesCache.project, projectName))
-    .run();
+    .execute();
 
   // Post-merge cleanup: return the working tree to the default branch and
   // pull so the next task starts clean. Stash any uncommitted work first so

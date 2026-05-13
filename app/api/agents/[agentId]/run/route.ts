@@ -24,15 +24,13 @@ import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { enqueueAgentRun, tryClaimAgentStartSlot, releaseAgentStartSlot, drainNextAgentRun } from '@/lib/agents/pending-agent-run';
 import { getSettings } from '@/lib/shared/config';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
-import { sqlite } from '@/lib/db';
-import { SqliteVecBackend } from '@/lib/agents/retrieval/sqlite-vec-backend';
+import { PgvectorBackend } from '@/lib/agents/retrieval/pgvector-backend';
 import { retrieveAgentContextDetailed } from '@/lib/agents/retrieval/retriever';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { redactSecrets } from '@/lib/shared/log-redaction';
-import { isSqliteVecAvailable } from '@/lib/db/sqlite-vec';
 import { runAgentIntakeWorkflow } from '@/lib/agents/intake-workflow';
 
 /**
@@ -64,8 +62,8 @@ export async function POST(
     if (!fa) return NextResponse.json({ detail: 'agent not found' }, { status: 404 });
     agent = { ...fa, skillIds: JSON.stringify(fa.skillIds), docPaths: JSON.stringify(fa.docPaths) };
   } else {
-    const row = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
-    if (row) agent = row;
+    const rows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).limit(1);
+    if (rows[0]) agent = rows[0];
   }
 
   if (!agent) return NextResponse.json({ detail: 'agent not found' }, { status: 404 });
@@ -104,8 +102,8 @@ export async function POST(
   // Block agent runs while a release pipeline holds the project lock.
   // Queue in DB (not in-memory) so the pending run survives a server restart.
   // The lock is released when the pipeline finishes, which drains this queue.
-  if (isLockOwnedByActiveRelease(agent.project)) {
-    const lock = getLock(agent.project);
+  if (await isLockOwnedByActiveRelease(agent.project)) {
+    const lock = await getLock(agent.project);
     try {
       enqueueQueuedAgentRun(agent.project, {
         project: agent.project,
@@ -227,10 +225,10 @@ export async function POST(
     // A previously-queued release must get first chance to reacquire the lock
     // before any newer agent work starts on the same project. Check only once
     // we know no other agent on the project is running or starting.
-    if (!readOnly && getPendingRelease(agent.project)) {
+    if (!readOnly && await getPendingRelease(agent.project)) {
       await drainPendingRelease(agent.project);
-      const lock = getLock(agent.project);
-      if (isLockOwnedByActiveRelease(agent.project) || getPendingRelease(agent.project)) {
+      const lock = await getLock(agent.project);
+      if (await isLockOwnedByActiveRelease(agent.project) || await getPendingRelease(agent.project)) {
         try {
           enqueueQueuedAgentRun(agent.project, {
             project: agent.project,
@@ -499,8 +497,8 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   // The prerequisite can run for minutes. Re-check project-wide blockers before
   // spawning the agent so a queued/manual replay never gets acknowledged as
   // "started" until the final start disposition is known.
-  if (isLockOwnedByActiveRelease(agent.project)) {
-    const lock = getLock(agent.project);
+  if (await isLockOwnedByActiveRelease(agent.project)) {
+    const lock = await getLock(agent.project);
     try {
       enqueueQueuedAgentRun(agent.project, {
         project: agent.project,
@@ -624,9 +622,9 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     : (systemPrompt || taskPrompt);
 
   let retrievedContext: string | null = null;
-  if (settings.retrieval_enabled && taskPrompt && isSqliteVecAvailable()) {
+  if (settings.retrieval_enabled && taskPrompt) {
     const retrieval = await retrieveAgentContextDetailed({
-      backend: new SqliteVecBackend(sqlite),
+      backend: new PgvectorBackend(),
       project: agent.project,
       taskPrompt,
       limit: settings.retrieval_context_limit,

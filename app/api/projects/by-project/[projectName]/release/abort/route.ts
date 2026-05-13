@@ -16,7 +16,7 @@ export async function POST(
 ) {
   const { projectName } = await params;
 
-  const lock = getLock(projectName);
+  const lock = await getLock(projectName);
   // Resolve the release we should abort. Normal case: lock-held release.
   // Orphan case: an unfinished `release` row with no lock (orchestrator died
   // between createReleaseJob and the first-step kickoff). Reap it too.
@@ -28,7 +28,7 @@ export async function POST(
     if (orphan) {
       releaseJob = orphan;
     } else {
-      if (lock) releaseLock(projectName, lock.lockedByJobId);
+      if (lock) await releaseLock(projectName, lock.lockedByJobId);
       return NextResponse.json({ status: 'no_pipeline', detail: lock ? 'release already finished' : 'no active pipeline lock' }, { status: 200 });
     }
   }

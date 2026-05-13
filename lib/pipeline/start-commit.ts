@@ -424,9 +424,9 @@ export async function startProjectCommit(
   const parentJobId = options.parentJobId ?? currentParent();
   // Check for existing pipeline lock — but allow running under a parent
   // release job's lock (this step was kicked off by the release pipeline).
-  const underRelease = isLockOwnedByActiveRelease(projectName);
+  const underRelease = await isLockOwnedByActiveRelease(projectName);
   if (!underRelease) {
-    const lock = getLock(projectName);
+    const lock = await getLock(projectName);
     if (lock) {
       setProjectPushResult(projectName, `Pipeline is running for ${projectName}`);
       return { ok: false, status: 409, detail: `Pipeline is running for ${projectName}`, blockingJobId: lock.lockedByJobId };

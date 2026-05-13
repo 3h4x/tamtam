@@ -30,9 +30,9 @@ export async function POST(
   // that allows the targeted release to be finished — the strict push-retry
   // path requires an active release lock, which doesn't exist after the prior
   // commit failed and the pipeline ended.
-  const retryValidation = commit
+  const retryValidation = await (commit
     ? validateReleaseLinkedCommitRetry(projectName, releaseId)
-    : validateReleaseLinkedRetry(projectName, releaseId);
+    : validateReleaseLinkedRetry(projectName, releaseId));
   if (!retryValidation.ok) {
     return NextResponse.json({ detail: retryValidation.detail }, { status: retryValidation.status });
   }
@@ -46,7 +46,7 @@ export async function POST(
     return NextResponse.json({ status: 'started', job_id: r.jobId });
   }
 
-  const result = launchProjectPush(projectName, { parentJobId });
+  const result = await launchProjectPush(projectName, { parentJobId });
   if ('error' in result) {
     return NextResponse.json({ detail: result.error }, { status: result.status ?? 404 });
   }

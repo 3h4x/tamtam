@@ -198,7 +198,7 @@ async function updateAgentSchedule(expectedProject: string, agentId: string, sch
 }
 
 export async function applyRecommendation(project: string, recommendationId: string): Promise<AppliedRecommendationResult> {
-  const recommendation = getRecommendation(project, recommendationId)
+  const recommendation = await getRecommendation(project, recommendationId)
   if (!recommendation) {
     throw new ApplyRecommendationError(404, 'Recommendation not found')
   }
@@ -209,10 +209,10 @@ export async function applyRecommendation(project: string, recommendationId: str
   const { agentId, recommendedSchedule } = requireBackoffTarget(recommendation)
   const { agent, rollback } = await updateAgentSchedule(project, agentId, recommendedSchedule)
 
-  const applied = updateRecommendationStatusIfCurrent(project, recommendationId, 'open', 'applied')
+  const applied = await updateRecommendationStatusIfCurrent(project, recommendationId, 'open', 'applied')
   if (!applied) {
     await rollback()
-    const latest = getRecommendation(project, recommendationId)
+    const latest = await getRecommendation(project, recommendationId)
     if (!latest) {
       throw new ApplyRecommendationError(404, 'Recommendation not found after apply')
     }

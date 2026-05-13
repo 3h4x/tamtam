@@ -60,7 +60,7 @@ export async function POST(
   // Get CI failure URL from DB
   const { db, schema } = await import('@/lib/db');
   const { eq } = await import('drizzle-orm');
-  const ciEntry = db.select().from(schema.ghStatus).where(eq(schema.ghStatus.project, projectName)).get();
+  const ciEntry = (await db.select().from(schema.ghStatus).where(eq(schema.ghStatus.project, projectName)).limit(1))[0] ?? null;
   const ciFailedUrl = ciEntry?.ciFailedUrl;
   if (!ciFailedUrl) {
     return NextResponse.json({ detail: 'No failed CI URL found' }, { status: 400 });

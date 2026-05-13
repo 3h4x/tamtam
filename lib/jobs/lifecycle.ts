@@ -38,7 +38,7 @@ import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 async function getProjectPipelineConfig(projectName: string): Promise<{ autoCommitEnabled: boolean; autoPushEnabled: boolean; releaseAfterRun: boolean; autoPrMergeEnabled: boolean }> {
   try {
     const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
-    const cfg = getProjectTestConfig(projectName);
+    const cfg = await getProjectTestConfig(projectName);
     return {
       autoCommitEnabled: !!cfg?.autoCommitEnabled,
       autoPushEnabled: !!cfg?.autoPushEnabled,
@@ -989,7 +989,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         if (!inRelease) {
           try {
             const { releaseLock } = await import('@/lib/pipeline/pipeline-lock');
-            releaseLock(job.project, job.id);
+            await releaseLock(job.project, job.id);
           } catch {}
         }
         const pushCount = recentStepCount(job.project, 'push', job);
@@ -1041,7 +1041,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         if (hasUncommittedChanges || hasUnpushedCommits) {
           // Review disabled → skip straight to commit (agent prompt covers review).
           const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
-          const reviewDisabled = !!getProjectTestConfig(job.project)?.reviewDisabled;
+          const reviewDisabled = !!(await getProjectTestConfig(job.project))?.reviewDisabled;
           if (freshLgtm) {
             const pushCount = recentStepCount(job.project, 'push', job);
             if (pushCount >= maxStepIterations()) {
@@ -1313,7 +1313,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
       // No active release job — still need to release the lock if this was a standalone pipeline job
       try {
         const { releaseLock } = await import('@/lib/pipeline/pipeline-lock');
-        releaseLock(job.project, job.id);
+        await releaseLock(job.project, job.id);
       } catch {}
     }
   }
@@ -1326,7 +1326,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   if (job.kind === 'release') {
     try {
       const { releaseLock } = await import('@/lib/pipeline/pipeline-lock');
-      releaseLock(job.project, job.id);
+      await releaseLock(job.project, job.id);
     } catch {}
   }
 

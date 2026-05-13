@@ -285,10 +285,10 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
 
     const recommendationsMod = await import('@/lib/recommendations/recommendations');
     const originalUpdateIfCurrent = recommendationsMod.updateRecommendationStatusIfCurrent;
-    const raceSpy = vi.spyOn(recommendationsMod, 'updateRecommendationStatusIfCurrent').mockImplementation((project, id, current, next) => {
-      const initial = originalUpdateIfCurrent(project, id, current, next);
+    const raceSpy = vi.spyOn(recommendationsMod, 'updateRecommendationStatusIfCurrent').mockImplementation(async (project, id, current, next) => {
+      const initial = await originalUpdateIfCurrent(project, id, current, next);
       if (next === 'applied' && initial) {
-        recommendationsMod.updateRecommendationStatus(project, id, 'dismissed');
+        await recommendationsMod.updateRecommendationStatus(project, id, 'dismissed');
         return null;
       }
       return initial;

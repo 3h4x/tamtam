@@ -260,7 +260,7 @@ describe('resume-stuck-release helpers', () => {
     ]);
 
     const { findStuckFinalizedReleases } = await import('@/lib/pipeline/resume-stuck-release');
-    const stuck = findStuckFinalizedReleases();
+    const stuck = await findStuckFinalizedReleases();
 
     expect(stuck).toHaveLength(1);
     expect(stuck[0]?.release.id).toBe('release-old-start');
@@ -304,7 +304,7 @@ describe('resume-stuck-release helpers', () => {
 
     const { findStuckFinalizedReleases, resumeStuckRelease } = await import('@/lib/pipeline/resume-stuck-release');
 
-    expect(findStuckFinalizedReleases()).toEqual([]);
+    expect(await findStuckFinalizedReleases()).toEqual([]);
 
     getJobMock.mockReturnValue(makeJob({
       id: 'release-gap',
