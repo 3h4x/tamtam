@@ -71,7 +71,22 @@ describe('finalizeAgentRunReport', () => {
       project: 'portal',
       type: 'agent_schedule_backoff',
       agentName: 'tests',
-      payload: expect.objectContaining({ currentSchedule: '2h', recommendedSchedule: '8h' }),
+      sourceId: 'portal-agent:tests-1',
+      detail: 'Recent run reported no actionable work and changed 0 files. Current schedule is 2h; consider 8h.',
+      payload: expect.objectContaining({
+        currentSchedule: '2h',
+        recommendedSchedule: '8h',
+        confidence: 'high',
+        reasoning: {
+          summary: 'No coverage gaps found.',
+          actionableWork: false,
+          filesChangedCount: 0,
+          currentSchedule: '2h',
+          recommendedSchedule: '8h',
+          confidence: 'high',
+          sourceJobId: 'portal-agent:tests-1',
+        },
+      }),
     }));
   });
 

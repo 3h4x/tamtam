@@ -57,7 +57,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 - `logo` — Repo-local project logo asset (GET). Detects a repo-local image from a small built-in allowlist of common paths such as `.tamtam/logo.*`, `public/logo.*`, `public/icon.*`, `public/favicon.*`, `app/icon.*`, `src/app/icon.*`, and root-level `logo.*`, then streams that file with the matching image content type. Returns `404` when the project is unknown; known projects without a supported local logo return a generated `image/svg+xml` placeholder.
 - `logs` — Project run log files (GET)
 - `docs` — Project documentation files (GET)
-- `recommendations` — GET; PATCH `{ id, status }` to update non-terminal state (`open` or `dismissed`)
+- `recommendations` — GET; PATCH `{ id, status }` to update non-terminal state (`open` or `dismissed`). Recommendation rows include the common fields from the `recommendations` table plus a parsed JSON `payload`. For `agent_schedule_backoff`, the payload includes `currentSchedule`, `recommendedSchedule`, `reason`, `confidence`, and an optional `reasoning` object with `{ summary, actionableWork, filesChangedCount, currentSchedule, recommendedSchedule, confidence, sourceJobId }` when the agent run report provided enough detail to explain the backoff suggestion in the UI.
 - `recommendations/apply` — Apply an auto-applicable recommendation server-side (POST `{ id }`). Validates the recommendation is still `open`, performs the underlying mutation, then marks the row `applied`; returns `409 { detail }` when the recommendation is stale/non-open
 
 ## Jobs / Runs
@@ -75,7 +75,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 
 ## Cross-project recommendations
 
-- `/api/recommendations` — Read-only list of every `open` recommendation across all projects, newest first (GET)
+- `/api/recommendations` — Read-only list of every `open` recommendation across all projects, newest first (GET). Uses the same recommendation row shape as the per-project route, including the structured `agent_schedule_backoff` payload described above.
 - `/api/recommendations/summary` — Read-only summary of all `open` recommendations (`{ openCount, byProject }`) for header/global UI polling (GET)
 
 ## Settings
