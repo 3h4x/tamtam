@@ -190,7 +190,7 @@ returns `409` with `code: "project_busy"` plus the blocking job id:
 
 The agent starts immediately as a PM2 process. Output is streamed to a log file and can be watched via SSE at `/api/streaming/{job_id}`.
 
-When an agent finishes, TamTam asks it to include a short `TamTam Run Report` in the final response. The lifecycle parser stores a concise `work_summary` and `modified_files` JSON array on the job row. If a scheduled agent repeatedly finds no actionable work and changes no files, TamTam creates an open project recommendation instead of silently changing the schedule.
+When an agent finishes, TamTam asks it to include a short `TamTam Run Report` in the final response. The lifecycle parser stores a concise `work_summary` and `modified_files` JSON array on the job row. If a scheduled agent repeatedly finds no actionable work and changes no files, TamTam creates an open project recommendation instead of silently changing the schedule. That `agent_schedule_backoff` recommendation now carries a structured rationale payload copied from the run report summary (`summary`, `actionableWork`, `filesChangedCount`, cadence, confidence, and `sourceJobId` when present), and the recommendations UI renders that metadata in a compact "Why" panel so operators can see why the slower cadence was suggested.
 
 ### Read-only Agent Runs
 

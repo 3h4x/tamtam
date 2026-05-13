@@ -89,6 +89,8 @@ function maybeRecommendSchedule(job: JobData, ctx: AgentContextMeta, files: Modi
     hours >= 8
   ) return;
 
+  const confidence = actionable === false ? 'high' : 'medium';
+  const suggestedSchedule = '8h';
   upsertRecommendation({
     project: job.project,
     sourceKind: job.kind,
@@ -97,12 +99,21 @@ function maybeRecommendSchedule(job: JobData, ctx: AgentContextMeta, files: Modi
     agentName,
     type: 'agent_schedule_backoff',
     title: `Run ${agentName} less often`,
-    detail: `Recent run found no actionable work. Current schedule is ${currentSchedule}; consider 8h.`,
+    detail: `Recent run reported no actionable work and changed 0 files. Current schedule is ${currentSchedule}; consider ${suggestedSchedule}.`,
     payload: {
       currentSchedule,
-      recommendedSchedule: '8h',
+      recommendedSchedule: suggestedSchedule,
       reason: 'recent run found no actionable work',
-      confidence: actionable === false ? 'high' : 'medium',
+      confidence,
+      reasoning: {
+        summary: job.workSummary ?? null,
+        actionableWork: actionable,
+        filesChangedCount: files.length,
+        currentSchedule,
+        recommendedSchedule: suggestedSchedule,
+        confidence,
+        sourceJobId: job.id,
+      },
     },
   });
 }
