@@ -1,4 +1,3 @@
-// tamtam
 import { useEffect, useState } from 'react'
 
 type ThemeValue = 'light' | 'dark'
