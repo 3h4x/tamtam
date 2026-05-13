@@ -53,7 +53,8 @@ export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
     }
     load()
     const id = setInterval(load, 60_000)
-    return () => { live = false; clearInterval(id) }
+    window.addEventListener('tamtam:recommendations-changed', load)
+    return () => { live = false; clearInterval(id); window.removeEventListener('tamtam:recommendations-changed', load) }
   }, [])
   const counts: Record<string, number> = { recommendations: recCount }
 
