@@ -245,7 +245,7 @@ export async function drainQueuedAgentRunsForProject(project: string): Promise<v
           const message = e instanceof Error ? e.message : String(e);
           // Timeout here just means the replay did not acknowledge within the
           // grace window; keep the row and retry on the next drain.
-          console.warn(`[queued-agent-runs] transient timeout draining ${entry.agentName} for ${project}: ${message}`);
+          console.log(`[queued-agent-runs] transient timeout draining ${entry.agentName} for ${project}: ${message}`);
           continue;
         }
         console.error(`[queued-agent-runs] drain error for ${project}/${entry.agentName}:`, e);
