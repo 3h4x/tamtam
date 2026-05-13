@@ -520,6 +520,30 @@ describe('queued-agent-runs', () => {
     vi.unstubAllGlobals();
   });
 
+  it('keeps the DB row on transient 409 project_paused code', async () => {
+    enqueueQueuedAgentRun('myproject', {
+      project: 'myproject',
+      agentId: 'agent-1',
+      agentName: 'docs',
+      triggeredBy: 'manual',
+      prompt: 'run docs',
+      enqueuedAt: 1_000,
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      text: vi.fn().mockResolvedValue(JSON.stringify({
+        code: 'project_paused',
+        detail: "Project 'myproject' is paused — agent runs are blocked. Resume on the project page to continue.",
+      })),
+    }));
+
+    await drainQueuedAgentRunsForProject('myproject');
+
+    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+
   it('keeps the DB row on transient 409 issue_branch code', async () => {
     enqueueQueuedAgentRun('myproject', {
       project: 'myproject',

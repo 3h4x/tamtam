@@ -418,6 +418,23 @@ describe('drainNextAgentRun', () => {
     expect(listQueuedAgents('p1')).toEqual([]);
   });
 
+  it('keeps the head when 409 reports project_paused and drains it after retrying later', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse({ code: 'project_paused', detail: "Project 'p1' is paused — agent runs are blocked. Resume on the project page to continue." }, 409)
+      )
+      .mockResolvedValueOnce(textResponse('', 200));
+
+    enqueueAgentRun('p1', { agentId: 'a', agentName: 'A', triggeredBy: 'schedule', prompt: '', enqueuedAt: 1 });
+
+    await drainNextAgentRun('p1');
+    expect(listQueuedAgents('p1').map((e) => e.agentId)).toEqual(['a']);
+
+    await drainNextAgentRun('p1');
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(listQueuedAgents('p1')).toEqual([]);
+  });
+
   it('drops the head on an unknown 409 (no code) so later entries can drain', async () => {
     fetchSpy.mockResolvedValueOnce(textResponse('plain text 409 with no code field', 409));
 

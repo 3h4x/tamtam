@@ -220,8 +220,10 @@ export async function drainNextAgentRun(project: string): Promise<void> {
         code === 'already_running' ||
         code === 'already_starting' ||
         code === 'project_busy' ||
+        code === 'project_paused' ||
         code === 'jobs_paused' ||
-        (parsed?.detail ?? raw).includes('Jobs are paused globally');
+        (parsed?.detail ?? raw).includes('Jobs are paused globally') ||
+        (parsed?.detail ?? raw).includes('project paused');
       if (transient) {
         console.log(
           `[pending-agent-run] keeping ${next.agentName} queued for ${project}: ${r.status} ${code} ${(parsed?.detail ?? raw).slice(0, 200)}`,
