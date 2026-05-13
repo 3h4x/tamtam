@@ -22,13 +22,33 @@ export function normalizeAgent(row: AgentRow): NormalizedAgent {
 
 const AGENTS_CACHE_TTL = 10; // seconds
 let _agentsCache: { agents: AgentRow[]; time: number } | null = null;
+let _agentsRefreshing = false;
 
-export function getAllAgentsCached() {
+async function _doAgentsRefresh(): Promise<void> {
+  if (_agentsRefreshing) return;
+  _agentsRefreshing = true;
+  try {
+    const agents = await db.select().from(schema.agents);
+    _agentsCache = { agents, time: Date.now() / 1000 };
+  } catch (e) {
+    console.error('[agents-cache] refresh failed:', e);
+  } finally {
+    _agentsRefreshing = false;
+  }
+}
+
+export function getAllAgentsCached(): AgentRow[] {
   const now = Date.now() / 1000;
   if (_agentsCache && now - _agentsCache.time < AGENTS_CACHE_TTL) return _agentsCache.agents;
-  const agents = db.select().from(schema.agents).all();
-  _agentsCache = { agents, time: now };
-  return agents;
+  void _doAgentsRefresh();
+  return _agentsCache?.agents ?? [];
+}
+
+export async function getAllAgentsCachedAsync(): Promise<AgentRow[]> {
+  const now = Date.now() / 1000;
+  if (_agentsCache && now - _agentsCache.time < AGENTS_CACHE_TTL) return _agentsCache.agents;
+  await _doAgentsRefresh();
+  return _agentsCache?.agents ?? [];
 }
 
 export function clearAgentsCache() {

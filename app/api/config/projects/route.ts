@@ -33,14 +33,14 @@ function scanGitRepos(workspacePath: string): { name: string; path: string }[] {
 }
 
 export async function GET() {
-  const setting = db
+  const settingRows = await db
     .select()
     .from(schema.settings)
     .where(eq(schema.settings.key, 'workspace_path'))
-    .get();
-  const workspacePath = setting?.value || '';
+    .limit(1);
+  const workspacePath = settingRows[0]?.value || '';
 
-  const savedProjects = db.select().from(schema.projects).all();
+  const savedProjects = await db.select().from(schema.projects);
   const savedMap = new Map(savedProjects.map((p) => [p.name, p]));
 
   const discovered = workspacePath ? scanGitRepos(workspacePath) : [];
@@ -80,7 +80,7 @@ export async function PATCH(request: NextRequest) {
 
   for (const proj of projects) {
     const actionsJson = proj.custom_actions ? JSON.stringify(proj.custom_actions) : null;
-    db.insert(schema.projects)
+    await db.insert(schema.projects)
       .values({
         name: proj.name,
         path: proj.path,
@@ -98,8 +98,7 @@ export async function PATCH(request: NextRequest) {
           priority: proj.priority || null,
           customActions: actionsJson,
         },
-      })
-      .run();
+      });
   }
 
   return NextResponse.json({ status: 'ok' });

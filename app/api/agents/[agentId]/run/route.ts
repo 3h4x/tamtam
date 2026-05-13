@@ -326,7 +326,7 @@ async function runAgentStart(
   // prompt-improvement endpoint via `composeAgentSkills`.
   const allSkillIds: string[] = JSON.parse(agent.skillIds);
   const docPathsParsed: string[] = JSON.parse(agent.docPaths || '[]');
-  const composed = composeAgentSkills(projPath, allSkillIds, docPathsParsed);
+  const composed = await composeAgentSkills(projPath, allSkillIds, docPathsParsed);
   const docParts = composed.docParts;
   const parts = composed.parts;
   const metaSkills = composed.metaSkills;

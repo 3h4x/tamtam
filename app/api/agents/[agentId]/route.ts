@@ -42,7 +42,8 @@ export async function GET(
     return NextResponse.json({ agent: withEffectivePrerequisite(agent) });
   }
 
-  const agent = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
+  const agentRows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).limit(1);
+  const agent = agentRows[0] ?? null;
   if (!agent) return NextResponse.json({ detail: 'not found' }, { status: 404 });
   return NextResponse.json({ agent: normalizeAgent(agent) });
 }
@@ -80,7 +81,7 @@ export async function PATCH(
         body.runner !== undefined ||
         body.skillIds !== undefined
       ) {
-        setFileAgentOverride(parsedFile.project, parsedFile.name, {
+        await setFileAgentOverride(parsedFile.project, parsedFile.name, {
           enabled: body.enabled,
           schedule: body.schedule !== undefined ? parsedSchedule.schedule : undefined,
           model: parsedModel ?? undefined,
@@ -112,7 +113,8 @@ export async function PATCH(
     }
   }
 
-  const existing = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
+  const existingRows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).limit(1);
+  const existing = existingRows[0] ?? null;
   if (!existing) return NextResponse.json({ detail: 'not found' }, { status: 404 });
 
   // Capture identity before update so we can clean up the old PM2 entry if
@@ -129,7 +131,7 @@ export async function PATCH(
       return NextResponse.json({ detail: parsedName.error }, { status: 400 });
     }
     nextName = parsedName.name!;
-    const conflict = findAgentNameConflict(existing.project, nextName, {
+    const conflict = await findAgentNameConflict(existing.project, nextName, {
       excludeDbAgentId: existing.id,
       excludeFileAgentName: existing.name,
     });
@@ -152,9 +154,10 @@ export async function PATCH(
     updates.prerequisiteCommand = parsePrerequisiteCommandInput(body.prerequisiteCommand) ?? '';
   }
 
-  db.update(schema.agents).set(updates).where(eq(schema.agents.id, agentId)).run();
+  await db.update(schema.agents).set(updates).where(eq(schema.agents.id, agentId)).execute();
   clearAgentsCache();
-  const agent = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
+  const updatedRows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).limit(1);
+  const agent = updatedRows[0] ?? null;
 
   // Sync to .tamtam/agents/<name>.md for version control
   if (agent) {
@@ -222,7 +225,8 @@ export async function DELETE(
   }
 
   // Uninstall schedule before deleting
-  const agent = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
+  const deleteRows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).limit(1);
+  const agent = deleteRows[0] ?? null;
   try {
     await uninstallAgentSchedule(agentId, agent?.runner || 'pm2', agent?.project, agent?.name);
   } catch (e: unknown) {
@@ -235,7 +239,7 @@ export async function DELETE(
     if (projPath) deleteFileAgent(projPath, agent.name);
   }
 
-  db.delete(schema.agents).where(eq(schema.agents.id, agentId)).run();
+  await db.delete(schema.agents).where(eq(schema.agents.id, agentId)).execute();
   clearAgentsCache();
   return NextResponse.json({ status: 'deleted' });
 }

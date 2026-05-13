@@ -37,7 +37,8 @@ export async function GET(
   const fileConfig = loadFileConfig(projPath);
   const branchCtx = getBranchContext(projPath);
   const pipelinePrompts = getProjectPipelinePrompts(projectName);
-  const projectRow = db.select().from(schema.projects).where(eq(schema.projects.name, projectName)).get();
+  const projectRows = await db.select().from(schema.projects).where(eq(schema.projects.name, projectName)).limit(1);
+  const projectRow = projectRows[0] ?? null;
 
   return NextResponse.json({
     project: projectName,

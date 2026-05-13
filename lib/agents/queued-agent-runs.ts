@@ -39,7 +39,7 @@ export function enqueueQueuedAgentRun(
   project: string,
   entry: Omit<QueuedAgentRunEntry, 'id'>,
 ): void {
-  db.insert(schema.queuedAgentRuns)
+  void db.insert(schema.queuedAgentRuns)
     .values({
       project,
       agentId: entry.agentId,
@@ -57,29 +57,28 @@ export function enqueueQueuedAgentRun(
         enqueuedAt: entry.enqueuedAt / 1000,
       },
     })
-    .run();
+    .execute()
+    .catch((e) => console.error('[queued-agent-runs] enqueue failed:', e));
 }
 
-export function listQueuedAgentRunsForProject(project: string): QueuedAgentRunEntry[] {
+export async function listQueuedAgentRunsForProject(project: string): Promise<QueuedAgentRunEntry[]> {
   try {
-    return db
+    const rows = await db
       .select()
       .from(schema.queuedAgentRuns)
       .where(eq(schema.queuedAgentRuns.project, project))
-      .orderBy(asc(schema.queuedAgentRuns.enqueuedAt))
-      .all()
-      .map(toEntry);
+      .orderBy(asc(schema.queuedAgentRuns.enqueuedAt));
+    return rows.map(toEntry);
   } catch {
     return [];
   }
 }
 
-export function listQueuedAgentRunProjects(): string[] {
+export async function listQueuedAgentRunProjects(): Promise<string[]> {
   try {
-    const rows = db
+    const rows = await db
       .select({ project: schema.queuedAgentRuns.project })
-      .from(schema.queuedAgentRuns)
-      .all();
+      .from(schema.queuedAgentRuns);
     return [...new Set(
       rows
         .map((row) => row.project)
@@ -91,19 +90,17 @@ export function listQueuedAgentRunProjects(): string[] {
 }
 
 export function removeQueuedAgentRun(id: number): void {
-  try {
-    db.delete(schema.queuedAgentRuns)
-      .where(eq(schema.queuedAgentRuns.id, id))
-      .run();
-  } catch {}
+  void db.delete(schema.queuedAgentRuns)
+    .where(eq(schema.queuedAgentRuns.id, id))
+    .execute()
+    .catch((e) => console.error('[queued-agent-runs] remove failed:', e));
 }
 
 export function clearQueuedAgentRunsForProject(project: string): void {
-  try {
-    db.delete(schema.queuedAgentRuns)
-      .where(eq(schema.queuedAgentRuns.project, project))
-      .run();
-  } catch {}
+  void db.delete(schema.queuedAgentRuns)
+    .where(eq(schema.queuedAgentRuns.project, project))
+    .execute()
+    .catch((e) => console.error('[queued-agent-runs] clear failed:', e));
 }
 
 type QueueDrainResponse = {
@@ -181,7 +178,7 @@ export async function drainQueuedAgentRunsForProject(project: string): Promise<v
   if (activeProjectDrains.has(project)) return;
   activeProjectDrains.add(project);
   try {
-    const queued = listQueuedAgentRunsForProject(project);
+    const queued = await listQueuedAgentRunsForProject(project);
     if (queued.length === 0) return;
 
     const port = process.env.PORT || '1337';

@@ -7,8 +7,9 @@ import { scanFileAgents } from '@/lib/agents/tamtam-file-agents';
 import { listEnabledProjects } from '@/lib/shared/enabled-projects';
 import { errMsg } from '@/lib/shared/types';
 
-function loadAgentsForCheck() {
-  const dbAgents = db.select().from(schema.agents).all().map(a => ({
+async function loadAgentsForCheck() {
+  const rawAgents = await db.select().from(schema.agents);
+  const dbAgents = rawAgents.map(a => ({
     id: a.id,
     project: a.project,
     name: a.name,
@@ -38,11 +39,11 @@ function loadAgentsForCheck() {
   return [...dbAgents, ...fileAgents];
 }
 
-function buildLastJobMap(entries: { agentId: string; project: string; name: string }[]): Map<string, number> {
+async function buildLastJobMap(entries: { agentId: string; project: string; name: string }[]): Promise<Map<string, number>> {
   const map = new Map<string, number>();
   for (const e of entries) {
     try {
-      const row = db
+      const rows = await db
         .select({ finishedAt: schema.jobs.finishedAt })
         .from(schema.jobs)
         .where(and(
@@ -51,8 +52,8 @@ function buildLastJobMap(entries: { agentId: string; project: string; name: stri
           isNotNull(schema.jobs.finishedAt),
         ))
         .orderBy(desc(schema.jobs.finishedAt))
-        .limit(1)
-        .get();
+        .limit(1);
+      const row = rows[0] ?? null;
       if (row?.finishedAt) map.set(e.agentId, row.finishedAt * 1000);
     } catch {
       // jobs table may not exist in test environments
@@ -63,10 +64,10 @@ function buildLastJobMap(entries: { agentId: string; project: string; name: stri
 
 export async function GET() {
   try {
-    const agents = loadAgentsForCheck();
+    const agents = await loadAgentsForCheck();
     const health = await getSchedulerHealth(agents);
     const internal = dumpInternalScheduler();
-    const lastJobMap = buildLastJobMap(internal.entries);
+    const lastJobMap = await buildLastJobMap(internal.entries);
     const enrichedEntries = internal.entries.map(e => ({
       ...e,
       lastJobMs: lastJobMap.get(e.agentId) ?? null,
@@ -79,7 +80,7 @@ export async function GET() {
 
 export async function POST() {
   try {
-    const agents = loadAgentsForCheck();
+    const agents = await loadAgentsForCheck();
     const before = await getSchedulerHealth(agents);
 
     const installed: string[] = [];
@@ -101,7 +102,7 @@ export async function POST() {
 
     const after = await getSchedulerHealth(agents);
     const internal = dumpInternalScheduler();
-    const lastJobMap = buildLastJobMap(internal.entries);
+    const lastJobMap = await buildLastJobMap(internal.entries);
     const enrichedEntries = internal.entries.map(e => ({
       ...e,
       lastJobMs: lastJobMap.get(e.agentId) ?? null,

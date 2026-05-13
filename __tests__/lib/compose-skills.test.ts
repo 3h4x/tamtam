@@ -56,7 +56,7 @@ describe('composeAgentSkills', () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('composes requested docs, DB skills, and persona files in the expected order', () => {
+  it('composes requested docs, DB skills, and persona files in the expected order', async () => {
     testDb.sqlite
       .prepare('INSERT INTO skills (id, name, description, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run('db-skill-1', 'DB Skill', 'database description', 'Use the real db skill.', 1, 1);
@@ -74,7 +74,7 @@ Review recent changes carefully.`,
       '# Team Writer\n\nProduce concise docs updates.',
     );
 
-    const composed = composeAgentSkills(
+    const composed = await composeAgentSkills(
       join(tempDir, 'project'),
       ['db-skill-1', 'persona:engineering/reviewer', 'persona:custom/writer'],
       ['docs/plan.md'],
@@ -117,10 +117,10 @@ Review recent changes carefully.`,
     ]);
   });
 
-  it('ignores doc paths outside the project root', () => {
+  it('ignores doc paths outside the project root', async () => {
     writeFileSync(join(tempDir, 'outside.md'), 'should stay out');
 
-    const composed = composeAgentSkills(
+    const composed = await composeAgentSkills(
       join(tempDir, 'project'),
       [],
       ['../outside.md', 'docs/missing.md'],
@@ -130,8 +130,8 @@ Review recent changes carefully.`,
     expect(composed.metaDocs).toEqual([]);
   });
 
-  it('keeps fallback metadata for missing persona files without adding prompt content', () => {
-    const composed = composeAgentSkills(
+  it('keeps fallback metadata for missing persona files without adding prompt content', async () => {
+    const composed = await composeAgentSkills(
       join(tempDir, 'project'),
       ['persona:engineering/missing-skill'],
       [],

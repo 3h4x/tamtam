@@ -64,7 +64,7 @@ describe('queued-agent-runs', () => {
     drainQueuedAgentRunsForUnlockedProjects = mod.drainQueuedAgentRunsForUnlockedProjects;
   });
 
-  it('enqueues an agent run and lists it', () => {
+  it('enqueues an agent run and lists it', async () => {
     enqueueQueuedAgentRun('myproject', {
       project: 'myproject',
       agentId: 'agent-1',
@@ -73,7 +73,7 @@ describe('queued-agent-runs', () => {
       prompt: 'update docs',
       enqueuedAt: 1_000_000,
     });
-    const rows = listQueuedAgentRunsForProject('myproject');
+    const rows = await listQueuedAgentRunsForProject('myproject');
     expect(rows).toHaveLength(1);
     expect(rows[0].agentId).toBe('agent-1');
     expect(rows[0].agentName).toBe('docs');
@@ -82,7 +82,7 @@ describe('queued-agent-runs', () => {
     expect(rows[0].enqueuedAt).toBe(1_000_000); // converted back to ms
   });
 
-  it('is idempotent per project+agentId (upsert updates prompt)', () => {
+  it('is idempotent per project+agentId (upsert updates prompt)', async () => {
     enqueueQueuedAgentRun('myproject', {
       project: 'myproject',
       agentId: 'agent-1',
@@ -99,13 +99,13 @@ describe('queued-agent-runs', () => {
       prompt: 'second prompt',
       enqueuedAt: 2_000,
     });
-    const rows = listQueuedAgentRunsForProject('myproject');
+    const rows = await listQueuedAgentRunsForProject('myproject');
     expect(rows).toHaveLength(1);
     expect(rows[0].prompt).toBe('second prompt');
     expect(rows[0].triggeredBy).toBe('schedule');
   });
 
-  it('allows multiple different agents queued for the same project', () => {
+  it('allows multiple different agents queued for the same project', async () => {
     enqueueQueuedAgentRun('myproject', {
       project: 'myproject',
       agentId: 'agent-1',
@@ -122,13 +122,13 @@ describe('queued-agent-runs', () => {
       prompt: '',
       enqueuedAt: 2_000,
     });
-    const rows = listQueuedAgentRunsForProject('myproject');
+    const rows = await listQueuedAgentRunsForProject('myproject');
     expect(rows).toHaveLength(2);
     expect(rows[0].agentId).toBe('agent-1'); // ordered by enqueuedAt asc
     expect(rows[1].agentId).toBe('agent-2');
   });
 
-  it('lists only entries for the requested project', () => {
+  it('lists only entries for the requested project', async () => {
     enqueueQueuedAgentRun('project-a', {
       project: 'project-a',
       agentId: 'agent-1',
@@ -145,12 +145,12 @@ describe('queued-agent-runs', () => {
       prompt: '',
       enqueuedAt: 2_000,
     });
-    expect(listQueuedAgentRunsForProject('project-a')).toHaveLength(1);
-    expect(listQueuedAgentRunsForProject('project-b')).toHaveLength(1);
-    expect(listQueuedAgentRunsForProject('project-c')).toHaveLength(0);
+    expect(await listQueuedAgentRunsForProject('project-a')).toHaveLength(1);
+    expect(await listQueuedAgentRunsForProject('project-b')).toHaveLength(1);
+    expect(await listQueuedAgentRunsForProject('project-c')).toHaveLength(0);
   });
 
-  it('removeQueuedAgentRun deletes a single entry by id', () => {
+  it('removeQueuedAgentRun deletes a single entry by id', async () => {
     enqueueQueuedAgentRun('myproject', {
       project: 'myproject',
       agentId: 'agent-1',
@@ -167,14 +167,14 @@ describe('queued-agent-runs', () => {
       prompt: '',
       enqueuedAt: 2_000,
     });
-    const before = listQueuedAgentRunsForProject('myproject');
+    const before = await listQueuedAgentRunsForProject('myproject');
     removeQueuedAgentRun(before[0].id);
-    const after = listQueuedAgentRunsForProject('myproject');
+    const after = await listQueuedAgentRunsForProject('myproject');
     expect(after).toHaveLength(1);
     expect(after[0].agentId).toBe('agent-2');
   });
 
-  it('clearQueuedAgentRunsForProject removes all entries for the project', () => {
+  it('clearQueuedAgentRunsForProject removes all entries for the project', async () => {
     enqueueQueuedAgentRun('myproject', {
       project: 'myproject',
       agentId: 'agent-1',
@@ -192,15 +192,15 @@ describe('queued-agent-runs', () => {
       enqueuedAt: 2_000,
     });
     clearQueuedAgentRunsForProject('myproject');
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
-    expect(listQueuedAgentRunsForProject('other')).toHaveLength(1); // unaffected
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
+    expect(await listQueuedAgentRunsForProject('other')).toHaveLength(1); // unaffected
   });
 
-  it('returns empty array for a project with no queued runs', () => {
-    expect(listQueuedAgentRunsForProject('nonexistent')).toEqual([]);
+  it('returns empty array for a project with no queued runs', async () => {
+    expect(await listQueuedAgentRunsForProject('nonexistent')).toEqual([]);
   });
 
-  it('lists distinct queued projects', () => {
+  it('lists distinct queued projects', async () => {
     enqueueQueuedAgentRun('project-a', {
       project: 'project-a',
       agentId: 'agent-1',
@@ -225,11 +225,13 @@ describe('queued-agent-runs', () => {
       prompt: '',
       enqueuedAt: 3_000,
     });
-    expect(listQueuedAgentRunProjects().sort()).toEqual(['project-a', 'project-b']);
+    expect((await listQueuedAgentRunProjects()).sort()).toEqual(['project-a', 'project-b']);
   });
 
-  it('throws when the queue row cannot be persisted', () => {
+  it('silently swallows errors when the queue row cannot be persisted (fire-and-forget)', async () => {
     testDb.exec('DROP TABLE queued_agent_runs');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // fire-and-forget: does not throw synchronously
     expect(() => enqueueQueuedAgentRun('myproject', {
       project: 'myproject',
       agentId: 'agent-1',
@@ -237,7 +239,13 @@ describe('queued-agent-runs', () => {
       triggeredBy: 'manual',
       prompt: 'run docs',
       enqueuedAt: 1_000,
-    })).toThrow();
+    })).not.toThrow();
+    await Promise.resolve();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[queued-agent-runs] enqueue failed:'),
+      expect.anything(),
+    );
+    errorSpy.mockRestore();
   });
 
   it('keeps the DB row when the replay route returns 202 pipeline_lock', async () => {
@@ -260,7 +268,7 @@ describe('queued-agent-runs', () => {
 
     await drainQueuedAgentRunsForProject('myproject');
 
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
     vi.unstubAllGlobals();
   });
 
@@ -284,7 +292,7 @@ describe('queued-agent-runs', () => {
 
     await drainQueuedAgentRunsForProject('myproject');
 
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
     vi.unstubAllGlobals();
   });
 
@@ -313,10 +321,10 @@ describe('queued-agent-runs', () => {
       }));
 
     await drainQueuedAgentRunsForProject('myproject');
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
 
     await drainQueuedAgentRunsForProject('myproject');
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
     vi.unstubAllGlobals();
   });
 
@@ -340,7 +348,7 @@ describe('queued-agent-runs', () => {
 
     await drainQueuedAgentRunsForProject('myproject');
 
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
     vi.unstubAllGlobals();
   });
 
@@ -370,10 +378,10 @@ describe('queued-agent-runs', () => {
       }));
 
     await drainQueuedAgentRunsForProject('myproject');
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
 
     await drainQueuedAgentRunsForProject('myproject');
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
     vi.unstubAllGlobals();
   });
 
@@ -401,10 +409,10 @@ describe('queued-agent-runs', () => {
       }));
 
     await drainQueuedAgentRunsForProject('myproject');
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
 
     await drainQueuedAgentRunsForProject('myproject');
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
     vi.unstubAllGlobals();
   });
 
@@ -429,7 +437,7 @@ describe('queued-agent-runs', () => {
 
     await drainQueuedAgentRunsForProject('myproject');
 
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
     expect(logSpy).toHaveBeenCalledWith(
       '[queued-agent-runs] transient timeout draining docs for myproject: fetch failed',
     );
@@ -468,7 +476,7 @@ describe('queued-agent-runs', () => {
     fetchControl.resolve();
     await Promise.all([first, second]);
 
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
     vi.unstubAllGlobals();
   });
 
@@ -492,7 +500,7 @@ describe('queued-agent-runs', () => {
 
     await drainQueuedAgentRunsForProject('myproject');
 
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
     vi.unstubAllGlobals();
   });
 
@@ -516,7 +524,7 @@ describe('queued-agent-runs', () => {
 
     await drainQueuedAgentRunsForProject('myproject');
 
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
     vi.unstubAllGlobals();
   });
 
@@ -540,7 +548,7 @@ describe('queued-agent-runs', () => {
 
     await drainQueuedAgentRunsForProject('myproject');
 
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
     vi.unstubAllGlobals();
   });
 
@@ -564,7 +572,7 @@ describe('queued-agent-runs', () => {
 
     await drainQueuedAgentRunsForProject('myproject');
 
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
     vi.unstubAllGlobals();
   });
 
@@ -587,7 +595,7 @@ describe('queued-agent-runs', () => {
 
     await drainQueuedAgentRunsForProject('myproject');
 
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
     vi.unstubAllGlobals();
   });
 
@@ -609,7 +617,7 @@ describe('queued-agent-runs', () => {
 
     await drainQueuedAgentRunsForProject('myproject');
 
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
     expect(logSpy).toHaveBeenCalledWith(
       '[queued-agent-runs] transient timeout draining docs for myproject: The operation was aborted',
     );
@@ -639,7 +647,7 @@ describe('queued-agent-runs', () => {
 
     await drainQueuedAgentRunsForProject('myproject');
 
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
     vi.unstubAllGlobals();
   });
 
@@ -662,7 +670,7 @@ describe('queued-agent-runs', () => {
 
     await drainQueuedAgentRunsForProject('myproject');
 
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
     vi.unstubAllGlobals();
   });
 
@@ -686,7 +694,7 @@ describe('queued-agent-runs', () => {
 
     await drainQueuedAgentRunsForProject('myproject');
 
-    expect(listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
+    expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
     vi.unstubAllGlobals();
   });
 
@@ -745,8 +753,8 @@ describe('queued-agent-runs', () => {
 
     await drainQueuedAgentRunsForUnlockedProjects();
 
-    expect(listQueuedAgentRunsForProject('unlocked')).toHaveLength(0);
-    expect(listQueuedAgentRunsForProject('locked')).toHaveLength(1);
+    expect(await listQueuedAgentRunsForProject('unlocked')).toHaveLength(0);
+    expect(await listQueuedAgentRunsForProject('locked')).toHaveLength(1);
     vi.unstubAllGlobals();
   });
 });

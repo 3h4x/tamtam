@@ -24,23 +24,23 @@ function createTestDb() {
       updated_at REAL NOT NULL
     );
   `);
-  return drizzle(sqlite, { schema });
+  return { sqlite, db: drizzle(sqlite, { schema }) };
 }
 
 const scanFileAgentsMock = vi.fn();
 const resolveProjectPathMock = vi.fn();
 
 describe('findAgentNameConflict', () => {
-  let db: ReturnType<typeof createTestDb>;
-  let findAgentNameConflict: (project: string, name: string, options?: { excludeDbAgentId?: string; excludeFileAgentName?: string }) => import('@/lib/agents/agent-conflicts').AgentNameConflict | null;
+  let testDb: ReturnType<typeof createTestDb>;
+  let findAgentNameConflict: (project: string, name: string, options?: { excludeDbAgentId?: string; excludeFileAgentName?: string }) => Promise<import('@/lib/agents/agent-conflicts').AgentNameConflict | null>;
 
   beforeEach(async () => {
     vi.resetModules();
-    db = createTestDb();
+    testDb = createTestDb();
     scanFileAgentsMock.mockReset();
     resolveProjectPathMock.mockReset();
 
-    vi.doMock('@/lib/db', () => ({ db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     vi.doMock('@/lib/agents/tamtam-file-agents', () => ({
       scanFileAgents: scanFileAgentsMock,
     }));
@@ -53,101 +53,92 @@ describe('findAgentNameConflict', () => {
   });
 
   function insertAgent(id: string, project: string, name: string) {
-    db.insert(schema.agents).values({
-      id,
-      name,
-      project,
-      skillIds: '[]',
-      docPaths: '[]',
-      model: 'sonnet',
-      prompt: '',
-      runner: 'pm2',
-      enabled: true,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    }).run();
+    testDb.sqlite.prepare(`
+      INSERT INTO agents (id, name, project, skill_ids, doc_paths, model, prompt, runner, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, '[]', '[]', 'sonnet', '', 'pm2', 1, ?, ?)
+    `).run(id, name, project, Date.now(), Date.now());
   }
 
-  it('returns null when no DB agent and no file agents match', () => {
+  it('returns null when no DB agent and no file agents match', async () => {
     resolveProjectPathMock.mockReturnValue('/projects/myproject');
     scanFileAgentsMock.mockReturnValue([]);
-    expect(findAgentNameConflict('myproject', 'my-agent')).toBeNull();
+    expect(await findAgentNameConflict('myproject', 'my-agent')).toBeNull();
   });
 
-  it('detects a DB agent name conflict (exact match)', () => {
+  it('detects a DB agent name conflict (exact match)', async () => {
     insertAgent('agent-1', 'myproject', 'my-agent');
     resolveProjectPathMock.mockReturnValue('/projects/myproject');
     scanFileAgentsMock.mockReturnValue([]);
 
-    const conflict = findAgentNameConflict('myproject', 'my-agent');
+    const conflict = await findAgentNameConflict('myproject', 'my-agent');
     expect(conflict).toEqual({ kind: 'db', name: 'my-agent', agentId: 'agent-1' });
   });
 
-  it('detects a DB agent name conflict case-insensitively', () => {
+  it('detects a DB agent name conflict case-insensitively', async () => {
     insertAgent('agent-2', 'myproject', 'My-Agent');
     resolveProjectPathMock.mockReturnValue('/projects/myproject');
     scanFileAgentsMock.mockReturnValue([]);
 
-    const conflict = findAgentNameConflict('myproject', 'my-agent');
+    const conflict = await findAgentNameConflict('myproject', 'my-agent');
     expect(conflict).not.toBeNull();
     expect(conflict?.kind).toBe('db');
     expect(conflict?.agentId).toBe('agent-2');
   });
 
-  it('skips DB agent when excludeDbAgentId matches', () => {
+  it('skips DB agent when excludeDbAgentId matches', async () => {
     insertAgent('agent-1', 'myproject', 'my-agent');
     resolveProjectPathMock.mockReturnValue('/projects/myproject');
     scanFileAgentsMock.mockReturnValue([]);
 
-    const conflict = findAgentNameConflict('myproject', 'my-agent', { excludeDbAgentId: 'agent-1' });
+    const conflict = await findAgentNameConflict('myproject', 'my-agent', { excludeDbAgentId: 'agent-1' });
     expect(conflict).toBeNull();
   });
 
-  it('does not skip a different DB agent when excludeDbAgentId is set', () => {
+  it('does not skip a different DB agent when excludeDbAgentId is set', async () => {
     insertAgent('agent-1', 'myproject', 'my-agent');
     insertAgent('agent-2', 'myproject', 'other-agent');
     resolveProjectPathMock.mockReturnValue('/projects/myproject');
     scanFileAgentsMock.mockReturnValue([]);
 
-    const conflict = findAgentNameConflict('myproject', 'my-agent', { excludeDbAgentId: 'agent-2' });
+    const conflict = await findAgentNameConflict('myproject', 'my-agent', { excludeDbAgentId: 'agent-2' });
     expect(conflict?.agentId).toBe('agent-1');
   });
 
-  it('detects a file agent name conflict', () => {
+  it('detects a file agent name conflict', async () => {
     resolveProjectPathMock.mockReturnValue('/projects/myproject');
     scanFileAgentsMock.mockReturnValue([
       { id: 'file:myproject:docs', name: 'docs', project: 'myproject' },
     ]);
 
-    const conflict = findAgentNameConflict('myproject', 'docs');
+    const conflict = await findAgentNameConflict('myproject', 'docs');
     expect(conflict).toEqual({ kind: 'file', name: 'docs', agentId: 'file:myproject:docs' });
   });
 
-  it('skips file agent when excludeFileAgentName matches canonically', () => {
+  it('skips file agent when excludeFileAgentName matches canonically', async () => {
     resolveProjectPathMock.mockReturnValue('/projects/myproject');
     scanFileAgentsMock.mockReturnValue([
       { id: 'file:myproject:Docs', name: 'Docs', project: 'myproject' },
     ]);
 
-    const conflict = findAgentNameConflict('myproject', 'docs', { excludeFileAgentName: 'Docs' });
+    const conflict = await findAgentNameConflict('myproject', 'docs', { excludeFileAgentName: 'Docs' });
     expect(conflict).toBeNull();
   });
 
-  it('returns null when resolveProjectPath returns null (skips file scan)', () => {
+  it('returns null when resolveProjectPath returns null (skips file scan)', async () => {
     insertAgent('agent-x', 'other-project', 'shared-name');
     resolveProjectPathMock.mockReturnValue(null);
 
-    const conflict = findAgentNameConflict('myproject', 'shared-name');
+    const conflict = await findAgentNameConflict('myproject', 'shared-name');
     expect(conflict).toBeNull();
     expect(scanFileAgentsMock).not.toHaveBeenCalled();
   });
 
-  it('only matches agents belonging to the same project', () => {
+  it('only matches agents belonging to the same project', async () => {
     insertAgent('agent-a', 'project-a', 'shared-name');
     resolveProjectPathMock.mockReturnValue('/projects/project-b');
     scanFileAgentsMock.mockReturnValue([]);
 
-    const conflict = findAgentNameConflict('project-b', 'shared-name');
+    const conflict = await findAgentNameConflict('project-b', 'shared-name');
     expect(conflict).toBeNull();
   });
 });

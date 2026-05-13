@@ -24,11 +24,12 @@ export async function PATCH(
     return NextResponse.json({ detail: 'paused must be a boolean' }, { status: 400 });
   }
 
-  const row = db
+  const projectRows = await db
     .select()
     .from(schema.projects)
     .where(eq(schema.projects.name, projectName))
-    .get();
+    .limit(1);
+  const row = projectRows[0] ?? null;
   if (!row) {
     return NextResponse.json({ detail: 'project not found' }, { status: 404 });
   }
@@ -37,21 +38,19 @@ export async function PATCH(
   if (hasArchived) updates.archived = body.archived as boolean;
   if (hasPaused) updates.paused = body.paused as boolean;
 
-  db.update(schema.projects)
+  await db.update(schema.projects)
     .set(updates)
-    .where(eq(schema.projects.name, projectName))
-    .run();
+    .where(eq(schema.projects.name, projectName));
 
   clearProjectDataCache();
 
   if (hasArchived && body.archived) {
     // Drop any scheduled agent timers belonging to this project so the
     // archive takes effect without waiting for the next scheduler reload.
-    const agents = db
+    const agents = await db
       .select({ id: schema.agents.id })
       .from(schema.agents)
-      .where(eq(schema.agents.project, projectName))
-      .all();
+      .where(eq(schema.agents.project, projectName));
     for (const a of agents) removeAgentSchedule(a.id);
   }
 

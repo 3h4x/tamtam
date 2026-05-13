@@ -437,7 +437,7 @@ export async function registerNode(): Promise<void> {
   await migrateLegacyFileWorkflowFlags();
   try {
     const { backfillIssueCruncherPrerequisites } = await import('./lib/agents/default-agent-skills');
-    backfillIssueCruncherPrerequisites();
+    await backfillIssueCruncherPrerequisites();
   } catch (err) {
     console.error('[boot] issue-cruncher prerequisite backfill failed:', err);
   }

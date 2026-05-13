@@ -453,16 +453,15 @@ export async function reconcileStaleRelease(job: JobData): Promise<void> {
   // walk found only the test step and finalized the release with exit 0
   // before review/commit/push had a chance to chain.
   try {
-    const stillRunning = db
+    const allRows = await db
       .select({ id: schema.jobs.id, kind: schema.jobs.kind, startedAt: schema.jobs.startedAt, finishedAt: schema.jobs.finishedAt })
       .from(schema.jobs)
-      .where(eq(schema.jobs.project, release.project))
-      .all()
-      .filter(r =>
-        PIPELINE_STEP_KINDS.has(r.kind)
-        && r.finishedAt == null
-        && (r.startedAt ?? 0) >= releaseStart - 1,
-      );
+      .where(eq(schema.jobs.project, release.project));
+    const stillRunning = allRows.filter(r =>
+      PIPELINE_STEP_KINDS.has(r.kind)
+      && r.finishedAt == null
+      && (r.startedAt ?? 0) >= releaseStart - 1,
+    );
     if (stillRunning.length > 0) return;
   } catch {
     /* DB error → fall through; better to potentially over-finalize than to
@@ -558,7 +557,7 @@ export async function finalizeReleaseJob(release: JobData, exitCode: number): Pr
   // Release the pipeline lock
   try {
     const { releaseLock } = await import('@/lib/pipeline/pipeline-lock');
-    releaseLock(release.project, release.id);
+    await releaseLock(release.project, release.id);
   } catch {}
 }
 
@@ -1515,11 +1514,10 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
   // instance (fetched via separate listJobs() calls), both see finishedAt ===
   // null, and both run the completion hook, producing double "release
   // finished" markers, double fix chains, and orphaned child jobs. Consult
-  // the DB so the first writer wins. better-sqlite3 is synchronous so this
-  // check-then-write is atomic w.r.t. the JS event loop; no await means no
-  // other markDone can interleave here.
-  const dbRow = db.select({ finishedAt: schema.jobs.finishedAt })
-    .from(schema.jobs).where(eq(schema.jobs.id, job.id)).get();
+  // the DB so the first writer wins.
+  const dbRows = await db.select({ finishedAt: schema.jobs.finishedAt })
+    .from(schema.jobs).where(eq(schema.jobs.id, job.id)).limit(1);
+  const dbRow = dbRows[0] ?? null;
   if (dbRow?.finishedAt != null) {
     job.finishedAt = dbRow.finishedAt; // keep in-memory object in sync
     // A concurrent markDone (e.g. another probe) finalized this job first.
@@ -1584,9 +1582,7 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
   }
   if (shouldAutoMarkSeen(job)) job.seen = true;
   saveToDb(job);
-  try {
-    db.delete(schema.ghIssuesCache).where(eq(schema.ghIssuesCache.project, job.project)).run();
-  } catch {}
+  void db.delete(schema.ghIssuesCache).where(eq(schema.ghIssuesCache.project, job.project)).execute().catch(() => {});
   // Wrap completion hooks so a thrown handler can't strand the release
   // meta-job in `running`. Without this, an error inside e.g. the test→fix
   // hook (dynamic import failure, helper crash) would propagate up to the

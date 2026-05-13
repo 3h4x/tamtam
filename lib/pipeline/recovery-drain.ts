@@ -20,7 +20,7 @@ export async function drainQueuedAgentsForProjectIfClear(
   }
 
   const { getLock } = await import('./pipeline-lock');
-  if (getLock(project)) return;
+  if (await getLock(project)) return;
 
   const { drainQueuedAgentRunsForProject } = await import('@/lib/agents/queued-agent-runs');
   await drainQueuedAgentRunsForProject(project);
@@ -44,7 +44,7 @@ export async function drainAllRecoveryWork(logPrefix = '[recovery]'): Promise<vo
   const { listQueuedAgentRunProjects } = await import('@/lib/agents/queued-agent-runs');
   const projects = uniqueProjects([
     ...listPendingReleaseProjects(),
-    ...listQueuedAgentRunProjects(),
+    ...(await listQueuedAgentRunProjects()),
   ]);
   for (const project of projects) {
     try {
@@ -59,7 +59,7 @@ export async function drainUnlockedQueuedAgentRuns(
   logPrefix = '[queued-agent-runs]',
 ): Promise<void> {
   const { listQueuedAgentRunProjects } = await import('@/lib/agents/queued-agent-runs');
-  for (const project of uniqueProjects(listQueuedAgentRunProjects())) {
+  for (const project of uniqueProjects(await listQueuedAgentRunProjects())) {
     try {
       await drainQueuedAgentsForProjectIfClear(project, logPrefix);
     } catch (err) {
