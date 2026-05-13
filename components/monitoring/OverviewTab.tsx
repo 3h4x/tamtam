@@ -23,6 +23,7 @@ export function OverviewTab({
   const upServices = data.prometheus.services.filter(s => s.value?.[1] !== '0')
   const pm2ErrorCount = pm2Logs?.entries.filter(e => e.level === 'error').length ?? 0
   const pm2WarnCount  = pm2Logs?.entries.filter(e => e.level === 'warn').length ?? 0
+  const throttle = data.notificationThrottle
 
   const sections = [
     {
@@ -57,6 +58,16 @@ export function OverviewTab({
         data.loki.status !== 'unavailable' && data.loki.errors.length === 0 && data.loki.warnings.length === 0 ? 'No errors or warnings' : null,
       ].filter(Boolean) as string[],
     },
+    {
+      title: 'Notifications',
+      status: 'ok',
+      lines: [
+        `Throttle window ${throttle.windowSeconds}s`,
+        throttle.suppressedTotal > 0
+          ? `${throttle.suppressedTotal} suppressed alert${throttle.suppressedTotal === 1 ? '' : 's'} pending`
+          : 'No suppressed alerts pending',
+      ],
+    },
   ] as const
 
   const statusIcon = (s: string) =>
@@ -68,7 +79,7 @@ export function OverviewTab({
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {sections.map(sec => (
           <div key={sec.title} className={`rounded-lg border p-4 flex flex-col gap-2 ${statusCls(sec.status)}`}>
             <div className="flex items-center justify-between gap-2">
@@ -85,6 +96,21 @@ export function OverviewTab({
           </div>
         ))}
       </div>
+
+      {throttle.entries.length > 0 && (
+        <div>
+          <h3 className="text-xs font-medium text-text-secondary mb-2 uppercase tracking-wide">Notification throttle</h3>
+          <div className="space-y-1">
+            {throttle.entries.map((entry) => (
+              <div key={entry.key} className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-bg-secondary text-sm">
+                <span className="font-mono text-xs text-text-primary truncate" data-private>{entry.key}</span>
+                <span className="ml-auto text-xs text-text-tertiary">{entry.suppressedCount} suppressed</span>
+                <span className="text-xs text-text-tertiary">{new Date(entry.lastSentAt).toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Firing alerts inline */}
       {data.prometheus.status !== 'unavailable' && data.prometheus.alerts.length > 0 && (

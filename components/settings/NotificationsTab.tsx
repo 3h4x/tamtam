@@ -12,6 +12,8 @@ export interface NotificationsSettings {
   notification_on_fix_loop_exhausted: string
   notification_on_review_do_not_ship: string
   notification_on_agent_run_fail: string
+  notification_throttle_window_seconds: string
+  notification_throttle_overrides: string
   [key: string]: string
 }
 
@@ -125,6 +127,36 @@ export function NotificationsTab({
             )}
           </div>
         </form>
+      </div>
+
+      <div className="bg-bg-secondary rounded-lg border border-border">
+        <div className="px-5 py-3 border-b border-border flex items-baseline gap-3">
+          <h3 className="text-sm font-semibold text-text-primary">Throttle</h3>
+          <p className="text-xs text-text-tertiary">Suppress repeated alerts with the same event, project, and agent</p>
+        </div>
+        <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block font-medium text-sm text-text-primary mb-1.5">Window Seconds</label>
+            <input
+              type="number"
+              min="1"
+              value={settings.notification_throttle_window_seconds}
+              onChange={(e) => onChange('notification_throttle_window_seconds', e.target.value)}
+              className={INPUT_CLASS}
+            />
+            <p className="text-xs text-text-tertiary mt-1.5">Default 900. Repeated matching alerts are counted, then included on the next send after the window.</p>
+          </div>
+          <div>
+            <label className="block font-medium text-sm text-text-primary mb-1.5">Override JSON</label>
+            <input
+              type="text"
+              value={settings.notification_throttle_overrides}
+              onChange={(e) => onChange('notification_throttle_overrides', e.target.value)}
+              className={INPUT_CLASS}
+            />
+            <p className="text-xs text-text-tertiary mt-1.5">Set an event to 0 to always send it.</p>
+          </div>
+        </div>
       </div>
 
       {/* Event Toggles */}

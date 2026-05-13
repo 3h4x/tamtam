@@ -265,7 +265,10 @@ describe('job-control', () => {
       // notify is fire-and-forget; wait a microtask
       await new Promise<void>((r) => setTimeout(r, 0));
       expect(notifyMock).toHaveBeenCalledWith(
-        expect.objectContaining({ event: 'budget_blocked' })
+        expect.objectContaining({
+          event: 'budget_blocked',
+          throttleKeySuffix: 'budget:5h:2099-01-01T00:00:00Z',
+        })
       );
     });
 
@@ -275,6 +278,24 @@ describe('job-control', () => {
       budgetBlockedResult();
       await new Promise<void>((r) => setTimeout(r, 0));
       expect(notifyMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('notifies again when the reset window identity changes', async () => {
+      peekQuotaCacheMock
+        .mockReturnValueOnce(makeSnapshot(96, 40, '2099-01-01T00:00:00Z'))
+        .mockReturnValueOnce(makeSnapshot(96, 40, '2099-01-01T01:00:00Z'));
+      budgetBlockedResult();
+      budgetBlockedResult();
+      await new Promise<void>((r) => setTimeout(r, 0));
+      expect(notifyMock).toHaveBeenCalledTimes(2);
+      expect(notifyMock).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ throttleKeySuffix: 'budget:5h:2099-01-01T00:00:00Z' })
+      );
+      expect(notifyMock).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ throttleKeySuffix: 'budget:5h:2099-01-01T01:00:00Z' })
+      );
     });
   });
 

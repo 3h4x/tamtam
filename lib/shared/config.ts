@@ -62,6 +62,8 @@ export interface TamTamConfig {
   notification_on_fix_loop_exhausted: boolean;
   notification_on_review_do_not_ship: boolean;
   notification_on_agent_run_fail: boolean;
+  notification_throttle_window_seconds: number;
+  notification_throttle_overrides: Record<string, number>;
   pipeline_model_review: string;
   pipeline_model_fix: string;
   pipeline_model_dod: string;
@@ -130,6 +132,8 @@ const DEFAULTS: TamTamConfig = {
   notification_on_fix_loop_exhausted: false,
   notification_on_review_do_not_ship: false,
   notification_on_agent_run_fail: false,
+  notification_throttle_window_seconds: 900,
+  notification_throttle_overrides: { release_fail: 0, release_aborted: 0 },
   // Empty string = use the per-step sensible default (review/fix → workspace
   // default_model; dod/commit → fast since they're cheap classification tasks).
   pipeline_model_review: '',
@@ -274,6 +278,14 @@ export function getSettings(): TamTamConfig {
     notification_on_fix_loop_exhausted: map.notification_on_fix_loop_exhausted === 'true',
     notification_on_review_do_not_ship: map.notification_on_review_do_not_ship === 'true',
     notification_on_agent_run_fail: map.notification_on_agent_run_fail === 'true',
+    notification_throttle_window_seconds: parseIntOr(
+      map.notification_throttle_window_seconds,
+      DEFAULTS.notification_throttle_window_seconds
+    ),
+    notification_throttle_overrides: parseJsonNumberMap(
+      map.notification_throttle_overrides,
+      DEFAULTS.notification_throttle_overrides
+    ),
     pipeline_model_review: resolveModelAlias(map.pipeline_model_review),
     pipeline_model_fix: resolveModelAlias(map.pipeline_model_fix),
     pipeline_model_dod: resolveModelAlias(map.pipeline_model_dod),
@@ -327,6 +339,22 @@ function parseJsonObject(v: string | undefined): Record<string, string> {
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, string> : {};
   } catch {
     return {};
+  }
+}
+
+function parseJsonNumberMap(v: string | undefined, fallback: Record<string, number>): Record<string, number> {
+  if (!v) return fallback;
+  try {
+    const parsed = JSON.parse(v);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fallback;
+    const out: Record<string, number> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      const n = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
+      if (Number.isFinite(n) && n >= 0) out[key] = n;
+    }
+    return { ...fallback, ...out };
+  } catch {
+    return fallback;
   }
 }
 

@@ -109,6 +109,18 @@ User-defined reusable prompt blocks.
 
 ---
 
+### `notification_throttle`
+
+Persisted dedupe state for outbound webhook throttling.
+
+| Column | Type | Default | Notes |
+|--------|------|---------|-------|
+| `key` | TEXT | — | PRIMARY KEY; `${event}:${project}:${agent-or-kind}` |
+| `lastSentAt` | INTEGER | — | Unix timestamp in milliseconds for the last delivered alert |
+| `suppressedCount` | INTEGER | `0` | Number of matching alerts suppressed since `lastSentAt` |
+
+---
+
 ### `agents`
 
 Configuration for scheduled automated agents.
