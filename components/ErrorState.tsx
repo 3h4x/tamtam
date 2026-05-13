@@ -1,4 +1,3 @@
-// tamtam
 'use client'
 
 interface ErrorStateProps {

@@ -58,8 +58,8 @@ if (step.sleep_ms && step.sleep_ms > 0) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, step.sleep_ms);
 }
 
-// TamTam can mark Codex-backed jobs done as soon as the translated terminal
-// event is observed, so apply scripted workspace mutations before emitting it.
+// The harness can mark Codex-backed jobs done as soon as the translated
+// terminal event is observed, so apply scripted workspace mutations first.
 applyFileWrites(step.write_files);
 
 function emit(obj) {
