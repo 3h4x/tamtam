@@ -86,6 +86,7 @@ export interface FileCustomAction {
  * everyone working on the repo. It captures things that should be the same
  * for every developer:
  *   • test_command   — what command runs the project's tests
+ *   • release_timeout_minutes — per-project wall-clock budget for releases
  *   • custom_actions — buttons that should exist on the project page
  *   • safe_users     — GitHub logins whose PR comments are not wrapped as untrusted
  *
@@ -96,6 +97,7 @@ export interface FileCustomAction {
  */
 export interface FileProjectConfig {
   test_command?: string;
+  release_timeout_minutes?: number;
   custom_actions?: FileCustomAction[];
   safe_users?: string[];
   // Per-project commit-message style guide. When set, replaces the global
@@ -106,7 +108,7 @@ export interface FileProjectConfig {
 }
 
 const GROUPS: { label: string; keys: (keyof FileProjectConfig)[] }[] = [
-  { label: 'pipeline', keys: ['test_command'] },
+  { label: 'pipeline', keys: ['test_command', 'release_timeout_minutes'] },
   { label: 'actions', keys: ['custom_actions'] },
   { label: 'security', keys: ['safe_users'] },
   { label: 'commits', keys: ['commit_style'] },
@@ -149,6 +151,9 @@ function parseConfigYaml(raw: string): FileProjectConfig | null {
     const config: FileProjectConfig = {};
 
     if (typeof flat.test_command === 'string') config.test_command = flat.test_command;
+    if (typeof flat.release_timeout_minutes === 'number' && Number.isFinite(flat.release_timeout_minutes) && flat.release_timeout_minutes > 0) {
+      config.release_timeout_minutes = Math.floor(flat.release_timeout_minutes);
+    }
 
     if (typeof flat.commit_style === 'string') config.commit_style = flat.commit_style;
 
@@ -203,7 +208,7 @@ export { getBranchContext } from '@/lib/git/git-branch';
  */
 export function writeFileConfig(
   projectPath: string,
-  updates: Partial<Record<keyof FileProjectConfig, string | string[] | FileCustomAction[] | null>>
+  updates: Partial<Record<keyof FileProjectConfig, string | number | string[] | FileCustomAction[] | null>>
 ): void {
   const tamtamDir = join(projectPath, '.tamtam');
   const configPath = join(tamtamDir, 'config.yml');

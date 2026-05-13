@@ -68,6 +68,7 @@ function buildSettingsResponse(): Record<string, string> {
   settings.claude_provider = serializeSettingValue('claude_provider', effective.claude_provider);
   settings.cli_enabled_providers = serializeSettingValue('cli_enabled_providers', effective.cli_enabled_providers);
   settings.review_fix_max_iterations = serializeSettingValue('review_fix_max_iterations', effective.review_fix_max_iterations);
+  settings.release_wall_clock_timeout_minutes = serializeSettingValue('release_wall_clock_timeout_minutes', effective.release_wall_clock_timeout_minutes);
   if (effective.cli_bin_claude) {
     settings.cli_bin_claude = serializeSettingValue('cli_bin_claude', effective.cli_bin_claude);
   }
@@ -112,6 +113,7 @@ const SETTING_KEYS = [
   'review_verdict_rules',
   'jobs_paused',
   'review_fix_max_iterations',
+  'release_wall_clock_timeout_minutes',
   'agent_templates',
   'log_retention_count',
   'log_retention_days',
@@ -236,8 +238,8 @@ function validateAndSerializeSettingValue(
     return { value: parsed.model, error: null };
   }
 
-  if (key === 'review_fix_max_iterations') {
-    return parsePositiveIntegerSetting(value, 'review_fix_max_iterations');
+  if (key === 'review_fix_max_iterations' || key === 'release_wall_clock_timeout_minutes') {
+    return parsePositiveIntegerSetting(value, key);
   }
 
   if (key === 'notification_throttle_window_seconds') {

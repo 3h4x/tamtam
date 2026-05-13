@@ -423,6 +423,7 @@ export async function updateProjectConfig(
   projectName: string,
   config: {
     test_command?: string
+    release_timeout_minutes?: string
     test_cron_enabled?: boolean
     test_cron_schedule?: string
     auto_commit_enabled?: boolean

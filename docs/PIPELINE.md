@@ -225,7 +225,7 @@ steps reusing the same `release_id` from being mistaken for the release's
 authoritative stopping point. The background sweep only touches releases that
 finished successfully within the last 24 hours.
 
-The release meta-job (`kind='release'`) collects log sections from each step. Its own `finishedAt` is set when any step finalizes without chaining.
+The release meta-job (`kind='release'`) collects log sections from each step. Its own `finishedAt` is set when any step finalizes without chaining. On start, TamTam stores a `release_deadline_at` unix-ms deadline on that meta-job. The 30-second probe sweep checks unfinished release jobs and calls the same abort helper used by `POST /api/projects/by-project/<project>/release/abort` when the deadline has passed, emitting `release_aborted` with `reason: "wall_clock_timeout"`. The default budget is `release_wall_clock_timeout_minutes=60`; `.tamtam/config.yml` may override it per project with `pipeline.release_timeout_minutes`.
 
 ### History view — release grouping
 

@@ -61,6 +61,13 @@ test_command: npm test
     expect(loadFileConfig(tmpDir)?.test_command).toBe('pnpm lint && pnpm test');
   });
 
+  it('parses release_timeout_minutes under pipeline', () => {
+    writeConfig(tmpDir, `pipeline:
+  release_timeout_minutes: 45
+`);
+    expect(loadFileConfig(tmpDir)?.release_timeout_minutes).toBe(45);
+  });
+
   it('ignores legacy workflow flags on read (DB is authoritative)', () => {
     writeConfig(tmpDir, `pipeline:
   test_command: pnpm test
@@ -189,6 +196,20 @@ describe('writeFileConfig', () => {
     writeConfig(tmpDir, 'test_command: npm test\n');
     writeFileConfig(tmpDir, { test_command: null });
     expect(loadFileConfig(tmpDir)?.test_command).toBeUndefined();
+  });
+
+  it('writes release_timeout_minutes under pipeline and round-trips', () => {
+    writeFileConfig(tmpDir, { release_timeout_minutes: 45 });
+    const content = readFileSync(join(tmpDir, '.tamtam', 'config.yml'), 'utf-8');
+    expect(content).toContain('pipeline:');
+    expect(content).toContain('release_timeout_minutes: 45');
+    expect(loadFileConfig(tmpDir)?.release_timeout_minutes).toBe(45);
+  });
+
+  it('removes release_timeout_minutes when set to null', () => {
+    writeConfig(tmpDir, 'pipeline:\n  release_timeout_minutes: 45\n');
+    writeFileConfig(tmpDir, { release_timeout_minutes: null });
+    expect(loadFileConfig(tmpDir)?.release_timeout_minutes).toBeUndefined();
   });
 
   it('writes safe_users under security section', () => {

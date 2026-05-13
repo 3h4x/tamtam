@@ -51,6 +51,7 @@ export interface TamTamConfig {
   review_verdict_rules: string;
   jobs_paused: boolean;
   review_fix_max_iterations: number;
+  release_wall_clock_timeout_minutes: number;
   log_retention_count: number;
   log_retention_days: number;
   job_row_retention_days: number;
@@ -129,6 +130,7 @@ const DEFAULTS: TamTamConfig = {
 - Keep LGTM responses short: one sentence confirmation is enough.`,
   jobs_paused: false,
   review_fix_max_iterations: 3,
+  release_wall_clock_timeout_minutes: 60,
   log_retention_count: 200,
   log_retention_days: 30,
   job_row_retention_days: 180,
@@ -283,6 +285,10 @@ export function getSettings(): TamTamConfig {
     review_verdict_rules: map.review_verdict_rules ?? DEFAULTS.review_verdict_rules,
     jobs_paused: map.jobs_paused === 'true',
     review_fix_max_iterations: parsePositiveIntOr(map.review_fix_max_iterations, DEFAULTS.review_fix_max_iterations),
+    release_wall_clock_timeout_minutes: parsePositiveIntOr(
+      map.release_wall_clock_timeout_minutes,
+      DEFAULTS.release_wall_clock_timeout_minutes
+    ),
     log_retention_count: parseIntOr(map.log_retention_count, DEFAULTS.log_retention_count),
     log_retention_days: parseIntOr(map.log_retention_days, DEFAULTS.log_retention_days),
     job_row_retention_days: parseIntOr(map.job_row_retention_days, DEFAULTS.job_row_retention_days),

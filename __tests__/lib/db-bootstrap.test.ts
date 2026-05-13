@@ -94,7 +94,7 @@ describe('db bootstrap migrations', () => {
     expect(queuedIndex?.name).toBe('queued_agent_runs_project_agent');
   });
 
-  it('keeps maintenance_status compatible with the numbered migration after runtime bootstrap', async () => {
+  it('keeps runtime-bootstrapped schema compatible with the numbered migrations', async () => {
     const dbPath = createDbWithSettings([]);
     process.env.TAMTAM_DB_PATH = dbPath;
 
@@ -139,8 +139,10 @@ describe('db bootstrap migrations', () => {
           FROM sqlite_master
           WHERE type = 'table' AND name = 'maintenance_status'
         `).get() as { name: string } | undefined;
+        const jobsColumns = sqlite.prepare('PRAGMA table_info(jobs)').all() as Array<{ name: string }>;
 
         expect(maintenanceStatus?.name).toBe('maintenance_status');
+        expect(jobsColumns.map((column) => column.name)).toContain('release_deadline_at');
       } finally {
         sqlite.close();
       }

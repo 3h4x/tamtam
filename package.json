@@ -31,7 +31,7 @@
     "check": "pnpm lint && pnpm type-check && pnpm test",
     "lint": "eslint app components lib hooks",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "node scripts/db-migrate.js",
     "db:verify": "node scripts/db-verify.js",
     "db:restore": "node scripts/db-restore.js",
     "prepare": "husky"

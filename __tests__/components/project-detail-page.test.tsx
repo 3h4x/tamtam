@@ -122,6 +122,7 @@ vi.mock('@/components/project-detail/ConfigTab', () => ({
     configLoading: boolean
     anyDirty: boolean
     setTestCommandInput: (value: string) => void
+    setReleaseTimeoutMinutesInput: (value: string) => void
     setEditActions: (value: CustomAction[]) => void
     onSaveAll: () => Promise<void>
   }) => (
@@ -130,6 +131,7 @@ vi.mock('@/components/project-detail/ConfigTab', () => ({
       <div data-command={props.config?.test_command ?? 'none'} />
       <div data-dirty={props.anyDirty ? 'yes' : 'no'} />
       <button type="button" onClick={() => props.setTestCommandInput('pnpm lint')}>change config</button>
+      <button type="button" onClick={() => props.setReleaseTimeoutMinutesInput('45')}>change timeout</button>
       <button type="button" onClick={() => props.setEditActions([{ name: 'Deploy', command: 'pnpm deploy --prod' }])}>change actions</button>
       <button type="button" onClick={() => void props.onSaveAll()}>save all</button>
     </div>
@@ -170,6 +172,7 @@ function buildConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
   return {
     project: 'acme/widgets',
     test_command: 'pnpm test',
+    release_timeout_minutes: null,
     detected_test_command: 'pnpm test',
     effective_test_command: 'pnpm test',
     test_cron_enabled: false,
@@ -427,6 +430,7 @@ describe('ProjectDetailPage', () => {
 
     flushSync(() => {
       buttonByText(container, 'change config').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      buttonByText(container, 'change timeout').dispatchEvent(new MouseEvent('click', { bubbles: true }))
       buttonByText(container, 'change actions').dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
@@ -441,6 +445,7 @@ describe('ProjectDetailPage', () => {
     await vi.waitFor(() => {
       expect(updateProjectConfigMock).toHaveBeenCalledWith('acme/widgets', expect.objectContaining({
         test_command: 'pnpm lint',
+        release_timeout_minutes: '45',
         test_cron_enabled: false,
         auto_push_enabled: false,
       }))

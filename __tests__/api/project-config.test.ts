@@ -79,8 +79,21 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     const data = await res.json();
     expect(data.project).toBe('proj1');
     expect(data.test_command).toBe('');
+    expect(data.release_timeout_minutes).toBeNull();
     expect(data.detected_test_command).toBe('');
     expect(data.effective_test_command).toBe('');
+  });
+
+  it('surfaces release_timeout_minutes from the file config when set', async () => {
+    mkdirSync(join(tempDir, '.tamtam'), { recursive: true });
+    writeFileSync(join(tempDir, '.tamtam', 'config.yml'), 'pipeline:\n  release_timeout_minutes: 45\n');
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+
+    expect(data.release_timeout_minutes).toBe(45);
+    expect(data.file_config).toContain('release_timeout_minutes');
   });
 
   it('returns auto_commit_enabled=false by default', async () => {
@@ -453,6 +466,44 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     const data = await res.json();
     expect(data.status).toBe('ok');
     expect(writeProjectFieldYamlMock).toHaveBeenCalledWith('proj1', 'test_command', 'pnpm test');
+  });
+
+  it('persists release_timeout_minutes to the project file config', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ release_timeout_minutes: '45' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeProjectFieldYamlMock).not.toHaveBeenCalled();
+    expect(writeFileConfigMock).toHaveBeenCalledWith('/path/to/proj', {
+      release_timeout_minutes: 45,
+    });
+  });
+
+  it('clears release_timeout_minutes from the project file config when whitespace-only', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ release_timeout_minutes: '   ' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(writeFileConfigMock).toHaveBeenCalledWith('/path/to/proj', {
+      release_timeout_minutes: null,
+    });
+  });
+
+  it('rejects non-numeric release_timeout_minutes payloads', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ release_timeout_minutes: 'soon' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toContain('release_timeout_minutes must be a positive integer');
+    expect(writeFileConfigMock).not.toHaveBeenCalled();
+    expect(writeProjectFieldYamlMock).not.toHaveBeenCalled();
   });
 
   it('clears test_command when empty string provided', async () => {
