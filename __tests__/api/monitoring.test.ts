@@ -334,6 +334,93 @@ describe('GET /api/monitoring', () => {
     });
     expect(data.retention.lastNightlyCleanup).toEqual(nightlySummary);
     expect(data.retention.lastProjectLogCleanup).toEqual(projectLogSummary);
+    expect(data.hasIssues).toBe(false);
+  });
+
+  it('sets hasIssues true when nightly retention cleanup failed', async () => {
+    const failedNightly = {
+      type: 'nightly',
+      status: 'failed',
+      startedAt: 1700000000,
+      finishedAt: 1700000010,
+      rowsScanned: 2,
+      rowsDeleted: 0,
+      skippedRunningRows: 0,
+      errorCount: 1,
+      lastError: 'disk full',
+      sqliteMaintenance: {
+        status: 'skipped',
+        startedAt: 1700000000,
+        finishedAt: 1700000000,
+        activeJobs: 0,
+        reason: 'no_deleted_rows',
+        checkpointRan: false,
+        vacuumRan: false,
+      },
+    };
+    testDb.sqlite.prepare('INSERT INTO maintenance_status (key, value, updated_at) VALUES (?, ?, ?)').run('retention:nightly:last', JSON.stringify(failedNightly), 1700000010);
+    fetchSpy.mockRejectedValue(new Error('connection refused'));
+
+    const res = await GET(makeRequest());
+    const data = await res.json();
+    expect(data.retention.lastNightlyCleanup.status).toBe('failed');
+    expect(data.hasIssues).toBe(true);
+  });
+
+  it('sets hasIssues true when project log retention cleanup failed', async () => {
+    const failedProjectLog = {
+      type: 'project_logs',
+      project: 'proj',
+      status: 'failed',
+      startedAt: 1700000020,
+      finishedAt: 1700000030,
+      rowsScanned: 3,
+      rowsEligible: 2,
+      rowsUpdated: 1,
+      logFilesDeleted: 0,
+      bytesReclaimed: 0,
+      skippedRunningRows: 0,
+      errorCount: 1,
+      lastError: 'EPERM unlink denied',
+    };
+    testDb.sqlite.prepare('INSERT INTO maintenance_status (key, value, updated_at) VALUES (?, ?, ?)').run('retention:project-logs:last', JSON.stringify(failedProjectLog), 1700000030);
+    fetchSpy.mockRejectedValue(new Error('connection refused'));
+
+    const res = await GET(makeRequest());
+    const data = await res.json();
+    expect(data.retention.lastProjectLogCleanup.status).toBe('failed');
+    expect(data.hasIssues).toBe(true);
+  });
+
+  it('sets hasIssues true when sqlite maintenance failed even if row deletion succeeded', async () => {
+    const nightlyWithFailedSqlite = {
+      type: 'nightly',
+      status: 'completed',
+      startedAt: 1700000000,
+      finishedAt: 1700000020,
+      rowsScanned: 3,
+      rowsDeleted: 2,
+      skippedRunningRows: 0,
+      errorCount: 0,
+      lastError: null,
+      sqliteMaintenance: {
+        status: 'failed',
+        startedAt: 1700000010,
+        finishedAt: 1700000020,
+        activeJobs: 0,
+        reason: 'error',
+        checkpointRan: false,
+        vacuumRan: false,
+        error: 'SQLITE_IOERR',
+      },
+    };
+    testDb.sqlite.prepare('INSERT INTO maintenance_status (key, value, updated_at) VALUES (?, ?, ?)').run('retention:nightly:last', JSON.stringify(nightlyWithFailedSqlite), 1700000020);
+    fetchSpy.mockRejectedValue(new Error('connection refused'));
+
+    const res = await GET(makeRequest());
+    const data = await res.json();
+    expect(data.retention.lastNightlyCleanup.sqliteMaintenance.status).toBe('failed');
+    expect(data.hasIssues).toBe(true);
   });
 
   it('loki queries exclude info/debug/trace log levels', async () => {

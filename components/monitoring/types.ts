@@ -12,43 +12,8 @@ export interface LogLine {
 export type TimeWindow = '5m' | '15m' | '1h'
 export type MonitoringTab = 'overview' | 'agents' | 'logs' | 'infra'
 
-export interface SqliteMaintenanceSummary {
-  status: 'completed' | 'skipped' | 'failed'
-  startedAt: number
-  finishedAt: number
-  activeJobs: number
-  reason?: string
-  checkpointRan: boolean
-  vacuumRan: boolean
-  error?: string
-}
-
-export type RetentionSummary = {
-  type: 'project_logs'
-  project: string
-  status: 'completed' | 'disabled' | 'failed'
-  startedAt: number
-  finishedAt: number
-  rowsScanned: number
-  rowsEligible: number
-  rowsUpdated: number
-  logFilesDeleted: number
-  bytesReclaimed: number
-  skippedRunningRows: number
-  errorCount: number
-  lastError: string | null
-} | {
-  type: 'nightly'
-  status: 'completed' | 'disabled' | 'failed'
-  startedAt: number
-  finishedAt: number
-  rowsScanned: number
-  rowsDeleted: number
-  skippedRunningRows: number
-  errorCount: number
-  lastError: string | null
-  sqliteMaintenance: SqliteMaintenanceSummary
-}
+export type { SqliteMaintenanceSummary, ProjectLogRetentionSummary, NightlyRetentionSummary, RetentionSummary } from '@/lib/jobs/retention'
+import type { ProjectLogRetentionSummary, NightlyRetentionSummary } from '@/lib/jobs/retention'
 
 export interface MonitoringData {
   prometheus: {
@@ -73,8 +38,8 @@ export interface MonitoringData {
       logRetentionDays: number
       jobRowRetentionDays: number
     }
-    lastProjectLogCleanup: Extract<RetentionSummary, { type: 'project_logs' }> | null
-    lastNightlyCleanup: Extract<RetentionSummary, { type: 'nightly' }> | null
+    lastProjectLogCleanup: ProjectLogRetentionSummary | null
+    lastNightlyCleanup: NightlyRetentionSummary | null
   }
   hasIssues: boolean
   fetchedAt: number
