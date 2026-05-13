@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { JobData } from '@/lib/jobs/types';
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
@@ -26,9 +26,13 @@ describe('abortActiveRelease', () => {
   let updateJobMock: ReturnType<typeof vi.fn>;
   let finalizeAbortedReleaseMock: ReturnType<typeof vi.fn>;
   let notifyMock: ReturnType<typeof vi.fn>;
+  let execMock: ReturnType<typeof vi.fn>;
+  let requestJobCancellationMock: ReturnType<typeof vi.fn>;
+  let shouldSignalJobPidMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.resetModules();
+    vi.useFakeTimers();
     getLockMock = vi.fn().mockReturnValue({ project: 'proj1', lockedByJobId: 'release-1', acquiredAt: 1000 });
     releaseLockMock = vi.fn();
     getJobMock = vi.fn();
@@ -36,6 +40,9 @@ describe('abortActiveRelease', () => {
     updateJobMock = vi.fn();
     finalizeAbortedReleaseMock = vi.fn().mockResolvedValue(undefined);
     notifyMock = vi.fn().mockResolvedValue(undefined);
+    execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+    requestJobCancellationMock = vi.fn().mockResolvedValue(true);
+    shouldSignalJobPidMock = vi.fn().mockReturnValue(false);
 
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: getLockMock,
@@ -50,12 +57,12 @@ describe('abortActiveRelease', () => {
       finalizeAbortedRelease: finalizeAbortedReleaseMock,
     }));
     vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+      exec: execMock,
     }));
     vi.doMock('@/lib/jobs/cancellation', () => ({
-      requestJobCancellation: vi.fn().mockResolvedValue(true),
+      requestJobCancellation: requestJobCancellationMock,
       SAFE_PID_FLOOR: 100,
-      shouldSignalJobPid: vi.fn().mockReturnValue(false),
+      shouldSignalJobPid: shouldSignalJobPidMock,
     }));
     vi.doMock('@/lib/jobs/redacted-log-writer', () => ({
       appendRedactedFileSync: vi.fn(),
@@ -63,6 +70,11 @@ describe('abortActiveRelease', () => {
     vi.doMock('@/lib/shared/notifications', () => ({
       notify: notifyMock,
     }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it('emits release_aborted with the wall-clock timeout reason', async () => {
@@ -156,5 +168,113 @@ describe('abortActiveRelease', () => {
     });
     expect(releaseLockMock).not.toHaveBeenCalled();
     expect(finalizeAbortedReleaseMock).not.toHaveBeenCalled();
+  });
+
+  it('returns abort_pending when a commit step does not stop after cancellation', async () => {
+    const release = makeJob();
+    const runningCommit = makeJob({
+      id: 'commit-1',
+      kind: 'commit',
+      pid: 99999,
+      releaseId: 'release-1',
+      startedAt: 1500,
+    });
+    getJobMock.mockReturnValue(release);
+    listJobsMock.mockReturnValue([release, runningCommit]);
+    requestJobCancellationMock.mockResolvedValue(false);
+
+    const { abortActiveRelease } = await import('@/lib/pipeline/release-abort');
+    const result = await abortActiveRelease('proj1', { reason: 'user' });
+
+    expect(result).toEqual({
+      status: 'abort_pending',
+      detail: 'Timed out waiting for commit to stop cleanly',
+      release_id: 'release-1',
+      killed_job_id: null,
+      httpStatus: 409,
+    });
+    expect(execMock).toHaveBeenNthCalledWith(1, 'pm2', ['stop', 'commit-1', '--silent'], { timeout: 5000 });
+    expect(execMock).toHaveBeenNthCalledWith(2, 'pm2', ['delete', 'commit-1', '--silent'], { timeout: 5000 });
+    expect(requestJobCancellationMock).toHaveBeenCalledWith('commit-1', 20_000);
+    expect(updateJobMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'release-1', abortedAt: expect.any(Number) }));
+    expect(updateJobMock).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'commit-1' }));
+    expect(finalizeAbortedReleaseMock).not.toHaveBeenCalled();
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('signals a non-inline running step and force-kills it on the timer', async () => {
+    const release = makeJob();
+    const runningReview = makeJob({
+      id: 'review-1',
+      kind: 'review',
+      pid: 99999,
+      releaseId: 'release-1',
+      startedAt: 1500,
+    });
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    getJobMock.mockReturnValue(release);
+    listJobsMock.mockReturnValue([release, runningReview]);
+    shouldSignalJobPidMock.mockReturnValue(true);
+
+    const { abortActiveRelease } = await import('@/lib/pipeline/release-abort');
+    const resultPromise = abortActiveRelease('proj1', { reason: 'user' });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({
+      status: 'aborted',
+      release_id: 'release-1',
+      killed_job_id: 'review-1',
+      httpStatus: 200,
+    });
+    expect(killSpy).toHaveBeenNthCalledWith(1, 99999, 'SIGTERM');
+    expect(killSpy).toHaveBeenNthCalledWith(2, 99999, 'SIGKILL');
+    expect(updateJobMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'review-1',
+      abortedAt: expect.any(Number),
+      finishedAt: expect.any(Number),
+      exitCode: -3,
+    }));
+    expect(finalizeAbortedReleaseMock).toHaveBeenCalledWith(release);
+    expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'release_aborted',
+      reason: 'user',
+    }));
+  });
+
+  it('refuses to signal suspicious low pids and still finalizes the abort', async () => {
+    const release = makeJob();
+    const runningReview = makeJob({
+      id: 'review-1',
+      kind: 'review',
+      pid: 42,
+      releaseId: 'release-1',
+      startedAt: 1500,
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    getJobMock.mockReturnValue(release);
+    listJobsMock.mockReturnValue([release, runningReview]);
+
+    const { abortActiveRelease } = await import('@/lib/pipeline/release-abort');
+    const result = await abortActiveRelease('proj1', { reason: 'user' });
+
+    expect(result).toMatchObject({
+      status: 'aborted',
+      release_id: 'release-1',
+      killed_job_id: 'review-1',
+      httpStatus: 200,
+    });
+    expect(killSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[release-abort] refusing to signal suspicious pid=42 for review-1 (review)',
+    );
+    expect(updateJobMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'review-1',
+      abortedAt: expect.any(Number),
+      finishedAt: expect.any(Number),
+      exitCode: -3,
+    }));
+    expect(finalizeAbortedReleaseMock).toHaveBeenCalledWith(release);
   });
 });
