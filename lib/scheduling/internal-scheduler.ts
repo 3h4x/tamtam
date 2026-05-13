@@ -30,6 +30,7 @@ import {
 } from '@/lib/shared/job-control';
 import { getDirtyFileCount } from '@/lib/git/dirty-worktree';
 import { resolveProjectPath } from '@/lib/shared/project-data';
+import { isProjectArchived } from '@/lib/shared/enabled-projects';
 import { getSettings } from '@/lib/shared/config';
 import { db, schema } from '@/lib/db';
 import { eq, and, isNotNull, desc } from 'drizzle-orm';
@@ -172,6 +173,26 @@ export function computeNextFire(schedule: string, agentId: string, fromMs: numbe
 async function fire(entry: ScheduleEntry): Promise<void> {
   if (getPaused() || !entry.enabled) return;
   let shouldRearm = true;
+
+  // Archived projects keep their agent rows in the DB so users can unarchive
+  // later, but scheduled fires stay quiet. Re-arm so the check recurs if this
+  // entry is still live (e.g. the project was archived via a direct DB edit
+  // rather than the API). When archived via the PATCH route, removeAgentSchedule
+  // already deleted this entry before fire() could run, so this path is only
+  // reached in the direct-DB case; agents resume on the next server restart or
+  // an explicit upsertAgentSchedule call after a normal API unarchive.
+  try {
+    if (isProjectArchived(entry.project)) {
+      entry.skippedCount += 1;
+      entry.lastSkippedReason = 'project archived';
+      console.log(`[internal-scheduler] ${entry.project}/${entry.name} skipped — project archived`);
+      armNext(entry);
+      shouldRearm = false;
+      return;
+    }
+  } catch {
+    // Archive probe failure shouldn't block runs — fall through.
+  }
 
   // Warm quota-aware provider caches before consulting the synchronous
   // multi-provider budget gates so the first scheduled fire after boot

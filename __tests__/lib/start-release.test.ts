@@ -6,6 +6,11 @@ import type { JobData } from '@/lib/jobs/types';
 import type { CliProvider } from '@/lib/usage/cli-providers';
 import type { QuotaSnapshot } from '@/lib/usage/quota-types';
 
+const isProjectArchivedMock = vi.fn().mockReturnValue(false);
+vi.mock('@/lib/shared/enabled-projects', () => ({
+  isProjectArchived: (...args: unknown[]) => isProjectArchivedMock(...args),
+}));
+
 describe('startRelease — release pipeline entry decision tree', () => {
   let startRelease: typeof import('@/lib/pipeline/start-release').startRelease;
   let execMock: ReturnType<typeof vi.fn>;
@@ -123,6 +128,18 @@ describe('startRelease — release pipeline entry decision tree', () => {
     const r = await startRelease('missing');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(404);
+  });
+
+  it('returns 409 when the project is archived', async () => {
+    isProjectArchivedMock.mockReturnValueOnce(true);
+    const r = await startRelease('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(409);
+      expect(r.detail).toBe('project archived');
+    }
+    expect(createJobMock).not.toHaveBeenCalled();
+    expect(startProjectTestMock).not.toHaveBeenCalled();
   });
 
   it('blocks release startup while an agent prerequisite holds the project start slot', async () => {

@@ -24,7 +24,9 @@ describe('listEnabledProjects', () => {
     }));
 
     const { listEnabledProjects } = await import('@/lib/shared/enabled-projects');
-    expect(listEnabledProjects()).toEqual([{ name: 'proj1', path: '/w/proj1' }]);
+    expect(listEnabledProjects()).toEqual([
+      expect.objectContaining({ name: 'proj1', path: '/w/proj1', archived: false }),
+    ]);
   });
 
   it('falls back to an unfiltered scan when the where-chain is unavailable', async () => {
@@ -41,7 +43,9 @@ describe('listEnabledProjects', () => {
     }));
 
     const { listEnabledProjects } = await import('@/lib/shared/enabled-projects');
-    expect(listEnabledProjects()).toEqual([{ name: 'proj1', path: '/w/proj1' }]);
+    expect(listEnabledProjects()).toEqual([
+      expect.objectContaining({ name: 'proj1', path: '/w/proj1', archived: false }),
+    ]);
   });
 
   it('returns an empty list when the projects table is unavailable', async () => {
