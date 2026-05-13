@@ -24,6 +24,9 @@ import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { enqueueAgentRun, tryClaimAgentStartSlot, releaseAgentStartSlot, drainNextAgentRun } from '@/lib/agents/pending-agent-run';
 import { getSettings } from '@/lib/shared/config';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
+import { sqlite } from '@/lib/db';
+import { SqliteVecBackend } from '@/lib/agents/retrieval/sqlite-vec-backend';
+import { retrieveAgentContext } from '@/lib/agents/retrieval/retriever';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
@@ -568,7 +571,24 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   const corePrompt = systemPrompt && taskPrompt
     ? `${systemPrompt}\n\n---\n\n${taskPrompt}`
     : (systemPrompt || taskPrompt);
-  const fullPrompt = withBasePrompt(`${corePrompt}\n\n---\n\n${memoryBlock}`, { projectPath: projPath, provider });
+
+  let retrievedContext: string | null = null;
+  if (settings.retrieval_enabled && taskPrompt) {
+    retrievedContext = await retrieveAgentContext({
+      backend: new SqliteVecBackend(sqlite),
+      project: agent.project,
+      taskPrompt,
+      limit: settings.retrieval_context_limit,
+      scoreThreshold: settings.retrieval_score_threshold,
+      ollamaUrl: settings.retrieval_ollama_url,
+      embeddingModel: settings.retrieval_embedding_model,
+    });
+  }
+
+  const promptWithRetrieval = retrievedContext
+    ? `${retrievedContext}\n\n---\n\n${corePrompt}`
+    : corePrompt;
+  const fullPrompt = withBasePrompt(`${promptWithRetrieval}\n\n---\n\n${memoryBlock}`, { projectPath: projPath, provider });
 
   try {
     const pid = await startJob(job.id, cmd, fullPrompt, projPath, { env: cliEnv });

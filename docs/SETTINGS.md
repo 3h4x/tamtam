@@ -189,6 +189,21 @@ Outbound webhook fired when the release pipeline reaches a terminal state. Suppo
 | `notification_throttle_window_seconds` | number | `900` | Suppress repeated webhook notifications with the same event/project/agent key for this many seconds |
 | `notification_throttle_overrides` | JSON object | `{ "release_fail": 0, "release_aborted": 0 }` | Per-event throttle windows in seconds; `0` always sends |
 
+### Retrieval
+
+Semantic retrieval layer — embeds agent run reports and project docs into a local vector store (`sqlite-vec`) and injects relevant context into agent prompts at run time. Embeddings are generated locally via Ollama (`nomic-embed-text`). Everything is off by default (`retrieval_enabled = false`).
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `retrieval_enabled` | bool | `false` | Master gate — nothing runs if off |
+| `retrieval_ollama_url` | string | `http://localhost:11434` | Ollama base URL |
+| `retrieval_embedding_model` | string | `nomic-embed-text` | Ollama embedding model name |
+| `retrieval_context_limit` | int | `5` | Max snippets injected per agent prompt |
+| `retrieval_score_threshold` | float | `0.8` | Min similarity score to include a result |
+| `retrieval_manage_ollama` | bool | `true` | Whether TamTam starts Ollama via PM2 if not running |
+
+When enabled, TamTam starts Ollama via PM2 (`ollama-serve`) on boot if not already reachable, pulls `nomic-embed-text` if not installed, and indexes completed agent run reports automatically. Use `POST /api/projects/[name]/retrieval/reindex` to index project docs on demand.
+
 ### Subscription Budget
 
 Live subscription quota (5-hour rolling + 7-day weekly window) is surfaced on `/stats` and Settings → Budget. For the `claude` provider, TamTam fetches `https://api.anthropic.com/api/oauth/usage` using the OAuth token from the macOS Keychain (`security find-generic-password -s "Claude Code-credentials" -w`) or `~/.claude/.credentials.json` and caches the snapshot for 600 s. The background budget-recovery ticker refreshes that cache every 300 s before checking whether queued work can resume. For the `codex` provider, TamTam reads the latest local Codex `token_count.rate_limits` event from `~/.codex/sessions/**/*.jsonl`, matching the windows shown by Codex `/status`.

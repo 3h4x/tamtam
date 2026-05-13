@@ -159,3 +159,24 @@ export const maintenanceStatus = sqliteTable('maintenance_status', {
   value: text('value').notNull(),
   updatedAt: real('updated_at').notNull(),
 });
+
+export const retrievalRecords = sqliteTable('retrieval_records', {
+  id: text('id').primaryKey(), // `${project}:${sourceKind}:${sourceId}`
+  project: text('project').notNull(),
+  sourceKind: text('source_kind').notNull(),
+  sourceId: text('source_id').notNull(),
+  chunkCount: integer('chunk_count').notNull(),
+  contentHash: text('content_hash').notNull(),
+  indexedAt: real('indexed_at').notNull(),
+});
+
+export const retrievalChunks = sqliteTable('retrieval_chunks', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  chunkId: text('chunk_id').notNull().unique(),
+  project: text('project').notNull(),
+  sourceKind: text('source_kind').notNull(),
+  sourceId: text('source_id').notNull(),
+  chunkIndex: integer('chunk_index').notNull(),
+  text: text('text').notNull(),
+  metadata: text('metadata').notNull(),
+});

@@ -4,6 +4,11 @@ import { upsertRecommendation } from '@/lib/recommendations/recommendations';
 import { isAgentJobKind } from '@/lib/jobs/kinds';
 import type { JobData } from '@/lib/jobs/types';
 import { extractAssistantTextFromRawLog, extractWorkSummary } from '@/lib/agents/work-summary-extractor.mjs';
+import { getSettings } from '@/lib/shared/config';
+import { db, schema, sqlite } from '@/lib/db';
+import { eq } from 'drizzle-orm';
+import { SqliteVecBackend } from '@/lib/agents/retrieval/sqlite-vec-backend';
+import { ingestAgentRun, hashContent } from '@/lib/agents/retrieval/ingestion';
 
 interface AgentContextMeta {
   agent?: { id?: string; name?: string; schedule?: string | null; triggeredBy?: string };
@@ -144,4 +149,58 @@ export async function finalizeAgentRunReport(job: JobData, rawLog: string): Prom
     if (parsed != null) job.ghIssueNumber = parsed;
   }
   if (isAgent) maybeRecommendSchedule(job, ctx, files, actionable);
+
+  // Best-effort: index completed run for future retrieval (fire-and-forget)
+  void (async () => {
+    try {
+      const cfg = getSettings();
+      if (!cfg.retrieval_enabled || !job.workSummary) return;
+
+      const recordId = `${job.project}:agent_run:${job.id}`;
+      const existing = db.select()
+        .from(schema.retrievalRecords)
+        .where(eq(schema.retrievalRecords.id, recordId))
+        .get();
+
+      const backend = new SqliteVecBackend(sqlite);
+      const files: string[] = job.modifiedFiles
+        ? (JSON.parse(job.modifiedFiles) as { path: string }[]).map((f) => f.path)
+        : [];
+
+      const { contentHash, skipped } = await ingestAgentRun({
+        backend,
+        project: job.project,
+        jobId: job.id,
+        agentId: ctx.agent?.id ?? job.id,
+        agentName: ctx.agent?.name ?? job.kind.replace(/^agent:/, ''),
+        workSummary: job.workSummary,
+        modifiedFiles: files,
+        exitCode: job.exitCode ?? -1,
+        completedAt: job.finishedAt ?? Date.now() / 1000,
+        ollamaUrl: cfg.retrieval_ollama_url,
+        embeddingModel: cfg.retrieval_embedding_model,
+        existingHash: existing?.contentHash ?? null,
+      });
+
+      if (!skipped) {
+        db.insert(schema.retrievalRecords)
+          .values({
+            id: recordId,
+            project: job.project,
+            sourceKind: 'agent_run',
+            sourceId: job.id,
+            chunkCount: 1,
+            contentHash,
+            indexedAt: Date.now() / 1000,
+          })
+          .onConflictDoUpdate({
+            target: schema.retrievalRecords.id,
+            set: { contentHash, indexedAt: Date.now() / 1000, chunkCount: 1 },
+          })
+          .run();
+      }
+    } catch (err) {
+      console.warn('[retrieval] agent run ingestion failed:', err);
+    }
+  })();
 }

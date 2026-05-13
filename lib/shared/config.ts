@@ -78,6 +78,12 @@ export interface TamTamConfig {
   notification_on_budget_blocked: boolean;
   dirty_worktree_block_threshold: number;
   incremental_review_enabled: boolean;
+  retrieval_enabled: boolean;
+  retrieval_ollama_url: string;
+  retrieval_embedding_model: string;
+  retrieval_context_limit: number;
+  retrieval_score_threshold: number;
+  retrieval_manage_ollama: boolean;
 }
 
 const DEFAULTS: TamTamConfig = {
@@ -152,6 +158,12 @@ const DEFAULTS: TamTamConfig = {
   notification_on_budget_blocked: false,
   dirty_worktree_block_threshold: 20,
   incremental_review_enabled: true,
+  retrieval_enabled: false,
+  retrieval_ollama_url: 'http://localhost:11434',
+  retrieval_embedding_model: 'nomic-embed-text',
+  retrieval_context_limit: 5,
+  retrieval_score_threshold: 0.8,
+  retrieval_manage_ollama: true,
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
@@ -310,6 +322,15 @@ export function getSettings(): TamTamConfig {
       map.incremental_review_enabled === undefined
         ? DEFAULTS.incremental_review_enabled
         : map.incremental_review_enabled === 'true',
+    retrieval_enabled: map.retrieval_enabled === 'true',
+    retrieval_ollama_url: map.retrieval_ollama_url ?? DEFAULTS.retrieval_ollama_url,
+    retrieval_embedding_model: map.retrieval_embedding_model ?? DEFAULTS.retrieval_embedding_model,
+    retrieval_context_limit: parseIntOr(map.retrieval_context_limit, DEFAULTS.retrieval_context_limit),
+    retrieval_score_threshold: (() => {
+      const v = parseFloat(map.retrieval_score_threshold ?? '');
+      return Number.isFinite(v) ? v : DEFAULTS.retrieval_score_threshold;
+    })(),
+    retrieval_manage_ollama: map.retrieval_manage_ollama !== 'false',
   };
 
   if (config.lmstudio_model) {
