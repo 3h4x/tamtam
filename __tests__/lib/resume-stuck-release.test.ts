@@ -129,6 +129,110 @@ describe('resume-stuck-release helpers', () => {
     testDb.sqlite.close();
   });
 
+  it('returns not_found when the release belongs to another project', async () => {
+    getJobMock.mockReturnValue(makeJob({
+      id: 'release-other-project',
+      project: 'other-proj',
+      kind: 'release',
+      finishedAt: 100,
+      exitCode: 0,
+    }));
+
+    const { resumeStuckRelease } = await import('@/lib/pipeline/resume-stuck-release');
+    const resumed = await resumeStuckRelease('proj', 'release-other-project');
+
+    expect(resumed).toEqual({
+      ok: false,
+      status: 'not_found',
+      detail: 'release not found',
+      attempted: false,
+    });
+    expect(listJobsMock).not.toHaveBeenCalled();
+    expect(acquireLockMock).not.toHaveBeenCalled();
+    expect(runCompletionHooksMock).not.toHaveBeenCalled();
+  });
+
+  it('returns not_found when the job exists but is not a release', async () => {
+    getJobMock.mockReturnValue(makeJob({
+      id: 'review-1',
+      project: 'proj',
+      kind: 'review',
+      finishedAt: 100,
+      exitCode: 0,
+    }));
+
+    const { resumeStuckRelease } = await import('@/lib/pipeline/resume-stuck-release');
+    const resumed = await resumeStuckRelease('proj', 'review-1');
+
+    expect(resumed).toEqual({
+      ok: false,
+      status: 'not_found',
+      detail: 'release not found',
+      attempted: false,
+    });
+    expect(listJobsMock).not.toHaveBeenCalled();
+    expect(acquireLockMock).not.toHaveBeenCalled();
+    expect(runCompletionHooksMock).not.toHaveBeenCalled();
+  });
+
+  it('returns not_stuck when the release has no pipeline steps', async () => {
+    getJobMock.mockReturnValue(makeJob({
+      id: 'release-no-steps',
+      project: 'proj',
+      kind: 'release',
+      finishedAt: 100,
+      exitCode: 0,
+    }));
+    listJobsMock.mockReturnValue([]);
+
+    const { resumeStuckRelease } = await import('@/lib/pipeline/resume-stuck-release');
+    const resumed = await resumeStuckRelease('proj', 'release-no-steps');
+
+    expect(resumed).toEqual({
+      ok: false,
+      status: 'not_stuck',
+      detail: 'release has no pipeline steps to resume from',
+      attempted: false,
+    });
+    expect(acquireLockMock).not.toHaveBeenCalled();
+    expect(runCompletionHooksMock).not.toHaveBeenCalled();
+  });
+
+  it('returns not_stuck when the latest step failed', async () => {
+    const now = Date.now() / 1000;
+    getJobMock.mockReturnValue(makeJob({
+      id: 'release-failed-step',
+      project: 'proj',
+      kind: 'release',
+      startedAt: now - 300,
+      finishedAt: now - 60,
+      exitCode: 0,
+    }));
+    listJobsMock.mockReturnValue([
+      makeJob({
+        id: 'review-failed',
+        project: 'proj',
+        kind: 'review',
+        releaseId: 'release-failed-step',
+        startedAt: now - 290,
+        finishedAt: now - 280,
+        exitCode: 1,
+      }),
+    ]);
+
+    const { resumeStuckRelease } = await import('@/lib/pipeline/resume-stuck-release');
+    const resumed = await resumeStuckRelease('proj', 'release-failed-step');
+
+    expect(resumed).toEqual({
+      ok: false,
+      status: 'not_stuck',
+      detail: 'last step review (exit 1) is not a stuck non-terminal step — nothing to resume',
+      attempted: false,
+    });
+    expect(acquireLockMock).not.toHaveBeenCalled();
+    expect(runCompletionHooksMock).not.toHaveBeenCalled();
+  });
+
   it('scans by release finishedAt, not startedAt', async () => {
     const now = Date.now() / 1000;
     testDb.db.insert(schema.jobs).values({
