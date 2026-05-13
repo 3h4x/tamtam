@@ -124,7 +124,7 @@ See `docs/API.md` for the full route reference. New routes must be documented th
 - Do NOT claim frontend work complete without the Playwright screenshot step
 
 ## Key Patterns
-- Runtime config is stored in DB (`settings`, `projects`, `jobs`, `skills`, `agents`, `recommendations`, `ghStatus`, `ghIssuesCache`, `pipelineLocks`, `queuedAgentRuns`, `notificationThrottle`); shared per-project config and file-agent prompts can also live in committed `.tamtam/` files.
+- Runtime config/state is stored in DB (`settings`, `projects`, `jobs`, `skills`, `agents`, `recommendations`, `ghStatus`, `ghIssuesCache`, `pipelineLocks`, `queuedAgentRuns`, `notificationThrottle`, `maintenanceStatus`); shared per-project config and file-agent prompts can also live in committed `.tamtam/` files.
 - Workspace path configured in Settings UI; projects discovered by scanning for git repos.
 - Application/runtime DB access should import `db` / `schema` from `@/lib/db`. Do not open ad-hoc `better-sqlite3` connections in `app/`, `components/`, or `lib/`; reserve direct SQLite construction for tests and explicit bootstrap/maintenance scripts.
 - Most CLI calls (git, gh, launchctl, pm2) go through `lib/shared/shell.ts`. `lib/shared/project-data.ts` assembles project data with 10s TTL cache.
