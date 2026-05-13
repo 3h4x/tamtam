@@ -2,6 +2,7 @@
 model: normal
 schedule: 30m
 skillIds: ["persona:engineering/frontend"]
+enabled: false
 prerequisiteCommand: ""
 ---
 
