@@ -152,3 +152,9 @@ export const notificationThrottle = sqliteTable('notification_throttle', {
   lastSentAt: integer('last_sent_at').notNull(),
   suppressedCount: integer('suppressed_count').notNull().default(0),
 });
+
+export const maintenanceStatus = sqliteTable('maintenance_status', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: real('updated_at').notNull(),
+});

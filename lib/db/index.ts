@@ -186,6 +186,17 @@ sqlite.exec(`
   );
 `);
 
+// Latest maintenance summaries, including retention cleanup and SQLite
+// checkpoint/vacuum status. Kept as JSON so the monitoring API can render
+// recent maintenance state without parsing process logs.
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS maintenance_status (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at REAL NOT NULL
+  );
+`);
+
 // Migrate: add token/duration/session columns to jobs if missing
 try {
   sqlite.exec('ALTER TABLE jobs ADD COLUMN duration_ms INTEGER');

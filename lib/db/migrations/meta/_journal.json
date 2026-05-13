@@ -134,6 +134,13 @@
       "when": 1778645765813,
       "tag": "0018_green_rattler",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1778653028243,
+      "tag": "0019_graceful_wendell_rand",
+      "breakpoints": true
     }
   ]
 }

@@ -3,6 +3,8 @@ import Database from 'better-sqlite3';
 import { mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 
 function createDbWithSettings(rows: Array<{ key: string; value: string }>) {
   const dir = mkdtempSync(join(tmpdir(), 'tamtam-db-bootstrap-'));
@@ -90,6 +92,63 @@ describe('db bootstrap migrations', () => {
     expect(queuedAgentRuns?.name).toBe('queued_agent_runs');
     expect(recommendations?.name).toBe('recommendations');
     expect(queuedIndex?.name).toBe('queued_agent_runs_project_agent');
+  });
+
+  it('keeps maintenance_status compatible with the numbered migration after runtime bootstrap', async () => {
+    const dbPath = createDbWithSettings([]);
+    process.env.TAMTAM_DB_PATH = dbPath;
+
+    await import('@/lib/db');
+
+    const migratedDir = mkdtempSync(join(tmpdir(), 'tamtam-db-bootstrap-migrate-'));
+    const migratedDbPath = join(migratedDir, 'baseline.db');
+    const migratedSqlite = new Database(migratedDbPath);
+    try {
+      migrate(drizzle(migratedSqlite), { migrationsFolder: join(process.cwd(), 'lib', 'db', 'migrations') });
+      const previousMigrationRows = migratedSqlite.prepare(`
+        SELECT hash, created_at
+        FROM __drizzle_migrations
+        ORDER BY created_at ASC
+        LIMIT 19
+      `).all() as Array<{ hash: string; created_at: number }>;
+      migratedSqlite.close();
+
+      const sqlite = new Database(dbPath);
+      try {
+        sqlite.exec(`
+          CREATE TABLE IF NOT EXISTS "__drizzle_migrations" (
+            id SERIAL PRIMARY KEY,
+            hash text NOT NULL,
+            created_at numeric
+          )
+        `);
+        const insertMigration = sqlite.prepare(`
+          INSERT INTO "__drizzle_migrations" (hash, created_at)
+          VALUES (?, ?)
+        `);
+        for (const row of previousMigrationRows) {
+          insertMigration.run(row.hash, row.created_at);
+        }
+
+        expect(() =>
+          migrate(drizzle(sqlite), { migrationsFolder: join(process.cwd(), 'lib', 'db', 'migrations') })
+        ).not.toThrow();
+
+        const maintenanceStatus = sqlite.prepare(`
+          SELECT name
+          FROM sqlite_master
+          WHERE type = 'table' AND name = 'maintenance_status'
+        `).get() as { name: string } | undefined;
+
+        expect(maintenanceStatus?.name).toBe('maintenance_status');
+      } finally {
+        sqlite.close();
+      }
+    } finally {
+      try {
+        migratedSqlite.close();
+      } catch {}
+    }
   });
 
   it('backfills doc_paths and provider columns onto legacy agents tables', async () => {
