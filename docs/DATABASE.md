@@ -247,6 +247,10 @@ db.select().from(schema.jobs).where(eq(schema.jobs.project, name)).all()
 # Hot backup via API (safe while running)
 curl -X POST http://localhost:1337/api/settings/backup
 
+# Verify or restore a backup
+pnpm db:verify data/db/tamtam.db
+pnpm db:restore data/db/tamtam-YYYYMMDD-HHMM.db
+
 # Inspect directly with sqlite3
 sqlite3 data/db/tamtam.db ".tables"
 sqlite3 data/db/tamtam.db "SELECT project, kind, exit_code FROM jobs ORDER BY started_at DESC LIMIT 20;"

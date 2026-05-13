@@ -1,0 +1,271 @@
+import Database from 'better-sqlite3';
+import { spawnSync } from 'child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { delimiter, join } from 'path';
+import { describe, expect, it } from 'vitest';
+
+const repoRoot = process.cwd();
+
+function createDb(dbPath: string, marker: string) {
+  const db = new Database(dbPath);
+  db.exec(`
+    CREATE TABLE settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('marker', marker);
+  db.close();
+}
+
+function createWalBackedDb(dbPath: string, marker: string): () => void {
+  const writer = new Database(dbPath);
+  writer.pragma('journal_mode = WAL');
+  writer.pragma('wal_autocheckpoint = 0');
+  writer.exec(`
+    CREATE TABLE settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+
+  // Keep a second connection open so SQLite does not checkpoint the WAL away
+  // when the writer closes; the restore fixture must rely on sidecars.
+  const reader = new Database(dbPath, { readonly: true });
+  reader.prepare('SELECT count(*) AS c FROM sqlite_master').get();
+
+  writer.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('marker', marker);
+  writer.close();
+
+  return () => {
+    reader.close();
+  };
+}
+
+function readMarker(dbPath: string): string | null {
+  const db = new Database(dbPath, { readonly: true });
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('marker') as { value: string } | undefined;
+  db.close();
+  return row?.value ?? null;
+}
+
+function readMigratedMarker(dbPath: string): string | null {
+  const db = new Database(dbPath, { readonly: true });
+  const table = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'restored_meta'").get() as { name: string } | undefined;
+  if (!table) {
+    db.close();
+    return null;
+  }
+  const row = db.prepare('SELECT value FROM restored_meta WHERE key = ?').get('migrated') as { value: string } | undefined;
+  db.close();
+  return row?.value ?? null;
+}
+
+function writeFakePnpm(binPath: string) {
+  const betterSqlitePath = JSON.stringify(require.resolve('better-sqlite3'));
+  writeFileSync(binPath, `#!/usr/bin/env node
+const { appendFileSync, existsSync, readFileSync, writeFileSync } = require('fs');
+const Database = require(${betterSqlitePath});
+const args = process.argv.slice(2);
+appendFileSync(process.env.PNPM_LOG_PATH, args.join(' ') + '\\n');
+if (args[0] === 'db:migrate' && process.env.TAMTAM_DB_PATH) {
+  const db = new Database(process.env.TAMTAM_DB_PATH);
+  db.pragma('journal_mode = WAL');
+  db.exec('CREATE TABLE IF NOT EXISTS restored_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  db.prepare('INSERT OR REPLACE INTO restored_meta (key, value) VALUES (?, ?)').run('migrated', 'yes');
+  db.close();
+}
+if (args[0] === 'start' && process.env.PNPM_FAIL_FIRST_START === '1') {
+  const countPath = process.env.PNPM_START_COUNT_PATH;
+  const count = existsSync(countPath) ? Number(readFileSync(countPath, 'utf8')) : 0;
+  const next = count + 1;
+  writeFileSync(countPath, String(next));
+  if (next === 1) process.exit(1);
+}
+if (args[0] === 'stop' && process.env.PNPM_FAIL_STOP === '1') {
+  process.exit(1);
+}
+process.exit(0);
+`);
+  chmodSync(binPath, 0o755);
+}
+
+describe('scripts/db-restore.js', () => {
+  it('restores the backup via a staged swap on success', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tamtam-db-restore-success-'));
+
+    try {
+      const dbPath = join(dir, 'data', 'tamtam.db');
+      const backupPath = join(dir, 'backups', 'tamtam-backup.db');
+      const binDir = join(dir, 'bin');
+      const pnpmPath = join(binDir, 'pnpm');
+      const pnpmLogPath = join(dir, 'pnpm.log');
+
+      writeFileSync(pnpmLogPath, '');
+      mkdirSync(join(dir, 'data'), { recursive: true });
+      mkdirSync(join(dir, 'backups'), { recursive: true });
+      mkdirSync(binDir, { recursive: true });
+      writeFakePnpm(pnpmPath);
+      createDb(dbPath, 'old');
+      createDb(backupPath, 'new');
+
+      const result = spawnSync(process.execPath, ['scripts/db-restore.js', backupPath], {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          TAMTAM_DB_PATH: dbPath,
+          PNPM_LOG_PATH: pnpmLogPath,
+          PNPM_START_COUNT_PATH: join(dir, 'start-count.txt'),
+          PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
+        },
+        encoding: 'utf-8',
+      });
+
+      expect(result.status).toBe(0);
+      expect(readMarker(dbPath)).toBe('new');
+      expect(readMigratedMarker(dbPath)).toBe('yes');
+      expect(readFileSync(pnpmLogPath, 'utf-8').trim().split('\n')).toEqual([
+        'db:migrate',
+        'stop',
+        'start',
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rolls back the old database and restarts TamTam if the post-swap start fails', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tamtam-db-restore-rollback-'));
+
+    try {
+      const dbPath = join(dir, 'data', 'tamtam.db');
+      const backupPath = join(dir, 'backups', 'tamtam-backup.db');
+      const binDir = join(dir, 'bin');
+      const pnpmPath = join(binDir, 'pnpm');
+      const pnpmLogPath = join(dir, 'pnpm.log');
+      const startCountPath = join(dir, 'start-count.txt');
+
+      writeFileSync(pnpmLogPath, '');
+      mkdirSync(join(dir, 'data'), { recursive: true });
+      mkdirSync(join(dir, 'backups'), { recursive: true });
+      mkdirSync(binDir, { recursive: true });
+      writeFakePnpm(pnpmPath);
+      createDb(dbPath, 'old');
+      createDb(backupPath, 'new');
+
+      const result = spawnSync(process.execPath, ['scripts/db-restore.js', backupPath], {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          TAMTAM_DB_PATH: dbPath,
+          PNPM_LOG_PATH: pnpmLogPath,
+          PNPM_START_COUNT_PATH: startCountPath,
+          PNPM_FAIL_FIRST_START: '1',
+          PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
+        },
+        encoding: 'utf-8',
+      });
+
+      expect(result.status).toBe(1);
+      expect(readMarker(dbPath)).toBe('old');
+      expect(readMigratedMarker(dbPath)).toBe(null);
+      expect(readFileSync(pnpmLogPath, 'utf-8').trim().split('\n')).toEqual([
+        'db:migrate',
+        'stop',
+        'start',
+        'start',
+      ]);
+      expect(result.stderr).toContain('Database restore failed');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('aborts before swapping the live database when pnpm stop fails', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tamtam-db-restore-stop-fail-'));
+
+    try {
+      const dbPath = join(dir, 'data', 'tamtam.db');
+      const backupPath = join(dir, 'backups', 'tamtam-backup.db');
+      const binDir = join(dir, 'bin');
+      const pnpmPath = join(binDir, 'pnpm');
+      const pnpmLogPath = join(dir, 'pnpm.log');
+
+      writeFileSync(pnpmLogPath, '');
+      mkdirSync(join(dir, 'data'), { recursive: true });
+      mkdirSync(join(dir, 'backups'), { recursive: true });
+      mkdirSync(binDir, { recursive: true });
+      writeFakePnpm(pnpmPath);
+      createDb(dbPath, 'old');
+      createDb(backupPath, 'new');
+
+      const result = spawnSync(process.execPath, ['scripts/db-restore.js', backupPath], {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          TAMTAM_DB_PATH: dbPath,
+          PNPM_LOG_PATH: pnpmLogPath,
+          PNPM_FAIL_STOP: '1',
+          PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
+        },
+        encoding: 'utf-8',
+      });
+
+      expect(result.status).toBe(1);
+      expect(readMarker(dbPath)).toBe('old');
+      expect(readMigratedMarker(dbPath)).toBe(null);
+      expect(readFileSync(pnpmLogPath, 'utf-8').trim().split('\n')).toEqual([
+        'db:migrate',
+        'stop',
+      ]);
+      expect(result.stderr).toContain('aborting restore before swapping the live database');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('restores backup data that lives in the backup WAL sidecar', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tamtam-db-restore-wal-'));
+
+    try {
+      const dbPath = join(dir, 'data', 'tamtam.db');
+      const backupPath = join(dir, 'backups', 'tamtam-backup.db');
+      const binDir = join(dir, 'bin');
+      const pnpmPath = join(binDir, 'pnpm');
+      const pnpmLogPath = join(dir, 'pnpm.log');
+
+      writeFileSync(pnpmLogPath, '');
+      mkdirSync(join(dir, 'data'), { recursive: true });
+      mkdirSync(join(dir, 'backups'), { recursive: true });
+      mkdirSync(binDir, { recursive: true });
+      writeFakePnpm(pnpmPath);
+      createDb(dbPath, 'old');
+      const releaseWalFixture = createWalBackedDb(backupPath, 'new-from-wal');
+
+      try {
+        expect(existsSync(`${backupPath}-wal`)).toBe(true);
+
+        const result = spawnSync(process.execPath, ['scripts/db-restore.js', backupPath], {
+          cwd: repoRoot,
+          env: {
+            ...process.env,
+            TAMTAM_DB_PATH: dbPath,
+            PNPM_LOG_PATH: pnpmLogPath,
+            PNPM_START_COUNT_PATH: join(dir, 'start-count.txt'),
+            PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
+          },
+          encoding: 'utf-8',
+        });
+
+        expect(result.status).toBe(0);
+        expect(readMarker(dbPath)).toBe('new-from-wal');
+        expect(readMigratedMarker(dbPath)).toBe('yes');
+      } finally {
+        releaseWalFixture();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

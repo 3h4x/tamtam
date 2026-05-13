@@ -42,6 +42,21 @@ function parsePositiveIntegerSetting(
   return { value: String(parsed), error: null };
 }
 
+function parseNonNegativeIntegerSetting(
+  value: unknown,
+  label: string,
+): { value: string | null; error: string | null } {
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) {
+    return { value: null, error: `${label} must be a non-negative integer.` };
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return { value: null, error: `${label} must be a non-negative integer.` };
+  }
+  return { value: String(parsed), error: null };
+}
+
 function buildSettingsResponse(): Record<string, string> {
   const rows = db.select().from(schema.settings).all();
   const settings: Record<string, string> = {};
@@ -101,6 +116,8 @@ const SETTING_KEYS = [
   'log_retention_count',
   'log_retention_days',
   'job_row_retention_days',
+  'backup_retention_count',
+  'backup_retention_weekly_count',
   'notification_webhook_url',
   'notification_webhook_secret',
   'notification_on_release_success',
@@ -225,6 +242,10 @@ function validateAndSerializeSettingValue(
 
   if (key === 'notification_throttle_window_seconds') {
     return parsePositiveIntegerSetting(value, 'notification_throttle_window_seconds');
+  }
+
+  if (key === 'backup_retention_count' || key === 'backup_retention_weekly_count') {
+    return parseNonNegativeIntegerSetting(value, key);
   }
 
   if (key === 'notification_throttle_overrides') {
