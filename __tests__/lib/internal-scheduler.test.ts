@@ -6,8 +6,10 @@ vi.mock('@/lib/shared/job-control', () => ({
 }));
 
 const isProjectArchivedMock = vi.fn().mockReturnValue(false);
+const isProjectPausedMock = vi.fn().mockReturnValue(false);
 vi.mock('@/lib/shared/enabled-projects', () => ({
   isProjectArchived: (...args: unknown[]) => isProjectArchivedMock(...args),
+  isProjectPaused: (...args: unknown[]) => isProjectPausedMock(...args),
 }));
 
 import {
@@ -27,6 +29,7 @@ describe('internal-scheduler', () => {
     stopInternalScheduler();
     vi.useFakeTimers();
     isProjectArchivedMock.mockReturnValue(false);
+    isProjectPausedMock.mockReturnValue(false);
   });
 
   afterEach(() => {
@@ -34,6 +37,7 @@ describe('internal-scheduler', () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     isProjectArchivedMock.mockReturnValue(false);
+    isProjectPausedMock.mockReturnValue(false);
   });
 
   describe('computeNextFire', () => {
@@ -701,6 +705,26 @@ describe('internal-scheduler — budget skip', () => {
       const dump = dumpInternalScheduler();
       expect(dump.entries[0].skippedCount).toBeGreaterThanOrEqual(1);
       expect(dump.entries[0].lastSkippedReason).toBe('project archived');
+    });
+  });
+
+  describe('paused project gating', () => {
+    it('skips scheduled fires when the project is paused', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+      vi.stubGlobal('fetch', fetchMock);
+      setSchedulerBaseUrl('http://test');
+      isProjectArchivedMock.mockReturnValue(false);
+      isProjectPausedMock.mockReturnValue(true);
+
+      upsertAgentSchedule({ id: 'a2', project: 'paused-proj', name: 'qa', schedule: '1m', prompt: 'go', enabled: true });
+
+      await vi.advanceTimersByTimeAsync(60_000 + 100);
+      for (let _i = 0; _i < 20; _i++) await Promise.resolve();
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      const dump = dumpInternalScheduler();
+      expect(dump.entries[0].skippedCount).toBeGreaterThanOrEqual(1);
+      expect(dump.entries[0].lastSkippedReason).toBe('project paused');
     });
   });
 });

@@ -29,6 +29,7 @@ export const projects = sqliteTable('projects', {
   website: text('website'),
   qaUrl: text('qa_url'),
   archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
+  paused: integer('paused', { mode: 'boolean' }).notNull().default(false),
 });
 
 export const jobs = sqliteTable('jobs', {

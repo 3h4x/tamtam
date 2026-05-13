@@ -84,3 +84,16 @@ export function isProjectArchived(name: string): boolean {
     return false;
   }
 }
+
+export function isProjectPaused(name: string): boolean {
+  try {
+    const row = db
+      .select({ paused: schema.projects.paused })
+      .from(schema.projects)
+      .where(eq(schema.projects.name, name))
+      .get();
+    return isArchived(row?.paused as unknown);
+  } catch {
+    return false;
+  }
+}

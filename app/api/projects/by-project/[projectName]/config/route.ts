@@ -62,6 +62,7 @@ export async function GET(
     fix_prompt_addendum: pipelinePrompts.fixPromptAddendum ?? '',
     website: projectRow?.website ?? '',
     qa_url: projectRow?.qaUrl ?? '',
+    paused: !!projectRow?.paused,
     // Per-project commit style. File-only (team contract); empty string means
     // fall back to the global `commit_style` setting at commit-generation time.
     commit_style: fileConfig?.commit_style ?? '',

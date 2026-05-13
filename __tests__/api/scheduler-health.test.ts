@@ -46,7 +46,8 @@ function createTestDb() {
       fix_prompt_addendum TEXT,
       website TEXT,
       qa_url TEXT,
-      archived INTEGER NOT NULL DEFAULT 0
+      archived INTEGER NOT NULL DEFAULT 0,
+      paused INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS jobs (
       id TEXT PRIMARY KEY,

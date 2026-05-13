@@ -78,6 +78,7 @@ describe('POST /api/agents/{agentId}/run', () => {
   let isLockOwnedByActiveReleaseMock: ReturnType<typeof vi.fn>;
   let getPendingReleaseMock: ReturnType<typeof vi.fn>;
   let drainPendingReleaseMock: ReturnType<typeof vi.fn>;
+  let isProjectPausedMock: ReturnType<typeof vi.fn>;
   let tempSkillsDir: string;
   let logDirMock: string;
   let settingsMock: Record<string, unknown>;
@@ -151,6 +152,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     isLockOwnedByActiveReleaseMock = vi.fn().mockReturnValue(false);
     getPendingReleaseMock = vi.fn().mockReturnValue(false);
     drainPendingReleaseMock = vi.fn().mockResolvedValue(undefined);
+    isProjectPausedMock = vi.fn().mockReturnValue(false);
     settingsMock = {
       workspace_path: '',
       github_owner: '',
@@ -240,6 +242,10 @@ describe('POST /api/agents/{agentId}/run', () => {
     vi.doMock('@/lib/git/dirty-worktree', () => ({
       getDirtyFileCount: vi.fn().mockResolvedValue(0),
     }));
+    vi.doMock('@/lib/shared/enabled-projects', () => ({
+      isProjectArchived: vi.fn().mockReturnValue(false),
+      isProjectPaused: (...args: unknown[]) => (isProjectPausedMock as (...a: unknown[]) => unknown)(...args),
+    }));
 
     const mod = await import('@/app/api/agents/[agentId]/run/route');
     POST = mod.POST;
@@ -294,6 +300,22 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(res.status).toBe(404);
     const data = await res.json();
     expect(data.detail).toContain('proj1');
+  });
+
+  it('returns 409 when project is paused', async () => {
+    insertAgent();
+    isProjectPausedMock.mockReturnValue(true);
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.code).toBe('project_paused');
+    expect(data.detail).toContain('paused');
+    expect(createJobMock).not.toHaveBeenCalled();
+    expect(startJobMock).not.toHaveBeenCalled();
   });
 
   it('starts job and returns job info', async () => {
