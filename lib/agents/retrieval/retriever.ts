@@ -10,6 +10,8 @@ export function buildRetrievedContextBlock(results: RetrievalResult[]): string |
         ? `agent_run · ${r.metadata.agentName ?? r.sourceId}`
         : r.sourceKind === 'project_doc'
         ? `project_doc · ${r.metadata.filePath ?? r.sourceId}`
+        : r.sourceKind === 'project_config'
+        ? `project_config · ${r.metadata.label ?? r.sourceId}`
         : `skill · ${r.metadata.skillTitle ?? r.sourceId}`;
     return `[${label}]\n${r.text}`;
   });
@@ -33,7 +35,35 @@ export interface RetrieveAgentContextOpts {
   embeddingModel: string;
 }
 
-export async function retrieveAgentContext(opts: RetrieveAgentContextOpts): Promise<string | null> {
+export interface RetrievalDiagnostics {
+  status: 'ok' | 'warning';
+  reason: 'results' | 'empty_corpus' | 'no_results' | 'below_threshold' | 'embed_failed';
+  corpusChunkCount: number;
+  retrievedCount: number;
+  acceptedCount: number;
+  topScore: number | null;
+  scoreThreshold: number;
+}
+
+export async function retrieveAgentContextDetailed(
+  opts: RetrieveAgentContextOpts
+): Promise<{ block: string | null; diagnostics: RetrievalDiagnostics }> {
+  const corpusChunkCount = opts.backend.countProjectChunks(opts.project, ['project_doc', 'skill', 'project_config', 'agent_run']);
+  if (corpusChunkCount === 0) {
+    return {
+      block: null,
+      diagnostics: {
+        status: 'warning',
+        reason: 'empty_corpus',
+        corpusChunkCount,
+        retrievedCount: 0,
+        acceptedCount: 0,
+        topScore: null,
+        scoreThreshold: opts.scoreThreshold,
+      },
+    };
+  }
+
   try {
     const embedding = await embedText(opts.taskPrompt, opts.ollamaUrl, opts.embeddingModel, {
       project: opts.project,
@@ -41,9 +71,37 @@ export async function retrieveAgentContext(opts: RetrieveAgentContextOpts): Prom
     });
     const results = opts.backend.search({ embedding, project: opts.project, limit: opts.limit });
     const above = results.filter((r) => r.score >= opts.scoreThreshold);
-    return buildRetrievedContextBlock(above);
+    const topScore = results[0]?.score ?? null;
+    return {
+      block: buildRetrievedContextBlock(above),
+      diagnostics: {
+        status: above.length > 0 ? 'ok' : 'warning',
+        reason: results.length === 0 ? 'no_results' : above.length === 0 ? 'below_threshold' : 'results',
+        corpusChunkCount,
+        retrievedCount: results.length,
+        acceptedCount: above.length,
+        topScore,
+        scoreThreshold: opts.scoreThreshold,
+      },
+    };
   } catch (err) {
     console.warn('[retrieval] retrieveAgentContext failed (best-effort):', err);
-    return null;
+    return {
+      block: null,
+      diagnostics: {
+        status: 'warning',
+        reason: 'embed_failed',
+        corpusChunkCount,
+        retrievedCount: 0,
+        acceptedCount: 0,
+        topScore: null,
+        scoreThreshold: opts.scoreThreshold,
+      },
+    };
   }
+}
+
+export async function retrieveAgentContext(opts: RetrieveAgentContextOpts): Promise<string | null> {
+  const result = await retrieveAgentContextDetailed(opts);
+  return result.block;
 }

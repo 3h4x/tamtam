@@ -79,7 +79,7 @@ describe('POST /api/agents/{agentId}/run', () => {
   let getPendingReleaseMock: ReturnType<typeof vi.fn>;
   let drainPendingReleaseMock: ReturnType<typeof vi.fn>;
   let isProjectPausedMock: ReturnType<typeof vi.fn>;
-  let retrieveAgentContextMock: ReturnType<typeof vi.fn>;
+  let retrieveAgentContextDetailedMock: ReturnType<typeof vi.fn>;
   let isSqliteVecAvailableMock: ReturnType<typeof vi.fn>;
   let tempSkillsDir: string;
   let logDirMock: string;
@@ -155,7 +155,18 @@ describe('POST /api/agents/{agentId}/run', () => {
     getPendingReleaseMock = vi.fn().mockReturnValue(false);
     drainPendingReleaseMock = vi.fn().mockResolvedValue(undefined);
     isProjectPausedMock = vi.fn().mockReturnValue(false);
-    retrieveAgentContextMock = vi.fn().mockResolvedValue('## Retrieved Context\ncached context');
+    retrieveAgentContextDetailedMock = vi.fn().mockResolvedValue({
+      block: '## Retrieved Context\ncached context',
+      diagnostics: {
+        status: 'ok',
+        reason: 'results',
+        corpusChunkCount: 3,
+        retrievedCount: 1,
+        acceptedCount: 1,
+        topScore: 0.9,
+        scoreThreshold: 0.8,
+      },
+    });
     isSqliteVecAvailableMock = vi.fn().mockReturnValue(true);
     settingsMock = {
       workspace_path: '',
@@ -247,7 +258,7 @@ describe('POST /api/agents/{agentId}/run', () => {
       checkCliStartGate: checkCliStartGateMock,
     }));
     vi.doMock('@/lib/agents/retrieval/retriever', () => ({
-      retrieveAgentContext: retrieveAgentContextMock,
+      retrieveAgentContextDetailed: retrieveAgentContextDetailedMock,
     }));
     vi.doMock('@/lib/git/dirty-worktree', () => ({
       getDirtyFileCount: vi.fn().mockResolvedValue(0),
@@ -293,7 +304,7 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     expect(res.status).toBe(200);
     expect(body.status).toBe('started');
-    expect(retrieveAgentContextMock).not.toHaveBeenCalled();
+    expect(retrieveAgentContextDetailedMock).not.toHaveBeenCalled();
     expect(startJobMock).toHaveBeenCalledOnce();
   });
 

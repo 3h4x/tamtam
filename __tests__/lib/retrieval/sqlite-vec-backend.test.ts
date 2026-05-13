@@ -130,4 +130,43 @@ describeIfSqliteVec('SqliteVecBackend', () => {
     });
     expect(results.every(r => r.sourceKind === 'agent_run')).toBe(true);
   });
+
+  it('counts chunks for a project and optional source filters', () => {
+    backend.upsertChunks([
+      makeChunk({ chunkId: 'agent_run:j1:0', sourceKind: 'agent_run' }),
+      makeChunk({ chunkId: 'project_doc:readme:0', sourceKind: 'project_doc', sourceId: 'README.md' }),
+      makeChunk({ chunkId: 'project_doc:readme:1', sourceKind: 'project_doc', sourceId: 'README.md', chunkIndex: 1 }),
+      makeChunk({ chunkId: 'agent_run:other:0', project: 'other' }),
+    ]);
+
+    expect(backend.countProjectChunks('myproject')).toBe(3);
+    expect(backend.countProjectChunks('myproject', ['project_doc'])).toBe(2);
+    expect(backend.countProjectChunks('other')).toBe(1);
+  });
+
+  it('removes trailing stale chunks when a source is replaced with fewer chunks', () => {
+    backend.upsertChunks([
+      makeChunk({ chunkId: 'project_doc:README.md:0', sourceKind: 'project_doc', sourceId: 'README.md' }),
+      makeChunk({ chunkId: 'project_doc:README.md:1', sourceKind: 'project_doc', sourceId: 'README.md', chunkIndex: 1 }),
+      makeChunk({ chunkId: 'project_doc:README.md:2', sourceKind: 'project_doc', sourceId: 'README.md', chunkIndex: 2 }),
+    ]);
+
+    backend.deleteSource('myproject', 'project_doc', 'README.md');
+    backend.upsertChunks([
+      makeChunk({ chunkId: 'project_doc:README.md:0', sourceKind: 'project_doc', sourceId: 'README.md' }),
+      makeChunk({ chunkId: 'project_doc:README.md:1', sourceKind: 'project_doc', sourceId: 'README.md', chunkIndex: 1 }),
+    ]);
+
+    expect(backend.countProjectChunks('myproject', ['project_doc'])).toBe(2);
+    expect(
+      db.prepare<[string], { chunk_id: string } | undefined>(
+        'SELECT chunk_id FROM retrieval_chunks WHERE chunk_id = ?'
+      ).get('project_doc:README.md:2')
+    ).toBeUndefined();
+    expect(
+      db.prepare<[string], { rowid: number } | undefined>(
+        'SELECT rowid FROM vec_chunks WHERE chunk_id = ?'
+      ).get('project_doc:README.md:2')
+    ).toBeUndefined();
+  });
 });

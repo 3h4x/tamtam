@@ -7,12 +7,13 @@ vi.mock('@/lib/agents/retrieval/ollama-embedder', () => ({ embedText: mockEmbed 
 const mockSearch = vi.fn();
 const mockBackend = {
   search: mockSearch,
+  countProjectChunks: vi.fn().mockReturnValue(3),
   upsertChunks: vi.fn(),
   deleteSource: vi.fn(),
   deleteProject: vi.fn(),
 };
 
-import { buildRetrievedContextBlock, retrieveAgentContext } from '@/lib/agents/retrieval/retriever';
+import { buildRetrievedContextBlock, retrieveAgentContext, retrieveAgentContextDetailed } from '@/lib/agents/retrieval/retriever';
 
 describe('buildRetrievedContextBlock', () => {
   it('returns null for empty results', () => {
@@ -50,7 +51,12 @@ describe('buildRetrievedContextBlock', () => {
 });
 
 describe('retrieveAgentContext', () => {
-  beforeEach(() => { mockSearch.mockReset(); mockEmbed.mockResolvedValue(Array(768).fill(0.1)); });
+  beforeEach(() => {
+    mockSearch.mockReset();
+    mockEmbed.mockClear();
+    mockEmbed.mockResolvedValue(Array(768).fill(0.1));
+    mockBackend.countProjectChunks.mockReturnValue(3);
+  });
 
   it('returns null when all results are below threshold', async () => {
     mockSearch.mockReturnValue([
@@ -97,5 +103,43 @@ describe('retrieveAgentContext', () => {
       embeddingModel: 'nomic-embed-text',
     });
     expect(result).toBeNull();
+  });
+
+  it('returns empty-corpus diagnostics without embedding when no chunks are indexed', async () => {
+    mockBackend.countProjectChunks.mockReturnValue(0);
+
+    const result = await retrieveAgentContextDetailed({
+      backend: mockBackend,
+      project: 'myproject',
+      taskPrompt: 'review',
+      limit: 5,
+      scoreThreshold: 0.8,
+      ollamaUrl: 'http://localhost:11434',
+      embeddingModel: 'nomic-embed-text',
+    });
+
+    expect(result.block).toBeNull();
+    expect(result.diagnostics.reason).toBe('empty_corpus');
+    expect(mockEmbed).not.toHaveBeenCalled();
+  });
+
+  it('reports below-threshold diagnostics when search returns only weak matches', async () => {
+    mockSearch.mockReturnValue([
+      { text: 'irrelevant', sourceKind: 'agent_run', sourceId: 'j1', score: 0.4, metadata: {} },
+    ]);
+
+    const result = await retrieveAgentContextDetailed({
+      backend: mockBackend,
+      project: 'myproject',
+      taskPrompt: 'review',
+      limit: 5,
+      scoreThreshold: 0.8,
+      ollamaUrl: 'http://localhost:11434',
+      embeddingModel: 'nomic-embed-text',
+    });
+
+    expect(result.block).toBeNull();
+    expect(result.diagnostics.reason).toBe('below_threshold');
+    expect(result.diagnostics.topScore).toBe(0.4);
   });
 });

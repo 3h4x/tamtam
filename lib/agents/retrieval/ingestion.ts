@@ -32,6 +32,55 @@ export interface IngestAgentRunOpts {
   existingHash: string | null;
 }
 
+export interface IngestSourceOpts {
+  backend: RetrievalBackend;
+  project: string;
+  sourceKind: SourceKind;
+  sourceId: string;
+  text: string;
+  metadata: Record<string, string>;
+  ollamaUrl: string;
+  embeddingModel: string;
+  existingHash: string | null;
+}
+
+export async function ingestSourceText(
+  opts: IngestSourceOpts
+): Promise<{ contentHash: string; chunkCount: number; skipped: boolean; stored: boolean }> {
+  const contentHash = hashContent(opts.text);
+
+  if (opts.existingHash === contentHash) {
+    return { contentHash, chunkCount: 0, skipped: true, stored: false };
+  }
+
+  try {
+    const chunks = chunkText(opts.text);
+    const embeddedChunks = await Promise.all(
+      chunks.map(async (chunk, i) => ({
+        chunkId: `${opts.sourceKind}:${opts.sourceId}:${i}`,
+        text: chunk,
+        embedding: await embedText(chunk, opts.ollamaUrl, opts.embeddingModel, {
+          project: opts.project,
+          sourceKind: opts.sourceKind,
+        }),
+        project: opts.project,
+        sourceKind: opts.sourceKind,
+        sourceId: opts.sourceId,
+        chunkIndex: i,
+        metadata: opts.metadata,
+      }))
+    );
+    if (opts.existingHash !== null) {
+      opts.backend.deleteSource(opts.project, opts.sourceKind, opts.sourceId);
+    }
+    opts.backend.upsertChunks(embeddedChunks);
+    return { contentHash, chunkCount: chunks.length, skipped: false, stored: true };
+  } catch (err) {
+    console.warn(`[retrieval] ingestSourceText failed for ${opts.sourceKind}:${opts.sourceId}:`, err);
+    return { contentHash, chunkCount: 0, skipped: false, stored: false };
+  }
+}
+
 export async function ingestAgentRun(
   opts: IngestAgentRunOpts
 ): Promise<{ contentHash: string; skipped: boolean; stored: boolean }> {
@@ -47,33 +96,22 @@ export async function ingestAgentRun(
     return { contentHash, skipped: true, stored: false };
   }
 
-  try {
-    const chunks = chunkText(text);
-    const embeddedChunks = await Promise.all(
-      chunks.map(async (chunk, i) => ({
-        chunkId: `agent_run:${opts.jobId}:${i}` as const,
-        text: chunk,
-        embedding: await embedText(chunk, opts.ollamaUrl, opts.embeddingModel, {
-          project: opts.project,
-          sourceKind: 'agent_run',
-        }),
-        project: opts.project,
-        sourceKind: 'agent_run' as SourceKind,
-        sourceId: opts.jobId,
-        chunkIndex: i,
-        metadata: {
-          agentId: opts.agentId,
-          agentName: opts.agentName,
-          jobId: opts.jobId,
-          exitCode: String(opts.exitCode),
-          completedAt: String(opts.completedAt),
-        },
-      }))
-    );
-    opts.backend.upsertChunks(embeddedChunks);
-    return { contentHash, skipped: false, stored: true };
-  } catch (err) {
-    console.warn('[retrieval] ingestAgentRun failed (best-effort):', err);
-    return { contentHash, skipped: false, stored: false };
-  }
+  const result = await ingestSourceText({
+    backend: opts.backend,
+    project: opts.project,
+    sourceKind: 'agent_run' as SourceKind,
+    sourceId: opts.jobId,
+    text,
+    metadata: {
+      agentId: opts.agentId,
+      agentName: opts.agentName,
+      jobId: opts.jobId,
+      exitCode: String(opts.exitCode),
+      completedAt: String(opts.completedAt),
+    },
+    ollamaUrl: opts.ollamaUrl,
+    embeddingModel: opts.embeddingModel,
+    existingHash: null,
+  });
+  return { contentHash, skipped: result.skipped, stored: result.stored };
 }

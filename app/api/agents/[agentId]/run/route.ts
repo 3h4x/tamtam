@@ -26,7 +26,7 @@ import { getSettings } from '@/lib/shared/config';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { sqlite } from '@/lib/db';
 import { SqliteVecBackend } from '@/lib/agents/retrieval/sqlite-vec-backend';
-import { retrieveAgentContext } from '@/lib/agents/retrieval/retriever';
+import { retrieveAgentContextDetailed } from '@/lib/agents/retrieval/retriever';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
@@ -575,7 +575,7 @@ At the end of your run, include a short final section exactly named "TamTam Run 
 
   let retrievedContext: string | null = null;
   if (settings.retrieval_enabled && taskPrompt && isSqliteVecAvailable()) {
-    retrievedContext = await retrieveAgentContext({
+    const retrieval = await retrieveAgentContextDetailed({
       backend: new SqliteVecBackend(sqlite),
       project: agent.project,
       taskPrompt,
@@ -583,6 +583,11 @@ At the end of your run, include a short final section exactly named "TamTam Run 
       scoreThreshold: settings.retrieval_score_threshold,
       ollamaUrl: settings.retrieval_ollama_url,
       embeddingModel: settings.retrieval_embedding_model,
+    });
+    retrievedContext = retrieval.block;
+    job.contextMeta = JSON.stringify({
+      ...(job.contextMeta ? JSON.parse(job.contextMeta) as Record<string, unknown> : {}),
+      retrieval: retrieval.diagnostics,
     });
   }
 

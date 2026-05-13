@@ -7,6 +7,7 @@ vi.mock('@/lib/agents/retrieval/ollama-embedder', () => ({ embedText: mockEmbed 
 const mockBackend = {
   upsertChunks: vi.fn(),
   search: vi.fn(),
+  countProjectChunks: vi.fn().mockReturnValue(0),
   deleteSource: vi.fn(),
   deleteProject: vi.fn(),
 };
@@ -121,5 +122,27 @@ describe('ingestAgentRun', () => {
       skipped: false,
       stored: false,
     }));
+  });
+
+  it('deletes an existing source before storing replacement chunks', async () => {
+    const { ingestSourceText } = await import('@/lib/agents/retrieval/ingestion');
+
+    await ingestSourceText({
+      backend: mockBackend,
+      project: 'myproject',
+      sourceKind: 'project_doc',
+      sourceId: 'README.md',
+      text: '# README\n\nUpdated docs',
+      metadata: { filePath: 'README.md' },
+      ollamaUrl: 'http://localhost:11434',
+      embeddingModel: 'nomic-embed-text',
+      existingHash: 'old-hash',
+    });
+
+    expect(mockBackend.deleteSource).toHaveBeenCalledWith('myproject', 'project_doc', 'README.md');
+    expect(mockBackend.upsertChunks).toHaveBeenCalledOnce();
+    expect(mockBackend.deleteSource.mock.invocationCallOrder[0]).toBeLessThan(
+      mockBackend.upsertChunks.mock.invocationCallOrder[0]
+    );
   });
 });
