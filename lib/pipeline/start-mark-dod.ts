@@ -19,6 +19,8 @@ import {
   findReleaseScopedIssueContext,
   findReleaseScopedPrContext,
 } from './release-context';
+export { extractCriteria, tickCriteria } from './mark-dod-criteria';
+import { extractCriteria, tickCriteria } from './mark-dod-criteria';
 
 export type MarkDodResult =
   | { ok: true; jobId: string; issueNumber: number; verified: number; total: number; changed: boolean }
@@ -58,33 +60,6 @@ function findPrContext(projectName: string): { number: number; repo: string } | 
   const pr = findLatestPrContext(projectName);
   if (!pr) return null;
   return { number: pr.number, repo: pr.repo };
-}
-
-// Extract acceptance criteria (unchecked checkbox lines) from issue body.
-export function extractCriteria(body: string): Array<{ raw: string; text: string }> {
-  const out: Array<{ raw: string; text: string }> = [];
-  for (const line of body.split('\n')) {
-    const m = line.match(/^(\s*[-*]\s+)\[\s\]\s+(.+)$/);
-    if (m) out.push({ raw: line, text: m[2].trim() });
-  }
-  return out;
-}
-
-// Replace the `- [ ]` of matching criterion lines with `- [x]`. Matches by the
-// exact criterion text captured by extractCriteria.
-export function tickCriteria(body: string, verifiedTexts: Set<string>): { body: string; ticked: number } {
-  let ticked = 0;
-  const out = body.split('\n').map(line => {
-    const m = line.match(/^(\s*[-*]\s+)\[\s\](\s+)(.+)$/);
-    if (!m) return line;
-    const text = m[3].trim();
-    if (verifiedTexts.has(text)) {
-      ticked++;
-      return `${m[1]}[x]${m[2]}${m[3]}`;
-    }
-    return line;
-  }).join('\n');
-  return { body: out, ticked };
 }
 
 /**
