@@ -25,7 +25,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 - `/api/projects/[schedId]/pause` — Pause project scheduling (POST)
 - `/api/projects/[schedId]/resume` — Resume project scheduling (POST)
 - `/api/projects/[schedId]/detail` — Project scheduling detail (GET)
-- `/api/projects/[schedId]/retrieval/reindex` — Re-index project docs for semantic retrieval (POST). Returns `200 { chunks }` on success, `400 { error }` when retrieval is disabled, `404 { error }` when the project is unknown, and `503 { error, code: 'sqlite_vec_unavailable' }` when the optional native `sqlite-vec` module is not installed in the current environment.
+- `/api/projects/[schedId]/retrieval/reindex` — Re-index the project retrieval corpus (POST). The corpus includes committed project docs, DB-backed skills referenced by that project's agents, and synthesized project config guidance. Returns `200 { chunks, indexedSources, skippedSources, diagnostics }` on success, where `diagnostics` includes pre-reindex `missingSourcesBeforeReindex`, `staleSourcesBeforeReindex`, and per-source counts. Returns `400 { error }` when retrieval is disabled, `404 { error }` when the project is unknown, and `503 { error, code: 'sqlite_vec_unavailable' }` when the optional native `sqlite-vec` module is not installed in the current environment.
 - `/api/config/projects` — Scan workspace for git repos and configure projects (GET, PATCH)
 
 ## Project actions (`by-project/[name]/...`)

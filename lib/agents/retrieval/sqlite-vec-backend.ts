@@ -77,6 +77,21 @@ export class SqliteVecBackend implements RetrievalBackend {
     return results;
   }
 
+  countProjectChunks(project: string, sourceKinds?: SourceKind[]): number {
+    if (!sourceKinds || sourceKinds.length === 0) {
+      const row = this.db.prepare<[string], { count: number }>(
+        'SELECT count(*) AS count FROM retrieval_chunks WHERE project = ?'
+      ).get(project);
+      return row?.count ?? 0;
+    }
+
+    const placeholders = sourceKinds.map(() => '?').join(', ');
+    const row = this.db.prepare<[string, ...string[]], { count: number }>(
+      `SELECT count(*) AS count FROM retrieval_chunks WHERE project = ? AND source_kind IN (${placeholders})`
+    ).get(project, ...sourceKinds);
+    return row?.count ?? 0;
+  }
+
   deleteSource(project: string, sourceKind: SourceKind, sourceId: string): void {
     const rows = this.db
       .prepare<[string, string, string], { chunk_id: string }>(
