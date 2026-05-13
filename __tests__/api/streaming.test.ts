@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
@@ -24,7 +24,7 @@ import { GET } from '@/app/api/streaming/[jobId]/route';
 async function collectSSEStream(
   response: Response,
   abortController: AbortController,
-  timeoutMs = 500
+  timeoutMs = 120
 ): Promise<string[]> {
   const events: string[] = [];
   const reader = response.body!.getReader();
@@ -52,16 +52,19 @@ describe('GET /api/streaming/[jobId]', () => {
   let getJobMock: ReturnType<typeof vi.fn>;
   let probeJobStatusMock: ReturnType<typeof vi.fn>;
 
-  beforeEach(() => {
+  beforeAll(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-streaming-test-'));
+  });
+
+  afterAll(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
     getJobMock = vi.fn().mockReturnValue(null);
     probeJobStatusMock = vi.fn().mockResolvedValue('running');
     getJobImpl = getJobMock;
     probeJobStatusImpl = probeJobStatusMock;
-  });
-
-  afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
   });
 
   it('returns SSE content-type header', async () => {
@@ -401,15 +404,18 @@ describe('GET /api/streaming/[jobId] – extractLogDetail in done event', () => 
   let tempDir: string;
   let getJobMock: ReturnType<typeof vi.fn>;
 
-  beforeEach(() => {
+  beforeAll(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-streaming-detail-test-'));
+  });
+
+  afterAll(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
     getJobMock = vi.fn().mockReturnValue(null);
     getJobImpl = getJobMock;
     probeJobStatusImpl = vi.fn().mockResolvedValue('running');
-  });
-
-  afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
   });
 
   async function getDonePayload(logContent: string, exitCode: number): Promise<Record<string, unknown>> {
@@ -522,15 +528,18 @@ describe('GET /api/streaming/[jobId] – passthrough mode', () => {
   let tempDir: string;
   let getJobMock: ReturnType<typeof vi.fn>;
 
-  beforeEach(() => {
+  beforeAll(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-streaming-pt-test-'));
+  });
+
+  afterAll(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
     getJobMock = vi.fn().mockReturnValue(null);
     getJobImpl = getJobMock;
     probeJobStatusImpl = vi.fn().mockResolvedValue('running');
-  });
-
-  afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
   });
 
   it('emits non-JSON lines as raw SSE events', async () => {
@@ -648,15 +657,18 @@ describe('GET /api/streaming/[jobId] – tool_result SSE event', () => {
   let tempDir: string;
   let getJobMock: ReturnType<typeof vi.fn>;
 
-  beforeEach(() => {
+  beforeAll(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-streaming-tr-test-'));
+  });
+
+  afterAll(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
     getJobMock = vi.fn().mockReturnValue(null);
     getJobImpl = getJobMock;
     probeJobStatusImpl = vi.fn().mockResolvedValue('running');
-  });
-
-  afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
   });
 
   it('emits tool_result SSE event from system subtype tool_result log line', async () => {
