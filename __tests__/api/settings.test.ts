@@ -70,6 +70,7 @@ describe('settings API', () => {
         claude_provider: 'claude',
         cli_enabled_providers: 'claude',
         review_fix_max_iterations: '3',
+        release_wall_clock_timeout_minutes: '60',
       });
     });
 
@@ -362,6 +363,7 @@ describe('settings API', () => {
         'review_verdict_rules',
         'jobs_paused',
         'review_fix_max_iterations',
+        'release_wall_clock_timeout_minutes',
         'agent_templates',
         'notification_webhook_url',
         'notification_webhook_secret',
@@ -379,6 +381,7 @@ describe('settings API', () => {
           : k === 'permission_mode' ? 'acceptEdits'
           : k.startsWith('pipeline_model_') ? 'normal'
           : k === 'review_fix_max_iterations' ? '5'
+          : k === 'release_wall_clock_timeout_minutes' ? '30'
           : k === 'agent_templates'
             ? JSON.stringify([{ name: 'template', description: 'desc', model: 'smart', schedule: '', runner: 'pm2', prompt: '' }])
             : 'test-value',

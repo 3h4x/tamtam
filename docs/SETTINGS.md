@@ -132,7 +132,7 @@ Outbound webhooks for release pipeline events. Never blocks pipeline progress �
 **Payload format:** 
 - **Slack**: Formatted as block kit with event, project, status, verdict (if review), cost (if available), and a log link.
 - **Discord**: Embedded message with event details and a timestamp.
-- **Generic**: JSON POST with `{ event, project, job_id, status, verdict?, agent?, cost_usd?, log_url?, suppressedSince?, timestamp }`. The full event union is documented in the later **Payload shape** section below.
+- **Generic**: JSON POST with `{ event, project, job_id, status, verdict?, agent?, cost_usd?, log_url?, reason?, suppressedSince?, timestamp }`. `release_aborted` includes `reason: "wall_clock_timeout"` for automatic timeout aborts. The full event union is documented in the later **Payload shape** section below.
 
 When a throttled event is finally sent after suppressed repeats, the payload includes `suppressedSince` and the human message includes the suppressed count.
 
@@ -145,6 +145,7 @@ All three are read live on each job (not cached), so changing them takes effect 
 | Key | Type | Default | Effect |
 |-----|------|---------|--------|
 | `review_fix_max_iterations` | number | `3` | Cap on **NEEDS ATTENTION** review→fix verification rounds per release. It applies only to the review-side recovery loop. When the cap (or stuck-findings / fix-contradicts-review) trips, TamTam files a follow-up GitHub issue titled from the highest-severity structured `Finding ID` (`chore(review): <headline-finding-id> (+N more)`, the bare `Finding ID` when only one exists, or `chore(review): unresolved review` when none were extracted), tries to apply the canonical labels `tamtam` `review-followup` `priority-medium`, and skips any missing repo labels, then continues to commit + push so the partial work ships. The issue body carries the structured unresolved findings; if the review did not emit structured Finding blocks, the issue includes a quoted prose excerpt instead. The fallback issue keeps findings under `## Problem` and writes `## Acceptance criteria` as unchecked `- [ ]` checkboxes so later `mark-dod` runs can tick verified items; only the CTO issue-planning flow uses the full `Problem` / `Proposed approach` / `Acceptance criteria` template. **DO NOT SHIP** reviews are not downgraded by this setting; they still stop the release before commit/push. Test/commit/push safety caps still come from the shared env guard (`TAMTAM_MAX_STEP_ITERATIONS`). |
+| `release_wall_clock_timeout_minutes` | number | `60` | Overall wall-clock budget for an active Release run. Each release meta-job stores `release_deadline_at`; the 30s probe sweep aborts expired releases with reason `wall_clock_timeout`. Per-project `.tamtam/config.yml` can override this with `pipeline.release_timeout_minutes`. |
 
 ### Worktree & Review Gates
 
@@ -309,7 +310,7 @@ cli_default_model_gemini, cli_default_model_lmstudio, log_dir,
 frequency, daytime, weekends, launchagent_prefix, workspace_path,
 base_prompt, default_model, permission_mode, commit_style,
 review_verdict_rules, jobs_paused,
-review_fix_max_iterations,
+review_fix_max_iterations, release_wall_clock_timeout_minutes,
 agent_templates, log_retention_count, log_retention_days,
 job_row_retention_days, backup_retention_count,
 backup_retention_weekly_count, notification_webhook_url,
@@ -321,7 +322,9 @@ notification_throttle_window_seconds, notification_throttle_overrides,
 budget_block_runs_enabled, budget_subscription_providers,
 budget_block_at_pct, budget_warn_at_pct, pipeline_model_review,
 pipeline_model_fix, pipeline_model_dod, pipeline_model_commit,
-dirty_worktree_block_threshold, incremental_review_enabled
+dirty_worktree_block_threshold, incremental_review_enabled,
+retrieval_enabled, retrieval_ollama_url, retrieval_embedding_model,
+retrieval_context_limit, retrieval_score_threshold, retrieval_manage_ollama
 ```
 
 **POST `/api/settings/test-notification`** — sends a test notification to verify webhook connectivity. Request body: `{ webhook_url: string, webhook_secret?: string }`. Response: `{ ok: boolean, error?: string }`.

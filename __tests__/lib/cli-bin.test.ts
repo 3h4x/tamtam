@@ -41,6 +41,7 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     review_verdict_rules: '',
     jobs_paused: false,
     review_fix_max_iterations: 3,
+    release_wall_clock_timeout_minutes: 60,
     log_retention_count: 200,
     log_retention_days: 30,
     job_row_retention_days: 180,

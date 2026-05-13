@@ -27,6 +27,7 @@ export interface JobData {
   model?: string | null;
   releaseId?: string | null;
   abortedAt?: number | null;
+  releaseDeadlineAt?: number | null;
   promptBytes?: number | null;
   workSummary?: string | null;
   modifiedFiles?: string | null;

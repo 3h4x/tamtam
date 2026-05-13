@@ -73,6 +73,7 @@ export function ProjectDetailPage({
   const [config, setConfig] = useState<ProjectConfig | null>(null)
   const [configLoading, setConfigLoading] = useState(false)
   const [testCommandInput, setTestCommandInput] = useState('')
+  const [releaseTimeoutMinutesInput, setReleaseTimeoutMinutesInput] = useState('')
   const [testCronEnabledInput, setTestCronEnabledInput] = useState(false)
   const [testCronScheduleInput, setTestCronScheduleInput] = useState('')
   const [autoCommitEnabledInput, setAutoCommitEnabledInput] = useState(false)
@@ -185,6 +186,7 @@ export function ProjectDetailPage({
   const applyConfigData = (data: ProjectConfig) => {
     setConfig(data)
     setTestCommandInput(data.test_command)
+    setReleaseTimeoutMinutesInput(data.release_timeout_minutes != null ? String(data.release_timeout_minutes) : '')
     setTestCronEnabledInput(data.test_cron_enabled)
     setTestCronScheduleInput(data.test_cron_schedule)
     setAutoCommitEnabledInput(!!data.auto_commit_enabled)
@@ -462,6 +464,7 @@ export function ProjectDetailPage({
 
   const configInputs = {
     test_command: testCommandInput,
+    release_timeout_minutes: releaseTimeoutMinutesInput,
     test_cron_enabled: testCronEnabledInput,
     test_cron_schedule: testCronScheduleInput,
     auto_commit_enabled: autoCommitEnabledInput,
@@ -496,6 +499,7 @@ export function ProjectDetailPage({
 
   const configDirty = config !== null && (
     configInputs.test_command !== config.test_command ||
+    configInputs.release_timeout_minutes !== String(config.release_timeout_minutes ?? '') ||
     configInputs.test_cron_enabled !== config.test_cron_enabled ||
     configInputs.test_cron_schedule !== config.test_cron_schedule ||
     configInputs.auto_commit_enabled !== !!config.auto_commit_enabled ||
@@ -721,12 +725,14 @@ export function ProjectDetailPage({
       {/* Config Tab */}
       {activeTab === 'config' && (
         <div className="mt-4">
-          <ConfigTab
-            config={config}
-            configLoading={configLoading}
-            testCommandInput={testCommandInput}
-            setTestCommandInput={setTestCommandInput}
-            testCronEnabledInput={testCronEnabledInput}
+                <ConfigTab
+                  config={config}
+                  configLoading={configLoading}
+                  testCommandInput={testCommandInput}
+                  setTestCommandInput={setTestCommandInput}
+                  releaseTimeoutMinutesInput={releaseTimeoutMinutesInput}
+                  setReleaseTimeoutMinutesInput={setReleaseTimeoutMinutesInput}
+                  testCronEnabledInput={testCronEnabledInput}
             setTestCronEnabledInput={setTestCronEnabledInput}
             testCronScheduleInput={testCronScheduleInput}
             setTestCronScheduleInput={setTestCronScheduleInput}

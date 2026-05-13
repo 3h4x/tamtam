@@ -111,6 +111,7 @@ describe('project config client helpers', () => {
 
     const result = await updateProjectConfig('owner/repo name', {
       auto_push_enabled: true,
+      release_timeout_minutes: '45',
       review_disabled: false,
       test_command: 'pnpm test',
     });
@@ -122,6 +123,7 @@ describe('project config client helpers', () => {
     expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
     expect(JSON.parse(init.body as string)).toEqual({
       auto_push_enabled: true,
+      release_timeout_minutes: '45',
       review_disabled: false,
       test_command: 'pnpm test',
     });

@@ -78,6 +78,7 @@ function createTestDb() {
       model TEXT,
       release_id TEXT,
       aborted_at REAL,
+      release_deadline_at INTEGER,
       prompt_bytes INTEGER,
       work_summary TEXT,
       modified_files TEXT,
