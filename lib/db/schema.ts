@@ -1,48 +1,73 @@
-import { sqliteTable, text, integer, real, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
+import {
+  pgTable,
+  text,
+  integer,
+  boolean,
+  doublePrecision,
+  bigint,
+  uniqueIndex,
+  index,
+  customType,
+  serial,
+} from 'drizzle-orm/pg-core';
 
-export const settings = sqliteTable('settings', {
+// pgvector column type for 768-dimensional float vectors
+const vector = customType<{ data: number[]; driverData: string }>({
+  dataType() {
+    return 'vector(768)';
+  },
+  toDriver(value: number[]): string {
+    return `[${value.join(',')}]`;
+  },
+  fromDriver(value: string): number[] {
+    if (Array.isArray(value)) return value as number[];
+    return JSON.parse(value.replace(/^\[/, '[').replace(/\]$/, ']'));
+  },
+});
+
+export const settings = pgTable('settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
 });
 
-export const projects = sqliteTable('projects', {
+export const projects = pgTable('projects', {
   name: text('name').primaryKey(),
   path: text('path').notNull(),
-  enabled: integer('enabled', { mode: 'boolean' }).default(false),
+  enabled: boolean('enabled').default(false),
   github: text('github'),
   priority: text('priority'),
   customActions: text('custom_actions'),
   testCommand: text('test_command'),
-  testsDisabled: integer('tests_disabled', { mode: 'boolean' }).default(false),
-  reviewDisabled: integer('review_disabled', { mode: 'boolean' }).default(false),
-  testCronEnabled: integer('test_cron_enabled', { mode: 'boolean' }).default(false),
+  testsDisabled: boolean('tests_disabled').default(false),
+  reviewDisabled: boolean('review_disabled').default(false),
+  testCronEnabled: boolean('test_cron_enabled').default(false),
   testCronSchedule: text('test_cron_schedule'),
-  autoCommitEnabled: integer('auto_commit_enabled', { mode: 'boolean' }).default(false),
-  autoPushEnabled: integer('auto_push_enabled', { mode: 'boolean' }).default(false),
-  autoPrMergeEnabled: integer('auto_pr_merge_enabled', { mode: 'boolean' }).default(false),
-  releaseAfterRun: integer('release_after_run', { mode: 'boolean' }).default(false),
-  issueAutoBranch: integer('issue_auto_branch', { mode: 'boolean' }).default(true),
+  autoCommitEnabled: boolean('auto_commit_enabled').default(false),
+  autoPushEnabled: boolean('auto_push_enabled').default(false),
+  autoPrMergeEnabled: boolean('auto_pr_merge_enabled').default(false),
+  releaseAfterRun: boolean('release_after_run').default(false),
+  issueAutoBranch: boolean('issue_auto_branch').default(true),
   lastPushError: text('last_push_error'),
-  lastPushAt: real('last_push_at'),
+  lastPushAt: doublePrecision('last_push_at'),
   reviewPromptAddendum: text('review_prompt_addendum'),
   fixPromptAddendum: text('fix_prompt_addendum'),
   website: text('website'),
   qaUrl: text('qa_url'),
-  archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
-  paused: integer('paused', { mode: 'boolean' }).notNull().default(false),
+  archived: boolean('archived').notNull().default(false),
+  paused: boolean('paused').notNull().default(false),
 });
 
-export const jobs = sqliteTable('jobs', {
+export const jobs = pgTable('jobs', {
   id: text('id').primaryKey(),
   project: text('project').notNull(),
   kind: text('kind').notNull(),
   prompt: text('prompt'),
   pid: integer('pid').notNull(),
   logPath: text('log_path'),
-  startedAt: real('started_at').notNull(),
-  finishedAt: real('finished_at'),
+  startedAt: doublePrecision('started_at').notNull(),
+  finishedAt: doublePrecision('finished_at'),
   exitCode: integer('exit_code'),
-  seen: integer('seen', { mode: 'boolean' }).default(false),
+  seen: boolean('seen').default(false),
   durationMs: integer('duration_ms'),
   inputTokens: integer('input_tokens'),
   outputTokens: integer('output_tokens'),
@@ -55,19 +80,19 @@ export const jobs = sqliteTable('jobs', {
   ghIssueNumber: integer('gh_issue_number'),
   ghIssueRepo: text('gh_issue_repo'),
   ghIssueTitle: text('gh_issue_title'),
-  logPruned: integer('log_pruned', { mode: 'boolean' }).default(false),
+  logPruned: boolean('log_pruned').default(false),
   verdict: text('verdict'),
-  costUsd: real('cost_usd'),
+  costUsd: doublePrecision('cost_usd'),
   model: text('model'),
   releaseId: text('release_id'),
-  abortedAt: real('aborted_at'),
+  abortedAt: doublePrecision('aborted_at'),
   promptBytes: integer('prompt_bytes'),
   workSummary: text('work_summary'),
   modifiedFiles: text('modified_files'),
   provider: text('provider'),
 });
 
-export const recommendations = sqliteTable('recommendations', {
+export const recommendations = pgTable('recommendations', {
   id: text('id').primaryKey(),
   project: text('project').notNull(),
   sourceKind: text('source_kind').notNull(),
@@ -79,37 +104,37 @@ export const recommendations = sqliteTable('recommendations', {
   detail: text('detail').notNull(),
   status: text('status').notNull().default('open'),
   payload: text('payload'),
-  createdAt: real('created_at').notNull(),
-  updatedAt: real('updated_at').notNull(),
+  createdAt: doublePrecision('created_at').notNull(),
+  updatedAt: doublePrecision('updated_at').notNull(),
 });
 
-export const skills = sqliteTable('skills', {
+export const skills = pgTable('skills', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   description: text('description').notNull().default(''),
   content: text('content').notNull().default(''),
-  createdAt: real('created_at').notNull(),
-  updatedAt: real('updated_at').notNull(),
+  createdAt: doublePrecision('created_at').notNull(),
+  updatedAt: doublePrecision('updated_at').notNull(),
 });
 
-export const agents = sqliteTable('agents', {
+export const agents = pgTable('agents', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   project: text('project').notNull(),
-  skillIds: text('skill_ids').notNull().default('[]'),  // JSON array of skill IDs
+  skillIds: text('skill_ids').notNull().default('[]'),
   model: text('model').notNull().default('normal'),
-  prompt: text('prompt').notNull().default(''),  // default task prompt for scheduled runs
-  schedule: text('schedule'),  // e.g. "1h", "30m", "8h", null = manual only
-  runner: text('runner').notNull().default('pm2'),  // "launchctl" or "pm2"
-  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
-  docPaths: text('doc_paths').notNull().default('[]'),  // JSON array of project-relative doc paths
+  prompt: text('prompt').notNull().default(''),
+  schedule: text('schedule'),
+  runner: text('runner').notNull().default('pm2'),
+  enabled: boolean('enabled').notNull().default(true),
+  docPaths: text('doc_paths').notNull().default('[]'),
   provider: text('provider'),
-  prerequisiteCommand: text('prerequisite_command'),  // shell command run before the agent; stdout/stderr captured to <logDir>/<jobId>.prereq.txt and prepended to the prompt
-  createdAt: real('created_at').notNull(),
-  updatedAt: real('updated_at').notNull(),
+  prerequisiteCommand: text('prerequisite_command'),
+  createdAt: doublePrecision('created_at').notNull(),
+  updatedAt: doublePrecision('updated_at').notNull(),
 });
 
-export const ghStatus = sqliteTable('gh_status', {
+export const ghStatus = pgTable('gh_status', {
   project: text('project').primaryKey(),
   releaseTag: text('release_tag'),
   ci: text('ci'),
@@ -119,59 +144,56 @@ export const ghStatus = sqliteTable('gh_status', {
   fetchedAt: text('fetched_at').notNull(),
 });
 
-export const ghIssuesCache = sqliteTable('gh_issues_cache', {
+export const ghIssuesCache = pgTable('gh_issues_cache', {
   project: text('project').primaryKey(),
   repo: text('repo').notNull(),
   prs: text('prs').notNull().default('[]'),
   issues: text('issues').notNull().default('[]'),
-  fetchedAt: real('fetched_at').notNull(),
+  fetchedAt: doublePrecision('fetched_at').notNull(),
 });
 
-export const pipelineLocks = sqliteTable('pipeline_locks', {
+export const pipelineLocks = pgTable('pipeline_locks', {
   project: text('project').primaryKey(),
   lockedByJobId: text('locked_by_job_id').notNull(),
-  acquiredAt: real('acquired_at').notNull(),
+  acquiredAt: doublePrecision('acquired_at').notNull(),
 });
 
-// Agents queued for a project while a release pipeline holds the lock.
-// DB-backed so the queue survives a server restart — unlike the in-memory
-// pending-agent-run queue which is only for agent-vs-agent serialization.
-export const queuedAgentRuns = sqliteTable('queued_agent_runs', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const queuedAgentRuns = pgTable('queued_agent_runs', {
+  id: serial('id').primaryKey(),
   project: text('project').notNull(),
   agentId: text('agent_id').notNull(),
   agentName: text('agent_name').notNull(),
   triggeredBy: text('triggered_by').notNull().default('manual'),
   prompt: text('prompt').notNull().default(''),
-  enqueuedAt: real('enqueued_at').notNull(),
+  enqueuedAt: doublePrecision('enqueued_at').notNull(),
 }, (t) => ({
   projectAgentUniq: uniqueIndex('queued_agent_runs_project_agent').on(t.project, t.agentId),
 }));
 
-export const notificationThrottle = sqliteTable('notification_throttle', {
+export const notificationThrottle = pgTable('notification_throttle', {
   key: text('key').primaryKey(),
-  lastSentAt: integer('last_sent_at').notNull(),
+  lastSentAt: bigint('last_sent_at', { mode: 'number' }).notNull(),
   suppressedCount: integer('suppressed_count').notNull().default(0),
 });
 
-export const maintenanceStatus = sqliteTable('maintenance_status', {
+export const maintenanceStatus = pgTable('maintenance_status', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
-  updatedAt: real('updated_at').notNull(),
+  updatedAt: doublePrecision('updated_at').notNull(),
 });
 
-export const retrievalRecords = sqliteTable('retrieval_records', {
-  id: text('id').primaryKey(), // `${project}:${sourceKind}:${sourceId}`
+export const retrievalRecords = pgTable('retrieval_records', {
+  id: text('id').primaryKey(),
   project: text('project').notNull(),
   sourceKind: text('source_kind').notNull(),
   sourceId: text('source_id').notNull(),
   chunkCount: integer('chunk_count').notNull(),
   contentHash: text('content_hash').notNull(),
-  indexedAt: real('indexed_at').notNull(),
+  indexedAt: doublePrecision('indexed_at').notNull(),
 });
 
-export const retrievalChunks = sqliteTable('retrieval_chunks', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const retrievalChunks = pgTable('retrieval_chunks', {
+  id: serial('id').primaryKey(),
   chunkId: text('chunk_id').notNull().unique(),
   project: text('project').notNull(),
   sourceKind: text('source_kind').notNull(),
@@ -179,15 +201,12 @@ export const retrievalChunks = sqliteTable('retrieval_chunks', {
   chunkIndex: integer('chunk_index').notNull(),
   text: text('text').notNull(),
   metadata: text('metadata').notNull(),
+  embedding: vector('embedding'),
 });
 
-// One row per Ollama embedding call. `project` and `sourceKind` are null for
-// query-time embeddings (no indexed corpus context). `inputTokens` and
-// `durationMs` are pulled from the embed response (prompt_eval_count,
-// total_duration / 1e6).
-export const ollamaUsage = sqliteTable('ollama_usage', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  ts: real('ts').notNull(),
+export const ollamaUsage = pgTable('ollama_usage', {
+  id: serial('id').primaryKey(),
+  ts: doublePrecision('ts').notNull(),
   model: text('model').notNull(),
   project: text('project'),
   sourceKind: text('source_kind'),

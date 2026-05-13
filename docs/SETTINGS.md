@@ -206,7 +206,7 @@ When enabled, TamTam starts Ollama via PM2 (`ollama-serve`) on boot if not alrea
 
 ### Durable Agent Workflows
 
-Phase-1 durable intake for agent runs, backed by the `workflow` package and a Postgres world. When enabled, **read-only agent runs with no prerequisite command** go through a two-step durable workflow (`composePromptStep` → `startAgentStep`) rather than the direct route path. The workflow state is persisted to Postgres so prompt composition and PM2 spawn are retried automatically on transient failures or server restarts. Everything after PM2 spawn (lifecycle hooks, SSE streaming, completion detection) is unchanged.
+Durable intake for agent runs, backed by the `workflow` package and a Postgres world. When enabled, **all agent runs** — including runs with prerequisite commands and non-read-only runs — go through a durable workflow (`runPrerequisiteStep` → `composePromptStep` → `startAgentStep`) rather than the direct route path. The workflow state is persisted to Postgres so prompt composition and PM2 spawn are retried automatically on transient failures or server restarts. Everything after PM2 spawn (lifecycle hooks, SSE streaming, completion detection) is unchanged.
 
 Requires: Postgres 17+ accessible to the TamTam process, with env vars set in `.env.local`:
 ```
@@ -218,6 +218,13 @@ Run `workflow-postgres-setup` (from `@workflow/world-postgres`) once to create t
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `durable_agent_workflows_enabled` | bool | `false` | Master gate — off by default; enable after Postgres is provisioned |
+
+There is no Settings UI toggle for this key. Enable it via the API:
+```bash
+curl -X PATCH http://localhost:1337/api/settings \
+  -H "Content-Type: application/json" \
+  -d '{"durable_agent_workflows_enabled": true}'
+```
 
 The Postgres world worker starts automatically on TamTam boot when the flag is `true` and `WORKFLOW_TARGET_WORLD` is set. Run history and job rows remain SQLite-backed; only workflow execution state (runs, steps) lives in Postgres.
 

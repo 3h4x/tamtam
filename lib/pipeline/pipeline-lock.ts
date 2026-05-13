@@ -1,5 +1,6 @@
 import { db, schema } from '@/lib/db';
 import { eq } from 'drizzle-orm';
+import { getJob } from '@/lib/jobs/storage';
 
 /**
  * True when the project's pipeline lock is held by an active (unfinished)

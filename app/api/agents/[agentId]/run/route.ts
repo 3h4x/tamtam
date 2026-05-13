@@ -400,11 +400,12 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     prerequisiteCommand: agent.prerequisiteCommand,
   });
 
-  // Durable workflow path: read-only runs with no prerequisite command and the
-  // feature flag enabled go through the workflow intake. The workflow owns
-  // prompt composition and PM2 spawn; everything after spawn (lifecycle,
-  // streaming, completion hooks) is unchanged.
-  if (readOnly && !prereqCmd && settings.durable_agent_workflows_enabled) {
+  // Durable workflow path: when the feature flag is enabled, all agent runs go
+  // through the workflow intake regardless of readOnly or prerequisite status.
+  // The workflow owns prompt composition, optional prereq execution, and PM2
+  // spawn; everything after spawn (lifecycle, streaming, completion hooks) is
+  // unchanged.
+  if (settings.durable_agent_workflows_enabled) {
     try {
       const { start } = await import('workflow/api');
       await start(runAgentIntakeWorkflow, [{
@@ -420,7 +421,10 @@ At the end of your run, include a short final section exactly named "TamTam Run 
         triggeredBy,
         provider,
         logPath,
+        logDir,
         baseContextMeta: initialContextMeta,
+        prereqCmd: prereqCmd ?? null,
+        readOnly,
       }]);
     } catch (e: unknown) {
       appendRedactedFileSync(/*turbopackIgnore: true*/ logPath, `\n# workflow: failed to enqueue: ${errMsg(e)}\n`);

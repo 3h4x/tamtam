@@ -20,14 +20,14 @@ export interface RetrievalResult {
 }
 
 export interface RetrievalBackend {
-  upsertChunks(chunks: RetrievalChunk[]): void;
+  upsertChunks(chunks: RetrievalChunk[]): Promise<void>;
   search(opts: {
     embedding: number[];
     project: string;
     limit: number;
     sourceKinds?: SourceKind[];
-  }): RetrievalResult[];
-  countProjectChunks(project: string, sourceKinds?: SourceKind[]): number;
-  deleteSource(project: string, sourceKind: SourceKind, sourceId: string): void;
-  deleteProject(project: string): void;
+  }): Promise<RetrievalResult[]>;
+  countProjectChunks(project: string, sourceKinds?: SourceKind[]): Promise<number>;
+  deleteSource(project: string, sourceKind: SourceKind, sourceId: string): Promise<void>;
+  deleteProject(project: string): Promise<void>;
 }

@@ -9,6 +9,7 @@ Agents are reusable automation units that combine skills, optional attached proj
 - Understanding how skills and attached project docs are composed into the system prompt
 - Preventing duplicate/concurrent agent runs
 - Understanding the internal scheduler and legacy launchctl compatibility
+- Understanding the durable intake workflow (Postgres-backed two-step path for read-only runs)
 
 ---
 
@@ -512,6 +513,58 @@ after the running-job check but before the first request has created its job row
 ### Spawn-grace in `probeJobStatus`
 
 Job rows are inserted with `pid=0` and the real pid is persisted asynchronously after `pm2 start` returns (hundreds of ms, up to pm2's 15 s timeout). `probeJobStatus` treats `pid<=0` as **still spawning** for the first 30 seconds after `startedAt` — otherwise a concurrent duplicate-check would `markDone(-1)` the sibling mid-spawn **and** `pm2 delete` its Claude process, producing a phantom `exit -1 @ 0s` row next to the real run. After the grace window, `pid<=0` is treated as dead as before. See `lib/job-storage.ts:probeJobStatus`.
+
+### Drain circuit breaker
+
+`drainNextAgentRun` in `lib/agents/pending-agent-run.ts` has a per-project circuit breaker to prevent a fast-failing route (e.g. PM2 spawn `EBADF` after file-descriptor exhaustion) from churning the queue at ~50 runs/sec.
+
+Behavior:
+- Each 5xx response or fetch-level error increments a per-project, per-entry `consecutiveFailures` counter.
+- After `MAX_CONSECUTIVE_FAILURES` (5) consecutive failures on the same queue head, the head is dropped and the breaker clears. A log warning is emitted.
+- Between failure attempts, a 30-second `scheduleDrainRetry` timer fires instead of immediately retrying on the next lifecycle drain.
+- Replacing a queue entry (same `agentId`, new `enqueuedAt`) resets the failure counter for that slot.
+- A successful drain or a terminal 400/404/409 (non-transient) drops the head and clears the counter without tripping the breaker.
+
+## Durable Agent Intake (Experimental)
+
+When `durable_agent_workflows_enabled` is `true` and the environment is configured with a Postgres world (see `docs/SETTINGS.md`), **read-only agent runs with no prerequisite command** take a durable two-step path instead of composing and spawning inline in the route handler.
+
+### What changes
+
+The run route delegates to `runAgentIntakeWorkflow()` in `lib/agents/intake-workflow.ts`. This function is declared with `'use workflow'` / `'use step'` directives and runs under the `workflow` package's Postgres-backed execution world, which persists step state so transient crashes or server restarts retry from the last completed step rather than starting over.
+
+**Step 1 — `composePromptStep`**: reads agent skills and docs, runs `git rev-parse HEAD` and `git status` to capture a baseline snapshot, builds the full system prompt, resolves the CLI binary and env, and returns a `ComposeResult` struct.
+
+**Step 2 — `startAgentStep`**: updates the job row with the composed `contextMeta`, calls `startJob()` to hand off to PM2, and on failure writes an error artifact to the log file, marks the job done with `exitCode -1`, and rethrows so the workflow runtime can retry the step.
+
+Everything after PM2 spawn — lifecycle hooks, SSE streaming, log tailing, completion detection, project recommendations — is unchanged.
+
+### Response
+
+When the durable path handles a run, the `/api/agents/{agentId}/run` response includes `via: "workflow"`:
+
+```json
+{
+  "status": "started",
+  "job_id": "job-…",
+  "via": "workflow",
+  "agent": "My Agent"
+}
+```
+
+### Eligibility
+
+When `durable_agent_workflows_enabled` is `true` **all** agent runs go through the workflow, including runs with prerequisite commands and non-read-only runs. The only condition is:
+- `durable_agent_workflows_enabled` setting is `true`
+- `WORKFLOW_TARGET_WORLD` env var is set (set in `.env.local`)
+
+When the flag is off, all runs use the direct inline path unchanged.
+
+Completed workflow runs have `"workflow": true` in `contextMeta` on the job row, which can be used to confirm the durable path was active.
+
+### Setup
+
+See `docs/SETTINGS.md` → "Durable Agent Workflows" for Postgres provisioning, env vars, and the `workflow-postgres-setup` migration command. There is no Settings UI toggle — enable via `PATCH /api/settings` with `{"durable_agent_workflows_enabled": true}`.
 
 ## Example: Set Up a Weekly Review Agent
 

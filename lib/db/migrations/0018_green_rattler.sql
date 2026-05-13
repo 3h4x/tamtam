@@ -1,1 +1,0 @@
-ALTER TABLE `projects` ADD `archived` integer DEFAULT false NOT NULL;

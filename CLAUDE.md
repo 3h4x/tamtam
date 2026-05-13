@@ -219,7 +219,7 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 | `docs/DATABASE.md` | Drizzle schema reference — all tables, columns, indices | Adding/changing DB tables, writing migrations, or working with `lib/db/` |
 | `docs/BACKUP.md` | SQLite backup, verification, restore, and retention runbook | Changing backup/restore behavior or operating database recovery |
 | `docs/SETTINGS.md` | All `settings` table keys, their types, and defaults | Adding a new setting, reading config in a new place, or changing defaults |
-| `docs/AGENT.md` | Agent concepts: skills composition, scheduling, runner lifecycle | Working on agents, the internal scheduler, or skill composition |
+| `docs/AGENT.md` | Agent concepts: skills composition, scheduling, runner lifecycle, durable intake workflow | Working on agents, the internal scheduler, skill composition, or the Postgres-backed durable workflow path |
 | `docs/CACHING.md` | Layered TTL cache strategy (in-memory + SQLite) | Adding a new cache layer, changing TTLs, or debugging stale data |
 | `docs/PROFILING.md` | Server/client/Turbopack profiling guide | Investigating perf regressions or high CPU/memory |
 | `docs/SECURITY.md` | Security model: file-agent trust, untrusted input handling, threat surface | Any security-sensitive change: auth, file-agent parsing, untrusted content |

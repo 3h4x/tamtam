@@ -48,7 +48,7 @@ export interface RetrievalDiagnostics {
 export async function retrieveAgentContextDetailed(
   opts: RetrieveAgentContextOpts
 ): Promise<{ block: string | null; diagnostics: RetrievalDiagnostics }> {
-  const corpusChunkCount = opts.backend.countProjectChunks(opts.project, ['project_doc', 'skill', 'project_config', 'agent_run']);
+  const corpusChunkCount = await opts.backend.countProjectChunks(opts.project, ['project_doc', 'skill', 'project_config', 'agent_run']);
   if (corpusChunkCount === 0) {
     return {
       block: null,
@@ -69,7 +69,7 @@ export async function retrieveAgentContextDetailed(
       project: opts.project,
       sourceKind: 'query',
     });
-    const results = opts.backend.search({ embedding, project: opts.project, limit: opts.limit });
+    const results = await opts.backend.search({ embedding, project: opts.project, limit: opts.limit });
     const above = results.filter((r) => r.score >= opts.scoreThreshold);
     const topScore = results[0]?.score ?? null;
     return {

@@ -1,1 +1,0 @@
-ALTER TABLE `agents` ADD `doc_paths` text DEFAULT '[]' NOT NULL;
