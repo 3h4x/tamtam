@@ -228,7 +228,9 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 | `docs/PROMPT-SIZE.md` | Prompt size & cache-read cost analysis | Changing skill/prompt composition, adding skills, or investigating token cost |
 | `docs/E2E.md` | Playwright pipeline e2e harness: mocks, scenarios, helpers | Writing or debugging pipeline e2e tests in `e2e/pipeline/` |
 | `docs/superpowers/plans/2026-04-16-docs-picker.md` | Implementation plan for the Experimental tab docs picker | Continuing or auditing the `+docs` picker work in the Experimental tab or its project-docs API route |
+| `docs/superpowers/plans/2026-05-13-agent-retrieval.md` | Implementation plan for agent retrieval with sqlite-vec + Ollama | Continuing or auditing the retrieval ingestion/reindex/retriever work for agent prompts |
 | `docs/superpowers/specs/2026-04-16-docs-picker-design.md` | Approved design spec for the Experimental tab docs picker | Verifying intended behavior for project-doc selection and first-message docs injection in the Experimental tab |
+| `docs/superpowers/specs/2026-05-13-agent-retrieval-design.md` | Approved design spec for agent retrieval | Verifying the intended retrieval architecture, Ollama/sqlite-vec choices, or prompt-time context injection |
 
 ## Coding Conventions
 - **Stay project-generic in source**: TamTam is shared infrastructure across many projects. Do NOT reference any specific project slug, GitHub owner/repo, PR number, or issue number in code, comments, log strings, variable names, or commit messages within source files. Describe the symptom or behavior generically — say what triggers the bug, not which ticket reported it. Discovery context belongs in chat / PR descriptions, not in source. Such references rot fast (the ticket closes, projects get renamed) and leak operational context to anyone pulling the repo.
