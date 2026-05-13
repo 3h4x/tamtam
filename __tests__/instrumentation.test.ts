@@ -46,6 +46,7 @@ describe('instrumentation', () => {
       pauseInternalScheduler: vi.fn(),
       resumeInternalScheduler: vi.fn(),
     };
+    const noopExec = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     vi.doMock('@/lib/db', () => dbMock);
     vi.doMock('./lib/db', () => dbMock);
     vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerMock);
@@ -53,6 +54,8 @@ describe('instrumentation', () => {
     vi.doMock('@/lib/scheduling/agent-scheduler', () => ({
       reconcilePm2Schedules: reconcilePm2SchedulesMock,
     }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: noopExec }));
+    vi.doMock('./lib/shared/shell', () => ({ exec: noopExec }));
     vi.doMock('drizzle-orm', () => ({ isNotNull: vi.fn(v => v), eq: vi.fn((_a, b) => b), and: vi.fn((...args) => args) }));
   }
 
@@ -211,6 +214,9 @@ describe('instrumentation', () => {
         select: vi.fn().mockReturnValue({
           from: vi.fn().mockReturnValue({
             where: lockWhere,
+            // safety valve: prevents TypeError if lib/jobs/storage.ts is accidentally
+            // evaluated with this dbMock (it calls db.select().from(jobs).all())
+            all: vi.fn().mockReturnValue([]),
           }),
         }),
         delete: vi.fn().mockReturnValue({
@@ -218,18 +224,18 @@ describe('instrumentation', () => {
         }),
       };
 
-      vi.doMock('@/lib/jobs/job-storage', () => ({
+      const storageMock = {
         listJobs: vi.fn(() => jobs),
         getJob: vi.fn((id: string) => byId.get(id) ?? null),
         markDone: markDoneMock,
         reconcileStaleRelease: reconcileStaleReleaseMock,
-      }));
-      vi.doMock('./lib/jobs/job-storage', () => ({
-        listJobs: vi.fn(() => jobs),
-        getJob: vi.fn((id: string) => byId.get(id) ?? null),
-        markDone: markDoneMock,
-        reconcileStaleRelease: reconcileStaleReleaseMock,
-      }));
+      };
+
+      vi.doMock('@/lib/jobs/job-storage', () => storageMock);
+      vi.doMock('./lib/jobs/job-storage', () => storageMock);
+      // Also mock the non-barrel path so the barrel bypass doesn't fall through to real storage.ts
+      vi.doMock('@/lib/jobs/storage', () => storageMock);
+      vi.doMock('./lib/jobs/storage', () => storageMock);
       vi.doMock('@/lib/db', () => ({ db: dbMock, schema: { pipelineLocks: { project: 'project' } } }));
       vi.doMock('./lib/db', () => ({ db: dbMock, schema: { pipelineLocks: { project: 'project' } } }));
       vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));

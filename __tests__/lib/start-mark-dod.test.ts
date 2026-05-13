@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { extractCriteria, tickCriteria } from '@/lib/pipeline/start-mark-dod';
+import { extractCriteria, tickCriteria } from '@/lib/pipeline/mark-dod-criteria';
 
 // ─── Pure helpers ────────────────────────────────────────────────────────────
 

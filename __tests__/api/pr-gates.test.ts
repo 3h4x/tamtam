@@ -48,7 +48,7 @@ describe('GET /api/projects/by-project/[projectName]/pr-gates', () => {
       getVerdict: getVerdictMock,
     }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({
+    vi.doMock('@/lib/pipeline/mark-dod-criteria', () => ({
       extractCriteria: extractCriteriaMock,
     }));
 

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { exec } from '@/lib/shared/shell';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { listJobs, getVerdict } from '@/lib/jobs/job-storage';
-import { extractCriteria } from '@/lib/pipeline/start-mark-dod';
+import { extractCriteria } from '@/lib/pipeline/mark-dod-criteria';
 
 export type GateState = 'pass' | 'fail' | 'warn' | 'none';
 export type PrGates = {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractCriteria } from '@/lib/pipeline/start-mark-dod';
+import { extractCriteria } from '@/lib/pipeline/mark-dod-criteria';
 import {
   ISSUE_BODY_TEMPLATE,
   ISSUE_FORMAT_INSTRUCTION,
