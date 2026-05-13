@@ -45,8 +45,8 @@ Permission mode mapping:
   bypassPermissions -> --dangerously-bypass-approvals-and-sandbox
   dontAsk           -> --ask-for-approval never --sandbox workspace-write
   auto              -> --ask-for-approval never --sandbox workspace-write
-  acceptEdits       -> --ask-for-approval on-request --sandbox workspace-write
-  default           -> --ask-for-approval on-request --sandbox workspace-write
+  acceptEdits       -> --ask-for-approval never --sandbox workspace-write
+  default           -> --ask-for-approval never --sandbox workspace-write
   plan              -> --ask-for-approval on-request --sandbox read-only
 `);
     process.exit(0);
@@ -133,7 +133,7 @@ function sandboxFor(mode) {
 }
 
 function approvalFor(mode) {
-  if (mode === 'plan' || mode === 'default' || mode === 'acceptEdits') return 'on-request';
+  if (mode === 'plan') return 'on-request';
   return 'never';
 }
 

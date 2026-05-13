@@ -67,6 +67,16 @@ function getInputByLabel(container: HTMLElement, labelText: string): HTMLInputEl
   return input
 }
 
+function getSelectByLabel(container: HTMLElement, labelText: string): HTMLSelectElement {
+  const label = Array.from(container.querySelectorAll('label')).find(
+    (node) => node.textContent?.trim() === labelText,
+  )
+  const wrapper = label?.parentElement
+  const select = wrapper?.querySelector('select')
+  if (!(select instanceof HTMLSelectElement)) throw new Error(`Select not found: ${labelText}`)
+  return select
+}
+
 function setInputValue(input: HTMLInputElement, value: string) {
   const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
   valueSetter?.call(input, value)
@@ -164,6 +174,27 @@ describe('CliTab', () => {
 
     expect(onChange).toHaveBeenCalledWith('budget_block_at_pct', '100')
     expect(onChange).toHaveBeenCalledWith('budget_warn_at_pct', '0')
+
+    unmount()
+  })
+
+  it('defaults the permission-mode picker to acceptEdits when the stored value is empty', () => {
+    const { container, unmount } = renderCliTab(makeSettings({
+      permission_mode: '',
+    }))
+
+    expect(getSelectByLabel(container, 'Permission mode').value).toBe('acceptEdits')
+
+    unmount()
+  })
+
+  it('shows the provider-neutral auto warning copy', () => {
+    const { container, unmount } = renderCliTab(makeSettings({
+      permission_mode: 'auto',
+    }))
+
+    expect(container.textContent).toContain('auto preserves provider-native approval behavior')
+    expect(container.textContent).toContain('Prefer acceptEdits for background runs')
 
     unmount()
   })

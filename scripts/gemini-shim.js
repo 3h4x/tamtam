@@ -13,9 +13,11 @@ const { installInactivityWatchdog } = require('./shim-utils');
 // Mapping Claude permission modes to Gemini approval modes
 const APPROVAL_MAP = {
   'bypassPermissions': 'yolo',
+  'acceptEdits': 'auto_edit',
   'auto': 'auto_edit',
+  'dontAsk': 'auto_edit',
   'plan': 'plan',
-  'default': 'default'
+  'default': 'auto_edit'
 };
 
 function resolveGeminiModel(model, env) {

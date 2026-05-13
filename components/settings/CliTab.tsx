@@ -264,16 +264,22 @@ export function CliTab({
             <div>
               <label className="block text-xs text-text-secondary mb-1">Permission mode</label>
               <select
-                value={settings.permission_mode || 'bypassPermissions'}
+                value={settings.permission_mode || 'acceptEdits'}
                 onChange={(e) => onChange('permission_mode', e.target.value)}
                 className={SELECT_CLASS}
               >
                 <option value="bypassPermissions">bypassPermissions</option>
                 <option value="acceptEdits">acceptEdits</option>
+                <option value="auto">auto</option>
                 <option value="dontAsk">dontAsk</option>
                 <option value="default">default</option>
                 <option value="plan">plan</option>
               </select>
+              {settings.permission_mode === 'auto' && (
+                <div className="mt-2 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs text-status-warning" role="alert">
+                  <span className="font-medium">Warning:</span> auto preserves provider-native approval behavior. On CLIs that still prompt for write approval in headless mode, unattended jobs can block. Prefer acceptEdits for background runs.
+                </div>
+              )}
             </div>
           </div>
           <div>

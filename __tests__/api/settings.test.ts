@@ -119,6 +119,15 @@ describe('settings API', () => {
       expect(data.settings.pipeline_model_review).toBe('');
     });
 
+    it('normalizes invalid stored permission_mode in the API response', async () => {
+      testDb.db.insert(schema.settings).values({ key: 'permission_mode', value: 'dangerousMode' }).run();
+
+      const response = await GET();
+      const data = await response.json();
+
+      expect(data.settings.permission_mode).toBe('acceptEdits');
+    });
+
     it('returns the effective review_fix_max_iterations when the stored row is invalid', async () => {
       testDb.db.insert(schema.settings).values({ key: 'review_fix_max_iterations', value: 'abc' }).run();
 
@@ -206,6 +215,18 @@ describe('settings API', () => {
       expect(map.workspace_path).toBe('/projects');
       expect(map.github_owner).toBe('octocat');
       expect(map.frequency).toBe('2h');
+    });
+
+    it('rejects invalid permission_mode values', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ permission_mode: 'dangerousMode' }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.detail).toContain('permission_mode must be one of');
     });
 
     it('ignores unknown keys', async () => {
@@ -355,6 +376,7 @@ describe('settings API', () => {
       const body = Object.fromEntries(validKeys.map((k) => [
         k,
         k === 'default_model' ? 'fast'
+          : k === 'permission_mode' ? 'acceptEdits'
           : k.startsWith('pipeline_model_') ? 'normal'
           : k === 'review_fix_max_iterations' ? '5'
           : k === 'agent_templates'
