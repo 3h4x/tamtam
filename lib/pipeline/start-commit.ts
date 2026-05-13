@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from 'fs';
+import { mkdirSync } from 'fs';
 import { join } from 'path';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/shared/project-data';
 import { exec } from '@/lib/shared/shell';
@@ -21,6 +21,7 @@ import {
   issueStamped,
   type IssueContext,
 } from './release-context';
+import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 
 export type CommitResult =
   | { ok: true; commitSha: string; message: string; jobId?: string }
@@ -472,7 +473,7 @@ export async function startProjectCommit(
   }
 
   const append = (s: string) => {
-    try { appendFileSync(logPath, s); } catch {}
+    try { appendRedactedFileSync(logPath, s); } catch {}
   };
   append(`# commit start — ${new Date().toISOString()}\n# repo: ${projPath}\n`);
 

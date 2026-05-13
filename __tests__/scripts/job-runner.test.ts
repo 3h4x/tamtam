@@ -107,6 +107,23 @@ describe('scripts/job-runner.js', () => {
     expect(log).toContain('done');
   });
 
+  it('redacts child output before writing the job log', async () => {
+    const logPath = join(dir, 'redacted.log');
+    const promptPath = join(dir, 'redacted.prompt');
+    writeFileSync(promptPath, '');
+
+    const { exitCode } = await runRunner([
+      'job-redacted', logPath, promptPath,
+      'bash', '-c', 'echo "token=ghp_abcdefghijklmnopqrstuvwxyz123456"; echo "ordinary line"',
+    ], { TAMTAM_ROOT: join(dir, 'no-db-root') });
+
+    expect(exitCode).toBe(0);
+    const log = readFileSync(logPath, 'utf-8');
+    expect(log).toContain('token=[REDACTED]');
+    expect(log).toContain('ordinary line');
+    expect(log).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz123456');
+  });
+
   it('uses TAMTAM_DB_PATH for the pause check when provided', async () => {
     const root = join(dir, 'root');
     const tempDbPath = join(dir, 'e2e-db', 'tamtam.db');

@@ -409,6 +409,7 @@ describe('action API POST pause gate', () => {
   let spawnMock: ReturnType<typeof vi.fn>;
   let procOnMock: ReturnType<typeof vi.fn>;
   let procUnrefMock: ReturnType<typeof vi.fn>;
+  let customActions: Array<{ name: string; command: string }>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -431,6 +432,7 @@ describe('action API POST pause gate', () => {
       on: procOnMock,
       unref: procUnrefMock,
     }));
+    customActions = [{ name: 'Deploy', command: 'pnpm deploy' }];
 
     vi.doMock('@/lib/db', () => ({ db: {}, schema: {} }));
     vi.doMock('@/lib/shared/project-data', () => ({
@@ -447,7 +449,7 @@ describe('action API POST pause gate', () => {
       updateJob: updateJobMock,
     }));
     vi.doMock('@/lib/skills/tamtam-file-config', () => ({
-      loadFileConfig: () => ({ custom_actions: [{ name: 'Deploy', command: 'pnpm deploy' }] }),
+      loadFileConfig: () => ({ custom_actions: customActions }),
       writeFileConfig: vi.fn(),
     }));
     vi.doMock('child_process', () => ({
@@ -506,10 +508,42 @@ describe('action API POST pause gate', () => {
       action: 'Deploy',
     });
     expect(createJobMock).toHaveBeenCalledWith('proj1', 'Deploy', 0, '');
-    expect(spawnMock).toHaveBeenCalledWith('bash', ['-c', 'pnpm deploy'], expect.objectContaining({
+    const spawnArgs = spawnMock.mock.calls[0];
+    expect(spawnArgs[0]).toBe('bash');
+    expect(spawnArgs[1][0]).toBe('-lc');
+    expect(spawnArgs[1][1]).toContain('pnpm deploy');
+    expect(spawnArgs[1][1]).toContain('redact-log-stream.js');
+    expect(spawnArgs[2]).toEqual(expect.objectContaining({
       cwd: tmpDir,
       detached: true,
+      stdio: 'ignore',
     }));
+    expect(existsSync(join(tmpDir, 'logs', 'job-123.sh'))).toBe(false);
+    expect(procUnrefMock).toHaveBeenCalledOnce();
+    expect(updateJobMock).toHaveBeenCalled();
+  });
+
+  it('does not persist a wrapper script when the action command contains inline secrets', async () => {
+    jobsPausedResultMock.mockReturnValue(null);
+    customActions = [{
+      name: 'Deploy',
+      command: 'SERVICE_TOKEN=runtime-secret-value curl https://user:supersecret@example.com/path',
+    }];
+
+    const response = await POST(
+      new NextRequest('http://localhost/api/projects/by-project/proj1/action', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'Deploy' }),
+      }),
+      { params: Promise.resolve({ projectName: 'proj1' }) }
+    );
+
+    expect(response.status).toBe(200);
+    const spawnArgs = spawnMock.mock.calls[0];
+    expect(spawnArgs[1][0]).toBe('-lc');
+    expect(spawnArgs[1][1]).toContain('SERVICE_TOKEN=runtime-secret-value');
+    expect(spawnArgs[1][1]).toContain('https://user:supersecret@example.com/path');
+    expect(existsSync(join(tmpDir, 'logs', 'job-123.sh'))).toBe(false);
     expect(procUnrefMock).toHaveBeenCalledOnce();
     expect(updateJobMock).toHaveBeenCalled();
   });

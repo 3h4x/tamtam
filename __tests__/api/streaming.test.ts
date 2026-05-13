@@ -99,6 +99,25 @@ describe('GET /api/streaming/[jobId]', () => {
     expect(combined).toContain('data: line three');
   });
 
+  it('redacts existing raw log content before streaming', async () => {
+    const logFile = join(tempDir, 'raw-secret.log');
+    writeFileSync(logFile, 'token=ghp_abcdefghijklmnopqrstuvwxyz123456\nordinary line\n');
+    getJobMock.mockReturnValue({ logPath: logFile, finishedAt: Date.now() / 1000, exitCode: 0 } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-1?raw=1', {
+      signal: ac.signal,
+    });
+
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    expect(combined).toContain('data: token=[REDACTED]');
+    expect(combined).toContain('data: ordinary line');
+    expect(combined).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz123456');
+  });
+
   it('sends empty stream when log file does not exist', async () => {
     getJobMock.mockReturnValue({ logPath: '/nonexistent/path/job.log' } as Partial<JobData>);
 
@@ -133,6 +152,26 @@ describe('GET /api/streaming/[jobId]', () => {
 
     const combined = events.join('');
     expect(combined).toContain('data: Hello world');
+  });
+
+  it('redacts parsed stream event text before streaming', async () => {
+    const logFile = join(tempDir, 'parsed-secret.log');
+    const textLine =
+      '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"token=ghp_abcdefghijklmnopqrstuvwxyz123456 kept"}}}';
+    writeFileSync(logFile, textLine + '\n');
+    getJobMock.mockReturnValue({ logPath: logFile, finishedAt: Date.now() / 1000, exitCode: 0 } as Partial<JobData>);
+
+    const ac = new AbortController();
+    const request = new NextRequest('http://localhost/api/streaming/job-1', {
+      signal: ac.signal,
+    });
+
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
+    const events = await collectSSEStream(response, ac);
+
+    const combined = events.join('');
+    expect(combined).toContain('data: token=[REDACTED] kept');
+    expect(combined).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz123456');
   });
 
   it('sends done event for result lines', async () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { JobData } from '@/lib/jobs/job-storage';
@@ -46,6 +46,11 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
   let spawnMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
   let projDir: string;
+  let improveConfig: {
+    claudeBin: string;
+    logDir: string;
+    projects: Record<string, { project: string; test_command?: string }>;
+  };
 
   beforeEach(async () => {
     vi.resetModules();
@@ -66,17 +71,18 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
 
     const mockProc = makeMockProcess();
     spawnMock = vi.fn().mockReturnValue(mockProc);
+    improveConfig = {
+      claudeBin: 'claude',
+      logDir: join(tempDir, 'logs'),
+      projects: {},
+    };
 
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
     }));
 
     vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({
-        claudeBin: 'claude',
-        logDir: join(tempDir, 'logs'),
-        projects: {},
-      }),
+      getImproveConfig: vi.fn(() => improveConfig),
     }));
 
     vi.doMock('@/lib/jobs/job-storage', () => ({
@@ -193,6 +199,31 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
     expect(data.job_id).toBeTruthy();
     expect(data.log_path).toBeTruthy();
     expect(data.test_cmd).toBeTruthy();
+    const spawnArgs = spawnMock.mock.calls[0];
+    expect(spawnArgs[1][0]).toBe('-lc');
+    expect(spawnArgs[1][1]).toContain('redact-log-stream.js');
+    expect(spawnArgs[1][1]).toContain('node ');
+    expect(spawnArgs[2]).toEqual(expect.objectContaining({ detached: true, stdio: 'ignore' }));
+    expect(existsSync(join(improveConfig.logDir, 'test-job-id.sh'))).toBe(false);
+  });
+
+  it('does not persist a wrapper script when the test command contains inline secrets', async () => {
+    improveConfig.projects.proj1 = {
+      project: 'proj1',
+      test_command: 'SERVICE_TOKEN=runtime-secret-value curl https://user:supersecret@example.com/path',
+    };
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/test', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    expect(res.status).toBe(200);
+    const spawnArgs = spawnMock.mock.calls[0];
+    expect(spawnArgs[1][0]).toBe('-lc');
+    expect(spawnArgs[1][1]).toContain('SERVICE_TOKEN=runtime-secret-value');
+    expect(spawnArgs[1][1]).toContain('https://user:supersecret@example.com/path');
+    expect(existsSync(join(improveConfig.logDir, 'test-job-id.sh'))).toBe(false);
   });
 
   it('detects pnpm test when pnpm-lock.yaml exists', async () => {

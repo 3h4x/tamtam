@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, writeFileSync, chmodSync } from 'fs';
+import { mkdirSync, writeFileSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { resolveProjectPath } from '@/lib/shared/project-data';
@@ -16,6 +16,7 @@ import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { hasFreshLgtm, hasLocalCommitsAhead } from './release-state';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import type { IssueContext } from './release-context';
+import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 
 const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push', 'pr-wait', 'mark-dod', 'release']);
 
@@ -101,7 +102,7 @@ async function createReleaseJob(
       }
     }
 
-    appendFileSync(logPath, `# release start — ${new Date().toISOString()}\n# project: ${projectName}\n${triggerLine}`);
+    appendRedactedFileSync(logPath, `# release start — ${new Date().toISOString()}\n# project: ${projectName}\n${triggerLine}`);
 
     // Bash monitor: polls the release log for the completion marker, then exits
     // with the embedded exit code so PM2 records it correctly.
