@@ -95,6 +95,10 @@ function makeResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   }
 }
 
+function fastWaitFor(assertion: Parameters<typeof vi.waitFor>[0]) {
+  return vi.waitFor(assertion, { interval: 1 })
+}
+
 describe('ProjectRunsTab release actions', () => {
   beforeEach(() => {
     fetchJobsMock.mockResolvedValue({
@@ -129,14 +133,14 @@ describe('ProjectRunsTab release actions', () => {
   it('shows continue release only for the newest virtual grouped pipeline in failed and release filters', async () => {
     const { container, unmount } = renderTab()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
       expect(container.textContent).toContain('Pipeline steps')
     })
 
     buttonByText(container, 'release').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       const continueButtons = Array.from(container.querySelectorAll('button')).filter((node) => node.textContent?.trim() === 'Continue release')
       expect(continueButtons).toHaveLength(1)
       expect(container.textContent?.match(/Pipeline steps/g)?.length).toBe(2)
@@ -144,7 +148,7 @@ describe('ProjectRunsTab release actions', () => {
 
     buttonByText(container, 'release').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       const continueButtons = Array.from(container.querySelectorAll('button')).filter((node) => node.textContent?.trim() === 'Continue release')
       expect(continueButtons).toHaveLength(1)
       expect(container.textContent?.match(/Pipeline steps/g)?.length).toBe(2)
@@ -152,7 +156,7 @@ describe('ProjectRunsTab release actions', () => {
 
     buttonByText(container, 'Continue release').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(releaseProjectMock).toHaveBeenCalledWith('alpha', {
         queueIfBlocked: true,
         sourceJobId: 'new-push',
@@ -172,7 +176,7 @@ describe('ProjectRunsTab release actions', () => {
 
     const { container, unmount } = renderTab()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
       expect(container.textContent).toContain('1 running')
     })
@@ -193,14 +197,14 @@ describe('ProjectRunsTab release actions', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('settings offline')))
     const { container, unmount } = renderTab()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
       expect(buttonByText(container, 'Sync board')).toBeInstanceOf(HTMLButtonElement)
     })
 
     buttonByText(container, 'Sync board').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(syncJobBoardMock).toHaveBeenCalledWith('new-push')
     })
 
@@ -220,7 +224,7 @@ describe('ProjectRunsTab release actions', () => {
 
     const { container, unmount } = renderTab()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
       expect(container.textContent).toContain('cancelled after review')
     })
@@ -242,7 +246,7 @@ describe('ProjectRunsTab release actions', () => {
 
     const { container, unmount } = renderTab()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
       expect(container.textContent).toContain('Release pipeline')
     })
@@ -251,7 +255,7 @@ describe('ProjectRunsTab release actions', () => {
     if (!(expandButton instanceof HTMLButtonElement)) throw new Error('expand button not found')
     expandButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       const text = container.textContent ?? ''
       const testIndex = text.indexOf('Test run')
       const fixIndex = text.indexOf('Auto-fix')
@@ -275,14 +279,14 @@ describe('ProjectRunsTab release actions', () => {
     })
     const { container, unmount } = renderTab()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
       expect(buttonByText(container, 'Retry commit')).toBeInstanceOf(HTMLButtonElement)
     })
 
     buttonByText(container, 'Retry commit').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(pushProjectMock).toHaveBeenCalledWith('alpha', {
         commit: true,
         releaseId: 'rel-commit-failed',
@@ -304,14 +308,14 @@ describe('ProjectRunsTab release actions', () => {
 
     const { container, unmount } = renderTab()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
       expect(buttonByText(container, 'Sync board')).toBeInstanceOf(HTMLButtonElement)
     })
 
     buttonByText(container, 'Sync board').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(syncJobBoardMock).toHaveBeenCalledWith('aborted-release')
     })
 
@@ -332,14 +336,14 @@ describe('ProjectRunsTab release actions', () => {
 
     const { container, unmount } = renderTab()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
       expect(buttonByText(container, 'Stop')).toBeInstanceOf(HTMLButtonElement)
     })
 
     buttonByText(container, 'Stop').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/projects/by-project/alpha/release/abort', { method: 'POST' })
     })
     expect(fetchMock).not.toHaveBeenCalledWith('/api/jobs/running-release', expect.anything())
@@ -365,14 +369,14 @@ describe('ProjectRunsTab release actions', () => {
 
     const { container, unmount } = renderTab()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
       expect(buttonByText(container, 'Stop')).toBeInstanceOf(HTMLButtonElement)
     })
 
     buttonByText(container, 'Stop').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/projects/by-project/alpha/release/abort', { method: 'POST' })
       expect(buttonByText(container, 'abort pending')).toBeInstanceOf(HTMLButtonElement)
     })
@@ -395,21 +399,21 @@ describe('ProjectRunsTab release actions', () => {
 
     const { container, unmount } = renderTab()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
       expect(buttonByText(container, 'test')).toBeInstanceOf(HTMLButtonElement)
     })
 
     buttonByText(container, 'test').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(container.textContent).toContain('Test run')
       expect(buttonByText(container, 'Stop')).toBeInstanceOf(HTMLButtonElement)
     })
 
     buttonByText(container, 'Stop').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/projects/by-project/alpha/release/abort', { method: 'POST' })
     })
     expect(fetchMock).not.toHaveBeenCalledWith('/api/jobs/running-test', expect.anything())
@@ -429,14 +433,14 @@ describe('ProjectRunsTab release actions', () => {
 
     const { container, unmount } = renderTab()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
       expect(buttonByText(container, 'Stop')).toBeInstanceOf(HTMLButtonElement)
     })
 
     buttonByText(container, 'Stop').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/jobs/running-review', { method: 'DELETE' })
     })
     expect(fetchMock).not.toHaveBeenCalledWith('/api/projects/by-project/alpha/release/abort', expect.anything())
@@ -458,14 +462,14 @@ describe('ProjectRunsTab release actions', () => {
 
     const { container, unmount } = renderTab()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
       expect(buttonByText(container, 'Stop')).toBeInstanceOf(HTMLButtonElement)
     })
 
     buttonByText(container, 'Stop').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/projects/by-project/alpha/release/abort', { method: 'POST' })
     })
     expect(fetchMock).not.toHaveBeenCalledWith('/api/jobs/agent-run', expect.anything())
@@ -487,7 +491,7 @@ describe('ProjectRunsTab release actions', () => {
 
     const { container, unmount } = renderTab()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
       expect(container.textContent).toContain('Release pipeline')
       expect(container.textContent).toContain('ship')
@@ -500,7 +504,7 @@ describe('ProjectRunsTab release actions', () => {
     if (!(expandButton instanceof HTMLButtonElement)) throw new Error('expand button not found')
     expandButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       const continueButtons = Array.from(container.querySelectorAll('button')).filter((node) => node.textContent?.trim() === 'Continue release')
       const retryButtons = Array.from(container.querySelectorAll('button')).filter((node) => node.textContent?.trim() === 'Retry release')
       expect(continueButtons).toHaveLength(1)
@@ -509,7 +513,7 @@ describe('ProjectRunsTab release actions', () => {
 
     buttonByText(container, 'Continue release').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(releaseProjectMock).toHaveBeenCalledWith('alpha', {
         queueIfBlocked: true,
         sourceJobId: 'nested-release',
@@ -530,19 +534,19 @@ describe('ProjectRunsTab release actions', () => {
 
     const { container, unmount } = renderTab()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
       expect(container.textContent).toContain('Pipeline steps')
     })
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       const continueButtons = Array.from(container.querySelectorAll('button')).filter((node) => node.textContent?.trim() === 'Continue release')
       expect(continueButtons).toHaveLength(1)
     })
 
     buttonByText(container, 'Continue release').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(releaseProjectMock).toHaveBeenCalledWith('alpha', {
         queueIfBlocked: true,
         sourceJobId: 'dod-success',
@@ -555,7 +559,7 @@ describe('ProjectRunsTab release actions', () => {
   it('disables release retry while jobs are paused and re-enables it live', async () => {
     const { container, rerender, unmount } = renderTab({ jobsPaused: true })
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
       expect(buttonByText(container, 'Continue release').disabled).toBe(true)
       expect(buttonByText(container, 'Continue release').title).toContain('Jobs are paused globally')
@@ -566,7 +570,7 @@ describe('ProjectRunsTab release actions', () => {
 
     rerender({ jobsPaused: false })
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(buttonByText(container, 'Continue release').disabled).toBe(false)
       expect(buttonByText(container, 'Continue release').title).toContain('Start a new release attempt')
     })
@@ -582,7 +586,7 @@ describe('ProjectRunsTab release actions', () => {
 
     const { container, unmount } = renderTab()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
       expect(container.textContent).toContain('Release queued')
     })

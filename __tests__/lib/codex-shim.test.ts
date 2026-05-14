@@ -55,7 +55,7 @@ async function withTempDir<T>(run: (dir: string) => Promise<T>): Promise<T> {
 let suiteTempDir = '';
 let fakeCodexBin = '';
 
-async function writeScenario(dir: string, source: string): Promise<string> {
+async function writeScenario(source: string, dir = suiteTempDir): Promise<string> {
   const path = join(dir, `${randomUUID()}.cjs`);
   await writeFile(path, source);
   return path;
@@ -120,9 +120,9 @@ require(process.env.TAMTAM_CODEX_SHIM_SCENARIO);
     expect(shim.resolveModel('haiku', { CODEX_HAIKU_MODEL: 'gpt-test-fast' })).toBe('gpt-test-fast');
   });
 
-  it.concurrent('emits assistant text once and preserves the Codex session id', () => withTempDir(async (dir) => {
+  it.concurrent('emits assistant text once and preserves the Codex session id', async () => {
     const sessionId = '019de76e-0ffe-7e43-9335-60c482aac2ea';
-    const scenarioPath = await writeScenario(dir, `
+    const scenarioPath = await writeScenario(`
 const events = [
   { type: 'session_meta', payload: { id: '${sessionId}' } },
   { type: 'event_msg', payload: { type: 'agent_message', message: 'NEEDS ATTENTION', phase: 'final_answer' } },
@@ -159,10 +159,10 @@ for (const event of events) console.log(JSON.stringify(event));
       outputTokens: 3,
       cacheReadInputTokens: 4,
     });
-  }));
+  });
 
-  it.concurrent('emits assistant response_item text without echoing prompt messages', () => withTempDir(async (dir) => {
-    const scenarioPath = await writeScenario(dir, `
+  it.concurrent('emits assistant response_item text without echoing prompt messages', async () => {
+    const scenarioPath = await writeScenario(`
 const events = [
   { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'DO NOT ECHO' }] } },
   { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Verdict: LGTM' }] } },
@@ -190,11 +190,11 @@ for (const event of events) console.log(JSON.stringify(event));
     expect(text).toBe('Verdict: LGTM');
     expect(text).not.toContain('DO NOT ECHO');
     expect(final.is_error).toBe(false);
-  }));
+  });
 
-  it.concurrent('parses real Codex item.completed agent_message events', () => withTempDir(async (dir) => {
+  it.concurrent('parses real Codex item.completed agent_message events', async () => {
     const sessionId = '019de81b-075a-7410-a6eb-0031655a589f';
-    const scenarioPath = await writeScenario(dir, `
+    const scenarioPath = await writeScenario(`
 const events = [
   { type: 'thread.started', thread_id: '${sessionId}' },
   { type: 'turn.started' },
@@ -228,10 +228,10 @@ for (const event of events) console.log(JSON.stringify(event));
       outputTokens: 20,
       cacheReadInputTokens: 10112,
     });
-  }));
+  });
 
-  it.concurrent('silently consumes Codex lifecycle events (item.started, turn.started, etc.) without echoing JSON', () => withTempDir(async (dir) => {
-    const scenarioPath = await writeScenario(dir, `
+  it.concurrent('silently consumes Codex lifecycle events (item.started, turn.started, etc.) without echoing JSON', async () => {
+    const scenarioPath = await writeScenario(`
 const events = [
   { type: 'thread.started', thread_id: 'sess-life' },
   { type: 'turn.started' },
@@ -261,10 +261,10 @@ for (const event of events) console.log(JSON.stringify(event));
     expect(text).not.toContain('item.started');
     expect(text).not.toContain('turn.started');
     expect(text).not.toContain('command_execution');
-  }));
+  });
 
-  it.concurrent('reports Codex cached input separately instead of double-counting it as full-price input', () => withTempDir(async (dir) => {
-    const scenarioPath = await writeScenario(dir, `
+  it.concurrent('reports Codex cached input separately instead of double-counting it as full-price input', async () => {
+    const scenarioPath = await writeScenario(`
 const events = [
   { type: 'thread.started', thread_id: 'sess-cache' },
   { type: 'item.completed', item: { type: 'agent_message', text: 'done' } },
@@ -290,10 +290,10 @@ for (const event of events) console.log(JSON.stringify(event));
       outputTokens: 50,
       cacheReadInputTokens: 900,
     });
-  }));
+  });
 
-  it.concurrent('fails stream-json runs that produce no assistant output', () => withTempDir(async (dir) => {
-    const scenarioPath = await writeScenario(dir, `
+  it.concurrent('fails stream-json runs that produce no assistant output', async () => {
+    const scenarioPath = await writeScenario(`
 console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 10, output_tokens: 0 } } } }));
 `);
 
@@ -311,10 +311,10 @@ console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', 
 
     expect(final.is_error).toBe(true);
     expect(final.result).toBe('[codex-shim] codex produced no assistant output');
-  }));
+  });
 
-  it.concurrent('passes through plain JSON assistant output in text mode', () => withTempDir(async (dir) => {
-    const scenarioPath = await writeScenario(dir, `
+  it.concurrent('passes through plain JSON assistant output in text mode', async () => {
+    const scenarioPath = await writeScenario(`
 console.log(JSON.stringify({ results: [{ index: 1, text: 'criterion', verified: true }] }));
 `);
 
@@ -328,10 +328,10 @@ console.log(JSON.stringify({ results: [{ index: 1, text: 'criterion', verified: 
     expect(JSON.parse(result.stdout)).toEqual({
       results: [{ index: 1, text: 'criterion', verified: true }],
     });
-  }));
+  });
 
-  it.concurrent('passes through JSON assistant output with protocol-looking keys in text mode', () => withTempDir(async (dir) => {
-    const scenarioPath = await writeScenario(dir, `
+  it.concurrent('passes through JSON assistant output with protocol-looking keys in text mode', async () => {
+    const scenarioPath = await writeScenario(`
 console.log(JSON.stringify({
   type: 'verification_report',
   payload: { status: 'LGTM', item: { type: 'check', verified: true } },
@@ -351,10 +351,10 @@ console.log(JSON.stringify({
       payload: { status: 'LGTM', item: { type: 'check', verified: true } },
       usage: { notes: 'assistant output, not Codex telemetry' },
     });
-  }));
+  });
 
-  it.concurrent('emits a useful error when Codex exits non-zero without stderr', () => withTempDir(async (dir) => {
-    const scenarioPath = await writeScenario(dir, `
+  it.concurrent('emits a useful error when Codex exits non-zero without stderr', async () => {
+    const scenarioPath = await writeScenario(`
 console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'working on it' } }));
 process.exit(1);
 `);
@@ -373,13 +373,13 @@ process.exit(1);
 
     expect(final.is_error).toBe(true);
     expect(final.result).toContain('codex exited 1 after assistant output with no stderr');
-  }));
+  });
 
   it.concurrent('forwards termination signals to the Codex child process', () => withTempDir(async (dir) => {
     const readyFile = join(dir, 'ready');
     const signalFile = join(dir, 'signal');
     const pidFile = join(dir, 'pid');
-    const scenarioPath = await writeScenario(dir, `
+    const scenarioPath = await writeScenario(`
 const fs = require('fs');
 fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
 fs.writeFileSync(${JSON.stringify(readyFile)}, 'ready');
@@ -388,7 +388,7 @@ process.on('SIGTERM', () => {
   process.exit(143);
 });
 setInterval(() => {}, 1000);
-`);
+`, dir);
 
     const proc = spawn(process.execPath, [
       'scripts/codex-shim.js',
@@ -427,7 +427,7 @@ setInterval(() => {}, 1000);
 
   it.concurrent('retries once when codex exits 1 with no stderr after streaming output (transient crash)', () => withTempDir(async (dir) => {
     const attemptFile = join(dir, 'attempt');
-    const scenarioPath = await writeScenario(dir, `
+    const scenarioPath = await writeScenario(`
 const fs = require('fs');
 const path = ${JSON.stringify(attemptFile)};
 let attempt = 0;
@@ -440,7 +440,7 @@ if (attempt === 0) {
 }
 console.log(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'recovered' }] } }));
 console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 5, output_tokens: 2, cached_input_tokens: 1 } } } }));
-`);
+`, dir);
 
     const result = await runNode([
       'scripts/codex-shim.js',
@@ -473,7 +473,7 @@ console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', 
 
   it.concurrent('does not retry when codex exits 1 with stderr (real failure)', () => withTempDir(async (dir) => {
     const attemptFile = join(dir, 'attempt');
-    const scenarioPath = await writeScenario(dir, `
+    const scenarioPath = await writeScenario(`
 const fs = require('fs');
 const path = ${JSON.stringify(attemptFile)};
 let attempt = 0;
@@ -482,7 +482,7 @@ fs.writeFileSync(path, String(attempt + 1));
 console.log(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'oops' }] } }));
 process.stderr.write('apply_patch verification failed\\n');
 process.exit(1);
-`);
+`, dir);
 
     const result = await runNode([
       'scripts/codex-shim.js',
@@ -501,7 +501,7 @@ process.exit(1);
 
   it.concurrent('does not duplicate an already-streamed prefix when the retry restarts the answer', () => withTempDir(async (dir) => {
     const attemptFile = join(dir, 'attempt');
-    const scenarioPath = await writeScenario(dir, `
+    const scenarioPath = await writeScenario(`
 const fs = require('fs');
 const path = ${JSON.stringify(attemptFile)};
 let attempt = 0;
@@ -513,7 +513,7 @@ if (attempt === 0) {
 }
 console.log(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hello world' }] } }));
 console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 7, output_tokens: 2 } } } }));
-`);
+`, dir);
 
     const result = await runNode([
       'scripts/codex-shim.js',
@@ -539,7 +539,7 @@ console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', 
 
   it.concurrent('exits 0 when the retry cleanly replays the exact same answer', () => withTempDir(async (dir) => {
     const attemptFile = join(dir, 'attempt');
-    const scenarioPath = await writeScenario(dir, `
+    const scenarioPath = await writeScenario(`
 const fs = require('fs');
 const path = ${JSON.stringify(attemptFile)};
 let attempt = 0;
@@ -550,7 +550,7 @@ if (attempt === 0) {
   process.exit(1);
 }
 console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 5, output_tokens: 1 } } } }));
-`);
+`, dir);
 
     const result = await runNode([
       'scripts/codex-shim.js',
