@@ -211,12 +211,15 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         if (cancelled) return
         if (attempt > 0) await new Promise(r => setTimeout(r, 1000))
         try {
-          const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
+          // Looking for a release row that was spawned from this run. Narrow
+          // to release-kind rows; the latest dozen is plenty since this poll
+          // runs immediately after a chat finishes.
+          const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}&kind=release&limit=12`)
           if (!res.ok) continue
           const data = await res.json()
           const found = (data.jobs ?? []).find(
             (j: { kind: string; parent_job_id?: string | null; id: string }) =>
-              j.kind === 'release' && j.parent_job_id === lastJobId
+              j.parent_job_id === lastJobId
           )
           if (found) { setPostRunReleaseId(found.id); return }
         } catch {}

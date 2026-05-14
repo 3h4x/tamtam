@@ -130,11 +130,10 @@ export function useTerminalBootstrap({
       if (cur.restoredFor === initialSessionId && cur.history.length > 0) {
         const userEntries = cur.history.filter(h => h.role === 'user').length
         try {
-          const listRes = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
+          const listRes = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}&session_id=${encodeURIComponent(initialSessionId)}&limit=200`)
           const listData = await listRes.json()
           const dbMatches = (listData.jobs ?? []).filter(
-            (j: JobDict) => j.session_id === initialSessionId
-              && (['run', 'review', 'fix', 'fix-ci'].includes(j.kind) || j.kind.startsWith('agent:'))
+            (j: JobDict) => (['run', 'review', 'fix', 'fix-ci'].includes(j.kind) || j.kind.startsWith('agent:')),
           ).length
           if (dbMatches <= userEntries) return
         } catch {
@@ -143,14 +142,14 @@ export function useTerminalBootstrap({
       }
 
       if (cancelled) return
-      await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
+      await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}&session_id=${encodeURIComponent(initialSessionId)}&limit=200`)
       .then(r => r.json())
       .then(async (data) => {
         const jobs: JobDict[] = data.jobs ?? []
         const isSessionKind = (k: string) =>
           ['run', 'review', 'fix', 'fix-ci'].includes(k) || k.startsWith('agent:')
         const matches = jobs
-          .filter(j => j.session_id === initialSessionId && isSessionKind(j.kind))
+          .filter(j => isSessionKind(j.kind))
           .sort((a, b) => a.started_at - b.started_at)
         if (matches.length === 0) return
 
@@ -341,13 +340,14 @@ export function useTerminalBootstrap({
         cur.pendingAutoSubmit
       ) return
       try {
-        const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
+        // Polled every 1s on the terminal page — pull only running release
+        // rows to keep this cheap.
+        const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}&kind=release&status=running&limit=5`)
         if (!res.ok) return
         const data = await res.json()
         const runningJobs: JobDict[] = (data.jobs ?? [])
-          .filter((job: JobDict) => job.status === 'running')
           .sort((a: JobDict, b: JobDict) => b.started_at - a.started_at)
-        const target = runningJobs.find((job: JobDict) => job.kind === 'release')
+        const target = runningJobs[0]
         if (!target || attachedExternalJobRef.current === target.id) return
         attachedExternalJobRef.current = target.id
         router.replace(`/project/${projectName}/terminal?job=${encodeURIComponent(target.id)}`)
