@@ -21,6 +21,24 @@ vi.mock('@/lib/jobs/claude-stream-parser', async () => {
 
 import { GET } from '@/app/api/streaming/[jobId]/route';
 
+async function collectClosedSSEStream(response: Response): Promise<string[]> {
+  const events: string[] = [];
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      events.push(decoder.decode(value, { stream: true }));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return events;
+}
+
 async function collectSSEStream(
   response: Response,
   abortController: AbortController,
@@ -94,7 +112,7 @@ describe('GET /api/streaming/[jobId]', () => {
     });
 
     const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
-    const events = await collectSSEStream(response, ac);
+    const events = await collectClosedSSEStream(response);
 
     const combined = events.join('');
     expect(combined).toContain('data: line one');
@@ -113,7 +131,7 @@ describe('GET /api/streaming/[jobId]', () => {
     });
 
     const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
-    const events = await collectSSEStream(response, ac);
+    const events = await collectClosedSSEStream(response);
 
     const combined = events.join('');
     expect(combined).toContain('data: token=[REDACTED]');
@@ -132,7 +150,7 @@ describe('GET /api/streaming/[jobId]', () => {
     const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
     expect(response.status).toBe(200);
     // Abort quickly — no content expected
-    const events = await collectSSEStream(response, ac, 100);
+    const events = await collectClosedSSEStream(response);
     const combined = events.join('');
     // No data events for missing file
     expect(combined).toBe('');
@@ -151,7 +169,7 @@ describe('GET /api/streaming/[jobId]', () => {
     });
 
     const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
-    const events = await collectSSEStream(response, ac);
+    const events = await collectClosedSSEStream(response);
 
     const combined = events.join('');
     expect(combined).toContain('data: Hello world');
@@ -170,7 +188,7 @@ describe('GET /api/streaming/[jobId]', () => {
     });
 
     const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
-    const events = await collectSSEStream(response, ac);
+    const events = await collectClosedSSEStream(response);
 
     const combined = events.join('');
     expect(combined).toContain('data: token=[REDACTED] kept');
@@ -190,7 +208,7 @@ describe('GET /api/streaming/[jobId]', () => {
     });
 
     const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
-    const events = await collectSSEStream(response, ac);
+    const events = await collectClosedSSEStream(response);
 
     const combined = events.join('');
     expect(combined).toContain('event: done');
@@ -210,7 +228,7 @@ describe('GET /api/streaming/[jobId]', () => {
     });
 
     const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
-    const events = await collectSSEStream(response, ac, 1000);
+    const events = await collectClosedSSEStream(response);
 
     const combined = events.join('');
     expect(combined).toContain('event: done');
@@ -231,7 +249,7 @@ describe('GET /api/streaming/[jobId]', () => {
     });
 
     const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
-    const events = await collectSSEStream(response, ac);
+    const events = await collectClosedSSEStream(response);
 
     const combined = events.join('');
     expect(combined).toContain('event: thinking');
@@ -250,7 +268,7 @@ describe('GET /api/streaming/[jobId]', () => {
     });
 
     const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
-    const events = await collectSSEStream(response, ac);
+    const events = await collectClosedSSEStream(response);
 
     const combined = events.join('');
     // Multi-line SSE: each line gets its own "data:" prefix
@@ -270,7 +288,7 @@ describe('GET /api/streaming/[jobId]', () => {
     });
 
     const response = await GET(request, { params: Promise.resolve({ jobId: 'job-1' }) });
-    const events = await collectSSEStream(response, ac);
+    const events = await collectClosedSSEStream(response);
 
     const combined = events.join('');
     expect(combined).toContain('event: tool_use');
@@ -298,7 +316,7 @@ describe('GET /api/streaming/[jobId]', () => {
     const ac = new AbortController();
     const request = new NextRequest('http://localhost/api/streaming/job-tr', { signal: ac.signal });
     const response = await GET(request, { params: Promise.resolve({ jobId: 'job-tr' }) });
-    const events = await collectSSEStream(response, ac);
+    const events = await collectClosedSSEStream(response);
 
     const combined = events.join('');
     expect(combined).toContain('event: tool_result');
@@ -378,7 +396,7 @@ describe('GET /api/streaming/[jobId]', () => {
       signal: ac.signal,
     });
     const response = await GET(request, { params: Promise.resolve({ jobId: 'job-probe-stop' }) });
-    await collectSSEStream(response, ac, 200);
+    await collectClosedSSEStream(response);
 
     // Finished-at path short-circuits before the poller ever starts,
     // so probeJobStatus must never be called.
@@ -432,7 +450,7 @@ describe('GET /api/streaming/[jobId] – extractLogDetail in done event', () => 
       signal: ac.signal,
     });
     const response = await GET(request, { params: Promise.resolve({ jobId: 'job-detail' }) });
-    const events = await collectSSEStream(response, ac, 300);
+    const events = await collectClosedSSEStream(response);
     const combined = events.join('');
 
     const match = combined.match(/event: done\ndata: (.+)/);
@@ -452,7 +470,7 @@ describe('GET /api/streaming/[jobId] – extractLogDetail in done event', () => 
     const ac = new AbortController();
     const request = new NextRequest(`http://localhost/api/streaming/job-ok?raw=1`, { signal: ac.signal });
     const response = await GET(request, { params: Promise.resolve({ jobId: 'job-ok' }) });
-    const events = await collectSSEStream(response, ac, 300);
+    const events = await collectClosedSSEStream(response);
     const combined = events.join('');
 
     const match = combined.match(/event: done\ndata: (.+)/);
@@ -472,7 +490,7 @@ describe('GET /api/streaming/[jobId] – extractLogDetail in done event', () => 
     const ac = new AbortController();
     const request = new NextRequest(`http://localhost/api/streaming/job-missing?raw=1`, { signal: ac.signal });
     const response = await GET(request, { params: Promise.resolve({ jobId: 'job-missing' }) });
-    const events = await collectSSEStream(response, ac, 300);
+    const events = await collectClosedSSEStream(response);
     const combined = events.join('');
 
     const match = combined.match(/event: done\ndata: (.+)/);
@@ -554,7 +572,7 @@ describe('GET /api/streaming/[jobId] – passthrough mode', () => {
     const ac = new AbortController();
     const req = new NextRequest('http://localhost/api/streaming/job-pt?passthrough=1', { signal: ac.signal });
     const response = await GET(req, { params: Promise.resolve({ jobId: 'job-pt' }) });
-    const events = await collectSSEStream(response, ac, 300);
+    const events = await collectClosedSSEStream(response);
     const combined = events.join('');
 
     expect(combined).toContain('event: raw\ndata: plain shell output');
@@ -574,7 +592,7 @@ describe('GET /api/streaming/[jobId] – passthrough mode', () => {
     const ac = new AbortController();
     const req = new NextRequest('http://localhost/api/streaming/job-pt-mix?passthrough=1', { signal: ac.signal });
     const response = await GET(req, { params: Promise.resolve({ jobId: 'job-pt-mix' }) });
-    const events = await collectSSEStream(response, ac, 300);
+    const events = await collectClosedSSEStream(response);
     const combined = events.join('');
 
     expect(combined).toContain('event: raw\ndata: shell line before');
@@ -595,7 +613,7 @@ describe('GET /api/streaming/[jobId] – passthrough mode', () => {
     const ac = new AbortController();
     const req = new NextRequest('http://localhost/api/streaming/job-pt-res?passthrough=1', { signal: ac.signal });
     const response = await GET(req, { params: Promise.resolve({ jobId: 'job-pt-res' }) });
-    const events = await collectSSEStream(response, ac, 300);
+    const events = await collectClosedSSEStream(response);
     const combined = events.join('');
 
     // Exactly one done event (synthetic), carrying the server exitCode — not the embedded result
@@ -621,7 +639,7 @@ describe('GET /api/streaming/[jobId] – passthrough mode', () => {
     const ac = new AbortController();
     const req = new NextRequest('http://localhost/api/streaming/job-pt-tool?passthrough=1', { signal: ac.signal });
     const response = await GET(req, { params: Promise.resolve({ jobId: 'job-pt-tool' }) });
-    const events = await collectSSEStream(response, ac, 300);
+    const events = await collectClosedSSEStream(response);
     const combined = events.join('');
 
     expect(combined).toContain('event: tool_use');
@@ -645,7 +663,7 @@ describe('GET /api/streaming/[jobId] – passthrough mode', () => {
     const ac = new AbortController();
     const req = new NextRequest('http://localhost/api/streaming/job-pt-partial?passthrough=1', { signal: ac.signal });
     const response = await GET(req, { params: Promise.resolve({ jobId: 'job-pt-partial' }) });
-    const events = await collectSSEStream(response, ac, 300);
+    const events = await collectClosedSSEStream(response);
     const combined = events.join('');
 
     expect(combined).toContain('event: raw\ndata: complete-line');
@@ -684,7 +702,7 @@ describe('GET /api/streaming/[jobId] – tool_result SSE event', () => {
     const ac = new AbortController();
     const req = new NextRequest('http://localhost/api/streaming/job-sys-tr', { signal: ac.signal });
     const response = await GET(req, { params: Promise.resolve({ jobId: 'job-sys-tr' }) });
-    const events = await collectSSEStream(response, ac);
+    const events = await collectClosedSSEStream(response);
 
     const combined = events.join('');
     expect(combined).toContain('event: tool_result');
@@ -708,7 +726,7 @@ describe('GET /api/streaming/[jobId] – tool_result SSE event', () => {
     const ac = new AbortController();
     const req = new NextRequest('http://localhost/api/streaming/job-user-tr', { signal: ac.signal });
     const response = await GET(req, { params: Promise.resolve({ jobId: 'job-user-tr' }) });
-    const events = await collectSSEStream(response, ac);
+    const events = await collectClosedSSEStream(response);
 
     const combined = events.join('');
     expect(combined).toContain('event: tool_result');
@@ -728,7 +746,7 @@ describe('GET /api/streaming/[jobId] – tool_result SSE event', () => {
     const ac = new AbortController();
     const req = new NextRequest('http://localhost/api/streaming/job-tr-payload', { signal: ac.signal });
     const response = await GET(req, { params: Promise.resolve({ jobId: 'job-tr-payload' }) });
-    const events = await collectSSEStream(response, ac);
+    const events = await collectClosedSSEStream(response);
 
     const combined = events.join('');
     // The SSE data should be JSON with a "content" field
