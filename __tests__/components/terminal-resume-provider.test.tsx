@@ -228,7 +228,7 @@ describe('pending continue-issue resume provider', () => {
   it('restores provider locking from the recent sessions flow for non-run session kinds', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url === '/api/jobs?project=proj') {
+      if (url.startsWith('/api/jobs?project=proj')) {
         return {
           ok: true,
           json: async () => ({
@@ -393,7 +393,7 @@ describe('pending continue-issue resume provider', () => {
   it('renders cancelled for restored sessions with retained cancelled logs', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url === '/api/jobs?project=proj') {
+      if (url.startsWith('/api/jobs?project=proj')) {
         return {
           ok: true,
           json: async () => ({
@@ -444,7 +444,7 @@ describe('pending continue-issue resume provider', () => {
   it('renders failed plain-text restored sessions as error output instead of assistant replies', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url === '/api/jobs?project=proj') {
+      if (url.startsWith('/api/jobs?project=proj')) {
         return {
           ok: true,
           json: async () => ({
@@ -495,7 +495,7 @@ describe('pending continue-issue resume provider', () => {
   it('restores a running session even when context_meta is malformed', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url === '/api/jobs?project=proj') {
+      if (url.startsWith('/api/jobs?project=proj')) {
         return {
           ok: true,
           json: async () => ({
@@ -559,7 +559,7 @@ describe('pending continue-issue resume provider', () => {
   it('continues a restored running session with prerequisite-aware streaming', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url === '/api/jobs?project=proj') {
+      if (url.startsWith('/api/jobs?project=proj')) {
         return {
           ok: true,
           json: async () => ({
@@ -785,7 +785,7 @@ describe('pending continue-issue resume provider', () => {
           }),
         }
       }
-      if (url === '/api/jobs?project=proj') {
+      if (url.startsWith('/api/jobs?project=proj')) {
         return {
           ok: true,
           json: async () => ({
@@ -818,7 +818,7 @@ describe('pending continue-issue resume provider', () => {
 
     const fetchMock = vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url === '/api/jobs?project=proj') {
+      if (url.startsWith('/api/jobs?project=proj')) {
         return {
           ok: true,
           json: async () => ({

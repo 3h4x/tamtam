@@ -10,6 +10,12 @@ import {
 } from '@/lib/terminal/terminal-session-store'
 import type { SessionItem } from './SessionsPanel'
 import { hasPrerequisiteContext } from './prerequisite-context'
+import {
+  buildEntriesForCompletedJobs,
+  contextItemsFromMeta,
+  fetchSessionJobs,
+  isRestorableSessionKind,
+} from './session-restore'
 
 interface JobDict {
   id: string
@@ -35,8 +41,6 @@ export function useSessionManager(projectName: string) {
   const router = useRouter()
   const [sessions, setSessions] = useState<SessionItem[]>([])
   const [loadingSessions, setLoadingSessions] = useState(false)
-  const isSessionKind = (k: string) =>
-    k === 'run' || ['review', 'fix', 'fix-ci'].includes(k) || k.startsWith('agent:')
 
   const loadSessions = async () => {
     setLoadingSessions(true)
@@ -47,7 +51,7 @@ export function useSessionManager(projectName: string) {
       const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}&has_session=1&limit=50`)
       const data = await res.json()
       const jobs: JobDict[] = (data.jobs ?? [])
-        .filter((j: JobDict) => isSessionKind(j.kind) && j.session_id)
+        .filter((j: JobDict) => isRestorableSessionKind(j.kind) && j.session_id)
         .sort((a: JobDict, b: JobDict) => b.started_at - a.started_at)
 
       const seen = new Set<string>()
@@ -80,71 +84,18 @@ export function useSessionManager(projectName: string) {
         terminalStore.reset(projectName)
       }
       try {
-        // Server-side filter to this exact session_id — avoids fetching the
-        // full project history just to find the half-dozen rows that share
-        // the session.
-        const listRes = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}&session_id=${encodeURIComponent(session.sessionId)}&limit=200`)
-        const listData = await listRes.json()
-        const jobs: JobDict[] = listData.jobs ?? []
+        const jobs = await fetchSessionJobs(projectName, session.sessionId)
         const matches = jobs
-          .filter(j => isSessionKind(j.kind))
+          .filter(j => isRestorableSessionKind(j.kind))
           .sort((a, b) => a.started_at - b.started_at)
         if (matches.length > 0) {
           const firstMatch = matches[0]
           const sessionProvider = matches.find(m => typeof m.provider === 'string' && m.provider)?.provider ?? null
-          let loadedSkills: SkillItem[] = []
-          let loadedDocs: DocItem[] = []
-          if (firstMatch.context_meta) {
-            try {
-              const meta = JSON.parse(firstMatch.context_meta)
-              if (meta.skills && Array.isArray(meta.skills)) loadedSkills = meta.skills
-              if (meta.docs && Array.isArray(meta.docs)) loadedDocs = meta.docs
-            } catch {}
-          }
+          const { skills: loadedSkills, docs: loadedDocs } = contextItemsFromMeta(firstMatch.context_meta)
           const lastMatch = matches[matches.length - 1]
           const lastIsRunning = lastMatch.status !== 'done' && lastMatch.finished_at === null
           const completedMatches = lastIsRunning ? matches.slice(0, -1) : matches
-          const logData = await Promise.all(
-            completedMatches.map(m =>
-              fetch(`/api/jobs/${encodeURIComponent(m.id)}`).then(r => r.json()).catch(() => null)
-            )
-          )
-          const entries: TermEntry[] = []
-          completedMatches.forEach((m, i) => {
-            const prompt = m.user_prompt || m.prompt
-            if (prompt) entries.push({ role: 'user', text: prompt })
-            const jobEntry = logData[i]
-            const log = jobEntry?.log
-            const exitCode = typeof jobEntry?.exit_code === 'number' ? jobEntry.exit_code : m.exit_code
-            const exitEntry = exitCode !== null && exitCode !== undefined
-              ? terminalExitEntry(exitCode)
-              : null
-            if (log) {
-              if (exitEntry?.text === 'cancelled') {
-                entries.push(...buildTerminalEntriesFromJobLog(log, {
-                  passthrough: hasPrerequisiteContext(m.context_meta),
-                }))
-                entries.push(exitEntry)
-              } else if (exitCode !== null && exitCode !== undefined && exitCode !== 0) {
-                entries.push({ role: 'error', text: 'claude run failed' })
-                entries.push(...buildTerminalEntriesFromJobLog(log, {
-                  passthrough: hasPrerequisiteContext(m.context_meta),
-                  fallbackRole: 'error',
-                }))
-              } else {
-                entries.push(...buildTerminalEntriesFromJobLog(log, {
-                  passthrough: hasPrerequisiteContext(m.context_meta),
-                }))
-              }
-            } else if (jobEntry?.log_pruned) {
-              entries.push({ role: 'status', text: 'Log file deleted by retention policy' })
-              if (exitEntry) {
-                entries.push(exitEntry)
-              }
-            } else if (exitEntry && exitCode !== 0) {
-              entries.push(exitEntry)
-            }
-          })
+          const entries = await buildEntriesForCompletedJobs(completedMatches)
           router.replace(`/project/${projectName}/terminal/${session.sessionId}`)
           if (lastIsRunning) {
             const prompt = lastMatch.user_prompt || lastMatch.prompt
