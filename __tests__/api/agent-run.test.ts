@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
@@ -81,6 +81,9 @@ describe('POST /api/agents/{agentId}/run', () => {
   let isProjectPausedMock: ReturnType<typeof vi.fn>;
   let retrieveAgentContextDetailedMock: ReturnType<typeof vi.fn>;
   let isSqliteVecAvailableMock: ReturnType<typeof vi.fn>;
+  let releaseAgentStartSlotMock: ReturnType<typeof vi.fn>;
+  let markDoneMock: ReturnType<typeof vi.fn>;
+  let getDirtyFileCountMock: ReturnType<typeof vi.fn>;
   let tempSkillsDir: string;
   let logDirMock: string;
   let settingsMock: Record<string, unknown>;
@@ -116,13 +119,101 @@ describe('POST /api/agents/{agentId}/run', () => {
     return { promise, resolve, reject };
   }
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     vi.resetModules();
     vi.doUnmock('@/lib/usage/resolve-provider');
     testDb = createTestDb();
     tempSkillsDir = mkdtempSync(join(tmpdir(), 'tamtam-agent-run-test-'));
-    logDirMock = '/tmp/logs';
 
+    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema, sqlite: {} }));
+    vi.doMock('@/lib/db/sqlite-vec', () => ({
+      isSqliteVecAvailable: (...args: unknown[]) => (isSqliteVecAvailableMock as (...innerArgs: unknown[]) => unknown)(...args),
+    }));
+    vi.doMock('@/lib/agents/pending-agent-run', () => ({
+      enqueueAgentRun: (...args: unknown[]) => (enqueueAgentRunMock as (...innerArgs: unknown[]) => unknown)(...args),
+      tryClaimAgentStartSlot: (...args: unknown[]) => (tryClaimAgentStartSlotMock as (...innerArgs: unknown[]) => unknown)(...args),
+      releaseAgentStartSlot: (...args: unknown[]) => (releaseAgentStartSlotMock as (...innerArgs: unknown[]) => unknown)(...args),
+      drainNextAgentRun: (...args: unknown[]) => (drainNextAgentRunMock as (...innerArgs: unknown[]) => unknown)(...args),
+    }));
+    vi.doMock('@/lib/agents/queued-agent-runs', () => ({
+      enqueueQueuedAgentRun: (...args: unknown[]) => (enqueueQueuedAgentRunMock as (...innerArgs: unknown[]) => unknown)(...args),
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      getLock: (...args: unknown[]) => (getLockMock as (...innerArgs: unknown[]) => unknown)(...args),
+      isLockOwnedByActiveRelease: (...args: unknown[]) => (isLockOwnedByActiveReleaseMock as (...innerArgs: unknown[]) => unknown)(...args),
+    }));
+    vi.doMock('@/lib/pipeline/pending-release', () => ({
+      getPendingRelease: (...args: unknown[]) => (getPendingReleaseMock as (...innerArgs: unknown[]) => unknown)(...args),
+      drainPendingRelease: (...args: unknown[]) => (drainPendingReleaseMock as (...innerArgs: unknown[]) => unknown)(...args),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: (...args: unknown[]) => (resolveProjectPathMock as (...innerArgs: unknown[]) => unknown)(...args),
+    }));
+    vi.doMock('@/lib/shared/shell', () => ({
+      exec: (...args: unknown[]) => (execMock as (...innerArgs: unknown[]) => unknown)(...args),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: vi.fn(() => ({ claudeBin: 'claude', logDir: logDirMock })),
+      getProjectTestConfig: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: (...args: unknown[]) => (createJobMock as (...innerArgs: unknown[]) => unknown)(...args),
+      updateJob: (...args: unknown[]) => (updateJobMock as (...innerArgs: unknown[]) => unknown)(...args),
+      listJobs: (...args: unknown[]) => (listJobsMock as (...innerArgs: unknown[]) => unknown)(...args),
+      probeJobStatus: (...args: unknown[]) => (probeJobStatusMock as (...innerArgs: unknown[]) => unknown)(...args),
+      markDone: (...args: unknown[]) => (markDoneMock as (...innerArgs: unknown[]) => unknown)(...args),
+    }));
+    vi.doMock('@/lib/jobs/project-active-job', () => ({
+      findBlockingRunningJob: (...args: unknown[]) => (findBlockingRunningJobMock as (...innerArgs: unknown[]) => unknown)(...args),
+    }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      startJob: (...args: unknown[]) => (startJobMock as (...innerArgs: unknown[]) => unknown)(...args),
+    }));
+    vi.doMock('@/lib/skills/skills', () => ({ SKILLS_DIR: tempSkillsDir, DATA_SKILLS_DIR: join(tempSkillsDir, 'data-skills') }));
+    vi.doMock('@/lib/agents/agent-memory', () => ({
+      getAgentMemoryDir: vi.fn().mockReturnValue('/tmp/tamtam-memory'),
+      ensureAgentMemoryDir: vi.fn(),
+      getAgentMemoryPath: vi.fn().mockReturnValue('/tmp/tamtam-memory/proj1/Test Agent.md'),
+      readAgentMemory: vi.fn().mockReturnValue(null),
+      buildMemoryBlock: vi.fn().mockReturnValue(''),
+    }));
+    vi.doMock('@/lib/shared/config', () => ({
+      withBasePrompt: (p: string) => p,
+      getPermissionModeFlag: () => '--dangerously-skip-permissions',
+      getSettings: () => settingsMock,
+    }));
+    vi.doMock('@/lib/shared/job-control', () => ({
+      runGates: (...args: unknown[]) => (runGatesMock as (...innerArgs: unknown[]) => unknown)(...args),
+      jobsPausedResult: (...args: unknown[]) => (runGatesMock as (...innerArgs: unknown[]) => unknown)(...args),
+    }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: (...args: unknown[]) => (checkCliStartGateMock as (...innerArgs: unknown[]) => unknown)(...args),
+    }));
+    vi.doMock('@/lib/agents/retrieval/retriever', () => ({
+      retrieveAgentContextDetailed: (...args: unknown[]) => (retrieveAgentContextDetailedMock as (...innerArgs: unknown[]) => unknown)(...args),
+    }));
+    vi.doMock('@/lib/git/dirty-worktree', () => ({
+      getDirtyFileCount: (...args: unknown[]) => (getDirtyFileCountMock as (...innerArgs: unknown[]) => unknown)(...args),
+    }));
+    vi.doMock('@/lib/shared/enabled-projects', () => ({
+      isProjectArchived: vi.fn().mockReturnValue(false),
+      isProjectPaused: (...args: unknown[]) => (isProjectPausedMock as (...innerArgs: unknown[]) => unknown)(...args),
+    }));
+
+    const mod = await import('@/app/api/agents/[agentId]/run/route');
+    POST = mod.POST;
+  });
+
+  beforeEach(() => {
+    testDb.sqlite.exec(`
+      DELETE FROM agents;
+      DELETE FROM skills;
+    `);
+    rmSync(tempSkillsDir, { recursive: true, force: true });
+    mkdirSync(tempSkillsDir, { recursive: true });
+    vi.clearAllMocks();
+
+    logDirMock = '/tmp/logs';
     startJobMock = vi.fn().mockResolvedValue(12345);
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     createJobMock = vi.fn().mockImplementation(() => makeJob());
@@ -135,7 +226,7 @@ describe('POST /api/agents/{agentId}/run', () => {
       if (cmd === 'bash' && args[1] === 'echo TAMTAM_PREREQ_MARKER') {
         return { stdout: 'TAMTAM_PREREQ_MARKER\n', stderr: '', exitCode: 0 };
       }
-      if (cmd === 'bash' && args[1] === 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"') {
+      if (cmd === 'bash' && args[1] === 'curl -fsS \"http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1\"') {
         return { stdout: '{"issues":[{"number":1,"title":"Trusted issue"}]}\n', stderr: '', exitCode: 0 };
       }
       if (cmd === 'bash' && args[1] === 'exit 7') {
@@ -148,6 +239,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     enqueueQueuedAgentRunMock = vi.fn();
     drainNextAgentRunMock = vi.fn().mockResolvedValue(undefined);
     tryClaimAgentStartSlotMock = vi.fn().mockReturnValue({ ok: true });
+    releaseAgentStartSlotMock = vi.fn();
     checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
     findBlockingRunningJobMock = vi.fn().mockResolvedValue(null);
     getLockMock = vi.fn().mockReturnValue(null);
@@ -168,6 +260,8 @@ describe('POST /api/agents/{agentId}/run', () => {
       },
     });
     isSqliteVecAvailableMock = vi.fn().mockReturnValue(true);
+    markDoneMock = vi.fn().mockResolvedValue(undefined);
+    getDirtyFileCountMock = vi.fn().mockResolvedValue(0);
     settingsMock = {
       workspace_path: '',
       github_owner: '',
@@ -185,96 +279,12 @@ describe('POST /api/agents/{agentId}/run', () => {
       permission_mode: 'bypassPermissions',
       dirty_worktree_block_threshold: 0,
     };
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema, sqlite: {} }));
-    vi.doMock('@/lib/db/sqlite-vec', () => ({
-      isSqliteVecAvailable: isSqliteVecAvailableMock,
-    }));
-    vi.doMock('@/lib/agents/pending-agent-run', () => ({
-      enqueueAgentRun: enqueueAgentRunMock,
-      tryClaimAgentStartSlot: tryClaimAgentStartSlotMock,
-      releaseAgentStartSlot: vi.fn(),
-      drainNextAgentRun: drainNextAgentRunMock,
-    }));
-    vi.doMock('@/lib/agents/queued-agent-runs', () => ({
-      enqueueQueuedAgentRun: enqueueQueuedAgentRunMock,
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      getLock: getLockMock,
-      isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
-    }));
-    vi.doMock('@/lib/pipeline/pending-release', () => ({
-      getPendingRelease: getPendingReleaseMock,
-      drainPendingRelease: drainPendingReleaseMock,
-    }));
-
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: resolveProjectPathMock,
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: execMock,
-    }));
-
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn(() => ({ claudeBin: 'claude', logDir: logDirMock })),
-      getProjectTestConfig: vi.fn().mockReturnValue(null),
-    }));
-
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: createJobMock,
-      updateJob: updateJobMock,
-      listJobs: listJobsMock,
-      probeJobStatus: probeJobStatusMock,
-      markDone: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/jobs/project-active-job', () => ({
-      findBlockingRunningJob: findBlockingRunningJobMock,
-    }));
-
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      startJob: startJobMock,
-    }));
-
-    vi.doMock('@/lib/skills/skills', () => ({ SKILLS_DIR: tempSkillsDir, DATA_SKILLS_DIR: join(tempSkillsDir, 'data-skills') }));
-
-    vi.doMock('@/lib/agents/agent-memory', () => ({
-      getAgentMemoryDir: vi.fn().mockReturnValue('/tmp/tamtam-memory'),
-      ensureAgentMemoryDir: vi.fn(),
-      getAgentMemoryPath: vi.fn().mockReturnValue('/tmp/tamtam-memory/proj1/Test Agent.md'),
-      readAgentMemory: vi.fn().mockReturnValue(null),
-      buildMemoryBlock: vi.fn().mockReturnValue(''),
-    }));
-
-    vi.doMock('@/lib/shared/config', () => ({
-      withBasePrompt: (p: string) => p,
-      getPermissionModeFlag: () => '--dangerously-skip-permissions',
-      getSettings: () => settingsMock,
-    }));
-    vi.doMock('@/lib/shared/job-control', () => ({
-      runGates: runGatesMock,
-      jobsPausedResult: runGatesMock,
-    }));
-    vi.doMock('@/lib/usage/resolve-provider', () => ({
-      checkCliStartGate: checkCliStartGateMock,
-    }));
-    vi.doMock('@/lib/agents/retrieval/retriever', () => ({
-      retrieveAgentContextDetailed: retrieveAgentContextDetailedMock,
-    }));
-    vi.doMock('@/lib/git/dirty-worktree', () => ({
-      getDirtyFileCount: vi.fn().mockResolvedValue(0),
-    }));
-    vi.doMock('@/lib/shared/enabled-projects', () => ({
-      isProjectArchived: vi.fn().mockReturnValue(false),
-      isProjectPaused: (...args: unknown[]) => (isProjectPausedMock as (...a: unknown[]) => unknown)(...args),
-    }));
-
-    const mod = await import('@/app/api/agents/[agentId]/run/route');
-    POST = mod.POST;
   });
 
-  afterEach(() => {
-    vi.resetModules();
+  afterAll(() => {
+    testDb.sqlite.close();
     rmSync(tempSkillsDir, { recursive: true, force: true });
+    vi.resetModules();
   });
 
   it('returns 404 if agent not found', async () => {
@@ -1451,52 +1461,14 @@ File-backed prompt.`);
 
   describe('dirty worktree gate', () => {
     it('rejects with 409 dirty_worktree when count >= threshold', async () => {
-      vi.resetModules();
-      vi.doMock('@/lib/git/dirty-worktree', () => ({
-        getDirtyFileCount: vi.fn().mockResolvedValue(38),
-      }));
-      // Re-apply all the other mocks installed in beforeEach for the new module realm.
-      vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-      vi.doMock('@/lib/agents/pending-agent-run', () => ({
-        enqueueAgentRun: enqueueAgentRunMock,
-        tryClaimAgentStartSlot: tryClaimAgentStartSlotMock,
-        releaseAgentStartSlot: vi.fn(),
-        drainNextAgentRun: drainNextAgentRunMock,
-      }));
-      vi.doMock('@/lib/agents/queued-agent-runs', () => ({ enqueueQueuedAgentRun: enqueueQueuedAgentRunMock }));
-      vi.doMock('@/lib/pipeline/pipeline-lock', () => ({ getLock: getLockMock, isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock }));
-      vi.doMock('@/lib/pipeline/pending-release', () => ({ getPendingRelease: getPendingReleaseMock, drainPendingRelease: drainPendingReleaseMock }));
-      vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-      vi.doMock('@/lib/scheduling/scheduling', () => ({
-        getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: '/tmp/logs' }),
-        getProjectTestConfig: vi.fn().mockReturnValue(null),
-      }));
-      vi.doMock('@/lib/jobs/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock, listJobs: listJobsMock, probeJobStatus: probeJobStatusMock, markDone: vi.fn().mockResolvedValue(undefined) }));
-      vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
-      vi.doMock('@/lib/skills/skills', () => ({ SKILLS_DIR: tempSkillsDir, DATA_SKILLS_DIR: join(tempSkillsDir, 'data-skills') }));
-      vi.doMock('@/lib/agents/agent-memory', () => ({
-        getAgentMemoryDir: vi.fn().mockReturnValue('/tmp/tamtam-memory'),
-        ensureAgentMemoryDir: vi.fn(),
-        getAgentMemoryPath: vi.fn().mockReturnValue('/tmp/tamtam-memory/proj1/Test Agent.md'),
-        readAgentMemory: vi.fn().mockReturnValue(null),
-        buildMemoryBlock: vi.fn().mockReturnValue(''),
-      }));
+      getDirtyFileCountMock.mockResolvedValue(38);
       settingsMock.dirty_worktree_block_threshold = 20;
-      vi.doMock('@/lib/shared/config', () => ({
-        withBasePrompt: (p: string) => p,
-        getPermissionModeFlag: () => '--dangerously-skip-permissions',
-        getSettings: () => settingsMock,
-      }));
-      vi.doMock('@/lib/shared/job-control', () => ({ runGates: runGatesMock, jobsPausedResult: runGatesMock }));
-      vi.doMock('@/lib/usage/resolve-provider', () => ({ checkCliStartGate: checkCliStartGateMock }));
-
-      const mod = await import('@/app/api/agents/[agentId]/run/route');
       insertAgent();
       const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
         method: 'POST',
         body: JSON.stringify({ prompt: 'do something' }),
       });
-      const res = await mod.POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+      const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
       expect(res.status).toBe(409);
       const data = await res.json();
       expect(data.code).toBe('dirty_worktree');
