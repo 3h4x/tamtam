@@ -3,7 +3,7 @@ import { spawn } from 'child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { delimiter, join } from 'path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const repoRoot = process.cwd();
 
@@ -116,34 +116,61 @@ async function withRestoreFixture(run: (dir: string) => Promise<void>): Promise<
   }
 }
 
+let suiteBinDir = '';
+
+function createFixtureLayout(dir: string) {
+  const dataDir = join(dir, 'data');
+  const backupsDir = join(dir, 'backups');
+  mkdirSync(dataDir, { recursive: true });
+  mkdirSync(backupsDir, { recursive: true });
+  const pnpmLogPath = join(dir, 'pnpm.log');
+  writeFileSync(pnpmLogPath, '');
+
+  return {
+    dbPath: join(dataDir, 'tamtam.db'),
+    backupPath: join(backupsDir, 'tamtam-backup.db'),
+    pnpmLogPath,
+    startCountPath: join(dir, 'start-count.txt'),
+  };
+}
+
+function buildRestoreEnv(
+  layout: ReturnType<typeof createFixtureLayout>,
+  extra: Partial<NodeJS.ProcessEnv> = {}
+): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    TAMTAM_DB_PATH: layout.dbPath,
+    PNPM_LOG_PATH: layout.pnpmLogPath,
+    PNPM_START_COUNT_PATH: layout.startCountPath,
+    PATH: `${suiteBinDir}${delimiter}${process.env.PATH ?? ''}`,
+    ...extra,
+  };
+}
+
 describe('scripts/db-restore.js', () => {
+  beforeAll(() => {
+    suiteBinDir = mkdtempSync(join(tmpdir(), 'tamtam-db-restore-bin-'));
+    writeFakePnpm(join(suiteBinDir, 'pnpm'));
+  });
+
+  afterAll(() => {
+    if (suiteBinDir) {
+      rmSync(suiteBinDir, { recursive: true, force: true });
+    }
+  });
+
   it.concurrent('restores the backup via a staged swap on success', () => withRestoreFixture(async (dir) => {
-      const dbPath = join(dir, 'data', 'tamtam.db');
-      const backupPath = join(dir, 'backups', 'tamtam-backup.db');
-      const binDir = join(dir, 'bin');
-      const pnpmPath = join(binDir, 'pnpm');
-      const pnpmLogPath = join(dir, 'pnpm.log');
+      const layout = createFixtureLayout(dir);
+      createDb(layout.dbPath, 'old');
+      createDb(layout.backupPath, 'new');
 
-      writeFileSync(pnpmLogPath, '');
-      mkdirSync(join(dir, 'data'), { recursive: true });
-      mkdirSync(join(dir, 'backups'), { recursive: true });
-      mkdirSync(binDir, { recursive: true });
-      writeFakePnpm(pnpmPath);
-      createDb(dbPath, 'old');
-      createDb(backupPath, 'new');
-
-      const result = await runRestore(backupPath, {
-        ...process.env,
-        TAMTAM_DB_PATH: dbPath,
-        PNPM_LOG_PATH: pnpmLogPath,
-        PNPM_START_COUNT_PATH: join(dir, 'start-count.txt'),
-        PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
-      });
+      const result = await runRestore(layout.backupPath, buildRestoreEnv(layout));
 
       expect(result.status).toBe(0);
-      expect(readMarker(dbPath)).toBe('new');
-      expect(readMigratedMarker(dbPath)).toBe('yes');
-      expect(readFileSync(pnpmLogPath, 'utf-8').trim().split('\n')).toEqual([
+      expect(readMarker(layout.dbPath)).toBe('new');
+      expect(readMigratedMarker(layout.dbPath)).toBe('yes');
+      expect(readFileSync(layout.pnpmLogPath, 'utf-8').trim().split('\n')).toEqual([
         'db:migrate',
         'stop',
         'start',
@@ -151,34 +178,19 @@ describe('scripts/db-restore.js', () => {
     }));
 
   it.concurrent('rolls back the old database and restarts TamTam if the post-swap start fails', () => withRestoreFixture(async (dir) => {
-      const dbPath = join(dir, 'data', 'tamtam.db');
-      const backupPath = join(dir, 'backups', 'tamtam-backup.db');
-      const binDir = join(dir, 'bin');
-      const pnpmPath = join(binDir, 'pnpm');
-      const pnpmLogPath = join(dir, 'pnpm.log');
-      const startCountPath = join(dir, 'start-count.txt');
+      const layout = createFixtureLayout(dir);
+      createDb(layout.dbPath, 'old');
+      createDb(layout.backupPath, 'new');
 
-      writeFileSync(pnpmLogPath, '');
-      mkdirSync(join(dir, 'data'), { recursive: true });
-      mkdirSync(join(dir, 'backups'), { recursive: true });
-      mkdirSync(binDir, { recursive: true });
-      writeFakePnpm(pnpmPath);
-      createDb(dbPath, 'old');
-      createDb(backupPath, 'new');
-
-      const result = await runRestore(backupPath, {
-        ...process.env,
-        TAMTAM_DB_PATH: dbPath,
-        PNPM_LOG_PATH: pnpmLogPath,
-        PNPM_START_COUNT_PATH: startCountPath,
-        PNPM_FAIL_FIRST_START: '1',
-        PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
-      });
+      const result = await runRestore(
+        layout.backupPath,
+        buildRestoreEnv(layout, { PNPM_FAIL_FIRST_START: '1' })
+      );
 
       expect(result.status).toBe(1);
-      expect(readMarker(dbPath)).toBe('old');
-      expect(readMigratedMarker(dbPath)).toBe(null);
-      expect(readFileSync(pnpmLogPath, 'utf-8').trim().split('\n')).toEqual([
+      expect(readMarker(layout.dbPath)).toBe('old');
+      expect(readMigratedMarker(layout.dbPath)).toBe(null);
+      expect(readFileSync(layout.pnpmLogPath, 'utf-8').trim().split('\n')).toEqual([
         'db:migrate',
         'stop',
         'start',
@@ -188,32 +200,19 @@ describe('scripts/db-restore.js', () => {
     }));
 
   it.concurrent('aborts before swapping the live database when pnpm stop fails', () => withRestoreFixture(async (dir) => {
-      const dbPath = join(dir, 'data', 'tamtam.db');
-      const backupPath = join(dir, 'backups', 'tamtam-backup.db');
-      const binDir = join(dir, 'bin');
-      const pnpmPath = join(binDir, 'pnpm');
-      const pnpmLogPath = join(dir, 'pnpm.log');
+      const layout = createFixtureLayout(dir);
+      createDb(layout.dbPath, 'old');
+      createDb(layout.backupPath, 'new');
 
-      writeFileSync(pnpmLogPath, '');
-      mkdirSync(join(dir, 'data'), { recursive: true });
-      mkdirSync(join(dir, 'backups'), { recursive: true });
-      mkdirSync(binDir, { recursive: true });
-      writeFakePnpm(pnpmPath);
-      createDb(dbPath, 'old');
-      createDb(backupPath, 'new');
-
-      const result = await runRestore(backupPath, {
-        ...process.env,
-        TAMTAM_DB_PATH: dbPath,
-        PNPM_LOG_PATH: pnpmLogPath,
-        PNPM_FAIL_STOP: '1',
-        PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
-      });
+      const result = await runRestore(
+        layout.backupPath,
+        buildRestoreEnv(layout, { PNPM_FAIL_STOP: '1' })
+      );
 
       expect(result.status).toBe(1);
-      expect(readMarker(dbPath)).toBe('old');
-      expect(readMigratedMarker(dbPath)).toBe(null);
-      expect(readFileSync(pnpmLogPath, 'utf-8').trim().split('\n')).toEqual([
+      expect(readMarker(layout.dbPath)).toBe('old');
+      expect(readMigratedMarker(layout.dbPath)).toBe(null);
+      expect(readFileSync(layout.pnpmLogPath, 'utf-8').trim().split('\n')).toEqual([
         'db:migrate',
         'stop',
       ]);
@@ -221,34 +220,18 @@ describe('scripts/db-restore.js', () => {
     }));
 
   it.concurrent('restores backup data that lives in the backup WAL sidecar', () => withRestoreFixture(async (dir) => {
-      const dbPath = join(dir, 'data', 'tamtam.db');
-      const backupPath = join(dir, 'backups', 'tamtam-backup.db');
-      const binDir = join(dir, 'bin');
-      const pnpmPath = join(binDir, 'pnpm');
-      const pnpmLogPath = join(dir, 'pnpm.log');
-
-      writeFileSync(pnpmLogPath, '');
-      mkdirSync(join(dir, 'data'), { recursive: true });
-      mkdirSync(join(dir, 'backups'), { recursive: true });
-      mkdirSync(binDir, { recursive: true });
-      writeFakePnpm(pnpmPath);
-      createDb(dbPath, 'old');
-      const releaseWalFixture = createWalBackedDb(backupPath, 'new-from-wal');
+      const layout = createFixtureLayout(dir);
+      createDb(layout.dbPath, 'old');
+      const releaseWalFixture = createWalBackedDb(layout.backupPath, 'new-from-wal');
 
       try {
-        expect(existsSync(`${backupPath}-wal`)).toBe(true);
+        expect(existsSync(`${layout.backupPath}-wal`)).toBe(true);
 
-        const result = await runRestore(backupPath, {
-          ...process.env,
-          TAMTAM_DB_PATH: dbPath,
-          PNPM_LOG_PATH: pnpmLogPath,
-          PNPM_START_COUNT_PATH: join(dir, 'start-count.txt'),
-          PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
-        });
+        const result = await runRestore(layout.backupPath, buildRestoreEnv(layout));
 
         expect(result.status).toBe(0);
-        expect(readMarker(dbPath)).toBe('new-from-wal');
-        expect(readMigratedMarker(dbPath)).toBe('yes');
+        expect(readMarker(layout.dbPath)).toBe('new-from-wal');
+        expect(readMigratedMarker(layout.dbPath)).toBe('yes');
       } finally {
         releaseWalFixture();
       }
