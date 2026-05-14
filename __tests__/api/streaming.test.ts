@@ -346,15 +346,22 @@ describe('GET /api/streaming/[jobId]', () => {
     writeFileSync(logFile, metaLine + '\n');
     getJobMock.mockReturnValue({ logPath: logFile } as Partial<JobData>);
 
-    const ac = new AbortController();
-    const request = new NextRequest('http://localhost/api/streaming/job-meta', { signal: ac.signal });
-    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-meta' }) });
-    const events = await collectSSEStream(response, ac, 200);
+    vi.useFakeTimers();
+    try {
+      const ac = new AbortController();
+      const request = new NextRequest('http://localhost/api/streaming/job-meta', { signal: ac.signal });
+      const response = await GET(request, { params: Promise.resolve({ jobId: 'job-meta' }) });
+      const eventsPromise = collectSSEStream(response, ac, 200);
+      await vi.advanceTimersByTimeAsync(200);
+      const events = await eventsPromise;
 
-    const combined = events.join('');
-    // No data events should contain raw ephemeral/usage fields.
-    expect(combined).not.toContain('ephemeral_5m_input_tokens');
-    expect(combined).not.toContain('parent_tool_use_id');
+      const combined = events.join('');
+      // No data events should contain raw ephemeral/usage fields.
+      expect(combined).not.toContain('ephemeral_5m_input_tokens');
+      expect(combined).not.toContain('parent_tool_use_id');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('emits done via poll when job finishes after last log write (fs.watch miss)', async () => {
@@ -368,17 +375,24 @@ describe('GET /api/streaming/[jobId]', () => {
       exitCode: finished ? 0 : null,
     } as any));
 
-    const ac = new AbortController();
-    const request = new NextRequest('http://localhost/api/streaming/job-poll?raw=1', { signal: ac.signal });
-    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-poll' }) });
+    vi.useFakeTimers();
+    try {
+      const ac = new AbortController();
+      const request = new NextRequest('http://localhost/api/streaming/job-poll?raw=1', { signal: ac.signal });
+      const response = await GET(request, { params: Promise.resolve({ jobId: 'job-poll' }) });
 
-    // Flip the job to finished AFTER the stream has already started and replayed initial content.
-    setTimeout(() => { finished = true; }, 50);
+      // Flip the job to finished AFTER the stream has already started and replayed initial content.
+      setTimeout(() => { finished = true; }, 50);
 
-    const events = await collectSSEStream(response, ac, 2000);
-    const combined = events.join('');
-    expect(combined).toContain('event: done');
-    expect(combined).toContain('"exitCode":0');
+      const eventsPromise = collectSSEStream(response, ac, 2000);
+      await vi.advanceTimersByTimeAsync(1100);
+      const events = await eventsPromise;
+      const combined = events.join('');
+      expect(combined).toContain('event: done');
+      expect(combined).toContain('"exitCode":0');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not probe job status once finishedAt is set', async () => {
