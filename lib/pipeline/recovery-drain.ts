@@ -14,13 +14,13 @@ export async function drainQueuedAgentsForProjectIfClear(
   logPrefix = '[recovery]',
 ): Promise<void> {
   const { getPendingRelease } = await import('./pending-release');
-  if (getPendingRelease(project)) {
+  if (await getPendingRelease(project)) {
     console.log(`${logPrefix} keeping queued agents behind pending release for ${project}`);
     return;
   }
 
   const { getLock } = await import('./pipeline-lock');
-  if (getLock(project)) return;
+  if (await getLock(project)) return;
 
   const { drainQueuedAgentRunsForProject } = await import('@/lib/agents/queued-agent-runs');
   await drainQueuedAgentRunsForProject(project);
@@ -32,7 +32,7 @@ export async function drainProjectRecoveryWork(
 ): Promise<void> {
   const { drainPendingRelease, getPendingRelease } = await import('./pending-release');
   await drainPendingRelease(project);
-  if (getPendingRelease(project)) {
+  if (await getPendingRelease(project)) {
     console.log(`${logPrefix} release still pending for ${project}; leaving queued agents deferred`);
     return;
   }
@@ -43,8 +43,8 @@ export async function drainAllRecoveryWork(logPrefix = '[recovery]'): Promise<vo
   const { listPendingReleaseProjects } = await import('./pending-release');
   const { listQueuedAgentRunProjects } = await import('@/lib/agents/queued-agent-runs');
   const projects = uniqueProjects([
-    ...listPendingReleaseProjects(),
-    ...listQueuedAgentRunProjects(),
+    ...(await listPendingReleaseProjects()),
+    ...(await listQueuedAgentRunProjects()),
   ]);
   for (const project of projects) {
     try {
@@ -59,7 +59,7 @@ export async function drainUnlockedQueuedAgentRuns(
   logPrefix = '[queued-agent-runs]',
 ): Promise<void> {
   const { listQueuedAgentRunProjects } = await import('@/lib/agents/queued-agent-runs');
-  for (const project of uniqueProjects(listQueuedAgentRunProjects())) {
+  for (const project of uniqueProjects(await listQueuedAgentRunProjects())) {
     try {
       await drainQueuedAgentsForProjectIfClear(project, logPrefix);
     } catch (err) {

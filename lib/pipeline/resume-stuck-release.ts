@@ -37,13 +37,13 @@ export interface StuckRelease {
   chainKinds: string[];
 }
 
-export function findStuckFinalizedReleases(limit = 50): StuckRelease[] {
+export async function findStuckFinalizedReleases(limit = 50): Promise<StuckRelease[]> {
   const cutoff = Date.now() / 1000 - SCAN_WINDOW_MS / 1000;
-  const releases = db
+  const allReleases = await db
     .select()
     .from(schema.jobs)
-    .where(eq(schema.jobs.kind, 'release'))
-    .all()
+    .where(eq(schema.jobs.kind, 'release'));
+  const releases = allReleases
     .filter(
       (r) => r.finishedAt != null && r.exitCode === 0 && (r.finishedAt ?? 0) >= cutoff,
     )
@@ -182,7 +182,7 @@ export async function resumeStuckRelease(
     release.finishedAt = previousFinishedAt;
     release.exitCode = previousExitCode;
     updateJob(release);
-    releaseLock(projectName, releaseId);
+    await releaseLock(projectName, releaseId);
     return {
       ok: false,
       status: 'error',
@@ -274,7 +274,7 @@ export async function autoResumeOrphanedAgentRuns(): Promise<void> {
     if (attempts >= MAX_AUTO_RESUME_ATTEMPTS) continue;
     try {
       const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
-      const cfg = getProjectTestConfig(o.project);
+      const cfg = await getProjectTestConfig(o.project);
       const wantsAutoShip = !!(cfg?.releaseAfterRun);
       if (!wantsAutoShip) continue;
       // Only count an attempt after confirming the project wants auto-ship and
@@ -305,7 +305,7 @@ export async function autoResumeOrphanedAgentRuns(): Promise<void> {
 export async function autoResumeStuckReleases(): Promise<void> {
   let stuck: StuckRelease[];
   try {
-    stuck = findStuckFinalizedReleases(50);
+    stuck = await findStuckFinalizedReleases(50);
   } catch (err) {
     console.error('[auto-resume] scan failed:', err);
     return;

@@ -1,4 +1,85 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
+import * as schema from '@/lib/db/schema';
+
+async function applyProjectsSchema(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS settings (
+    key text PRIMARY KEY,
+    value text NOT NULL
+  )`));
+  await handle.db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS projects (
+    name text PRIMARY KEY,
+    path text NOT NULL,
+    enabled boolean DEFAULT false,
+    github text,
+    priority text,
+    custom_actions text,
+    test_command text,
+    tests_disabled boolean DEFAULT false,
+    review_disabled boolean DEFAULT false,
+    test_cron_enabled boolean DEFAULT false,
+    test_cron_schedule text,
+    auto_commit_enabled boolean DEFAULT false,
+    auto_push_enabled boolean DEFAULT false,
+    auto_pr_merge_enabled boolean DEFAULT false,
+    release_after_run boolean DEFAULT false,
+    issue_auto_branch boolean DEFAULT true,
+    last_push_error text,
+    last_push_at double precision,
+    review_prompt_addendum text,
+    fix_prompt_addendum text,
+    website text,
+    qa_url text,
+    archived boolean NOT NULL DEFAULT false,
+    paused boolean NOT NULL DEFAULT false
+  )`));
+}
+
+// Shared PGlite handle for every DB-using describe block below. Booted once
+// per file and truncated between tests — was previously booted per-test
+// (5 describes × ~7 tests × ~500ms boot ≈ 17s of pure setup).
+let sharedHandle: TestDbHandle;
+
+async function truncateProjects(): Promise<void> {
+  await sharedHandle.db.execute(sql.raw('TRUNCATE projects, settings'));
+}
+
+const DEFAULT_SETTINGS = {
+  workspace_path: '/workspace',
+  github_owner: '',
+  claude_bin: '~/.local/bin/claude',
+  log_dir: '~/logs',
+  frequency: '1h',
+  daytime: false,
+  weekends: false,
+  launchagent_prefix: 'com.tamtam',
+};
+
+// Hoisted shared state for module-scope mocks. `currentSettings` is mutated
+// per-test; the mocked `getSettings()` reads it lazily. `dbHolder.db` is
+// populated in `beforeAll` so the module-scope db mock points at the shared
+// PGlite handle for every test in this file.
+const mockState = vi.hoisted(() => ({
+  currentSettings: {} as Record<string, unknown>,
+  dbHolder: { db: null as unknown as TestDbHandle['db'] },
+}));
+
+vi.mock('@/lib/shared/config', () => ({
+  getSettings: () => mockState.currentSettings,
+}));
+
+vi.mock('@/lib/db', async () => {
+  const realSchema = await vi.importActual<typeof import('@/lib/db/schema')>('@/lib/db/schema');
+  return {
+    get db() {
+      return mockState.dbHolder.db;
+    },
+    schema: realSchema,
+  };
+});
+
+// Import the subject once at top scope — see vitest convention guide.
 import {
   parseFrequency,
   effectiveFreqMin,
@@ -9,49 +90,26 @@ import {
   writePriorityYaml,
   writeProjectFieldYaml,
   getProjectTestConfig,
+  getImproveConfig,
+  setProjectPushResult,
+  getProjectPushResult,
 } from '@/lib/scheduling/scheduling';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
-import * as schema from '@/lib/db/schema';
+import { clearProjectsCache, refreshProjectsCacheSync } from '@/lib/shared/enabled-projects';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS projects (
-      name TEXT PRIMARY KEY,
-      path TEXT NOT NULL,
-      enabled INTEGER DEFAULT 0,
-      github TEXT,
-      priority TEXT,
-      custom_actions TEXT,
-      test_command TEXT,
-      tests_disabled INTEGER DEFAULT 0,
-      review_disabled INTEGER DEFAULT 0,
-      test_cron_enabled INTEGER DEFAULT 0,
-      test_cron_schedule TEXT,
-      auto_commit_enabled INTEGER DEFAULT 0,
-      auto_push_enabled INTEGER DEFAULT 0,
-      auto_pr_merge_enabled INTEGER DEFAULT 0,
-      pr_workflow_enabled INTEGER DEFAULT 0,
-      release_after_run INTEGER DEFAULT 0,
-      issue_auto_branch INTEGER DEFAULT 1,
-      last_push_error TEXT,
-      last_push_at REAL,
-      review_prompt_addendum TEXT,
-      fix_prompt_addendum TEXT,
-      website TEXT,
-      qa_url TEXT,
-      archived INTEGER NOT NULL DEFAULT 0,
-      paused INTEGER NOT NULL DEFAULT 0
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
-}
+beforeAll(async () => {
+  sharedHandle = await createTestPgDbEmpty();
+  await applyProjectsSchema(sharedHandle);
+  mockState.dbHolder.db = sharedHandle.db;
+  mockState.currentSettings = { ...DEFAULT_SETTINGS };
+});
+
+afterAll(async () => {
+  try {
+    await sharedHandle[Symbol.asyncDispose]();
+  } catch {
+    // ignore
+  }
+});
 
 describe('parseFrequency', () => {
   it('parses minutes', () => {
@@ -176,295 +234,226 @@ describe('resolveTargets', () => {
 });
 
 describe('writePriorityYaml', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-
   beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        workspace_path: '/workspace',
-        github_owner: '',
-        claude_bin: '~/.local/bin/claude',
-        log_dir: '~/logs',
-        frequency: '1h',
-        daytime: false,
-        weekends: false,
-        launchagent_prefix: 'com.tamtam',
-      }),
-    }));
-  });
-
-  afterEach(() => {
-    vi.resetModules();
+    await truncateProjects();
+    mockState.currentSettings = { ...DEFAULT_SETTINGS };
   });
 
   it('returns false when project does not exist', async () => {
-    const { writePriorityYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('nonexistent', null, 'high')).toBe(false);
+    expect(await writePriorityYaml('nonexistent', null, 'high')).toBe(false);
   });
 
   it('updates priority for existing project', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
-    const { writePriorityYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('proj1', null, 'high')).toBe(true);
-    const row = testDb.db.select().from(schema.projects).get();
-    expect(row?.priority).toBe('high');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true });
+    expect(await writePriorityYaml('proj1', null, 'high')).toBe(true);
+    // wait for fire-and-forget update
+    await vi.waitFor(async () => {
+      const [row] = await sharedHandle.db.select().from(schema.projects);
+      expect(row?.priority).toBe('high');
+    }, { interval: 1, timeout: 1000 });
   });
 
   it('clears priority when null is passed', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, priority: 'critical' }).run();
-    const { writePriorityYaml: fn } = await import('@/lib/scheduling/scheduling');
-    fn('proj1', null, null);
-    const row = testDb.db.select().from(schema.projects).get();
-    expect(row?.priority).toBeNull();
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, priority: 'critical' });
+    await writePriorityYaml('proj1', null, null);
+    await vi.waitFor(async () => {
+      const [row] = await sharedHandle.db.select().from(schema.projects);
+      expect(row?.priority).toBeNull();
+    }, { interval: 1, timeout: 1000 });
   });
 });
 
 describe('writeProjectFieldYaml', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-
   beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        workspace_path: '/workspace',
-        github_owner: '',
-        claude_bin: '~/.local/bin/claude',
-        log_dir: '~/logs',
-        frequency: '1h',
-        daytime: false,
-        weekends: false,
-        launchagent_prefix: 'com.tamtam',
-      }),
-    }));
-  });
-
-  afterEach(() => {
-    vi.resetModules();
+    await truncateProjects();
+    mockState.currentSettings = { ...DEFAULT_SETTINGS };
   });
 
   it('returns false when project does not exist', async () => {
-    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('nonexistent', 'github', 'owner/repo')).toBe(false);
+    expect(await writeProjectFieldYaml('nonexistent', 'github', 'owner/repo')).toBe(false);
   });
 
   it('updates github field', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
-    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('proj1', 'github', 'owner/proj1')).toBe(true);
-    const row = testDb.db.select().from(schema.projects).get();
-    expect(row?.github).toBe('owner/proj1');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true });
+    expect(await writeProjectFieldYaml('proj1', 'github', 'owner/proj1')).toBe(true);
+    await vi.waitFor(async () => {
+      const [row] = await sharedHandle.db.select().from(schema.projects);
+      expect(row?.github).toBe('owner/proj1');
+    }, { interval: 1, timeout: 1000 });
   });
 
   it('updates priority field', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
-    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('proj1', 'priority', 'critical')).toBe(true);
-    const row = testDb.db.select().from(schema.projects).get();
-    expect(row?.priority).toBe('critical');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true });
+    expect(await writeProjectFieldYaml('proj1', 'priority', 'critical')).toBe(true);
+    await vi.waitFor(async () => {
+      const [row] = await sharedHandle.db.select().from(schema.projects);
+      expect(row?.priority).toBe('critical');
+    }, { interval: 1, timeout: 1000 });
   });
 
   it('returns true for unknown field (no-op)', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
-    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('proj1', 'unknown_field', 'value')).toBe(true);
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true });
+    expect(await writeProjectFieldYaml('proj1', 'unknown_field', 'value')).toBe(true);
   });
 
   it('sets tests_disabled=true when value is "1"', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
-    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('proj1', 'tests_disabled', '1')).toBe(true);
-    const row = testDb.db.select().from(schema.projects).get();
-    expect(row?.testsDisabled).toBe(true);
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true });
+    expect(await writeProjectFieldYaml('proj1', 'tests_disabled', '1')).toBe(true);
+    await vi.waitFor(async () => {
+      const [row] = await sharedHandle.db.select().from(schema.projects);
+      expect(row?.testsDisabled).toBe(true);
+    }, { interval: 1, timeout: 1000 });
   });
 
   it('clears tests_disabled when value is "0"', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, testsDisabled: true }).run();
-    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('proj1', 'tests_disabled', '0')).toBe(true);
-    const row = testDb.db.select().from(schema.projects).get();
-    expect(row?.testsDisabled).toBeFalsy();
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, testsDisabled: true });
+    expect(await writeProjectFieldYaml('proj1', 'tests_disabled', '0')).toBe(true);
+    await vi.waitFor(async () => {
+      const [row] = await sharedHandle.db.select().from(schema.projects);
+      expect(row?.testsDisabled).toBeFalsy();
+    }, { interval: 1, timeout: 1000 });
   });
 
   it('sets review_disabled=true when value is "1"', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
-    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('proj1', 'review_disabled', '1')).toBe(true);
-    const row = testDb.db.select().from(schema.projects).get();
-    expect(row?.reviewDisabled).toBe(true);
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true });
+    expect(await writeProjectFieldYaml('proj1', 'review_disabled', '1')).toBe(true);
+    await vi.waitFor(async () => {
+      const [row] = await sharedHandle.db.select().from(schema.projects);
+      expect(row?.reviewDisabled).toBe(true);
+    }, { interval: 1, timeout: 1000 });
   });
 
   it('clears review_disabled when value is "0"', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, reviewDisabled: true }).run();
-    const { writeProjectFieldYaml: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('proj1', 'review_disabled', '0')).toBe(true);
-    const row = testDb.db.select().from(schema.projects).get();
-    expect(row?.reviewDisabled).toBeFalsy();
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, reviewDisabled: true });
+    expect(await writeProjectFieldYaml('proj1', 'review_disabled', '0')).toBe(true);
+    await vi.waitFor(async () => {
+      const [row] = await sharedHandle.db.select().from(schema.projects);
+      expect(row?.reviewDisabled).toBeFalsy();
+    }, { interval: 1, timeout: 1000 });
   });
 });
 
 describe('getProjectTestConfig — testsDisabled / reviewDisabled', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-
   beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        workspace_path: '/workspace',
-        github_owner: '',
-        claude_bin: '~/.local/bin/claude',
-        log_dir: '~/logs',
-        frequency: '1h',
-        daytime: false,
-        weekends: false,
-        launchagent_prefix: 'com.tamtam',
-      }),
-    }));
+    await truncateProjects();
+    mockState.currentSettings = { ...DEFAULT_SETTINGS };
   });
 
-  afterEach(() => { vi.resetModules(); });
-
   it('returns null for unknown project', async () => {
-    const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    expect(fn('ghost')).toBeNull();
+    expect(await getProjectTestConfig('ghost')).toBeNull();
   });
 
   it('defaults testsDisabled to false when column is NULL', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
-    const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true });
+    const cfg = await getProjectTestConfig('proj1');
     expect(cfg?.testsDisabled).toBe(false);
   });
 
   it('returns testsDisabled=true when column is set', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, testsDisabled: true }).run();
-    const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, testsDisabled: true });
+    const cfg = await getProjectTestConfig('proj1');
     expect(cfg?.testsDisabled).toBe(true);
   });
 
   it('defaults reviewDisabled to false when column is NULL', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
-    const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true });
+    const cfg = await getProjectTestConfig('proj1');
     expect(cfg?.reviewDisabled).toBe(false);
   });
 
   it('returns reviewDisabled=true when column is set', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, reviewDisabled: true }).run();
-    const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, reviewDisabled: true });
+    const cfg = await getProjectTestConfig('proj1');
     expect(cfg?.reviewDisabled).toBe(true);
   });
 
   it('returns both flags independently — testsDisabled=true, reviewDisabled=false', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, testsDisabled: true, reviewDisabled: false }).run();
-    const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, testsDisabled: true, reviewDisabled: false });
+    const cfg = await getProjectTestConfig('proj1');
     expect(cfg?.testsDisabled).toBe(true);
     expect(cfg?.reviewDisabled).toBe(false);
   });
 
   it('defaults issueAutoBranch to true when column is NULL', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
-    const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true });
+    const cfg = await getProjectTestConfig('proj1');
     expect(cfg?.issueAutoBranch).toBe(true);
   });
 
   it('returns issueAutoBranch=false when explicitly set to false', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, issueAutoBranch: false }).run();
-    const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, issueAutoBranch: false });
+    const cfg = await getProjectTestConfig('proj1');
     expect(cfg?.issueAutoBranch).toBe(false);
   });
 
   it('returns issueAutoBranch=true when explicitly set to true', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, issueAutoBranch: true }).run();
-    const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, issueAutoBranch: true });
+    const cfg = await getProjectTestConfig('proj1');
     expect(cfg?.issueAutoBranch).toBe(true);
   });
 
   it('defaults autoPushEnabled to false when column is NULL', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
-    const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true });
+    const cfg = await getProjectTestConfig('proj1');
     expect(cfg?.autoPushEnabled).toBe(false);
   });
 
   it('returns autoPushEnabled=true when set', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, autoPushEnabled: true }).run();
-    const { getProjectTestConfig: fn } = await import('@/lib/scheduling/scheduling');
-    const cfg = fn('proj1');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true, autoPushEnabled: true });
+    const cfg = await getProjectTestConfig('proj1');
     expect(cfg?.autoPushEnabled).toBe(true);
   });
 
 });
 
 describe('getImproveConfig — logDir path expansion', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-
-  function setupMocks(log_dir: string) {
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        workspace_path: '/workspace',
-        github_owner: '',
-        claude_bin: '/usr/bin/claude',
-        log_dir,
-        frequency: '1h',
-        daytime: false,
-        weekends: false,
-        launchagent_prefix: 'com.tamtam',
-        base_prompt: '',
-        permission_mode: 'bypassPermissions',
-      }),
-    }));
+  async function setupMocks(log_dir: string) {
+    await truncateProjects();
+    mockState.currentSettings = {
+      workspace_path: '/workspace',
+      github_owner: '',
+      claude_bin: '/usr/bin/claude',
+      log_dir,
+      frequency: '1h',
+      daytime: false,
+      weekends: false,
+      launchagent_prefix: 'com.tamtam',
+      base_prompt: '',
+      permission_mode: 'bypassPermissions',
+    };
+    // getImproveConfig calls listEnabledProjects (cached). Prime the cache
+    // synchronously so it picks up the truncated state and not stale rows.
+    clearProjectsCache();
+    await refreshProjectsCacheSync();
   }
 
   afterEach(() => {
-    vi.resetModules();
+    mockState.currentSettings = { ...DEFAULT_SETTINGS };
   });
 
   it('resolves ./relative path against process.cwd()', async () => {
-    vi.resetModules();
-    setupMocks('./data/logs');
-    const { getImproveConfig } = await import('@/lib/scheduling/scheduling');
+    await setupMocks('./data/logs');
     const { join } = await import('path');
     const config = getImproveConfig();
     expect(config.logDir).toBe(join(process.cwd(), 'data/logs'));
   });
 
   it('resolves ../relative path against process.cwd()', async () => {
-    vi.resetModules();
-    setupMocks('../other-logs');
-    const { getImproveConfig } = await import('@/lib/scheduling/scheduling');
+    await setupMocks('../other-logs');
     const { join } = await import('path');
     const config = getImproveConfig();
     expect(config.logDir).toBe(join(process.cwd(), '../other-logs'));
   });
 
   it('resolves bare relative path (no leading dot) against process.cwd()', async () => {
-    vi.resetModules();
-    setupMocks('logs/tamtam');
-    const { getImproveConfig } = await import('@/lib/scheduling/scheduling');
+    await setupMocks('logs/tamtam');
     const { join } = await import('path');
     const config = getImproveConfig();
     expect(config.logDir).toBe(join(process.cwd(), 'logs/tamtam'));
   });
 
   it('expands ~/path to homedir', async () => {
-    vi.resetModules();
-    setupMocks('~/my-logs');
-    const { getImproveConfig } = await import('@/lib/scheduling/scheduling');
+    await setupMocks('~/my-logs');
     const { join } = await import('path');
     const { homedir } = await import('os');
     const config = getImproveConfig();
@@ -472,93 +461,82 @@ describe('getImproveConfig — logDir path expansion', () => {
   });
 
   it('returns absolute path unchanged', async () => {
-    vi.resetModules();
-    setupMocks('/var/log/tamtam');
-    const { getImproveConfig } = await import('@/lib/scheduling/scheduling');
+    await setupMocks('/var/log/tamtam');
     const config = getImproveConfig();
     expect(config.logDir).toBe('/var/log/tamtam');
   });
 });
 
 describe('setProjectPushResult / getProjectPushResult', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-
   beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        workspace_path: '/workspace',
-        github_owner: '',
-        claude_bin: '~/.local/bin/claude',
-        log_dir: '~/logs',
-        frequency: '1h',
-        daytime: false,
-        weekends: false,
-        launchagent_prefix: 'com.tamtam',
-      }),
-    }));
-  });
-
-  afterEach(() => {
-    vi.resetModules();
+    await truncateProjects();
+    mockState.currentSettings = { ...DEFAULT_SETTINGS };
   });
 
   it('getProjectPushResult returns null for unknown project', async () => {
-    const { getProjectPushResult } = await import('@/lib/scheduling/scheduling');
-    expect(getProjectPushResult('no-such-project')).toBeNull();
+    expect(await getProjectPushResult('no-such-project')).toBeNull();
   });
 
   it('getProjectPushResult returns null error and null timestamp when project has no push history', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
-    const { getProjectPushResult } = await import('@/lib/scheduling/scheduling');
-    const result = getProjectPushResult('proj1');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true });
+    const result = await getProjectPushResult('proj1');
     expect(result).not.toBeNull();
     expect(result!.lastPushError).toBeNull();
     expect(result!.lastPushAt).toBeNull();
   });
 
   it('setProjectPushResult stores null error on success', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
-    const { setProjectPushResult, getProjectPushResult } = await import('@/lib/scheduling/scheduling');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true });
     setProjectPushResult('proj1', null);
-    const result = getProjectPushResult('proj1');
-    expect(result!.lastPushError).toBeNull();
-    expect(result!.lastPushAt).toBeGreaterThan(0);
+    await vi.waitFor(async () => {
+      const result = await getProjectPushResult('proj1');
+      expect(result!.lastPushError).toBeNull();
+      expect(result!.lastPushAt).toBeGreaterThan(0);
+    }, { interval: 1, timeout: 1000 });
   });
 
   it('setProjectPushResult stores error string on failure', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
-    const { setProjectPushResult, getProjectPushResult } = await import('@/lib/scheduling/scheduling');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true });
     setProjectPushResult('proj1', 'Push failed: remote rejected');
-    const result = getProjectPushResult('proj1');
-    expect(result!.lastPushError).toBe('Push failed: remote rejected');
-    expect(result!.lastPushAt).toBeGreaterThan(0);
+    await vi.waitFor(async () => {
+      const result = await getProjectPushResult('proj1');
+      expect(result!.lastPushError).toBe('Push failed: remote rejected');
+      expect(result!.lastPushAt).toBeGreaterThan(0);
+    }, { interval: 1, timeout: 1000 });
   });
 
   it('setProjectPushResult overwrites a previous error with null', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
-    const { setProjectPushResult, getProjectPushResult } = await import('@/lib/scheduling/scheduling');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true });
     setProjectPushResult('proj1', 'previous error');
+    await vi.waitFor(async () => {
+      const r = await getProjectPushResult('proj1');
+      expect(r!.lastPushError).toBe('previous error');
+    }, { interval: 1, timeout: 1000 });
     setProjectPushResult('proj1', null);
-    const result = getProjectPushResult('proj1');
-    expect(result!.lastPushError).toBeNull();
+    await vi.waitFor(async () => {
+      const result = await getProjectPushResult('proj1');
+      expect(result!.lastPushError).toBeNull();
+    }, { interval: 1, timeout: 1000 });
   });
 
   it('setProjectPushResult updates lastPushAt on each call', async () => {
-    testDb.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true }).run();
-    const { setProjectPushResult, getProjectPushResult } = await import('@/lib/scheduling/scheduling');
+    await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true });
     setProjectPushResult('proj1', null);
-    const first = getProjectPushResult('proj1')!.lastPushAt!;
+    let first = 0;
+    await vi.waitFor(async () => {
+      const r = await getProjectPushResult('proj1');
+      expect(r!.lastPushAt).toBeGreaterThan(0);
+      first = r!.lastPushAt!;
+    }, { interval: 1, timeout: 1000 });
     setProjectPushResult('proj1', null);
-    const second = getProjectPushResult('proj1')!.lastPushAt!;
-    expect(second).toBeGreaterThanOrEqual(first);
+    await vi.waitFor(async () => {
+      const r = await getProjectPushResult('proj1');
+      expect(r!.lastPushAt).toBeGreaterThanOrEqual(first);
+    }, { interval: 1, timeout: 1000 });
   });
 
   it('setProjectPushResult is a no-op for unknown project', async () => {
-    const { setProjectPushResult, getProjectPushResult } = await import('@/lib/scheduling/scheduling');
     expect(() => setProjectPushResult('ghost', 'err')).not.toThrow();
-    expect(getProjectPushResult('ghost')).toBeNull();
+    expect(await getProjectPushResult('ghost')).toBeNull();
   });
 });

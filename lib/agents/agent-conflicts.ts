@@ -10,14 +10,14 @@ export interface AgentNameConflict {
   agentId?: string;
 }
 
-export function findAgentNameConflict(
+export async function findAgentNameConflict(
   project: string,
   name: string,
   options: { excludeDbAgentId?: string; excludeFileAgentName?: string } = {},
-): AgentNameConflict | null {
+): Promise<AgentNameConflict | null> {
   const targetKey = canonicalAgentNameKey(name);
 
-  const dbAgents = db.select().from(schema.agents).where(eq(schema.agents.project, project)).all();
+  const dbAgents = await db.select().from(schema.agents).where(eq(schema.agents.project, project));
   for (const agent of dbAgents) {
     if (options.excludeDbAgentId && agent.id === options.excludeDbAgentId) continue;
     if (canonicalAgentNameKey(agent.name) === targetKey) {

@@ -57,8 +57,8 @@ function parseNonNegativeIntegerSetting(
   return { value: String(parsed), error: null };
 }
 
-function buildSettingsResponse(): Record<string, string> {
-  const rows = db.select().from(schema.settings).all();
+async function buildSettingsResponse(): Promise<Record<string, string>> {
+  const rows = await db.select().from(schema.settings);
   const settings: Record<string, string> = {};
   for (const row of rows) {
     settings[row.key] = serializeSettingValue(row.key, row.value);
@@ -308,7 +308,7 @@ function validateAndSerializeSettingValue(
 }
 
 export async function GET() {
-  return NextResponse.json({ settings: buildSettingsResponse() });
+  return NextResponse.json({ settings: await buildSettingsResponse() });
 }
 
 export async function PATCH(request: NextRequest) {
@@ -381,19 +381,18 @@ export async function PATCH(request: NextRequest) {
 
   for (const { key, value } of serializedEntries) {
     if (value === null) {
-      db.delete(schema.settings).where(eq(schema.settings.key, key)).run();
+      await db.delete(schema.settings).where(eq(schema.settings.key, key));
     } else {
-      db.insert(schema.settings)
+      await db.insert(schema.settings)
         .values({ key, value })
         .onConflictDoUpdate({
           target: schema.settings.key,
           set: { value },
-        })
-        .run();
+        });
     }
   }
 
   reloadConfig();
   syncJobsPauseState(getSettings().jobs_paused);
-  return NextResponse.json({ status: 'ok', settings: buildSettingsResponse() });
+  return NextResponse.json({ status: 'ok', settings: await buildSettingsResponse() });
 }

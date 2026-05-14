@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { CliProvider } from '@/lib/usage/cli-providers';
@@ -22,92 +22,115 @@ function makeJob(overrides: Record<string, unknown> = {}) {
   };
 }
 
+// Hoisted shared state used by module-scope vi.mock() factories below.
+// We keep a single set of module mocks installed at module load time and
+// mutate `state.*` between tests instead of repeatedly calling
+// `vi.resetModules()` + `vi.doMock()` + `await import(...)` per test
+// (which would rebuild the route's entire module graph each time).
+const state = vi.hoisted(() => {
+  const fns = {
+    startJob: vi.fn().mockResolvedValue(99999),
+    resolveProjectPath: vi.fn().mockReturnValue('/path/to/project'),
+    createJob: vi.fn(),
+    updateJob: vi.fn(),
+    checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
+    findBlockingRunningJob: vi.fn().mockResolvedValue(null),
+    getSettings: vi.fn(),
+    getImproveConfig: vi.fn(),
+    getQuotaSnapshots: vi.fn().mockResolvedValue(new Map()),
+  };
+  return {
+    fns,
+    // Adjustable behavior per-test without resetting modules.
+    skillsDir: '',
+    cwdOverride: '',
+    withBasePrompt: (p: string) => p as string,
+  };
+});
+
+vi.mock('@/lib/shared/project-data', () => ({
+  resolveProjectPath: (...args: unknown[]) => state.fns.resolveProjectPath(...args),
+}));
+vi.mock('@/lib/scheduling/scheduling', () => ({
+  getImproveConfig: (...args: unknown[]) => state.fns.getImproveConfig(...args),
+}));
+vi.mock('@/lib/jobs/job-storage', () => ({
+  createJob: (...args: unknown[]) => state.fns.createJob(...args),
+  updateJob: (...args: unknown[]) => state.fns.updateJob(...args),
+}));
+vi.mock('@/lib/jobs/project-active-job', () => ({
+  findBlockingRunningJob: (...args: unknown[]) => state.fns.findBlockingRunningJob(...args),
+}));
+vi.mock('@/lib/jobs/pm2-jobs', () => ({
+  startJob: (...args: unknown[]) => state.fns.startJob(...args),
+}));
+vi.mock('@/lib/skills/skills', () => ({
+  get SKILLS_DIR() { return state.skillsDir; },
+  get DATA_SKILLS_DIR() { return join(state.skillsDir, 'data-skills'); },
+}));
+vi.mock('@/lib/shared/config', () => ({
+  withBasePrompt: (p: string, ...rest: unknown[]) => state.withBasePrompt(p, ...(rest as [])),
+  getPermissionModeFlag: () => '--permission-mode bypassPermissions',
+  getSettings: (...args: unknown[]) => state.fns.getSettings(...args),
+}));
+vi.mock('@/lib/shared/job-control', () => ({
+  runGates: () => null,
+  jobsPausedResult: () => null,
+  runAutoChainGates: () => null,
+  isJobsPaused: () => false,
+}));
+vi.mock('@/lib/usage/resolve-provider', () => ({
+  checkCliStartGate: (...args: unknown[]) => state.fns.checkCliStartGate(...args),
+}));
+vi.mock('@/lib/usage/quota', () => ({
+  getQuotaSnapshots: (...args: unknown[]) => state.fns.getQuotaSnapshots(...args),
+}));
+
+// Import the route once — module-scope mocks above are hoisted before this.
+const routeModulePromise = import('@/app/api/projects/by-project/[projectName]/run/route');
+
 describe('POST /api/projects/by-project/{projectName}/run', () => {
-  let POST: any;
-  let startJobMock: ReturnType<typeof vi.fn>;
-  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
-  let createJobMock: ReturnType<typeof vi.fn>;
-  let updateJobMock: ReturnType<typeof vi.fn>;
-  let checkCliStartGateMock: ReturnType<typeof vi.fn>;
-  let findBlockingRunningJobMock: ReturnType<typeof vi.fn>;
-  let getSettingsMock: ReturnType<typeof vi.fn>;
+  let POST: Awaited<typeof routeModulePromise>['POST'];
   let tempDir: string;
   let skillsDir: string;
+  let cwdSpy: ReturnType<typeof vi.spyOn> | null = null;
 
   beforeEach(async () => {
-    vi.resetModules();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-proj-run-test-'));
     skillsDir = join(tempDir, 'skills');
     mkdirSync(skillsDir, { recursive: true });
 
-    startJobMock = vi.fn().mockResolvedValue(99999);
-    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/project');
-    createJobMock = vi.fn().mockImplementation(() => makeJob());
-    updateJobMock = vi.fn();
-    checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
-    findBlockingRunningJobMock = vi.fn().mockResolvedValue(null);
-    getSettingsMock = vi.fn(() => ({
+    // Reset hoisted shared state to default per-test behavior.
+    state.skillsDir = skillsDir;
+    state.cwdOverride = '';
+    state.withBasePrompt = (p: string) => p;
+
+    state.fns.startJob.mockReset().mockResolvedValue(99999);
+    state.fns.resolveProjectPath.mockReset().mockReturnValue('/path/to/project');
+    state.fns.createJob.mockReset().mockImplementation(() => makeJob());
+    state.fns.updateJob.mockReset();
+    state.fns.checkCliStartGate.mockReset().mockResolvedValue({ ok: true, provider: 'claude' });
+    state.fns.findBlockingRunningJob.mockReset().mockResolvedValue(null);
+    state.fns.getSettings.mockReset().mockImplementation(() => ({
       cli_enabled_providers: ['claude'],
       cli_bin_claude: '/legacy/claude',
     }));
+    state.fns.getImproveConfig.mockReset().mockReturnValue({
+      claudeBin: 'claude',
+      logDir: join(tempDir, 'logs'),
+    });
 
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: resolveProjectPathMock,
-    }));
-
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi
-        .fn()
-        .mockReturnValue({ claudeBin: 'claude', logDir: join(tempDir, 'logs') }),
-    }));
-
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: createJobMock,
-      updateJob: updateJobMock,
-    }));
-    vi.doMock('@/lib/jobs/project-active-job', () => ({
-      findBlockingRunningJob: findBlockingRunningJobMock,
-    }));
-
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      startJob: startJobMock,
-    }));
-
-    vi.doMock('@/lib/skills/skills', () => ({
-      SKILLS_DIR: skillsDir,
-      DATA_SKILLS_DIR: join(skillsDir, 'data-skills'),
-    }));
-
-    vi.doMock('@/lib/shared/config', () => ({
-      withBasePrompt: (p: string) => p,
-      getPermissionModeFlag: () => '--permission-mode bypassPermissions',
-      getSettings: getSettingsMock,
-    }));
-
-    vi.doMock('@/lib/shared/job-control', () => ({
-      runGates: () => null,
-      jobsPausedResult: () => null,
-      runAutoChainGates: () => null,
-      isJobsPaused: () => false,
-    }));
-    vi.doMock('@/lib/usage/resolve-provider', () => ({
-      checkCliStartGate: checkCliStartGateMock,
-    }));
-    vi.doMock('@/lib/usage/resolve-provider', () => ({
-      checkCliStartGate: checkCliStartGateMock,
-    }));
-
-    const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
-    POST = mod.POST;
+    POST = (await routeModulePromise).POST;
   });
 
   afterEach(() => {
-    vi.resetModules();
+    cwdSpy?.mockRestore();
+    cwdSpy = null;
     rmSync(tempDir, { recursive: true, force: true });
   });
 
   it('returns 404 if project not found', async () => {
-    resolveProjectPathMock.mockReturnValue(null);
+    state.fns.resolveProjectPath.mockReturnValue(null);
     const req = new NextRequest('http://localhost/api/projects/by-project/unknown/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'hello' }),
@@ -152,7 +175,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
   });
 
   it('returns 429 when every enabled provider is over budget', async () => {
-    checkCliStartGateMock.mockResolvedValue({
+    state.fns.checkCliStartGate.mockResolvedValue({
       ok: false,
       status: 429,
       detail: 'All enabled CLI providers are over budget. Adjust block threshold or wait for the window to reset.',
@@ -163,7 +186,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(res.status).toBe(429);
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(state.fns.startJob).not.toHaveBeenCalled();
   });
 
   it('treats an explicit terminal provider as required instead of falling back', async () => {
@@ -174,7 +197,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
 
     await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
 
-    expect(checkCliStartGateMock).toHaveBeenCalledWith('start a terminal run', {
+    expect(state.fns.checkCliStartGate).toHaveBeenCalledWith('start a terminal run', {
       preferred: 'claude',
       strictPreferred: true,
       requestedModel: 'fast',
@@ -183,7 +206,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
   });
 
   it('rejects a resumed terminal run when the original provider cannot be reused', async () => {
-    checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'codex' });
+    state.fns.checkCliStartGate.mockResolvedValue({ ok: true, provider: 'codex' });
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
       method: 'POST',
       body: JSON.stringify({
@@ -198,11 +221,11 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
 
     expect(res.status).toBe(409);
     expect(data.detail).toContain('original session ran on claude');
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(state.fns.startJob).not.toHaveBeenCalled();
   });
 
   it('returns 409 with blocking_job_id when another project job is already running', async () => {
-    findBlockingRunningJobMock.mockResolvedValue(makeJob({ id: 'run-123', kind: 'review' }));
+    state.fns.findBlockingRunningJob.mockResolvedValue(makeJob({ id: 'run-123', kind: 'review' }));
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'run my agent' }),
@@ -214,8 +237,8 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     expect(res.status).toBe(409);
     expect(data.detail).toContain("Job 'review' is already running");
     expect(data.blocking_job_id).toBe('run-123');
-    expect(checkCliStartGateMock).not.toHaveBeenCalled();
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(state.fns.checkCliStartGate).not.toHaveBeenCalled();
+    expect(state.fns.startJob).not.toHaveBeenCalled();
   });
 
   it('calls startJob with correct project path', async () => {
@@ -224,8 +247,8 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
       body: JSON.stringify({ prompt: 'test prompt' }),
     });
     await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(startJobMock).toHaveBeenCalledOnce();
-    const [, , , projPath] = startJobMock.mock.calls[0];
+    expect(state.fns.startJob).toHaveBeenCalledOnce();
+    const [, , , projPath] = state.fns.startJob.mock.calls[0];
     expect(projPath).toBe('/path/to/project');
   });
 
@@ -236,7 +259,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     });
     await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
 
-    const [, , , , options] = startJobMock.mock.calls[0];
+    const [, , , , options] = state.fns.startJob.mock.calls[0];
     expect(options).toEqual({ env: { CLAUDE_BIN: '/legacy/claude' } });
   });
 
@@ -247,7 +270,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     });
     await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
 
-    const [, cmd] = startJobMock.mock.calls[0];
+    const [, cmd] = state.fns.startJob.mock.calls[0];
     expect(cmd).toContain('--model fast');
   });
 
@@ -258,7 +281,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     });
     await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
 
-    const [, cmd] = startJobMock.mock.calls[0];
+    const [, cmd] = state.fns.startJob.mock.calls[0];
     expect(cmd).toContain('--model smart');
   });
 
@@ -269,7 +292,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     });
     await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
 
-    const [, cmd] = startJobMock.mock.calls[0];
+    const [, cmd] = state.fns.startJob.mock.calls[0];
     expect(cmd).toContain('--model normal');
     expect(cmd).not.toContain('--model sonnet');
   });
@@ -286,7 +309,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     await expect(res.json()).resolves.toMatchObject({
       detail: expect.stringContaining('Invalid model'),
     });
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(state.fns.startJob).not.toHaveBeenCalled();
   });
 
   it('rejects invalid multipart models and does not start a job', async () => {
@@ -304,7 +327,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     await expect(res.json()).resolves.toMatchObject({
       detail: expect.stringContaining('Invalid model'),
     });
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(state.fns.startJob).not.toHaveBeenCalled();
   });
 
   it('accepts attachment-only multipart runs and injects the saved file path into the prompt', async () => {
@@ -312,21 +335,22 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     form.set('file', new File(['hello world'], 'notes.txt', { type: 'text/plain' }));
     const originalCwd = process.cwd();
 
+    // Thread-pool tests can't call process.chdir(); spy on process.cwd()
+    // instead — the route reads `process.cwd()` once when computing the
+    // attachments dir, so redirecting it is equivalent to chdir for this
+    // test's purposes (and the attachments dir is created via mkdirSync,
+    // which works against any path).
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tempDir);
+
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
       method: 'POST',
       body: form,
     });
 
-    let res = new Response(null, { status: 500 });
-    try {
-      process.chdir(tempDir);
-      res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    } finally {
-      process.chdir(originalCwd);
-    }
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
 
     expect(res.status).toBe(200);
-    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    const [, , fullPrompt] = state.fns.startJob.mock.calls[0];
     expect(fullPrompt).toContain('See the attached files.');
     expect(fullPrompt).toContain('Attached files (read them to see their content):');
     expect(fullPrompt).toContain(join(tempDir, 'data', 'attachments'));
@@ -340,8 +364,8 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
       body: JSON.stringify({ prompt: 'hello' }),
     });
     await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(createJobMock).toHaveBeenCalledOnce();
-    expect(updateJobMock).toHaveBeenCalledOnce();
+    expect(state.fns.createJob).toHaveBeenCalledOnce();
+    expect(state.fns.updateJob).toHaveBeenCalledOnce();
   });
 
   it('bypasses the global pause for manual terminal runs explicitly', async () => {
@@ -352,7 +376,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
 
     await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
 
-    expect(checkCliStartGateMock).toHaveBeenCalledWith('start a terminal run', {
+    expect(state.fns.checkCliStartGate).toHaveBeenCalledWith('start a terminal run', {
       preferred: undefined,
       strictPreferred: false,
       requestedModel: 'fast',
@@ -363,8 +387,8 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
   it('prepends persona content when persona file exists', async () => {
     const docsSkillsDir = join(skillsDir, 'docs', 'skills');
     mkdirSync(docsSkillsDir, { recursive: true });
-    const personaFile = join(docsSkillsDir, 'my-persona.md');
-    writeFileSync(personaFile, '# You are a helpful assistant');
+    const { writeFileSync } = await import('fs');
+    writeFileSync(join(docsSkillsDir, 'my-persona.md'), '# You are a helpful assistant');
 
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
       method: 'POST',
@@ -372,7 +396,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     });
     await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
 
-    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    const [, , fullPrompt] = state.fns.startJob.mock.calls[0];
     expect(fullPrompt).toContain('# You are a helpful assistant');
     expect(fullPrompt).toContain('do the thing');
   });
@@ -383,14 +407,14 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
       body: JSON.stringify({ prompt: 'do it', persona: 'nonexistent' }),
     });
     await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect((res: any) => res).toBeTruthy(); // no error thrown
-    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    expect((res: unknown) => res).toBeTruthy(); // no error thrown
+    const [, , fullPrompt] = state.fns.startJob.mock.calls[0];
     // base_prompt is prepended via withBasePrompt(); persona content is skipped since file doesn't exist
     expect(fullPrompt).toContain('do it');
   });
 
   it('returns 500 if startJob throws', async () => {
-    startJobMock.mockRejectedValue(new Error('pm2 crashed'));
+    state.fns.startJob.mockRejectedValue(new Error('pm2 crashed'));
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'run this' }),
@@ -400,8 +424,8 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     const data = await res.json();
     expect(data.detail).toContain('pm2 crashed');
     // Job must be persisted as failed so it doesn't stay "running" in the DB
-    expect(updateJobMock).toHaveBeenCalledOnce();
-    const savedJob = updateJobMock.mock.calls[0][0];
+    expect(state.fns.updateJob).toHaveBeenCalledOnce();
+    const savedJob = state.fns.updateJob.mock.calls[0][0];
     expect(savedJob.exitCode).toBe(-1);
     expect(savedJob.finishedAt).not.toBeNull();
   });
@@ -409,6 +433,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
   it('prepends persona content on follow-up turns (resumeSessionId set)', async () => {
     const docsSkillsDir = join(skillsDir, 'docs', 'skills');
     mkdirSync(docsSkillsDir, { recursive: true });
+    const { writeFileSync } = await import('fs');
     writeFileSync(join(docsSkillsDir, 'reviewer.md'), '# Senior reviewer persona');
 
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
@@ -421,7 +446,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     });
     await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
 
-    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    const [, , fullPrompt] = state.fns.startJob.mock.calls[0];
     expect(fullPrompt).toContain('# Senior reviewer persona');
     expect(fullPrompt).toContain('follow-up message');
   });
@@ -429,6 +454,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
   it('supports multiple personas via personas array on follow-up', async () => {
     const docsSkillsDir = join(skillsDir, 'docs', 'skills');
     mkdirSync(docsSkillsDir, { recursive: true });
+    const { writeFileSync } = await import('fs');
     writeFileSync(join(docsSkillsDir, 'a.md'), 'PERSONA-A');
     writeFileSync(join(docsSkillsDir, 'b.md'), 'PERSONA-B');
 
@@ -442,81 +468,36 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     });
     await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
 
-    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    const [, , fullPrompt] = state.fns.startJob.mock.calls[0];
     expect(fullPrompt).toContain('PERSONA-A');
     expect(fullPrompt).toContain('PERSONA-B');
     expect(fullPrompt).toContain('do it');
   });
 
   it('does NOT inject base_prompt on follow-up turns', async () => {
-    vi.resetModules();
-    // Re-mock with a recognizable base_prompt via config
-    vi.doMock('@/lib/shared/config', () => ({
-      withBasePrompt: (p: string) => `BASE-PROMPT-SENTINEL\n\n---\n\n${p}`,
-      getPermissionModeFlag: () => '--permission-mode bypassPermissions',
-      getSettings: () => ({ cli_enabled_providers: ['claude'] }),
-    }));
-    // Re-apply other mocks that resetModules cleared
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: join(tempDir, 'logs') }),
-    }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
-    vi.doMock('@/lib/skills/skills', () => ({ SKILLS_DIR: skillsDir, DATA_SKILLS_DIR: join(skillsDir, 'data-skills') }));
-    vi.doMock('@/lib/shared/job-control', () => ({
-      runGates: () => null,
-      jobsPausedResult: () => null,
-      runAutoChainGates: () => null,
-      isJobsPaused: () => false,
-    }));
-    vi.doMock('@/lib/usage/resolve-provider', () => ({
-      checkCliStartGate: checkCliStartGateMock,
-    }));
-    const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
-    const POST2 = mod.POST;
+    state.withBasePrompt = (p: string) => `BASE-PROMPT-SENTINEL\n\n---\n\n${p}`;
 
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'follow up', resumeSessionId: 'sess-1' }),
     });
-    await POST2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
 
-    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    const [, , fullPrompt] = state.fns.startJob.mock.calls[0];
     expect(fullPrompt).not.toContain('BASE-PROMPT-SENTINEL');
     expect(fullPrompt).toContain('follow up');
   });
 
   it('DOES inject base_prompt on initial turn (no resumeSessionId)', async () => {
-    vi.resetModules();
-    vi.doMock('@/lib/shared/config', () => ({
-      withBasePrompt: (p: string) => `BASE-PROMPT-SENTINEL\n\n---\n\n${p}`,
-      getPermissionModeFlag: () => '--permission-mode bypassPermissions',
-      getSettings: () => ({ cli_enabled_providers: ['claude'] }),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: join(tempDir, 'logs') }),
-    }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
-    vi.doMock('@/lib/skills/skills', () => ({ SKILLS_DIR: skillsDir, DATA_SKILLS_DIR: join(skillsDir, 'data-skills') }));
-    vi.doMock('@/lib/shared/job-control', () => ({
-      runGates: () => null,
-      jobsPausedResult: () => null,
-      runAutoChainGates: () => null,
-      isJobsPaused: () => false,
-    }));
-    const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
-    const POST2 = mod.POST;
+    state.withBasePrompt = (p: string) => `BASE-PROMPT-SENTINEL\n\n---\n\n${p}`;
 
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'first message' }),
     });
-    await POST2(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
 
-    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    const [, , fullPrompt] = state.fns.startJob.mock.calls[0];
     expect(fullPrompt).toContain('BASE-PROMPT-SENTINEL');
     expect(fullPrompt).toContain('first message');
   });
@@ -532,7 +513,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
       }),
     });
     await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(createJobMock).toHaveBeenCalledWith(
+    expect(state.fns.createJob).toHaveBeenCalledWith(
       'proj1', 'run', 0, '',
       expect.stringContaining('fix the bug'),
       undefined,
@@ -555,8 +536,8 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.detail).toContain('ghIssueRepo');
-    expect(createJobMock).not.toHaveBeenCalled();
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(state.fns.createJob).not.toHaveBeenCalled();
+    expect(state.fns.startJob).not.toHaveBeenCalled();
   });
 
   it('stores null ghIssue fields when not provided in request body', async () => {
@@ -565,7 +546,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
       body: JSON.stringify({ prompt: 'do something' }),
     });
     await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(createJobMock).toHaveBeenCalledWith(
+    expect(state.fns.createJob).toHaveBeenCalledWith(
       'proj1', 'run', 0, '',
       expect.stringContaining('do something'),
       undefined,
@@ -578,21 +559,52 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
 });
 
 describe('POST /api/projects/by-project/{projectName}/run weekly quota gating', () => {
-  let POST: any;
-  let startJobMock: ReturnType<typeof vi.fn>;
-  let createJobMock: ReturnType<typeof vi.fn>;
-  let updateJobMock: ReturnType<typeof vi.fn>;
+  let POST: Awaited<typeof routeModulePromise>['POST'];
   let tempDir: string;
 
   beforeEach(async () => {
-    vi.resetModules();
-    vi.doUnmock('@/lib/usage/resolve-provider');
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-proj-run-weekly-test-'));
 
-    startJobMock = vi.fn().mockResolvedValue(99999);
-    createJobMock = vi.fn().mockImplementation(() => makeJob());
-    updateJobMock = vi.fn();
+    state.skillsDir = join(tempDir, 'skills');
+    state.withBasePrompt = (p: string) => p;
 
+    state.fns.startJob.mockReset().mockResolvedValue(99999);
+    state.fns.resolveProjectPath.mockReset().mockReturnValue('/path/to/project');
+    state.fns.createJob.mockReset().mockImplementation(() => makeJob());
+    state.fns.updateJob.mockReset();
+    state.fns.findBlockingRunningJob.mockReset().mockResolvedValue(null);
+    // Use real checkCliStartGate by clearing the mock so the route's
+    // resolve-provider path actually consults the quota snapshots. Vitest's
+    // module-scope mock still proxies through `state.fns.checkCliStartGate`,
+    // so swap the implementation in to call the real exported function.
+    const real = await vi.importActual<typeof import('@/lib/usage/resolve-provider')>(
+      '@/lib/usage/resolve-provider'
+    );
+    state.fns.checkCliStartGate.mockReset().mockImplementation(real.checkCliStartGate);
+
+    state.fns.getImproveConfig.mockReset().mockReturnValue({
+      claudeBin: 'claude',
+      logDir: join(tempDir, 'logs'),
+    });
+    state.fns.getSettings.mockReset().mockImplementation(() => ({
+      cli_enabled_providers: ['claude', 'codex'],
+      claude_provider: 'claude',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: true,
+      cli_bin_claude: '/legacy/claude',
+      cli_bin_codex: '',
+      cli_bin_gemini: '',
+      cli_bin_lmstudio: '',
+    }));
+
+    POST = (await routeModulePromise).POST;
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('does not 429 a manual terminal run when only weekly quota is hot', async () => {
     const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
       ['claude', {
         provider: 'claude',
@@ -611,79 +623,21 @@ describe('POST /api/projects/by-project/{projectName}/run weekly quota gating', 
         stale: false,
       }],
     ]);
+    state.fns.getQuotaSnapshots.mockResolvedValue(snapshots);
 
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue('/path/to/project'),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: join(tempDir, 'logs') }),
-    }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: createJobMock,
-      updateJob: updateJobMock,
-    }));
-    vi.doMock('@/lib/jobs/project-active-job', () => ({
-      findBlockingRunningJob: vi.fn().mockResolvedValue(null),
-    }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      startJob: startJobMock,
-    }));
-    vi.doMock('@/lib/skills/skills', () => ({
-      SKILLS_DIR: join(tempDir, 'skills'),
-      DATA_SKILLS_DIR: join(tempDir, 'data-skills'),
-    }));
-    vi.doMock('@/lib/shared/config', () => ({
-      withBasePrompt: (p: string) => p,
-      getPermissionModeFlag: () => '--permission-mode bypassPermissions',
-      getSettings: vi.fn(() => ({
-        cli_enabled_providers: ['claude', 'codex'],
-        claude_provider: 'claude',
-        budget_block_at_pct: 95,
-        budget_block_runs_enabled: true,
-        cli_bin_claude: '/legacy/claude',
-        cli_bin_codex: '',
-        cli_bin_gemini: '',
-        cli_bin_lmstudio: '',
-      })),
-    }));
-    vi.doMock('@/lib/shared/job-control', () => ({
-      jobsPausedResult: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/usage/quota', () => ({
-      getQuotaSnapshots: vi.fn().mockResolvedValue(snapshots),
-    }));
-
-    const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
-    POST = mod.POST;
-  });
-
-  afterEach(() => {
-    vi.resetModules();
-    rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  it('does not 429 a manual terminal run when only weekly quota is hot', async () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'run my agent' }),
     });
     const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(res.status).toBe(200);
-    expect(startJobMock).toHaveBeenCalledOnce();
-    const [, cmd, , , options] = startJobMock.mock.calls[0];
+    expect(state.fns.startJob).toHaveBeenCalledOnce();
+    const [, cmd, , , options] = state.fns.startJob.mock.calls[0];
     expect(cmd).toContain('/scripts/claude-shim.js');
     expect(options).toEqual({ env: { CLAUDE_BIN: '/legacy/claude' } });
   });
 
   it('keeps Claude selected for a fast terminal run when only the sonnet weekly window is hot', async () => {
-    vi.resetModules();
-    vi.doUnmock('@/lib/usage/resolve-provider');
-    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-proj-run-weekly-tier-test-'));
-
-    startJobMock = vi.fn().mockResolvedValue(99999);
-    createJobMock = vi.fn().mockImplementation(() => makeJob());
-    updateJobMock = vi.fn();
-
     const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
       ['claude', {
         provider: 'claude',
@@ -702,47 +656,7 @@ describe('POST /api/projects/by-project/{projectName}/run weekly quota gating', 
         stale: false,
       }],
     ]);
-
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue('/path/to/project'),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: join(tempDir, 'logs') }),
-    }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: createJobMock,
-      updateJob: updateJobMock,
-    }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      startJob: startJobMock,
-    }));
-    vi.doMock('@/lib/skills/skills', () => ({
-      SKILLS_DIR: join(tempDir, 'skills'),
-      DATA_SKILLS_DIR: join(tempDir, 'data-skills'),
-    }));
-    vi.doMock('@/lib/shared/config', () => ({
-      withBasePrompt: (p: string) => p,
-      getPermissionModeFlag: () => '--permission-mode bypassPermissions',
-      getSettings: vi.fn(() => ({
-        cli_enabled_providers: ['claude', 'codex'],
-        claude_provider: 'claude',
-        budget_block_at_pct: 95,
-        budget_block_runs_enabled: true,
-        cli_bin_claude: '/legacy/claude',
-        cli_bin_codex: '',
-        cli_bin_gemini: '',
-        cli_bin_lmstudio: '',
-      })),
-    }));
-    vi.doMock('@/lib/shared/job-control', () => ({
-      jobsPausedResult: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/usage/quota', () => ({
-      getQuotaSnapshots: vi.fn().mockResolvedValue(snapshots),
-    }));
-
-    const mod = await import('@/app/api/projects/by-project/[projectName]/run/route');
-    POST = mod.POST;
+    state.fns.getQuotaSnapshots.mockResolvedValue(snapshots);
 
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
       method: 'POST',
@@ -751,8 +665,8 @@ describe('POST /api/projects/by-project/{projectName}/run weekly quota gating', 
     const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
 
     expect(res.status).toBe(200);
-    expect(startJobMock).toHaveBeenCalledOnce();
-    const [, cmd, , , options] = startJobMock.mock.calls[0];
+    expect(state.fns.startJob).toHaveBeenCalledOnce();
+    const [, cmd, , , options] = state.fns.startJob.mock.calls[0];
     expect(cmd).toContain('/scripts/claude-shim.js');
     expect(options).toEqual({ env: { CLAUDE_BIN: '/legacy/claude' } });
   });

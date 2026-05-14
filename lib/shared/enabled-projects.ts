@@ -1,15 +1,6 @@
-import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 
-type ProjectRow = {
-  name?: unknown;
-  path?: unknown;
-  enabled?: unknown;
-  github?: unknown;
-  priority?: unknown;
-  testCommand?: unknown;
-  archived?: unknown;
-};
+type ProjectRow = typeof schema.projects.$inferSelect;
 
 export type EnabledProject = {
   name: string;
@@ -20,80 +11,71 @@ export type EnabledProject = {
   archived?: boolean;
 };
 
-function isEnabled(value: unknown): boolean {
-  return value === true || value === 1;
+const PROJECTS_CACHE_TTL = 10; // seconds
+let _projectsCache: { rows: ProjectRow[]; time: number } | null = null;
+let _projectsRefreshing = false;
+
+async function _doProjectsRefresh(): Promise<void> {
+  if (_projectsRefreshing) return;
+  _projectsRefreshing = true;
+  try {
+    const rows = await db.select().from(schema.projects);
+    _projectsCache = { rows, time: Date.now() / 1000 };
+  } catch (e) {
+    console.error('[enabled-projects] refresh failed:', e);
+  } finally {
+    _projectsRefreshing = false;
+  }
 }
 
-function isArchived(value: unknown): boolean {
-  return value === true || value === 1;
+function _getCachedRows(): ProjectRow[] {
+  const now = Date.now() / 1000;
+  if (_projectsCache && now - _projectsCache.time < PROJECTS_CACHE_TTL) return _projectsCache.rows;
+  void _doProjectsRefresh();
+  return _projectsCache?.rows ?? [];
 }
 
-function normalizeProjects(rows: ProjectRow[], includeArchived: boolean): EnabledProject[] {
-  return rows
-    .filter((row) => typeof row.name === 'string' && typeof row.path === 'string')
-    .filter((row) => row.enabled === undefined || row.enabled === null || isEnabled(row.enabled))
-    .filter((row) => includeArchived || !isArchived(row.archived))
-    .map((row) => ({
-      name: row.name as string,
-      path: row.path as string,
-      github: typeof row.github === 'string' || row.github === null ? row.github : undefined,
-      priority: typeof row.priority === 'string' || row.priority === null ? row.priority : undefined,
-      testCommand: typeof row.testCommand === 'string' || row.testCommand === null ? row.testCommand : undefined,
-      archived: isArchived(row.archived),
-    }));
+export function clearProjectsCache(): void {
+  _projectsCache = null;
+}
+
+// Test-only: awaitable, blocking refresh so callers can prime the cache
+// without polling. Production code keeps the lazy fire-and-forget path.
+export async function refreshProjectsCacheSync(): Promise<void> {
+  const wasRefreshing = _projectsRefreshing;
+  _projectsRefreshing = false;
+  try {
+    await _doProjectsRefresh();
+  } finally {
+    if (wasRefreshing) _projectsRefreshing = true;
+  }
+}
+
+function normalizeRow(row: ProjectRow): EnabledProject {
+  return {
+    name: row.name,
+    path: row.path,
+    github: row.github ?? null,
+    priority: row.priority ?? null,
+    testCommand: row.testCommand ?? null,
+    archived: row.archived ?? false,
+  };
 }
 
 export function listEnabledProjects(options: { includeArchived?: boolean } = {}): EnabledProject[] {
   const includeArchived = options.includeArchived === true;
-  if (!schema.projects) return [];
-
-  try {
-    const query = db.select().from(schema.projects);
-    if (typeof (query as { where?: unknown }).where === 'function' && schema.projects.enabled) {
-      const filtered = (query as { where: (arg: unknown) => { all: () => ProjectRow[] } })
-        .where(eq(schema.projects.enabled, true))
-        .all();
-      return normalizeProjects(filtered, includeArchived);
-    }
-    if (typeof (query as { all?: unknown }).all === 'function') {
-      return normalizeProjects((query as { all: () => ProjectRow[] }).all(), includeArchived);
-    }
-  } catch {
-    try {
-      const query = db.select().from(schema.projects);
-      if (typeof (query as { all?: unknown }).all === 'function') {
-        return normalizeProjects((query as { all: () => ProjectRow[] }).all(), includeArchived);
-      }
-    } catch {
-      return [];
-    }
-  }
-
-  return [];
+  return _getCachedRows()
+    .filter((row) => row.enabled !== false)
+    .filter((row) => includeArchived || !row.archived)
+    .map(normalizeRow);
 }
 
 export function isProjectArchived(name: string): boolean {
-  try {
-    const row = db
-      .select({ archived: schema.projects.archived })
-      .from(schema.projects)
-      .where(eq(schema.projects.name, name))
-      .get();
-    return isArchived(row?.archived);
-  } catch {
-    return false;
-  }
+  const row = _getCachedRows().find((r) => r.name === name);
+  return row?.archived ?? false;
 }
 
 export function isProjectPaused(name: string): boolean {
-  try {
-    const row = db
-      .select({ paused: schema.projects.paused })
-      .from(schema.projects)
-      .where(eq(schema.projects.name, name))
-      .get();
-    return isArchived(row?.paused as unknown);
-  } catch {
-    return false;
-  }
+  const row = _getCachedRows().find((r) => r.name === name);
+  return row?.paused ?? false;
 }

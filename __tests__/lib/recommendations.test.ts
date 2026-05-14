@@ -1,46 +1,66 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { beforeAll, beforeEach, afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import * as schema from '@/lib/db/schema';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries, so issue each DDL
+  // separately.
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS recommendations (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      source_kind TEXT NOT NULL,
-      source_id TEXT,
-      agent_id TEXT,
-      agent_name TEXT,
-      type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      detail TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open',
-      payload TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      source_kind text NOT NULL,
+      source_id text,
+      agent_id text,
+      agent_name text,
+      type text NOT NULL,
+      title text NOT NULL,
+      detail text NOT NULL,
+      status text NOT NULL DEFAULT 'open',
+      payload text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
 }
 
 describe('recommendations storage', () => {
-  let testDb: ReturnType<typeof createTestDb>;
+  let sharedHandle: TestDbHandle;
+  // Back-compat shim so existing test bodies that use `handle.db` keep working.
+  const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
   let upsertRecommendation: typeof import('@/lib/recommendations/recommendations').upsertRecommendation;
   let listRecommendations: typeof import('@/lib/recommendations/recommendations').listRecommendations;
   let updateRecommendationStatus: typeof import('@/lib/recommendations/recommendations').updateRecommendationStatus;
 
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    await sharedHandle.db.execute(sql.raw('TRUNCATE recommendations'));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     ({ upsertRecommendation, listRecommendations, updateRecommendationStatus } = await import('@/lib/recommendations/recommendations'));
   });
 
-  it('upserts a recommendation with a stable sanitized id and parsed payload', () => {
-    const row = upsertRecommendation({
+  afterEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  it('upserts a recommendation with a stable sanitized id and parsed payload', async () => {
+    const row = await upsertRecommendation({
       project: 'owner/repo name',
       sourceKind: 'agent:tests',
       sourceId: 'job-1',
@@ -61,8 +81,8 @@ describe('recommendations storage', () => {
     });
   });
 
-  it('updates an existing recommendation, reopens it, and preserves created_at ordering fields', () => {
-    const first = upsertRecommendation({
+  it('updates an existing recommendation, reopens it, and preserves created_at ordering fields', async () => {
+    const first = await upsertRecommendation({
       project: 'portal',
       sourceKind: 'agent:tests',
       agentId: 'agent-1',
@@ -72,10 +92,10 @@ describe('recommendations storage', () => {
       payload: { recommendedSchedule: '4h' },
     });
 
-    const updated = updateRecommendationStatus('portal', first!.id, 'dismissed');
+    const updated = await updateRecommendationStatus('portal', first!.id, 'dismissed');
     expect(updated?.status).toBe('dismissed');
 
-    const second = upsertRecommendation({
+    const second = await upsertRecommendation({
       project: 'portal',
       sourceKind: 'agent:tests',
       sourceId: 'job-2',
@@ -98,8 +118,8 @@ describe('recommendations storage', () => {
     expect(second!.updated_at).toBeGreaterThanOrEqual(first!.updated_at);
   });
 
-  it('lists newest recommendations first and drops invalid JSON payloads to null', () => {
-    testDb.db.insert(schema.recommendations).values([
+  it('lists newest recommendations first and drops invalid JSON payloads to null', async () => {
+    await handle.db.insert(schema.recommendations).values([
       {
         id: 'rec-older',
         project: 'portal',
@@ -124,16 +144,16 @@ describe('recommendations storage', () => {
         createdAt: 11,
         updatedAt: 30,
       },
-    ]).run();
+    ]);
 
-    const rows = listRecommendations('portal');
+    const rows = await listRecommendations('portal');
 
     expect(rows.map((row) => row.id)).toEqual(['rec-newer', 'rec-older']);
     expect(rows[0].payload).toEqual({ recommendedSchedule: '12h' });
     expect(rows[1].payload).toBeNull();
   });
 
-  it('returns null when updating a missing recommendation', () => {
-    expect(updateRecommendationStatus('portal', 'missing', 'applied')).toBeNull();
+  it('returns null when updating a missing recommendation', async () => {
+    expect(await updateRecommendationStatus('portal', 'missing', 'applied')).toBeNull();
   });
 });

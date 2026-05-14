@@ -27,14 +27,13 @@ function withEffectivePrerequisite<T extends { project: string; skillIds: string
   };
 }
 
-function findDbAgentByProjectAndName(project: string, name: string) {
+async function findDbAgentByProjectAndName(project: string, name: string) {
   const targetKey = canonicalAgentNameKey(name);
-  return db
+  const rows = await db
     .select()
     .from(schema.agents)
-    .where(eq(schema.agents.project, project))
-    .all()
-    .find((agent) => canonicalAgentNameKey(agent.name) === targetKey) ?? null;
+    .where(eq(schema.agents.project, project));
+  return rows.find((agent) => canonicalAgentNameKey(agent.name) === targetKey) ?? null;
 }
 
 // PATCH /api/agents/by-name
@@ -69,12 +68,12 @@ export async function PATCH(request: NextRequest) {
   if (parsedSchedule.error) return NextResponse.json({ detail: parsedSchedule.error }, { status: 400 });
 
   // Try DB agent first
-  const existing = findDbAgentByProjectAndName(projectName, lookupName);
+  const existing = await findDbAgentByProjectAndName(projectName, lookupName);
 
   if (existing) {
     const nextName = requestedName ?? existing.name;
     if (requestedName !== null) {
-      const conflict = findAgentNameConflict(projectName, nextName, {
+      const conflict = await findAgentNameConflict(projectName, nextName, {
         excludeDbAgentId: existing.id,
         excludeFileAgentName: existing.name,
       });
@@ -93,10 +92,11 @@ export async function PATCH(request: NextRequest) {
     if (provider !== undefined) updates.provider = provider;
     if (fields.prerequisiteCommand !== undefined) updates.prerequisiteCommand = prerequisiteCommand ?? '';
 
-    db.update(schema.agents).set(updates).where(eq(schema.agents.id, existing.id)).run();
+    await db.update(schema.agents).set(updates).where(eq(schema.agents.id, existing.id)).execute();
     clearAgentsCache();
 
-    const agent = db.select().from(schema.agents).where(eq(schema.agents.id, existing.id)).get();
+    const agentRows = await db.select().from(schema.agents).where(eq(schema.agents.id, existing.id)).limit(1);
+    const agent = agentRows[0] ?? null;
 
     if (agent) {
       // Sync to .tamtam/agents/<name>.md for version control
@@ -143,7 +143,7 @@ export async function PATCH(request: NextRequest) {
       try {
         const nextName = requestedName ?? fileAgent.name;
         if (requestedName !== null) {
-          const conflict = findAgentNameConflict(projectName, nextName, {
+          const conflict = await findAgentNameConflict(projectName, nextName, {
             excludeFileAgentName: fileAgent.name,
           });
           if (conflict) {
@@ -151,7 +151,7 @@ export async function PATCH(request: NextRequest) {
           }
         }
 
-        const override = getFileAgentOverride(projectName, fileAgent.name);
+        const override = await getFileAgentOverride(projectName, fileAgent.name);
         const fileUpdates = {
           prompt: fields.prompt !== undefined ? fields.prompt : fileAgent.prompt,
           model: fields.model !== undefined ? (parsedModel ?? undefined) : fileAgent.model,
@@ -167,7 +167,7 @@ export async function PATCH(request: NextRequest) {
           : writeFileAgent(projPath, projectName, nextName, fileUpdates);
         if (fileAgent.name !== nextName) {
           if (override) {
-            setFileAgentOverride(projectName, nextName, override);
+            await setFileAgentOverride(projectName, nextName, override);
             deleteFileAgentOverride(projectName, fileAgent.name);
           }
         }

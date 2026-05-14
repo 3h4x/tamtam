@@ -1,4 +1,17 @@
 services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: tamtam
+      POSTGRES_PASSWORD: tamtam
+      POSTGRES_DB: tamtam_qa
+    volumes:
+      - tamtam-qa-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tamtam -d tamtam_qa"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
   tamtam-qa:
     build:
       context: .
@@ -12,12 +25,15 @@ services:
       PORT: "1338"
       HOSTNAME: 0.0.0.0
       TAMTAM_ROOT: /app
-      TAMTAM_DB_PATH: /qa/data/tamtam-qa.db
+      DATABASE_URL: postgres://tamtam:tamtam@postgres:5432/tamtam_qa
       TAMTAM_BASE_URL: http://localhost:1338
       TAMTAM_QA_MODE: "1"
       CLAUDE_BIN: /app/scripts/qa-shim.js
       SHIM_INACTIVITY_TIMEOUT_MS: "120000"
       PATH: /app/scripts/qa-mocks:/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - .:/app
       - tamtam-qa-node-modules:/app/node_modules
@@ -25,6 +41,7 @@ services:
       - tamtam-qa-data:/qa
 
 volumes:
+  tamtam-qa-postgres:
   tamtam-qa-data:
   tamtam-qa-node-modules:
   tamtam-qa-next:

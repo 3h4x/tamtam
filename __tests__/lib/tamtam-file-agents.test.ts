@@ -1,11 +1,40 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+
+// Mock git-branch so scanFileAgents / loadFileAgent / writeFileAgent don't
+// spawn `git` subprocesses per call against tmp dirs that aren't real repos.
+// Branch-aware behavior is covered separately by
+// __tests__/lib/tamtam-file-agents-branch.test.ts; here we exercise the
+// default-branch (working-tree) read/write paths and one explicit feature-branch
+// scenario that re-mocks git-branch for itself.
+vi.mock('@/lib/git/git-branch', () => ({
+  getBranchContext: vi.fn(() => ({
+    currentBranch: 'main',
+    defaultBranch: 'main',
+    isDefaultBranch: true,
+  })),
+  gitShowSync: vi.fn(() => null),
+  gitLsTreeSync: vi.fn(() => []),
+  getDefaultBranchSync: vi.fn(() => 'main'),
+  getCurrentBranchSync: vi.fn(() => 'main'),
+}));
+
+// Mock file-agent-overrides so buildFileAgent doesn't kick off background DB
+// reads via the sync stale-while-revalidate cache.
+vi.mock('@/lib/agents/file-agent-overrides', () => ({
+  getFileAgentOverride: vi.fn().mockResolvedValue(null),
+  getFileAgentOverrideSync: vi.fn().mockReturnValue(null),
+}));
+
 import { scanFileAgents, loadFileAgent, parseFileAgentId, renameFileAgent, writeFileAgent } from '@/lib/agents/tamtam-file-agents';
 
+let rootTmpDir: string;
+let tmpCounter = 0;
+
 function makeTmpDir(): string {
-  const dir = join(tmpdir(), `tamtam-test-${Date.now()}`);
+  const dir = join(rootTmpDir, `p-${++tmpCounter}`);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -15,6 +44,15 @@ function writeAgent(dir: string, name: string, content: string) {
   mkdirSync(agentsDir, { recursive: true });
   writeFileSync(join(agentsDir, `${name}.md`), content);
 }
+
+beforeAll(() => {
+  rootTmpDir = join(tmpdir(), `tamtam-agents-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(rootTmpDir, { recursive: true });
+});
+
+afterAll(() => {
+  rmSync(rootTmpDir, { recursive: true, force: true });
+});
 
 describe('parseFileAgentId', () => {
   it('returns null for non-file IDs', () => {
@@ -402,7 +440,8 @@ model: normal
 Prompt from default branch.`),
     }));
     vi.doMock('@/lib/agents/file-agent-overrides', () => ({
-      getFileAgentOverride: vi.fn().mockReturnValue(null),
+      getFileAgentOverride: vi.fn().mockResolvedValue(null),
+      getFileAgentOverrideSync: vi.fn().mockReturnValue(null),
     }));
 
     const mod = await import('@/lib/agents/tamtam-file-agents');

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { getBranchContext, gitLsTreeSync, gitShowSync } from '@/lib/git/git-branch';
-import { getFileAgentOverride } from '@/lib/agents/file-agent-overrides';
+import { getFileAgentOverrideSync } from '@/lib/agents/file-agent-overrides';
 import { canonicalAgentNameKey, canonicalizeAgentName, getAgentNameValidationError } from '@/lib/agents/agent-name';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { normalizeStoredPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
@@ -110,7 +110,7 @@ function buildFileAgent(
   // toggle them without dirtying a committed file. Frontmatter values are
   // used as a starting baseline; the DB override (if any) wins on every
   // field it explicitly sets.
-  const override = getFileAgentOverride(projectName, name);
+  const override = getFileAgentOverrideSync(projectName, name);
   const fileSkillIds = meta.skillIds ? parseSkillIds(meta.skillIds) : [];
   return {
     id: `file:${projectName}:${name}`,

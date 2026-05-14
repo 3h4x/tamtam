@@ -22,10 +22,8 @@
     "start": "bash scripts/pm2-start.sh",
     "restart": "pnpm build && bash scripts/pm2-start.sh",
     "type-check": "tsc --noEmit",
-    "pretest": "node scripts/ensure-better-sqlite3.js",
-    "test": "vitest run",
-    "pretest:watch": "node scripts/ensure-better-sqlite3.js",
-    "test:watch": "vitest",
+    "test": "vitest run --no-color",
+    "test:watch": "vitest --no-color",
     "test:e2e": "playwright test",
     "test:e2e:pipeline": "playwright test --config playwright.pipeline.config.ts",
     "check": "pnpm lint && pnpm type-check && pnpm test",
@@ -44,18 +42,21 @@
   },
   "packageManager": "pnpm@10.33.0",
   "dependencies": {
-    "better-sqlite3": "^12.9.0",
+    "@workflow/next": "4.0.5",
+    "@workflow/world-postgres": "4.1.1",
     "drizzle-orm": "^0.45.2",
     "glob": "^13.0.6",
     "next": "^16.2.4",
+    "pg": "^8.20.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "sqlite-vec": "^0.1.9",
+    "workflow": "4.2.4",
     "yaml": "^2.8.3"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.4.5",
     "@eslint/eslintrc": "^3.3.5",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.59.1",
@@ -64,6 +65,8 @@
     "@testing-library/react": "^16.3.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.6.0",
+    "@types/pg": "^8.20.0",
+    "better-sqlite3": "^12.9.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@typescript-eslint/eslint-plugin": "^8.58.2",
@@ -86,5 +89,6 @@
       "sharp",
       "unrs-resolver"
     ]
-  }
+  },
+  "//": "better-sqlite3 is a devDep only because scripts/migrate-sqlite-to-pg.mjs needs it; remove after the cutover migration has run in production"
 }

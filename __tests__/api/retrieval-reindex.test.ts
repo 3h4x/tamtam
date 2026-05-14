@@ -15,7 +15,6 @@ const mockExistingRecords = vi.hoisted<
   }>
 >(() => []);
 const mockInsertRun = vi.hoisted(() => vi.fn());
-const mockIsSqliteVecAvailable = vi.hoisted(() => vi.fn().mockReturnValue(true));
 const mockCollectProjectRetrievalSources = vi.hoisted(() => vi.fn().mockReturnValue([
   {
     recordId: 'myproject:project_doc:README.md',
@@ -47,43 +46,54 @@ vi.mock('@/lib/agents/retrieval/ollama-embedder', () => ({
   embedText: vi.fn().mockResolvedValue(Array(768).fill(0.1)),
 }));
 
-vi.mock('@/lib/agents/retrieval/sqlite-vec-backend', () => ({
-  SqliteVecBackend: vi.fn().mockImplementation(function(this: {
+vi.mock('@/lib/agents/retrieval/pgvector-backend', () => ({
+  PgvectorBackend: vi.fn().mockImplementation(function(this: {
     upsertChunks: typeof mockUpsert;
     search: ReturnType<typeof vi.fn>;
     countProjectChunks: ReturnType<typeof vi.fn>;
-    deleteSource: ReturnType<typeof vi.fn>;
+    deleteSource: typeof mockDeleteSource;
     deleteProject: ReturnType<typeof vi.fn>;
   }) {
     this.upsertChunks = mockUpsert;
     this.search = vi.fn();
-    this.countProjectChunks = vi.fn().mockReturnValue(0);
+    this.countProjectChunks = vi.fn().mockResolvedValue(0);
     this.deleteSource = mockDeleteSource;
     this.deleteProject = vi.fn();
   }),
 }));
 
-vi.mock('@/lib/db', () => ({
-  sqlite: {},
-  db: {
-    select: vi.fn().mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          all: vi.fn(() => mockExistingRecords),
+vi.mock('@/lib/db', () => {
+  const makeWhereChain = () => {
+    const chain: Record<string, unknown> = {
+      limit: vi.fn().mockResolvedValue([]),
+      orderBy: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }),
+      then: (resolve: (value: unknown[]) => unknown, reject?: (reason: unknown) => unknown) =>
+        Promise.resolve([...mockExistingRecords]).then(resolve, reject),
+    };
+    return chain;
+  };
+  return {
+    db: {
+      select: vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockImplementation(() => makeWhereChain()),
+          orderBy: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([]),
+          }),
         }),
       }),
-    }),
-    insert: vi.fn().mockReturnValue({
-      values: vi.fn().mockReturnValue({
-        onConflictDoUpdate: vi.fn().mockReturnValue({ run: mockInsertRun }),
+      insert: vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          onConflictDoUpdate: vi.fn().mockReturnValue({ execute: mockInsertRun }),
+        }),
       }),
-    }),
-    delete: vi.fn().mockReturnValue({
-      where: vi.fn().mockReturnValue({ run: vi.fn() }),
-    }),
-  },
-  schema: { retrievalRecords: { id: 'id', project: 'project', sourceKind: 'source_kind' } },
-}));
+      delete: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({ execute: vi.fn().mockResolvedValue({}) }),
+      }),
+    },
+    schema: { retrievalRecords: { id: 'id', project: 'project', sourceKind: 'source_kind' } },
+  };
+});
 
 vi.mock('@/lib/shared/project-data', () => ({
   resolveProjectPath: vi.fn().mockReturnValue('/tmp/workspace/myproject'),
@@ -92,12 +102,7 @@ vi.mock('@/lib/shared/project-data', () => ({
 vi.mock('@/lib/agents/retrieval/project-corpus', () => ({
   collectProjectRetrievalSources: mockCollectProjectRetrievalSources,
 }));
-vi.mock('@/lib/db/sqlite-vec', () => ({
-  isSqliteVecAvailable: mockIsSqliteVecAvailable,
-  getSqliteVecUnavailableDetail: vi.fn().mockReturnValue(
-    'Retrieval is unavailable: sqlite-vec is not installed in this environment'
-  ),
-}));
+
 describe('POST /api/projects/[schedId]/retrieval/reindex', () => {
   beforeEach(() => {
     mockUpsert.mockClear();
@@ -105,7 +110,6 @@ describe('POST /api/projects/[schedId]/retrieval/reindex', () => {
     mockExistingRecords.length = 0;
     mockInsertRun.mockClear();
     mockCollectProjectRetrievalSources.mockClear();
-    mockIsSqliteVecAvailable.mockReturnValue(true);
   });
 
   it('returns 400 when retrieval is disabled', async () => {
@@ -126,17 +130,6 @@ describe('POST /api/projects/[schedId]/retrieval/reindex', () => {
     expect(body.indexedSources).toBe(2);
     expect(body.diagnostics.sourceCounts.project_doc).toBe(1);
     expect(body.diagnostics.sourceCounts.skill).toBe(1);
-  });
-
-  it('returns 503 when sqlite-vec is unavailable', async () => {
-    mockIsSqliteVecAvailable.mockReturnValue(false);
-    const { POST } = await import('@/app/api/projects/[schedId]/retrieval/reindex/route');
-    const res = await POST(new Request('http://x', { method: 'POST' }), { params: Promise.resolve({ schedId: 'myproject' }) });
-    expect(res.status).toBe(503);
-    const body = await res.json() as { code: string };
-    expect(body.code).toBe('sqlite_vec_unavailable');
-    expect(mockCollectProjectRetrievalSources).not.toHaveBeenCalled();
-    expect(mockUpsert).not.toHaveBeenCalled();
   });
 
   it('refreshes indexedAt for timestamp-only stale sources without re-embedding', async () => {

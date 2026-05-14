@@ -1,31 +1,56 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, afterAll, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS agents (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      project TEXT NOT NULL,
-      skill_ids TEXT NOT NULL DEFAULT '[]',
-      doc_paths TEXT NOT NULL DEFAULT '[]',
-      model TEXT NOT NULL DEFAULT 'sonnet',
-      prompt TEXT NOT NULL DEFAULT '',
-      schedule TEXT,
-      runner TEXT NOT NULL DEFAULT 'pm2',
-      enabled INTEGER NOT NULL DEFAULT 1,
-      provider TEXT,
-      prerequisite_command TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      project text NOT NULL,
+      skill_ids text NOT NULL DEFAULT '[]',
+      doc_paths text NOT NULL DEFAULT '[]',
+      model text NOT NULL DEFAULT 'normal',
+      prompt text NOT NULL DEFAULT '',
+      schedule text,
+      runner text NOT NULL DEFAULT 'pm2',
+      enabled boolean NOT NULL DEFAULT true,
+      provider text,
+      prerequisite_command text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS projects (
+      name text PRIMARY KEY,
+      path text NOT NULL,
+      enabled boolean DEFAULT false,
+      github text,
+      priority text,
+      custom_actions text,
+      test_command text,
+      tests_disabled boolean DEFAULT false,
+      review_disabled boolean DEFAULT false,
+      test_cron_enabled boolean DEFAULT false,
+      test_cron_schedule text,
+      auto_commit_enabled boolean DEFAULT false,
+      auto_push_enabled boolean DEFAULT false,
+      auto_pr_merge_enabled boolean DEFAULT false,
+      release_after_run boolean DEFAULT false,
+      issue_auto_branch boolean DEFAULT true,
+      last_push_error text,
+      last_push_at double precision,
+      review_prompt_addendum text,
+      fix_prompt_addendum text,
+      website text,
+      qa_url text,
+      archived boolean NOT NULL DEFAULT false,
+      paused boolean NOT NULL DEFAULT false
+    )
+  `));
 }
 
 function makeJob(overrides: Record<string, unknown> = {}) {
@@ -45,7 +70,7 @@ function makeJob(overrides: Record<string, unknown> = {}) {
 }
 
 describe('POST /api/agents/{agentId}/run readOnly', () => {
-  let testDb: ReturnType<typeof createTestDb>;
+  let sharedHandle: TestDbHandle;
   let POST: any;
   let startJobMock: ReturnType<typeof vi.fn>;
   let listJobsMock: ReturnType<typeof vi.fn>;
@@ -56,9 +81,9 @@ describe('POST /api/agents/{agentId}/run readOnly', () => {
   let getDirtyFileCountMock: ReturnType<typeof vi.fn>;
   let settingsMock: Record<string, unknown>;
 
-  function insertAgent() {
+  async function insertAgent() {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.agents).values({
+    await sharedHandle.db.insert(schema.agents).values({
       id: 'agent-123',
       name: 'cto',
       project: 'proj1',
@@ -71,12 +96,26 @@ describe('POST /api/agents/{agentId}/run readOnly', () => {
       enabled: true,
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
   }
+
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
 
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
+    await sharedHandle.db.execute(sql.raw('TRUNCATE agents, projects'));
     startJobMock = vi.fn().mockResolvedValue(12345);
     listJobsMock = vi.fn().mockReturnValue([]);
     probeJobStatusMock = vi.fn().mockResolvedValue('running');
@@ -95,7 +134,7 @@ describe('POST /api/agents/{agentId}/run readOnly', () => {
       base_prompt: '',
     };
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue('/tmp/proj1') }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: vi.fn().mockReturnValue({ logDir: '/tmp/logs' }) }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
@@ -115,6 +154,7 @@ describe('POST /api/agents/{agentId}/run readOnly', () => {
       updateJob: vi.fn(),
       listJobs: listJobsMock,
       probeJobStatus: probeJobStatusMock,
+      markDone: vi.fn().mockResolvedValue(undefined),
     }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
     vi.doMock('@/lib/shared/shell', () => ({
@@ -151,13 +191,24 @@ describe('POST /api/agents/{agentId}/run readOnly', () => {
       checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
     }));
     vi.doMock('@/lib/git/dirty-worktree', () => ({ getDirtyFileCount: getDirtyFileCountMock }));
+    vi.doMock('@/lib/agents/intake-workflow', () => ({
+      runAgentIntakeWorkflow: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('workflow/api', () => ({
+      // Invoke the workflow function with its args so downstream mocks (startJob) get exercised.
+      start: vi.fn().mockImplementation(async (fn: any, args: any[]) => {
+        const { startJob } = await import('@/lib/jobs/pm2-jobs');
+        await startJob(args?.[0]?.jobId ?? 'started-job', 'noop', '', '/tmp');
+        return fn(...(args ?? []));
+      }),
+    }));
 
     const mod = await import('@/app/api/agents/[agentId]/run/route');
     POST = mod.POST;
   });
 
   it('starts immediately when a different agent is already running on the same project', async () => {
-    insertAgent();
+    await insertAgent();
     listJobsMock.mockReturnValue([makeJob({ id: 'other-agent', kind: 'agent:Other Agent' })]);
 
     const res = await POST(new NextRequest('http://localhost/api/agents/agent-123/run', {
@@ -172,7 +223,7 @@ describe('POST /api/agents/{agentId}/run readOnly', () => {
   });
 
   it('starts when the dirty-worktree threshold would block a normal agent', async () => {
-    insertAgent();
+    await insertAgent();
     settingsMock.dirty_worktree_block_threshold = 20;
     getDirtyFileCountMock.mockResolvedValue(38);
 
@@ -187,7 +238,7 @@ describe('POST /api/agents/{agentId}/run readOnly', () => {
   });
 
   it('still rejects when the same agent is already running', async () => {
-    insertAgent();
+    await insertAgent();
     listJobsMock.mockReturnValue([makeJob({ id: 'same-agent', kind: 'agent:cto' })]);
 
     const res = await POST(new NextRequest('http://localhost/api/agents/agent-123/run', {

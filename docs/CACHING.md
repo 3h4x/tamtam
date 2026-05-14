@@ -87,8 +87,8 @@ time curl -s http://localhost:1337/api/projects > /dev/null
 time curl -s http://localhost:1337/api/projects > /dev/null
 
 # Check gh_issues_cache freshness
-sqlite3 data/db/tamtam.db \
-  "SELECT project, datetime(fetched_at,'unixepoch','localtime') as cached_at FROM gh_issues_cache ORDER BY fetched_at DESC;"
+psql "$DATABASE_URL" -c \
+  "SELECT project, to_timestamp(fetched_at) AS cached_at FROM gh_issues_cache ORDER BY fetched_at DESC;"
 
 # Check agents cache TTL by watching DB query logs (dev mode)
 # Or run the cache-check agent from the Agents page

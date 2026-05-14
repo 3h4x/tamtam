@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
   const cliEnv = resolveCliEnv(gate.provider, settings);
 
   // Compose context: TamTam primer + CLAUDE.md + selected skills + selected docs.
-  const composed = composeAgentSkills(projPath, skillIds, docPaths);
+  const composed = await composeAgentSkills(projPath, skillIds, docPaths);
   const claudeMd = readClaudeMd(projPath);
   const contextSections: string[] = [WAND_PRIMER];
   if (claudeMd) contextSections.push(`## Project CLAUDE.md\n${claudeMd}`);

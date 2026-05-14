@@ -1,1 +1,0 @@
-ALTER TABLE `projects` ADD `qa_url` text;

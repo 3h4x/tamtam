@@ -89,11 +89,10 @@ function buildProjectConfigText(projectPath: string, project: {
   return lines.length > 1 ? lines.join('\n\n') : '';
 }
 
-function collectEffectiveProjectSkillIds(project: string, projectPath: string): string[] {
-  const agentRows = db.select({ name: schema.agents.name, skillIds: schema.agents.skillIds })
+async function collectEffectiveProjectSkillIds(project: string, projectPath: string): Promise<string[]> {
+  const agentRows = await db.select({ name: schema.agents.name, skillIds: schema.agents.skillIds })
     .from(schema.agents)
-    .where(eq(schema.agents.project, project))
-    .all();
+    .where(eq(schema.agents.project, project));
   const dbAgentKeys = new Set(agentRows.map((row) => canonicalAgentNameKey(row.name)));
   const skillIds = agentRows.flatMap((row) => safeJsonArray(row.skillIds));
 
@@ -105,7 +104,7 @@ function collectEffectiveProjectSkillIds(project: string, projectPath: string): 
   return Array.from(new Set(skillIds.filter((id) => !id.startsWith('persona:'))));
 }
 
-export function collectProjectRetrievalSources(project: string, projectPath: string): ProjectRetrievalSource[] {
+export async function collectProjectRetrievalSources(project: string, projectPath: string): Promise<ProjectRetrievalSource[]> {
   const sources: ProjectRetrievalSource[] = [];
   const branchContext = getBranchContext(projectPath);
 
@@ -124,9 +123,9 @@ export function collectProjectRetrievalSources(project: string, projectPath: str
     });
   }
 
-  const dbSkillIds = collectEffectiveProjectSkillIds(project, projectPath);
+  const dbSkillIds = await collectEffectiveProjectSkillIds(project, projectPath);
   if (dbSkillIds.length > 0) {
-    const skills = db.select().from(schema.skills).where(inArray(schema.skills.id, dbSkillIds)).all();
+    const skills = await db.select().from(schema.skills).where(inArray(schema.skills.id, dbSkillIds));
     for (const skill of skills) {
       const text = buildSkillText(skill);
       if (!text.trim()) continue;
@@ -144,7 +143,8 @@ export function collectProjectRetrievalSources(project: string, projectPath: str
     }
   }
 
-  const projectRow = db.select().from(schema.projects).where(eq(schema.projects.name, project)).get();
+  const projectRows = await db.select().from(schema.projects).where(eq(schema.projects.name, project)).limit(1);
+  const projectRow = projectRows[0] ?? null;
   const configText = buildProjectConfigText(projectPath, projectRow);
   if (configText.trim()) {
     sources.push({

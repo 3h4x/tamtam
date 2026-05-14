@@ -160,7 +160,7 @@ const DEFAULTS: TamTamConfig = {
   notification_on_budget_blocked: false,
   dirty_worktree_block_threshold: 20,
   incremental_review_enabled: true,
-  retrieval_enabled: false,
+  retrieval_enabled: true,
   retrieval_ollama_url: 'http://localhost:11434',
   retrieval_embedding_model: 'nomic-embed-text',
   retrieval_context_limit: 5,
@@ -169,7 +169,13 @@ const DEFAULTS: TamTamConfig = {
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
+let _refreshing = false;
 const CACHE_TTL = 5; // seconds
+
+/** Pre-warm the settings cache at startup. Call once before serving requests. */
+export async function initSettings(): Promise<void> {
+  await _doSettingsRefresh();
+}
 
 const VALID_CLAUDE_PROVIDERS = new Set(['claude', 'gemini', 'lmstudio', 'codex', 'custom']);
 const PROJECT_MEMORY_PROVIDERS = new Set(['gemini', 'lmstudio', 'codex']);
@@ -228,14 +234,39 @@ function resolveClaudeBin(provider: string, storedBin: string | undefined): stri
   return storedBin ?? DEFAULTS.claude_bin;
 }
 
+/**
+ * Synchronous settings accessor. Returns cached config; triggers a background async refresh
+ * when the cache expires. Call `initSettings()` at startup to pre-warm the cache.
+ */
 export function getSettings(): TamTamConfig {
   const now = Date.now() / 1000;
   if (_cache && now - _cache.time < CACHE_TTL) return _cache.config;
 
-  const rows = db.select().from(schema.settings).all();
+  // Trigger async background refresh; don't block the caller.
+  if (!_refreshing) {
+    _refreshing = true;
+    _doSettingsRefresh()
+      .finally(() => { _refreshing = false; })
+      .catch(e => console.error('[config] settings background refresh failed:', e));
+  }
+
+  return _cache?.config ?? DEFAULTS;
+}
+
+async function _doSettingsRefresh(): Promise<void> {
+  const rows = await db.select().from(schema.settings);
   const map: Record<string, string> = {};
   for (const row of rows) map[row.key] = row.value;
+  const config = _buildConfig(map);
+  _cache = { config, time: Date.now() / 1000 };
+  if (config.lmstudio_model) {
+    process.env.LMSTUDIO_MODEL = config.lmstudio_model;
+  } else {
+    delete process.env.LMSTUDIO_MODEL;
+  }
+}
 
+function _buildConfig(map: Record<string, string>): TamTamConfig {
   const provider = VALID_CLAUDE_PROVIDERS.has(map.claude_provider)
     ? map.claude_provider
     : inferClaudeProvider(map.claude_bin);
@@ -338,14 +369,6 @@ export function getSettings(): TamTamConfig {
     })(),
     retrieval_manage_ollama: map.retrieval_manage_ollama !== 'false',
   };
-
-  if (config.lmstudio_model) {
-    process.env.LMSTUDIO_MODEL = config.lmstudio_model;
-  } else {
-    delete process.env.LMSTUDIO_MODEL;
-  }
-
-  _cache = { config, time: now };
   return config;
 }
 

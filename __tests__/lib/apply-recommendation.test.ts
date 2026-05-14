@@ -1,54 +1,57 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { beforeAll, beforeEach, afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { eq, sql } from 'drizzle-orm';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import * as schema from '@/lib/db/schema';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries, so issue each DDL
+  // separately.
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS agents (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      project TEXT NOT NULL,
-      skill_ids TEXT NOT NULL DEFAULT '[]',
-      doc_paths TEXT NOT NULL DEFAULT '[]',
-      model TEXT NOT NULL DEFAULT 'normal',
-      prompt TEXT NOT NULL DEFAULT '',
-      schedule TEXT,
-      runner TEXT NOT NULL DEFAULT 'pm2',
-      enabled INTEGER NOT NULL DEFAULT 1,
-      provider TEXT,
-      prerequisite_command TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      project text NOT NULL,
+      skill_ids text NOT NULL DEFAULT '[]',
+      doc_paths text NOT NULL DEFAULT '[]',
+      model text NOT NULL DEFAULT 'normal',
+      prompt text NOT NULL DEFAULT '',
+      schedule text,
+      runner text NOT NULL DEFAULT 'pm2',
+      enabled boolean NOT NULL DEFAULT true,
+      provider text,
+      prerequisite_command text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS recommendations (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      source_kind TEXT NOT NULL,
-      source_id TEXT,
-      agent_id TEXT,
-      agent_name TEXT,
-      type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      detail TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open',
-      payload TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      source_kind text NOT NULL,
+      source_id text,
+      agent_id text,
+      agent_name text,
+      type text NOT NULL,
+      title text NOT NULL,
+      detail text NOT NULL,
+      status text NOT NULL DEFAULT 'open',
+      payload text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      key text PRIMARY KEY,
+      value text NOT NULL
+    )
+  `));
 }
 
 describe('applyRecommendation', () => {
-  let testDb: ReturnType<typeof createTestDb>;
+  let sharedHandle: TestDbHandle;
+  const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
   let applyRecommendation: typeof import('@/lib/recommendations/apply-recommendation').applyRecommendation;
   let ApplyRecommendationError: typeof import('@/lib/recommendations/apply-recommendation').ApplyRecommendationError;
   let installAgentScheduleMock: ReturnType<typeof vi.fn>;
@@ -56,15 +59,31 @@ describe('applyRecommendation', () => {
   let clearAgentsCacheMock: ReturnType<typeof vi.fn>;
   let normalizeAgentMock: ReturnType<typeof vi.fn>;
 
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
   beforeEach(async () => {
+    await sharedHandle.db.execute(sql.raw(
+      'TRUNCATE agents, recommendations, settings',
+    ));
     vi.resetModules();
-    testDb = createTestDb();
     installAgentScheduleMock = vi.fn().mockResolvedValue(undefined);
     uninstallAgentScheduleMock = vi.fn().mockResolvedValue(undefined);
     clearAgentsCacheMock = vi.fn();
     normalizeAgentMock = vi.fn((agent) => ({ ...agent, source: 'db' }));
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/scheduling/agent-scheduler', () => ({
       installAgentSchedule: installAgentScheduleMock,
       uninstallAgentSchedule: uninstallAgentScheduleMock,
@@ -80,8 +99,13 @@ describe('applyRecommendation', () => {
     ({ applyRecommendation, ApplyRecommendationError } = await import('@/lib/recommendations/apply-recommendation'));
   });
 
+  afterEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
   it('rejects non-auto-applicable recommendations before mutating agent state', async () => {
-    testDb.db.insert(schema.recommendations).values({
+    await handle.db.insert(schema.recommendations).values({
       id: 'rec-manual',
       project: 'portal',
       sourceKind: 'agent:tests',
@@ -94,7 +118,7 @@ describe('applyRecommendation', () => {
       payload: JSON.stringify({ recommendedSchedule: '8h' }),
       createdAt: 100,
       updatedAt: 100,
-    }).run();
+    });
 
     await expect(applyRecommendation('portal', 'rec-manual')).rejects.toMatchObject({
       name: 'ApplyRecommendationError',
@@ -106,7 +130,7 @@ describe('applyRecommendation', () => {
   });
 
   it('rejects invalid recommended schedules before updating the target agent', async () => {
-    testDb.db.insert(schema.agents).values({
+    await handle.db.insert(schema.agents).values({
       id: 'agent-1',
       name: 'tests',
       project: 'portal',
@@ -119,8 +143,8 @@ describe('applyRecommendation', () => {
       enabled: true,
       createdAt: 100,
       updatedAt: 100,
-    }).run();
-    testDb.db.insert(schema.recommendations).values({
+    });
+    await handle.db.insert(schema.recommendations).values({
       id: 'rec-invalid-schedule',
       project: 'portal',
       sourceKind: 'agent:tests',
@@ -133,7 +157,7 @@ describe('applyRecommendation', () => {
       payload: JSON.stringify({ recommendedSchedule: '1w' }),
       createdAt: 100,
       updatedAt: 100,
-    }).run();
+    });
 
     await expect(applyRecommendation('portal', 'rec-invalid-schedule')).rejects.toMatchObject({
       name: 'ApplyRecommendationError',
@@ -141,12 +165,13 @@ describe('applyRecommendation', () => {
       message: expect.stringContaining('Invalid schedule'),
     });
 
-    const agent = testDb.db.select().from(schema.agents).where(eq(schema.agents.id, 'agent-1')).get();
-    const recommendation = testDb.db
+    const agentRows = await handle.db.select().from(schema.agents).where(eq(schema.agents.id, 'agent-1'));
+    const agent = agentRows[0];
+    const recRows = await handle.db
       .select()
       .from(schema.recommendations)
-      .where(eq(schema.recommendations.id, 'rec-invalid-schedule'))
-      .get();
+      .where(eq(schema.recommendations.id, 'rec-invalid-schedule'));
+    const recommendation = recRows[0];
     expect(agent?.schedule).toBe('1h');
     expect(recommendation?.status).toBe('open');
     expect(installAgentScheduleMock).not.toHaveBeenCalled();
@@ -156,7 +181,7 @@ describe('applyRecommendation', () => {
   it('surfaces rollback failure when live scheduler sync fails twice for a DB agent', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    testDb.db.insert(schema.agents).values({
+    await handle.db.insert(schema.agents).values({
       id: 'agent-1',
       name: 'tests',
       project: 'portal',
@@ -169,8 +194,8 @@ describe('applyRecommendation', () => {
       enabled: true,
       createdAt: 100,
       updatedAt: 100,
-    }).run();
-    testDb.db.insert(schema.recommendations).values({
+    });
+    await handle.db.insert(schema.recommendations).values({
       id: 'rec-rollback-fail',
       project: 'portal',
       sourceKind: 'agent:tests',
@@ -183,7 +208,7 @@ describe('applyRecommendation', () => {
       payload: JSON.stringify({ recommendedSchedule: '8h' }),
       createdAt: 100,
       updatedAt: 100,
-    }).run();
+    });
     installAgentScheduleMock
       .mockRejectedValueOnce(new Error('scheduler boom'))
       .mockRejectedValueOnce(new Error('rollback boom'));
@@ -192,12 +217,13 @@ describe('applyRecommendation', () => {
       new ApplyRecommendationError(500, 'Failed to update live agent schedule; rollback also failed'),
     );
 
-    const agent = testDb.db.select().from(schema.agents).where(eq(schema.agents.id, 'agent-1')).get();
-    const recommendation = testDb.db
+    const agentRows = await handle.db.select().from(schema.agents).where(eq(schema.agents.id, 'agent-1'));
+    const agent = agentRows[0];
+    const recRows = await handle.db
       .select()
       .from(schema.recommendations)
-      .where(eq(schema.recommendations.id, 'rec-rollback-fail'))
-      .get();
+      .where(eq(schema.recommendations.id, 'rec-rollback-fail'));
+    const recommendation = recRows[0];
     expect(agent?.schedule).toBe('1h');
     expect(recommendation?.status).toBe('open');
     expect(clearAgentsCacheMock).toHaveBeenCalledTimes(2);

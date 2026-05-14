@@ -9,6 +9,7 @@ Agents are reusable automation units that combine skills, optional attached proj
 - Understanding how skills and attached project docs are composed into the system prompt
 - Preventing duplicate/concurrent agent runs
 - Understanding the internal scheduler and legacy launchctl compatibility
+- Understanding the durable intake workflow (Postgres-backed two-step path for read-only runs)
 
 ---
 
@@ -513,6 +514,51 @@ after the running-job check but before the first request has created its job row
 
 Job rows are inserted with `pid=0` and the real pid is persisted asynchronously after `pm2 start` returns (hundreds of ms, up to pm2's 15 s timeout). `probeJobStatus` treats `pid<=0` as **still spawning** for the first 30 seconds after `startedAt` — otherwise a concurrent duplicate-check would `markDone(-1)` the sibling mid-spawn **and** `pm2 delete` its Claude process, producing a phantom `exit -1 @ 0s` row next to the real run. After the grace window, `pid<=0` is treated as dead as before. See `lib/job-storage.ts:probeJobStatus`.
 
+### Drain circuit breaker
+
+`drainNextAgentRun` in `lib/agents/pending-agent-run.ts` has a per-project circuit breaker to prevent a fast-failing route (e.g. PM2 spawn `EBADF` after file-descriptor exhaustion) from churning the queue at ~50 runs/sec.
+
+Behavior:
+- Each 5xx response or fetch-level error increments a per-project, per-entry `consecutiveFailures` counter.
+- After `MAX_CONSECUTIVE_FAILURES` (5) consecutive failures on the same queue head, the head is dropped and the breaker clears. A log warning is emitted.
+- Between failure attempts, a 30-second `scheduleDrainRetry` timer fires instead of immediately retrying on the next lifecycle drain.
+- Replacing a queue entry (same `agentId`, new `enqueuedAt`) resets the failure counter for that slot.
+- A successful drain or a terminal 400/404/409 (non-transient) drops the head and clears the counter without tripping the breaker.
+
+## Durable Agent Intake
+
+All agent runs go through `runAgentIntakeWorkflow()` in `lib/agents/intake-workflow.ts`. There is no flag and no alternate path; the workflow owns prompt composition, optional prerequisite execution, retrieval/memory injection, and the PM2 handoff. The function is declared with `'use workflow'` / `'use step'` directives and runs under the `workflow` package's Postgres-backed execution world, which persists step state so transient crashes or server restarts retry from the last completed step rather than restart the run.
+
+### Steps
+
+**Step 1 — `runPrerequisiteStep`** (only when the agent has `prerequisiteCommand`): runs `bash -c <cmd>` in the project directory with cancellation support, captures stdout/stderr, and returns a `PrereqResult`. Cancelled prereqs short-circuit the workflow and mark the job done with exit 130.
+
+**Step 2 — `composePromptStep`**: re-checks the release lock and (for non-readOnly runs) the project-busy gate after the prereq, composes skills + docs, captures a `git rev-parse HEAD` + `git status` baseline, loads agent memory, queries pgvector retrieval when `retrieval_enabled` is on, resolves the CLI binary + env, and builds the full prompt.
+
+**Step 3 — `startAgentStep`**: writes the prereq artifact to disk, updates the job row with the composed `contextMeta` (which includes `workflow: true`), and calls `startJob()` to hand off to PM2. On failure it writes an error breadcrumb to the log file, marks the job done with `exitCode -1`, and rethrows so the workflow runtime can retry.
+
+Everything after PM2 spawn — lifecycle hooks, SSE streaming, log tailing, completion detection, recommendation side effects — is unchanged.
+
+### Response
+
+The `/api/agents/{agentId}/run` success response always includes `via: "workflow"`:
+
+```json
+{
+  "status": "started",
+  "job_id": "job-…",
+  "pid": 0,
+  "via": "workflow",
+  "agent": "My Agent"
+}
+```
+
+`pid` is `0` because the route returns before the workflow step has spawned the PM2 process; query `/api/jobs/<job_id>` later to get the actual PID.
+
+### Setup
+
+The workflow requires `WORKFLOW_TARGET_WORLD` to point at the `@workflow/world-postgres` world and `DATABASE_URL` to reach the same Postgres database the rest of TamTam uses. The world is started by `instrumentation-node.ts` at boot; if it fails to start, agent runs return `500 { detail: "Workflow failed to enqueue: …" }`.
+
 ## Example: Set Up a Weekly Review Agent
 
 1. **Create a skill** that provides code review instructions:
@@ -576,7 +622,7 @@ Job rows are inserted with `pid=0` and the real pid is persisted asynchronously 
 
 ### Instrumentation edge-runtime constraint
 
-Next.js compiles `instrumentation.ts` for **both** the Node and Edge runtimes. Anything the file imports — even transitively, and even through `await import(...)` — is traced into the Edge bundle. `lib/db` uses `path`, `fs`, and `better-sqlite3`, none of which exist on Edge, so a direct import produces:
+Next.js compiles `instrumentation.ts` for **both** the Node and Edge runtimes. Anything the file imports — even transitively, and even through `await import(...)` — is traced into the Edge bundle. `lib/db` uses `path`, `fs`, and `pg`, none of which exist on Edge, so a direct import produces:
 
 ```
 A Node.js module is loaded ('path' at line 4) which is not supported in the Edge Runtime.

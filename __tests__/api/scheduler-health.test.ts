@@ -1,95 +1,99 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.exec(`
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries, so issue each DDL
+  // separately.
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS agents (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      project TEXT NOT NULL,
-      skill_ids TEXT NOT NULL DEFAULT '[]',
-      doc_paths TEXT NOT NULL DEFAULT '[]',
-      model TEXT NOT NULL DEFAULT 'sonnet',
-      prompt TEXT NOT NULL DEFAULT '',
-      schedule TEXT,
-      runner TEXT NOT NULL DEFAULT 'pm2',
-      enabled INTEGER NOT NULL DEFAULT 1,
-      provider TEXT,
-      prerequisite_command TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      project text NOT NULL,
+      skill_ids text NOT NULL DEFAULT '[]',
+      doc_paths text NOT NULL DEFAULT '[]',
+      model text NOT NULL DEFAULT 'sonnet',
+      prompt text NOT NULL DEFAULT '',
+      schedule text,
+      runner text NOT NULL DEFAULT 'pm2',
+      enabled boolean NOT NULL DEFAULT true,
+      provider text,
+      prerequisite_command text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS projects (
-      name TEXT PRIMARY KEY,
-      path TEXT NOT NULL,
-      enabled INTEGER DEFAULT 0,
-      github TEXT,
-      priority TEXT,
-      custom_actions TEXT,
-      test_command TEXT,
-      tests_disabled INTEGER DEFAULT 0,
-      review_disabled INTEGER DEFAULT 0,
-      test_cron_enabled INTEGER DEFAULT 0,
-      test_cron_schedule TEXT,
-      auto_commit_enabled INTEGER DEFAULT 0,
-      auto_push_enabled INTEGER DEFAULT 0,
-      auto_pr_merge_enabled INTEGER DEFAULT 0,
-      release_after_run INTEGER DEFAULT 0,
-      pr_workflow_enabled INTEGER DEFAULT 0,
-      issue_auto_branch INTEGER DEFAULT 1,
-      last_push_error TEXT,
-      last_push_at REAL,
-      review_prompt_addendum TEXT,
-      fix_prompt_addendum TEXT,
-      website TEXT,
-      qa_url TEXT,
-      archived INTEGER NOT NULL DEFAULT 0,
-      paused INTEGER NOT NULL DEFAULT 0
-    );
+      name text PRIMARY KEY,
+      path text NOT NULL,
+      enabled boolean DEFAULT false,
+      github text,
+      priority text,
+      custom_actions text,
+      test_command text,
+      tests_disabled boolean DEFAULT false,
+      review_disabled boolean DEFAULT false,
+      test_cron_enabled boolean DEFAULT false,
+      test_cron_schedule text,
+      auto_commit_enabled boolean DEFAULT false,
+      auto_push_enabled boolean DEFAULT false,
+      auto_pr_merge_enabled boolean DEFAULT false,
+      release_after_run boolean DEFAULT false,
+      pr_workflow_enabled boolean DEFAULT false,
+      issue_auto_branch boolean DEFAULT true,
+      last_push_error text,
+      last_push_at double precision,
+      review_prompt_addendum text,
+      fix_prompt_addendum text,
+      website text,
+      qa_url text,
+      archived boolean NOT NULL DEFAULT false,
+      paused boolean NOT NULL DEFAULT false
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS jobs (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      prompt TEXT,
-      pid INTEGER NOT NULL DEFAULT 0,
-      log_path TEXT,
-      started_at REAL NOT NULL DEFAULT 0,
-      finished_at REAL,
-      exit_code INTEGER,
-      seen INTEGER DEFAULT 0,
-      duration_ms INTEGER,
-      input_tokens INTEGER,
-      output_tokens INTEGER,
-      cache_read_tokens INTEGER,
-      cache_create_tokens INTEGER,
-      session_id TEXT,
-      user_prompt TEXT,
-      context_meta TEXT,
-      parent_job_id TEXT,
-      gh_issue_number INTEGER,
-      gh_issue_repo TEXT,
-      gh_issue_title TEXT,
-      log_pruned INTEGER DEFAULT 0,
-      verdict TEXT,
-      cost_usd REAL,
-      model TEXT,
-      release_id TEXT,
-      aborted_at REAL,
-      release_deadline_at INTEGER,
-      prompt_bytes INTEGER,
-      work_summary TEXT,
-      modified_files TEXT,
-      provider TEXT
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      kind text NOT NULL,
+      prompt text,
+      pid integer NOT NULL DEFAULT 0,
+      log_path text,
+      started_at double precision NOT NULL DEFAULT 0,
+      finished_at double precision,
+      exit_code integer,
+      seen boolean DEFAULT false,
+      duration_ms integer,
+      input_tokens integer,
+      output_tokens integer,
+      cache_read_tokens integer,
+      cache_create_tokens integer,
+      session_id text,
+      user_prompt text,
+      context_meta text,
+      parent_job_id text,
+      gh_issue_number integer,
+      gh_issue_repo text,
+      gh_issue_title text,
+      log_pruned boolean DEFAULT false,
+      verdict text,
+      cost_usd double precision,
+      model text,
+      release_id text,
+      aborted_at double precision,
+      release_deadline_at integer,
+      prompt_bytes integer,
+      work_summary text,
+      modified_files text,
+      provider text
+    )
+  `));
 }
 
 describe('GET /api/agents/scheduler-health', () => {
-  let testDb: ReturnType<typeof createTestDb>;
+  let sharedHandle: TestDbHandle;
   let GET: any;
   let POST: any;
   let execMock: ReturnType<typeof vi.fn>;
@@ -97,8 +101,22 @@ describe('GET /api/agents/scheduler-health', () => {
   let upsertAgentScheduleMock: ReturnType<typeof vi.fn>;
   const now = Date.now() / 1000;
 
-  function insertAgent(overrides: Record<string, unknown> = {}) {
-    testDb.db.insert(schema.agents).values({
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
+  async function insertAgent(overrides: Record<string, unknown> = {}) {
+    await sharedHandle.db.insert(schema.agents).values({
       id: 'agent-1',
       name: 'My Agent',
       project: 'projA',
@@ -111,17 +129,24 @@ describe('GET /api/agents/scheduler-health', () => {
       createdAt: now,
       updatedAt: now,
       ...overrides,
-    }).run();
+    });
+  }
+
+  async function insertProject(name: string, path: string, enabled = true) {
+    await sharedHandle.db.execute(sql.raw(
+      `INSERT INTO projects (name, path, enabled) VALUES ('${name}', '${path}', ${enabled ? 'true' : 'false'})`,
+    ));
   }
 
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
+    await sharedHandle.db.execute(sql.raw('TRUNCATE agents, projects, jobs'));
+
     execMock = vi.fn();
     dumpInternalSchedulerMock = vi.fn().mockReturnValue({ started: true, entries: [] });
     upsertAgentScheduleMock = vi.fn();
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ launchagent_prefix: 'com.tamtam' }),
@@ -140,13 +165,17 @@ describe('GET /api/agents/scheduler-health', () => {
     vi.doMock('./internal-scheduler', () => internalSchedulerStub);
     vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: vi.fn().mockReturnValue([]) }));
 
+    const enabledProjects = await import('@/lib/shared/enabled-projects');
+    enabledProjects.clearProjectsCache();
+    await enabledProjects.refreshProjectsCacheSync();
+
     const mod = await import('@/app/api/agents/scheduler-health/route');
     GET = mod.GET;
     POST = mod.POST;
   });
 
   it('reports ok when DB schedule matches an internal-scheduler entry', async () => {
-    insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', runner: 'pm2', schedule: '1h' });
+    await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', runner: 'pm2', schedule: '1h' });
     dumpInternalSchedulerMock.mockReturnValue({
       started: true,
       entries: [{ agentId: 'agent-1', project: 'projA', name: 'My Agent', schedule: '1h', enabled: true, nextFireMs: Date.now() + 1000, lastFireMs: null, fireCount: 0, errorCount: 0, lastError: null }],
@@ -166,7 +195,7 @@ describe('GET /api/agents/scheduler-health', () => {
   });
 
   it('flags missing schedule when DB agent is not in the internal scheduler', async () => {
-    insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', runner: 'pm2', schedule: '1h' });
+    await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', runner: 'pm2', schedule: '1h' });
     dumpInternalSchedulerMock.mockReturnValue({ started: true, entries: [] });
     execMock.mockImplementation(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
 
@@ -178,7 +207,7 @@ describe('GET /api/agents/scheduler-health', () => {
   });
 
   it('flags an orphan when the internal scheduler has an agent not in the DB', async () => {
-    insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', runner: 'pm2', schedule: '1h' });
+    await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', runner: 'pm2', schedule: '1h' });
     dumpInternalSchedulerMock.mockReturnValue({
       started: true,
       entries: [
@@ -195,8 +224,8 @@ describe('GET /api/agents/scheduler-health', () => {
   });
 
   it('skips disabled and unscheduled agents from expected set', async () => {
-    insertAgent({ id: 'agent-1', project: 'projA', name: 'Disabled', runner: 'pm2', schedule: '1h', enabled: false });
-    insertAgent({ id: 'agent-2', project: 'projA', name: 'Manual', runner: 'pm2', schedule: null });
+    await insertAgent({ id: 'agent-1', project: 'projA', name: 'Disabled', runner: 'pm2', schedule: '1h', enabled: false });
+    await insertAgent({ id: 'agent-2', project: 'projA', name: 'Manual', runner: 'pm2', schedule: null });
     dumpInternalSchedulerMock.mockReturnValue({ started: true, entries: [] });
     execMock.mockImplementation(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
 
@@ -225,7 +254,7 @@ describe('GET /api/agents/scheduler-health', () => {
   });
 
   it('POST installs missing schedules and re-runs the check', async () => {
-    insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', runner: 'pm2', schedule: '1h' });
+    await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', runner: 'pm2', schedule: '1h' });
 
     let internalEntries: any[] = [];
     dumpInternalSchedulerMock.mockImplementation(() => ({ started: true, entries: internalEntries.slice() }));
@@ -257,8 +286,7 @@ describe('GET /api/agents/scheduler-health', () => {
 
     // Reset module registry so the new mocks take effect for the route import.
     vi.resetModules();
-    testDb = createTestDb();
-    testDb.sqlite.exec(`INSERT INTO projects (name, path, enabled) VALUES ('proj1', '/w/proj1', 1)`);
+    await insertProject('proj1', '/w/proj1', true);
 
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     dumpInternalSchedulerMock = vi.fn().mockReturnValue({
@@ -272,13 +300,17 @@ describe('GET /api/agents/scheduler-health', () => {
       removeAgentSchedule: vi.fn(),
     };
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ launchagent_prefix: 'com.tamtam' }) }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir: '/tmp', claudeBin: 'claude' }) }));
     vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerStub);
     vi.doMock('./internal-scheduler', () => internalSchedulerStub);
     vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: vi.fn().mockReturnValue([fileAgent]) }));
+
+    const enabledProjects = await import('@/lib/shared/enabled-projects');
+    enabledProjects.clearProjectsCache();
+    await enabledProjects.refreshProjectsCacheSync();
 
     const { GET: GET2 } = await import('@/app/api/agents/scheduler-health/route');
     const res = await GET2();
@@ -292,8 +324,6 @@ describe('GET /api/agents/scheduler-health', () => {
 
   it('DB agent takes precedence over file agent with same project+name', async () => {
     // DB agent "shared" in proj1 — file agent with same name must not be double-counted.
-    insertAgent({ id: 'agent-db', project: 'proj1', name: 'shared', runner: 'pm2', schedule: '1h' });
-    testDb.sqlite.exec(`INSERT INTO projects (name, path, enabled) VALUES ('proj1', '/w/proj1', 1)`);
     const fileAgent = {
       id: 'file:proj1:shared',
       project: 'proj1',
@@ -306,13 +336,12 @@ describe('GET /api/agents/scheduler-health', () => {
 
     // Override the scanFileAgents mock for this test.
     vi.resetModules();
-    testDb = createTestDb();
-    testDb.sqlite.exec(`INSERT INTO projects (name, path, enabled) VALUES ('proj1', '/w/proj1', 1)`);
-    testDb.db.insert(schema.agents).values({
+    await insertProject('proj1', '/w/proj1', true);
+    await sharedHandle.db.insert(schema.agents).values({
       id: 'agent-db', name: 'shared', project: 'proj1', skillIds: '[]', model: 'sonnet',
       prompt: 'db version', schedule: '1h', runner: 'pm2', enabled: true,
       createdAt: now, updatedAt: now,
-    }).run();
+    });
 
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     dumpInternalSchedulerMock = vi.fn().mockReturnValue({
@@ -326,13 +355,17 @@ describe('GET /api/agents/scheduler-health', () => {
       removeAgentSchedule: vi.fn(),
     };
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ launchagent_prefix: 'com.tamtam' }) }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir: '/tmp', claudeBin: 'claude' }) }));
     vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerStub);
     vi.doMock('./internal-scheduler', () => internalSchedulerStub);
     vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: vi.fn().mockReturnValue([fileAgent]) }));
+
+    const enabledProjects = await import('@/lib/shared/enabled-projects');
+    enabledProjects.clearProjectsCache();
+    await enabledProjects.refreshProjectsCacheSync();
 
     const { GET: GET3 } = await import('@/app/api/agents/scheduler-health/route');
     const res = await GET3();

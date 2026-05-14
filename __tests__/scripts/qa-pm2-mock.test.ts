@@ -32,21 +32,17 @@ async function waitForState(
   throw new Error(`Timed out waiting for ${name} in ${statePath}`);
 }
 
-function createTempState() {
+function makeDir() {
   const dir = mkdtempSync(join(tmpdir(), 'qa-pm2-mock-'));
-  return {
-    dir,
-    statePath: join(dir, 'state.json'),
-    cleanup: () => rmSync(dir, { recursive: true, force: true }),
-  };
+  return { dir, statePath: join(dir, 'state.json') };
 }
 
-describe('scripts/qa-mocks/pm2', () => {
-  it.concurrent('runs Node scripts through --interpreter node and records their exit code', async () => {
-    const { dir, statePath, cleanup } = createTempState();
-    const marker = join(dir, 'node-ran.txt');
-    const script = join(dir, 'runner.js');
+describe.concurrent('scripts/qa-mocks/pm2', () => {
+  it('runs Node scripts through --interpreter node and records their exit code', async () => {
+    const { dir, statePath } = makeDir();
     try {
+      const marker = join(dir, 'node-ran.txt');
+      const script = join(dir, 'runner.js');
       writeFileSync(script, `require('fs').writeFileSync(${JSON.stringify(marker)}, process.argv.slice(2).join(','));\n`);
 
       const started = runPm2(['start', script, '--name', 'node-job', '--interpreter', 'node', '--', 'a', 'b'], statePath, dir);
@@ -57,15 +53,15 @@ describe('scripts/qa-mocks/pm2', () => {
       expect(entry.exit_code).toBe(0);
       expect(readFileSync(marker, 'utf-8')).toBe('a,b');
     } finally {
-      cleanup();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it.concurrent('executes shebang scripts directly when no interpreter is specified', async () => {
-    const { dir, statePath, cleanup } = createTempState();
-    const marker = join(dir, 'shell-ran.txt');
-    const script = join(dir, 'release-monitor.sh');
+  it('executes shebang scripts directly when no interpreter is specified', async () => {
+    const { dir, statePath } = makeDir();
     try {
+      const marker = join(dir, 'shell-ran.txt');
+      const script = join(dir, 'release-monitor.sh');
       writeFileSync(script, `#!/bin/sh\nprintf 'ok\\n' > ${JSON.stringify(marker)}\n`);
       chmodSync(script, 0o755);
 
@@ -77,14 +73,14 @@ describe('scripts/qa-mocks/pm2', () => {
       expect(entry.exit_code).toBe(0);
       expect(readFileSync(marker, 'utf-8').trim()).toBe('ok');
     } finally {
-      cleanup();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it.concurrent('returns from start while a direct executable is still running', async () => {
-    const { dir, statePath, cleanup } = createTempState();
-    const script = join(dir, 'long-monitor.sh');
+  it('returns from start while a direct executable is still running', async () => {
+    const { dir, statePath } = makeDir();
     try {
+      const script = join(dir, 'long-monitor.sh');
       writeFileSync(script, "#!/usr/bin/env node\nsetInterval(() => {}, 1000);\n");
       chmodSync(script, 0o755);
 
@@ -101,12 +97,12 @@ describe('scripts/qa-mocks/pm2', () => {
       });
       runPm2(['delete', 'long-release-monitor'], statePath, dir);
     } finally {
-      cleanup();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
   it('detects state written after waiting begins', async () => {
-    const { statePath, cleanup } = createTempState();
+    const { dir, statePath } = makeDir();
     const waiter = waitForState(statePath, 'late-job', (state) => state?.status === 'stopped');
 
     try {
@@ -118,7 +114,7 @@ describe('scripts/qa-mocks/pm2', () => {
 
       await expect(waiter).resolves.toMatchObject({ status: 'stopped', exit_code: 0 });
     } finally {
-      cleanup();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

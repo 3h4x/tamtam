@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
   }
   const projectName = project.trim();
   const agentName = parsedName.name!;
-  const conflict = findAgentNameConflict(projectName, agentName);
+  const conflict = await findAgentNameConflict(projectName, agentName);
   if (conflict) {
     return NextResponse.json({ detail: `agent '${agentName}' already exists for ${projectName}` }, { status: 409 });
   }
@@ -132,7 +132,7 @@ export async function POST(request: NextRequest) {
     updatedAt: now,
   };
 
-  db.insert(schema.agents).values(agent).run();
+  await db.insert(schema.agents).values(agent).execute();
   clearAgentsCache();
 
   // Sync to .tamtam/agents/<name>.md for version control

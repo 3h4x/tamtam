@@ -3,42 +3,226 @@ import { NextRequest } from 'next/server';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import type { CliProvider } from '@/lib/usage/cli-providers';
 import type { QuotaSnapshot } from '@/lib/usage/quota-types';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
+// ------------------------------------------------------------------
+// Hoisted mock state — shared across all tests; replaces the per-test
+// `vi.resetModules()` + `vi.doMock()` pattern that previously rebuilt the
+// whole module graph (and re-spawned git) for every test (~50ms each).
+// ------------------------------------------------------------------
+const mocks = vi.hoisted(() => {
+  return {
+    db: null as unknown,
+    startJob: vi.fn(),
+    resolveProjectPath: vi.fn(),
+    createJob: vi.fn(),
+    updateJob: vi.fn(),
+    listJobs: vi.fn(),
+    probeJobStatus: vi.fn(),
+    markDone: vi.fn(),
+    getJob: vi.fn(),
+    shellRun: vi.fn(),
+    runGates: vi.fn(),
+    enqueueAgentRun: vi.fn(),
+    enqueueQueuedAgentRun: vi.fn(),
+    drainNextAgentRun: vi.fn(),
+    tryClaimAgentStartSlot: vi.fn(),
+    checkCliStartGate: vi.fn(),
+    findBlockingRunningJob: vi.fn(),
+    getLock: vi.fn(),
+    isLockOwnedByActiveRelease: vi.fn(),
+    getPendingRelease: vi.fn(),
+    drainPendingRelease: vi.fn(),
+    isProjectPaused: vi.fn(),
+    retrieveAgentContextDetailed: vi.fn(),
+    getDirtyFileCount: vi.fn(),
+    getQuotaSnapshots: vi.fn(),
+    getSettings: vi.fn(),
+    getImproveConfig: vi.fn(),
+    getProjectTestConfig: vi.fn(),
+    skillsDir: '',
+    dataSkillsDir: '',
+    // The first describe block fully mocks `checkCliStartGate`, but the
+    // second describe ("weekly quota gating") must let the *real*
+    // `resolve-provider` module branch off `getQuotaSnapshots`. This flag
+    // toggles between the two.
+    useRealResolveProvider: false,
+  };
+});
+
+// ------------------------------------------------------------------
+// Top-level mocks (resolved at module-graph load time, ONCE per worker).
+// ------------------------------------------------------------------
+vi.mock('@/lib/db', () => ({
+  get db() { return mocks.db; },
+  schema,
+  sqlite: {},
+}));
+
+vi.mock('workflow/api', () => ({
+  start: async (fn: (p: unknown) => Promise<void>, args: unknown[]) => {
+    await fn(args[0]);
+  },
+}));
+
+vi.mock('@/lib/agents/pending-agent-run', () => ({
+  enqueueAgentRun: (...a: unknown[]) => mocks.enqueueAgentRun(...a),
+  tryClaimAgentStartSlot: (...a: unknown[]) => mocks.tryClaimAgentStartSlot(...a),
+  releaseAgentStartSlot: vi.fn(),
+  drainNextAgentRun: (...a: unknown[]) => mocks.drainNextAgentRun(...a),
+}));
+
+vi.mock('@/lib/agents/queued-agent-runs', () => ({
+  enqueueQueuedAgentRun: (...a: unknown[]) => mocks.enqueueQueuedAgentRun(...a),
+}));
+
+vi.mock('@/lib/pipeline/pipeline-lock', () => ({
+  getLock: (...a: unknown[]) => mocks.getLock(...a),
+  isLockOwnedByActiveRelease: (...a: unknown[]) => mocks.isLockOwnedByActiveRelease(...a),
+}));
+
+vi.mock('@/lib/pipeline/pending-release', () => ({
+  getPendingRelease: (...a: unknown[]) => mocks.getPendingRelease(...a),
+  drainPendingRelease: (...a: unknown[]) => mocks.drainPendingRelease(...a),
+}));
+
+vi.mock('@/lib/shared/project-data', () => ({
+  resolveProjectPath: (...a: unknown[]) => mocks.resolveProjectPath(...a),
+}));
+
+vi.mock('@/lib/shared/shell', () => ({
+  exec: (...a: unknown[]) => mocks.shellRun(...a),
+}));
+
+vi.mock('@/lib/scheduling/scheduling', () => ({
+  getImproveConfig: (...a: unknown[]) => mocks.getImproveConfig(...a),
+  getProjectTestConfig: (...a: unknown[]) => mocks.getProjectTestConfig(...a),
+}));
+
+vi.mock('@/lib/jobs/job-storage', () => ({
+  createJob: (...a: unknown[]) => mocks.createJob(...a),
+  updateJob: (...a: unknown[]) => mocks.updateJob(...a),
+  listJobs: (...a: unknown[]) => mocks.listJobs(...a),
+  probeJobStatus: (...a: unknown[]) => mocks.probeJobStatus(...a),
+  markDone: (...a: unknown[]) => mocks.markDone(...a),
+  getJob: (...a: unknown[]) => mocks.getJob(...a),
+}));
+
+vi.mock('@/lib/jobs/project-active-job', () => ({
+  findBlockingRunningJob: (...a: unknown[]) => mocks.findBlockingRunningJob(...a),
+}));
+
+vi.mock('@/lib/jobs/pm2-jobs', () => ({
+  startJob: (...a: unknown[]) => mocks.startJob(...a),
+}));
+
+vi.mock('@/lib/skills/skills', () => ({
+  get SKILLS_DIR() { return mocks.skillsDir; },
+  get DATA_SKILLS_DIR() { return mocks.dataSkillsDir; },
+}));
+
+vi.mock('@/lib/agents/agent-memory', () => ({
+  getAgentMemoryDir: vi.fn().mockReturnValue('/tmp/tamtam-memory'),
+  ensureAgentMemoryDir: vi.fn(),
+  getAgentMemoryPath: vi.fn().mockReturnValue('/tmp/tamtam-memory/proj1/Test Agent.md'),
+  readAgentMemory: vi.fn().mockReturnValue(null),
+  buildMemoryBlock: vi.fn().mockReturnValue(''),
+}));
+
+vi.mock('@/lib/shared/config', () => ({
+  withBasePrompt: (p: string) => p,
+  getPermissionModeFlag: () => '--dangerously-skip-permissions',
+  getSettings: (...a: unknown[]) => mocks.getSettings(...a),
+}));
+
+vi.mock('@/lib/shared/job-control', () => ({
+  runGates: (...a: unknown[]) => mocks.runGates(...a),
+  jobsPausedResult: (...a: unknown[]) => mocks.runGates(...a),
+}));
+
+// `checkCliStartGate` toggles between the explicit mock (first describe) and
+// the real implementation (second describe — to exercise the quota path).
+vi.mock('@/lib/usage/resolve-provider', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/lib/usage/resolve-provider')>();
+  return {
+    ...real,
+    checkCliStartGate: (...a: Parameters<typeof real.checkCliStartGate>) =>
+      mocks.useRealResolveProvider
+        ? real.checkCliStartGate(...a)
+        : (mocks.checkCliStartGate as typeof real.checkCliStartGate)(...a),
+  };
+});
+
+vi.mock('@/lib/agents/retrieval/retriever', () => ({
+  retrieveAgentContextDetailed: (...a: unknown[]) => mocks.retrieveAgentContextDetailed(...a),
+}));
+
+vi.mock('@/lib/git/dirty-worktree', () => ({
+  getDirtyFileCount: (...a: unknown[]) => mocks.getDirtyFileCount(...a),
+}));
+
+vi.mock('@/lib/shared/enabled-projects', () => ({
+  isProjectArchived: vi.fn().mockReturnValue(false),
+  isProjectPaused: (...a: unknown[]) => mocks.isProjectPaused(...a),
+}));
+
+// Avoid spawning real `git` for file-agent loading on every test (~10–30ms).
+vi.mock('@/lib/git/git-branch', () => ({
+  getBranchContext: vi.fn().mockReturnValue({
+    isDefaultBranch: true,
+    currentBranch: 'master',
+    defaultBranch: 'master',
+  }),
+  getDefaultBranchSync: vi.fn().mockReturnValue('master'),
+  gitLsTreeSync: vi.fn().mockReturnValue([]),
+  gitShowSync: vi.fn().mockReturnValue(null),
+}));
+
+// `getQuotaSnapshots` is only consulted by the real `resolve-provider` path
+// in the second describe; route-import time still reads it but the value
+// doesn't matter unless `useRealResolveProvider` is true.
+vi.mock('@/lib/usage/quota', () => ({
+  getQuotaSnapshots: (...a: unknown[]) => mocks.getQuotaSnapshots(...a),
+}));
+
+// Top-level imports are safe now that mocks are module-scope.
+let POST: typeof import('@/app/api/agents/[agentId]/run/route').POST;
+
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries, so issue each DDL
+  // separately.
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS agents (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      project TEXT NOT NULL,
-      skill_ids TEXT NOT NULL DEFAULT '[]',
-      doc_paths TEXT NOT NULL DEFAULT '[]',
-      model TEXT NOT NULL DEFAULT 'sonnet',
-      prompt TEXT NOT NULL DEFAULT '',
-      schedule TEXT,
-      runner TEXT NOT NULL DEFAULT 'pm2',
-      enabled INTEGER NOT NULL DEFAULT 1,
-      provider TEXT,
-      prerequisite_command TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      project text NOT NULL,
+      skill_ids text NOT NULL DEFAULT '[]',
+      doc_paths text NOT NULL DEFAULT '[]',
+      model text NOT NULL DEFAULT 'normal',
+      prompt text NOT NULL DEFAULT '',
+      schedule text,
+      runner text NOT NULL DEFAULT 'pm2',
+      enabled boolean NOT NULL DEFAULT true,
+      provider text,
+      prerequisite_command text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS skills (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT NOT NULL DEFAULT '',
-      content TEXT NOT NULL DEFAULT '',
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      description text NOT NULL DEFAULT '',
+      content text NOT NULL DEFAULT '',
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
 }
 
 function makeJob(overrides: Record<string, unknown> = {}) {
@@ -58,40 +242,15 @@ function makeJob(overrides: Record<string, unknown> = {}) {
 }
 
 describe('POST /api/agents/{agentId}/run', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let POST: any;
-  let startJobMock: ReturnType<typeof vi.fn>;
-  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
-  let createJobMock: ReturnType<typeof vi.fn>;
-  let updateJobMock: ReturnType<typeof vi.fn>;
-  let listJobsMock: ReturnType<typeof vi.fn>;
-  let probeJobStatusMock: ReturnType<typeof vi.fn>;
-  let execMock: ReturnType<typeof vi.fn>;
-  let runGatesMock: ReturnType<typeof vi.fn>;
-  let enqueueAgentRunMock: ReturnType<typeof vi.fn>;
-  let enqueueQueuedAgentRunMock: ReturnType<typeof vi.fn>;
-  let drainNextAgentRunMock: ReturnType<typeof vi.fn>;
-  let tryClaimAgentStartSlotMock: ReturnType<typeof vi.fn>;
-  let checkCliStartGateMock: ReturnType<typeof vi.fn>;
-  let findBlockingRunningJobMock: ReturnType<typeof vi.fn>;
-  let getLockMock: ReturnType<typeof vi.fn>;
-  let isLockOwnedByActiveReleaseMock: ReturnType<typeof vi.fn>;
-  let getPendingReleaseMock: ReturnType<typeof vi.fn>;
-  let drainPendingReleaseMock: ReturnType<typeof vi.fn>;
-  let isProjectPausedMock: ReturnType<typeof vi.fn>;
-  let retrieveAgentContextDetailedMock: ReturnType<typeof vi.fn>;
-  let isSqliteVecAvailableMock: ReturnType<typeof vi.fn>;
-  let releaseAgentStartSlotMock: ReturnType<typeof vi.fn>;
-  let markDoneMock: ReturnType<typeof vi.fn>;
-  let getDirtyFileCountMock: ReturnType<typeof vi.fn>;
+  let sharedHandle: TestDbHandle;
   let tempSkillsDir: string;
   let logDirMock: string;
   let settingsMock: Record<string, unknown>;
 
   const now = Date.now() / 1000;
 
-  function insertAgent(overrides: Record<string, unknown> = {}) {
-    testDb.db
+  async function insertAgent(overrides: Record<string, unknown> = {}) {
+    await sharedHandle.db
       .insert(schema.agents)
       .values({
         id: 'agent-123',
@@ -105,8 +264,7 @@ describe('POST /api/agents/{agentId}/run', () => {
         createdAt: now,
         updatedAt: now,
         ...overrides,
-      })
-      .run();
+      });
   }
 
   function deferred<T>() {
@@ -120,113 +278,63 @@ describe('POST /api/agents/{agentId}/run', () => {
   }
 
   beforeAll(async () => {
-    vi.resetModules();
-    vi.doUnmock('@/lib/usage/resolve-provider');
-    testDb = createTestDb();
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+    mocks.db = sharedHandle.db;
+    // One shared skills tempdir per suite (avoids per-test mkdtemp/rmSync churn).
+    // Tests that write into it explicitly clean up the inner `docs/` subtree so
+    // file-skill content does not leak between cases.
     tempSkillsDir = mkdtempSync(join(tmpdir(), 'tamtam-agent-run-test-'));
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema, sqlite: {} }));
-    vi.doMock('@/lib/db/sqlite-vec', () => ({
-      isSqliteVecAvailable: (...args: unknown[]) => (isSqliteVecAvailableMock as (...innerArgs: unknown[]) => unknown)(...args),
-    }));
-    vi.doMock('@/lib/agents/pending-agent-run', () => ({
-      enqueueAgentRun: (...args: unknown[]) => (enqueueAgentRunMock as (...innerArgs: unknown[]) => unknown)(...args),
-      tryClaimAgentStartSlot: (...args: unknown[]) => (tryClaimAgentStartSlotMock as (...innerArgs: unknown[]) => unknown)(...args),
-      releaseAgentStartSlot: (...args: unknown[]) => (releaseAgentStartSlotMock as (...innerArgs: unknown[]) => unknown)(...args),
-      drainNextAgentRun: (...args: unknown[]) => (drainNextAgentRunMock as (...innerArgs: unknown[]) => unknown)(...args),
-    }));
-    vi.doMock('@/lib/agents/queued-agent-runs', () => ({
-      enqueueQueuedAgentRun: (...args: unknown[]) => (enqueueQueuedAgentRunMock as (...innerArgs: unknown[]) => unknown)(...args),
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      getLock: (...args: unknown[]) => (getLockMock as (...innerArgs: unknown[]) => unknown)(...args),
-      isLockOwnedByActiveRelease: (...args: unknown[]) => (isLockOwnedByActiveReleaseMock as (...innerArgs: unknown[]) => unknown)(...args),
-    }));
-    vi.doMock('@/lib/pipeline/pending-release', () => ({
-      getPendingRelease: (...args: unknown[]) => (getPendingReleaseMock as (...innerArgs: unknown[]) => unknown)(...args),
-      drainPendingRelease: (...args: unknown[]) => (drainPendingReleaseMock as (...innerArgs: unknown[]) => unknown)(...args),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: (...args: unknown[]) => (resolveProjectPathMock as (...innerArgs: unknown[]) => unknown)(...args),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: (...args: unknown[]) => (execMock as (...innerArgs: unknown[]) => unknown)(...args),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn(() => ({ claudeBin: 'claude', logDir: logDirMock })),
-      getProjectTestConfig: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: (...args: unknown[]) => (createJobMock as (...innerArgs: unknown[]) => unknown)(...args),
-      updateJob: (...args: unknown[]) => (updateJobMock as (...innerArgs: unknown[]) => unknown)(...args),
-      listJobs: (...args: unknown[]) => (listJobsMock as (...innerArgs: unknown[]) => unknown)(...args),
-      probeJobStatus: (...args: unknown[]) => (probeJobStatusMock as (...innerArgs: unknown[]) => unknown)(...args),
-      markDone: (...args: unknown[]) => (markDoneMock as (...innerArgs: unknown[]) => unknown)(...args),
-    }));
-    vi.doMock('@/lib/jobs/project-active-job', () => ({
-      findBlockingRunningJob: (...args: unknown[]) => (findBlockingRunningJobMock as (...innerArgs: unknown[]) => unknown)(...args),
-    }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      startJob: (...args: unknown[]) => (startJobMock as (...innerArgs: unknown[]) => unknown)(...args),
-    }));
-    vi.doMock('@/lib/skills/skills', () => ({ SKILLS_DIR: tempSkillsDir, DATA_SKILLS_DIR: join(tempSkillsDir, 'data-skills') }));
-    vi.doMock('@/lib/agents/agent-memory', () => ({
-      getAgentMemoryDir: vi.fn().mockReturnValue('/tmp/tamtam-memory'),
-      ensureAgentMemoryDir: vi.fn(),
-      getAgentMemoryPath: vi.fn().mockReturnValue('/tmp/tamtam-memory/proj1/Test Agent.md'),
-      readAgentMemory: vi.fn().mockReturnValue(null),
-      buildMemoryBlock: vi.fn().mockReturnValue(''),
-    }));
-    vi.doMock('@/lib/shared/config', () => ({
-      withBasePrompt: (p: string) => p,
-      getPermissionModeFlag: () => '--dangerously-skip-permissions',
-      getSettings: () => settingsMock,
-    }));
-    vi.doMock('@/lib/shared/job-control', () => ({
-      runGates: (...args: unknown[]) => (runGatesMock as (...innerArgs: unknown[]) => unknown)(...args),
-      jobsPausedResult: (...args: unknown[]) => (runGatesMock as (...innerArgs: unknown[]) => unknown)(...args),
-    }));
-    vi.doMock('@/lib/usage/resolve-provider', () => ({
-      checkCliStartGate: (...args: unknown[]) => (checkCliStartGateMock as (...innerArgs: unknown[]) => unknown)(...args),
-    }));
-    vi.doMock('@/lib/agents/retrieval/retriever', () => ({
-      retrieveAgentContextDetailed: (...args: unknown[]) => (retrieveAgentContextDetailedMock as (...innerArgs: unknown[]) => unknown)(...args),
-    }));
-    vi.doMock('@/lib/git/dirty-worktree', () => ({
-      getDirtyFileCount: (...args: unknown[]) => (getDirtyFileCountMock as (...innerArgs: unknown[]) => unknown)(...args),
-    }));
-    vi.doMock('@/lib/shared/enabled-projects', () => ({
-      isProjectArchived: vi.fn().mockReturnValue(false),
-      isProjectPaused: (...args: unknown[]) => (isProjectPausedMock as (...innerArgs: unknown[]) => unknown)(...args),
-    }));
-
+    mocks.skillsDir = tempSkillsDir;
+    mocks.dataSkillsDir = join(tempSkillsDir, 'data-skills');
     const mod = await import('@/app/api/agents/[agentId]/run/route');
     POST = mod.POST;
   });
 
-  beforeEach(() => {
-    testDb.sqlite.exec(`
-      DELETE FROM agents;
-      DELETE FROM skills;
-    `);
+  afterAll(async () => {
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
     rmSync(tempSkillsDir, { recursive: true, force: true });
-    mkdirSync(tempSkillsDir, { recursive: true });
-    vi.clearAllMocks();
+  });
 
+  beforeEach(async () => {
+    mocks.useRealResolveProvider = false;
+    mocks.db = sharedHandle.db;
+    await Promise.all([
+      sharedHandle.db.execute(sql.raw('DELETE FROM agents')),
+      sharedHandle.db.execute(sql.raw('DELETE FROM skills')),
+    ]);
     logDirMock = '/tmp/logs';
-    startJobMock = vi.fn().mockResolvedValue(12345);
-    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
-    createJobMock = vi.fn().mockImplementation(() => makeJob());
-    updateJobMock = vi.fn();
-    listJobsMock = vi.fn().mockReturnValue([]);
-    probeJobStatusMock = vi.fn().mockResolvedValue('done');
-    execMock = vi.fn().mockImplementation(async (cmd: string, args: string[]) => {
+
+    // Reset every shared mock and reinstall defaults.
+    mocks.startJob.mockReset().mockResolvedValue(12345);
+    mocks.resolveProjectPath.mockReset().mockReturnValue('/path/to/proj');
+    // `createJob` returns a stable job object so the workflow can mutate it
+    // (contextMeta, finishedAt, exitCode) and tests can observe the result via
+    // either `getJob` (which returns the same instance the route created) or
+    // by reading the job object stored in `mocks.createJob.mock.results`.
+    mocks.createJob.mockReset().mockImplementation(() => makeJob());
+    // `getJob` returns whatever `createJob` most recently returned so workflow
+    // mutations land on the same job object the test holds a reference to.
+    mocks.getJob.mockReset().mockImplementation(() => {
+      const results = mocks.createJob.mock.results;
+      const last = results[results.length - 1];
+      return last && last.type === 'return' ? last.value : makeJob();
+    });
+    mocks.updateJob.mockReset();
+    mocks.listJobs.mockReset().mockReturnValue([]);
+    mocks.probeJobStatus.mockReset().mockResolvedValue('done');
+    mocks.markDone.mockReset().mockResolvedValue(undefined);
+    mocks.shellRun.mockReset().mockImplementation(async (cmd: string, args: string[]) => {
       if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
       if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
       if (cmd === 'bash' && args[1] === 'echo TAMTAM_PREREQ_MARKER') {
         return { stdout: 'TAMTAM_PREREQ_MARKER\n', stderr: '', exitCode: 0 };
       }
-      if (cmd === 'bash' && args[1] === 'curl -fsS \"http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1\"') {
+      if (cmd === 'bash' && args[1] === 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"') {
         return { stdout: '{"issues":[{"number":1,"title":"Trusted issue"}]}\n', stderr: '', exitCode: 0 };
       }
       if (cmd === 'bash' && args[1] === 'exit 7') {
@@ -234,20 +342,20 @@ describe('POST /api/agents/{agentId}/run', () => {
       }
       return { stdout: '', stderr: '', exitCode: 0 };
     });
-    runGatesMock = vi.fn().mockReturnValue(null);
-    enqueueAgentRunMock = vi.fn();
-    enqueueQueuedAgentRunMock = vi.fn();
-    drainNextAgentRunMock = vi.fn().mockResolvedValue(undefined);
-    tryClaimAgentStartSlotMock = vi.fn().mockReturnValue({ ok: true });
-    releaseAgentStartSlotMock = vi.fn();
-    checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
-    findBlockingRunningJobMock = vi.fn().mockResolvedValue(null);
-    getLockMock = vi.fn().mockReturnValue(null);
-    isLockOwnedByActiveReleaseMock = vi.fn().mockReturnValue(false);
-    getPendingReleaseMock = vi.fn().mockReturnValue(false);
-    drainPendingReleaseMock = vi.fn().mockResolvedValue(undefined);
-    isProjectPausedMock = vi.fn().mockReturnValue(false);
-    retrieveAgentContextDetailedMock = vi.fn().mockResolvedValue({
+    mocks.runGates.mockReset().mockReturnValue(null);
+    mocks.enqueueAgentRun.mockReset();
+    mocks.enqueueQueuedAgentRun.mockReset();
+    mocks.drainNextAgentRun.mockReset().mockResolvedValue(undefined);
+    mocks.tryClaimAgentStartSlot.mockReset().mockReturnValue({ ok: true });
+    mocks.checkCliStartGate.mockReset().mockResolvedValue({ ok: true, provider: 'claude' });
+    mocks.findBlockingRunningJob.mockReset().mockResolvedValue(null);
+    mocks.getLock.mockReset().mockReturnValue(null);
+    mocks.isLockOwnedByActiveRelease.mockReset().mockReturnValue(false);
+    mocks.getPendingRelease.mockReset().mockReturnValue(false);
+    mocks.drainPendingRelease.mockReset().mockResolvedValue(undefined);
+    mocks.isProjectPaused.mockReset().mockReturnValue(false);
+    mocks.getDirtyFileCount.mockReset().mockResolvedValue(0);
+    mocks.retrieveAgentContextDetailed.mockReset().mockResolvedValue({
       block: '## Retrieved Context\ncached context',
       diagnostics: {
         status: 'ok',
@@ -259,9 +367,6 @@ describe('POST /api/agents/{agentId}/run', () => {
         scoreThreshold: 0.8,
       },
     });
-    isSqliteVecAvailableMock = vi.fn().mockReturnValue(true);
-    markDoneMock = vi.fn().mockResolvedValue(undefined);
-    getDirtyFileCountMock = vi.fn().mockResolvedValue(0);
     settingsMock = {
       workspace_path: '',
       github_owner: '',
@@ -279,12 +384,15 @@ describe('POST /api/agents/{agentId}/run', () => {
       permission_mode: 'bypassPermissions',
       dirty_worktree_block_threshold: 0,
     };
+    mocks.getSettings.mockReset().mockImplementation(() => settingsMock);
+    mocks.getImproveConfig.mockReset().mockImplementation(() => ({ claudeBin: 'claude', logDir: logDirMock }));
+    mocks.getProjectTestConfig.mockReset().mockReturnValue(null);
   });
 
-  afterAll(() => {
-    testDb.sqlite.close();
-    rmSync(tempSkillsDir, { recursive: true, force: true });
-    vi.resetModules();
+  afterEach(() => {
+    // Only the few persona/file-skill tests populate this; cheaper than a full
+    // mkdtemp/rmSync per test.
+    rmSync(join(tempSkillsDir, 'docs'), { recursive: true, force: true });
   });
 
   it('returns 404 if agent not found', async () => {
@@ -298,28 +406,8 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(data.detail).toContain('agent not found');
   });
 
-  it('skips retrieval context lookup when sqlite-vec is unavailable', async () => {
-    settingsMock.retrieval_enabled = true;
-    isSqliteVecAvailableMock.mockReturnValue(false);
-    insertAgent({ prompt: 'Review the project' });
-
-    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
-      method: 'POST',
-      body: JSON.stringify({ prompt: 'inspect auth flow' }),
-      headers: { 'content-type': 'application/json' },
-    });
-
-    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
-    const body = await res.json() as { status: string };
-
-    expect(res.status).toBe(200);
-    expect(body.status).toBe('started');
-    expect(retrieveAgentContextDetailedMock).not.toHaveBeenCalled();
-    expect(startJobMock).toHaveBeenCalledOnce();
-  });
-
   it('returns 400 if prompt is missing', async () => {
-    insertAgent();
+    await insertAgent();
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({}),
@@ -331,7 +419,7 @@ describe('POST /api/agents/{agentId}/run', () => {
   });
 
   it('returns 400 if prompt is whitespace only', async () => {
-    insertAgent();
+    await insertAgent();
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: '   ' }),
@@ -341,8 +429,8 @@ describe('POST /api/agents/{agentId}/run', () => {
   });
 
   it('returns 404 if project path cannot be resolved', async () => {
-    insertAgent();
-    resolveProjectPathMock.mockReturnValue(null);
+    await insertAgent();
+    mocks.resolveProjectPath.mockReturnValue(null);
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'do something' }),
@@ -354,8 +442,8 @@ describe('POST /api/agents/{agentId}/run', () => {
   });
 
   it('returns 409 when project is paused', async () => {
-    insertAgent();
-    isProjectPausedMock.mockReturnValue(true);
+    await insertAgent();
+    mocks.isProjectPaused.mockReturnValue(true);
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'do something' }),
@@ -365,12 +453,12 @@ describe('POST /api/agents/{agentId}/run', () => {
     const data = await res.json();
     expect(data.code).toBe('project_paused');
     expect(data.detail).toContain('paused');
-    expect(createJobMock).not.toHaveBeenCalled();
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(mocks.createJob).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('starts job and returns job info', async () => {
-    insertAgent();
+    await insertAgent();
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'do something' }),
@@ -381,12 +469,12 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(data.status).toBe('started');
     expect(data.job_id).toBeTruthy();
     expect(data.agent).toBe('Test Agent');
-    expect(drainNextAgentRunMock).toHaveBeenCalledWith('proj1');
+    expect(mocks.drainNextAgentRun).toHaveBeenCalledWith('proj1');
   });
 
   it('keeps the Codex shim on the command line and forwards CODEX_BIN via env', async () => {
-    insertAgent({ provider: 'codex' });
-    checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'codex' });
+    await insertAgent({ provider: 'codex' });
+    mocks.checkCliStartGate.mockResolvedValue({ ok: true, provider: 'codex' });
     settingsMock.cli_bin_codex = '/custom/codex';
 
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
@@ -396,7 +484,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
     expect(res.status).toBe(200);
-    expect(startJobMock).toHaveBeenCalledWith(
+    expect(mocks.startJob).toHaveBeenCalledWith(
       'test-job-id',
       expect.stringContaining('/scripts/codex-shim.js'),
       expect.any(String),
@@ -406,8 +494,8 @@ describe('POST /api/agents/{agentId}/run', () => {
   });
 
   it('returns 429 when every enabled provider is over budget', async () => {
-    insertAgent();
-    checkCliStartGateMock.mockResolvedValue({
+    await insertAgent();
+    mocks.checkCliStartGate.mockResolvedValue({
       ok: false,
       status: 429,
       detail: 'All enabled CLI providers are over budget. Adjust block threshold or wait for the window to reset.',
@@ -420,12 +508,12 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(res.status).toBe(429);
     const data = await res.json();
     expect(data.code).toBe('providers_over_budget');
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('returns a coded 409 for scheduled runs when jobs are paused so queue drains can preserve the head', async () => {
-    insertAgent({ schedule: '1h' });
-    checkCliStartGateMock.mockResolvedValue({
+    await insertAgent({ schedule: '1h' });
+    mocks.checkCliStartGate.mockResolvedValue({
       ok: false,
       status: 409,
       detail: 'Jobs are paused globally. Turn the switch back on in Settings to start an agent run.',
@@ -439,11 +527,11 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(res.status).toBe(409);
     const data = await res.json();
     expect(data.code).toBe('jobs_paused');
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('rejects scheduled triggers for disabled agents before starting work', async () => {
-    insertAgent({ enabled: false, schedule: '1h' });
+    await insertAgent({ enabled: false, schedule: '1h' });
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       headers: { 'x-tamtam-trigger': 'schedule' },
@@ -455,11 +543,11 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     expect(res.status).toBe(409);
     expect(data.detail).toContain('is disabled');
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('rejects scheduled triggers for agents without schedules before starting work', async () => {
-    insertAgent({ schedule: null });
+    await insertAgent({ schedule: null });
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       headers: { 'x-tamtam-trigger': 'schedule' },
@@ -471,13 +559,13 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     expect(res.status).toBe(409);
     expect(data.detail).toContain('has no schedule');
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('rejects scheduled triggers when the agent is already running', async () => {
-    insertAgent({ schedule: '1h' });
-    listJobsMock.mockReturnValue([makeJob({ id: 'job-1', finishedAt: null })]);
-    probeJobStatusMock.mockResolvedValue('running');
+    await insertAgent({ schedule: '1h' });
+    mocks.listJobs.mockReturnValue([makeJob({ id: 'job-1', finishedAt: null })]);
+    mocks.probeJobStatus.mockResolvedValue('running');
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       headers: { 'x-tamtam-trigger': 'schedule' },
@@ -489,16 +577,16 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     expect(res.status).toBe(409);
     expect(data.detail).toContain('already running');
-    expect(startJobMock).not.toHaveBeenCalled();
-    expect(enqueueAgentRunMock).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
+    expect(mocks.enqueueAgentRun).not.toHaveBeenCalled();
   });
 
   it('queues the run when a different agent is already running on the project', async () => {
-    insertAgent({ schedule: '1h' });
-    listJobsMock.mockReturnValue([
+    await insertAgent({ schedule: '1h' });
+    mocks.listJobs.mockReturnValue([
       makeJob({ id: 'job-other', kind: 'agent:Other Agent', finishedAt: null }),
     ]);
-    probeJobStatusMock.mockResolvedValue('running');
+    mocks.probeJobStatus.mockResolvedValue('running');
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       headers: { 'x-tamtam-trigger': 'schedule' },
@@ -511,10 +599,10 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(res.status).toBe(202);
     expect(data.status).toBe('queued');
     expect(data.blockingJobId).toBe('job-other');
-    expect(startJobMock).not.toHaveBeenCalled();
-    expect(enqueueAgentRunMock).toHaveBeenCalledTimes(1);
-    expect(enqueueQueuedAgentRunMock).not.toHaveBeenCalled();
-    const [project, entry] = enqueueAgentRunMock.mock.calls[0];
+    expect(mocks.startJob).not.toHaveBeenCalled();
+    expect(mocks.enqueueAgentRun).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueQueuedAgentRun).not.toHaveBeenCalled();
+    const [project, entry] = mocks.enqueueAgentRun.mock.calls[0];
     expect(project).toBe('proj1');
     expect(entry.agentId).toBe('agent-123');
     expect(entry.agentName).toBe('Test Agent');
@@ -523,8 +611,8 @@ describe('POST /api/agents/{agentId}/run', () => {
   });
 
   it('returns 409 project_busy when a non-agent project job is already running', async () => {
-    insertAgent({ schedule: '1h' });
-    findBlockingRunningJobMock.mockResolvedValue(makeJob({ id: 'run-123', kind: 'run' }));
+    await insertAgent({ schedule: '1h' });
+    mocks.findBlockingRunningJob.mockResolvedValue(makeJob({ id: 'run-123', kind: 'run' }));
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'do something' }),
@@ -537,17 +625,17 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(data.code).toBe('project_busy');
     expect(data.blockingJobId).toBe('run-123');
     expect(data.detail).toContain("Job 'run' is already running");
-    expect(enqueueAgentRunMock).not.toHaveBeenCalled();
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(mocks.enqueueAgentRun).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('does not let manage-agents metadata bypass a non-agent project blocker', async () => {
-    insertAgent({
+    await insertAgent({
       name: 'manage-agents',
       skillIds: '["agent-manage-agents"]',
       schedule: '1h',
     });
-    findBlockingRunningJobMock.mockResolvedValue(makeJob({ id: 'run-123', kind: 'run' }));
+    mocks.findBlockingRunningJob.mockResolvedValue(makeJob({ id: 'run-123', kind: 'run' }));
 
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
@@ -560,17 +648,17 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(res.status).toBe(409);
     expect(data.code).toBe('project_busy');
     expect(data.blockingJobId).toBe('run-123');
-    expect(enqueueAgentRunMock).not.toHaveBeenCalled();
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(mocks.enqueueAgentRun).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('releases the starting slot after a pre-start failure so same-agent retries are not stranded', async () => {
-    insertAgent({ schedule: '1h' });
+    await insertAgent({ schedule: '1h' });
     const pendingStart = deferred<void>();
-    tryClaimAgentStartSlotMock
+    mocks.tryClaimAgentStartSlot
       .mockReturnValueOnce({ ok: true })
       .mockReturnValueOnce({ ok: false, runningAgent: 'Test Agent' });
-    startJobMock.mockImplementationOnce(async () => {
+    mocks.startJob.mockImplementationOnce(async () => {
       await pendingStart.promise;
       throw new Error('pm2 boot failed');
     });
@@ -596,15 +684,15 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     expect(resA.status).toBe(500);
     expect(resB.status).toBe(409);
-    expect(enqueueAgentRunMock).not.toHaveBeenCalled();
-    expect(drainNextAgentRunMock).toHaveBeenCalledWith('proj1');
+    expect(mocks.enqueueAgentRun).not.toHaveBeenCalled();
+    expect(mocks.drainNextAgentRun).toHaveBeenCalledWith('proj1');
   });
 
   it('drains the queued different agent after a pre-start failure by the slot holder', async () => {
-    insertAgent({ schedule: '1h' });
+    await insertAgent({ schedule: '1h' });
     const pendingStart = deferred<void>();
-    tryClaimAgentStartSlotMock.mockReturnValueOnce({ ok: true });
-    startJobMock.mockImplementationOnce(async () => {
+    mocks.tryClaimAgentStartSlot.mockReturnValueOnce({ ok: true });
+    mocks.startJob.mockImplementationOnce(async () => {
       await pendingStart.promise;
       throw new Error('pm2 boot failed');
     });
@@ -619,7 +707,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     void pendingFirst.catch(() => undefined);
     await Promise.resolve();
 
-    tryClaimAgentStartSlotMock.mockReturnValueOnce({ ok: false, runningAgent: 'Other Agent' });
+    mocks.tryClaimAgentStartSlot.mockReturnValueOnce({ ok: false, runningAgent: 'Other Agent' });
     const otherReq = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       headers: { 'x-tamtam-trigger': 'schedule' },
@@ -631,16 +719,16 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     expect(queuedRes.status).toBe(202);
     expect(failedRes.status).toBe(500);
-    expect(enqueueAgentRunMock).toHaveBeenCalledTimes(1);
-    expect(drainNextAgentRunMock).toHaveBeenCalledWith('proj1');
+    expect(mocks.enqueueAgentRun).toHaveBeenCalledTimes(1);
+    expect(mocks.drainNextAgentRun).toHaveBeenCalledWith('proj1');
   });
 
   it('does not queue when a different agent for the project is no longer actually running', async () => {
-    insertAgent({ schedule: '1h' });
-    listJobsMock.mockReturnValue([
+    await insertAgent({ schedule: '1h' });
+    mocks.listJobs.mockReturnValue([
       makeJob({ id: 'job-stale', kind: 'agent:Stale Agent', finishedAt: null }),
     ]);
-    probeJobStatusMock.mockResolvedValue('done');
+    mocks.probeJobStatus.mockResolvedValue('done');
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       headers: { 'x-tamtam-trigger': 'schedule' },
@@ -649,20 +737,20 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
     expect(res.status).toBe(200);
-    expect(enqueueAgentRunMock).not.toHaveBeenCalled();
-    expect(startJobMock).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueAgentRun).not.toHaveBeenCalled();
+    expect(mocks.startJob).toHaveBeenCalledTimes(1);
   });
 
   it('does not let manage-agents metadata run alongside a different agent on the same project', async () => {
-    insertAgent({
+    await insertAgent({
       name: 'manage-agents',
       skillIds: '["agent-manage-agents"]',
       schedule: '1h',
     });
-    listJobsMock.mockReturnValue([
+    mocks.listJobs.mockReturnValue([
       makeJob({ id: 'job-other', kind: 'agent:Other Agent', finishedAt: null }),
     ]);
-    probeJobStatusMock.mockResolvedValue('running');
+    mocks.probeJobStatus.mockResolvedValue('running');
 
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
@@ -676,14 +764,14 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(res.status).toBe(202);
     expect(data.status).toBe('queued');
     expect(data.blockingJobId).toBe('job-other');
-    expect(startJobMock).not.toHaveBeenCalled();
-    expect(enqueueAgentRunMock).toHaveBeenCalledOnce();
-    expect(tryClaimAgentStartSlotMock).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
+    expect(mocks.enqueueAgentRun).toHaveBeenCalledOnce();
+    expect(mocks.tryClaimAgentStartSlot).not.toHaveBeenCalled();
   });
 
   it('ignores malformed running-job rows whose kind is not a string', async () => {
-    insertAgent({ schedule: '1h' });
-    listJobsMock.mockReturnValue([
+    await insertAgent({ schedule: '1h' });
+    mocks.listJobs.mockReturnValue([
       makeJob({ id: 'job-bad', kind: null, finishedAt: null }),
     ]);
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
@@ -694,15 +782,15 @@ describe('POST /api/agents/{agentId}/run', () => {
     const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
     expect(res.status).toBe(200);
-    expect(startJobMock).toHaveBeenCalledTimes(1);
-    expect(enqueueAgentRunMock).not.toHaveBeenCalled();
+    expect(mocks.startJob).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueAgentRun).not.toHaveBeenCalled();
   });
 
   it('queues in the DB-backed release-lock queue before checking running agents', async () => {
-    insertAgent({ schedule: '1h' });
-    isLockOwnedByActiveReleaseMock.mockReturnValue(true);
-    getLockMock.mockReturnValue({ project: 'proj1', lockedByJobId: 'release-1' });
-    listJobsMock.mockReturnValue([
+    await insertAgent({ schedule: '1h' });
+    mocks.isLockOwnedByActiveRelease.mockReturnValue(true);
+    mocks.getLock.mockReturnValue({ project: 'proj1', lockedByJobId: 'release-1' });
+    mocks.listJobs.mockReturnValue([
       makeJob({ id: 'job-other', kind: 'agent:Other Agent', finishedAt: null }),
     ]);
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
@@ -718,14 +806,14 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(data.status).toBe('queued');
     expect(data.code).toBe('pipeline_lock');
     expect(data.blockingJobId).toBe('release-1');
-    expect(enqueueQueuedAgentRunMock).toHaveBeenCalledTimes(1);
-    expect(enqueueAgentRunMock).not.toHaveBeenCalled();
-    expect(probeJobStatusMock).not.toHaveBeenCalled();
+    expect(mocks.enqueueQueuedAgentRun).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueAgentRun).not.toHaveBeenCalled();
+    expect(mocks.probeJobStatus).not.toHaveBeenCalled();
   });
 
   it('drains an older pending release before allowing a fresh agent start', async () => {
-    insertAgent({ schedule: '1h' });
-    getPendingReleaseMock
+    await insertAgent({ schedule: '1h' });
+    mocks.getPendingRelease
       .mockReturnValueOnce(true)
       .mockReturnValueOnce(false);
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
@@ -737,14 +825,14 @@ describe('POST /api/agents/{agentId}/run', () => {
     const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
     expect(res.status).toBe(200);
-    expect(drainPendingReleaseMock).toHaveBeenCalledWith('proj1');
-    expect(startJobMock).toHaveBeenCalledTimes(1);
-    expect(enqueueQueuedAgentRunMock).not.toHaveBeenCalled();
+    expect(mocks.drainPendingRelease).toHaveBeenCalledWith('proj1');
+    expect(mocks.startJob).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueQueuedAgentRun).not.toHaveBeenCalled();
   });
 
   it('queues behind a still-pending release after retrying the drain', async () => {
-    insertAgent({ schedule: '1h' });
-    getPendingReleaseMock.mockReturnValue(true);
+    await insertAgent({ schedule: '1h' });
+    mocks.getPendingRelease.mockReturnValue(true);
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       headers: { 'x-tamtam-trigger': 'schedule' },
@@ -757,16 +845,16 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(res.status).toBe(202);
     expect(data.status).toBe('queued');
     expect(data.code).toBe('pending_release');
-    expect(drainPendingReleaseMock).toHaveBeenCalledWith('proj1');
-    expect(enqueueQueuedAgentRunMock).toHaveBeenCalledTimes(1);
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(mocks.drainPendingRelease).toHaveBeenCalledWith('proj1');
+    expect(mocks.enqueueQueuedAgentRun).toHaveBeenCalledTimes(1);
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('does not claim a run was queued when persisting the release-lock row fails', async () => {
-    insertAgent({ schedule: '1h' });
-    isLockOwnedByActiveReleaseMock.mockReturnValue(true);
-    getLockMock.mockReturnValue({ project: 'proj1', lockedByJobId: 'release-1' });
-    enqueueQueuedAgentRunMock.mockImplementation(() => {
+    await insertAgent({ schedule: '1h' });
+    mocks.isLockOwnedByActiveRelease.mockReturnValue(true);
+    mocks.getLock.mockReturnValue({ project: 'proj1', lockedByJobId: 'release-1' });
+    mocks.enqueueQueuedAgentRun.mockImplementation(() => {
       throw new Error('SQLITE_ERROR: no such table: queued_agent_runs');
     });
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
@@ -780,13 +868,13 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     expect(res.status).toBe(500);
     expect(data.detail).toContain('Failed to queue agent');
-    expect(startJobMock).not.toHaveBeenCalled();
-    expect(enqueueAgentRunMock).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
+    expect(mocks.enqueueAgentRun).not.toHaveBeenCalled();
   });
 
   it('returns the global pause conflict when scheduled work reaches the route while jobs are paused', async () => {
-    insertAgent({ schedule: '1h' });
-    checkCliStartGateMock.mockResolvedValue({
+    await insertAgent({ schedule: '1h' });
+    mocks.checkCliStartGate.mockResolvedValue({
       ok: false,
       status: 409,
       detail: 'Jobs are paused globally. Turn the switch back on in Settings to start an agent run.',
@@ -802,18 +890,18 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     expect(res.status).toBe(409);
     expect(data.detail).toContain('Jobs are paused globally');
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('calls startJob with correct args', async () => {
-    insertAgent();
+    await insertAgent();
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'run tests' }),
     });
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
-    expect(startJobMock).toHaveBeenCalledOnce();
-    const [, cmd, fullPrompt, projPath] = startJobMock.mock.calls[0];
+    expect(mocks.startJob).toHaveBeenCalledOnce();
+    const [, cmd, fullPrompt, projPath] = mocks.startJob.mock.calls[0];
     expect(cmd).toContain('claude');
     expect(cmd).toContain('--model normal');
     expect(fullPrompt).toContain('run tests');
@@ -821,7 +909,7 @@ describe('POST /api/agents/{agentId}/run', () => {
   });
 
   it('treats the agent provider as required when one is configured', async () => {
-    insertAgent({ provider: 'claude' });
+    await insertAgent({ provider: 'claude' });
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'run tests' }),
@@ -829,7 +917,7 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-    expect(checkCliStartGateMock).toHaveBeenCalledWith('start an agent run', {
+    expect(mocks.checkCliStartGate).toHaveBeenCalledWith('start an agent run', {
       preferred: 'claude',
       strictPreferred: true,
       requestedModel: 'normal',
@@ -838,8 +926,8 @@ describe('POST /api/agents/{agentId}/run', () => {
   });
 
   it('does not mislabel a disabled required provider as jobs_paused', async () => {
-    insertAgent({ provider: 'claude' });
-    checkCliStartGateMock.mockResolvedValue({
+    await insertAgent({ provider: 'claude' });
+    mocks.checkCliStartGate.mockResolvedValue({
       ok: false,
       status: 409,
       detail: "Selected provider 'claude' is not enabled. Pick another provider or enable it in Settings → CLI.",
@@ -855,11 +943,11 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(res.status).toBe(409);
     expect(data.code).toBeUndefined();
     expect(data.detail).toContain("Selected provider 'claude' is not enabled");
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('sanitizes an invalid stored model before building the command', async () => {
-    insertAgent({ model: 'smart --resume injected' });
+    await insertAgent({ model: 'smart --resume injected' });
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'run tests' }),
@@ -867,24 +955,24 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-    const [, cmd] = startJobMock.mock.calls[0];
+    const [, cmd] = mocks.startJob.mock.calls[0];
     expect(cmd).toContain('--model normal');
     expect(cmd).not.toContain('--resume');
     expect(cmd).not.toContain('injected');
   });
 
   it('calls updateJob after startJob', async () => {
-    insertAgent();
+    await insertAgent();
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'do it' }),
     });
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
-    expect(updateJobMock).toHaveBeenCalled();
+    expect(mocks.updateJob).toHaveBeenCalled();
   });
 
   it('composes skills into system prompt', async () => {
-    testDb.db
+    await sharedHandle.db
       .insert(schema.skills)
       .values({
         id: 'skill-1',
@@ -893,9 +981,8 @@ describe('POST /api/agents/{agentId}/run', () => {
         content: 'Skill instructions here',
         createdAt: now,
         updatedAt: now,
-      })
-      .run();
-    insertAgent({ skillIds: '["skill-1"]' });
+      });
+    await insertAgent({ skillIds: '["skill-1"]' });
 
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
@@ -903,28 +990,28 @@ describe('POST /api/agents/{agentId}/run', () => {
     });
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    const [, , fullPrompt] = mocks.startJob.mock.calls[0];
     expect(fullPrompt).toContain('## My Skill');
     expect(fullPrompt).toContain('Skill instructions here');
     expect(fullPrompt).toContain('task prompt');
   });
 
   it('does not prepend skill content when agent has no skills', async () => {
-    insertAgent({ skillIds: '[]' });
+    await insertAgent({ skillIds: '[]' });
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'task prompt' }),
     });
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    const [, , fullPrompt] = mocks.startJob.mock.calls[0];
     expect(fullPrompt).toContain('task prompt');
     expect(fullPrompt).not.toContain('## My Skill');
   });
 
   it('returns 500 if startJob throws', async () => {
-    insertAgent();
-    startJobMock.mockRejectedValue(new Error('pm2 not available'));
+    await insertAgent();
+    mocks.startJob.mockRejectedValue(new Error('pm2 not available'));
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'do something' }),
@@ -934,8 +1021,8 @@ describe('POST /api/agents/{agentId}/run', () => {
     const data = await res.json();
     expect(data.detail).toContain('pm2 not available');
     // Job must be persisted as failed so it doesn't stay "running" in the DB
-    expect(updateJobMock).toHaveBeenCalled();
-    const savedJob = updateJobMock.mock.calls[updateJobMock.mock.calls.length - 1][0];
+    expect(mocks.updateJob).toHaveBeenCalled();
+    const savedJob = mocks.updateJob.mock.calls[mocks.updateJob.mock.calls.length - 1][0];
     expect(savedJob.exitCode).toBe(-1);
     expect(savedJob.finishedAt).not.toBeNull();
   });
@@ -945,7 +1032,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     mkdirSync(docsDir, { recursive: true });
     writeFileSync(join(docsDir, 'senior-fullstack.md'), 'FULLSTACK-PERSONA-BODY');
 
-    insertAgent({ skillIds: '["persona:engineering-team/senior-fullstack"]' });
+    await insertAgent({ skillIds: '["persona:engineering-team/senior-fullstack"]' });
 
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
@@ -953,7 +1040,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     });
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    const [, , fullPrompt] = mocks.startJob.mock.calls[0];
     expect(fullPrompt).toContain('FULLSTACK-PERSONA-BODY');
     expect(fullPrompt).toContain('build it');
   });
@@ -963,11 +1050,10 @@ describe('POST /api/agents/{agentId}/run', () => {
     mkdirSync(docsDir, { recursive: true });
     writeFileSync(join(docsDir, 'reviewer.md'), 'REVIEWER-FILE-CONTENT');
 
-    testDb.db
+    await sharedHandle.db
       .insert(schema.skills)
-      .values({ id: 'skill-1', name: 'DB Skill', description: '', content: 'DB-SKILL-BODY', createdAt: now, updatedAt: now })
-      .run();
-    insertAgent({ skillIds: '["skill-1","persona:reviewer"]' });
+      .values({ id: 'skill-1', name: 'DB Skill', description: '', content: 'DB-SKILL-BODY', createdAt: now, updatedAt: now });
+    await insertAgent({ skillIds: '["skill-1","persona:reviewer"]' });
 
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
@@ -975,37 +1061,36 @@ describe('POST /api/agents/{agentId}/run', () => {
     });
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    const [, , fullPrompt] = mocks.startJob.mock.calls[0];
     expect(fullPrompt).toContain('DB-SKILL-BODY');
     expect(fullPrompt).toContain('REVIEWER-FILE-CONTENT');
     expect(fullPrompt).toContain('task');
   });
 
   it('omits the prerequisite block when the agent has no prerequisiteCommand', async () => {
-    insertAgent();
+    await insertAgent();
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'task' }),
     });
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
-    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    const [, , fullPrompt] = mocks.startJob.mock.calls[0];
     expect(fullPrompt).not.toContain('## Prerequisite Output');
     expect(fullPrompt).not.toContain('Exit code:');
   });
 
   it('runs the prerequisite command and prepends its output to the prompt', async () => {
     mkdirSync('/tmp/logs', { recursive: true });
-    resolveProjectPathMock.mockReturnValue('/tmp');
-    const POST2 = POST;
+    mocks.resolveProjectPath.mockReturnValue('/tmp');
 
-    insertAgent({ prerequisiteCommand: 'echo TAMTAM_PREREQ_MARKER' });
+    await insertAgent({ prerequisiteCommand: 'echo TAMTAM_PREREQ_MARKER' });
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'analyze the output above' }),
     });
-    await POST2(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    const [, , fullPrompt] = mocks.startJob.mock.calls[0];
     expect(fullPrompt).toContain('## Prerequisite Output');
     expect(fullPrompt).toContain('echo TAMTAM_PREREQ_MARKER');
     expect(fullPrompt).toContain('Exit code: 0');
@@ -1016,8 +1101,8 @@ describe('POST /api/agents/{agentId}/run', () => {
   it('redacts prerequisite command secrets in the prompt, artifact, and context metadata', async () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'tamtam-agent-prereq-redaction-'));
     logDirMock = join(tempRoot, 'logs');
-    resolveProjectPathMock.mockReturnValue('/tmp');
-    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+    mocks.resolveProjectPath.mockReturnValue('/tmp');
+    mocks.shellRun.mockImplementation(async (cmd: string, args: string[]) => {
       if (cmd === 'bash' && args[1] === 'SERVICE_TOKEN=runtime-secret-value curl https://user:supersecret@example.com/path') {
         return {
           stdout: 'token=ghp_abcdefghijklmnopqrstuvwxyz123456\n',
@@ -1031,14 +1116,14 @@ describe('POST /api/agents/{agentId}/run', () => {
     });
 
     try {
-      insertAgent({ prerequisiteCommand: 'SERVICE_TOKEN=runtime-secret-value curl https://user:supersecret@example.com/path' });
+      await insertAgent({ prerequisiteCommand: 'SERVICE_TOKEN=runtime-secret-value curl https://user:supersecret@example.com/path' });
       const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
         method: 'POST',
         body: JSON.stringify({ prompt: 'inspect prereq' }),
       });
       await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-      const [, , fullPrompt] = startJobMock.mock.calls[0];
+      const [, , fullPrompt] = mocks.startJob.mock.calls[0];
       expect(fullPrompt).toContain('SERVICE_TOKEN=[REDACTED] curl https://user:[REDACTED]@example.com/path');
       expect(fullPrompt).not.toContain('runtime-secret-value');
       expect(fullPrompt).not.toContain('supersecret');
@@ -1049,7 +1134,7 @@ describe('POST /api/agents/{agentId}/run', () => {
       expect(artifact).not.toContain('runtime-secret-value');
       expect(artifact).not.toContain('supersecret');
 
-      const updatedJob = updateJobMock.mock.calls.at(-1)?.[0];
+      const updatedJob = mocks.updateJob.mock.calls.at(-1)?.[0];
       expect(updatedJob?.contextMeta).toBeTruthy();
       const contextMeta = JSON.parse(updatedJob.contextMeta);
       expect(contextMeta.prerequisite.command).toBe('SERVICE_TOKEN=[REDACTED] curl https://user:[REDACTED]@example.com/path');
@@ -1059,7 +1144,7 @@ describe('POST /api/agents/{agentId}/run', () => {
   });
 
   it('injects the trusted-only issue prerequisite for issue-cruncher agents without an explicit prerequisiteCommand', async () => {
-    insertAgent({ name: 'Issue Cruncher', skillIds: '["agent-issue-cruncher"]' });
+    await insertAgent({ name: 'Issue Cruncher', skillIds: '["agent-issue-cruncher"]' });
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'pick the next issue' }),
@@ -1067,19 +1152,19 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-    expect(execMock).toHaveBeenCalledWith(
+    expect(mocks.shellRun).toHaveBeenCalledWith(
       'bash',
       ['-c', 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"'],
       expect.objectContaining({ cwd: '/path/to/proj' }),
     );
-    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    const [, , fullPrompt] = mocks.startJob.mock.calls[0];
     expect(fullPrompt).toContain('## Prerequisite Output');
     expect(fullPrompt).toContain('trusted_only=1');
     expect(fullPrompt).toContain('Trusted issue');
   });
 
   it('does not re-inject the issue-cruncher prerequisite after an explicit clear', async () => {
-    insertAgent({
+    await insertAgent({
       name: 'Issue Cruncher',
       skillIds: '["agent-issue-cruncher"]',
       prerequisiteCommand: '',
@@ -1091,12 +1176,12 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-    expect(execMock).not.toHaveBeenCalledWith(
+    expect(mocks.shellRun).not.toHaveBeenCalledWith(
       'bash',
       ['-c', 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"'],
       expect.anything(),
     );
-    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    const [, , fullPrompt] = mocks.startJob.mock.calls[0];
     expect(fullPrompt).not.toContain('## Prerequisite Output');
     expect(fullPrompt).not.toContain('trusted_only=1');
   });
@@ -1105,7 +1190,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'tamtam-agent-prereq-logdir-'));
     logDirMock = join(tempRoot, 'missing-logs');
     try {
-      insertAgent({ prerequisiteCommand: 'echo TAMTAM_PREREQ_MARKER' });
+      await insertAgent({ prerequisiteCommand: 'echo TAMTAM_PREREQ_MARKER' });
       const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
         method: 'POST',
         body: JSON.stringify({ prompt: 'inspect artifact' }),
@@ -1123,31 +1208,30 @@ describe('POST /api/agents/{agentId}/run', () => {
 
   it('still spawns the agent when the prerequisite exits non-zero', async () => {
     mkdirSync('/tmp/logs', { recursive: true });
-    resolveProjectPathMock.mockReturnValue('/tmp');
-    const POST2 = POST;
+    mocks.resolveProjectPath.mockReturnValue('/tmp');
 
-    insertAgent({ prerequisiteCommand: 'exit 7' });
+    await insertAgent({ prerequisiteCommand: 'exit 7' });
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'inspect failure' }),
     });
-    const res = await POST2(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
     expect(res.status).toBe(200);
-    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    const [, , fullPrompt] = mocks.startJob.mock.calls[0];
     expect(fullPrompt).toContain('## Prerequisite Output');
     expect(fullPrompt).toContain('Exit code: 7');
   });
 
   it('creates the job row before the prerequisite runs so it is visible in the UI', async () => {
     const prereq = deferred<{ stdout: string; stderr: string; exitCode: number }>();
-    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+    mocks.shellRun.mockImplementation(async (cmd: string, args: string[]) => {
       if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
       if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
       if (cmd === 'bash' && args[1] === 'sleep 40') return prereq.promise;
       return { stdout: '', stderr: '', exitCode: 0 };
     });
-    insertAgent({ prerequisiteCommand: 'sleep 40' });
+    await insertAgent({ prerequisiteCommand: 'sleep 40' });
 
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
@@ -1157,30 +1241,35 @@ describe('POST /api/agents/{agentId}/run', () => {
     const pending = POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
     await vi.waitFor(() => {
-      expect(createJobMock).toHaveBeenCalledOnce();
-      expect(execMock).toHaveBeenCalledWith('bash', ['-c', 'sleep 40'], expect.objectContaining({ cwd: '/path/to/proj' }));
-    });
-    expect(startJobMock).not.toHaveBeenCalled();
+      expect(mocks.createJob).toHaveBeenCalledOnce();
+      expect(mocks.shellRun).toHaveBeenCalledWith('bash', ['-c', 'sleep 40'], expect.objectContaining({ cwd: '/path/to/proj' }));
+    }, { interval: 2, timeout: 1000 });
+    expect(mocks.startJob).not.toHaveBeenCalled();
 
     prereq.resolve({ stdout: 'done\n', stderr: '', exitCode: 0 });
     const res = await pending;
     expect(res.status).toBe(200);
-    expect(createJobMock).toHaveBeenCalledOnce();
-    expect(startJobMock).toHaveBeenCalledOnce();
-    expect(drainNextAgentRunMock).toHaveBeenCalledWith('proj1');
+    expect(mocks.createJob).toHaveBeenCalledOnce();
+    expect(mocks.startJob).toHaveBeenCalledOnce();
+    expect(mocks.drainNextAgentRun).toHaveBeenCalledWith('proj1');
   });
 
   it('cancels a db-backed prerequisite run before the agent spawn begins', async () => {
+    // Workflow refactor: the route no longer surfaces a "cancelled" response
+    // status because `start()` resolves with a Run handle, not the final job
+    // disposition. Cancellation is now a workflow side-effect: the prerequisite
+    // step aborts via the signal, marks the job done with exit 130, and the
+    // start step is never reached. Assertions track those side effects.
     const sharedJob = makeJob();
-    createJobMock.mockReturnValue(sharedJob);
+    mocks.createJob.mockReturnValue(sharedJob);
     const prereq = deferred<{ stdout: string; stderr: string; exitCode: number }>();
-    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+    mocks.shellRun.mockImplementation(async (cmd: string, args: string[]) => {
       if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
       if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
       if (cmd === 'bash' && args[1] === 'sleep 40') return prereq.promise;
       return { stdout: '', stderr: '', exitCode: 0 };
     });
-    insertAgent({ prerequisiteCommand: 'sleep 40' });
+    await insertAgent({ prerequisiteCommand: 'sleep 40' });
 
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
@@ -1190,9 +1279,9 @@ describe('POST /api/agents/{agentId}/run', () => {
     const pending = POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
     await vi.waitFor(() => {
-      expect(createJobMock).toHaveBeenCalledOnce();
-      expect(execMock).toHaveBeenCalledWith('bash', ['-c', 'sleep 40'], expect.objectContaining({ cwd: '/path/to/proj' }));
-    });
+      expect(mocks.createJob).toHaveBeenCalledOnce();
+      expect(mocks.shellRun).toHaveBeenCalledWith('bash', ['-c', 'sleep 40'], expect.objectContaining({ cwd: '/path/to/proj' }));
+    }, { interval: 2, timeout: 1000 });
 
     const { requestJobCancellation } = await import('@/lib/jobs/cancellation');
     const cancellation = requestJobCancellation(sharedJob.id, 1_000);
@@ -1200,26 +1289,31 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     await expect(cancellation).resolves.toBe(true);
     const res = await pending;
-    const data = await res.json();
     expect(res.status).toBe(200);
-    expect(data.status).toBe('cancelled');
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
     expect(sharedJob.finishedAt).not.toBeNull();
     expect(sharedJob.exitCode).toBe(130);
   });
 
   it('re-checks project blockers after a long prerequisite before spawning the agent', async () => {
+    // Workflow refactor: the post-prerequisite blocker re-check now happens
+    // inside the compose step, not in the route. The route returns the synchronous
+    // "started" handle; the workflow then detects the late-arriving blocker,
+    // logs it, and marks the job done without spawning the agent. The blocker
+    // helper must still be called twice (route admission + workflow re-check).
+    const sharedJob = makeJob();
+    mocks.createJob.mockReturnValue(sharedJob);
     const prereq = deferred<{ stdout: string; stderr: string; exitCode: number }>();
-    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+    mocks.shellRun.mockImplementation(async (cmd: string, args: string[]) => {
       if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
       if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
       if (cmd === 'bash' && args[1] === 'sleep 40') return prereq.promise;
       return { stdout: '', stderr: '', exitCode: 0 };
     });
-    findBlockingRunningJobMock
+    mocks.findBlockingRunningJob
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(makeJob({ id: 'run-while-prereq', kind: 'run' }));
-    insertAgent({ prerequisiteCommand: 'sleep 40' });
+    await insertAgent({ prerequisiteCommand: 'sleep 40' });
 
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
@@ -1229,31 +1323,35 @@ describe('POST /api/agents/{agentId}/run', () => {
     const pending = POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
     await vi.waitFor(() => {
-      expect(createJobMock).toHaveBeenCalledOnce();
-      expect(execMock).toHaveBeenCalledWith('bash', ['-c', 'sleep 40'], expect.objectContaining({ cwd: '/path/to/proj' }));
-    });
+      expect(mocks.createJob).toHaveBeenCalledOnce();
+      expect(mocks.shellRun).toHaveBeenCalledWith('bash', ['-c', 'sleep 40'], expect.objectContaining({ cwd: '/path/to/proj' }));
+    }, { interval: 2, timeout: 1000 });
 
     prereq.resolve({ stdout: 'done\n', stderr: '', exitCode: 0 });
-    const res = await pending;
-    const data = await res.json();
-    expect(res.status).toBe(409);
-    expect(data.code).toBe('project_busy');
-    expect(data.blockingJobId).toBe('run-while-prereq');
-    expect(startJobMock).not.toHaveBeenCalled();
+    await pending;
+    expect(mocks.findBlockingRunningJob).toHaveBeenCalledTimes(2);
+    expect(mocks.startJob).not.toHaveBeenCalled();
+    expect(sharedJob.finishedAt).not.toBeNull();
+    expect(sharedJob.exitCode).toBe(1);
   });
 
   it('re-checks the post-prerequisite blocker for manage-agents metadata', async () => {
+    // Same architectural note as the prior test: the late-arriving blocker
+    // is now detected in the compose step, surfaced via job-state mutation
+    // rather than a 409 response. The route's response remains "started".
+    const sharedJob = makeJob();
+    mocks.createJob.mockReturnValue(sharedJob);
     const prereq = deferred<{ stdout: string; stderr: string; exitCode: number }>();
-    execMock.mockImplementation(async (cmd: string, args: string[]) => {
+    mocks.shellRun.mockImplementation(async (cmd: string, args: string[]) => {
       if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
       if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
       if (cmd === 'bash' && args[1] === 'sleep 40') return prereq.promise;
       return { stdout: '', stderr: '', exitCode: 0 };
     });
-    findBlockingRunningJobMock
+    mocks.findBlockingRunningJob
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(makeJob({ id: 'run-while-prereq', kind: 'run' }));
-    insertAgent({
+    await insertAgent({
       name: 'manage-agents',
       skillIds: '["agent-manage-agents"]',
       prerequisiteCommand: 'sleep 40',
@@ -1267,18 +1365,17 @@ describe('POST /api/agents/{agentId}/run', () => {
     const pending = POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
     await vi.waitFor(() => {
-      expect(createJobMock).toHaveBeenCalledOnce();
-      expect(execMock).toHaveBeenCalledWith('bash', ['-c', 'sleep 40'], expect.objectContaining({ cwd: '/path/to/proj' }));
-    });
+      expect(mocks.createJob).toHaveBeenCalledOnce();
+      expect(mocks.shellRun).toHaveBeenCalledWith('bash', ['-c', 'sleep 40'], expect.objectContaining({ cwd: '/path/to/proj' }));
+    }, { interval: 2, timeout: 1000 });
 
     prereq.resolve({ stdout: 'done\n', stderr: '', exitCode: 0 });
-    const res = await pending;
-    const data = await res.json();
+    await pending;
 
-    expect(res.status).toBe(409);
-    expect(data.code).toBe('project_busy');
-    expect(data.blockingJobId).toBe('run-while-prereq');
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(mocks.findBlockingRunningJob).toHaveBeenCalledTimes(2);
+    expect(mocks.startJob).not.toHaveBeenCalled();
+    expect(sharedJob.finishedAt).not.toBeNull();
+    expect(sharedJob.exitCode).toBe(1);
   });
 
   it('creates the job row before the prerequisite runs (file agent variant)', async () => {
@@ -1290,8 +1387,8 @@ describe('POST /api/agents/{agentId}/run', () => {
 prerequisiteCommand: "sleep 45"
 ---
 File-backed prompt.`);
-      resolveProjectPathMock.mockReturnValue(projDir);
-      execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      mocks.resolveProjectPath.mockReturnValue(projDir);
+      mocks.shellRun.mockImplementation(async (cmd: string, args: string[]) => {
         if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
         if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
         if (cmd === 'bash' && args[1] === 'sleep 45') return prereq.promise;
@@ -1306,17 +1403,17 @@ File-backed prompt.`);
       const pending = POST(req, { params: Promise.resolve({ agentId: 'file:proj1:file-agent' }) });
 
       await vi.waitFor(() => {
-        expect(createJobMock).toHaveBeenCalledOnce();
-        expect(execMock).toHaveBeenCalledWith('bash', ['-c', 'sleep 45'], expect.objectContaining({ cwd: projDir }));
-      });
-      expect(startJobMock).not.toHaveBeenCalled();
+        expect(mocks.createJob).toHaveBeenCalledOnce();
+        expect(mocks.shellRun).toHaveBeenCalledWith('bash', ['-c', 'sleep 45'], expect.objectContaining({ cwd: projDir }));
+      }, { interval: 2, timeout: 1000 });
+      expect(mocks.startJob).not.toHaveBeenCalled();
 
       prereq.resolve({ stdout: 'file done\n', stderr: '', exitCode: 0 });
       const res = await pending;
       expect(res.status).toBe(200);
-      expect(createJobMock).toHaveBeenCalledOnce();
-      expect(startJobMock).toHaveBeenCalledOnce();
-      expect(drainNextAgentRunMock).toHaveBeenCalledWith('proj1');
+      expect(mocks.createJob).toHaveBeenCalledOnce();
+      expect(mocks.startJob).toHaveBeenCalledOnce();
+      expect(mocks.drainNextAgentRun).toHaveBeenCalledWith('proj1');
     } finally {
       rmSync(projDir, { recursive: true, force: true });
     }
@@ -1330,8 +1427,8 @@ File-backed prompt.`);
 skillIds: ["agent-manage-agents"]
 ---
 File-backed prompt.`);
-      resolveProjectPathMock.mockReturnValue(projDir);
-      findBlockingRunningJobMock.mockResolvedValue(makeJob({ id: 'run-123', kind: 'run' }));
+      mocks.resolveProjectPath.mockReturnValue(projDir);
+      mocks.findBlockingRunningJob.mockResolvedValue(makeJob({ id: 'run-123', kind: 'run' }));
 
       const req = new NextRequest('http://localhost/api/agents/file%3Aproj1%3Amanage-agents/run', {
         method: 'POST',
@@ -1344,16 +1441,19 @@ File-backed prompt.`);
       expect(res.status).toBe(409);
       expect(data.code).toBe('project_busy');
       expect(data.blockingJobId).toBe('run-123');
-      expect(startJobMock).not.toHaveBeenCalled();
-      expect(enqueueAgentRunMock).not.toHaveBeenCalled();
+      expect(mocks.startJob).not.toHaveBeenCalled();
+      expect(mocks.enqueueAgentRun).not.toHaveBeenCalled();
     } finally {
       rmSync(projDir, { recursive: true, force: true });
     }
   });
 
   it('cancels a file-backed prerequisite run before the agent spawn begins', async () => {
+    // See workflow-refactor note on the db-backed cancel test above: the route
+    // surface no longer exposes a `data.status === 'cancelled'` field; we
+    // assert the cancellation's side-effects on the shared job instead.
     const sharedJob = makeJob();
-    createJobMock.mockReturnValue(sharedJob);
+    mocks.createJob.mockReturnValue(sharedJob);
     const projDir = mkdtempSync(join(tmpdir(), 'tamtam-file-agent-prereq-cancel-'));
     const prereq = deferred<{ stdout: string; stderr: string; exitCode: number }>();
     try {
@@ -1362,8 +1462,8 @@ File-backed prompt.`);
 prerequisiteCommand: "sleep 45"
 ---
 File-backed prompt.`);
-      resolveProjectPathMock.mockReturnValue(projDir);
-      execMock.mockImplementation(async (cmd: string, args: string[]) => {
+      mocks.resolveProjectPath.mockReturnValue(projDir);
+      mocks.shellRun.mockImplementation(async (cmd: string, args: string[]) => {
         if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
         if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
         if (cmd === 'bash' && args[1] === 'sleep 45') return prereq.promise;
@@ -1378,9 +1478,9 @@ File-backed prompt.`);
       const pending = POST(req, { params: Promise.resolve({ agentId: 'file:proj1:file-agent' }) });
 
       await vi.waitFor(() => {
-        expect(createJobMock).toHaveBeenCalledOnce();
-        expect(execMock).toHaveBeenCalledWith('bash', ['-c', 'sleep 45'], expect.objectContaining({ cwd: projDir }));
-      });
+        expect(mocks.createJob).toHaveBeenCalledOnce();
+        expect(mocks.shellRun).toHaveBeenCalledWith('bash', ['-c', 'sleep 45'], expect.objectContaining({ cwd: projDir }));
+      }, { interval: 2, timeout: 1000 });
 
       const { requestJobCancellation } = await import('@/lib/jobs/cancellation');
       const cancellation = requestJobCancellation(sharedJob.id, 1_000);
@@ -1388,10 +1488,8 @@ File-backed prompt.`);
 
       await expect(cancellation).resolves.toBe(true);
       const res = await pending;
-      const data = await res.json();
       expect(res.status).toBe(200);
-      expect(data.status).toBe('cancelled');
-      expect(startJobMock).not.toHaveBeenCalled();
+      expect(mocks.startJob).not.toHaveBeenCalled();
       expect(sharedJob.finishedAt).not.toBeNull();
       expect(sharedJob.exitCode).toBe(130);
     } finally {
@@ -1400,15 +1498,18 @@ File-backed prompt.`);
   });
 
   it('records resolved skills in contextMeta so the terminal toolbar can show chips', async () => {
+    // Workflow refactor: skills/docs/baseline are now resolved inside the
+    // compose step and written to `job.contextMeta` (which the workflow's
+    // start step then persists via `updateJob`). The initial createJob value
+    // only carries the agent meta. Assert against the final job state.
     const docsDir = join(tempSkillsDir, 'docs', 'skills', 'engineering-team');
     mkdirSync(docsDir, { recursive: true });
     writeFileSync(join(docsDir, 'senior-fullstack.md'), '---\nname: Senior Fullstack\n---\nbody');
 
-    testDb.db
+    await sharedHandle.db
       .insert(schema.skills)
-      .values({ id: 'skill-db', name: 'DB One', description: 'desc', content: 'x', createdAt: now, updatedAt: now })
-      .run();
-    insertAgent({ skillIds: '["skill-db","persona:engineering-team/senior-fullstack"]' });
+      .values({ id: 'skill-db', name: 'DB One', description: 'desc', content: 'x', createdAt: now, updatedAt: now });
+    await insertAgent({ skillIds: '["skill-db","persona:engineering-team/senior-fullstack"]' });
 
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
@@ -1416,11 +1517,9 @@ File-backed prompt.`);
     });
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-    // createJob is called as createJob(project, kind, pid, logPath, prompt, contextMeta, userPrompt)
-    const createArgs = createJobMock.mock.calls[0];
-    const contextMeta = createArgs[5];
-    expect(contextMeta).toBeTruthy();
-    const meta = JSON.parse(contextMeta);
+    const createdJob = mocks.createJob.mock.results[0].value;
+    expect(createdJob.contextMeta).toBeTruthy();
+    const meta = JSON.parse(createdJob.contextMeta);
     expect(meta.skills).toHaveLength(2);
     const dbChip = meta.skills.find((s: any) => s.source === 'db');
     const fileChip = meta.skills.find((s: any) => s.source === 'file');
@@ -1430,7 +1529,7 @@ File-backed prompt.`);
   });
 
   it('records the trigger source in contextMeta for the report finalizer', async () => {
-    insertAgent({ schedule: '2h' });
+    await insertAgent({ schedule: '2h' });
 
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
@@ -1439,13 +1538,13 @@ File-backed prompt.`);
     });
     await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-    const createArgs = createJobMock.mock.calls[0];
+    const createArgs = mocks.createJob.mock.calls[0];
     const contextMeta = JSON.parse(createArgs[5]);
     expect(contextMeta.agent.triggeredBy).toBe('schedule');
   });
 
   it('silently skips persona paths whose file does not exist', async () => {
-    insertAgent({ skillIds: '["persona:nonexistent/missing"]' });
+    await insertAgent({ skillIds: '["persona:nonexistent/missing"]' });
 
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
@@ -1454,16 +1553,18 @@ File-backed prompt.`);
     const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
     expect(res.status).toBe(200);
 
-    const [, , fullPrompt] = startJobMock.mock.calls[0];
+    const [, , fullPrompt] = mocks.startJob.mock.calls[0];
     expect(fullPrompt).toContain('task');
     expect(fullPrompt).not.toContain('nonexistent');
   });
 
   describe('dirty worktree gate', () => {
     it('rejects with 409 dirty_worktree when count >= threshold', async () => {
-      getDirtyFileCountMock.mockResolvedValue(38);
+      // Replaces the previous `vi.resetModules()` + full mock reinstall with a
+      // simple per-test override on the hoisted mocks.
+      mocks.getDirtyFileCount.mockResolvedValue(38);
       settingsMock.dirty_worktree_block_threshold = 20;
-      insertAgent();
+      await insertAgent();
       const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
         method: 'POST',
         body: JSON.stringify({ prompt: 'do something' }),
@@ -1474,12 +1575,12 @@ File-backed prompt.`);
       expect(data.code).toBe('dirty_worktree');
       expect(data.detail).toContain('38');
       expect(data.detail).toContain('20');
-      expect(startJobMock).not.toHaveBeenCalled();
+      expect(mocks.startJob).not.toHaveBeenCalled();
     });
 
     it('does not block when threshold is 0 (disabled)', async () => {
       // settingsMock already has dirty_worktree_block_threshold: 0 from beforeEach
-      insertAgent();
+      await insertAgent();
       const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
         method: 'POST',
         body: JSON.stringify({ prompt: 'do something' }),
@@ -1494,8 +1595,8 @@ File-backed prompt.`);
       const projDir = mkdtempSync(join(tmpdir(), 'tamtam-docpath-'));
       try {
         writeFileSync(join(projDir, 'NOTES.md'), 'PROJECT NOTES CONTENT');
-        resolveProjectPathMock.mockReturnValue(projDir);
-        insertAgent({ docPaths: '["NOTES.md"]' });
+        mocks.resolveProjectPath.mockReturnValue(projDir);
+        await insertAgent({ docPaths: '["NOTES.md"]' });
 
         const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
           method: 'POST',
@@ -1503,7 +1604,7 @@ File-backed prompt.`);
         });
         await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-        const [, , fullPrompt] = startJobMock.mock.calls[0];
+        const [, , fullPrompt] = mocks.startJob.mock.calls[0];
         expect(fullPrompt).toContain('PROJECT NOTES CONTENT');
         expect(fullPrompt).toContain('## NOTES.md');
         // doc content must appear before the task prompt
@@ -1514,7 +1615,7 @@ File-backed prompt.`);
     });
 
     it('silently skips doc paths whose file does not exist', async () => {
-      insertAgent({ docPaths: '["nonexistent.md"]' });
+      await insertAgent({ docPaths: '["nonexistent.md"]' });
 
       const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
         method: 'POST',
@@ -1523,7 +1624,7 @@ File-backed prompt.`);
       const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
       expect(res.status).toBe(200);
 
-      const [, , fullPrompt] = startJobMock.mock.calls[0];
+      const [, , fullPrompt] = mocks.startJob.mock.calls[0];
       expect(fullPrompt).toContain('do task');
       expect(fullPrompt).not.toContain('nonexistent');
     });
@@ -1531,8 +1632,8 @@ File-backed prompt.`);
     it('blocks path traversal outside the project root', async () => {
       const projDir = mkdtempSync(join(tmpdir(), 'tamtam-docpath-'));
       try {
-        resolveProjectPathMock.mockReturnValue(projDir);
-        insertAgent({ docPaths: '["../../../etc/passwd"]' });
+        mocks.resolveProjectPath.mockReturnValue(projDir);
+        await insertAgent({ docPaths: '["../../../etc/passwd"]' });
 
         const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
           method: 'POST',
@@ -1541,7 +1642,7 @@ File-backed prompt.`);
         const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
         expect(res.status).toBe(200);
 
-        const [, , fullPrompt] = startJobMock.mock.calls[0];
+        const [, , fullPrompt] = mocks.startJob.mock.calls[0];
         // traversal path is blocked — no /etc/passwd content should appear
         expect(fullPrompt).not.toContain('root:');
         expect(fullPrompt).not.toContain('etc/passwd');
@@ -1551,11 +1652,13 @@ File-backed prompt.`);
     });
 
     it('records resolved docs in contextMeta', async () => {
+      // Workflow refactor: docs are resolved inside the compose step and
+      // assigned to `job.contextMeta`; assert against the final job state.
       const projDir = mkdtempSync(join(tmpdir(), 'tamtam-docpath-'));
       try {
         writeFileSync(join(projDir, 'GUIDE.md'), 'guide content');
-        resolveProjectPathMock.mockReturnValue(projDir);
-        insertAgent({ docPaths: '["GUIDE.md"]' });
+        mocks.resolveProjectPath.mockReturnValue(projDir);
+        await insertAgent({ docPaths: '["GUIDE.md"]' });
 
         const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
           method: 'POST',
@@ -1563,8 +1666,8 @@ File-backed prompt.`);
         });
         await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-        const createArgs = createJobMock.mock.calls[0];
-        const contextMeta = JSON.parse(createArgs[5]);
+        const createdJob = mocks.createJob.mock.results[0].value;
+        const contextMeta = JSON.parse(createdJob.contextMeta);
         expect(contextMeta.docs).toHaveLength(1);
         expect(contextMeta.docs[0].name).toBe('GUIDE.md');
         expect(contextMeta.docs[0].path).toBe('GUIDE.md');
@@ -1576,23 +1679,39 @@ File-backed prompt.`);
 });
 
 describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let POST: any;
-  let startJobMock: ReturnType<typeof vi.fn>;
-  let createJobMock: ReturnType<typeof vi.fn>;
-  let updateJobMock: ReturnType<typeof vi.fn>;
+  // Re-uses the module-scope mocks; flips `useRealResolveProvider` so the
+  // genuine `checkCliStartGate` runs against our mocked `getQuotaSnapshots`.
+  let sharedHandle: TestDbHandle;
   let tempSkillsDir: string;
   let snapshots: Map<CliProvider, QuotaSnapshot | null>;
 
   const now = Date.now() / 1000;
 
-  beforeEach(async () => {
-    vi.resetModules();
-    vi.doUnmock('@/lib/usage/resolve-provider');
-    testDb = createTestDb();
-    tempSkillsDir = mkdtempSync(join(tmpdir(), 'tamtam-agent-run-weekly-test-'));
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
 
-    testDb.db.insert(schema.agents).values({
+  afterAll(async () => {
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
+  beforeEach(async () => {
+    mocks.useRealResolveProvider = true;
+    mocks.db = sharedHandle.db;
+    await Promise.all([
+      sharedHandle.db.execute(sql.raw('DELETE FROM agents')),
+      sharedHandle.db.execute(sql.raw('DELETE FROM skills')),
+    ]);
+    tempSkillsDir = mkdtempSync(join(tmpdir(), 'tamtam-agent-run-weekly-test-'));
+    mocks.skillsDir = tempSkillsDir;
+    mocks.dataSkillsDir = join(tempSkillsDir, 'data-skills');
+
+    await sharedHandle.db.insert(schema.agents).values({
       id: 'agent-123',
       name: 'Test Agent',
       project: 'proj1',
@@ -1605,11 +1724,7 @@ describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
       provider: 'claude',
       createdAt: now,
       updatedAt: now,
-    }).run();
-
-    startJobMock = vi.fn().mockResolvedValue(12345);
-    createJobMock = vi.fn().mockImplementation(() => makeJob());
-    updateJobMock = vi.fn();
+    });
 
     snapshots = new Map<CliProvider, QuotaSnapshot | null>([
       ['claude', {
@@ -1630,94 +1745,54 @@ describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
       }],
     ]);
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/agents/pending-agent-run', () => ({
-      enqueueAgentRun: vi.fn(),
-      tryClaimAgentStartSlot: vi.fn().mockReturnValue({ ok: true }),
-      releaseAgentStartSlot: vi.fn(),
-      drainNextAgentRun: vi.fn().mockResolvedValue(undefined),
+    mocks.startJob.mockReset().mockResolvedValue(12345);
+    mocks.createJob.mockReset().mockImplementation(() => makeJob());
+    mocks.updateJob.mockReset();
+    mocks.listJobs.mockReset().mockReturnValue([]);
+    mocks.probeJobStatus.mockReset().mockResolvedValue('done');
+    mocks.markDone.mockReset().mockResolvedValue(undefined);
+    mocks.getJob.mockReset().mockImplementation(() => makeJob());
+    mocks.resolveProjectPath.mockReset().mockReturnValue('/path/to/proj');
+    mocks.runGates.mockReset().mockReturnValue(null);
+    mocks.enqueueAgentRun.mockReset();
+    mocks.enqueueQueuedAgentRun.mockReset();
+    mocks.drainNextAgentRun.mockReset().mockResolvedValue(undefined);
+    mocks.tryClaimAgentStartSlot.mockReset().mockReturnValue({ ok: true });
+    mocks.findBlockingRunningJob.mockReset().mockResolvedValue(null);
+    mocks.getLock.mockReset().mockReturnValue(null);
+    mocks.isLockOwnedByActiveRelease.mockReset().mockReturnValue(false);
+    mocks.getPendingRelease.mockReset().mockReturnValue(false);
+    mocks.drainPendingRelease.mockReset().mockResolvedValue(undefined);
+    mocks.isProjectPaused.mockReset().mockReturnValue(false);
+    mocks.getDirtyFileCount.mockReset().mockResolvedValue(0);
+    mocks.shellRun.mockReset().mockImplementation(async () => ({ stdout: '', stderr: '', exitCode: 0 }));
+    mocks.getQuotaSnapshots.mockReset().mockImplementation(() => Promise.resolve(snapshots));
+    mocks.getSettings.mockReset().mockImplementation(() => ({
+      workspace_path: '',
+      github_owner: '',
+      claude_bin: 'claude',
+      log_dir: '/tmp/logs',
+      cli_enabled_providers: ['claude', 'codex'],
+      claude_provider: 'claude',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: true,
+      cli_bin_claude: '',
+      cli_bin_codex: '',
+      cli_bin_gemini: '',
+      cli_bin_lmstudio: '',
+      frequency: '1h',
+      daytime: false,
+      weekends: false,
+      launchagent_prefix: 'com.tamtam',
+      base_prompt: '',
+      permission_mode: 'bypassPermissions',
+      dirty_worktree_block_threshold: 0,
     }));
-    vi.doMock('@/lib/agents/queued-agent-runs', () => ({
-      enqueueQueuedAgentRun: vi.fn(),
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      getLock: vi.fn().mockReturnValue(null),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/pipeline/pending-release', () => ({
-      getPendingRelease: vi.fn().mockReturnValue(false),
-      drainPendingRelease: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: '/tmp/logs' }),
-      getProjectTestConfig: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: createJobMock,
-      updateJob: updateJobMock,
-      listJobs: vi.fn().mockReturnValue([]),
-      probeJobStatus: vi.fn().mockResolvedValue('done'),
-      markDone: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      startJob: startJobMock,
-    }));
-    vi.doMock('@/lib/skills/skills', () => ({
-      SKILLS_DIR: tempSkillsDir,
-      DATA_SKILLS_DIR: join(tempSkillsDir, 'data-skills'),
-    }));
-    vi.doMock('@/lib/agents/agent-memory', () => ({
-      getAgentMemoryDir: vi.fn().mockReturnValue('/tmp/tamtam-memory'),
-      ensureAgentMemoryDir: vi.fn(),
-      getAgentMemoryPath: vi.fn().mockReturnValue('/tmp/tamtam-memory/proj1/Test Agent.md'),
-      readAgentMemory: vi.fn().mockReturnValue(null),
-      buildMemoryBlock: vi.fn().mockReturnValue(''),
-    }));
-    vi.doMock('@/lib/shared/config', () => ({
-      withBasePrompt: (p: string) => p,
-      getPermissionModeFlag: () => '--dangerously-skip-permissions',
-      getSettings: vi.fn(() => ({
-        workspace_path: '',
-        github_owner: '',
-        claude_bin: 'claude',
-        log_dir: '/tmp/logs',
-        cli_enabled_providers: ['claude', 'codex'],
-        claude_provider: 'claude',
-        budget_block_at_pct: 95,
-        budget_block_runs_enabled: true,
-        cli_bin_claude: '',
-        cli_bin_codex: '',
-        cli_bin_gemini: '',
-        cli_bin_lmstudio: '',
-        frequency: '1h',
-        daytime: false,
-        weekends: false,
-        launchagent_prefix: 'com.tamtam',
-        base_prompt: '',
-        permission_mode: 'bypassPermissions',
-        dirty_worktree_block_threshold: 0,
-      })),
-    }));
-    vi.doMock('@/lib/shared/job-control', () => ({
-      runGates: vi.fn().mockReturnValue(null),
-      jobsPausedResult: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/git/dirty-worktree', () => ({
-      getDirtyFileCount: vi.fn().mockResolvedValue(0),
-    }));
-    vi.doMock('@/lib/usage/quota', () => ({
-      getQuotaSnapshots: vi.fn(() => Promise.resolve(snapshots)),
-    }));
-
-    const mod = await import('@/app/api/agents/[agentId]/run/route');
-    POST = mod.POST;
+    mocks.getImproveConfig.mockReset().mockImplementation(() => ({ claudeBin: 'claude', logDir: '/tmp/logs' }));
+    mocks.getProjectTestConfig.mockReset().mockReturnValue(null);
   });
 
   afterEach(() => {
-    vi.resetModules();
     rmSync(tempSkillsDir, { recursive: true, force: true });
   });
 
@@ -1728,8 +1803,8 @@ describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
     expect(res.status).toBe(200);
-    expect(startJobMock).toHaveBeenCalledOnce();
-    expect(createJobMock.mock.results[0]?.value.provider).toBe('claude');
+    expect(mocks.startJob).toHaveBeenCalledOnce();
+    expect(mocks.createJob.mock.results[0]?.value.provider).toBe('claude');
   });
 
   it('returns 429 when a sibling quota-aware provider is missing and the known provider is over the hard cap', async () => {
@@ -1743,6 +1818,7 @@ describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
       }],
       ['codex', null],
     ]);
+    mocks.getQuotaSnapshots.mockImplementation(() => Promise.resolve(snapshots));
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'do something' }),
@@ -1752,6 +1828,6 @@ describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
     expect(res.status).toBe(429);
     expect(data.code).toBe('providers_over_budget');
     expect(data.detail).toContain("Selected provider 'claude' is over budget right now");
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 });

@@ -10,12 +10,17 @@ describe('listEnabledProjects', () => {
   });
 
   it('uses the filtered query path when available', async () => {
-    const all = vi.fn().mockReturnValue([
+    const rows = [
       { name: 'proj1', path: '/w/proj1', enabled: true },
       { name: 'proj2', path: '/w/proj2', enabled: false },
-    ]);
-    const where = vi.fn().mockReturnValue({ all });
-    const from = vi.fn().mockReturnValue({ where, all });
+    ];
+    const all = vi.fn().mockReturnValue(rows);
+    const where = vi.fn().mockReturnValue({ all, then: (r: (v: unknown) => unknown) => r(rows) });
+    const from = vi.fn().mockReturnValue({
+      where,
+      all,
+      then: (r: (v: unknown) => unknown) => r(rows),
+    });
     const select = vi.fn().mockReturnValue({ from });
 
     vi.doMock('@/lib/db', () => ({
@@ -23,18 +28,22 @@ describe('listEnabledProjects', () => {
       schema: { projects: { enabled: 'enabled' } },
     }));
 
-    const { listEnabledProjects } = await import('@/lib/shared/enabled-projects');
+    const { listEnabledProjects, refreshProjectsCacheSync } = await import(
+      '@/lib/shared/enabled-projects'
+    );
+    await refreshProjectsCacheSync();
     expect(listEnabledProjects()).toEqual([
       expect.objectContaining({ name: 'proj1', path: '/w/proj1', archived: false }),
     ]);
   });
 
   it('falls back to an unfiltered scan when the where-chain is unavailable', async () => {
-    const all = vi.fn().mockReturnValue([
-      { name: 'proj1', path: '/w/proj1', enabled: 1 },
-      { name: 'proj2', path: '/w/proj2', enabled: 0 },
-    ]);
-    const from = vi.fn().mockReturnValue({ all });
+    const rows = [
+      { name: 'proj1', path: '/w/proj1', enabled: true },
+      { name: 'proj2', path: '/w/proj2', enabled: false },
+    ];
+    const all = vi.fn().mockReturnValue(rows);
+    const from = vi.fn().mockReturnValue({ all, then: (r: (v: unknown) => unknown) => r(rows) });
     const select = vi.fn().mockReturnValue({ from });
 
     vi.doMock('@/lib/db', () => ({
@@ -42,7 +51,10 @@ describe('listEnabledProjects', () => {
       schema: { projects: { enabled: 'enabled' } },
     }));
 
-    const { listEnabledProjects } = await import('@/lib/shared/enabled-projects');
+    const { listEnabledProjects, refreshProjectsCacheSync } = await import(
+      '@/lib/shared/enabled-projects'
+    );
+    await refreshProjectsCacheSync();
     expect(listEnabledProjects()).toEqual([
       expect.objectContaining({ name: 'proj1', path: '/w/proj1', archived: false }),
     ]);
@@ -54,7 +66,10 @@ describe('listEnabledProjects', () => {
       schema: {},
     }));
 
-    const { listEnabledProjects } = await import('@/lib/shared/enabled-projects');
+    const { listEnabledProjects, refreshProjectsCacheSync } = await import(
+      '@/lib/shared/enabled-projects'
+    );
+    await refreshProjectsCacheSync();
     expect(listEnabledProjects()).toEqual([]);
   });
 });

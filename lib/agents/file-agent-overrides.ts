@@ -24,13 +24,49 @@ function keyFor(project: string, name: string): string {
   return `agent_override:${project}:${name}`;
 }
 
-export function getFileAgentOverride(project: string, name: string): FileAgentOverride | null {
+// ---------------------------------------------------------------------------
+// Stale-while-revalidate cache for sync callers (e.g. tamtam-file-agents.ts
+// which builds FileAgent objects inside synchronous scanFileAgents / loadFileAgent).
+// The cache entry holds the last resolved value. On each sync read we kick off
+// an async background refresh so the next read is fresh. Writes invalidate the
+// entry immediately so reads after a write see the new value promptly.
+// ---------------------------------------------------------------------------
+const _overrideCache = new Map<string, FileAgentOverride | null>();
+const _overridePending = new Set<string>();
+
+function refreshOverrideCache(key: string, project: string, name: string): void {
+  if (_overridePending.has(key)) return;
+  _overridePending.add(key);
+  void getFileAgentOverride(project, name)
+    .then((v) => { _overrideCache.set(key, v); })
+    .catch(() => { /* keep stale */ })
+    .finally(() => { _overridePending.delete(key); });
+}
+
+/**
+ * Synchronous read that returns the cached override (may be stale on first
+ * call) and kicks off a background refresh. Use this only in contexts that
+ * cannot be made async (e.g. buildFileAgent inside scanFileAgents).
+ */
+export function getFileAgentOverrideSync(project: string, name: string): FileAgentOverride | null {
+  const key = keyFor(project, name);
+  refreshOverrideCache(key, project, name);
+  return _overrideCache.get(key) ?? null;
+}
+
+/** Invalidate the sync cache for a given key after a write. */
+function invalidateOverrideCache(project: string, name: string): void {
+  _overrideCache.delete(keyFor(project, name));
+}
+
+export async function getFileAgentOverride(project: string, name: string): Promise<FileAgentOverride | null> {
   try {
-    const row = db
+    const rows = await db
       .select()
       .from(schema.settings)
       .where(eq(schema.settings.key, keyFor(project, name)))
-      .get();
+      .limit(1);
+    const row = rows[0] ?? null;
     if (!row?.value) return null;
     const parsed = JSON.parse(row.value) as FileAgentOverride;
     if (parsed && typeof parsed === 'object') {
@@ -45,8 +81,8 @@ export function getFileAgentOverride(project: string, name: string): FileAgentOv
   }
 }
 
-export function setFileAgentOverride(project: string, name: string, patch: FileAgentOverride): FileAgentOverride {
-  const existing = getFileAgentOverride(project, name) ?? {};
+export async function setFileAgentOverride(project: string, name: string, patch: FileAgentOverride): Promise<FileAgentOverride> {
+  const existing = (await getFileAgentOverride(project, name)) ?? {};
   const next: FileAgentOverride = { ...existing };
   if (patch.enabled !== undefined) next.enabled = patch.enabled;
   if (patch.schedule !== undefined) next.schedule = patch.schedule;
@@ -54,15 +90,20 @@ export function setFileAgentOverride(project: string, name: string, patch: FileA
   if (patch.runner !== undefined) next.runner = patch.runner;
   if (patch.skillIds !== undefined) next.skillIds = patch.skillIds;
   const value = JSON.stringify(next);
-  db.insert(schema.settings)
+  await db.insert(schema.settings)
     .values({ key: keyFor(project, name), value })
     .onConflictDoUpdate({ target: schema.settings.key, set: { value } })
-    .run();
+    .execute();
+  // Update the sync cache so callers that use getFileAgentOverrideSync see the
+  // new value on the next call without waiting for the background refresh.
+  _overrideCache.set(keyFor(project, name), next);
   return next;
 }
 
 export function deleteFileAgentOverride(project: string, name: string): void {
-  try {
-    db.delete(schema.settings).where(eq(schema.settings.key, keyFor(project, name))).run();
-  } catch { /* non-fatal */ }
+  invalidateOverrideCache(project, name);
+  void db.delete(schema.settings)
+    .where(eq(schema.settings.key, keyFor(project, name)))
+    .execute()
+    .catch((e) => console.error('[file-agent-overrides] delete failed:', e));
 }

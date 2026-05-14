@@ -5,6 +5,68 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import type { JobData } from '@/lib/jobs/job-storage';
 
+// All mocks are hoisted to top-level so route handlers can be imported once
+// at module scope. Per-test behavior is configured by re-assigning mock
+// return values in beforeEach.
+const mocks = vi.hoisted(() => ({
+  listJobs: vi.fn(),
+  getJob: vi.fn(),
+  probeJobStatus: vi.fn(),
+  jobToDict: vi.fn(),
+  readDisplayLog: vi.fn(),
+  readLog: vi.fn(),
+  markSeen: vi.fn(),
+  unseenFinished: vi.fn(),
+  updateJob: vi.fn(),
+  exec: vi.fn(),
+  getJobCancellationSignal: vi.fn(),
+  requestJobCancellation: vi.fn(),
+  listPendingReleaseProjects: vi.fn(),
+  parseStreamLines: vi.fn(),
+  createParseState: vi.fn(),
+}));
+
+vi.mock('@/lib/jobs/job-storage', () => ({
+  listJobs: mocks.listJobs,
+  getJob: mocks.getJob,
+  probeJobStatus: mocks.probeJobStatus,
+  jobToDict: mocks.jobToDict,
+  readDisplayLog: mocks.readDisplayLog,
+  readLog: mocks.readLog,
+  markSeen: mocks.markSeen,
+  unseenFinished: mocks.unseenFinished,
+  updateJob: mocks.updateJob,
+}));
+
+vi.mock('@/lib/shared/shell', () => ({
+  exec: mocks.exec,
+}));
+
+vi.mock('@/lib/jobs/cancellation', () => ({
+  getJobCancellationSignal: mocks.getJobCancellationSignal,
+  requestJobCancellation: mocks.requestJobCancellation,
+  SAFE_PID_FLOOR: 100,
+  shouldSignalJobPid: (job: { pid: number; kind: string }) =>
+    job.pid > 100 && job.kind !== 'push' && job.kind !== 'commit',
+}));
+
+vi.mock('@/lib/pipeline/pending-release', () => ({
+  listPendingReleaseProjects: mocks.listPendingReleaseProjects,
+}));
+
+vi.mock('@/lib/jobs/claude-stream-parser', () => ({
+  parseStreamLines: mocks.parseStreamLines,
+  createParseState: mocks.createParseState,
+}));
+
+// Import route handlers once at top-level — no per-test re-imports.
+import { GET as jobsGET } from '@/app/api/jobs/route';
+import { GET as jobGET, DELETE as jobDELETE } from '@/app/api/jobs/[jobId]/route';
+import { POST as jobSeenPOST } from '@/app/api/jobs/[jobId]/seen/route';
+import { GET as notificationsGET } from '@/app/api/jobs/notifications/route';
+import { POST as markSeenPOST } from '@/app/api/jobs/notifications/mark-seen/route';
+import { GET as streamingGET } from '@/app/api/streaming/[jobId]/route';
+
 function makeJob(overrides: Partial<JobData> = {}): JobData {
   return {
     id: 'job-1',
@@ -21,41 +83,43 @@ function makeJob(overrides: Partial<JobData> = {}): JobData {
   };
 }
 
-describe('GET /api/jobs', () => {
-  let GET: any;
-  let listJobsMock: ReturnType<typeof vi.fn>;
-  let probeJobStatusMock: ReturnType<typeof vi.fn>;
-  let jobToDictMock: ReturnType<typeof vi.fn>;
-
-  beforeEach(async () => {
-    vi.resetModules();
-
-    listJobsMock = vi.fn().mockReturnValue([]);
-    probeJobStatusMock = vi.fn().mockResolvedValue('done');
-    jobToDictMock = vi.fn().mockImplementation((j: JobData) => ({
-      id: j.id,
-      project: j.project,
-      kind: j.kind,
-      status: j.finishedAt ? 'done' : 'running',
-    }));
-
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      listJobs: listJobsMock,
-      probeJobStatus: probeJobStatusMock,
-      jobToDict: jobToDictMock,
-    }));
-
-    const mod = await import('@/app/api/jobs/route');
-    GET = mod.GET;
+// Default behaviors shared by all describes. Each describe still overrides as needed.
+function resetDefaults() {
+  mocks.listJobs.mockReset().mockReturnValue([]);
+  mocks.getJob.mockReset().mockReturnValue(null);
+  mocks.probeJobStatus.mockReset().mockResolvedValue('done');
+  mocks.jobToDict.mockReset().mockImplementation((j: JobData) => ({
+    id: j.id,
+    project: j.project,
+    kind: j.kind,
+    status: j.finishedAt ? 'done' : 'running',
+  }));
+  mocks.readDisplayLog.mockReset().mockReturnValue('display log content');
+  mocks.readLog.mockReset().mockReturnValue('raw log content');
+  mocks.markSeen.mockReset().mockReturnValue(true);
+  mocks.unseenFinished.mockReset().mockReturnValue([]);
+  mocks.updateJob.mockReset();
+  mocks.exec.mockReset().mockResolvedValue({ stdout: '', stderr: '' });
+  mocks.getJobCancellationSignal.mockReset().mockReturnValue(null);
+  mocks.requestJobCancellation.mockReset().mockResolvedValue(true);
+  mocks.listPendingReleaseProjects.mockReset().mockResolvedValue([]);
+  mocks.parseStreamLines.mockReset().mockReturnValue([]);
+  mocks.createParseState.mockReset().mockReturnValue({
+    currentToolName: '',
+    currentToolInput: '',
+    inToolUse: false,
+    hasEmitted: false,
   });
+}
 
-  afterEach(() => {
-    vi.resetModules();
+describe('GET /api/jobs', () => {
+  beforeEach(() => {
+    resetDefaults();
   });
 
   it('returns empty jobs list', async () => {
     const req = new NextRequest('http://localhost/api/jobs');
-    const res = await GET(req);
+    const res = await jobsGET(req);
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.jobs).toEqual([]);
@@ -65,10 +129,10 @@ describe('GET /api/jobs', () => {
   it('returns all jobs', async () => {
     const job1 = makeJob({ id: 'job-1', project: 'proj1' });
     const job2 = makeJob({ id: 'job-2', project: 'proj2' });
-    listJobsMock.mockReturnValue([job1, job2]);
+    mocks.listJobs.mockReturnValue([job1, job2]);
 
     const req = new NextRequest('http://localhost/api/jobs');
-    const res = await GET(req);
+    const res = await jobsGET(req);
     const data = await res.json();
     expect(data.jobs).toHaveLength(2);
     expect(data.total).toBe(2);
@@ -79,10 +143,10 @@ describe('GET /api/jobs', () => {
   it('filters by project query param', async () => {
     const job1 = makeJob({ id: 'job-1', project: 'proj1' });
     const job2 = makeJob({ id: 'job-2', project: 'proj2' });
-    listJobsMock.mockReturnValue([job1, job2]);
+    mocks.listJobs.mockReturnValue([job1, job2]);
 
     const req = new NextRequest('http://localhost/api/jobs?project=proj1');
-    const res = await GET(req);
+    const res = await jobsGET(req);
     const data = await res.json();
     expect(data.jobs).toHaveLength(1);
     expect(data.total).toBe(1);
@@ -92,19 +156,19 @@ describe('GET /api/jobs', () => {
   it('calls probeJobStatus for each job', async () => {
     const job1 = makeJob({ id: 'job-1' });
     const job2 = makeJob({ id: 'job-2' });
-    listJobsMock.mockReturnValue([job1, job2]);
+    mocks.listJobs.mockReturnValue([job1, job2]);
 
     const req = new NextRequest('http://localhost/api/jobs');
-    await GET(req);
-    expect(probeJobStatusMock).toHaveBeenCalledTimes(2);
+    await jobsGET(req);
+    expect(mocks.probeJobStatus).toHaveBeenCalledTimes(2);
   });
 
   it('returns empty list when project filter matches nothing', async () => {
     const job1 = makeJob({ id: 'job-1', project: 'proj1' });
-    listJobsMock.mockReturnValue([job1]);
+    mocks.listJobs.mockReturnValue([job1]);
 
     const req = new NextRequest('http://localhost/api/jobs?project=nonexistent');
-    const res = await GET(req);
+    const res = await jobsGET(req);
     const data = await res.json();
     expect(data.jobs).toEqual([]);
   });
@@ -113,10 +177,10 @@ describe('GET /api/jobs', () => {
     const old = makeJob({ id: 'old', startedAt: 100 });
     const mid = makeJob({ id: 'mid', startedAt: 500 });
     const newest = makeJob({ id: 'new', startedAt: 900 });
-    listJobsMock.mockReturnValue([old, newest, mid]);
+    mocks.listJobs.mockReturnValue([old, newest, mid]);
 
     const req = new NextRequest('http://localhost/api/jobs');
-    const res = await GET(req);
+    const res = await jobsGET(req);
     const data = await res.json();
     expect(data.jobs.map((j: any) => j.id)).toEqual(['new', 'mid', 'old']);
   });
@@ -125,10 +189,10 @@ describe('GET /api/jobs', () => {
     const jobs = Array.from({ length: 5 }, (_, i) =>
       makeJob({ id: `job-${i}`, startedAt: i })
     );
-    listJobsMock.mockReturnValue(jobs);
+    mocks.listJobs.mockReturnValue(jobs);
 
     const req = new NextRequest('http://localhost/api/jobs?limit=3');
-    const res = await GET(req);
+    const res = await jobsGET(req);
     const data = await res.json();
     expect(data.jobs).toHaveLength(3);
     expect(data.total).toBe(5);
@@ -138,10 +202,10 @@ describe('GET /api/jobs', () => {
     const jobs = Array.from({ length: 5 }, (_, i) =>
       makeJob({ id: `job-${i}`, startedAt: i })
     );
-    listJobsMock.mockReturnValue(jobs);
+    mocks.listJobs.mockReturnValue(jobs);
 
     const req = new NextRequest('http://localhost/api/jobs?limit=2');
-    const res = await GET(req);
+    const res = await jobsGET(req);
     const data = await res.json();
     expect(data.jobs.map((j: any) => j.id)).toEqual(['job-4', 'job-3']);
   });
@@ -150,10 +214,10 @@ describe('GET /api/jobs', () => {
     const jobs = Array.from({ length: 5 }, (_, i) =>
       makeJob({ id: `job-${i}`, startedAt: i })
     );
-    listJobsMock.mockReturnValue(jobs);
+    mocks.listJobs.mockReturnValue(jobs);
 
     const req = new NextRequest('http://localhost/api/jobs?limit=0');
-    const res = await GET(req);
+    const res = await jobsGET(req);
     const data = await res.json();
     expect(data.jobs).toHaveLength(5);
   });
@@ -162,57 +226,24 @@ describe('GET /api/jobs', () => {
     const jobs = Array.from({ length: 5 }, (_, i) =>
       makeJob({ id: `job-${i}`, startedAt: i })
     );
-    listJobsMock.mockReturnValue(jobs);
+    mocks.listJobs.mockReturnValue(jobs);
 
     const req = new NextRequest('http://localhost/api/jobs?limit=2');
-    const res = await GET(req);
+    const res = await jobsGET(req);
     const data = await res.json();
     expect(data.total).toBe(5);
-    expect(probeJobStatusMock).toHaveBeenCalledTimes(2);
+    expect(mocks.probeJobStatus).toHaveBeenCalledTimes(2);
   });
 });
 
 describe('GET /api/jobs/[jobId]', () => {
-  let GET: any;
-  let getJobMock: ReturnType<typeof vi.fn>;
-  let probeJobStatusMock: ReturnType<typeof vi.fn>;
-  let jobToDictMock: ReturnType<typeof vi.fn>;
-  let readDisplayLogMock: ReturnType<typeof vi.fn>;
-  let readLogMock: ReturnType<typeof vi.fn>;
-
-  beforeEach(async () => {
-    vi.resetModules();
-
-    getJobMock = vi.fn().mockReturnValue(null);
-    probeJobStatusMock = vi.fn().mockResolvedValue('done');
-    jobToDictMock = vi.fn().mockImplementation((j: JobData) => ({
-      id: j.id,
-      project: j.project,
-      kind: j.kind,
-      status: j.finishedAt ? 'done' : 'running',
-    }));
-    readDisplayLogMock = vi.fn().mockReturnValue('display log content');
-    readLogMock = vi.fn().mockReturnValue('raw log content');
-
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      getJob: getJobMock,
-      probeJobStatus: probeJobStatusMock,
-      jobToDict: jobToDictMock,
-      readDisplayLog: readDisplayLogMock,
-      readLog: readLogMock,
-    }));
-
-    const mod = await import('@/app/api/jobs/[jobId]/route');
-    GET = mod.GET;
-  });
-
-  afterEach(() => {
-    vi.resetModules();
+  beforeEach(() => {
+    resetDefaults();
   });
 
   it('returns 404 for nonexistent job', async () => {
     const req = new NextRequest('http://localhost/api/jobs/nonexistent');
-    const res = await GET(req, { params: Promise.resolve({ jobId: 'nonexistent' }) });
+    const res = await jobGET(req, { params: Promise.resolve({ jobId: 'nonexistent' }) });
     expect(res.status).toBe(404);
     const data = await res.json();
     expect(data.detail).toContain('nonexistent');
@@ -220,15 +251,15 @@ describe('GET /api/jobs/[jobId]', () => {
 
   it('returns job data with display log for Claude-kind jobs', async () => {
     const job = makeJob({ id: 'job-123', finishedAt: 2000, exitCode: 0 });
-    getJobMock.mockReturnValue(job);
+    mocks.getJob.mockReturnValue(job);
 
     const req = new NextRequest('http://localhost/api/jobs/job-123');
-    const res = await GET(req, { params: Promise.resolve({ jobId: 'job-123' }) });
+    const res = await jobGET(req, { params: Promise.resolve({ jobId: 'job-123' }) });
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.id).toBe('job-123');
     expect(data.log).toBe('display log content');
-    expect(readLogMock).not.toHaveBeenCalled();
+    expect(mocks.readLog).not.toHaveBeenCalled();
   });
 
   it('returns RAW log for release jobs (aggregated pipeline output)', async () => {
@@ -237,53 +268,37 @@ describe('GET /api/jobs/[jobId]', () => {
     // plain-text sections; the API must serve raw so the terminal shows
     // the full pipeline output.
     const job = makeJob({ id: 'rel-1', kind: 'release', finishedAt: 2000, exitCode: 0 });
-    getJobMock.mockReturnValue(job);
+    mocks.getJob.mockReturnValue(job);
 
     const req = new NextRequest('http://localhost/api/jobs/rel-1');
-    const res = await GET(req, { params: Promise.resolve({ jobId: 'rel-1' }) });
+    const res = await jobGET(req, { params: Promise.resolve({ jobId: 'rel-1' }) });
     const data = await res.json();
     expect(data.log).toBe('raw log content');
-    expect(readLogMock).toHaveBeenCalledWith(job);
-    expect(readDisplayLogMock).not.toHaveBeenCalled();
+    expect(mocks.readLog).toHaveBeenCalledWith(job);
+    expect(mocks.readDisplayLog).not.toHaveBeenCalled();
   });
 
   it('calls probeJobStatus before returning', async () => {
     const job = makeJob({ id: 'job-abc' });
-    getJobMock.mockReturnValue(job);
+    mocks.getJob.mockReturnValue(job);
 
     const req = new NextRequest('http://localhost/api/jobs/job-abc');
-    await GET(req, { params: Promise.resolve({ jobId: 'job-abc' }) });
-    expect(probeJobStatusMock).toHaveBeenCalledWith(job);
+    await jobGET(req, { params: Promise.resolve({ jobId: 'job-abc' }) });
+    expect(mocks.probeJobStatus).toHaveBeenCalledWith(job);
   });
 });
 
 describe('POST /api/jobs/[jobId]/seen', () => {
-  let POST: any;
-  let markSeenMock: ReturnType<typeof vi.fn>;
-
-  beforeEach(async () => {
-    vi.resetModules();
-
-    markSeenMock = vi.fn().mockReturnValue(true);
-
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      markSeen: markSeenMock,
-    }));
-
-    const mod = await import('@/app/api/jobs/[jobId]/seen/route');
-    POST = mod.POST;
-  });
-
-  afterEach(() => {
-    vi.resetModules();
+  beforeEach(() => {
+    resetDefaults();
   });
 
   it('returns 404 for nonexistent job', async () => {
-    markSeenMock.mockReturnValue(false);
+    mocks.markSeen.mockReturnValue(false);
     const req = new NextRequest('http://localhost/api/jobs/nonexistent/seen', {
       method: 'POST',
     });
-    const res = await POST(req, { params: Promise.resolve({ jobId: 'nonexistent' }) });
+    const res = await jobSeenPOST(req, { params: Promise.resolve({ jobId: 'nonexistent' }) });
     expect(res.status).toBe(404);
     const data = await res.json();
     expect(data.detail).toContain('nonexistent');
@@ -293,44 +308,23 @@ describe('POST /api/jobs/[jobId]/seen', () => {
     const req = new NextRequest('http://localhost/api/jobs/job-123/seen', {
       method: 'POST',
     });
-    const res = await POST(req, { params: Promise.resolve({ jobId: 'job-123' }) });
+    const res = await jobSeenPOST(req, { params: Promise.resolve({ jobId: 'job-123' }) });
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('ok');
-    expect(markSeenMock).toHaveBeenCalledWith('job-123');
+    expect(mocks.markSeen).toHaveBeenCalledWith('job-123');
   });
 });
 
 describe('GET /api/jobs/notifications', () => {
-  let GET: any;
-  let unseenFinishedMock: ReturnType<typeof vi.fn>;
-  let jobToDictMock: ReturnType<typeof vi.fn>;
-  let probeJobStatusMock: ReturnType<typeof vi.fn>;
-
-  beforeEach(async () => {
-    vi.resetModules();
-
-    unseenFinishedMock = vi.fn().mockReturnValue([]);
-    jobToDictMock = vi.fn().mockImplementation((j: JobData) => ({ id: j.id }));
-    probeJobStatusMock = vi.fn().mockResolvedValue('running');
-
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      unseenFinished: unseenFinishedMock,
-      jobToDict: jobToDictMock,
-      listJobs: vi.fn().mockReturnValue([]),
-      probeJobStatus: probeJobStatusMock,
-    }));
-
-    const mod = await import('@/app/api/jobs/notifications/route');
-    GET = mod.GET;
-  });
-
-  afterEach(() => {
-    vi.resetModules();
+  beforeEach(() => {
+    resetDefaults();
+    mocks.probeJobStatus.mockResolvedValue('running');
+    mocks.jobToDict.mockImplementation((j: JobData) => ({ id: j.id }));
   });
 
   it('returns count 0 with empty jobs when no unseen jobs', async () => {
-    const res = await GET();
+    const res = await notificationsGET();
     const data = await res.json();
     expect(data.count).toBe(0);
     expect(data.jobs).toEqual([]);
@@ -339,9 +333,9 @@ describe('GET /api/jobs/notifications', () => {
   it('returns count and jobs for unseen finished jobs', async () => {
     const job1 = makeJob({ id: 'job-1', finishedAt: 2000 });
     const job2 = makeJob({ id: 'job-2', finishedAt: 3000 });
-    unseenFinishedMock.mockReturnValue([job1, job2]);
+    mocks.unseenFinished.mockReturnValue([job1, job2]);
 
-    const res = await GET();
+    const res = await notificationsGET();
     const data = await res.json();
     expect(data.count).toBe(2);
     expect(data.jobs).toHaveLength(2);
@@ -349,99 +343,48 @@ describe('GET /api/jobs/notifications', () => {
 });
 
 describe('POST /api/jobs/notifications/mark-seen', () => {
-  let POST: any;
-  let unseenFinishedMock: ReturnType<typeof vi.fn>;
-  let markSeenMock: ReturnType<typeof vi.fn>;
-
-  beforeEach(async () => {
-    vi.resetModules();
-
-    unseenFinishedMock = vi.fn().mockReturnValue([]);
-    markSeenMock = vi.fn().mockReturnValue(true);
-
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      unseenFinished: unseenFinishedMock,
-      markSeen: markSeenMock,
-    }));
-
-    const mod = await import('@/app/api/jobs/notifications/mark-seen/route');
-    POST = mod.POST;
-  });
-
-  afterEach(() => {
-    vi.resetModules();
+  beforeEach(() => {
+    resetDefaults();
   });
 
   it('returns ok when no unseen jobs', async () => {
-    const res = await POST();
+    const res = await markSeenPOST();
     const data = await res.json();
     expect(data.status).toBe('ok');
-    expect(markSeenMock).not.toHaveBeenCalled();
+    expect(mocks.markSeen).not.toHaveBeenCalled();
   });
 
   it('marks all unseen jobs as seen', async () => {
     const job1 = makeJob({ id: 'job-1' });
     const job2 = makeJob({ id: 'job-2' });
-    unseenFinishedMock.mockReturnValue([job1, job2]);
+    mocks.unseenFinished.mockReturnValue([job1, job2]);
 
-    const res = await POST();
+    const res = await markSeenPOST();
     const data = await res.json();
     expect(data.status).toBe('ok');
-    expect(markSeenMock).toHaveBeenCalledTimes(2);
-    expect(markSeenMock).toHaveBeenCalledWith('job-1');
-    expect(markSeenMock).toHaveBeenCalledWith('job-2');
+    expect(mocks.markSeen).toHaveBeenCalledTimes(2);
+    expect(mocks.markSeen).toHaveBeenCalledWith('job-1');
+    expect(mocks.markSeen).toHaveBeenCalledWith('job-2');
   });
 });
 
 describe('DELETE /api/jobs/[jobId]', () => {
-  let DELETE: any;
-  let getJobMock: ReturnType<typeof vi.fn>;
-  let updateJobMock: ReturnType<typeof vi.fn>;
-  let execMock: ReturnType<typeof vi.fn>;
-  let requestJobCancellationMock: ReturnType<typeof vi.fn>;
-  let getJobCancellationSignalMock: ReturnType<typeof vi.fn>;
   let killSpy: ReturnType<typeof vi.spyOn>;
 
-  beforeEach(async () => {
-    vi.resetModules();
+  beforeEach(() => {
+    resetDefaults();
     vi.useFakeTimers();
-
-    getJobMock = vi.fn().mockReturnValue(null);
-    updateJobMock = vi.fn();
-    execMock = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
-    requestJobCancellationMock = vi.fn().mockResolvedValue(true);
-    getJobCancellationSignalMock = vi.fn().mockReturnValue(null);
-
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      getJob: getJobMock,
-      updateJob: updateJobMock,
-    }));
-
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: execMock,
-    }));
-    vi.doMock('@/lib/jobs/cancellation', () => ({
-      getJobCancellationSignal: getJobCancellationSignalMock,
-      requestJobCancellation: requestJobCancellationMock,
-      SAFE_PID_FLOOR: 100,
-      shouldSignalJobPid: (job: { pid: number; kind: string }) => job.pid > 100 && job.kind !== 'push' && job.kind !== 'commit',
-    }));
-
     killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
-
-    const mod = await import('@/app/api/jobs/[jobId]/route');
-    DELETE = mod.DELETE;
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    vi.resetModules();
     killSpy.mockRestore();
   });
 
   it('returns 404 for nonexistent job', async () => {
     const req = new NextRequest('http://localhost/api/jobs/nonexistent', { method: 'DELETE' });
-    const res = await DELETE(req, { params: Promise.resolve({ jobId: 'nonexistent' }) });
+    const res = await jobDELETE(req, { params: Promise.resolve({ jobId: 'nonexistent' }) });
     expect(res.status).toBe(404);
     const data = await res.json();
     expect(data.detail).toContain('nonexistent');
@@ -449,10 +392,10 @@ describe('DELETE /api/jobs/[jobId]', () => {
 
   it('returns 409 for already-finished job', async () => {
     const job = makeJob({ id: 'done-job', finishedAt: 9999 });
-    getJobMock.mockReturnValue(job);
+    mocks.getJob.mockReturnValue(job);
 
     const req = new NextRequest('http://localhost/api/jobs/done-job', { method: 'DELETE' });
-    const res = await DELETE(req, { params: Promise.resolve({ jobId: 'done-job' }) });
+    const res = await jobDELETE(req, { params: Promise.resolve({ jobId: 'done-job' }) });
     expect(res.status).toBe(409);
     const data = await res.json();
     expect(data.detail).toContain('already finished');
@@ -460,10 +403,10 @@ describe('DELETE /api/jobs/[jobId]', () => {
 
   it('returns cancelled status for running job', async () => {
     const job = makeJob({ id: 'running-job', finishedAt: null });
-    getJobMock.mockReturnValue(job);
+    mocks.getJob.mockReturnValue(job);
 
     const req = new NextRequest('http://localhost/api/jobs/running-job', { method: 'DELETE' });
-    const res = await DELETE(req, { params: Promise.resolve({ jobId: 'running-job' }) });
+    const res = await jobDELETE(req, { params: Promise.resolve({ jobId: 'running-job' }) });
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('cancelled');
@@ -471,57 +414,57 @@ describe('DELETE /api/jobs/[jobId]', () => {
 
   it('calls pm2 stop and delete for running job', async () => {
     const job = makeJob({ id: 'pm2-job', finishedAt: null });
-    getJobMock.mockReturnValue(job);
+    mocks.getJob.mockReturnValue(job);
 
     const req = new NextRequest('http://localhost/api/jobs/pm2-job', { method: 'DELETE' });
-    await DELETE(req, { params: Promise.resolve({ jobId: 'pm2-job' }) });
+    await jobDELETE(req, { params: Promise.resolve({ jobId: 'pm2-job' }) });
 
-    expect(execMock).toHaveBeenCalledWith('pm2', ['stop', 'pm2-job', '--silent'], { timeout: 5000 });
-    expect(execMock).toHaveBeenCalledWith('pm2', ['delete', 'pm2-job', '--silent'], { timeout: 5000 });
+    expect(mocks.exec).toHaveBeenCalledWith('pm2', ['stop', 'pm2-job', '--silent'], { timeout: 5000 });
+    expect(mocks.exec).toHaveBeenCalledWith('pm2', ['delete', 'pm2-job', '--silent'], { timeout: 5000 });
   });
 
   it('sends SIGTERM to process by PID', async () => {
     const job = makeJob({ id: 'pid-job', pid: 5678, finishedAt: null });
-    getJobMock.mockReturnValue(job);
+    mocks.getJob.mockReturnValue(job);
 
     const req = new NextRequest('http://localhost/api/jobs/pid-job', { method: 'DELETE' });
-    await DELETE(req, { params: Promise.resolve({ jobId: 'pid-job' }) });
+    await jobDELETE(req, { params: Promise.resolve({ jobId: 'pid-job' }) });
 
     expect(killSpy).toHaveBeenCalledWith(5678, 'SIGTERM');
   });
 
   it('uses cooperative cancellation for inline push jobs', async () => {
     const job = makeJob({ id: 'inline-push', kind: 'push', pid: 999, finishedAt: null });
-    getJobMock.mockReturnValue(job);
+    mocks.getJob.mockReturnValue(job);
 
     const req = new NextRequest('http://localhost/api/jobs/inline-push', { method: 'DELETE' });
-    const res = await DELETE(req, { params: Promise.resolve({ jobId: 'inline-push' }) });
+    const res = await jobDELETE(req, { params: Promise.resolve({ jobId: 'inline-push' }) });
 
     expect(res.status).toBe(200);
-    expect(requestJobCancellationMock).toHaveBeenCalledWith('inline-push', 20_000);
+    expect(mocks.requestJobCancellation).toHaveBeenCalledWith('inline-push', 20_000);
     expect(killSpy).not.toHaveBeenCalled();
   });
 
   it('uses cooperative cancellation for agent placeholder jobs with a registered signal', async () => {
     const job = makeJob({ id: 'agent-prereq', kind: 'agent:Test Agent', pid: 0, finishedAt: null });
-    getJobMock.mockReturnValue(job);
-    getJobCancellationSignalMock.mockReturnValue(new AbortController().signal);
+    mocks.getJob.mockReturnValue(job);
+    mocks.getJobCancellationSignal.mockReturnValue(new AbortController().signal);
 
     const req = new NextRequest('http://localhost/api/jobs/agent-prereq', { method: 'DELETE' });
-    const res = await DELETE(req, { params: Promise.resolve({ jobId: 'agent-prereq' }) });
+    const res = await jobDELETE(req, { params: Promise.resolve({ jobId: 'agent-prereq' }) });
 
     expect(res.status).toBe(200);
-    expect(requestJobCancellationMock).toHaveBeenCalledWith('agent-prereq', 20_000);
+    expect(mocks.requestJobCancellation).toHaveBeenCalledWith('agent-prereq', 20_000);
     expect(killSpy).not.toHaveBeenCalled();
   });
 
   it('returns 409 when inline cancellation times out', async () => {
     const job = makeJob({ id: 'inline-commit', kind: 'commit', pid: 999, finishedAt: null });
-    getJobMock.mockReturnValue(job);
-    requestJobCancellationMock.mockResolvedValue(false);
+    mocks.getJob.mockReturnValue(job);
+    mocks.requestJobCancellation.mockResolvedValue(false);
 
     const req = new NextRequest('http://localhost/api/jobs/inline-commit', { method: 'DELETE' });
-    const res = await DELETE(req, { params: Promise.resolve({ jobId: 'inline-commit' }) });
+    const res = await jobDELETE(req, { params: Promise.resolve({ jobId: 'inline-commit' }) });
 
     expect(res.status).toBe(409);
     const data = await res.json();
@@ -532,10 +475,10 @@ describe('DELETE /api/jobs/[jobId]', () => {
 
   it('sends SIGKILL after 2s timeout', async () => {
     const job = makeJob({ id: 'kill-job', pid: 9999, finishedAt: null });
-    getJobMock.mockReturnValue(job);
+    mocks.getJob.mockReturnValue(job);
 
     const req = new NextRequest('http://localhost/api/jobs/kill-job', { method: 'DELETE' });
-    await DELETE(req, { params: Promise.resolve({ jobId: 'kill-job' }) });
+    await jobDELETE(req, { params: Promise.resolve({ jobId: 'kill-job' }) });
 
     expect(killSpy).not.toHaveBeenCalledWith(9999, 'SIGKILL');
     vi.advanceTimersByTime(2000);
@@ -544,78 +487,60 @@ describe('DELETE /api/jobs/[jobId]', () => {
 
   it('sets exitCode -2 and finishedAt on the job', async () => {
     const job = makeJob({ id: 'update-job', finishedAt: null });
-    getJobMock.mockReturnValue(job);
+    mocks.getJob.mockReturnValue(job);
 
     const req = new NextRequest('http://localhost/api/jobs/update-job', { method: 'DELETE' });
-    await DELETE(req, { params: Promise.resolve({ jobId: 'update-job' }) });
+    await jobDELETE(req, { params: Promise.resolve({ jobId: 'update-job' }) });
 
     expect(job.exitCode).toBe(-2);
     expect(job.finishedAt).toBeGreaterThan(0);
-    expect(updateJobMock).toHaveBeenCalledWith(job);
+    expect(mocks.updateJob).toHaveBeenCalledWith(job);
   });
 
   it('continues cancellation even when pm2 commands fail', async () => {
     const job = makeJob({ id: 'no-pm2-job', pid: 1111, finishedAt: null });
-    getJobMock.mockReturnValue(job);
-    execMock.mockRejectedValue(new Error('pm2 not found'));
+    mocks.getJob.mockReturnValue(job);
+    mocks.exec.mockRejectedValue(new Error('pm2 not found'));
 
     const req = new NextRequest('http://localhost/api/jobs/no-pm2-job', { method: 'DELETE' });
-    const res = await DELETE(req, { params: Promise.resolve({ jobId: 'no-pm2-job' }) });
+    const res = await jobDELETE(req, { params: Promise.resolve({ jobId: 'no-pm2-job' }) });
 
     expect(res.status).toBe(200);
     expect(killSpy).toHaveBeenCalledWith(1111, 'SIGTERM');
-    expect(updateJobMock).toHaveBeenCalled();
+    expect(mocks.updateJob).toHaveBeenCalled();
   });
 
   it('skips kill when pid is 0', async () => {
     const job = makeJob({ id: 'no-pid-job', pid: 0, finishedAt: null });
-    getJobMock.mockReturnValue(job);
+    mocks.getJob.mockReturnValue(job);
 
     const req = new NextRequest('http://localhost/api/jobs/no-pid-job', { method: 'DELETE' });
-    await DELETE(req, { params: Promise.resolve({ jobId: 'no-pid-job' }) });
+    await jobDELETE(req, { params: Promise.resolve({ jobId: 'no-pid-job' }) });
 
     expect(killSpy).not.toHaveBeenCalled();
   });
 });
 
 describe('GET /api/streaming/[jobId]', () => {
-  let GET: any;
-  let getJobMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
 
-  beforeEach(async () => {
-    vi.resetModules();
+  beforeEach(() => {
+    resetDefaults();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-streaming-test-'));
-
-    getJobMock = vi.fn().mockReturnValue(null);
-
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      getJob: getJobMock,
-    }));
-
-    vi.doMock('@/lib/jobs/claude-stream-parser', () => ({
-      parseStreamLines: vi.fn().mockReturnValue([]),
-      createParseState: vi.fn().mockReturnValue({ currentToolName: '', currentToolInput: '', inToolUse: false, hasEmitted: false }),
-    }));
-
-    const mod = await import('@/app/api/streaming/[jobId]/route');
-    GET = mod.GET;
   });
 
   afterEach(() => {
-    vi.resetModules();
     rmSync(tempDir, { recursive: true, force: true });
   });
 
   it('returns SSE response with correct content-type', async () => {
-    const req = new NextRequest('http://localhost/api/streaming/job-123');
     // abort immediately to avoid hanging
     const controller = new AbortController();
     controller.abort();
     const abortedReq = new NextRequest('http://localhost/api/streaming/job-123', {
       signal: controller.signal,
     });
-    const res = await GET(abortedReq, { params: Promise.resolve({ jobId: 'job-123' }) });
+    const res = await streamingGET(abortedReq, { params: Promise.resolve({ jobId: 'job-123' }) });
     expect(res.headers.get('content-type')).toBe('text/event-stream');
   });
 
@@ -625,14 +550,14 @@ describe('GET /api/streaming/[jobId]', () => {
     const req = new NextRequest('http://localhost/api/streaming/job-123', {
       signal: controller.signal,
     });
-    const res = await GET(req, { params: Promise.resolve({ jobId: 'job-123' }) });
+    const res = await streamingGET(req, { params: Promise.resolve({ jobId: 'job-123' }) });
     expect(res.headers.get('cache-control')).toBe('no-cache');
   });
 
   it('streams existing log content when log file exists', async () => {
     const logFile = join(tempDir, 'test-job.log');
     writeFileSync(logFile, 'line one\nline two\n');
-    getJobMock.mockReturnValue({
+    mocks.getJob.mockReturnValue({
       id: 'job-log',
       logPath: logFile,
     });
@@ -644,14 +569,14 @@ describe('GET /api/streaming/[jobId]', () => {
     const req = new NextRequest('http://localhost/api/streaming/job-log', {
       signal: controller.signal,
     });
-    const res = await GET(req, { params: Promise.resolve({ jobId: 'job-log' }) });
+    const res = await streamingGET(req, { params: Promise.resolve({ jobId: 'job-log' }) });
     expect(res.headers.get('content-type')).toBe('text/event-stream');
     // Can't easily read the stream body in tests, but we verify it's a response
     expect(res.body).toBeTruthy();
   });
 
   it('uses fallback log path when job has no logPath', async () => {
-    getJobMock.mockReturnValue({
+    mocks.getJob.mockReturnValue({
       id: 'job-no-log',
       logPath: null,
     });
@@ -661,20 +586,20 @@ describe('GET /api/streaming/[jobId]', () => {
     const req = new NextRequest('http://localhost/api/streaming/job-no-log', {
       signal: controller.signal,
     });
-    const res = await GET(req, { params: Promise.resolve({ jobId: 'job-no-log' }) });
+    const res = await streamingGET(req, { params: Promise.resolve({ jobId: 'job-no-log' }) });
     // Should still return an SSE response, just with no content
     expect(res.headers.get('content-type')).toBe('text/event-stream');
   });
 
   it('uses fallback log path when job does not exist', async () => {
-    getJobMock.mockReturnValue(null);
+    mocks.getJob.mockReturnValue(null);
 
     const controller = new AbortController();
     controller.abort();
     const req = new NextRequest('http://localhost/api/streaming/missing-job', {
       signal: controller.signal,
     });
-    const res = await GET(req, { params: Promise.resolve({ jobId: 'missing-job' }) });
+    const res = await streamingGET(req, { params: Promise.resolve({ jobId: 'missing-job' }) });
     expect(res.headers.get('content-type')).toBe('text/event-stream');
   });
 });

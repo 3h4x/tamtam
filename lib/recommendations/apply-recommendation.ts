@@ -93,11 +93,11 @@ async function updateFileAgentSchedule(expectedProject: string, agentId: string,
   }
   const previousSchedule = existing.schedule
   const rollback = async () => {
-    setFileAgentOverride(parsed.project, parsed.name, { schedule: previousSchedule })
+    await setFileAgentOverride(parsed.project, parsed.name, { schedule: previousSchedule })
     const reverted = loadFileAgent(projectPath, parsed.project, parsed.name)
     if (reverted) await syncFileAgentSchedule(reverted)
   }
-  setFileAgentOverride(parsed.project, parsed.name, { schedule })
+  await setFileAgentOverride(parsed.project, parsed.name, { schedule })
   const updated = loadFileAgent(projectPath, parsed.project, parsed.name)
   if (!updated) {
     await rollback()
@@ -115,7 +115,8 @@ async function updateFileAgentSchedule(expectedProject: string, agentId: string,
 }
 
 async function updateDbAgentSchedule(expectedProject: string, agentId: string, schedule: string): Promise<AgentUpdateResult> {
-  const existing = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get()
+  const existingRows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).limit(1)
+  const existing = existingRows[0] ?? null
   if (!existing) {
     throw new ApplyRecommendationError(404, 'Agent not found')
   }
@@ -124,12 +125,13 @@ async function updateDbAgentSchedule(expectedProject: string, agentId: string, s
   }
   const previousSchedule = existing.schedule
   const rollback = async () => {
-    db.update(schema.agents)
+    await db.update(schema.agents)
       .set({ schedule: previousSchedule, updatedAt: Date.now() / 1000 })
       .where(eq(schema.agents.id, agentId))
-      .run()
+      .execute()
     clearAgentsCache()
-    const reverted = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get()
+    const revertedRows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).limit(1)
+    const reverted = revertedRows[0] ?? null
     if (!reverted) return
     const revertedProjectPath = resolveProjectPath(reverted.project)
     if (revertedProjectPath) {
@@ -150,12 +152,13 @@ async function updateDbAgentSchedule(expectedProject: string, agentId: string, s
     await syncDbAgentSchedule(agentId, reverted)
   }
   const nextUpdatedAt = Date.now() / 1000
-  db.update(schema.agents)
+  await db.update(schema.agents)
     .set({ schedule, updatedAt: nextUpdatedAt })
     .where(eq(schema.agents.id, agentId))
-    .run()
+    .execute()
   clearAgentsCache()
-  const updated = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get()
+  const updatedRows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).limit(1)
+  const updated = updatedRows[0] ?? null
   if (!updated) {
     await rollback()
     throw new ApplyRecommendationError(500, 'Agent not found after update')
@@ -195,7 +198,7 @@ async function updateAgentSchedule(expectedProject: string, agentId: string, sch
 }
 
 export async function applyRecommendation(project: string, recommendationId: string): Promise<AppliedRecommendationResult> {
-  const recommendation = getRecommendation(project, recommendationId)
+  const recommendation = await getRecommendation(project, recommendationId)
   if (!recommendation) {
     throw new ApplyRecommendationError(404, 'Recommendation not found')
   }
@@ -206,10 +209,10 @@ export async function applyRecommendation(project: string, recommendationId: str
   const { agentId, recommendedSchedule } = requireBackoffTarget(recommendation)
   const { agent, rollback } = await updateAgentSchedule(project, agentId, recommendedSchedule)
 
-  const applied = updateRecommendationStatusIfCurrent(project, recommendationId, 'open', 'applied')
+  const applied = await updateRecommendationStatusIfCurrent(project, recommendationId, 'open', 'applied')
   if (!applied) {
     await rollback()
-    const latest = getRecommendation(project, recommendationId)
+    const latest = await getRecommendation(project, recommendationId)
     if (!latest) {
       throw new ApplyRecommendationError(404, 'Recommendation not found after apply')
     }

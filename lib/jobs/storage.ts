@@ -23,11 +23,11 @@ if (!isTestEnv && !g.__tamtamJobsCache) g.__tamtamJobsCache = new Map<string, Jo
 export const jobsCache = isTestEnv ? new Map<string, JobData>() : (g.__tamtamJobsCache as Map<string, JobData>);
 let loaded = false;
 
-export function loadFromDb(): void {
+export async function loadFromDb(): Promise<void> {
   const isLoaded = isTestEnv ? loaded : g.__tamtamJobsCacheLoaded;
   if (isLoaded) return;
   try {
-    const rows = db.select().from(schema.jobs).all();
+    const rows = await db.select().from(schema.jobs);
     for (const row of rows) {
       jobsCache.set(row.id, {
         id: row.id,
@@ -73,8 +73,7 @@ export function loadFromDb(): void {
 }
 
 export function saveToDb(job: JobData): void {
-  try {
-    db.insert(schema.jobs)
+  void db.insert(schema.jobs)
       .values({
         id: job.id,
         project: job.project,
@@ -143,10 +142,8 @@ export function saveToDb(job: JobData): void {
           provider: job.provider ?? null,
         },
       })
-      .run();
-  } catch (e) {
-    console.error(`Failed to save job ${job.id}:`, e);
-  }
+      .execute()
+      .catch(e => console.error(`Failed to save job ${job.id}:`, e));
 }
 
 // Find the most recent in-flight release job for this project — the single
@@ -173,7 +170,6 @@ export function createJob(
   parentJobId?: string | null,
   provider?: string | null,
 ): JobData {
-  loadFromDb();
   let timestamp = Math.floor(Date.now() * 1000);
   let jobId = `${project}-${kind}-${timestamp}`;
   while (jobsCache.has(jobId)) {
@@ -237,51 +233,7 @@ export function createJob(
 }
 
 export function getJob(jobId: string): JobData | null {
-  loadFromDb();
-  const cached = jobsCache.get(jobId);
-  if (cached) return cached;
-  const row = db
-    .select()
-    .from(schema.jobs)
-    .where(eq(schema.jobs.id, jobId))
-    .get();
-  if (!row) return null;
-  const job: JobData = {
-    id: row.id,
-    project: row.project,
-    kind: row.kind,
-    prompt: row.prompt ?? null,
-    pid: row.pid,
-    logPath: row.logPath,
-    startedAt: row.startedAt,
-    finishedAt: row.finishedAt ?? null,
-    exitCode: row.exitCode ?? null,
-    seen: row.seen ?? false,
-    durationMs: row.durationMs ?? null,
-    inputTokens: row.inputTokens ?? null,
-    outputTokens: row.outputTokens ?? null,
-    cacheReadTokens: row.cacheReadTokens ?? null,
-    cacheCreateTokens: row.cacheCreateTokens ?? null,
-    sessionId: row.sessionId ?? null,
-    contextMeta: row.contextMeta ?? null,
-    userPrompt: row.userPrompt ?? null,
-    ghIssueNumber: row.ghIssueNumber ?? null,
-    ghIssueRepo: row.ghIssueRepo ?? null,
-    ghIssueTitle: row.ghIssueTitle ?? null,
-    logPruned: row.logPruned ?? false,
-    verdict: row.verdict ?? null,
-    costUsd: row.costUsd ?? null,
-    model: row.model ?? null,
-    releaseId: row.releaseId ?? null,
-    abortedAt: row.abortedAt ?? null,
-    releaseDeadlineAt: row.releaseDeadlineAt ?? null,
-    promptBytes: row.promptBytes ?? null,
-    workSummary: row.workSummary ?? null,
-    modifiedFiles: row.modifiedFiles ?? null,
-    provider: row.provider ?? null,
-  };
-  jobsCache.set(jobId, job);
-  return job;
+  return jobsCache.get(jobId) ?? null;
 }
 
 // Persist verdict without a full job round-trip. Called right after a review
@@ -289,23 +241,18 @@ export function getJob(jobId: string): JobData | null {
 export function persistVerdict(jobId: string, verdict: string): void {
   const job = jobsCache.get(jobId);
   if (job) job.verdict = verdict;
-  try {
-    db.update(schema.jobs)
-      .set({ verdict })
-      .where(eq(schema.jobs.id, jobId))
-      .run();
-  } catch (e) {
-    console.error(`Failed to persist verdict for ${jobId}:`, e);
-  }
+  void db.update(schema.jobs)
+    .set({ verdict })
+    .where(eq(schema.jobs.id, jobId))
+    .execute()
+    .catch(e => console.error(`Failed to persist verdict for ${jobId}:`, e));
 }
 
 export function listJobs(): JobData[] {
-  loadFromDb();
   return Array.from(jobsCache.values());
 }
 
 export function unseenFinished(): JobData[] {
-  loadFromDb();
   return Array.from(jobsCache.values()).filter(
     (j) => j.finishedAt !== null && !j.seen
   );

@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
 function makeJsonResponse(data: unknown, status = 200) {
   return Promise.resolve({
@@ -23,34 +23,48 @@ function makeRequest(url = 'http://localhost/api/monitoring') {
   return new Request(url);
 }
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
-    CREATE TABLE notification_throttle (
-      key TEXT PRIMARY KEY,
-      last_sent_at INTEGER NOT NULL,
-      suppressed_count INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE maintenance_status (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      updated_at REAL NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries, so issue each DDL separately.
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS notification_throttle (
+      key text PRIMARY KEY,
+      last_sent_at bigint NOT NULL,
+      suppressed_count integer NOT NULL DEFAULT 0
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS maintenance_status (
+      key text PRIMARY KEY,
+      value text NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
 }
 
 describe('GET /api/monitoring', () => {
+  let sharedHandle: TestDbHandle;
   let GET: any;
   let fetchSpy: ReturnType<typeof vi.fn>;
-  let testDb: ReturnType<typeof createTestDb>;
+
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
 
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
+    await sharedHandle.db.execute(sql.raw('TRUNCATE notification_throttle, maintenance_status'));
     vi.doMock('@/lib/db', () => ({
-      db: testDb.db,
+      db: sharedHandle.db,
       schema,
     }));
     vi.doMock('@/lib/shared/config', () => ({
@@ -254,9 +268,15 @@ describe('GET /api/monitoring', () => {
   });
 
   it('includes notification throttle rows ordered by suppressed count', async () => {
-    testDb.sqlite.prepare('INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES (?, ?, ?)').run('agent_run_fail:p:qa', 1000, 2);
-    testDb.sqlite.prepare('INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES (?, ?, ?)').run('review_do_not_ship:p:review', 2000, 5);
-    testDb.sqlite.prepare('INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES (?, ?, ?)').run('release_success:p:release', 3000, 0);
+    await sharedHandle.db.execute(sql.raw(
+      `INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES ('agent_run_fail:p:qa', 1000, 2)`,
+    ));
+    await sharedHandle.db.execute(sql.raw(
+      `INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES ('review_do_not_ship:p:review', 2000, 5)`,
+    ));
+    await sharedHandle.db.execute(sql.raw(
+      `INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES ('release_success:p:release', 3000, 0)`,
+    ));
     fetchSpy.mockRejectedValue(new Error('connection refused'));
 
     const res = await GET(makeRequest());
@@ -270,9 +290,10 @@ describe('GET /api/monitoring', () => {
   });
 
   it('reports suppressedTotal across all rows while limiting entries to the top 20', async () => {
-    const insert = testDb.sqlite.prepare('INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES (?, ?, ?)');
     for (let i = 1; i <= 25; i += 1) {
-      insert.run(`agent_run_fail:p:agent-${i}`, i * 1000, i);
+      await sharedHandle.db.execute(sql.raw(
+        `INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES ('agent_run_fail:p:agent-${i}', ${i * 1000}, ${i})`,
+      ));
     }
     fetchSpy.mockRejectedValue(new Error('connection refused'));
 
@@ -286,8 +307,12 @@ describe('GET /api/monitoring', () => {
   });
 
   it('breaks notification throttle ties by newest lastSentAt first', async () => {
-    testDb.sqlite.prepare('INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES (?, ?, ?)').run('agent_run_fail:p:older', 1000, 4);
-    testDb.sqlite.prepare('INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES (?, ?, ?)').run('agent_run_fail:p:newer', 2000, 4);
+    await sharedHandle.db.execute(sql.raw(
+      `INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES ('agent_run_fail:p:older', 1000, 4)`,
+    ));
+    await sharedHandle.db.execute(sql.raw(
+      `INSERT INTO notification_throttle (key, last_sent_at, suppressed_count) VALUES ('agent_run_fail:p:newer', 2000, 4)`,
+    ));
     fetchSpy.mockRejectedValue(new Error('connection refused'));
 
     const res = await GET(makeRequest());
@@ -334,8 +359,14 @@ describe('GET /api/monitoring', () => {
       errorCount: 0,
       lastError: null,
     };
-    testDb.sqlite.prepare('INSERT INTO maintenance_status (key, value, updated_at) VALUES (?, ?, ?)').run('retention:nightly:last', JSON.stringify(nightlySummary), 1700000010);
-    testDb.sqlite.prepare('INSERT INTO maintenance_status (key, value, updated_at) VALUES (?, ?, ?)').run('retention:project-logs:last', JSON.stringify(projectLogSummary), 1700000030);
+    await sharedHandle.db.execute(sql`
+      INSERT INTO maintenance_status (key, value, updated_at)
+      VALUES ('retention:nightly:last', ${JSON.stringify(nightlySummary)}, 1700000010)
+    `);
+    await sharedHandle.db.execute(sql`
+      INSERT INTO maintenance_status (key, value, updated_at)
+      VALUES ('retention:project-logs:last', ${JSON.stringify(projectLogSummary)}, 1700000030)
+    `);
     fetchSpy.mockRejectedValue(new Error('connection refused'));
 
     const res = await GET(makeRequest());
@@ -372,7 +403,10 @@ describe('GET /api/monitoring', () => {
         vacuumRan: false,
       },
     };
-    testDb.sqlite.prepare('INSERT INTO maintenance_status (key, value, updated_at) VALUES (?, ?, ?)').run('retention:nightly:last', JSON.stringify(failedNightly), 1700000010);
+    await sharedHandle.db.execute(sql`
+      INSERT INTO maintenance_status (key, value, updated_at)
+      VALUES ('retention:nightly:last', ${JSON.stringify(failedNightly)}, 1700000010)
+    `);
     fetchSpy.mockRejectedValue(new Error('connection refused'));
 
     const res = await GET(makeRequest());
@@ -397,7 +431,10 @@ describe('GET /api/monitoring', () => {
       errorCount: 1,
       lastError: 'EPERM unlink denied',
     };
-    testDb.sqlite.prepare('INSERT INTO maintenance_status (key, value, updated_at) VALUES (?, ?, ?)').run('retention:project-logs:last', JSON.stringify(failedProjectLog), 1700000030);
+    await sharedHandle.db.execute(sql`
+      INSERT INTO maintenance_status (key, value, updated_at)
+      VALUES ('retention:project-logs:last', ${JSON.stringify(failedProjectLog)}, 1700000030)
+    `);
     fetchSpy.mockRejectedValue(new Error('connection refused'));
 
     const res = await GET(makeRequest());
@@ -406,7 +443,12 @@ describe('GET /api/monitoring', () => {
     expect(data.hasIssues).toBe(true);
   });
 
-  it('sets hasIssues true when sqlite maintenance failed even if row deletion succeeded', async () => {
+  // TODO: sqliteMaintenance was a nested status produced by the legacy SQLite
+  // nightly checkpoint/vacuum substep. After the Postgres migration there is no
+  // equivalent maintenance step, so the field is no longer populated or
+  // propagated by /api/monitoring. Re-enable (or rewrite for the new
+  // equivalent) if/when a Postgres maintenance substep is introduced.
+  it.skip('sets hasIssues true when sqlite maintenance failed even if row deletion succeeded', async () => {
     const nightlyWithFailedSqlite = {
       type: 'nightly',
       status: 'completed',
@@ -428,7 +470,10 @@ describe('GET /api/monitoring', () => {
         error: 'SQLITE_IOERR',
       },
     };
-    testDb.sqlite.prepare('INSERT INTO maintenance_status (key, value, updated_at) VALUES (?, ?, ?)').run('retention:nightly:last', JSON.stringify(nightlyWithFailedSqlite), 1700000020);
+    await sharedHandle.db.execute(sql`
+      INSERT INTO maintenance_status (key, value, updated_at)
+      VALUES ('retention:nightly:last', ${JSON.stringify(nightlyWithFailedSqlite)}, 1700000020)
+    `);
     fetchSpy.mockRejectedValue(new Error('connection refused'));
 
     const res = await GET(makeRequest());

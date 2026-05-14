@@ -31,7 +31,7 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
   let updateJobMock: ReturnType<typeof vi.fn>;
   let startJobMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
-  let dbGetMock: ReturnType<typeof vi.fn>;
+  let dbGetMock: ReturnType<typeof vi.fn<() => unknown>>;
   let checkCliStartGateMock: ReturnType<typeof vi.fn>;
   let findBlockingRunningJobMock: ReturnType<typeof vi.fn>;
 
@@ -49,6 +49,10 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
     findBlockingRunningJobMock = vi.fn().mockResolvedValue(null);
 
     dbGetMock = vi.fn().mockReturnValue({ project: 'proj1', ciFailedUrl: CI_URL });
+    const limitThenable = () => {
+      const value = dbGetMock();
+      return Promise.resolve(value ? [value] : []);
+    };
 
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
@@ -79,11 +83,13 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
       db: {
         select: vi.fn().mockReturnValue({
           from: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({ get: dbGetMock }),
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockImplementation(() => limitThenable()),
+            }),
           }),
         }),
       },
-      schema: { ghStatus: {} },
+      schema: { ghStatus: { project: 'project' } },
     }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/fix-ci/route');
@@ -302,11 +308,13 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci weekly model scorin
       db: {
         select: vi.fn().mockReturnValue({
           from: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({ get: vi.fn().mockReturnValue({ project: 'proj1', ciFailedUrl: CI_URL }) }),
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([{ project: 'proj1', ciFailedUrl: CI_URL }]),
+            }),
           }),
         }),
       },
-      schema: { ghStatus: {} },
+      schema: { ghStatus: { project: 'project' } },
     }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/fix-ci/route');

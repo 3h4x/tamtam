@@ -19,6 +19,6 @@ export async function PATCH(
   if (!cfg) {
     return NextResponse.json({ detail: `project '${schedId}' not found` }, { status: 404 });
   }
-  writePriorityYaml(cfg.project, cfg.scheduler, priority);
+  await writePriorityYaml(cfg.project, cfg.scheduler, priority);
   return NextResponse.json({ status: 'ok' });
 }

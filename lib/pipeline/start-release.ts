@@ -274,7 +274,7 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
 
   const release = await createReleaseJob(projectName, projPath, parentJobId, issueContext);
   if (!release) {
-    releaseLock(projectName, placeholderId);
+    await releaseLock(projectName, placeholderId);
     return { ok: false, status: 500, detail: 'Failed to create release job', retryable: true };
   }
   const releaseJobId = release.id;
@@ -296,8 +296,8 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
   // single button while still being smart about what to do.
   const skipToPush = await hasFreshLgtm(projectName, projPath);
 
-  const testCmd = detectTestCommand(projPath, projectName);
-  const testsDisabled = !!getProjectTestConfig(projectName)?.testsDisabled;
+  const testCmd = await detectTestCommand(projPath, projectName);
+  const testsDisabled = !!(await getProjectTestConfig(projectName))?.testsDisabled;
 
   // First step's parent is the release meta job, not whatever triggered the
   // release (agent run, manual click). Switching the AsyncLocalStorage parent
@@ -323,7 +323,7 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
         if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
         return { ok: true, step: 'push' as const, releaseJobId, message: r.message };
       }
-      const reviewDisabled = !!getProjectTestConfig(projectName)?.reviewDisabled;
+      const reviewDisabled = !!(await getProjectTestConfig(projectName))?.reviewDisabled;
       if (reviewDisabled) {
         const r = await startProjectPush(projectName);
         if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
@@ -352,7 +352,7 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
     // agent's own prompt as the review step. No autoCommit gating needed: we're
     // already inside an explicit release, which implies commit intent (same reason
     // job-storage.ts's completion hook lets `inRelease` bypass autoCommitEnabled).
-    const reviewDisabled = !!getProjectTestConfig(projectName)?.reviewDisabled;
+    const reviewDisabled = !!(await getProjectTestConfig(projectName))?.reviewDisabled;
     if (reviewDisabled) {
       const r = await startProjectCommit(projectName);
       if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
@@ -380,11 +380,11 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
         const { finalizeReleaseJob } = await import('@/lib/jobs/lifecycle');
         await finalizeReleaseJob(releaseJob, 1);
       } else {
-        releaseLock(projectName, releaseJobId);
+        await releaseLock(projectName, releaseJobId);
       }
     } catch (e) {
       console.log(`[release] cleanup after first-step failure threw for ${projectName}:`, e);
-      try { releaseLock(projectName, releaseJobId); } catch {}
+      try { await releaseLock(projectName, releaseJobId); } catch {}
     }
   }
   return result;

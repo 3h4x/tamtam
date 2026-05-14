@@ -19,11 +19,11 @@ export interface AbortActiveReleaseOptions {
   targetReleaseId?: string;
 }
 
-function resolveTargetRelease(
+async function resolveTargetRelease(
   projectName: string,
   targetReleaseId?: string,
-): { releaseJob: ReturnType<typeof getJob>; lockJobId: string | null } {
-  const lock = getLock(projectName);
+): Promise<{ releaseJob: ReturnType<typeof getJob>; lockJobId: string | null }> {
+  const lock = await getLock(projectName);
   const lockJobId = lock?.lockedByJobId ?? null;
 
   if (targetReleaseId) {
@@ -51,10 +51,10 @@ export async function abortActiveRelease(
   projectName: string,
   options: AbortActiveReleaseOptions,
 ): Promise<ReleaseAbortResult> {
-  const { releaseJob, lockJobId } = resolveTargetRelease(projectName, options.targetReleaseId);
+  const { releaseJob, lockJobId } = await resolveTargetRelease(projectName, options.targetReleaseId);
   if (!releaseJob) {
     if (lockJobId && !options.targetReleaseId) {
-      releaseLock(projectName, lockJobId);
+      await releaseLock(projectName, lockJobId);
     }
     return {
       status: 'no_pipeline',

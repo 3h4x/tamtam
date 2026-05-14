@@ -76,7 +76,7 @@ If the same Pages-Router fallback files (`_app`, `_error`, `[root-of-the-server]
 ```ts
 // next.config.ts
 const nextConfig: NextConfig = {
-  serverExternalPackages: ['better-sqlite3'],
+  serverExternalPackages: ['pg', 'graphile-worker'],
   experimental: {
     turbopackFileSystemCacheForDev: false,
   },

@@ -207,7 +207,8 @@ function persistBoardProvisioning(result: EnsureBoardResult): void {
         target: schema.settings.key,
         set: { value: entry.value },
       })
-      .run();
+      .execute()
+      .catch((e) => console.error('[project-board] failed to persist board settings:', e));
   }
   reloadConfig();
 }

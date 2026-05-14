@@ -12,7 +12,7 @@ export interface LogLine {
 export type TimeWindow = '5m' | '15m' | '1h'
 export type MonitoringTab = 'overview' | 'agents' | 'logs' | 'infra'
 
-export type { SqliteMaintenanceSummary, ProjectLogRetentionSummary, NightlyRetentionSummary, RetentionSummary } from '@/lib/jobs/retention'
+export type { ProjectLogRetentionSummary, NightlyRetentionSummary, RetentionSummary } from '@/lib/jobs/retention'
 import type { ProjectLogRetentionSummary, NightlyRetentionSummary } from '@/lib/jobs/retention'
 
 export interface MonitoringData {

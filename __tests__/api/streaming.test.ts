@@ -72,6 +72,9 @@ describe('GET /api/streaming/[jobId]', () => {
 
   beforeAll(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-streaming-test-'));
+    // Shrink the poll-fallback interval so the fs.watch-miss test doesn't
+    // wait a full production second per tick. Read once at module load.
+    process.env.TAMTAM_STREAM_POLL_MS = '25';
   });
 
   afterAll(() => {

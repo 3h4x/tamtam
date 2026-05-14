@@ -1,54 +1,85 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.pragma('foreign_keys = ON');
-
-  sqlite.exec(`
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-  `);
-
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      key text PRIMARY KEY,
+      value text NOT NULL
+    )
+  `));
 }
 
 describe('config', () => {
-  let testDb: ReturnType<typeof createTestDb>;
+  let sharedHandle: TestDbHandle;
   let getSettings: typeof import('@/lib/shared/config').getSettings;
   let reloadConfig: typeof import('@/lib/shared/config').reloadConfig;
+  let initSettings: typeof import('@/lib/shared/config').initSettings;
   let withBasePrompt: typeof import('@/lib/shared/config').withBasePrompt;
   let getPermissionModeFlag: typeof import('@/lib/shared/config').getPermissionModeFlag;
   let getPipelineModel: typeof import('@/lib/shared/config').getPipelineModel;
 
+  /**
+   * Helper: insert/update a setting then refresh the config cache so the next
+   * synchronous getSettings() reflects it. The production cache is populated by
+   * an async background refresh; in tests we always want a deterministic load.
+   */
+  async function setSetting(key: string, value: string): Promise<void> {
+    await sharedHandle.db
+      .insert(schema.settings)
+      .values({ key, value })
+      .onConflictDoUpdate({ target: schema.settings.key, set: { value } });
+  }
+
+  async function refresh(): Promise<void> {
+    reloadConfig();
+    await initSettings();
+  }
+
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
   beforeEach(async () => {
     vi.resetModules();
-
-    testDb = createTestDb();
+    await sharedHandle.db.execute(sql.raw('TRUNCATE settings'));
 
     vi.doMock('@/lib/db', () => ({
-      db: testDb.db,
+      db: sharedHandle.db,
       schema,
     }));
 
     const config = await import('@/lib/shared/config');
     getSettings = config.getSettings;
     reloadConfig = config.reloadConfig;
+    initSettings = config.initSettings;
     withBasePrompt = config.withBasePrompt;
     getPermissionModeFlag = config.getPermissionModeFlag;
     getPipelineModel = config.getPipelineModel;
+
+    // Pre-warm the cache so the first synchronous getSettings() sees an empty
+    // settings table rather than DEFAULTS-while-refresh-is-pending.
+    await initSettings();
   });
 
   afterEach(() => {
     vi.resetModules();
+    vi.clearAllMocks();
   });
 
   describe('getSettings', () => {
@@ -130,9 +161,9 @@ describe('config', () => {
       });
     });
 
-    it('returns config with overridden workspace_path', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'workspace_path', value: '/home/user/projects' }).run();
+    it('returns config with overridden workspace_path', async () => {
+      await setSetting('workspace_path', '/home/user/projects');
+      await refresh();
 
       const config = getSettings();
 
@@ -141,21 +172,21 @@ describe('config', () => {
       expect(config.claude_bin).toBe(`${process.cwd()}/scripts/claude-shim.js`);
     });
 
-    it('returns config with overridden github_owner', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'github_owner', value: 'octocat' }).run();
+    it('returns config with overridden github_owner', async () => {
+      await setSetting('github_owner', 'octocat');
+      await refresh();
 
       const config = getSettings();
 
       expect(config.github_owner).toBe('octocat');
     });
 
-    it('parses stored GitHub board settings', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'github_board_sync_enabled', value: 'true' }).run();
-      db.insert(schema.settings).values({ key: 'github_board_project_owner', value: 'acme' }).run();
-      db.insert(schema.settings).values({ key: 'github_board_project_title', value: 'TamTam Ops' }).run();
-      db.insert(schema.settings).values({ key: 'github_board_status_option_ids', value: JSON.stringify({ 'In Progress': 'opt-1' }) }).run();
+    it('parses stored GitHub board settings', async () => {
+      await setSetting('github_board_sync_enabled', 'true');
+      await setSetting('github_board_project_owner', 'acme');
+      await setSetting('github_board_project_title', 'TamTam Ops');
+      await setSetting('github_board_status_option_ids', JSON.stringify({ 'In Progress': 'opt-1' }));
+      await refresh();
 
       const config = getSettings();
 
@@ -165,9 +196,9 @@ describe('config', () => {
       expect(config.github_board_status_option_ids).toEqual({ 'In Progress': 'opt-1' });
     });
 
-    it('returns config with overridden claude_bin', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'claude_bin', value: '/usr/bin/claude' }).run();
+    it('returns config with overridden claude_bin', async () => {
+      await setSetting('claude_bin', '/usr/bin/claude');
+      await refresh();
 
       const config = getSettings();
 
@@ -178,10 +209,10 @@ describe('config', () => {
       expect(config.cli_bin_claude).toBe('/usr/bin/claude');
     });
 
-    it('preserves a legacy Claude binary override even when another provider is active', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'claude_provider', value: 'codex' }).run();
-      db.insert(schema.settings).values({ key: 'claude_bin', value: '/usr/bin/claude' }).run();
+    it('preserves a legacy Claude binary override even when another provider is active', async () => {
+      await setSetting('claude_provider', 'codex');
+      await setSetting('claude_bin', '/usr/bin/claude');
+      await refresh();
 
       const config = getSettings();
 
@@ -189,10 +220,10 @@ describe('config', () => {
       expect(config.cli_bin_claude).toBe('/usr/bin/claude');
     });
 
-    it('keeps legacy custom provider routing while dropping stale shim binaries', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'claude_provider', value: 'custom' }).run();
-      db.insert(schema.settings).values({ key: 'claude_bin', value: '/opt/tamtam/scripts/gemini-shim.js' }).run();
+    it('keeps legacy custom provider routing while dropping stale shim binaries', async () => {
+      await setSetting('claude_provider', 'custom');
+      await setSetting('claude_bin', '/opt/tamtam/scripts/gemini-shim.js');
+      await refresh();
 
       const config = getSettings();
 
@@ -202,11 +233,11 @@ describe('config', () => {
       expect(config.cli_bin_claude).toBe('');
     });
 
-    it('canonicalizes legacy model aliases from settings', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'default_model', value: 'sonnet' }).run();
-      db.insert(schema.settings).values({ key: 'pipeline_model_dod', value: 'haiku' }).run();
-      db.insert(schema.settings).values({ key: 'pipeline_model_commit', value: 'opus' }).run();
+    it('canonicalizes legacy model aliases from settings', async () => {
+      await setSetting('default_model', 'sonnet');
+      await setSetting('pipeline_model_dod', 'haiku');
+      await setSetting('pipeline_model_commit', 'opus');
+      await refresh();
 
       const config = getSettings();
 
@@ -215,19 +246,19 @@ describe('config', () => {
       expect(config.pipeline_model_commit).toBe('smart');
     });
 
-    it('parses budget subscription providers from settings', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'budget_subscription_providers', value: 'codex,claude,codex' }).run();
+    it('parses budget subscription providers from settings', async () => {
+      await setSetting('budget_subscription_providers', 'codex,claude,codex');
+      await refresh();
 
       const config = getSettings();
 
       expect(config.budget_subscription_providers).toEqual(['codex', 'claude']);
     });
 
-    it('resolves Gemini provider to the bundled shim', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'claude_provider', value: 'gemini' }).run();
-      db.insert(schema.settings).values({ key: 'claude_bin', value: '/usr/bin/claude' }).run();
+    it('resolves Gemini provider to the bundled shim', async () => {
+      await setSetting('claude_provider', 'gemini');
+      await setSetting('claude_bin', '/usr/bin/claude');
+      await refresh();
 
       const config = getSettings();
 
@@ -235,9 +266,9 @@ describe('config', () => {
       expect(config.claude_bin).toBe(`${process.cwd()}/scripts/gemini-shim.js`);
     });
 
-    it('resolves LM Studio provider to the bundled shim', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'claude_provider', value: 'lmstudio' }).run();
+    it('resolves LM Studio provider to the bundled shim', async () => {
+      await setSetting('claude_provider', 'lmstudio');
+      await refresh();
 
       const config = getSettings();
 
@@ -245,9 +276,9 @@ describe('config', () => {
       expect(config.claude_bin).toBe(`${process.cwd()}/scripts/lmstudio-shim.js`);
     });
 
-    it('resolves Codex provider to the bundled shim', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'claude_provider', value: 'codex' }).run();
+    it('resolves Codex provider to the bundled shim', async () => {
+      await setSetting('claude_provider', 'codex');
+      await refresh();
 
       const config = getSettings();
 
@@ -255,9 +286,9 @@ describe('config', () => {
       expect(config.claude_bin).toBe(`${process.cwd()}/scripts/codex-shim.js`);
     });
 
-    it('exports configured LM Studio model to child process env', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'lmstudio_model', value: 'gemma-4-e4b-uncensored-hauhaucs-aggressive' }).run();
+    it('exports configured LM Studio model to child process env', async () => {
+      await setSetting('lmstudio_model', 'gemma-4-e4b-uncensored-hauhaucs-aggressive');
+      await refresh();
 
       const config = getSettings();
 
@@ -265,9 +296,9 @@ describe('config', () => {
       expect(process.env.LMSTUDIO_MODEL).toBe('gemma-4-e4b-uncensored-hauhaucs-aggressive');
     });
 
-    it('infers provider from an existing shim path', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'claude_bin', value: '/opt/tamtam/scripts/lmstudio-shim.js' }).run();
+    it('infers provider from an existing shim path', async () => {
+      await setSetting('claude_bin', '/opt/tamtam/scripts/lmstudio-shim.js');
+      await refresh();
 
       const config = getSettings();
 
@@ -275,83 +306,83 @@ describe('config', () => {
       expect(config.claude_bin).toBe(`${process.cwd()}/scripts/lmstudio-shim.js`);
     });
 
-    it('returns config with overridden log_dir', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'log_dir', value: '/var/log/tamtam' }).run();
+    it('returns config with overridden log_dir', async () => {
+      await setSetting('log_dir', '/var/log/tamtam');
+      await refresh();
 
       const config = getSettings();
 
       expect(config.log_dir).toBe('/var/log/tamtam');
     });
 
-    it('returns config with overridden frequency', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'frequency', value: '30m' }).run();
+    it('returns config with overridden frequency', async () => {
+      await setSetting('frequency', '30m');
+      await refresh();
 
       const config = getSettings();
 
       expect(config.frequency).toBe('30m');
     });
 
-    it('parses daytime setting as boolean', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'daytime', value: 'true' }).run();
+    it('parses daytime setting as boolean', async () => {
+      await setSetting('daytime', 'true');
+      await refresh();
 
       const config = getSettings();
 
       expect(config.daytime).toBe(true);
     });
 
-    it('handles daytime setting as false when not "true"', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'daytime', value: 'false' }).run();
+    it('handles daytime setting as false when not "true"', async () => {
+      await setSetting('daytime', 'false');
+      await refresh();
 
       const config = getSettings();
 
       expect(config.daytime).toBe(false);
     });
 
-    it('parses weekends setting as boolean from "on" value', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'weekends', value: 'on' }).run();
+    it('parses weekends setting as boolean from "on" value', async () => {
+      await setSetting('weekends', 'on');
+      await refresh();
 
       const config = getSettings();
 
       expect(config.weekends).toBe(true);
     });
 
-    it('handles weekends setting as false when not "on"', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'weekends', value: 'off' }).run();
+    it('handles weekends setting as false when not "on"', async () => {
+      await setSetting('weekends', 'off');
+      await refresh();
 
       const config = getSettings();
 
       expect(config.weekends).toBe(false);
     });
 
-    it('returns config with overridden launchagent_prefix', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'launchagent_prefix', value: 'org.example' }).run();
+    it('returns config with overridden launchagent_prefix', async () => {
+      await setSetting('launchagent_prefix', 'org.example');
+      await refresh();
 
       const config = getSettings();
 
       expect(config.launchagent_prefix).toBe('org.example');
     });
 
-    it('returns jobs_paused=true when stored in settings', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'jobs_paused', value: 'true' }).run();
+    it('returns jobs_paused=true when stored in settings', async () => {
+      await setSetting('jobs_paused', 'true');
+      await refresh();
 
       const config = getSettings();
 
       expect(config.jobs_paused).toBe(true);
     });
 
-    it('handles multiple settings', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'workspace_path', value: '/projects' }).run();
-      db.insert(schema.settings).values({ key: 'github_owner', value: 'user123' }).run();
-      db.insert(schema.settings).values({ key: 'frequency', value: '2h' }).run();
+    it('handles multiple settings', async () => {
+      await setSetting('workspace_path', '/projects');
+      await setSetting('github_owner', 'user123');
+      await setSetting('frequency', '2h');
+      await refresh();
 
       const config = getSettings();
 
@@ -361,35 +392,35 @@ describe('config', () => {
       expect(config.claude_bin).toBe(`${process.cwd()}/scripts/claude-shim.js`);
     });
 
-    it('caches config for CACHE_TTL seconds', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'workspace_path', value: '/initial' }).run();
+    it('caches config for CACHE_TTL seconds', async () => {
+      await setSetting('workspace_path', '/initial');
+      await refresh();
 
       const config1 = getSettings();
       expect(config1.workspace_path).toBe('/initial');
 
-      // Modify database
-      db.delete(schema.settings).run();
-      db.insert(schema.settings).values({ key: 'workspace_path', value: '/modified' }).run();
+      // Modify database (but don't clear cache)
+      await sharedHandle.db.delete(schema.settings);
+      await setSetting('workspace_path', '/modified');
 
       // Should return cached value within TTL
       const config2 = getSettings();
       expect(config2.workspace_path).toBe('/initial');
     });
 
-    it('returns updated config after cache expires and reload is called', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'workspace_path', value: '/initial' }).run();
+    it('returns updated config after cache expires and reload is called', async () => {
+      await setSetting('workspace_path', '/initial');
+      await refresh();
 
       const config1 = getSettings();
       expect(config1.workspace_path).toBe('/initial');
 
-      // Clear cache
-      reloadConfig();
-
       // Modify database
-      db.delete(schema.settings).run();
-      db.insert(schema.settings).values({ key: 'workspace_path', value: '/modified' }).run();
+      await sharedHandle.db.delete(schema.settings);
+      await setSetting('workspace_path', '/modified');
+
+      // Clear cache and pre-warm with new data
+      await refresh();
 
       const config2 = getSettings();
       expect(config2.workspace_path).toBe('/modified');
@@ -397,32 +428,33 @@ describe('config', () => {
   });
 
   describe('reloadConfig', () => {
-    it('clears the cache', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'workspace_path', value: '/initial' }).run();
+    it('clears the cache', async () => {
+      await setSetting('workspace_path', '/initial');
+      await refresh();
 
       const config1 = getSettings();
       expect(config1.workspace_path).toBe('/initial');
 
-      // Clear cache
-      reloadConfig();
-
       // Modify database
-      db.delete(schema.settings).run();
-      db.insert(schema.settings).values({ key: 'workspace_path', value: '/updated' }).run();
+      await sharedHandle.db.delete(schema.settings);
+      await setSetting('workspace_path', '/updated');
+
+      // Clear cache and pre-warm
+      await refresh();
 
       const config2 = getSettings();
       expect(config2.workspace_path).toBe('/updated');
     });
 
-    it('can be called multiple times', () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'frequency', value: '1h' }).run();
+    it('can be called multiple times', async () => {
+      await setSetting('frequency', '1h');
+      await refresh();
 
       getSettings();
       reloadConfig();
       reloadConfig();
       reloadConfig();
+      await initSettings();
 
       const config = getSettings();
       expect(config.frequency).toBe('1h');
@@ -435,9 +467,9 @@ describe('config', () => {
       expect(config.base_prompt).toContain('Never ask clarifying questions');
     });
 
-    it('returns custom base_prompt when set in DB', () => {
-      testDb.db.insert(schema.settings).values({ key: 'base_prompt', value: 'Be concise.' }).run();
-      reloadConfig();
+    it('returns custom base_prompt when set in DB', async () => {
+      await setSetting('base_prompt', 'Be concise.');
+      await refresh();
 
       const config = getSettings();
       expect(config.base_prompt).toBe('Be concise.');
@@ -452,17 +484,17 @@ describe('config', () => {
       expect(result).toContain('do something');
     });
 
-    it('prepends custom base prompt when configured', () => {
-      testDb.db.insert(schema.settings).values({ key: 'base_prompt', value: 'Be concise.' }).run();
-      reloadConfig();
+    it('prepends custom base prompt when configured', async () => {
+      await setSetting('base_prompt', 'Be concise.');
+      await refresh();
 
       const result = withBasePrompt('do something');
       expect(result).toBe('Be concise.\n\n---\n\ndo something');
     });
 
-    it('returns prompt unchanged when base_prompt is empty', () => {
-      testDb.db.insert(schema.settings).values({ key: 'base_prompt', value: '' }).run();
-      reloadConfig();
+    it('returns prompt unchanged when base_prompt is empty', async () => {
+      await setSetting('base_prompt', '');
+      await refresh();
 
       // Empty string gets deleted from DB by settings API, so falls back to default
       // But if it somehow ends up empty in the map, withBasePrompt should handle it
@@ -471,21 +503,21 @@ describe('config', () => {
       expect(result).toContain('do something');
     });
 
-    it('preserves multiline prompts', () => {
-      testDb.db.insert(schema.settings).values({ key: 'base_prompt', value: 'Rule 1\nRule 2' }).run();
-      reloadConfig();
+    it('preserves multiline prompts', async () => {
+      await setSetting('base_prompt', 'Rule 1\nRule 2');
+      await refresh();
 
       const result = withBasePrompt('task here');
       expect(result).toBe('Rule 1\nRule 2\n\n---\n\ntask here');
     });
 
-    it('injects project CLAUDE.md for LM Studio provider', () => {
+    it('injects project CLAUDE.md for LM Studio provider', async () => {
       const dir = mkdtempSync(join(tmpdir(), 'tamtam-config-'));
       try {
         writeFileSync(join(dir, 'CLAUDE.md'), '# Project Rules\n\nUse pnpm.');
-        testDb.db.insert(schema.settings).values({ key: 'claude_provider', value: 'lmstudio' }).run();
-        testDb.db.insert(schema.settings).values({ key: 'base_prompt', value: 'Base rules.' }).run();
-        reloadConfig();
+        await setSetting('claude_provider', 'lmstudio');
+        await setSetting('base_prompt', 'Base rules.');
+        await refresh();
 
         const result = withBasePrompt('task here', { projectPath: dir });
 
@@ -498,14 +530,14 @@ describe('config', () => {
       }
     });
 
-    it('uses the enabled CLI set as the active provider when deciding CLAUDE.md injection', () => {
+    it('uses the enabled CLI set as the active provider when deciding CLAUDE.md injection', async () => {
       const dir = mkdtempSync(join(tmpdir(), 'tamtam-config-'));
       try {
         writeFileSync(join(dir, 'CLAUDE.md'), '# Project Rules\n\nUse pnpm.');
-        testDb.db.insert(schema.settings).values({ key: 'claude_provider', value: 'claude' }).run();
-        testDb.db.insert(schema.settings).values({ key: 'cli_enabled_providers', value: 'codex,claude' }).run();
-        testDb.db.insert(schema.settings).values({ key: 'base_prompt', value: 'Base rules.' }).run();
-        reloadConfig();
+        await setSetting('claude_provider', 'claude');
+        await setSetting('cli_enabled_providers', 'codex,claude');
+        await setSetting('base_prompt', 'Base rules.');
+        await refresh();
 
         const result = withBasePrompt('task here', { projectPath: dir });
 
@@ -516,13 +548,13 @@ describe('config', () => {
       }
     });
 
-    it('uses an explicit run provider when deciding CLAUDE.md injection', () => {
+    it('uses an explicit run provider when deciding CLAUDE.md injection', async () => {
       const dir = mkdtempSync(join(tmpdir(), 'tamtam-config-'));
       try {
         writeFileSync(join(dir, 'CLAUDE.md'), '# Project Rules\n\nUse pnpm.');
-        testDb.db.insert(schema.settings).values({ key: 'claude_provider', value: 'claude' }).run();
-        testDb.db.insert(schema.settings).values({ key: 'base_prompt', value: 'Base rules.' }).run();
-        reloadConfig();
+        await setSetting('claude_provider', 'claude');
+        await setSetting('base_prompt', 'Base rules.');
+        await refresh();
 
         const result = withBasePrompt('task here', { projectPath: dir, provider: 'codex' });
 
@@ -533,12 +565,12 @@ describe('config', () => {
       }
     });
 
-    it('does not inject project CLAUDE.md for Claude provider', () => {
+    it('does not inject project CLAUDE.md for Claude provider', async () => {
       const dir = mkdtempSync(join(tmpdir(), 'tamtam-config-'));
       try {
         writeFileSync(join(dir, 'CLAUDE.md'), '# Project Rules\n\nUse pnpm.');
-        testDb.db.insert(schema.settings).values({ key: 'base_prompt', value: 'Base rules.' }).run();
-        reloadConfig();
+        await setSetting('base_prompt', 'Base rules.');
+        await refresh();
 
         const result = withBasePrompt('task here', { projectPath: dir });
 
@@ -554,62 +586,62 @@ describe('config', () => {
       expect(getPermissionModeFlag()).toBe('--permission-mode acceptEdits');
     });
 
-    it('returns flag for a valid mode stored in DB', () => {
-      testDb.db.insert(schema.settings).values({ key: 'permission_mode', value: 'acceptEdits' }).run();
-      reloadConfig();
+    it('returns flag for a valid mode stored in DB', async () => {
+      await setSetting('permission_mode', 'acceptEdits');
+      await refresh();
       expect(getPermissionModeFlag()).toBe('--permission-mode acceptEdits');
     });
 
-    it('falls back to acceptEdits for an unrecognised mode', () => {
-      testDb.db.insert(schema.settings).values({ key: 'permission_mode', value: 'dangerousMode' }).run();
-      reloadConfig();
+    it('falls back to acceptEdits for an unrecognised mode', async () => {
+      await setSetting('permission_mode', 'dangerousMode');
+      await refresh();
       expect(getPermissionModeFlag()).toBe('--permission-mode acceptEdits');
     });
 
     it.each(['acceptEdits', 'auto', 'bypassPermissions', 'default', 'dontAsk', 'plan'])(
       'accepts valid mode %s',
-      (mode) => {
-        testDb.db.insert(schema.settings).values({ key: 'permission_mode', value: mode }).run();
-        reloadConfig();
+      async (mode) => {
+        await setSetting('permission_mode', mode);
+        await refresh();
         expect(getPermissionModeFlag()).toBe(`--permission-mode ${mode}`);
       }
     );
   });
 
   describe('review_fix_max_iterations', () => {
-    it('parses review_fix_max_iterations from DB as integer', () => {
-      testDb.db.insert(schema.settings).values({ key: 'review_fix_max_iterations', value: '5' }).run();
-      reloadConfig();
+    it('parses review_fix_max_iterations from DB as integer', async () => {
+      await setSetting('review_fix_max_iterations', '5');
+      await refresh();
       expect(getSettings().review_fix_max_iterations).toBe(5);
     });
 
-    it('falls back to default when value is non-numeric', () => {
-      testDb.db.insert(schema.settings).values({ key: 'review_fix_max_iterations', value: 'abc' }).run();
-      reloadConfig();
+    it('falls back to default when value is non-numeric', async () => {
+      await setSetting('review_fix_max_iterations', 'abc');
+      await refresh();
       expect(getSettings().review_fix_max_iterations).toBe(3);
     });
 
-    it('falls back to default when value is zero', () => {
-      testDb.db.insert(schema.settings).values({ key: 'review_fix_max_iterations', value: '0' }).run();
-      reloadConfig();
+    it('falls back to default when value is zero', async () => {
+      await setSetting('review_fix_max_iterations', '0');
+      await refresh();
       expect(getSettings().review_fix_max_iterations).toBe(3);
     });
 
-    it('falls back to default when value is negative', () => {
-      testDb.db.insert(schema.settings).values({ key: 'review_fix_max_iterations', value: '-1' }).run();
-      reloadConfig();
+    it('falls back to default when value is negative', async () => {
+      await setSetting('review_fix_max_iterations', '-1');
+      await refresh();
       expect(getSettings().review_fix_max_iterations).toBe(3);
     });
 
-    it('returns the default 3 when no DB row exists', () => {
-      reloadConfig();
+    it('returns the default 3 when no DB row exists', async () => {
+      await refresh();
       expect(getSettings().review_fix_max_iterations).toBe(3);
     });
   });
 
   describe('backup retention settings', () => {
-    it('returns backup retention defaults when no DB rows exist', () => {
-      reloadConfig();
+    it('returns backup retention defaults when no DB rows exist', async () => {
+      await refresh();
 
       const config = getSettings();
 
@@ -617,10 +649,10 @@ describe('config', () => {
       expect(config.backup_retention_weekly_count).toBe(8);
     });
 
-    it('parses backup retention values from DB as integers', () => {
-      testDb.db.insert(schema.settings).values({ key: 'backup_retention_count', value: '21' }).run();
-      testDb.db.insert(schema.settings).values({ key: 'backup_retention_weekly_count', value: '12' }).run();
-      reloadConfig();
+    it('parses backup retention values from DB as integers', async () => {
+      await setSetting('backup_retention_count', '21');
+      await setSetting('backup_retention_weekly_count', '12');
+      await refresh();
 
       const config = getSettings();
 
@@ -628,10 +660,10 @@ describe('config', () => {
       expect(config.backup_retention_weekly_count).toBe(12);
     });
 
-    it('preserves zero-valued backup retention settings from DB', () => {
-      testDb.db.insert(schema.settings).values({ key: 'backup_retention_count', value: '0' }).run();
-      testDb.db.insert(schema.settings).values({ key: 'backup_retention_weekly_count', value: '0' }).run();
-      reloadConfig();
+    it('preserves zero-valued backup retention settings from DB', async () => {
+      await setSetting('backup_retention_count', '0');
+      await setSetting('backup_retention_weekly_count', '0');
+      await refresh();
 
       const config = getSettings();
 
@@ -639,10 +671,10 @@ describe('config', () => {
       expect(config.backup_retention_weekly_count).toBe(0);
     });
 
-    it('falls back to defaults when backup retention values are non-numeric', () => {
-      testDb.db.insert(schema.settings).values({ key: 'backup_retention_count', value: 'abc' }).run();
-      testDb.db.insert(schema.settings).values({ key: 'backup_retention_weekly_count', value: 'xyz' }).run();
-      reloadConfig();
+    it('falls back to defaults when backup retention values are non-numeric', async () => {
+      await setSetting('backup_retention_count', 'abc');
+      await setSetting('backup_retention_weekly_count', 'xyz');
+      await refresh();
 
       const config = getSettings();
 
@@ -652,18 +684,15 @@ describe('config', () => {
   });
 
   describe('notification throttle settings', () => {
-    it('merges valid stored overrides with defaults and ignores invalid entries', () => {
-      testDb.db.insert(schema.settings).values({ key: 'notification_throttle_window_seconds', value: '120' }).run();
-      testDb.db.insert(schema.settings).values({
-        key: 'notification_throttle_overrides',
-        value: JSON.stringify({
-          release_fail: '15',
-          release_aborted: -1,
-          fix_loop_exhausted: 30,
-          review_do_not_ship: 'oops',
-        }),
-      }).run();
-      reloadConfig();
+    it('merges valid stored overrides with defaults and ignores invalid entries', async () => {
+      await setSetting('notification_throttle_window_seconds', '120');
+      await setSetting('notification_throttle_overrides', JSON.stringify({
+        release_fail: '15',
+        release_aborted: -1,
+        fix_loop_exhausted: 30,
+        review_do_not_ship: 'oops',
+      }));
+      await refresh();
 
       const config = getSettings();
 
@@ -682,9 +711,9 @@ describe('config', () => {
       expect(config.commit_style).toContain('conventional commits');
     });
 
-    it('returns overridden commit_style from DB', () => {
-      testDb.db.insert(schema.settings).values({ key: 'commit_style', value: 'squash everything' }).run();
-      reloadConfig();
+    it('returns overridden commit_style from DB', async () => {
+      await setSetting('commit_style', 'squash everything');
+      await refresh();
       expect(getSettings().commit_style).toBe('squash everything');
     });
 
@@ -693,9 +722,9 @@ describe('config', () => {
       expect(config.review_verdict_rules).toContain('Pragmatic verdict rules');
     });
 
-    it('returns overridden review_verdict_rules from DB', () => {
-      testDb.db.insert(schema.settings).values({ key: 'review_verdict_rules', value: 'always LGTM' }).run();
-      reloadConfig();
+    it('returns overridden review_verdict_rules from DB', async () => {
+      await setSetting('review_verdict_rules', 'always LGTM');
+      await refresh();
       expect(getSettings().review_verdict_rules).toBe('always LGTM');
     });
   });
@@ -711,11 +740,11 @@ describe('config', () => {
       expect(getPipelineModel('commit')).toBe('fast');
     });
 
-    it('canonicalizes legacy overrides', () => {
-      testDb.db.insert(schema.settings).values({ key: 'default_model', value: 'opus' }).run();
-      testDb.db.insert(schema.settings).values({ key: 'pipeline_model_review', value: 'sonnet' }).run();
-      testDb.db.insert(schema.settings).values({ key: 'pipeline_model_dod', value: 'haiku' }).run();
-      reloadConfig();
+    it('canonicalizes legacy overrides', async () => {
+      await setSetting('default_model', 'opus');
+      await setSetting('pipeline_model_review', 'sonnet');
+      await setSetting('pipeline_model_dod', 'haiku');
+      await refresh();
 
       expect(getPipelineModel('review')).toBe('normal');
       expect(getPipelineModel('fix')).toBe('smart');
@@ -723,11 +752,11 @@ describe('config', () => {
       expect(getPipelineModel('commit')).toBe('fast');
     });
 
-    it('falls back to safe tiers when stored model settings are invalid', () => {
-      testDb.db.insert(schema.settings).values({ key: 'default_model', value: 'smart --resume injected' }).run();
-      testDb.db.insert(schema.settings).values({ key: 'pipeline_model_review', value: 'normal --danger' }).run();
-      testDb.db.insert(schema.settings).values({ key: 'pipeline_model_dod', value: 'fast --tools injected' }).run();
-      reloadConfig();
+    it('falls back to safe tiers when stored model settings are invalid', async () => {
+      await setSetting('default_model', 'smart --resume injected');
+      await setSetting('pipeline_model_review', 'normal --danger');
+      await setSetting('pipeline_model_dod', 'fast --tools injected');
+      await refresh();
 
       expect(getSettings().default_model).toBe('fast');
       expect(getSettings().pipeline_model_review).toBe('');

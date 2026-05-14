@@ -31,6 +31,6 @@ export default [
     },
   },
   {
-    ignores: [".next/", "node_modules/", "skills/", "data/"],
+    ignores: [".next/", "node_modules/", "skills/", "data/", "app/.well-known/"],
   },
 ];

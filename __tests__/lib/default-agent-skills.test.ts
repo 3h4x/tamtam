@@ -1,70 +1,148 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { createHash } from 'crypto';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { sql } from 'drizzle-orm';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import * as schema from '@/lib/db/schema';
 
 function sha256Prefix(content: string): string {
   return createHash('sha256').update(content).digest('hex').slice(0, 16);
 }
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
+// Hoisted ref the module-scope vi.mock factory closes over. We swap in the
+// real PGlite-backed db once beforeAll has built it. Hoisting the mock keeps
+// `vi.resetModules()` cheap — we only re-evaluate the seed module itself
+// (to reset its module-level `seeded` guard), not the db module.
+const dbRef = vi.hoisted(() => ({ db: null as unknown as TestDbHandle['db'] }));
+
+vi.mock('@/lib/db', async () => {
+  const schemaModule = await import('@/lib/db/schema');
+  return { db: dbRef.db, schema: schemaModule };
+});
+
+let sharedHandle: TestDbHandle;
+
+async function applyDdl(h: TestDbHandle): Promise<void> {
+  // PGlite only accepts one CREATE per execute call.
+  await h.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS skills (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT NOT NULL DEFAULT '',
-      content TEXT NOT NULL DEFAULT '',
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      description text NOT NULL DEFAULT '',
+      content text NOT NULL DEFAULT '',
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await h.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS agents (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      project TEXT NOT NULL,
-      skill_ids TEXT NOT NULL DEFAULT '[]',
-      doc_paths TEXT NOT NULL DEFAULT '[]',
-      model TEXT NOT NULL DEFAULT 'sonnet',
-      prompt TEXT NOT NULL DEFAULT '',
-      schedule TEXT,
-      runner TEXT NOT NULL DEFAULT 'pm2',
-      enabled INTEGER NOT NULL DEFAULT 1,
-      provider TEXT,
-      prerequisite_command TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      project text NOT NULL,
+      skill_ids text NOT NULL DEFAULT '[]',
+      doc_paths text NOT NULL DEFAULT '[]',
+      model text NOT NULL DEFAULT 'sonnet',
+      prompt text NOT NULL DEFAULT '',
+      schedule text,
+      runner text NOT NULL DEFAULT 'pm2',
+      enabled boolean NOT NULL DEFAULT true,
+      provider text,
+      prerequisite_command text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+}
+
+beforeAll(async () => {
+  sharedHandle = await createTestPgDbEmpty();
+  await applyDdl(sharedHandle);
+  // Wire the module-scope mock factory's reference now that the db exists.
+  dbRef.db = sharedHandle.db;
+});
+
+afterAll(async () => {
+  try {
+    await sharedHandle[Symbol.asyncDispose]();
+  } catch {
+    // ignore
+  }
+});
+
+async function selectAllSkills() {
+  return sharedHandle.db.select().from(schema.skills);
+}
+
+async function selectAllAgents() {
+  return sharedHandle.db.select().from(schema.agents);
+}
+
+async function findSkill(id: string) {
+  const rows = await selectAllSkills();
+  return rows.find((s) => s.id === id);
+}
+
+async function findAgent(id: string) {
+  const rows = await selectAllAgents();
+  return rows.find((a) => a.id === id);
+}
+
+// Total number of default skills in lib/agents/default-agent-skills.ts.
+// Used as the strict drain target so we know every fire-and-forget seed write
+// has landed without needing a wall-clock sleep tail.
+const DEFAULT_SKILL_COUNT = 16;
+
+// seedDefaultSkills() is sync but kicks off `void db.select().then(insert|update)`
+// fire-and-forget chains for every default skill. Wait until exactly
+// DEFAULT_SKILL_COUNT default skill rows are present — that proves every insert
+// settled. Tests that mutate updates of pre-existing rows use vi.waitFor on
+// their own assertion to handle the update race.
+async function waitForSeedToSettle(): Promise<void> {
+  await vi.waitFor(async () => {
+    const rows = await selectAllSkills();
+    const defaultRows = rows.filter((s) => s.id.startsWith('agent-'));
+    expect(defaultRows.length).toBeGreaterThanOrEqual(DEFAULT_SKILL_COUNT);
+  }, { timeout: 5000, interval: 1 });
+}
+
+// Fast-polling vi.waitFor wrapper. Default vi.waitFor interval is 10ms, but
+// the work we wait on (a single drizzle update) typically lands within a
+// microtask or two. Use a 1ms interval to keep retry overhead out of the
+// per-test budget while still giving real failures a 5s ceiling.
+async function waitForFast(cb: () => unknown | Promise<unknown>): Promise<void> {
+  await vi.waitFor(cb, { timeout: 5000, interval: 1 });
 }
 
 describe('seedDefaultSkills', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let seedFn: typeof import('@/lib/agents/default-agent-skills').seedDefaultSkills;
 
   beforeEach(async () => {
+    // Reset the seed module's `seeded` guard. The module-scope vi.mock for
+    // `@/lib/db` survives this — only the seed module itself re-evaluates.
+    // Done once here (not also in afterEach) — back-to-back resets do nothing.
     vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    // Drain any fire-and-forget seed writes from the prior test before we
+    // wipe the tables — TRUNCATE racing against a pending insert would leak
+    // rows into the next test. A few microtask flushes settle any tail work
+    // not asserted on by the previous test (e.g. unobserved backfill update).
+    for (let i = 0; i < 4; i++) {
+      await new Promise((r) => setImmediate(r));
+    }
+    await sharedHandle.db.execute(sql.raw('TRUNCATE skills, agents'));
     const mod = await import('@/lib/agents/default-agent-skills');
     seedFn = mod.seedDefaultSkills;
   });
 
-  afterEach(() => {
-    vi.resetModules();
-  });
-
-  it('inserts all default skills on first call', () => {
+  it('inserts all default skills on first call', async () => {
     seedFn();
-    const skills = testDb.db.select().from(schema.skills).all();
+    await waitForSeedToSettle();
+    const skills = await selectAllSkills();
     expect(skills.length).toBeGreaterThanOrEqual(9);
   });
 
-  it('inserts agent-self-improve with correct fields', () => {
+  it('inserts agent-self-improve with correct fields', async () => {
     seedFn();
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-self-improve');
+    await waitForSeedToSettle();
+    const skill = await findSkill('agent-self-improve');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:self-improve');
     expect(skill!.content).toContain('http://localhost:1337');
@@ -74,9 +152,10 @@ describe('seedDefaultSkills', () => {
     expect(skill!.description).toContain('TamTam');
   });
 
-  it('inserts agent-docs-claude with correct fields', () => {
+  it('inserts agent-docs-claude with correct fields', async () => {
     seedFn();
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-docs-claude');
+    await waitForSeedToSettle();
+    const skill = await findSkill('agent-docs-claude');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:docs-claude');
     expect(skill!.description).toContain('CLAUDE.md');
@@ -90,9 +169,10 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain("Don't run `git` commands");
   });
 
-  it('inserts agent-cto with correct fields', () => {
+  it('inserts agent-cto with correct fields', async () => {
     seedFn();
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-cto');
+    await waitForSeedToSettle();
+    const skill = await findSkill('agent-cto');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:cto');
     expect(skill!.content).toContain('You are the CTO');
@@ -103,18 +183,20 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('- [ ]');
   });
 
-  it('inserts agent-senior-fullstack with correct fields', () => {
+  it('inserts agent-senior-fullstack with correct fields', async () => {
     seedFn();
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-senior-fullstack');
+    await waitForSeedToSettle();
+    const skill = await findSkill('agent-senior-fullstack');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:senior-fullstack');
     expect(skill!.content).toContain('Senior fullstack engineer');
     expect(skill!.content).toContain('CLAUDE.md');
   });
 
-  it('inserts agent-security-review with correct fields', () => {
+  it('inserts agent-security-review with correct fields', async () => {
     seedFn();
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-security-review');
+    await waitForSeedToSettle();
+    const skill = await findSkill('agent-security-review');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:security-review');
     expect(skill!.description).toContain('OWASP');
@@ -123,9 +205,10 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('CLEAN | FINDINGS');
   });
 
-  it('inserts agent-dependency-check with correct fields', () => {
+  it('inserts agent-dependency-check with correct fields', async () => {
     seedFn();
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-dependency-check');
+    await waitForSeedToSettle();
+    const skill = await findSkill('agent-dependency-check');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:dependency-check');
     expect(skill!.description).toContain('staleness');
@@ -133,9 +216,10 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('outdated');
   });
 
-  it('inserts agent-blog with correct fields', () => {
+  it('inserts agent-blog with correct fields', async () => {
     seedFn();
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-blog');
+    await waitForSeedToSettle();
+    const skill = await findSkill('agent-blog');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:blog');
     expect(skill!.description).toContain('blog');
@@ -145,9 +229,10 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('blog/');
   });
 
-  it('inserts agent-ci-monitor with correct fields', () => {
+  it('inserts agent-ci-monitor with correct fields', async () => {
     seedFn();
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-ci-monitor');
+    await waitForSeedToSettle();
+    const skill = await findSkill('agent-ci-monitor');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:ci-monitor');
     expect(skill!.description).toContain('CI');
@@ -155,9 +240,10 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('gh run view');
   });
 
-  it('inserts agent-issue-cruncher with correct fields', () => {
+  it('inserts agent-issue-cruncher with correct fields', async () => {
     seedFn();
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-issue-cruncher');
+    await waitForSeedToSettle();
+    const skill = await findSkill('agent-issue-cruncher');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:issue-cruncher');
     expect(skill!.description).toContain('ready-to-go issue');
@@ -171,9 +257,9 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).not.toContain('git commit');
   });
 
-  it('backfills the trusted-only prerequisite for existing issue-cruncher agents', () => {
+  it('backfills the trusted-only prerequisite for existing issue-cruncher agents', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.agents).values({
+    await sharedHandle.db.insert(schema.agents).values({
       id: 'agent-1',
       name: 'issue-cruncher',
       project: 'proj1',
@@ -187,41 +273,75 @@ describe('seedDefaultSkills', () => {
       prerequisiteCommand: null,
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const agent = testDb.db.select().from(schema.agents).all().find((row) => row.id === 'agent-1');
-    expect(agent?.prerequisiteCommand).toBe('curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"');
+    await waitForFast(async () => {
+      const agent = await findAgent('agent-1');
+      expect(agent?.prerequisiteCommand).toBe('curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"');
+    });
   });
 
-  it('does not backfill an explicitly cleared issue-cruncher prerequisite', () => {
+  it('does not backfill an explicitly cleared issue-cruncher prerequisite', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.agents).values({
-      id: 'agent-2',
-      name: 'issue-cruncher',
-      project: 'proj1',
-      skillIds: '["agent-issue-cruncher"]',
-      docPaths: '[]',
-      model: 'normal',
-      prompt: '',
-      schedule: null,
-      runner: 'pm2',
-      enabled: true,
-      prerequisiteCommand: '',
-      createdAt: now,
-      updatedAt: now,
-    }).run();
+    // The subject under test: explicitly-cleared prerequisite should NOT be
+    // backfilled. Race-free deterministic signal: insert a sentinel agent
+    // alongside whose prerequisite IS null — once backfill updates the
+    // sentinel, we know the whole backfill loop has run and any update for
+    // agent-2 (the negative case) would have already fired.
+    await sharedHandle.db.insert(schema.agents).values([
+      {
+        id: 'agent-2',
+        name: 'issue-cruncher',
+        project: 'proj1',
+        skillIds: '["agent-issue-cruncher"]',
+        docPaths: '[]',
+        model: 'normal',
+        prompt: '',
+        schedule: null,
+        runner: 'pm2',
+        enabled: true,
+        prerequisiteCommand: '',
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'agent-2-sentinel',
+        name: 'issue-cruncher',
+        project: 'proj1',
+        skillIds: '["agent-issue-cruncher"]',
+        docPaths: '[]',
+        model: 'normal',
+        prompt: '',
+        schedule: null,
+        runner: 'pm2',
+        enabled: true,
+        prerequisiteCommand: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const agent = testDb.db.select().from(schema.agents).all().find((row) => row.id === 'agent-2');
+    // Wait until the backfill has updated the sentinel — by that point any
+    // (incorrect) update against agent-2 would also have landed.
+    await waitForFast(async () => {
+      const sentinel = await findAgent('agent-2-sentinel');
+      expect(sentinel?.prerequisiteCommand).toBe('curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"');
+    });
+
+    const agent = await findAgent('agent-2');
     expect(agent?.prerequisiteCommand).toBe('');
   });
 
-  it('inserts agent-release-ready with correct fields', () => {
+  it('inserts agent-release-ready with correct fields', async () => {
     seedFn();
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-release-ready');
+    await waitForSeedToSettle();
+    const skill = await findSkill('agent-release-ready');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:release-ready');
     expect(skill!.description).toContain('Pre-flight');
@@ -229,9 +349,10 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('NOT READY');
   });
 
-  it('inserts agent-gha-audit with correct fields', () => {
+  it('inserts agent-gha-audit with correct fields', async () => {
     seedFn();
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-gha-audit');
+    await waitForSeedToSettle();
+    const skill = await findSkill('agent-gha-audit');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:gha-audit');
     expect(skill!.description).toContain('.github/workflows');
@@ -239,9 +360,10 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('CI workflow');
   });
 
-  it('inserts agent-tests with correct fields', () => {
+  it('inserts agent-tests with correct fields', async () => {
     seedFn();
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-tests');
+    await waitForSeedToSettle();
+    const skill = await findSkill('agent-tests');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:tests');
     expect(skill!.content).not.toContain('git log');
@@ -250,9 +372,10 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('test');
   });
 
-  it('inserts agent-manage-agents with correct fields', () => {
+  it('inserts agent-manage-agents with correct fields', async () => {
     seedFn();
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-manage-agents');
+    await waitForSeedToSettle();
+    const skill = await findSkill('agent-manage-agents');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:manage-agents');
     expect(skill!.content).toContain('http://localhost:1337');
@@ -261,9 +384,10 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('/api/agents');
   });
 
-  it('inserts agent-review-tuner with correct fields', () => {
+  it('inserts agent-review-tuner with correct fields', async () => {
     seedFn();
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-review-tuner');
+    await waitForSeedToSettle();
+    const skill = await findSkill('agent-review-tuner');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:review-tuner');
     expect(skill!.description).toContain('review/fix prompt tweaks');
@@ -272,9 +396,10 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('/api/projects/by-project/<name>/release/<id>');
   });
 
-  it('inserts agent-qa with the supported Playwright MCP namespace', () => {
+  it('inserts agent-qa with the supported Playwright MCP namespace', async () => {
     seedFn();
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-qa');
+    await waitForSeedToSettle();
+    const skill = await findSkill('agent-qa');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:qa');
     expect(skill!.description).toContain('Playwright');
@@ -302,9 +427,10 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).not.toMatch(/cto agent|QA_NO_CTO/);
   });
 
-  it('inserts agent-readme-sync with correct fields', () => {
+  it('inserts agent-readme-sync with correct fields', async () => {
     seedFn();
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-readme-sync');
+    await waitForSeedToSettle();
+    const skill = await findSkill('agent-readme-sync');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:readme-sync');
     expect(skill!.description).toContain('README');
@@ -314,9 +440,10 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain("Don't run `git` commands");
   });
 
-  it('no default skill content tells the model to run git', () => {
+  it('no default skill content tells the model to run git', async () => {
     seedFn();
-    const skills = testDb.db.select().from(schema.skills).all();
+    await waitForSeedToSettle();
+    const skills = await selectAllSkills();
     const violators: string[] = [];
     for (const skill of skills) {
       // Skip user-added rows from earlier tests — only enforce on default skills.
@@ -329,65 +456,79 @@ describe('seedDefaultSkills', () => {
     expect(violators).toEqual([]);
   });
 
-  it('does not insert skills on second call (seeded guard)', () => {
+  it('does not insert skills on second call (seeded guard)', async () => {
     seedFn();
-    const countAfterFirst = testDb.db.select().from(schema.skills).all().length;
+    await waitForSeedToSettle();
+    const countAfterFirst = (await selectAllSkills()).length;
 
     // Manually insert an extra row to detect if seed runs again
-    testDb.db.insert(schema.skills).values({
+    await sharedHandle.db.insert(schema.skills).values({
       id: 'canary',
       name: 'canary',
       description: '',
       content: 'x',
       createdAt: Date.now() / 1000,
       updatedAt: Date.now() / 1000,
-    }).run();
+    });
 
     seedFn(); // second call — should be a no-op, not duplicate-insert
-    const allIds = testDb.db.select().from(schema.skills).all().map((s) => s.id);
+    // Drain microtasks: if seedFn had fired any work, its synchronous
+    // .select().then(...) chains would have been scheduled by now. A few
+    // microtask flushes lets any (incorrect) second-pass writes run if they
+    // would, without paying a wall-clock sleep.
+    for (let i = 0; i < 5; i++) {
+      await new Promise((r) => setImmediate(r));
+    }
+    const allIds = (await selectAllSkills()).map((s) => s.id);
     // All original ids still present, no duplicates possible since id is PRIMARY KEY
     // The real assertion: row count is exactly countAfterFirst + 1 (canary only)
     expect(allIds.length).toBe(countAfterFirst + 1);
   });
 
-  it('overwrites content and description on existing default skills (defaults are read-only)', () => {
+  it('overwrites content and description on existing default skills (defaults are read-only)', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.skills).values({
+    await sharedHandle.db.insert(schema.skills).values({
       id: 'agent-cto',
       name: 'custom-name',
       description: 'custom-desc',
       content: 'custom-content',
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-cto');
-    // name is not part of the seed payload, so any prior value (including a
-    // pre-existing customisation from before the read-only switch) survives.
-    expect(skill!.name).toBe('custom-name');
-    expect(skill!.content).not.toBe('custom-content');
-    expect(skill!.content).toContain('CTO');
-    expect(skill!.description).not.toBe('custom-desc');
+    await waitForFast(async () => {
+      const skill = await findSkill('agent-cto');
+      // name is not part of the seed payload, so any prior value (including a
+      // pre-existing customisation from before the read-only switch) survives.
+      expect(skill!.name).toBe('custom-name');
+      expect(skill!.content).not.toBe('custom-content');
+      expect(skill!.content).toContain('CTO');
+      expect(skill!.description).not.toBe('custom-desc');
+    });
   });
 
-  it('updates content and description for a skill that exists with empty content', () => {
+  it('updates content and description for a skill that exists with empty content', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.skills).values({
+    await sharedHandle.db.insert(schema.skills).values({
       id: 'agent-cto',
       name: 'agent:cto',
       description: '',
       content: '',
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-cto');
-    expect(skill!.content).toContain('You are the CTO');
-    expect(skill!.description.length).toBeGreaterThan(0);
+    await waitForFast(async () => {
+      const skill = await findSkill('agent-cto');
+      expect(skill!.content).toContain('You are the CTO');
+      expect(skill!.description.length).toBeGreaterThan(0);
+    });
   });
 
   // Issue #64: when a seeded skill's content matches a hash in
@@ -395,7 +536,7 @@ describe('seedDefaultSkills', () => {
   // current (shorter) default. This is the mechanism that actually shrinks
   // prompts on running installs — a typo in the hash list would silently
   // break the upgrade and let the cache-read regression persist.
-  it('overwrites a seeded default whose content matches a known hash', () => {
+  it('overwrites a seeded default whose content matches a known hash', async () => {
     const now = Date.now() / 1000;
     // Verbatim content of agent-cto from before the issue-#64 rewrite.
     // sha256(...).slice(0,16) === 'a13c143efc007ea5', which is registered in
@@ -418,24 +559,27 @@ Be opinionated. Prioritize ruthlessly.
 - Check \`git log\` for in-progress work before creating issues; duplicate tracking wastes cycles.
 - Issues must be self-contained: a solo developer should be able to pick one up cold.`;
 
-    testDb.db.insert(schema.skills).values({
+    await sharedHandle.db.insert(schema.skills).values({
       id: 'agent-cto',
       name: 'agent:cto',
       description: 'old',
       content: previousDefault,
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-cto');
-    expect(skill!.content).not.toBe(previousDefault);
-    // Current default is much shorter; the whole point of the upgrade.
-    expect(skill!.content.length).toBeLessThan(previousDefault.length);
+    await waitForFast(async () => {
+      const skill = await findSkill('agent-cto');
+      expect(skill!.content).not.toBe(previousDefault);
+      // Current default is much shorter; the whole point of the upgrade.
+      expect(skill!.content.length).toBeLessThan(previousDefault.length);
+    });
   });
 
-  it('overwrites the immediately previous agent-cto default during template rollout', () => {
+  it('overwrites the immediately previous agent-cto default during template rollout', async () => {
     const now = Date.now() / 1000;
     // Verbatim content from the prompt shipped immediately before the
     // canonical issue-template rollout.
@@ -444,25 +588,28 @@ Be opinionated. Prioritize ruthlessly.
     const previousDefault = `You are the CTO. Read CLAUDE.md and skim the codebase. List existing GitHub issues with \`gh issue list --limit 20 --state open\` so you don't duplicate.
 Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — title states the outcome, body has problem → approach → acceptance criteria, labels include type + priority. Skip duplicates and in-progress work. Solo project: no team-coordination assumptions. Don't run \`git\` commands or branch/commit/push — TamTam's release pipeline owns version control.`;
 
-    testDb.db.insert(schema.skills).values({
+    await sharedHandle.db.insert(schema.skills).values({
       id: 'agent-cto',
       name: 'agent:cto',
       description: 'old',
       content: previousDefault,
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-cto');
-    expect(skill!.content).not.toBe(previousDefault);
-    expect(skill!.content).toContain('exact template below');
-    expect(skill!.content).toContain('## Acceptance criteria');
-    expect(skill!.content).toContain('- [ ] <verifiable outcome 1>');
+    await waitForFast(async () => {
+      const skill = await findSkill('agent-cto');
+      expect(skill!.content).not.toBe(previousDefault);
+      expect(skill!.content).toContain('exact template below');
+      expect(skill!.content).toContain('## Acceptance criteria');
+      expect(skill!.content).toContain('- [ ] <verifiable outcome 1>');
+    });
   });
 
-  it('overwrites the previous agent-issue-cruncher default via known hash', () => {
+  it('overwrites the previous agent-issue-cruncher default via known hash', async () => {
     const now = Date.now() / 1000;
     // Verbatim content from the first shipped issue-cruncher draft.
     // sha256(...).slice(0,16) === '362c85f7fe916df8', which must stay in
@@ -496,24 +643,27 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
     // Verify the fixture content actually produces the claimed hash — this is the contract test.
     expect(sha256Prefix(previousDefault)).toBe('362c85f7fe916df8');
 
-    testDb.db.insert(schema.skills).values({
+    await sharedHandle.db.insert(schema.skills).values({
       id: 'agent-issue-cruncher',
       name: 'agent:issue-cruncher',
       description: 'old',
       content: previousDefault,
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-issue-cruncher');
-    expect(skill!.content).not.toBe(previousDefault);
-    expect(skill!.content).toContain('current repo directory name');
-    expect(skill!.content).toContain('ISSUE_PROJECT_UNKNOWN');
+    await waitForFast(async () => {
+      const skill = await findSkill('agent-issue-cruncher');
+      expect(skill!.content).not.toBe(previousDefault);
+      expect(skill!.content).toContain('current repo directory name');
+      expect(skill!.content).toContain('ISSUE_PROJECT_UNKNOWN');
+    });
   });
 
-  it('overwrites the non-canonical agent-issue-cruncher default via known hash', () => {
+  it('overwrites the non-canonical agent-issue-cruncher default via known hash', async () => {
     const now = Date.now() / 1000;
     // Verbatim content from the prompt shipped immediately before canonical
     // repo-directory project resolution.
@@ -552,24 +702,27 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
     // Contract test: fixture content must produce the exact claimed hash.
     expect(sha256Prefix(previousDefault)).toBe('2753dcc26f2f434c');
 
-    testDb.db.insert(schema.skills).values({
+    await sharedHandle.db.insert(schema.skills).values({
       id: 'agent-issue-cruncher',
       name: 'agent:issue-cruncher',
       description: 'old',
       content: previousDefault,
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-issue-cruncher');
-    expect(skill!.content).not.toBe(previousDefault);
-    expect(skill!.content).toContain('current repo directory name');
-    expect(skill!.content).toContain('If either disagrees with the repo directory name');
+    await waitForFast(async () => {
+      const skill = await findSkill('agent-issue-cruncher');
+      expect(skill!.content).not.toBe(previousDefault);
+      expect(skill!.content).toContain('current repo directory name');
+      expect(skill!.content).toContain('If either disagrees with the repo directory name');
+    });
   });
 
-  it('overwrites the previous shipped issue-cruncher default via known hash', () => {
+  it('overwrites the previous shipped issue-cruncher default via known hash', async () => {
     const now = Date.now() / 1000;
     // Verbatim content from the previously shipped prompt immediately before
     // the trusted-issues prerequisite-output hardening.
@@ -606,24 +759,27 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
 
     expect(sha256Prefix(previousDefault)).toBe('554fcf2c7671a896');
 
-    testDb.db.insert(schema.skills).values({
+    await sharedHandle.db.insert(schema.skills).values({
       id: 'agent-issue-cruncher',
       name: 'agent:issue-cruncher',
       description: 'old',
       content: previousDefault,
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-issue-cruncher');
-    expect(skill!.content).not.toBe(previousDefault);
-    expect(skill!.content).toContain('Prerequisite Output');
-    expect(skill!.content).toContain("Do not run `gh issue list` directly");
+    await waitForFast(async () => {
+      const skill = await findSkill('agent-issue-cruncher');
+      expect(skill!.content).not.toBe(previousDefault);
+      expect(skill!.content).toContain('Prerequisite Output');
+      expect(skill!.content).toContain("Do not run `gh issue list` directly");
+    });
   });
 
-  it('overwrites the pre-aggressive-close issue-cruncher default via known hash', () => {
+  it('overwrites the pre-aggressive-close issue-cruncher default via known hash', async () => {
     const now = Date.now() / 1000;
     // Verbatim content shipped immediately before the close-by-default
     // validation rewrite. sha256(...).slice(0,16) === '5d8ac42a81259715',
@@ -660,25 +816,28 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
 
     expect(sha256Prefix(previousDefault)).toBe('5d8ac42a81259715');
 
-    testDb.db.insert(schema.skills).values({
+    await sharedHandle.db.insert(schema.skills).values({
       id: 'agent-issue-cruncher',
       name: 'agent:issue-cruncher',
       description: 'old',
       content: previousDefault,
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-issue-cruncher');
-    expect(skill!.content).not.toBe(previousDefault);
-    expect(skill!.content).toContain('Default to closing, not waiting');
-    expect(skill!.content).toContain('not planned');
-    expect(skill!.content).toContain('ISSUE_CLOSED');
+    await waitForFast(async () => {
+      const skill = await findSkill('agent-issue-cruncher');
+      expect(skill!.content).not.toBe(previousDefault);
+      expect(skill!.content).toContain('Default to closing, not waiting');
+      expect(skill!.content).toContain('not planned');
+      expect(skill!.content).toContain('ISSUE_CLOSED');
+    });
   });
 
-  it('overwrites the previous agent-self-improve default via known hash', () => {
+  it('overwrites the previous agent-self-improve default via known hash', async () => {
     const now = Date.now() / 1000;
     // Verbatim content from the previously shipped prompt before canonical
     // repo-directory project resolution.
@@ -694,24 +853,27 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
 
 Only patch \`prompt\`. Shorter is better. Don't restate the skill. Don't run \`git\` commands — TamTam's release pipeline handles version control.`;
 
-    testDb.db.insert(schema.skills).values({
+    await sharedHandle.db.insert(schema.skills).values({
       id: 'agent-self-improve',
       name: 'agent:self-improve',
       description: 'old',
       content: previousDefault,
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-self-improve');
-    expect(skill!.content).not.toBe(previousDefault);
-    expect(skill!.content).toContain('Project name = current repo directory name');
-    expect(skill!.content).toContain('if they disagree, stop instead of guessing');
+    await waitForFast(async () => {
+      const skill = await findSkill('agent-self-improve');
+      expect(skill!.content).not.toBe(previousDefault);
+      expect(skill!.content).toContain('Project name = current repo directory name');
+      expect(skill!.content).toContain('if they disagree, stop instead of guessing');
+    });
   });
 
-  it('overwrites the previous agent-manage-agents default via known hash', () => {
+  it('overwrites the previous agent-manage-agents default via known hash', async () => {
     const now = Date.now() / 1000;
     // Verbatim content from the previously shipped prompt before canonical
     // repo-directory project resolution.
@@ -731,24 +893,27 @@ Delete: \`DELETE /api/agents/<id>\` only when stale/broken.
 
 Report: created, updated, deleted, no-change. Filter strictly by this project. Keep prompts 3–8 sentences. Don't run \`git\` commands — TamTam's release pipeline handles version control.`;
 
-    testDb.db.insert(schema.skills).values({
+    await sharedHandle.db.insert(schema.skills).values({
       id: 'agent-manage-agents',
       name: 'agent:manage-agents',
       description: 'old',
       content: previousDefault,
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-manage-agents');
-    expect(skill!.content).not.toBe(previousDefault);
-    expect(skill!.content).toContain('project name from the current repo directory name');
-    expect(skill!.content).toContain('if they disagree with the repo directory name, stop instead of guessing');
+    await waitForFast(async () => {
+      const skill = await findSkill('agent-manage-agents');
+      expect(skill!.content).not.toBe(previousDefault);
+      expect(skill!.content).toContain('project name from the current repo directory name');
+      expect(skill!.content).toContain('if they disagree with the repo directory name, stop instead of guessing');
+    });
   });
 
-  it('overwrites the previous agent-review-tuner default via known hash', () => {
+  it('overwrites the previous agent-review-tuner default via known hash', async () => {
     const now = Date.now() / 1000;
     // Verbatim content from the previously shipped prompt before canonical
     // repo-directory project resolution.
@@ -778,24 +943,27 @@ Output (in your TamTam Run Report):
 \`\`\`
 Do NOT PATCH any settings. Surface proposals only — the user applies them in the Config tab.`;
 
-    testDb.db.insert(schema.skills).values({
+    await sharedHandle.db.insert(schema.skills).values({
       id: 'agent-review-tuner',
       name: 'agent:review-tuner',
       description: 'old',
       content: previousDefault,
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-review-tuner');
-    expect(skill!.content).not.toBe(previousDefault);
-    expect(skill!.content).toContain('Project name = current repo directory name');
-    expect(skill!.content).toContain('if they disagree with the repo directory name, stop instead of guessing');
+    await waitForFast(async () => {
+      const skill = await findSkill('agent-review-tuner');
+      expect(skill!.content).not.toBe(previousDefault);
+      expect(skill!.content).toContain('Project name = current repo directory name');
+      expect(skill!.content).toContain('if they disagree with the repo directory name, stop instead of guessing');
+    });
   });
 
-  it('overwrites the first shipped agent-qa default via known hash', () => {
+  it('overwrites the first shipped agent-qa default via known hash', async () => {
     const now = Date.now() / 1000;
     const previousDefault = `You are the QA agent. Use Playwright MCP tools (\`browser_navigate\`, \`browser_snapshot\`, \`browser_click\`, \`browser_console_messages\`, \`browser_take_screenshot\`) to exercise the project's live website.
 
@@ -821,24 +989,27 @@ Report a short summary: visited routes, findings handed off (with the cto job id
 
     expect(sha256Prefix(previousDefault)).toBe('5274a9f8d37e5b19');
 
-    testDb.db.insert(schema.skills).values({
+    await sharedHandle.db.insert(schema.skills).values({
       id: 'agent-qa',
       name: 'agent:qa',
       description: 'old',
       content: previousDefault,
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-qa');
-    expect(skill!.content).not.toBe(previousDefault);
-    expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_navigate');
-    expect(skill!.content).not.toContain('Use Playwright MCP tools (`browser_navigate`');
+    await waitForFast(async () => {
+      const skill = await findSkill('agent-qa');
+      expect(skill!.content).not.toBe(previousDefault);
+      expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_navigate');
+      expect(skill!.content).not.toContain('Use Playwright MCP tools (`browser_navigate`');
+    });
   });
 
-  it('overwrites the qa-url-aware agent-qa default via known hash', () => {
+  it('overwrites the qa-url-aware agent-qa default via known hash', async () => {
     const now = Date.now() / 1000;
     const previousDefault = `You are the QA agent. Use Playwright MCP tools (\`mcp__plugin_playwright_playwright__browser_navigate\`, \`mcp__plugin_playwright_playwright__browser_snapshot\`, \`mcp__plugin_playwright_playwright__browser_click\`, \`mcp__plugin_playwright_playwright__browser_console_messages\`, \`mcp__plugin_playwright_playwright__browser_take_screenshot\`) to exercise the target and fix what you can.
 
@@ -883,73 +1054,85 @@ Do NOT hand off to other agents and do NOT run \`gh issue create\`. Just leave t
 
     expect(sha256Prefix(previousDefault)).toBe('71c3483057adf226');
 
-    testDb.db.insert(schema.skills).values({
+    await sharedHandle.db.insert(schema.skills).values({
       id: 'agent-qa',
       name: 'agent:qa',
       description: 'old',
       content: previousDefault,
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-qa');
-    expect(skill!.content).not.toBe(previousDefault);
-    expect(skill!.content).toContain('Explore — go deep, not just wide');
-    expect(skill!.content).toContain('Budget: up to 30 navigations');
+    await waitForFast(async () => {
+      const skill = await findSkill('agent-qa');
+      expect(skill!.content).not.toBe(previousDefault);
+      expect(skill!.content).toContain('Explore — go deep, not just wide');
+      expect(skill!.content).toContain('Budget: up to 30 navigations');
+    });
   });
 
-  it('overwrites a previously customised default skill (defaults are read-only)', () => {
+  it('overwrites a previously customised default skill (defaults are read-only)', async () => {
     const now = Date.now() / 1000;
     const customised = 'You are the CTO. My custom instructions go here.';
-    testDb.db.insert(schema.skills).values({
+    await sharedHandle.db.insert(schema.skills).values({
       id: 'agent-cto',
       name: 'agent:cto',
       description: 'mine',
       content: customised,
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-cto');
-    expect(skill!.content).not.toBe(customised);
+    await waitForFast(async () => {
+      const skill = await findSkill('agent-cto');
+      expect(skill!.content).not.toBe(customised);
+    });
   });
 
-  it('refreshes updatedAt every boot for default skills (always re-applied)', () => {
+  it('refreshes updatedAt every boot for default skills (always re-applied)', async () => {
     const oldTime = 1_000_000;
-    testDb.db.insert(schema.skills).values({
+    await sharedHandle.db.insert(schema.skills).values({
       id: 'agent-cto',
       name: 'agent:cto',
       description: 'old',
       content: 'existing content',
       createdAt: oldTime,
       updatedAt: oldTime,
-    }).run();
+    });
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-cto');
-    expect(skill!.updatedAt).toBeGreaterThan(oldTime);
+    await waitForFast(async () => {
+      const skill = await findSkill('agent-cto');
+      expect(skill!.updatedAt).toBeGreaterThan(oldTime);
+    });
   });
 
-  it('sets updatedAt to a recent timestamp when backfilling empty content', () => {
+  it('sets updatedAt to a recent timestamp when backfilling empty content', async () => {
     const oldTime = 1_000_000;
     const before = Date.now() / 1000;
-    testDb.db.insert(schema.skills).values({
+    await sharedHandle.db.insert(schema.skills).values({
       id: 'agent-cto',
       name: 'agent:cto',
       description: '',
       content: '',
       createdAt: oldTime,
       updatedAt: oldTime,
-    }).run();
+    });
 
     seedFn();
+    await waitForSeedToSettle();
 
-    const skill = testDb.db.select().from(schema.skills).all().find((s) => s.id === 'agent-cto');
-    expect(skill!.updatedAt).toBeGreaterThanOrEqual(before);
+    await waitForFast(async () => {
+      const skill = await findSkill('agent-cto');
+      expect(skill!.updatedAt).toBeGreaterThanOrEqual(before);
+    });
   });
 });
