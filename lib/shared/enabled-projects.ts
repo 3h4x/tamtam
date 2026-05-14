@@ -9,6 +9,7 @@ export type EnabledProject = {
   priority?: string | null;
   testCommand?: string | null;
   archived?: boolean;
+  paused?: boolean;
 };
 
 const PROJECTS_CACHE_TTL = 10; // seconds
@@ -59,6 +60,7 @@ function normalizeRow(row: ProjectRow): EnabledProject {
     priority: row.priority ?? null,
     testCommand: row.testCommand ?? null,
     archived: row.archived ?? false,
+    paused: row.paused ?? false,
   };
 }
 

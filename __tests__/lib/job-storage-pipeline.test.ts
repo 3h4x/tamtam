@@ -107,6 +107,12 @@ async function truncateAll(): Promise<void> {
   ));
 }
 
+async function flushDbQueue(): Promise<void> {
+  // Fire-and-forget writes in job storage are serialized by PGlite, so a
+  // no-op query drains anything already queued without polling.
+  await sharedHandle.db.execute(sql.raw('SELECT 1'));
+}
+
 // Getter shim so existing `testDb.db.*` test code keeps working while the
 // underlying connection is the shared PGlite handle.
 const testDb = {
@@ -2300,11 +2306,11 @@ describe('persistVerdict', () => {
     const job = createJobFn('proj', 'review', 1, '/log');
     persistVerdictFn(job.id, 'LGTM');
 
-    await vi.waitFor(async () => {
-      const rows = await testDb.db.select().from(schema.jobs);
-      const stored = rows.find((r) => r.id === job.id);
-      expect(stored?.verdict).toBe('LGTM');
-    });
+    await flushDbQueue();
+
+    const rows = await testDb.db.select().from(schema.jobs);
+    const stored = rows.find((r) => r.id === job.id);
+    expect(stored?.verdict).toBe('LGTM');
 
     const cached = getJobFn(job.id);
     expect(cached?.verdict).toBe('LGTM');
@@ -2315,11 +2321,12 @@ describe('persistVerdict', () => {
     persistVerdictFn(job.id, 'NEEDS ATTENTION');
     persistVerdictFn(job.id, 'DO NOT SHIP');
 
-    await vi.waitFor(async () => {
-      const rows = await testDb.db.select().from(schema.jobs);
-      const stored = rows.find((r) => r.id === job.id);
-      expect(stored?.verdict).toBe('DO NOT SHIP');
-    });
+    await flushDbQueue();
+
+    const rows = await testDb.db.select().from(schema.jobs);
+    const stored = rows.find((r) => r.id === job.id);
+    expect(stored?.verdict).toBe('DO NOT SHIP');
+
     expect(getJobFn(job.id)?.verdict).toBe('DO NOT SHIP');
   });
 

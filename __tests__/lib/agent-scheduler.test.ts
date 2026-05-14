@@ -27,7 +27,7 @@ vi.mock('os', async () => {
 vi.mock('@/lib/shared/shell', () => ({ exec: mocks.execMock }));
 
 vi.mock('@/lib/shared/config', () => ({
-  getSettings: vi.fn().mockReturnValue({ launchagent_prefix: 'com.test' }),
+  getSettings: vi.fn().mockReturnValue({}),
 }));
 
 vi.mock('@/lib/scheduling/internal-scheduler', () => ({

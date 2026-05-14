@@ -8,7 +8,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     project: 'proj',
     job: null,
     priority: null,
-    launchctl: 'running',
+    paused: false,
     path: '/tmp/proj',
     fires_at: '',
     sync: null,
@@ -58,14 +58,9 @@ describe('computeFleetHealth', () => {
     });
 
     it('marks task as warning when paused', () => {
-      const fleet = computeFleetHealth([makeTask({ launchctl: 'paused', last_run_ago: '5m' })]);
+      const fleet = computeFleetHealth([makeTask({ paused: true, last_run_ago: '5m' })]);
       expect(fleet.projects[0].status).toBe('warning');
       expect(fleet.warningCount).toBe(1);
-    });
-
-    it('marks task as warning when sync is false', () => {
-      const fleet = computeFleetHealth([makeTask({ sync: false, last_run_ago: '5m' })]);
-      expect(fleet.projects[0].status).toBe('warning');
     });
 
     it('marks task as warning when changes unreviewed', () => {
@@ -112,7 +107,7 @@ describe('computeFleetHealth', () => {
 
     it('error takes precedence over warning conditions', () => {
       const fleet = computeFleetHealth([
-        makeTask({ last_run_exit: 1, launchctl: 'paused', sync: false, last_run_ago: '5m' }),
+        makeTask({ last_run_exit: 1, paused: true, sync: false, last_run_ago: '5m' }),
       ]);
       expect(fleet.projects[0].status).toBe('error');
     });
@@ -170,7 +165,7 @@ describe('computeFleetHealth', () => {
       const tasks = [
         makeTask({ id: 't1', project: 'healthy-proj', last_run_ago: '5m' }),
         makeTask({ id: 't2', project: 'error-proj', last_run_exit: 1, last_run_ago: '5m' }),
-        makeTask({ id: 't3', project: 'warn-proj', launchctl: 'paused', last_run_ago: '5m' }),
+        makeTask({ id: 't3', project: 'warn-proj', paused: true, last_run_ago: '5m' }),
       ];
       const fleet = computeFleetHealth(tasks);
       expect(fleet.projects[0].project).toBe('error-proj');
@@ -220,7 +215,7 @@ describe('computeFleetHealth', () => {
       const tasks = [
         makeTask({ id: 't1', project: 'e1', last_run_exit: 1, last_run_ago: '5m' }),
         makeTask({ id: 't2', project: 'e2', last_run_exit: 1, last_run_ago: '5m' }),
-        makeTask({ id: 't3', project: 'w1', launchctl: 'paused', last_run_ago: '5m' }),
+        makeTask({ id: 't3', project: 'w1', paused: true, last_run_ago: '5m' }),
         makeTask({ id: 't4', project: 'h1', last_run: '2024-01-01', last_run_ago: '5m' }),
         makeTask({ id: 't5', project: 'u1' }),
       ];

@@ -691,42 +691,44 @@ describe('pauseProject and resumeProject', () => {
     return { pauseProject, resumeProject };
   }
 
-  it('pauseProject posts to the pause endpoint', async () => {
-    const fetchMock = stubFetch(true, { status: 'paused' });
+  it('pauseProject patches the by-project route with paused=true', async () => {
+    const fetchMock = stubFetch(true, { project: 'proj-7', paused: true });
     const { pauseProject } = await getClientApi();
 
-    const result = await pauseProject('task-7');
+    const result = await pauseProject('proj-7');
 
-    expect(result).toEqual({ status: 'paused' });
+    expect(result).toEqual({ status: 'ok' });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain('/api/projects/task-7/pause');
-    expect(init.method).toBe('POST');
+    expect(url).toContain('/api/projects/by-project/proj-7');
+    expect(init.method).toBe('PATCH');
+    expect(init.body).toBe(JSON.stringify({ paused: true }));
   });
 
   it('pauseProject throws with the HTTP status text on failure', async () => {
     stubFetch(false, {}, 404, 'Not Found');
     const { pauseProject } = await getClientApi();
 
-    await expect(pauseProject('task-7')).rejects.toThrow('Failed to pause: Not Found');
+    await expect(pauseProject('proj-7')).rejects.toThrow('Failed to pause: Not Found');
   });
 
-  it('resumeProject posts to the resume endpoint', async () => {
-    const fetchMock = stubFetch(true, { status: 'running' });
+  it('resumeProject patches the by-project route with paused=false', async () => {
+    const fetchMock = stubFetch(true, { project: 'proj-8', paused: false });
     const { resumeProject } = await getClientApi();
 
-    const result = await resumeProject('task-8');
+    const result = await resumeProject('proj-8');
 
-    expect(result).toEqual({ status: 'running' });
+    expect(result).toEqual({ status: 'ok' });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain('/api/projects/task-8/resume');
-    expect(init.method).toBe('POST');
+    expect(url).toContain('/api/projects/by-project/proj-8');
+    expect(init.method).toBe('PATCH');
+    expect(init.body).toBe(JSON.stringify({ paused: false }));
   });
 
   it('resumeProject throws with the HTTP status text on failure', async () => {
     stubFetch(false, {}, 409, 'Conflict');
     const { resumeProject } = await getClientApi();
 
-    await expect(resumeProject('task-8')).rejects.toThrow('Failed to resume: Conflict');
+    await expect(resumeProject('proj-8')).rejects.toThrow('Failed to resume: Conflict');
   });
 });
 

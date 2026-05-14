@@ -182,7 +182,7 @@ export async function PATCH(
     }
   }
 
-  // Update schedule (uses pm2 or launchctl based on runner)
+  // Update schedule (PM2-tracked, fired by the in-process scheduler)
   if (agent) {
     try {
       // If name, project, or runner changed, the old PM2 entry has a different

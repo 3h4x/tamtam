@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
     } catch { /* non-fatal */ }
   }
 
-  // Install schedule if configured (uses pm2 or launchctl based on runner).
+  // Install schedule if configured (PM2-tracked, fired by the in-process scheduler).
   // Runs only need either a prompt or skills to produce meaningful output.
   const hasSkills = (skillIds || []).length > 0;
   if (agent.schedule && agent.enabled && (agent.prompt || hasSkills)) {

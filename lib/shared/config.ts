@@ -43,7 +43,6 @@ export interface TamTamConfig {
   frequency: string;
   daytime: boolean;
   weekends: boolean;
-  launchagent_prefix: string;
   base_prompt: string;
   default_model: string;
   permission_mode: string;
@@ -117,7 +116,6 @@ const DEFAULTS: TamTamConfig = {
   frequency: '1h',
   daytime: false,
   weekends: false,
-  launchagent_prefix: 'com.tamtam',
   base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
   default_model: 'fast',
   permission_mode: 'acceptEdits',
@@ -308,7 +306,6 @@ function _buildConfig(map: Record<string, string>): TamTamConfig {
     frequency: map.frequency ?? DEFAULTS.frequency,
     daytime: map.daytime === 'true',
     weekends: map.weekends === 'on',
-    launchagent_prefix: map.launchagent_prefix ?? DEFAULTS.launchagent_prefix,
     base_prompt: map.base_prompt ?? DEFAULTS.base_prompt,
     default_model: normalizeModelInput(map.default_model, DEFAULTS.default_model as 'fast'),
     permission_mode: map.permission_mode ?? DEFAULTS.permission_mode,

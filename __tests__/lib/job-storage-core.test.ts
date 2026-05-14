@@ -107,6 +107,10 @@ async function truncateAll(): Promise<void> {
   ));
 }
 
+async function yieldToNextTask(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
 // Getter shim so existing `testDb.db.*` test code keeps working while the
 // underlying connection is the shared PGlite handle.
 const testDb = {
@@ -321,7 +325,7 @@ describe('job-storage', () => {
       const results: Array<{ id: string; parentJobId: string | null | undefined }> = [];
       await Promise.all([
         runWithParent('parent-A', async () => {
-          await new Promise((r) => setTimeout(r, 5));
+          await yieldToNextTask();
           const job = createJob('proj', 'fix', 10, '/log');
           results.push({ id: job.id, parentJobId: job.parentJobId });
         }),

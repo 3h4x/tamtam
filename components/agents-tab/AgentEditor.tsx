@@ -11,7 +11,7 @@ import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher'
 import { CLI_PROVIDERS, type CliProvider } from '@/lib/usage/cli-providers'
 
 const MODELS = [...MODEL_TIERS]
-const RUNNERS = ['pm2', 'launchctl']
+const RUNNERS = ['pm2']
 const SCHEDULES = ['', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h', '3d', '7d', '30d']
 
 export interface AgentEditorSavePayload {

@@ -53,7 +53,6 @@ const DEFAULT_SETTINGS = {
   frequency: '1h',
   daytime: false,
   weekends: false,
-  launchagent_prefix: 'com.tamtam',
 };
 
 // Hoisted shared state for module-scope mocks. `currentSettings` is mutated
@@ -417,7 +416,6 @@ describe('getImproveConfig — logDir path expansion', () => {
       frequency: '1h',
       daytime: false,
       weekends: false,
-      launchagent_prefix: 'com.tamtam',
       base_prompt: '',
       permission_mode: 'bypassPermissions',
     };
