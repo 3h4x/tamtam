@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
@@ -13,21 +13,9 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
   let getProjectTestConfigValue: Record<string, unknown>;
   let getProjectPipelinePromptsValue: { reviewPromptAddendum: string | null; fixPromptAddendum: string | null };
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     vi.resetModules();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-config-test-'));
-    projectRow = undefined;
-    getImproveConfigValue = { projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' };
-    getProjectTestConfigValue = {
-      testCommand: null,
-      testCronEnabled: false,
-      testCronSchedule: null,
-      autoCommitEnabled: false,
-      autoPushEnabled: false,
-      releaseAfterRun: false,
-    };
-    getProjectPipelinePromptsValue = { reviewPromptAddendum: null, fixPromptAddendum: null };
-
     resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
 
     vi.doMock('@/lib/shared/project-data', () => ({
@@ -71,9 +59,27 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     GET = mod.GET;
   });
 
-  afterEach(() => {
-    vi.resetModules();
+  beforeEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
+    mkdirSync(tempDir, { recursive: true });
+    resolveProjectPathMock.mockReset();
+    resolveProjectPathMock.mockReturnValue(tempDir);
+    projectRow = undefined;
+    getImproveConfigValue = { projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' };
+    getProjectTestConfigValue = {
+      testCommand: null,
+      testCronEnabled: false,
+      testCronSchedule: null,
+      autoCommitEnabled: false,
+      autoPushEnabled: false,
+      releaseAfterRun: false,
+    };
+    getProjectPipelinePromptsValue = { reviewPromptAddendum: null, fixPromptAddendum: null };
+  });
+
+  afterAll(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+    vi.resetModules();
   });
 
   it('returns 404 when project not found', async () => {
@@ -328,10 +334,8 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
   let writeFileConfigMock: ReturnType<typeof vi.fn>;
   let projectRow: { website?: string | null; qaUrl?: string | null } | undefined;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     vi.resetModules();
-    projectRow = undefined;
-
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     writeProjectFieldYamlMock = vi.fn().mockReturnValue(true);
     getProjectTestConfigMock = vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null });
@@ -391,7 +395,22 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     PATCH = mod.PATCH;
   });
 
-  afterEach(() => {
+  beforeEach(() => {
+    projectRow = undefined;
+    resolveProjectPathMock.mockReset();
+    resolveProjectPathMock.mockReturnValue('/path/to/proj');
+    writeProjectFieldYamlMock.mockReset();
+    writeProjectFieldYamlMock.mockReturnValue(true);
+    getProjectTestConfigMock.mockReset();
+    getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null });
+    reloadConfigMock.mockReset();
+    clearProjectDataCacheMock.mockReset();
+    installTestScheduleMock.mockReset();
+    uninstallTestScheduleMock.mockReset();
+    writeFileConfigMock.mockReset();
+  });
+
+  afterAll(() => {
     vi.resetModules();
   });
 

@@ -90,26 +90,28 @@ describe('job-storage', () => {
   let jobToDict: typeof import('@/lib/jobs/job-storage').jobToDict;
   let probeJobStatus: typeof import('@/lib/jobs/job-storage').probeJobStatus;
   let runWithParent: typeof import('@/lib/jobs/job-storage').runWithParent;
+  let jobsCache: typeof import('@/lib/jobs/job-storage').jobsCache;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-job-test-'));
-  });
-
-  beforeEach(async () => {
-
-    // Clear all mocks and modules
     vi.resetModules();
-
-    // Create a fresh test database
     testDb = createTestDb();
-
-    // Mock the db module
     vi.doMock('@/lib/db', () => ({
       db: testDb.db,
       schema,
     }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      getJobStatus: vi.fn().mockResolvedValue({ status: 'unknown', exitCode: null }),
+      getJobPid: vi.fn().mockResolvedValue(null),
+      deleteJob: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: vi.fn().mockReturnValue({ github_board_sync_enabled: false }),
+    }));
 
-    // Now import job-storage (which will use the mocked db)
     const jobStorage = await import('@/lib/jobs/job-storage');
     createJob = jobStorage.createJob;
     getJob = jobStorage.getJob;
@@ -122,14 +124,22 @@ describe('job-storage', () => {
     jobToDict = jobStorage.jobToDict;
     probeJobStatus = jobStorage.probeJobStatus;
     runWithParent = jobStorage.runWithParent;
+    jobsCache = jobStorage.jobsCache;
   });
 
-  afterEach(() => {
-    vi.resetModules();
+  beforeEach(() => {
+    testDb.sqlite.exec(`
+      DELETE FROM jobs;
+      DELETE FROM recommendations;
+      DELETE FROM gh_issues_cache;
+    `);
+    jobsCache.clear();
   });
 
   afterAll(() => {
+    testDb.sqlite.close();
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+    vi.resetModules();
   });
 
   describe('createJob', () => {
@@ -1082,8 +1092,9 @@ describe('readParsedLog', () => {
   let tempDir: string;
   let testDb: ReturnType<typeof createTestDb>;
   let readParsedLog: typeof import('@/lib/jobs/job-storage').readParsedLog;
+  let jobsCache: typeof import('@/lib/jobs/job-storage').jobsCache;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-parsed-log-test-'));
     vi.resetModules();
     testDb = createTestDb();
@@ -1093,11 +1104,22 @@ describe('readParsedLog', () => {
 
     const mod = await import('@/lib/jobs/job-storage');
     readParsedLog = mod.readParsedLog;
+    jobsCache = mod.jobsCache;
   });
 
-  afterEach(() => {
-    vi.resetModules();
+  beforeEach(() => {
+    testDb.sqlite.exec(`
+      DELETE FROM jobs;
+      DELETE FROM recommendations;
+      DELETE FROM gh_issues_cache;
+    `);
+    jobsCache.clear();
+  });
+
+  afterAll(() => {
+    testDb.sqlite.close();
     rmSync(tempDir, { recursive: true, force: true });
+    vi.resetModules();
   });
 
   function makeJob(overrides: Partial<JobData> = {}): JobData {
@@ -1190,11 +1212,12 @@ describe('probeJobStatus with pm2', () => {
   let testDb: ReturnType<typeof createTestDb>;
   let probeJobStatusFn: typeof import('@/lib/jobs/job-storage').probeJobStatus;
   let getJobStatusMock: ReturnType<typeof vi.fn>;
+  let jobsCache: typeof import('@/lib/jobs/job-storage').jobsCache;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     vi.resetModules();
     testDb = createTestDb();
-    getJobStatusMock = vi.fn();
+    getJobStatusMock = vi.fn().mockResolvedValue({ status: 'unknown', exitCode: null });
 
     vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({ getJobStatus: getJobStatusMock, getJobPid: vi.fn().mockResolvedValue(null), deleteJob: vi.fn() }));
@@ -1202,9 +1225,22 @@ describe('probeJobStatus with pm2', () => {
 
     const mod = await import('@/lib/jobs/job-storage');
     probeJobStatusFn = mod.probeJobStatus;
+    jobsCache = mod.jobsCache;
   });
 
-  afterEach(() => {
+  beforeEach(() => {
+    testDb.sqlite.exec(`
+      DELETE FROM jobs;
+      DELETE FROM recommendations;
+      DELETE FROM gh_issues_cache;
+    `);
+    jobsCache.clear();
+    getJobStatusMock.mockReset();
+    getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
+  });
+
+  afterAll(() => {
+    testDb.sqlite.close();
     vi.resetModules();
   });
 
