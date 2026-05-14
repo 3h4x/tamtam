@@ -1,7 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+
+vi.mock('@/lib/git/git-branch', () => ({
+  getBranchContext: vi.fn(),
+  gitShowSync: vi.fn(),
+  gitLsTreeSync: vi.fn(),
+  getDefaultBranchSync: vi.fn(),
+  getCurrentBranchSync: vi.fn(),
+}));
+
+import * as gitBranch from '@/lib/git/git-branch';
 import { loadFileConfig, writeFileConfig } from '@/lib/skills/tamtam-file-config';
 
 function makeTmpDir(): string {
@@ -23,7 +33,16 @@ function writeConfig(dir: string, content: string) {
 describe('loadFileConfig', () => {
   let tmpDir: string;
 
-  beforeEach(() => { tmpDir = makeTmpDir(); });
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    vi.resetAllMocks();
+    vi.mocked(gitBranch.getBranchContext).mockReturnValue({
+      currentBranch: 'main',
+      defaultBranch: 'main',
+      isDefaultBranch: true,
+    });
+    vi.mocked(gitBranch.gitShowSync).mockReturnValue(null);
+  });
   afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('returns null when config.yml does not exist', () => {
@@ -171,7 +190,16 @@ gates:
 describe('writeFileConfig', () => {
   let tmpDir: string;
 
-  beforeEach(() => { tmpDir = makeTmpDir(); });
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    vi.resetAllMocks();
+    vi.mocked(gitBranch.getBranchContext).mockReturnValue({
+      currentBranch: 'main',
+      defaultBranch: 'main',
+      isDefaultBranch: true,
+    });
+    vi.mocked(gitBranch.gitShowSync).mockReturnValue(null);
+  });
   afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('creates .tamtam/config.yml when it does not exist', () => {
