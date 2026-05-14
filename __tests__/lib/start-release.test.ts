@@ -850,7 +850,14 @@ describe('startRelease — release pipeline entry decision tree', () => {
       .mockImplementationOnce(() => Promise.resolve({ exitCode: 0, stdout: ' M foo.ts\n', stderr: '' })) // status --porcelain
       .mockImplementationOnce(() => Promise.resolve({ exitCode: 0, stdout: '0\n', stderr: '' }))        // rev-list --count
       .mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'pm2') return Promise.resolve({ exitCode: 0, stdout: '[]', stderr: '' });
+        if (cmd === 'pm2' && args[0] === 'start') return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+        if (cmd === 'pm2' && args[0] === 'jlist') {
+          return Promise.resolve({
+            exitCode: 0,
+            stdout: JSON.stringify([{ name: 'proj-release-rel-id', pid: 1234 }]),
+            stderr: '',
+          });
+        }
         return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
       });
 
