@@ -124,7 +124,6 @@ function setInputValue(input: HTMLInputElement, value: string) {
 
 describe('SettingsPage', () => {
   beforeEach(() => {
-    vi.useFakeTimers()
     push.mockReset()
   })
 
@@ -202,6 +201,7 @@ describe('SettingsPage', () => {
   })
 
   it('dispatches settings-changed with canonical settings after a successful save', async () => {
+    vi.useFakeTimers()
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
       if (input === '/api/settings' && !init) {
         return makeResponse({
@@ -347,6 +347,7 @@ describe('SettingsPage', () => {
   })
 
   it('does not dispatch settings-changed when save fails', async () => {
+    vi.useFakeTimers()
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
       if (input === '/api/settings' && !init) {
         return makeResponse({
