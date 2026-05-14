@@ -7,6 +7,8 @@ export interface FetchJobsOptions {
   offset?: number
   kind?: string
   status?: 'running' | 'done' | 'aborted'
+  sessionId?: string
+  hasSession?: boolean
 }
 
 export async function fetchJobs(
@@ -19,6 +21,8 @@ export async function fetchJobs(
   if (typeof opts.offset === 'number') params.set('offset', String(opts.offset))
   if (opts.kind) params.set('kind', opts.kind)
   if (opts.status) params.set('status', opts.status)
+  if (opts.sessionId) params.set('session_id', opts.sessionId)
+  if (opts.hasSession) params.set('has_session', '1')
   const qs = params.toString()
   const url = qs ? `${JOBS_BASE}?${qs}` : JOBS_BASE
   const response = await fetch(url)

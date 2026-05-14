@@ -203,6 +203,8 @@ export function JobsPage() {
   const loadedSummary = jobs.length < totalRuns
     ? `${jobs.length} loaded`
     : `${filtered.length} grouped entr${filtered.length === 1 ? 'y' : 'ies'}`
+  const headerTotal = summary?.total ?? totalRuns
+  const headerRunning = summary?.byStatus.running ?? totals.running
 
   const navigate = (e: Entry) => {
     if (e.bucket === 'run' && e.navSessionId && e.kind !== 'release') {
@@ -222,9 +224,9 @@ export function JobsPage() {
         <div>
           <h2 className="text-xl font-semibold text-text-primary">Runs</h2>
           <div className="mt-1 text-xs text-text-tertiary font-mono">
-            {(summary?.total ?? totalRuns)} total run{(summary?.total ?? totalRuns) === 1 ? '' : 's'} · {loadedSummary}
-            {(summary?.byStatus.running ?? totals.running) > 0 && (
-              <> · <span className="text-status-info">{summary?.byStatus.running ?? totals.running} running</span></>
+            {headerTotal} total run{headerTotal === 1 ? '' : 's'} · {loadedSummary}
+            {headerRunning > 0 && (
+              <> · <span className="text-status-info">{headerRunning} running</span></>
             )}
             {(summary?.tokens.total ?? totals.tokens) > 0 && <> · {formatTokens(summary?.tokens.total ?? totals.tokens)} tok</>}
             {(summary?.cost.total ?? totals.costUsd) > 0 && <> · <span className="text-accent">{formatCost(summary?.cost.total ?? totals.costUsd)}</span></>}

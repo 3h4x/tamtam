@@ -41,7 +41,10 @@ export function useSessionManager(projectName: string) {
   const loadSessions = async () => {
     setLoadingSessions(true)
     try {
-      const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
+      // Ask the server for session-bearing rows only and cap to 50 — enough
+      // to surface the 5 most-recent distinct sessions even when many rows
+      // share a session_id (e.g. multi-step chats).
+      const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}&has_session=1&limit=50`)
       const data = await res.json()
       const jobs: JobDict[] = (data.jobs ?? [])
         .filter((j: JobDict) => isSessionKind(j.kind) && j.session_id)
@@ -77,11 +80,14 @@ export function useSessionManager(projectName: string) {
         terminalStore.reset(projectName)
       }
       try {
-        const listRes = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}`)
+        // Server-side filter to this exact session_id — avoids fetching the
+        // full project history just to find the half-dozen rows that share
+        // the session.
+        const listRes = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}&session_id=${encodeURIComponent(session.sessionId)}&limit=200`)
         const listData = await listRes.json()
         const jobs: JobDict[] = listData.jobs ?? []
         const matches = jobs
-          .filter(j => j.session_id === session.sessionId && isSessionKind(j.kind))
+          .filter(j => isSessionKind(j.kind))
           .sort((a, b) => a.started_at - b.started_at)
         if (matches.length > 0) {
           const firstMatch = matches[0]
