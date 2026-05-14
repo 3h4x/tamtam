@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { ProjectsProvider, useProjects } from '@/components/ProjectsProvider'
+import { dispatchSettingsChanged } from '@/lib/shared/settings-events'
 import type { ProjectsResponse } from '@/lib/shared/types'
 
 const { fetchProjects, pauseProject, resumeProject, setPriority } = vi.hoisted(() => ({
@@ -59,8 +60,16 @@ function buildProjectsResponse(projectName = 'acme/widgets'): ProjectsResponse {
   }
 }
 
+function buildEmptyProjectsResponse(): ProjectsResponse {
+  return {
+    tasks: [],
+    priorities: [],
+    issueCounts: {},
+  }
+}
+
 function Probe() {
-  const { tasks, loading, refreshing, handlePause } = useProjects()
+  const { tasks, loading, refreshing, loadProjects, handlePause } = useProjects()
 
   return React.createElement(
     'div',
@@ -69,7 +78,12 @@ function Probe() {
     React.createElement('div', { 'data-testid': 'projects' }, tasks.map(task => task.project).join(',')),
     React.createElement(
       'button',
-      { type: 'button', onClick: () => { void handlePause('task-1') } },
+      { type: 'button', 'data-testid': 'reload', onClick: () => { void loadProjects() } },
+      'reload',
+    ),
+    React.createElement(
+      'button',
+      { type: 'button', 'data-testid': 'pause', onClick: () => { void handlePause('task-1') } },
       'pause',
     ),
   )
@@ -109,6 +123,7 @@ describe('ProjectsProvider', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     document.body.innerHTML = ''
   })
 
@@ -132,7 +147,7 @@ describe('ProjectsProvider', () => {
       expect(container.querySelector('[data-testid="projects"]')?.textContent).toContain('acme/widgets')
     })
 
-    const pauseButton = container.querySelector('button')
+    const pauseButton = container.querySelector('[data-testid="pause"]')
     pauseButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     await vi.waitFor(() => {
@@ -147,6 +162,109 @@ describe('ProjectsProvider', () => {
     await vi.waitFor(() => {
       expect(container.querySelector('[data-testid="state"]')?.textContent).toBe('idle')
       expect(container.querySelector('[data-testid="projects"]')?.textContent).toContain('acme/renamed')
+    })
+
+    unmount()
+  })
+
+  it('keeps the previous project list when a background poll returns an empty blip', async () => {
+    vi.useFakeTimers()
+    fetchProjects
+      .mockResolvedValueOnce(buildProjectsResponse())
+      .mockResolvedValueOnce(buildEmptyProjectsResponse())
+
+    const { container, unmount } = renderProvider()
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="projects"]')?.textContent).toContain('acme/widgets')
+    })
+
+    await vi.advanceTimersByTimeAsync(30_000)
+
+    await vi.waitFor(() => {
+      expect(fetchProjects).toHaveBeenCalledTimes(2)
+      expect(container.querySelector('[data-testid="projects"]')?.textContent).toContain('acme/widgets')
+    })
+
+    unmount()
+  })
+
+  it('clears the project list when an explicit refresh returns no projects', async () => {
+    fetchProjects
+      .mockResolvedValueOnce(buildProjectsResponse())
+      .mockResolvedValueOnce(buildEmptyProjectsResponse())
+
+    const { container, unmount } = renderProvider()
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="projects"]')?.textContent).toContain('acme/widgets')
+    })
+
+    const reloadButton = container.querySelector('[data-testid="reload"]')
+    reloadButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(fetchProjects).toHaveBeenCalledTimes(2)
+      expect(container.querySelector('[data-testid="state"]')?.textContent).toBe('idle')
+      expect(container.querySelector('[data-testid="projects"]')?.textContent).toBe('')
+    })
+
+    unmount()
+  })
+
+  it('clears the project list when settings changes make the fleet empty', async () => {
+    fetchProjects
+      .mockResolvedValueOnce(buildProjectsResponse())
+      .mockResolvedValueOnce(buildEmptyProjectsResponse())
+
+    const { container, unmount } = renderProvider()
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="projects"]')?.textContent).toContain('acme/widgets')
+    })
+
+    dispatchSettingsChanged({ project_config_changed_at: '1' })
+
+    await vi.waitFor(() => {
+      expect(fetchProjects).toHaveBeenCalledTimes(2)
+      expect(container.querySelector('[data-testid="state"]')?.textContent).toBe('idle')
+      expect(container.querySelector('[data-testid="projects"]')?.textContent).toBe('')
+    })
+
+    unmount()
+  })
+
+  it('does not let an older background poll restore stale projects after a settings refresh clears them', async () => {
+    vi.useFakeTimers()
+    const stalePoll = deferred<ProjectsResponse>()
+    fetchProjects
+      .mockResolvedValueOnce(buildProjectsResponse())
+      .mockReturnValueOnce(stalePoll.promise)
+      .mockResolvedValueOnce(buildEmptyProjectsResponse())
+
+    const { container, unmount } = renderProvider()
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="projects"]')?.textContent).toContain('acme/widgets')
+    })
+
+    await vi.advanceTimersByTimeAsync(30_000)
+
+    await vi.waitFor(() => {
+      expect(fetchProjects).toHaveBeenCalledTimes(2)
+    })
+
+    dispatchSettingsChanged({ project_config_changed_at: '1' })
+
+    await vi.waitFor(() => {
+      expect(fetchProjects).toHaveBeenCalledTimes(3)
+      expect(container.querySelector('[data-testid="projects"]')?.textContent).toBe('')
+    })
+
+    stalePoll.resolve(buildProjectsResponse('acme/stale'))
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="projects"]')?.textContent).toBe('')
     })
 
     unmount()

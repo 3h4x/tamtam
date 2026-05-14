@@ -4,6 +4,7 @@ import { createContext, useContext, useState, useEffect, useRef, useCallback, ty
 import { fetchProjects, setPriority, pauseProject, resumeProject } from '@/lib/client-api'
 import type { Task, ProjectsResponse } from '@/lib/shared/types'
 import { computeFleetHealth, type FleetHealth } from '@/hooks/useProjectHealth'
+import { subscribeToSettingsChanged } from '@/lib/shared/settings-events'
 
 interface ProjectsContextType {
   tasks: Task[]
@@ -40,13 +41,38 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
   const [lastRefresh, setLastRefresh] = useState<number>(Date.now())
   const fastPollUntil = useRef<number>(0)
   const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const requestSeqRef = useRef(0)
+  const latestAuthoritativeSeqRef = useRef(0)
+  const authoritativeInFlightRef = useRef(0)
 
-  const loadProjects = useCallback(async (mode: 'initial' | 'refresh' = 'refresh') => {
+  const loadProjects = useCallback(async (mode: 'initial' | 'refresh' | 'poll' = 'refresh') => {
+    const isAuthoritative = mode !== 'poll'
+    const requestSeq = ++requestSeqRef.current
+    if (isAuthoritative) {
+      latestAuthoritativeSeqRef.current = requestSeq
+      authoritativeInFlightRef.current += 1
+    }
     const setPending = mode === 'initial' ? setLoading : setRefreshing
     try {
       setError(null)
       setPending(true)
       const data = await fetchProjects()
+      if (mode === 'poll') {
+        const startedBeforeLatestAuthoritative = requestSeq < latestAuthoritativeSeqRef.current
+        if (startedBeforeLatestAuthoritative || authoritativeInFlightRef.current > 0) {
+          setLastRefresh(Date.now())
+          return
+        }
+      } else if (requestSeq !== latestAuthoritativeSeqRef.current) {
+        return
+      }
+      // Poll-tick blip protection: if a periodic refresh comes back empty
+      // (transient cache miss, server warming, etc.) keep the prior list so
+      // open project pages don't flash "not found".
+      if (mode === 'poll' && data.tasks.length === 0) {
+        setLastRefresh(Date.now())
+        return
+      }
       setTasks(data.tasks)
       setPriorities(data.priorities)
       setIssueCounts(data.issueCounts ?? {})
@@ -55,6 +81,9 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
       const message = err instanceof Error ? err.message : 'Failed to load projects'
       setError(message)
     } finally {
+      if (isAuthoritative) {
+        authoritativeInFlightRef.current = Math.max(0, authoritativeInFlightRef.current - 1)
+      }
       setPending(false)
     }
   }, [])
@@ -69,13 +98,19 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
       const isFast = Date.now() < fastPollUntil.current
       const delay = isFast ? 10_000 : 30_000
       intervalRef.current = setTimeout(() => {
-        loadProjects('refresh').then(tick)
+        loadProjects('poll').then(tick)
       }, delay)
     }
     tick()
     return () => {
       if (intervalRef.current) clearTimeout(intervalRef.current)
     }
+  }, [loadProjects])
+
+  useEffect(() => {
+    return subscribeToSettingsChanged(() => {
+      void loadProjects('refresh')
+    })
   }, [loadProjects])
 
   const handlePriorityChange = async (taskId: string, priority: string) => {
