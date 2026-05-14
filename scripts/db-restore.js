@@ -4,6 +4,7 @@ const { copyFileSync, existsSync, mkdirSync, renameSync, rmSync } = require('fs'
 const { dirname, join, resolve } = require('path');
 const { spawnSync } = require('child_process');
 
+const repoRoot = resolve(__dirname, '..');
 const backupArg = process.argv[2];
 if (!backupArg) {
   console.error('Usage: pnpm db:restore <path-to-backup.db>');
@@ -11,7 +12,8 @@ if (!backupArg) {
 }
 
 const backupPath = resolve(backupArg);
-const dbPath = process.env.TAMTAM_DB_PATH || join(process.cwd(), 'data', 'db', 'tamtam.db');
+const dbPath = process.env.TAMTAM_DB_PATH || join(repoRoot, 'data', 'db', 'tamtam.db');
+const verifyScriptPath = join(__dirname, 'db-verify.js');
 
 if (!existsSync(backupPath)) {
   console.error(`Backup file not found: ${backupPath}`);
@@ -28,10 +30,10 @@ let stoppedForSwap = false;
 let swappedLiveDb = false;
 
 try {
-  run(process.execPath, ['scripts/db-verify.js', backupPath]);
+  run(process.execPath, [verifyScriptPath, backupPath]);
   copySqliteFiles(backupPath, stagedPath);
   run('pnpm', ['db:migrate'], { env: { TAMTAM_DB_PATH: stagedPath } });
-  run(process.execPath, ['scripts/db-verify.js', stagedPath]);
+  run(process.execPath, [verifyScriptPath, stagedPath]);
 
   ensureStoppedBeforeSwap(dbPath);
   stoppedForSwap = true;
@@ -46,7 +48,7 @@ try {
   moveSqliteFiles(stagedPath, dbPath);
   swappedLiveDb = true;
 
-  run(process.execPath, ['scripts/db-verify.js', dbPath]);
+  run(process.execPath, [verifyScriptPath, dbPath]);
   run('pnpm', ['start']);
   stoppedForSwap = false;
 
@@ -77,6 +79,7 @@ try {
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     stdio: 'inherit',
+    cwd: options.cwd ?? repoRoot,
     env: {
       ...process.env,
       ...(options.env ?? {}),

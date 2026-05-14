@@ -6,6 +6,7 @@ import { delimiter, join } from 'path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const repoRoot = process.cwd();
+const restoreScriptPath = join(repoRoot, 'scripts', 'db-restore.js');
 
 function createDb(dbPath: string, marker: string) {
   const db = new Database(dbPath);
@@ -69,6 +70,7 @@ const { appendFileSync, existsSync, readFileSync, writeFileSync } = require('fs'
 const Database = require(${betterSqlitePath});
 const args = process.argv.slice(2);
 appendFileSync(process.env.PNPM_LOG_PATH, args.join(' ') + '\\n');
+appendFileSync(process.env.PNPM_CWD_LOG_PATH, process.cwd() + '\\n');
 if (args[0] === 'db:migrate' && process.env.TAMTAM_DB_PATH) {
   const db = new Database(process.env.TAMTAM_DB_PATH);
   db.pragma('journal_mode = WAL');
@@ -91,10 +93,14 @@ process.exit(0);
   chmodSync(binPath, 0o755);
 }
 
-function runRestore(backupPath: string, env: NodeJS.ProcessEnv): Promise<{ status: number | null; stdout: string; stderr: string }> {
+function runRestore(
+  backupPath: string,
+  env: NodeJS.ProcessEnv,
+  cwd: string
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, ['scripts/db-restore.js', backupPath], {
-      cwd: repoRoot,
+    const proc = spawn(process.execPath, [restoreScriptPath, backupPath], {
+      cwd,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -130,6 +136,7 @@ function createFixtureLayout(dir: string) {
     dbPath: join(dataDir, 'tamtam.db'),
     backupPath: join(backupsDir, 'tamtam-backup.db'),
     pnpmLogPath,
+    pnpmCwdLogPath: join(dir, 'pnpm-cwd.log'),
     startCountPath: join(dir, 'start-count.txt'),
   };
 }
@@ -142,6 +149,7 @@ function buildRestoreEnv(
     ...process.env,
     TAMTAM_DB_PATH: layout.dbPath,
     PNPM_LOG_PATH: layout.pnpmLogPath,
+    PNPM_CWD_LOG_PATH: layout.pnpmCwdLogPath,
     PNPM_START_COUNT_PATH: layout.startCountPath,
     PATH: `${suiteBinDir}${delimiter}${process.env.PATH ?? ''}`,
     ...extra,
@@ -165,7 +173,7 @@ describe('scripts/db-restore.js', () => {
       createDb(layout.dbPath, 'old');
       createDb(layout.backupPath, 'new');
 
-      const result = await runRestore(layout.backupPath, buildRestoreEnv(layout));
+      const result = await runRestore(layout.backupPath, buildRestoreEnv(layout), dir);
 
       expect(result.status).toBe(0);
       expect(readMarker(layout.dbPath)).toBe('new');
@@ -174,6 +182,11 @@ describe('scripts/db-restore.js', () => {
         'db:migrate',
         'stop',
         'start',
+      ]);
+      expect(readFileSync(layout.pnpmCwdLogPath, 'utf-8').trim().split('\n')).toEqual([
+        repoRoot,
+        repoRoot,
+        repoRoot,
       ]);
     }));
 
@@ -184,7 +197,8 @@ describe('scripts/db-restore.js', () => {
 
       const result = await runRestore(
         layout.backupPath,
-        buildRestoreEnv(layout, { PNPM_FAIL_FIRST_START: '1' })
+        buildRestoreEnv(layout, { PNPM_FAIL_FIRST_START: '1' }),
+        dir
       );
 
       expect(result.status).toBe(1);
@@ -206,7 +220,8 @@ describe('scripts/db-restore.js', () => {
 
       const result = await runRestore(
         layout.backupPath,
-        buildRestoreEnv(layout, { PNPM_FAIL_STOP: '1' })
+        buildRestoreEnv(layout, { PNPM_FAIL_STOP: '1' }),
+        dir
       );
 
       expect(result.status).toBe(1);
@@ -227,7 +242,7 @@ describe('scripts/db-restore.js', () => {
       try {
         expect(existsSync(`${layout.backupPath}-wal`)).toBe(true);
 
-        const result = await runRestore(layout.backupPath, buildRestoreEnv(layout));
+        const result = await runRestore(layout.backupPath, buildRestoreEnv(layout), dir);
 
         expect(result.status).toBe(0);
         expect(readMarker(layout.dbPath)).toBe('new-from-wal');
@@ -235,5 +250,18 @@ describe('scripts/db-restore.js', () => {
       } finally {
         releaseWalFixture();
       }
+    }));
+
+  it.concurrent('rejects malformed backups with the real verifier before any restore commands run', () => withRestoreFixture(async (dir) => {
+      const layout = createFixtureLayout(dir);
+      createDb(layout.dbPath, 'old');
+      writeFileSync(layout.backupPath, 'not-a-sqlite-database');
+
+      const result = await runRestore(layout.backupPath, buildRestoreEnv(layout), dir);
+
+      expect(result.status).toBe(1);
+      expect(readMarker(layout.dbPath)).toBe('old');
+      expect(readFileSync(layout.pnpmLogPath, 'utf-8')).toBe('');
+      expect(result.stderr).toContain('Database verification failed');
     }));
 });

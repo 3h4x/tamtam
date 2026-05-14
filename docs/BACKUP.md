@@ -44,7 +44,7 @@ The restore script:
 
 If any step after the stop/swap boundary fails, the script restores the prior live database and attempts to restart TamTam on it before exiting non-zero. A failed `pnpm stop` is not treated as part of that boundary: with an existing live DB, the restore exits non-zero before any swap begins.
 
-Run restore from the repo root. If `TAMTAM_DB_PATH` is set, the backup is copied to that path instead of `data/db/tamtam.db`.
+The restore script resolves its helper commands and default live DB path relative to the TamTam repo, not the shell's current working directory. That means direct invocations such as `node /abs/path/to/tamtam/scripts/db-restore.js /abs/path/to/backup.db` work from any shell `cwd`. The `pnpm db:restore` package script still needs to be launched from the repo root because that requirement comes from `pnpm`, not from `db-restore.js`. If `TAMTAM_DB_PATH` is set, the backup is copied to that path instead of the repo-root `data/db/tamtam.db`.
 
 ## Off-Host Copies
 
