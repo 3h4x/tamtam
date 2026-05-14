@@ -1,7 +1,7 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { AddressInfo } from 'net';
 import { spawn } from 'child_process';
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 interface FakeServer {
   port: number;
@@ -23,12 +23,6 @@ function startFakeServer(handler: RequestHandler): Promise<FakeServer> {
     server.on('error', reject);
   });
 }
-
-const openServers: FakeServer[] = [];
-
-afterEach(async () => {
-  await Promise.all(openServers.splice(0).map((s) => s.close().catch(() => {})));
-});
 
 function runShim(
   baseUrl: string,
@@ -60,7 +54,7 @@ function sseResponse(events: Array<{ event?: string; data: string }>): string {
 }
 
 describe('lmstudio-shim model resolution', () => {
-  it('resolves fast tier to LMSTUDIO_FAST_MODEL', async () => {
+  it.concurrent('resolves fast tier to LMSTUDIO_FAST_MODEL', async () => {
     let capturedBody = '';
     const srv = await startFakeServer((req, res) => {
       let body = '';
@@ -75,17 +69,19 @@ describe('lmstudio-shim model resolution', () => {
         }));
       });
     });
-    openServers.push(srv);
+    try {
+      await runShim(`http://127.0.0.1:${srv.port}`, ['--model', 'fast', '--output-format', 'stream-json'], {
+        LMSTUDIO_FAST_MODEL: 'llama-3.1-8b',
+      });
 
-    await runShim(`http://127.0.0.1:${srv.port}`, ['--model', 'fast', '--output-format', 'stream-json'], {
-      LMSTUDIO_FAST_MODEL: 'llama-3.1-8b',
-    });
-
-    const body = JSON.parse(capturedBody);
-    expect(body.model).toBe('llama-3.1-8b');
+      const body = JSON.parse(capturedBody);
+      expect(body.model).toBe('llama-3.1-8b');
+    } finally {
+      await srv.close();
+    }
   });
 
-  it('resolves smart tier to LMSTUDIO_SMART_MODEL', async () => {
+  it.concurrent('resolves smart tier to LMSTUDIO_SMART_MODEL', async () => {
     let capturedBody = '';
     const srv = await startFakeServer((req, res) => {
       let body = '';
@@ -96,17 +92,19 @@ describe('lmstudio-shim model resolution', () => {
         res.end(JSON.stringify({ output: [{ type: 'message', content: 'done' }], stats: {} }));
       });
     });
-    openServers.push(srv);
+    try {
+      await runShim(`http://127.0.0.1:${srv.port}`, ['--model', 'smart', '--output-format', 'stream-json'], {
+        LMSTUDIO_SMART_MODEL: 'llama-3.1-70b',
+      });
 
-    await runShim(`http://127.0.0.1:${srv.port}`, ['--model', 'smart', '--output-format', 'stream-json'], {
-      LMSTUDIO_SMART_MODEL: 'llama-3.1-70b',
-    });
-
-    const body = JSON.parse(capturedBody);
-    expect(body.model).toBe('llama-3.1-70b');
+      const body = JSON.parse(capturedBody);
+      expect(body.model).toBe('llama-3.1-70b');
+    } finally {
+      await srv.close();
+    }
   });
 
-  it('falls back to LMSTUDIO_MODEL for unknown tier names', async () => {
+  it.concurrent('falls back to LMSTUDIO_MODEL for unknown tier names', async () => {
     let capturedBody = '';
     const srv = await startFakeServer((req, res) => {
       let body = '';
@@ -117,17 +115,19 @@ describe('lmstudio-shim model resolution', () => {
         res.end(JSON.stringify({ output: [{ type: 'message', content: 'ok' }], stats: {} }));
       });
     });
-    openServers.push(srv);
+    try {
+      await runShim(`http://127.0.0.1:${srv.port}`, ['--model', 'someunknown', '--output-format', 'stream-json'], {
+        LMSTUDIO_MODEL: 'my-custom-model',
+      });
 
-    await runShim(`http://127.0.0.1:${srv.port}`, ['--model', 'someunknown', '--output-format', 'stream-json'], {
-      LMSTUDIO_MODEL: 'my-custom-model',
-    });
-
-    const body = JSON.parse(capturedBody);
-    expect(body.model).toBe('my-custom-model');
+      const body = JSON.parse(capturedBody);
+      expect(body.model).toBe('my-custom-model');
+    } finally {
+      await srv.close();
+    }
   });
 
-  it('honours LMSTUDIO_OPUS_MODEL legacy alias for smart tier', async () => {
+  it.concurrent('honours LMSTUDIO_OPUS_MODEL legacy alias for smart tier', async () => {
     let capturedBody = '';
     const srv = await startFakeServer((req, res) => {
       let body = '';
@@ -138,19 +138,21 @@ describe('lmstudio-shim model resolution', () => {
         res.end(JSON.stringify({ output: [{ type: 'message', content: 'ok' }], stats: {} }));
       });
     });
-    openServers.push(srv);
+    try {
+      await runShim(`http://127.0.0.1:${srv.port}`, ['--model', 'opus', '--output-format', 'stream-json'], {
+        LMSTUDIO_OPUS_MODEL: 'llama-3.1-70b-legacy',
+      });
 
-    await runShim(`http://127.0.0.1:${srv.port}`, ['--model', 'opus', '--output-format', 'stream-json'], {
-      LMSTUDIO_OPUS_MODEL: 'llama-3.1-70b-legacy',
-    });
-
-    const body = JSON.parse(capturedBody);
-    expect(body.model).toBe('llama-3.1-70b-legacy');
+      const body = JSON.parse(capturedBody);
+      expect(body.model).toBe('llama-3.1-70b-legacy');
+    } finally {
+      await srv.close();
+    }
   });
 });
 
 describe('lmstudio-shim normalizeBaseUrl', () => {
-  it('strips /api/v1 suffix from the base URL', async () => {
+  it.concurrent('strips /api/v1 suffix from the base URL', async () => {
     let reqPath = '';
     const srv = await startFakeServer((req, res) => {
       reqPath = req.url || '';
@@ -161,17 +163,19 @@ describe('lmstudio-shim normalizeBaseUrl', () => {
         res.end(JSON.stringify({ output: [{ type: 'message', content: 'ok' }], stats: {} }));
       });
     });
-    openServers.push(srv);
+    try {
+      await runShim(
+        `http://127.0.0.1:${srv.port}/api/v1`,
+        ['--output-format', 'stream-json'],
+      );
 
-    await runShim(
-      `http://127.0.0.1:${srv.port}/api/v1`,
-      ['--output-format', 'stream-json'],
-    );
-
-    expect(reqPath).toBe('/api/v1/chat');
+      expect(reqPath).toBe('/api/v1/chat');
+    } finally {
+      await srv.close();
+    }
   });
 
-  it('strips /v1 suffix from the base URL', async () => {
+  it.concurrent('strips /v1 suffix from the base URL', async () => {
     let reqPath = '';
     const srv = await startFakeServer((req, res) => {
       reqPath = req.url || '';
@@ -182,19 +186,21 @@ describe('lmstudio-shim normalizeBaseUrl', () => {
         res.end(JSON.stringify({ output: [{ type: 'message', content: 'ok' }], stats: {} }));
       });
     });
-    openServers.push(srv);
+    try {
+      await runShim(
+        `http://127.0.0.1:${srv.port}/v1`,
+        ['--output-format', 'stream-json'],
+      );
 
-    await runShim(
-      `http://127.0.0.1:${srv.port}/v1`,
-      ['--output-format', 'stream-json'],
-    );
-
-    expect(reqPath).toBe('/api/v1/chat');
+      expect(reqPath).toBe('/api/v1/chat');
+    } finally {
+      await srv.close();
+    }
   });
 });
 
 describe('lmstudio-shim streaming (SSE)', () => {
-  it('emits text_delta events from SSE message.delta and a final result', async () => {
+  it.concurrent('emits text_delta events from SSE message.delta and a final result', async () => {
     const srv = await startFakeServer((req, res) => {
       let body = '';
       req.on('data', (c: Buffer) => { body += c.toString(); });
@@ -216,26 +222,28 @@ describe('lmstudio-shim streaming (SSE)', () => {
         res.end(frames);
       });
     });
-    openServers.push(srv);
+    try {
+      const { code, stdout } = await runShim(
+        `http://127.0.0.1:${srv.port}`,
+        ['--model', 'normal', '--output-format', 'stream-json'],
+      );
 
-    const { code, stdout } = await runShim(
-      `http://127.0.0.1:${srv.port}`,
-      ['--model', 'normal', '--output-format', 'stream-json'],
-    );
-
-    expect(code).toBe(0);
-    const lines = stdout.trim().split(/\r?\n/).filter(Boolean).map((l) => JSON.parse(l));
-    const text = lines
-      .filter((l) => l.type === 'stream_event' && l.event?.type === 'content_block_delta')
-      .map((l) => l.event.delta.text)
-      .join('');
-    expect(text).toBe('Hello world');
-    const result = lines.find((l) => l.type === 'result');
-    expect(result?.is_error).toBe(false);
-    expect(result?.session_id).toBe('resp_sse1');
+      expect(code).toBe(0);
+      const lines = stdout.trim().split(/\r?\n/).filter(Boolean).map((l) => JSON.parse(l));
+      const text = lines
+        .filter((l) => l.type === 'stream_event' && l.event?.type === 'content_block_delta')
+        .map((l) => l.event.delta.text)
+        .join('');
+      expect(text).toBe('Hello world');
+      const result = lines.find((l) => l.type === 'result');
+      expect(result?.is_error).toBe(false);
+      expect(result?.session_id).toBe('resp_sse1');
+    } finally {
+      await srv.close();
+    }
   });
 
-  it('emits plain text output when --output-format is not stream-json', async () => {
+  it.concurrent('emits plain text output when --output-format is not stream-json', async () => {
     const srv = await startFakeServer((req, res) => {
       let body = '';
       req.on('data', (c: Buffer) => { body += c.toString(); });
@@ -247,19 +255,21 @@ describe('lmstudio-shim streaming (SSE)', () => {
         ]));
       });
     });
-    openServers.push(srv);
+    try {
+      const { code, stdout } = await runShim(
+        `http://127.0.0.1:${srv.port}`,
+        ['--model', 'normal'],
+      );
 
-    const { code, stdout } = await runShim(
-      `http://127.0.0.1:${srv.port}`,
-      ['--model', 'normal'],
-    );
-
-    expect(code).toBe(0);
-    expect(stdout).toContain('plain text');
-    expect(() => JSON.parse(stdout.trim())).toThrow();
+      expect(code).toBe(0);
+      expect(stdout).toContain('plain text');
+      expect(() => JSON.parse(stdout.trim())).toThrow();
+    } finally {
+      await srv.close();
+    }
   });
 
-  it('emits error result on HTTP 4xx from LM Studio', async () => {
+  it.concurrent('emits error result on HTTP 4xx from LM Studio', async () => {
     const srv = await startFakeServer((req, res) => {
       req.on('data', () => {});
       req.on('end', () => {
@@ -267,17 +277,19 @@ describe('lmstudio-shim streaming (SSE)', () => {
         res.end(JSON.stringify({ error: 'rate limited' }));
       });
     });
-    openServers.push(srv);
+    try {
+      const { code, stdout } = await runShim(
+        `http://127.0.0.1:${srv.port}`,
+        ['--model', 'fast', '--output-format', 'stream-json'],
+      );
 
-    const { code, stdout } = await runShim(
-      `http://127.0.0.1:${srv.port}`,
-      ['--model', 'fast', '--output-format', 'stream-json'],
-    );
-
-    expect(code).toBe(1);
-    const lines = stdout.trim().split(/\r?\n/).filter(Boolean).map((l) => JSON.parse(l));
-    const result = lines.find((l) => l.type === 'result');
-    expect(result?.is_error).toBe(true);
-    expect(result?.result).toMatch(/429/);
+      expect(code).toBe(1);
+      const lines = stdout.trim().split(/\r?\n/).filter(Boolean).map((l) => JSON.parse(l));
+      const result = lines.find((l) => l.type === 'result');
+      expect(result?.is_error).toBe(true);
+      expect(result?.result).toMatch(/429/);
+    } finally {
+      await srv.close();
+    }
   });
 });
