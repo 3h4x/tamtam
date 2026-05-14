@@ -13,5 +13,6 @@ export default defineConfig({
     globalSetup: ['./__tests__/global-setup.ts'],
     pool: 'threads',
     maxWorkers: 12,
+    silent: 'passed-only',
   },
 });

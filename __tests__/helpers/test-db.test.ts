@@ -5,15 +5,20 @@ import * as schema from '@/lib/db/schema';
 
 describe('test-db helper', () => {
   // Two tests need a migrated DB; share the same handle to avoid paying
-  // ~500ms PGlite boot + migration twice.
+  // PGlite boot + migration twice. The empty-DB handle is also booted in
+  // `beforeAll` so its ~700ms PGlite cold-start runs alongside the
+  // migrated boot (the two `new PGlite(...)` constructors are issued
+  // synchronously before either `waitReady`/`migrate` is awaited), and
+  // the empty test body itself is just an assertion query.
   let fullDb: TestDbHandle;
+  let emptyDb: TestDbHandle;
 
   beforeAll(async () => {
-    fullDb = await createTestPgDb();
+    [fullDb, emptyDb] = await Promise.all([createTestPgDb(), createTestPgDbEmpty()]);
   });
 
   afterAll(async () => {
-    await fullDb[Symbol.asyncDispose]();
+    await Promise.all([fullDb[Symbol.asyncDispose](), emptyDb[Symbol.asyncDispose]()]);
   });
 
   it('createTestPgDb applies full schema and creates the vector extension', async () => {
@@ -31,15 +36,10 @@ describe('test-db helper', () => {
   });
 
   it('createTestPgDbEmpty boots a Postgres with no public tables', async () => {
-    const handle = await createTestPgDbEmpty();
-    try {
-      const tables = await handle.db.execute(
-        sql`select table_name from information_schema.tables where table_schema = 'public'`,
-      );
-      expect(tables.rows).toHaveLength(0);
-    } finally {
-      await handle[Symbol.asyncDispose]();
-    }
+    const tables = await emptyDb.db.execute(
+      sql`select table_name from information_schema.tables where table_schema = 'public'`,
+    );
+    expect(tables.rows).toHaveLength(0);
   });
 
   it('round-trips a row through drizzle', async () => {

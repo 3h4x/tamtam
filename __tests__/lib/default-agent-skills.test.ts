@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { createHash } from 'crypto';
 import { sql } from 'drizzle-orm';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
@@ -7,6 +7,17 @@ import * as schema from '@/lib/db/schema';
 function sha256Prefix(content: string): string {
   return createHash('sha256').update(content).digest('hex').slice(0, 16);
 }
+
+// Hoisted ref the module-scope vi.mock factory closes over. We swap in the
+// real PGlite-backed db once beforeAll has built it. Hoisting the mock keeps
+// `vi.resetModules()` cheap — we only re-evaluate the seed module itself
+// (to reset its module-level `seeded` guard), not the db module.
+const dbRef = vi.hoisted(() => ({ db: null as unknown as TestDbHandle['db'] }));
+
+vi.mock('@/lib/db', async () => {
+  const schemaModule = await import('@/lib/db/schema');
+  return { db: dbRef.db, schema: schemaModule };
+});
 
 let sharedHandle: TestDbHandle;
 
@@ -45,6 +56,8 @@ async function applyDdl(h: TestDbHandle): Promise<void> {
 beforeAll(async () => {
   sharedHandle = await createTestPgDbEmpty();
   await applyDdl(sharedHandle);
+  // Wire the module-scope mock factory's reference now that the db exists.
+  dbRef.db = sharedHandle.db;
 });
 
 afterAll(async () => {
@@ -88,33 +101,35 @@ async function waitForSeedToSettle(): Promise<void> {
     const rows = await selectAllSkills();
     const defaultRows = rows.filter((s) => s.id.startsWith('agent-'));
     expect(defaultRows.length).toBeGreaterThanOrEqual(DEFAULT_SKILL_COUNT);
-  }, { timeout: 5000, interval: 5 });
+  }, { timeout: 5000, interval: 1 });
+}
+
+// Fast-polling vi.waitFor wrapper. Default vi.waitFor interval is 10ms, but
+// the work we wait on (a single drizzle update) typically lands within a
+// microtask or two. Use a 1ms interval to keep retry overhead out of the
+// per-test budget while still giving real failures a 5s ceiling.
+async function waitForFast(cb: () => unknown | Promise<unknown>): Promise<void> {
+  await vi.waitFor(cb, { timeout: 5000, interval: 1 });
 }
 
 describe('seedDefaultSkills', () => {
   let seedFn: typeof import('@/lib/agents/default-agent-skills').seedDefaultSkills;
 
   beforeEach(async () => {
+    // Reset the seed module's `seeded` guard. The module-scope vi.mock for
+    // `@/lib/db` survives this — only the seed module itself re-evaluates.
+    // Done once here (not also in afterEach) — back-to-back resets do nothing.
     vi.resetModules();
     // Drain any fire-and-forget seed writes from the prior test before we
     // wipe the tables — TRUNCATE racing against a pending insert would leak
-    // rows into the next test. We poll until quiescent (no row count change
-    // across two consecutive samples) rather than sleeping a fixed amount.
-    let prev = -1;
-    for (let i = 0; i < 50; i++) {
-      const rows = await selectAllSkills();
-      if (rows.length === prev) break;
-      prev = rows.length;
+    // rows into the next test. A few microtask flushes settle any tail work
+    // not asserted on by the previous test (e.g. unobserved backfill update).
+    for (let i = 0; i < 4; i++) {
       await new Promise((r) => setImmediate(r));
     }
     await sharedHandle.db.execute(sql.raw('TRUNCATE skills, agents'));
-    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     const mod = await import('@/lib/agents/default-agent-skills');
     seedFn = mod.seedDefaultSkills;
-  });
-
-  afterEach(() => {
-    vi.resetModules();
   });
 
   it('inserts all default skills on first call', async () => {
@@ -263,7 +278,7 @@ describe('seedDefaultSkills', () => {
     seedFn();
     await waitForSeedToSettle();
 
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const agent = await findAgent('agent-1');
       expect(agent?.prerequisiteCommand).toBe('curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"');
     });
@@ -314,7 +329,7 @@ describe('seedDefaultSkills', () => {
 
     // Wait until the backfill has updated the sentinel — by that point any
     // (incorrect) update against agent-2 would also have landed.
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const sentinel = await findAgent('agent-2-sentinel');
       expect(sentinel?.prerequisiteCommand).toBe('curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"');
     });
@@ -484,7 +499,7 @@ describe('seedDefaultSkills', () => {
     seedFn();
     await waitForSeedToSettle();
 
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const skill = await findSkill('agent-cto');
       // name is not part of the seed payload, so any prior value (including a
       // pre-existing customisation from before the read-only switch) survives.
@@ -509,7 +524,7 @@ describe('seedDefaultSkills', () => {
     seedFn();
     await waitForSeedToSettle();
 
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const skill = await findSkill('agent-cto');
       expect(skill!.content).toContain('You are the CTO');
       expect(skill!.description.length).toBeGreaterThan(0);
@@ -556,7 +571,7 @@ Be opinionated. Prioritize ruthlessly.
     seedFn();
     await waitForSeedToSettle();
 
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const skill = await findSkill('agent-cto');
       expect(skill!.content).not.toBe(previousDefault);
       // Current default is much shorter; the whole point of the upgrade.
@@ -585,7 +600,7 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
     seedFn();
     await waitForSeedToSettle();
 
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const skill = await findSkill('agent-cto');
       expect(skill!.content).not.toBe(previousDefault);
       expect(skill!.content).toContain('exact template below');
@@ -640,7 +655,7 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
     seedFn();
     await waitForSeedToSettle();
 
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const skill = await findSkill('agent-issue-cruncher');
       expect(skill!.content).not.toBe(previousDefault);
       expect(skill!.content).toContain('current repo directory name');
@@ -699,7 +714,7 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
     seedFn();
     await waitForSeedToSettle();
 
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const skill = await findSkill('agent-issue-cruncher');
       expect(skill!.content).not.toBe(previousDefault);
       expect(skill!.content).toContain('current repo directory name');
@@ -756,7 +771,7 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
     seedFn();
     await waitForSeedToSettle();
 
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const skill = await findSkill('agent-issue-cruncher');
       expect(skill!.content).not.toBe(previousDefault);
       expect(skill!.content).toContain('Prerequisite Output');
@@ -813,7 +828,7 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
     seedFn();
     await waitForSeedToSettle();
 
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const skill = await findSkill('agent-issue-cruncher');
       expect(skill!.content).not.toBe(previousDefault);
       expect(skill!.content).toContain('Default to closing, not waiting');
@@ -850,7 +865,7 @@ Only patch \`prompt\`. Shorter is better. Don't restate the skill. Don't run \`g
     seedFn();
     await waitForSeedToSettle();
 
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const skill = await findSkill('agent-self-improve');
       expect(skill!.content).not.toBe(previousDefault);
       expect(skill!.content).toContain('Project name = current repo directory name');
@@ -890,7 +905,7 @@ Report: created, updated, deleted, no-change. Filter strictly by this project. K
     seedFn();
     await waitForSeedToSettle();
 
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const skill = await findSkill('agent-manage-agents');
       expect(skill!.content).not.toBe(previousDefault);
       expect(skill!.content).toContain('project name from the current repo directory name');
@@ -940,7 +955,7 @@ Do NOT PATCH any settings. Surface proposals only — the user applies them in t
     seedFn();
     await waitForSeedToSettle();
 
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const skill = await findSkill('agent-review-tuner');
       expect(skill!.content).not.toBe(previousDefault);
       expect(skill!.content).toContain('Project name = current repo directory name');
@@ -986,7 +1001,7 @@ Report a short summary: visited routes, findings handed off (with the cto job id
     seedFn();
     await waitForSeedToSettle();
 
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const skill = await findSkill('agent-qa');
       expect(skill!.content).not.toBe(previousDefault);
       expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_navigate');
@@ -1051,7 +1066,7 @@ Do NOT hand off to other agents and do NOT run \`gh issue create\`. Just leave t
     seedFn();
     await waitForSeedToSettle();
 
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const skill = await findSkill('agent-qa');
       expect(skill!.content).not.toBe(previousDefault);
       expect(skill!.content).toContain('Explore — go deep, not just wide');
@@ -1074,7 +1089,7 @@ Do NOT hand off to other agents and do NOT run \`gh issue create\`. Just leave t
     seedFn();
     await waitForSeedToSettle();
 
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const skill = await findSkill('agent-cto');
       expect(skill!.content).not.toBe(customised);
     });
@@ -1094,7 +1109,7 @@ Do NOT hand off to other agents and do NOT run \`gh issue create\`. Just leave t
     seedFn();
     await waitForSeedToSettle();
 
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const skill = await findSkill('agent-cto');
       expect(skill!.updatedAt).toBeGreaterThan(oldTime);
     });
@@ -1115,7 +1130,7 @@ Do NOT hand off to other agents and do NOT run \`gh issue create\`. Just leave t
     seedFn();
     await waitForSeedToSettle();
 
-    await vi.waitFor(async () => {
+    await waitForFast(async () => {
       const skill = await findSkill('agent-cto');
       expect(skill!.updatedAt).toBeGreaterThanOrEqual(before);
     });

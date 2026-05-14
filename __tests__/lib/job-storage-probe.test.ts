@@ -1,0 +1,1100 @@
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
+import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
+import { JobData } from '@/lib/jobs/job-storage';
+import { writeFileSync, readFileSync, mkdtempSync, rmSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries, so issue each DDL
+  // separately.
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS jobs (
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      kind text NOT NULL,
+      prompt text,
+      pid integer NOT NULL,
+      log_path text,
+      started_at double precision NOT NULL,
+      finished_at double precision,
+      exit_code integer,
+      seen boolean DEFAULT false,
+      duration_ms integer,
+      input_tokens integer,
+      output_tokens integer,
+      cache_read_tokens integer,
+      cache_create_tokens integer,
+      session_id text,
+      user_prompt text,
+      context_meta text,
+      parent_job_id text,
+      gh_issue_number integer,
+      gh_issue_repo text,
+      gh_issue_title text,
+      log_pruned boolean DEFAULT false,
+      verdict text,
+      cost_usd double precision,
+      model text,
+      release_id text,
+      aborted_at double precision,
+      prompt_bytes integer,
+      work_summary text,
+      modified_files text,
+      provider text
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS recommendations (
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      source_kind text NOT NULL,
+      source_id text,
+      agent_id text,
+      agent_name text,
+      type text NOT NULL,
+      title text NOT NULL,
+      detail text NOT NULL,
+      status text NOT NULL DEFAULT 'open',
+      payload text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS gh_issues_cache (
+      project text PRIMARY KEY,
+      repo text NOT NULL,
+      prs text NOT NULL DEFAULT '[]',
+      issues text NOT NULL DEFAULT '[]',
+      fetched_at double precision NOT NULL
+    )
+  `));
+}
+
+let sharedHandle: TestDbHandle;
+
+beforeAll(async () => {
+  sharedHandle = await createTestPgDbEmpty();
+  await applyDdl(sharedHandle);
+});
+
+afterAll(async () => {
+  // Drain any straggling fire-and-forget queries via a no-op SELECT before
+  // closing. PGlite serializes queries on a single instance, so awaiting a
+  // SELECT 1 flushes anything queued ahead of it without a fixed sleep.
+  try {
+    await sharedHandle.db.execute(sql.raw('SELECT 1'));
+  } catch {
+    // ignore
+  }
+  try {
+    await sharedHandle[Symbol.asyncDispose]();
+  } catch {
+    // ignore
+  }
+});
+
+async function truncateAll(): Promise<void> {
+  // DELETE is faster than TRUNCATE on PGlite for small tables (no table rewrite,
+  // no extension reload). Single execute() with multi-statement is rejected by
+  // PGlite, so issue them via a single CTE-style query.
+  await sharedHandle.db.execute(sql.raw(
+    'WITH a AS (DELETE FROM jobs RETURNING 1), b AS (DELETE FROM recommendations RETURNING 1) DELETE FROM gh_issues_cache'
+  ));
+}
+
+// Getter shim so existing `testDb.db.*` test code keeps working while the
+// underlying connection is the shared PGlite handle.
+const testDb = {
+  get db() {
+    return sharedHandle.db;
+  },
+} as { db: TestDbHandle['db'] };
+
+// `getJob`/`listJobs` are cache-only since commit 1cc1db25 — tests that seed
+// rows via direct DB inserts must populate the in-memory cache too, or
+// lifecycle hooks (which call `getJob`/`findActiveReleaseJob`/`listJobs`)
+// won't see those rows. Call this after raw inserts and before invoking
+// `markDoneFn`/lifecycle code so the cache mirrors the DB.
+async function syncCacheFromDb(): Promise<void> {
+  const { jobsCache } = await import('@/lib/jobs/storage');
+  jobsCache.clear();
+  const rows = await sharedHandle.db.select().from(schema.jobs);
+  for (const row of rows) {
+    jobsCache.set(row.id, {
+      id: row.id,
+      project: row.project,
+      kind: row.kind,
+      prompt: row.prompt ?? null,
+      pid: row.pid,
+      logPath: row.logPath,
+      startedAt: row.startedAt,
+      finishedAt: row.finishedAt ?? null,
+      exitCode: row.exitCode ?? null,
+      seen: row.seen ?? false,
+      durationMs: row.durationMs ?? null,
+      inputTokens: row.inputTokens ?? null,
+      outputTokens: row.outputTokens ?? null,
+      cacheReadTokens: row.cacheReadTokens ?? null,
+      cacheCreateTokens: row.cacheCreateTokens ?? null,
+      sessionId: row.sessionId ?? null,
+      contextMeta: row.contextMeta ?? null,
+      userPrompt: row.userPrompt ?? null,
+      parentJobId: row.parentJobId ?? null,
+      ghIssueNumber: row.ghIssueNumber ?? null,
+      ghIssueRepo: row.ghIssueRepo ?? null,
+      ghIssueTitle: row.ghIssueTitle ?? null,
+      logPruned: row.logPruned ?? false,
+      verdict: row.verdict ?? null,
+      costUsd: row.costUsd ?? null,
+      model: row.model ?? null,
+      releaseId: row.releaseId ?? null,
+      abortedAt: row.abortedAt ?? null,
+      promptBytes: row.promptBytes ?? null,
+      workSummary: row.workSummary ?? null,
+      modifiedFiles: row.modifiedFiles ?? null,
+      provider: row.provider ?? null,
+    });
+  }
+}
+describe('probeJobStatus with pm2', () => {
+  let probeJobStatusFn: typeof import('@/lib/jobs/job-storage').probeJobStatus;
+  // Stable mock references captured by the hoisted `vi.doMock` factories.
+  // `beforeEach` calls `mockReset()` on each so per-test `mockResolvedValue`
+  // (or `mockResolvedValueOnce`) calls work the same as in the original
+  // per-test mock setup.
+  const getJobStatusMock = vi.fn();
+  const getJobPidMock = vi.fn();
+  const deleteJobMock = vi.fn();
+  const resolveProjectPathMock = vi.fn();
+  let storageCache: Map<string, JobData>;
+
+  beforeAll(async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      getJobStatus: getJobStatusMock,
+      getJobPid: getJobPidMock,
+      deleteJob: deleteJobMock,
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+
+    const mod = await import('@/lib/jobs/job-storage');
+    probeJobStatusFn = mod.probeJobStatus;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+  });
+
+  beforeEach(async () => {
+    storageCache.clear();
+    await truncateAll();
+    getJobStatusMock.mockReset();
+    getJobPidMock.mockReset().mockResolvedValue(null);
+    deleteJobMock.mockReset();
+    resolveProjectPathMock.mockReset().mockReturnValue(null);
+  });
+
+  afterAll(() => {
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.resetModules();
+  });
+
+  it('returns running if pm2 reports running', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'running', exitCode: null });
+
+    const job: JobData = {
+      id: 'job-pm2-running',
+      project: 'proj',
+      kind: 'run',
+      prompt: null,
+      pid: 9999,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('running');
+    expect(job.finishedAt).toBeNull();
+  });
+
+  it('marks done with exit code if pm2 reports done', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
+
+    const job: JobData = {
+      id: 'job-pm2-done',
+      project: 'proj',
+      kind: 'run',
+      prompt: null,
+      pid: 9999,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('done');
+    expect(job.finishedAt).not.toBeNull();
+    expect(job.exitCode).toBe(0);
+  });
+
+  it('marks done via process.kill when pid no longer exists', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
+
+    const job: JobData = {
+      id: 'job-dead-pid',
+      project: 'proj',
+      kind: 'run',
+      prompt: null,
+      pid: 2147483647, // extremely unlikely to exist
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    // Either running (if signal succeeds by chance) or done (pid dead) — both valid
+    expect(['running', 'done']).toContain(status);
+  });
+
+  it('overrides exit code to 0 when log has a clean result (is_error:false) and pm2 reports non-zero', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: -1 });
+
+    const logFile = join(tmpdir(), `tamtam-exitcode-override-${Date.now()}.log`);
+    const resultLine = '{"type":"result","subtype":"success","is_error":false,"duration_ms":500,"total_cost_usd":0,"session_id":"s1","result":"ok"}';
+    writeFileSync(logFile, resultLine + '\n');
+
+    const job: JobData = {
+      id: 'job-override',
+      project: 'proj',
+      kind: 'run',
+      prompt: null,
+      pid: 9999,
+      logPath: logFile,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    try {
+      // getClaudeResultExitCode fires first: log has "type":"result" with is_error:false → markDone(0)
+      const status = await probeJobStatusFn(job);
+      expect(status).toBe('done');
+      expect(job.exitCode).toBe(0);
+    } finally {
+      try { rmSync(logFile); } catch {}
+    }
+  });
+
+  it('uses exit code 1 when log result has is_error:true (e.g. API timeout)', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
+
+    const logFile = join(tmpdir(), `tamtam-is-error-${Date.now()}.log`);
+    const resultLine = '{"type":"result","subtype":"error_max_turns","is_error":true,"duration_ms":1000,"total_cost_usd":0,"session_id":"s2","result":"Stream idle timeout"}';
+    writeFileSync(logFile, resultLine + '\n');
+
+    const job: JobData = {
+      id: 'job-is-error',
+      project: 'proj',
+      kind: 'run',
+      prompt: null,
+      pid: 9999,
+      logPath: logFile,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    try {
+      // getClaudeResultExitCode fires first: log has "type":"result" with is_error:true → markDone(1)
+      const status = await probeJobStatusFn(job);
+      expect(status).toBe('done');
+      expect(job.exitCode).toBe(1);
+    } finally {
+      try { rmSync(logFile); } catch {}
+    }
+  });
+
+  it('uses exit code 1 for is_error:true on agent: kind too', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
+
+    const logFile = join(tmpdir(), `tamtam-agent-is-error-${Date.now()}.log`);
+    const resultLine = '{"type":"result","subtype":"error_api","is_error":true,"duration_ms":500,"total_cost_usd":0,"session_id":"s3","result":"Rate limited"}';
+    writeFileSync(logFile, resultLine + '\n');
+
+    const job: JobData = {
+      id: 'job-agent-is-error',
+      project: 'proj',
+      kind: 'agent:my-agent',
+      prompt: null,
+      pid: 9999,
+      logPath: logFile,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    try {
+      const status = await probeJobStatusFn(job);
+      expect(status).toBe('done');
+      expect(job.exitCode).toBe(1);
+    } finally {
+      try { rmSync(logFile); } catch {}
+    }
+  });
+
+  it('does NOT override exit code for test kind even with a result in the log', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: -1 });
+
+    const logFile = join(tmpdir(), `tamtam-test-kind-${Date.now()}.log`);
+    const resultLine = '{"type":"result","subtype":"success","is_error":false,"duration_ms":200,"total_cost_usd":0,"session_id":"s3","result":"ok"}';
+    writeFileSync(logFile, resultLine + '\n');
+
+    const job: JobData = {
+      id: 'job-test-kind',
+      project: 'proj',
+      kind: 'test',
+      prompt: null,
+      pid: 9999,
+      logPath: logFile,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    try {
+      // logHasClaudeResult check is only for run/review → skipped for test kind
+      const status = await probeJobStatusFn(job);
+      // pm2 reports done with exitCode=-1, no override for test kind
+      expect(status).toBe('done');
+      expect(job.exitCode).toBe(-1);
+    } finally {
+      try { rmSync(logFile); } catch {}
+    }
+  });
+
+  // Regression: an `agent:*` job created via createJob(project, kind, 0, '')
+  // would spend hundreds of ms awaiting `pm2 start` before updateJob persisted
+  // the real pid. A concurrent duplicate-check (/api/agents/[id]/run) would
+  // call probeJobStatus on the in-flight sibling, hit the pid<=0 fast-path,
+  // and markDone(-1) — which also pm2-deletes the nascent process. User
+  // symptom: phantom "exit -1 @ 0s" row next to the successful run.
+  it("returns 'running' for a freshly-created pid=0 job (spawn grace)", async () => {
+    const job: JobData = {
+      id: 'job-spawn-grace',
+      project: 'proj',
+      kind: 'agent:docs',
+      prompt: null,
+      pid: 0,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('running');
+    expect(job.finishedAt).toBeNull();
+    expect(job.exitCode).toBeNull();
+    // pm2 getJobStatus must not be consulted — the job hasn't been registered yet.
+    expect(getJobStatusMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 'done' and marks exit -1 once a pid=0 job exceeds the spawn grace and pm2 forgot it", async () => {
+    // pm2 has no record of this job → truly dead.
+    getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
+
+    const job: JobData = {
+      id: 'job-spawn-grace-expired',
+      project: 'proj',
+      kind: 'agent:docs',
+      prompt: null,
+      pid: 0,
+      logPath: null,
+      // 60 s ago — well past the 30 s grace window.
+      startedAt: Date.now() / 1000 - 60,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('done');
+    expect(job.exitCode).toBe(-1);
+    expect(job.finishedAt).not.toBeNull();
+  });
+
+  it("returns 'running' for a freshly-created pid=-1 job (negative pid within grace)", async () => {
+    // pid can be -1 when createJob writes a placeholder before pm2 start completes.
+    // The grace window applies to all pid<=0, not just pid===0.
+    const job: JobData = {
+      id: 'job-spawn-grace-neg',
+      project: 'proj',
+      kind: 'agent:docs',
+      prompt: null,
+      pid: -1,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('running');
+    expect(job.finishedAt).toBeNull();
+    expect(getJobStatusMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 'done' for a pid=-1 job that exceeds the spawn grace when pm2 forgot it", async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
+
+    const job: JobData = {
+      id: 'job-spawn-grace-neg-expired',
+      project: 'proj',
+      kind: 'agent:docs',
+      prompt: null,
+      pid: -1,
+      logPath: null,
+      startedAt: Date.now() / 1000 - 60,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('done');
+    expect(job.exitCode).toBe(-1);
+    expect(job.finishedAt).not.toBeNull();
+  });
+
+  // Regression: long-running release meta-job. pm2 `start` raced pm2 `jlist`
+  // and job.pid stayed 0. After the 30 s spawn grace, the old probe path
+  // unconditionally markDone'd the release with exit -1 — which then surfaced
+  // in the Terminal as red-text "# release finished — exit 0" followed by
+  // "exit -1" plus a wall of raw NDJSON from extractLogDetail.
+  it("pid=0 past grace but pm2 still reports online → stays running (no spurious markDone -1)", async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'running', exitCode: null });
+
+    const job: JobData = {
+      id: 'release-long-running',
+      project: 'proj',
+      kind: 'release',
+      prompt: null,
+      pid: 0,
+      logPath: null,
+      startedAt: Date.now() / 1000 - 120,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('running');
+    expect(job.finishedAt).toBeNull();
+    expect(job.exitCode).toBeNull();
+  });
+
+  it('pid=0 past grace and pm2 reports done 0 → markDone(0), not -1', async () => {
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
+
+    const job: JobData = {
+      id: 'release-clean-finish',
+      project: 'proj',
+      kind: 'release',
+      prompt: null,
+      pid: 0,
+      logPath: null,
+      startedAt: Date.now() / 1000 - 120,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('done');
+    expect(job.exitCode).toBe(0);
+  });
+});
+describe('probeJobStatus – test/action kind liveness via process.kill', () => {
+  let probeJobStatusFn: typeof import('@/lib/jobs/job-storage').probeJobStatus;
+  let storageCache: Map<string, JobData>;
+
+  beforeAll(async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ getJobStatus: vi.fn(), deleteJob: vi.fn() }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
+
+    const mod = await import('@/lib/jobs/job-storage');
+    probeJobStatusFn = mod.probeJobStatus;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+  });
+
+  beforeEach(async () => {
+    storageCache.clear();
+    await truncateAll();
+  });
+
+  afterAll(() => {
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.resetModules();
+  });
+
+  it('test kind with live pid returns running (does not hit pm2)', async () => {
+    const livePid = process.pid;
+    const job: JobData = {
+      id: 'job-test-live',
+      project: 'proj',
+      kind: 'test',
+      prompt: null,
+      pid: livePid,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('running');
+  });
+
+  it('action kind with live pid returns running', async () => {
+    const job: JobData = {
+      id: 'job-action-live',
+      project: 'proj',
+      kind: 'action',
+      prompt: null,
+      pid: process.pid,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('running');
+  });
+
+  it('test kind with dead pid returns done', async () => {
+    const job: JobData = {
+      id: 'job-test-dead',
+      project: 'proj',
+      kind: 'test',
+      prompt: null,
+      pid: 2147483647,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    };
+
+    const status = await probeJobStatusFn(job);
+    expect(['running', 'done']).toContain(status);
+  });
+});
+describe('markDone – ghIssuesCache invalidation', () => {
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
+  let storageCache: Map<string, JobData>;
+
+  function makeJob(project: string, kind = 'run'): JobData {
+    return {
+      id: `${project}-${kind}-cache-test`,
+      project,
+      kind,
+      prompt: null,
+      pid: 0,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    };
+  }
+
+  async function insertCacheRow(project: string) {
+    await testDb.db.insert(schema.ghIssuesCache).values({
+      project,
+      repo: `owner/${project}`,
+      prs: '[]',
+      issues: '[]',
+      fetchedAt: Date.now() / 1000,
+    });
+  }
+
+  beforeAll(async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      getJobStatus: vi.fn(),
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shared/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/git/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/proj'),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({ autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false }),
+    }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({
+      startProjectReview: vi.fn().mockResolvedValue({ ok: false }),
+    }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({
+      startProjectPush: vi.fn().mockResolvedValue({ ok: false }),
+    }));
+    vi.doMock('@/lib/pipeline/start-fix', () => ({
+      startFixFromJob: vi.fn().mockResolvedValue({ ok: false }),
+    }));
+    vi.doMock('@/lib/pipeline/start-fix-push', () => ({
+      isHookRejection: vi.fn().mockReturnValue(false),
+      isTestFailureRejection: vi.fn().mockReturnValue(false),
+      startFixPush: vi.fn().mockResolvedValue({ ok: false }),
+    }));
+    vi.doMock('@/lib/pipeline/start-release', () => ({
+      startRelease: vi.fn().mockResolvedValue({ ok: false }),
+    }));
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+  });
+
+  beforeEach(async () => {
+    storageCache.clear();
+    await truncateAll();
+  });
+
+  afterAll(() => {
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/shell');
+    vi.doUnmock('@/lib/git/git-utils');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.doUnmock('@/lib/scheduling/scheduling');
+    vi.doUnmock('@/lib/pipeline/start-review');
+    vi.doUnmock('@/lib/pipeline/start-push');
+    vi.doUnmock('@/lib/pipeline/start-fix');
+    vi.doUnmock('@/lib/pipeline/start-fix-push');
+    vi.doUnmock('@/lib/pipeline/start-release');
+    vi.resetModules();
+  });
+
+  it('deletes the ghIssuesCache row for the job project on markDone', async () => {
+    await insertCacheRow('my-proj');
+    const before = await testDb.db.select().from(schema.ghIssuesCache);
+    expect(before).toHaveLength(1);
+
+    const job = makeJob('my-proj');
+    await markDoneFn(job, 0);
+
+    const after = await testDb.db.select().from(schema.ghIssuesCache);
+    expect(after).toHaveLength(0);
+  });
+
+  it('does not delete cache rows for other projects', async () => {
+    await insertCacheRow('proj-a');
+    await insertCacheRow('proj-b');
+
+    const job = makeJob('proj-a');
+    await markDoneFn(job, 0);
+
+    const remaining = await testDb.db.select().from(schema.ghIssuesCache);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].project).toBe('proj-b');
+  });
+
+  it('succeeds silently when no cache row exists for the project', async () => {
+    const job = makeJob('no-cache-proj');
+    await expect(markDoneFn(job, 0)).resolves.toBeUndefined();
+  });
+
+  it('invalidates cache regardless of exit code', async () => {
+    await insertCacheRow('failing-proj');
+    const job = makeJob('failing-proj');
+    await markDoneFn(job, 1);
+
+    const after = await testDb.db.select().from(schema.ghIssuesCache);
+    expect(after).toHaveLength(0);
+  });
+});
+describe('markDone – metadata extraction skipped for release kind', () => {
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
+  let tempDir: string;
+
+  const resultLine = '{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"session_id":"ses-abc","result":"ok","modelUsage":{"claude-sonnet":{"inputTokens":100,"outputTokens":50,"cacheReadInputTokens":10,"cacheCreationInputTokens":5}}}';
+
+  function makeJob(kind: string, logPath: string | null): JobData {
+    return {
+      id: `${kind.replace(':', '-')}-meta-test`,
+      project: 'meta-proj',
+      kind,
+      prompt: null,
+      pid: 1,
+      logPath,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    };
+  }
+
+  let storageCache: Map<string, JobData>;
+
+  beforeAll(async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      getJobStatus: vi.fn(),
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shared/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({ autoPushEnabled: false }),
+    }));
+    vi.doMock('@/lib/git/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({
+      startProjectReview: vi.fn().mockResolvedValue({ ok: false }),
+    }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({
+      startProjectPush: vi.fn().mockResolvedValue({ ok: false }),
+    }));
+    vi.doMock('@/lib/pipeline/start-fix-push', () => ({
+      isHookRejection: vi.fn().mockReturnValue(false),
+      isTestFailureRejection: vi.fn().mockReturnValue(false),
+      startFixPush: vi.fn().mockResolvedValue({ ok: false }),
+    }));
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-meta-'));
+  });
+
+  beforeEach(async () => {
+    storageCache.clear();
+    await truncateAll();
+  });
+
+  afterAll(() => {
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/shell');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.doUnmock('@/lib/scheduling/scheduling');
+    vi.doUnmock('@/lib/git/git-utils');
+    vi.doUnmock('@/lib/pipeline/start-review');
+    vi.doUnmock('@/lib/pipeline/start-push');
+    vi.doUnmock('@/lib/pipeline/start-fix-push');
+    vi.resetModules();
+  });
+
+  it('does NOT populate sessionId/tokens for release kind even when log has a result line', async () => {
+    const logFile = join(tempDir, 'release.log');
+    writeFileSync(logFile, resultLine + '\n');
+    const job = makeJob('release', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(job.sessionId).toBeNull();
+    expect(job.inputTokens).toBeNull();
+    expect(job.outputTokens).toBeNull();
+    expect(job.cacheReadTokens).toBeNull();
+    expect(job.cacheCreateTokens).toBeNull();
+    expect(job.durationMs).toBeNull();
+  });
+
+  it('DOES populate sessionId/tokens for non-release kinds (review)', async () => {
+    const logFile = join(tempDir, 'review.log');
+    writeFileSync(logFile, resultLine + '\n');
+    const job = makeJob('review', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(job.sessionId).toBe('ses-abc');
+    expect(job.inputTokens).toBe(100);
+    expect(job.outputTokens).toBe(50);
+    expect(job.cacheReadTokens).toBe(10);
+    expect(job.cacheCreateTokens).toBe(5);
+    expect(job.durationMs).toBe(1234);
+  });
+
+  it('DOES populate metadata for commit kind (non-release Claude job)', async () => {
+    const logFile = join(tempDir, 'commit.log');
+    writeFileSync(logFile, resultLine + '\n');
+    const job = makeJob('commit', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(job.sessionId).toBe('ses-abc');
+    expect(job.durationMs).toBe(1234);
+  });
+
+  it('populates model and costUsd from modelUsage for non-release kinds', async () => {
+    const logFile = join(tempDir, 'run-cost.log');
+    writeFileSync(logFile, resultLine + '\n');
+    const job = makeJob('run', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(job.model).toBe('claude-sonnet');
+    expect(typeof job.costUsd).toBe('number');
+    expect(job.costUsd).toBeGreaterThan(0);
+  });
+
+  it('persists costUsd and model to DB after markDone', async () => {
+    const logFile = join(tempDir, 'run-db.log');
+    writeFileSync(logFile, resultLine + '\n');
+    const job = makeJob('run', logFile);
+    await testDb.db.insert(schema.jobs).values({
+      id: job.id, project: job.project, kind: job.kind,
+      prompt: null, pid: job.pid, logPath: logFile,
+      startedAt: job.startedAt, finishedAt: null, exitCode: null,
+      seen: false, durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+    } as any);
+
+    await markDoneFn(job, 0);
+
+    const row = (await testDb.db.select().from(schema.jobs)).find(r => r.id === job.id);
+    expect(row?.model).toBe('claude-sonnet');
+    expect(row?.costUsd).toBeGreaterThan(0);
+  });
+
+  it('does NOT populate model or costUsd for release kind', async () => {
+    const logFile = join(tempDir, 'release-cost.log');
+    writeFileSync(logFile, resultLine + '\n');
+    const job = makeJob('release', logFile);
+
+    await markDoneFn(job, 0);
+
+    expect(job.model).toBeUndefined();
+    expect(job.costUsd).toBeUndefined();
+  });
+});
+describe('markDone – DB-level idempotency guard', () => {
+  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
+  const startProjectReviewMock = vi.fn();
+  const startProjectPushMock = vi.fn();
+  let tempDir: string;
+  let storageCache: Map<string, JobData>;
+
+  function makeJob(id: string, kind = 'push'): JobData {
+    return {
+      id,
+      project: 'guard-proj',
+      kind,
+      prompt: null,
+      pid: 999,
+      logPath: null,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+    };
+  }
+
+  beforeAll(async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      getJobStatus: vi.fn(),
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shared/shell', () => ({
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+    }));
+    vi.doMock('@/lib/git/git-utils', () => ({
+      markReviewed: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getProjectTestConfig: vi.fn().mockReturnValue({ autoPushEnabled: false }),
+    }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({
+      startProjectReview: startProjectReviewMock,
+    }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({
+      startProjectPush: startProjectPushMock,
+    }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({
+      startProjectCommit: vi.fn().mockResolvedValue({ ok: false, detail: 'guard' }),
+    }));
+    vi.doMock('@/lib/pipeline/start-fix', () => ({
+      startFixFromJob: vi.fn().mockResolvedValue({ ok: false, detail: 'guard' }),
+    }));
+    vi.doMock('@/lib/pipeline/start-fix-push', () => ({
+      isHookRejection: vi.fn().mockReturnValue(false),
+      isTestFailureRejection: vi.fn().mockReturnValue(false),
+      startFixPush: vi.fn().mockResolvedValue({ ok: false, detail: 'guard' }),
+    }));
+
+    const mod = await import('@/lib/jobs/job-storage');
+    markDoneFn = mod.markDone;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-db-guard-'));
+  });
+
+  beforeEach(async () => {
+    storageCache.clear();
+    await truncateAll();
+    startProjectReviewMock.mockReset().mockResolvedValue({ ok: false, detail: 'guard' });
+    startProjectPushMock.mockReset().mockResolvedValue({ ok: false, detail: 'guard' });
+  });
+
+  afterAll(() => {
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/shell');
+    vi.doUnmock('@/lib/git/git-utils');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.doUnmock('@/lib/scheduling/scheduling');
+    vi.doUnmock('@/lib/pipeline/start-review');
+    vi.doUnmock('@/lib/pipeline/start-push');
+    vi.doUnmock('@/lib/pipeline/start-commit');
+    vi.doUnmock('@/lib/pipeline/start-fix');
+    vi.doUnmock('@/lib/pipeline/start-fix-push');
+    vi.resetModules();
+  });
+
+  it('returns early and syncs finishedAt when DB row is already finalized', async () => {
+    const alreadyFinishedAt = Date.now() / 1000 - 60;
+    await testDb.db.insert(schema.jobs).values({
+      id: 'db-guard-job-1', project: 'guard-proj', kind: 'push',
+      prompt: null, pid: 1, logPath: null,
+      startedAt: alreadyFinishedAt - 10,
+      finishedAt: alreadyFinishedAt,
+      exitCode: 0,
+      seen: false, durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+    } as any);
+
+    const job = makeJob('db-guard-job-1');
+    // Stale in-memory object: finishedAt is null even though DB says it's done
+    expect(job.finishedAt).toBeNull();
+
+    await markDoneFn(job, 0);
+
+    // job.finishedAt must be synced from DB
+    expect(job.finishedAt).toBe(alreadyFinishedAt);
+    // No completion hooks should fire (no push/review triggered)
+    expect(startProjectPushMock).not.toHaveBeenCalled();
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite the DB finishedAt when returning early from DB guard', async () => {
+    const alreadyFinishedAt = Date.now() / 1000 - 60;
+    await testDb.db.insert(schema.jobs).values({
+      id: 'db-guard-job-2', project: 'guard-proj', kind: 'push',
+      prompt: null, pid: 1, logPath: null,
+      startedAt: alreadyFinishedAt - 10,
+      finishedAt: alreadyFinishedAt,
+      exitCode: 0,
+      seen: false, durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+    } as any);
+
+    const job = makeJob('db-guard-job-2');
+    await markDoneFn(job, 99);
+
+    const row = (await testDb.db.select().from(schema.jobs)).find(r => r.id === 'db-guard-job-2');
+    // DB row should still have the original finishedAt, not a new one
+    expect(row?.finishedAt).toBe(alreadyFinishedAt);
+    expect(row?.exitCode).toBe(0); // not overwritten with 99
+  });
+
+  it('proceeds normally when DB row has finishedAt = null', async () => {
+    await testDb.db.insert(schema.jobs).values({
+      id: 'db-guard-job-3', project: 'guard-proj', kind: 'push',
+      prompt: null, pid: 1, logPath: null,
+      startedAt: Date.now() / 1000 - 5,
+      finishedAt: null,
+      exitCode: null,
+      seen: false, durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+    } as any);
+
+    const job = makeJob('db-guard-job-3');
+    await markDoneFn(job, 0);
+
+    expect(job.finishedAt).not.toBeNull();
+    const row = (await testDb.db.select().from(schema.jobs)).find(r => r.id === 'db-guard-job-3');
+    expect(row?.finishedAt).not.toBeNull();
+    expect(row?.exitCode).toBe(0);
+  });
+
+  it('proceeds normally when no DB row exists (new job not yet persisted)', async () => {
+    // Job exists only in memory (no DB row inserted yet)
+    const job = makeJob('db-guard-no-row');
+    await markDoneFn(job, 0);
+
+    // Should have finalized as normal
+    expect(job.finishedAt).not.toBeNull();
+    expect(job.exitCode).toBe(0);
+  });
+
+  it('in-memory guard still fires before the DB check (finishedAt already set)', async () => {
+    const job = makeJob('db-guard-inmem');
+    job.finishedAt = Date.now() / 1000 - 5; // already finalized in memory
+
+    const snapshotFinishedAt = job.finishedAt;
+    await markDoneFn(job, 99);
+
+    // In-memory guard should have returned before any DB interaction
+    expect(job.finishedAt).toBe(snapshotFinishedAt); // unchanged
+    expect(job.exitCode).toBeNull(); // not overwritten
+  });
+});

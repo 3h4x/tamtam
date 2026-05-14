@@ -1,7 +1,40 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hoisted shared mock factories. Top-level vi.mock() lets every test reuse the
+// same compiled module graph for pending-release — much faster than calling
+// vi.resetModules() + vi.doMock() per test.
+// ─────────────────────────────────────────────────────────────────────────────
+const mocks = vi.hoisted(() => {
+  return {
+    sharedHandle: null as TestDbHandle | null,
+    startReleaseMock: vi.fn(),
+  };
+});
+
+vi.mock('@/lib/db', () => ({
+  get db() {
+    return mocks.sharedHandle!.db;
+  },
+  schema,
+}));
+
+vi.mock('@/lib/pipeline/start-release', () => ({
+  startRelease: (...args: unknown[]) => mocks.startReleaseMock(...args),
+}));
+
+// Single top-level import — all tests below share this resolved module graph.
+import {
+  setPendingRelease,
+  getPendingRelease,
+  clearPendingRelease,
+  listPendingReleaseProjects,
+  drainPendingRelease,
+  shouldKeepPendingRelease,
+} from '@/lib/pipeline/pending-release';
 
 async function applyDdl(handle: TestDbHandle): Promise<void> {
   await handle.db.execute(sql.raw(`
@@ -12,50 +45,41 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
   `));
 }
 
-describe('pending-release queue', () => {
-  let sharedHandle: TestDbHandle;
-  let setPendingRelease: typeof import('@/lib/pipeline/pending-release').setPendingRelease;
-  let getPendingRelease: typeof import('@/lib/pipeline/pending-release').getPendingRelease;
-  let clearPendingRelease: typeof import('@/lib/pipeline/pending-release').clearPendingRelease;
-  let listPendingReleaseProjects: typeof import('@/lib/pipeline/pending-release').listPendingReleaseProjects;
-  let drainPendingRelease: typeof import('@/lib/pipeline/pending-release').drainPendingRelease;
-  let startReleaseMock: ReturnType<typeof vi.fn>;
+async function waitForPending(project: string, expected: boolean): Promise<void> {
+  await vi.waitFor(async () => {
+    const actual = await getPendingRelease(project);
+    if (actual !== expected) throw new Error(`pending(${project}) not yet ${expected}`);
+  }, { interval: 1, timeout: 1000 });
+}
 
+async function waitForListed(expected: string[]): Promise<void> {
+  await vi.waitFor(async () => {
+    const actual = (await listPendingReleaseProjects()).sort();
+    const want = [...expected].sort();
+    if (actual.length !== want.length || actual.some((v, i) => v !== want[i])) {
+      throw new Error(`list not yet ${JSON.stringify(want)} (got ${JSON.stringify(actual)})`);
+    }
+  }, { interval: 1, timeout: 1000 });
+}
+
+describe('pending-release queue', () => {
   beforeAll(async () => {
-    sharedHandle = await createTestPgDbEmpty();
-    await applyDdl(sharedHandle);
+    mocks.sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(mocks.sharedHandle);
   });
 
   afterAll(async () => {
-    // Let any straggling fire-and-forget queries settle before closing.
-    await new Promise((r) => setTimeout(r, 30));
     try {
-      await sharedHandle[Symbol.asyncDispose]();
+      await mocks.sharedHandle![Symbol.asyncDispose]();
     } catch {
       // ignore
     }
   });
 
   beforeEach(async () => {
-    vi.resetModules();
-    await sharedHandle.db.execute(sql.raw('TRUNCATE settings'));
-    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    startReleaseMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rel-1' });
-    vi.doMock('@/lib/pipeline/start-release', () => ({ startRelease: startReleaseMock }));
-
-    const mod = await import('@/lib/pipeline/pending-release');
-    setPendingRelease = mod.setPendingRelease;
-    getPendingRelease = mod.getPendingRelease;
-    clearPendingRelease = mod.clearPendingRelease;
-    listPendingReleaseProjects = mod.listPendingReleaseProjects;
-    drainPendingRelease = mod.drainPendingRelease;
-  });
-
-  afterEach(async () => {
-    // Short settle: lets fire-and-forget inserts/deletes land before
-    // the next test truncates.
-    await new Promise((r) => setTimeout(r, 10));
-    vi.resetModules();
+    await mocks.sharedHandle!.db.execute(sql.raw('TRUNCATE settings'));
+    mocks.startReleaseMock.mockReset();
+    mocks.startReleaseMock.mockResolvedValue({ ok: true, jobId: 'rel-1' });
   });
 
   it('starts unset', async () => {
@@ -64,109 +88,93 @@ describe('pending-release queue', () => {
 
   it('set / get / clear roundtrip', async () => {
     setPendingRelease('proj');
-    // allow the fire-and-forget insert to settle
-    await new Promise(r => setTimeout(r, 20));
-    expect(await getPendingRelease('proj')).toBe(true);
+    await waitForPending('proj', true);
     clearPendingRelease('proj');
-    await new Promise(r => setTimeout(r, 20));
-    expect(await getPendingRelease('proj')).toBe(false);
+    await waitForPending('proj', false);
   });
 
   it('idempotent: setting twice yields a single flag', async () => {
     setPendingRelease('proj');
     setPendingRelease('proj');
-    await new Promise(r => setTimeout(r, 20));
-    expect(await listPendingReleaseProjects()).toEqual(['proj']);
+    await waitForListed(['proj']);
   });
 
   it('keeps multiple projects independent', async () => {
     setPendingRelease('proj-a');
     setPendingRelease('proj-b');
-    await new Promise(r => setTimeout(r, 20));
-    expect((await listPendingReleaseProjects()).sort()).toEqual(['proj-a', 'proj-b']);
+    await waitForListed(['proj-a', 'proj-b']);
     clearPendingRelease('proj-a');
-    await new Promise(r => setTimeout(r, 20));
-    expect(await listPendingReleaseProjects()).toEqual(['proj-b']);
+    await waitForListed(['proj-b']);
   });
 
   it('drain calls startRelease and clears the flag', async () => {
     setPendingRelease('proj');
-    await new Promise(r => setTimeout(r, 20));
+    await waitForPending('proj', true);
     await drainPendingRelease('proj');
-    expect(startReleaseMock).toHaveBeenCalledOnce();
-    expect(startReleaseMock).toHaveBeenCalledWith('proj');
-    expect(await getPendingRelease('proj')).toBe(false);
+    expect(mocks.startReleaseMock).toHaveBeenCalledOnce();
+    expect(mocks.startReleaseMock).toHaveBeenCalledWith('proj');
+    await waitForPending('proj', false);
   });
 
   it('drain is a no-op when no flag is set', async () => {
     await drainPendingRelease('proj');
-    expect(startReleaseMock).not.toHaveBeenCalled();
+    expect(mocks.startReleaseMock).not.toHaveBeenCalled();
   });
 
   it('drain swallows non-OK release results without surfacing them', async () => {
-    startReleaseMock.mockResolvedValueOnce({ ok: false, status: 400, detail: 'Nothing to release' });
+    mocks.startReleaseMock.mockResolvedValueOnce({ ok: false, status: 400, detail: 'Nothing to release' });
     setPendingRelease('proj');
-    await new Promise(r => setTimeout(r, 20));
+    await waitForPending('proj', true);
     await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
-    expect(await getPendingRelease('proj')).toBe(false);
+    await waitForPending('proj', false);
   });
 
   it('keeps the queue when drain hits a temporary global-pause block', async () => {
-    startReleaseMock.mockResolvedValueOnce({
+    mocks.startReleaseMock.mockResolvedValueOnce({
       ok: false,
       status: 409,
       detail: 'Jobs are paused globally. Turn the switch back on in Settings to start a release.',
     });
     setPendingRelease('proj');
-    await new Promise(r => setTimeout(r, 20));
+    await waitForPending('proj', true);
     await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
-    await new Promise(r => setTimeout(r, 20));
-    expect(await getPendingRelease('proj')).toBe(true);
+    await waitForPending('proj', true);
   });
 
   it('keeps the queue when drain hits a temporary project-pause block', async () => {
-    startReleaseMock.mockResolvedValueOnce({
+    mocks.startReleaseMock.mockResolvedValueOnce({
       ok: false,
       status: 409,
       detail: 'project paused',
     });
     setPendingRelease('proj');
-    await new Promise(r => setTimeout(r, 20));
+    await waitForPending('proj', true);
     await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
-    await new Promise(r => setTimeout(r, 20));
-    expect(await getPendingRelease('proj')).toBe(true);
+    await waitForPending('proj', true);
   });
 
   it('keeps the queue when drain returns a retryable startup failure', async () => {
-    startReleaseMock.mockResolvedValueOnce({
+    mocks.startReleaseMock.mockResolvedValueOnce({
       ok: false,
       status: 500,
       detail: 'Failed to create release job',
       retryable: true,
     });
     setPendingRelease('proj');
-    await new Promise(r => setTimeout(r, 20));
+    await waitForPending('proj', true);
     await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
-    await new Promise(r => setTimeout(r, 20));
-    expect(await getPendingRelease('proj')).toBe(true);
+    await waitForPending('proj', true);
   });
 
   it('keeps the queue when drain throws before release start is confirmed', async () => {
-    startReleaseMock.mockRejectedValueOnce(new Error('pm2 start failed'));
+    mocks.startReleaseMock.mockRejectedValueOnce(new Error('pm2 start failed'));
     setPendingRelease('proj');
-    await new Promise(r => setTimeout(r, 20));
+    await waitForPending('proj', true);
     await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
-    await new Promise(r => setTimeout(r, 20));
-    expect(await getPendingRelease('proj')).toBe(true);
+    await waitForPending('proj', true);
   });
 
   describe('shouldKeepPendingRelease', () => {
-    let shouldKeepPendingRelease: typeof import('@/lib/pipeline/pending-release').shouldKeepPendingRelease;
-    beforeEach(async () => {
-      const mod = await import('@/lib/pipeline/pending-release');
-      shouldKeepPendingRelease = mod.shouldKeepPendingRelease;
-    });
-
     it('drops the flag for "Nothing to release"', () => {
       expect(shouldKeepPendingRelease({ ok: false, status: 400, detail: 'Nothing to release — no changes' })).toBe(false);
     });

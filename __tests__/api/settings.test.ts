@@ -1,8 +1,27 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
+
+const dbRef = vi.hoisted(() => ({ current: null as unknown as TestDbHandle['db'] }));
+const syncJobsPauseStateMock = vi.hoisted(() => vi.fn());
+const ensureProjectBoardMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@/lib/db', () => ({
+  get db() {
+    return dbRef.current;
+  },
+  schema,
+}));
+
+vi.mock('@/lib/shared/job-control', () => ({
+  syncJobsPauseState: syncJobsPauseStateMock,
+}));
+
+vi.mock('@/lib/github/project-board', () => ({
+  ensureProjectBoard: ensureProjectBoardMock,
+}));
 
 async function applyDdl(handle: TestDbHandle): Promise<void> {
   await handle.db.execute(sql.raw(`
@@ -17,16 +36,22 @@ describe('settings API', () => {
   let sharedHandle: TestDbHandle;
   let GET: any;
   let PATCH: any;
-  let syncJobsPauseStateMock: ReturnType<typeof vi.fn>;
-  let ensureProjectBoardMock: ReturnType<typeof vi.fn>;
+  let reloadConfig: () => void;
 
   beforeAll(async () => {
     sharedHandle = await createTestPgDbEmpty();
     await applyDdl(sharedHandle);
+    dbRef.current = sharedHandle.db;
+    const [routeMod, configMod] = await Promise.all([
+      import('@/app/api/settings/route'),
+      import('@/lib/shared/config'),
+    ]);
+    GET = routeMod.GET;
+    PATCH = routeMod.PATCH;
+    reloadConfig = configMod.reloadConfig;
   });
 
   afterAll(async () => {
-    await new Promise((r) => setTimeout(r, 30));
     try {
       await sharedHandle[Symbol.asyncDispose]();
     } catch {
@@ -35,11 +60,11 @@ describe('settings API', () => {
   });
 
   beforeEach(async () => {
-    vi.resetModules();
     await sharedHandle.db.execute(sql.raw('TRUNCATE settings'));
 
-    syncJobsPauseStateMock = vi.fn();
-    ensureProjectBoardMock = vi.fn().mockResolvedValue({
+    syncJobsPauseStateMock.mockReset();
+    ensureProjectBoardMock.mockReset();
+    ensureProjectBoardMock.mockResolvedValue({
       owner: 'octocat',
       title: 'TamTam',
       projectNumber: '7',
@@ -50,24 +75,8 @@ describe('settings API', () => {
       customFieldIds: { project: 'F_P', agent: 'F_A', kind: 'F_K', branch: 'F_B' },
     });
 
-    vi.doMock('@/lib/db', () => ({
-      db: sharedHandle.db,
-      schema,
-    }));
-    vi.doMock('@/lib/shared/job-control', () => ({
-      syncJobsPauseState: syncJobsPauseStateMock,
-    }));
-    vi.doMock('@/lib/github/project-board', () => ({
-      ensureProjectBoard: ensureProjectBoardMock,
-    }));
-
-    const mod = await import('@/app/api/settings/route');
-    GET = mod.GET;
-    PATCH = mod.PATCH;
-  });
-
-  afterEach(() => {
-    vi.resetModules();
+    // Reset config cache between tests so seeded rows don't leak from prior tests.
+    reloadConfig();
   });
 
   describe('GET /settings', () => {
@@ -358,7 +367,7 @@ describe('settings API', () => {
         // boot performs.
         const { getSettings } = await import('@/lib/shared/config');
         expect(getSettings().jobs_paused).toBe(true);
-      });
+      }, { interval: 1 });
     });
 
     it('accepts all valid setting keys', async () => {
@@ -877,30 +886,23 @@ describe('settings API', () => {
   });
 
   describe('reloadConfig on PATCH', () => {
-    let reloadConfigMock: ReturnType<typeof vi.fn>;
-    let PATCHWithSpy: any;
-
-    beforeEach(async () => {
-      vi.resetModules();
-      await sharedHandle.db.execute(sql.raw('TRUNCATE settings'));
-
-      reloadConfigMock = vi.fn();
-      vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-      vi.doMock('@/lib/shared/config', () => ({ reloadConfig: reloadConfigMock, getSettings: () => ({ jobs_paused: false }) }));
-      vi.doMock('@/lib/shared/job-control', () => ({ syncJobsPauseState: vi.fn() }));
-
-      const mod = await import('@/app/api/settings/route');
-      PATCHWithSpy = mod.PATCH;
-    });
-
     it('calls reloadConfig after saving settings', async () => {
-      const request = new NextRequest('http://localhost/api/settings', {
-        method: 'PATCH',
-        body: JSON.stringify({ workspace_path: '/new/path' }),
-      });
-      await PATCHWithSpy(request);
+      // Spy on the real reloadConfig in @/lib/shared/config. The settings
+      // route imports it via a live ESM binding so the spy intercepts the
+      // call without needing vi.resetModules() / vi.doMock().
+      const configMod = await import('@/lib/shared/config');
+      const spy = vi.spyOn(configMod, 'reloadConfig');
+      try {
+        const request = new NextRequest('http://localhost/api/settings', {
+          method: 'PATCH',
+          body: JSON.stringify({ workspace_path: '/new/path' }),
+        });
+        await PATCH(request);
 
-      expect(reloadConfigMock).toHaveBeenCalledOnce();
+        expect(spy).toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });

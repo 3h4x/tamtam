@@ -13,6 +13,19 @@ vi.mock('@/lib/shared/config', () => ({
   getSettings: () => mockSettings,
 }));
 
+// Mock git branch detection so loadFileConfig() doesn't shell out to git for every
+// isUserTrusted/wrapIfUntrusted call. Each call would otherwise spawn 2-3 git
+// subprocesses (symbolic-ref → rev-parse fallback → rev-parse HEAD), dominating
+// the test file's runtime. The default-branch path means loadFileConfig reads
+// the working tree directly — which is what these tests need.
+vi.mock('@/lib/git/git-branch', () => ({
+  getBranchContext: () => ({ currentBranch: 'master', defaultBranch: 'master', isDefaultBranch: true }),
+  getDefaultBranchSync: () => 'master',
+  getCurrentBranchSync: () => 'master',
+  gitShowSync: () => null,
+  gitLsTreeSync: () => [],
+}));
+
 import {
   UNTRUSTED_SYSTEM_INSTRUCTION,
   wrapUntrusted,

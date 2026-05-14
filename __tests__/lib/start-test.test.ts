@@ -1,57 +1,82 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Hoisted shared mocks. Top-level vi.mock() with vi.hoisted() lets every test
+// reuse the same compiled module graph for start-test — much faster than
+// calling vi.resetModules() + vi.doMock() per test.
+// ─────────────────────────────────────────────────────────────────────────────
+const mocks = vi.hoisted(() => ({
+  getImproveConfigMock: vi.fn(),
+  getProjectTestConfigMock: vi.fn(),
+  execSyncMock: vi.fn(),
+}));
+
+vi.mock('@/lib/scheduling/scheduling', () => ({
+  getImproveConfig: (...args: unknown[]) => mocks.getImproveConfigMock(...args),
+  getProjectTestConfig: (...args: unknown[]) => mocks.getProjectTestConfigMock(...args),
+}));
+vi.mock('@/lib/shared/project-data', () => ({
+  resolveProjectPath: vi.fn(),
+}));
+vi.mock('@/lib/jobs/job-storage', () => ({
+  createJob: vi.fn(),
+  listJobs: vi.fn().mockReturnValue([]),
+  probeJobStatus: vi.fn().mockResolvedValue('done'),
+  updateJob: vi.fn(),
+  markDone: vi.fn().mockResolvedValue(undefined),
+}));
+// Stub heavy transitive deps that detectTestCommand doesn't need, so the
+// module graph for start-test.ts is small and module init stays cheap.
+vi.mock('@/lib/jobs/parent-context', () => ({ currentParent: () => null }));
+vi.mock('@/lib/shared/shell', () => ({ exec: vi.fn(), shellQuote: (s: string) => s }));
+vi.mock('@/lib/usage/resolve-provider', () => ({
+  checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
+}));
+vi.mock('@/lib/jobs/project-active-job', () => ({
+  findBlockingRunningJob: vi.fn().mockResolvedValue(null),
+}));
+vi.mock('@/lib/pipeline/pipeline-lock', () => ({
+  getLock: vi.fn().mockReturnValue(null),
+  acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: null }),
+  isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+}));
+// Stub out the file-config loader so anything reaching wrapIfUntrusted /
+// getBranchContext does not shell out to `git` (via execFileSync).
+vi.mock('@/lib/skills/tamtam-file-config', () => ({
+  loadFileConfig: () => null,
+}));
+vi.mock('child_process', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('child_process')>()),
+  execSync: (...args: unknown[]) => mocks.execSyncMock(...args),
+}));
+
+// Single top-level import — all tests below share this resolved module graph.
+import { detectTestCommand } from '@/lib/pipeline/start-test';
+
 describe('detectTestCommand', () => {
   let projDir: string;
-  let detectTestCommand: typeof import('@/lib/pipeline/start-test').detectTestCommand;
 
-  beforeEach(async () => {
-    vi.resetModules();
+  beforeEach(() => {
     projDir = mkdtempSync(join(tmpdir(), 'tamtam-detect-'));
-
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp' }),
-      getProjectTestConfig: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn(),
-    }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: vi.fn(),
-      listJobs: vi.fn().mockReturnValue([]),
-      probeJobStatus: vi.fn().mockResolvedValue('done'),
-      updateJob: vi.fn(),
-      markDone: vi.fn().mockResolvedValue(undefined),
-    }));
-
-    const mod = await import('@/lib/pipeline/start-test');
-    detectTestCommand = mod.detectTestCommand;
+    mocks.getImproveConfigMock.mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp' });
+    mocks.getProjectTestConfigMock.mockReturnValue(null);
+    mocks.execSyncMock.mockReset();
   });
 
   afterEach(() => {
-    vi.resetModules();
     rmSync(projDir, { recursive: true, force: true });
   });
 
   it('returns configured test_command when project config exists', async () => {
-    vi.resetModules();
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({
-        projects: { myproj: { project: 'myproj', test_command: 'custom-test-runner' } },
-        claudeBin: 'claude',
-        logDir: '/tmp',
-      }),
-      getProjectTestConfig: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn() }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: vi.fn(), listJobs: vi.fn().mockReturnValue([]),
-      probeJobStatus: vi.fn(), updateJob: vi.fn(), markDone: vi.fn(),
-    }));
-    const mod = await import('@/lib/pipeline/start-test');
-    await expect(mod.detectTestCommand(projDir, 'myproj')).resolves.toBe('custom-test-runner');
+    mocks.getImproveConfigMock.mockReturnValue({
+      projects: { myproj: { project: 'myproj', test_command: 'custom-test-runner' } },
+      claudeBin: 'claude',
+      logDir: '/tmp',
+    });
+    await expect(detectTestCommand(projDir, 'myproj')).resolves.toBe('custom-test-runner');
   });
 
   it('detects pnpm test when pnpm-lock.yaml exists alongside package.json with test script', async () => {
@@ -96,43 +121,17 @@ describe('detectTestCommand', () => {
   });
 
   it('detects swift test when Package.swift exists and xcode-select succeeds', async () => {
-    vi.resetModules();
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp' }),
-      getProjectTestConfig: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn() }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: vi.fn(), listJobs: vi.fn().mockReturnValue([]),
-      probeJobStatus: vi.fn(), updateJob: vi.fn(), markDone: vi.fn(),
-    }));
-    vi.doMock('child_process', async (importOriginal) => ({
-      ...(await importOriginal<typeof import('child_process')>()),
-      execSync: vi.fn(), // no-op = success
-    }));
-    const mod = await import('@/lib/pipeline/start-test');
+    mocks.execSyncMock.mockImplementation(() => Buffer.from(''));
     writeFileSync(join(projDir, 'Package.swift'), '// swift-tools-version:5.5');
-    await expect(mod.detectTestCommand(projDir)).resolves.toBe('swift test');
+    await expect(detectTestCommand(projDir)).resolves.toBe('swift test');
   });
 
   it('returns null when Package.swift exists but xcode-select is not configured', async () => {
-    vi.resetModules();
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp' }),
-      getProjectTestConfig: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn() }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: vi.fn(), listJobs: vi.fn().mockReturnValue([]),
-      probeJobStatus: vi.fn(), updateJob: vi.fn(), markDone: vi.fn(),
-    }));
-    vi.doMock('child_process', async (importOriginal) => ({
-      ...(await importOriginal<typeof import('child_process')>()),
-      execSync: vi.fn().mockImplementation(() => { throw new Error('xcode-select: error: unable to get active developer directory'); }),
-    }));
-    const mod = await import('@/lib/pipeline/start-test');
+    mocks.execSyncMock.mockImplementation(() => {
+      throw new Error('xcode-select: error: unable to get active developer directory');
+    });
     writeFileSync(join(projDir, 'Package.swift'), '// swift-tools-version:5.5');
-    await expect(mod.detectTestCommand(projDir)).resolves.toBeNull();
+    await expect(detectTestCommand(projDir)).resolves.toBeNull();
   });
 
   it('detects make test when Makefile has a test target', async () => {
@@ -150,19 +149,9 @@ describe('detectTestCommand', () => {
   });
 
   it('returns null when tests_disabled=true for the project, even if a test file exists', async () => {
-    vi.resetModules();
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp' }),
-      getProjectTestConfig: vi.fn().mockReturnValue({ testsDisabled: true }),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn() }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: vi.fn(), listJobs: vi.fn().mockReturnValue([]),
-      probeJobStatus: vi.fn(), updateJob: vi.fn(), markDone: vi.fn(),
-    }));
-    const mod = await import('@/lib/pipeline/start-test');
+    mocks.getProjectTestConfigMock.mockReturnValue({ testsDisabled: true });
     writeFileSync(join(projDir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
     writeFileSync(join(projDir, 'pnpm-lock.yaml'), '');
-    await expect(mod.detectTestCommand(projDir, 'myproj')).resolves.toBeNull();
+    await expect(detectTestCommand(projDir, 'myproj')).resolves.toBeNull();
   });
 });

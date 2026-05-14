@@ -1,10 +1,40 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { sql, eq } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
 let sharedHandle: TestDbHandle;
+
+const mocks = vi.hoisted(() => ({
+  exec: vi.fn(),
+  resolveProjectPath: vi.fn(),
+  clearProjectDataCache: vi.fn(),
+  loadFileConfig: vi.fn(),
+  getSettings: vi.fn(),
+  getDb: vi.fn(),
+}));
+
+vi.mock('@/lib/shared/project-data', () => ({
+  resolveProjectPath: mocks.resolveProjectPath,
+  clearProjectDataCache: mocks.clearProjectDataCache,
+}));
+vi.mock('@/lib/shared/shell', () => ({ exec: mocks.exec }));
+vi.mock('@/lib/db', () => ({
+  get db() {
+    return mocks.getDb();
+  },
+  schema,
+}));
+vi.mock('@/lib/skills/tamtam-file-config', () => ({
+  loadFileConfig: mocks.loadFileConfig,
+}));
+vi.mock('@/lib/shared/config', () => ({
+  getSettings: mocks.getSettings,
+}));
+
+// Import route once at module scope — the mocks above are hoisted before this.
+import { GET, POST } from '@/app/api/projects/by-project/[projectName]/issues/route';
 
 async function applyDdl(handle: TestDbHandle): Promise<void> {
   await handle.db.execute(sql.raw(`
@@ -21,10 +51,10 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
 beforeAll(async () => {
   sharedHandle = await createTestPgDbEmpty();
   await applyDdl(sharedHandle);
+  mocks.getDb.mockReturnValue(sharedHandle.db);
 });
 
 afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 30));
   try {
     await sharedHandle[Symbol.asyncDispose]();
   } catch {
@@ -32,53 +62,23 @@ afterAll(async () => {
   }
 });
 
+function resp(exitCode: number, stdout = '', stderr = '') {
+  return Promise.resolve({ exitCode, stdout, stderr });
+}
+
 describe('GET /api/projects/by-project/[projectName]/issues', () => {
-  let GET: any;
-  let execMock: ReturnType<typeof vi.fn>;
-  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
-  let loadFileConfigMock: ReturnType<typeof vi.fn>;
-  let getSettingsMock: ReturnType<typeof vi.fn>;
-
   beforeEach(async () => {
-    vi.resetModules();
     await sharedHandle.db.execute(sql.raw('TRUNCATE gh_issues_cache'));
-
-    execMock = vi.fn();
-    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
-    loadFileConfigMock = vi.fn().mockReturnValue(null);
-    getSettingsMock = vi.fn().mockReturnValue({ trusted_github_users: [], github_owner: '' });
-
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: resolveProjectPathMock,
-      clearProjectDataCache: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/skills/tamtam-file-config', () => ({ loadFileConfig: loadFileConfigMock }));
-    vi.doMock('@/lib/shared/config', async () => {
-      const actual = await vi.importActual<typeof import('@/lib/shared/config')>('@/lib/shared/config');
-      return {
-        ...actual,
-        getSettings: getSettingsMock,
-      };
-    });
-
-    const mod = await import('@/app/api/projects/by-project/[projectName]/issues/route');
-    GET = mod.GET;
+    mocks.exec.mockReset();
+    mocks.resolveProjectPath.mockReset().mockReturnValue('/path/to/proj');
+    mocks.clearProjectDataCache.mockReset();
+    mocks.loadFileConfig.mockReset().mockReturnValue(null);
+    mocks.getSettings.mockReset().mockReturnValue({ trusted_github_users: [], github_owner: '' });
+    mocks.getDb.mockReturnValue(sharedHandle.db);
   });
-
-  afterEach(async () => {
-    await new Promise((r) => setTimeout(r, 10));
-    vi.resetModules();
-    vi.clearAllMocks();
-  });
-
-  function resp(exitCode: number, stdout = '', stderr = '') {
-    return Promise.resolve({ exitCode, stdout, stderr });
-  }
 
   it('returns 404 when project not found', async () => {
-    resolveProjectPathMock.mockReturnValue(null);
+    mocks.resolveProjectPath.mockReturnValue(null);
     const req = new NextRequest('http://localhost/api/projects/by-project/unknown/issues');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'unknown' }) });
     expect(res.status).toBe(404);
@@ -103,7 +103,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
     expect(data.prs).toHaveLength(1);
     expect(data.prs[0].title).toBe('PR One');
     expect(data.issues[0].title).toBe('Bug One');
-    expect(execMock).not.toHaveBeenCalled();
+    expect(mocks.exec).not.toHaveBeenCalled();
   });
 
   it('fetches from gh when cache is stale', async () => {
@@ -116,7 +116,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
       fetchedAt: staleTime,
     });
 
-    execMock
+    mocks.exec
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
       .mockImplementationOnce(() => resp(0, JSON.stringify([{ number: 5, title: 'Fresh PR' }])))
       .mockImplementationOnce(() => resp(0, JSON.stringify([{ number: 3, title: 'Fresh Issue' }])));
@@ -140,7 +140,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
       fetchedAt: now - 10,
     });
 
-    execMock
+    mocks.exec
       .mockImplementationOnce(() => resp(0, 'git@github.com:owner/myproj.git'))
       .mockImplementationOnce(() => resp(0, JSON.stringify([{ number: 7, title: 'New PR' }])))
       .mockImplementationOnce(() => resp(0, '[]'));
@@ -154,7 +154,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('returns gh error in response when gh pr list fails', async () => {
-    execMock
+    mocks.exec
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
       .mockImplementationOnce(() => resp(1, '', 'authentication required'))
       .mockImplementationOnce(() => resp(0, '[]'));
@@ -167,7 +167,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('parses SSH remote URL to owner/repo format', async () => {
-    execMock
+    mocks.exec
       .mockImplementationOnce(() => resp(0, 'git@github.com:acme/coolrepo.git'))
       .mockImplementationOnce(() => resp(0, '[]'))
       .mockImplementationOnce(() => resp(0, '[]'));
@@ -179,7 +179,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('writes fresh results to cache on success', async () => {
-    execMock
+    mocks.exec
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
       .mockImplementationOnce(() => resp(0, JSON.stringify([{ number: 1 }])))
       .mockImplementationOnce(() => resp(0, '[]'));
@@ -195,7 +195,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('keeps only globally trusted issue authors when trusted_only=1', async () => {
-    getSettingsMock.mockReturnValue({ trusted_github_users: ['trusted-user'], github_owner: '' });
+    mocks.getSettings.mockReturnValue({ trusted_github_users: ['trusted-user'], github_owner: '' });
     await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
@@ -216,7 +216,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('keeps project safe_users issue authors when trusted_only=1', async () => {
-    loadFileConfigMock.mockReturnValue({ safe_users: ['repo-owner'] });
+    mocks.loadFileConfig.mockReturnValue({ safe_users: ['repo-owner'] });
     await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
@@ -236,8 +236,8 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('unions global trusted_github_users with project safe_users when trusted_only=1', async () => {
-    getSettingsMock.mockReturnValue({ trusted_github_users: ['octocat'], github_owner: '' });
-    loadFileConfigMock.mockReturnValue({ safe_users: ['repo-owner'] });
+    mocks.getSettings.mockReturnValue({ trusted_github_users: ['octocat'], github_owner: '' });
+    mocks.loadFileConfig.mockReturnValue({ safe_users: ['repo-owner'] });
     await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
@@ -274,8 +274,8 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('returns no issues when both allowlists are empty', async () => {
-    getSettingsMock.mockReturnValue({ trusted_github_users: [], github_owner: '' });
-    loadFileConfigMock.mockReturnValue({ safe_users: [] });
+    mocks.getSettings.mockReturnValue({ trusted_github_users: [], github_owner: '' });
+    mocks.loadFileConfig.mockReturnValue({ safe_users: [] });
     await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
@@ -293,7 +293,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('matches trusted authors case-insensitively when trusted_only=1', async () => {
-    getSettingsMock.mockReturnValue({ trusted_github_users: ['Trusted-User'], github_owner: '' });
+    mocks.getSettings.mockReturnValue({ trusted_github_users: ['Trusted-User'], github_owner: '' });
     await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
@@ -311,7 +311,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('leaves prs untouched when trusted_only=1', async () => {
-    getSettingsMock.mockReturnValue({ trusted_github_users: [], github_owner: '' });
+    mocks.getSettings.mockReturnValue({ trusted_github_users: [], github_owner: '' });
     await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
@@ -377,37 +377,15 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
 });
 
 describe('POST /api/projects/by-project/[projectName]/issues', () => {
-  let POST: any;
-  let execMock: ReturnType<typeof vi.fn>;
-  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
-
   beforeEach(async () => {
-    vi.resetModules();
     await sharedHandle.db.execute(sql.raw('TRUNCATE gh_issues_cache'));
-
-    execMock = vi.fn();
-    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
-
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: resolveProjectPathMock,
-      clearProjectDataCache: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-
-    const mod = await import('@/app/api/projects/by-project/[projectName]/issues/route');
-    POST = mod.POST;
+    mocks.exec.mockReset();
+    mocks.resolveProjectPath.mockReset().mockReturnValue('/path/to/proj');
+    mocks.clearProjectDataCache.mockReset();
+    mocks.loadFileConfig.mockReset().mockReturnValue(null);
+    mocks.getSettings.mockReset().mockReturnValue({ trusted_github_users: [], github_owner: '' });
+    mocks.getDb.mockReturnValue(sharedHandle.db);
   });
-
-  afterEach(async () => {
-    await new Promise((r) => setTimeout(r, 10));
-    vi.resetModules();
-    vi.clearAllMocks();
-  });
-
-  function resp(exitCode: number, stdout = '', stderr = '') {
-    return Promise.resolve({ exitCode, stdout, stderr });
-  }
 
   function makeReq(body: object) {
     return new NextRequest('http://localhost/api/projects/by-project/myproj/issues', {
@@ -439,13 +417,13 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('returns 404 when project not found', async () => {
-    resolveProjectPathMock.mockReturnValue(null);
+    mocks.resolveProjectPath.mockReturnValue(null);
     const res = await POST(makeReq({ prNumber: 1 }), { params: Promise.resolve({ projectName: 'unknown' }) });
     expect(res.status).toBe(404);
   });
 
   it('merges a PR successfully and returns status merged', async () => {
-    execMock
+    mocks.exec
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git')) // git remote get-url
       .mockImplementationOnce(() => resp(0, '')) // gh pr merge
       .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main\n')) // symbolic-ref
@@ -462,19 +440,19 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('calls gh pr merge with correct --squash flag', async () => {
-    execMock
+    mocks.exec
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
       .mockImplementationOnce(() => resp(0, ''));
 
     await POST(makeReq({ prNumber: 7, action: 'merge', mergeMethod: 'squash' }), { params: Promise.resolve({ projectName: 'myproj' }) });
 
-    const mergeCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('merge'));
+    const mergeCalls = mocks.exec.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('merge'));
     expect(mergeCalls).toHaveLength(1);
     expect(mergeCalls[0][1]).toContain('--squash');
   });
 
   it('returns 422 and does NOT fall back to --auto when repo has auto-merge disabled', async () => {
-    execMock
+    mocks.exec
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
       .mockImplementationOnce(() => resp(1, '', 'Pull request Auto merge is not allowed for this repository (enablePullRequestAutoMerge)'));
 
@@ -483,12 +461,12 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
     const data = await res.json();
     expect(data.detail).toContain('not allowed');
 
-    const autoCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('--auto'));
+    const autoCalls = mocks.exec.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('--auto'));
     expect(autoCalls).toHaveLength(0);
   });
 
   it('falls back to --auto when direct merge fails due to pending required checks', async () => {
-    execMock
+    mocks.exec
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
       .mockImplementationOnce(() => resp(1, '', 'required status checks have not passed'))
       .mockImplementationOnce(() => resp(0, '')) // retry with --auto succeeds
@@ -503,12 +481,12 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
     const data = await res.json();
     expect(data.status).toBe('merged');
 
-    const autoCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('--auto'));
+    const autoCalls = mocks.exec.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('--auto'));
     expect(autoCalls).toHaveLength(1);
   });
 
   it('returns 422 when merge fails without auto-merge pattern', async () => {
-    execMock
+    mocks.exec
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
       .mockImplementationOnce(() => resp(1, '', 'permission denied'));
 
@@ -519,7 +497,7 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('approves a PR successfully', async () => {
-    execMock
+    mocks.exec
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
       .mockImplementationOnce(() => resp(0, ''));
 
@@ -529,12 +507,12 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
     expect(data.status).toBe('approved');
     expect(data.pr).toBe(3);
 
-    const approveCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('--approve'));
+    const approveCalls = mocks.exec.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('--approve'));
     expect(approveCalls).toHaveLength(1);
   });
 
   it('returns 422 when approve fails', async () => {
-    execMock
+    mocks.exec
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
       .mockImplementationOnce(() => resp(1, '', 'cannot review your own PR'));
 
@@ -553,7 +531,7 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
       fetchedAt: Date.now() / 1000,
     });
 
-    execMock
+    mocks.exec
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
       .mockImplementationOnce(() => resp(0, ''));
 
@@ -573,7 +551,7 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
       fetchedAt: Date.now() / 1000,
     });
 
-    execMock
+    mocks.exec
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
       .mockImplementationOnce(() => resp(0, ''));
 
@@ -585,14 +563,14 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('does not fall back to --auto when merge fails with unrelated error', async () => {
-    execMock
+    mocks.exec
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
       .mockImplementationOnce(() => resp(1, '', 'branch does not exist'));
 
     const res = await POST(makeReq({ prNumber: 1, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(422);
 
-    const autoCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('--auto'));
+    const autoCalls = mocks.exec.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('--auto'));
     expect(autoCalls).toHaveLength(0);
   });
 
@@ -600,7 +578,7 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
   // working copy is ready for the next task. Stashes dirty state first.
   describe('post-merge cleanup', () => {
     it('switches to default branch (origin/HEAD) and pulls after a clean merge', async () => {
-      execMock
+      mocks.exec
         .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git')) // remote get-url
         .mockImplementationOnce(() => resp(0, '')) // gh pr merge
         .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main\n')) // symbolic-ref
@@ -615,14 +593,14 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
       expect(data.status).toBe('merged');
       expect(data.switchedTo).toBe('main');
 
-      const gitCalls = execMock.mock.calls.filter(([cmd]: any) => cmd === 'git');
+      const gitCalls = mocks.exec.mock.calls.filter(([cmd]: any) => cmd === 'git');
       expect(gitCalls.some(([, args]: any) => args[2] === 'symbolic-ref')).toBe(true);
       expect(gitCalls.some(([, args]: any) => args[2] === 'checkout' && args[3] === 'main')).toBe(true);
       expect(gitCalls.some(([, args]: any) => args[2] === 'pull' && args.includes('--ff-only'))).toBe(true);
     });
 
     it('resolves the default branch from origin/HEAD — honors master', async () => {
-      execMock
+      mocks.exec
         .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
         .mockImplementationOnce(() => resp(0, ''))
         .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/master\n'))
@@ -635,12 +613,12 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
       const data = await res.json();
       expect(data.switchedTo).toBe('master');
 
-      const checkoutCall = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args[2] === 'checkout');
+      const checkoutCall = mocks.exec.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args[2] === 'checkout');
       expect(checkoutCall![1][3]).toBe('master');
     });
 
     it('stashes uncommitted work before checkout and pops it after pull', async () => {
-      execMock
+      mocks.exec
         .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
         .mockImplementationOnce(() => resp(0, ''))
         .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main\n'))
@@ -654,15 +632,15 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
       const res = await POST(makeReq({ prNumber: 5, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
       expect(res.status).toBe(200);
 
-      const stashPush = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args[2] === 'stash' && args[3] === 'push');
-      const stashPop = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args[2] === 'stash' && args[3] === 'pop');
+      const stashPush = mocks.exec.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args[2] === 'stash' && args[3] === 'push');
+      const stashPop = mocks.exec.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args[2] === 'stash' && args[3] === 'pop');
       expect(stashPush).toBeTruthy();
       expect(stashPush![1]).toContain('-u'); // include untracked
       expect(stashPop).toBeTruthy();
     });
 
     it('skips stash when working tree is clean', async () => {
-      execMock
+      mocks.exec
         .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
         .mockImplementationOnce(() => resp(0, ''))
         .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main\n'))
@@ -673,12 +651,12 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
 
       await POST(makeReq({ prNumber: 9, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
 
-      const stashCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args[2] === 'stash');
+      const stashCalls = mocks.exec.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args[2] === 'stash');
       expect(stashCalls).toHaveLength(0);
     });
 
     it('short-circuits to pull when already on the default branch', async () => {
-      execMock
+      mocks.exec
         .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
         .mockImplementationOnce(() => resp(0, ''))
         .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main\n'))
@@ -689,14 +667,14 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
       const data = await res.json();
       expect(data.switchedTo).toBe('main');
 
-      const checkoutCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args[2] === 'checkout');
+      const checkoutCalls = mocks.exec.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args[2] === 'checkout');
       expect(checkoutCalls).toHaveLength(0);
-      const stashCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args[2] === 'stash');
+      const stashCalls = mocks.exec.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args[2] === 'stash');
       expect(stashCalls).toHaveLength(0);
     });
 
     it('restores the stash if checkout fails and returns 207 with switchError', async () => {
-      execMock
+      mocks.exec
         .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
         .mockImplementationOnce(() => resp(0, ''))
         .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main\n'))
@@ -713,12 +691,12 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
       expect(data.switchedTo).toBeNull();
       expect(data.switchError).toContain('checkout failed');
 
-      const stashPop = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args[2] === 'stash' && args[3] === 'pop');
+      const stashPop = mocks.exec.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args[2] === 'stash' && args[3] === 'pop');
       expect(stashPop).toBeTruthy();
     });
 
     it('returns 207 with switchError when cleanup step throws', async () => {
-      execMock
+      mocks.exec
         .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
         .mockImplementationOnce(() => resp(0, '')) // merge ok
         .mockImplementationOnce(() => Promise.reject(new Error('git fork bomb')));
@@ -732,7 +710,7 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
     });
 
     it('falls back to "main" when origin/HEAD is not set', async () => {
-      execMock
+      mocks.exec
         .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
         .mockImplementationOnce(() => resp(0, ''))
         .mockImplementationOnce(() => resp(1, '', 'no symbolic ref')) // symbolic-ref fails
@@ -745,31 +723,31 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
       const data = await res.json();
       expect(data.switchedTo).toBe('main');
 
-      const checkoutCall = execMock.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args[2] === 'checkout');
+      const checkoutCall = mocks.exec.mock.calls.find(([cmd, args]: any) => cmd === 'git' && args[2] === 'checkout');
       expect(checkoutCall![1][3]).toBe('main');
     });
 
     it('does not run cleanup when merge itself fails', async () => {
-      execMock
+      mocks.exec
         .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
         .mockImplementationOnce(() => resp(1, '', 'permission denied'));
 
       const res = await POST(makeReq({ prNumber: 7, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
       expect(res.status).toBe(422);
 
-      const gitCalls = execMock.mock.calls.filter(([cmd]: any) => cmd === 'git');
+      const gitCalls = mocks.exec.mock.calls.filter(([cmd]: any) => cmd === 'git');
       // only `git remote get-url` from getGhRepo — no checkout/pull/stash
       expect(gitCalls.every(([, args]: any) => args[0] === 'remote' || args.includes('get-url'))).toBe(true);
     });
 
     it('does not run cleanup on approve path', async () => {
-      execMock
+      mocks.exec
         .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
         .mockImplementationOnce(() => resp(0, '')); // gh pr review --approve
 
       await POST(makeReq({ prNumber: 8, action: 'approve' }), { params: Promise.resolve({ projectName: 'myproj' }) });
 
-      const checkoutCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args[2] === 'checkout');
+      const checkoutCalls = mocks.exec.mock.calls.filter(([cmd, args]: any) => cmd === 'git' && args[2] === 'checkout');
       expect(checkoutCalls).toHaveLength(0);
     });
   });

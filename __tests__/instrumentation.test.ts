@@ -84,7 +84,46 @@ describe('instrumentation', () => {
 
     it('fires reinstall in the background without blocking', async () => {
       process.env.NEXT_RUNTIME = 'nodejs';
+      vi.stubEnv('NODE_ENV', 'test');
       mockDeps([makeAgent({ id: 'agent-1', name: 'A', project: 'proj1', schedule: '2h', prompt: 'a' })]);
+      // Mock heavy modules that registerNode dynamically imports to avoid
+      // pulling their full transitive trees on every cold start.
+      vi.doMock('@/lib/agents/default-agent-skills', () => ({
+        backfillIssueCruncherPrerequisites: vi.fn().mockResolvedValue(undefined),
+      }));
+      vi.doMock('./lib/agents/default-agent-skills', () => ({
+        backfillIssueCruncherPrerequisites: vi.fn().mockResolvedValue(undefined),
+      }));
+      vi.doMock('@/lib/skills/tamtam-file-config', () => ({
+        readLegacyWorkflowFlags: vi.fn().mockReturnValue({}),
+      }));
+      vi.doMock('./lib/skills/tamtam-file-config', () => ({
+        readLegacyWorkflowFlags: vi.fn().mockReturnValue({}),
+      }));
+      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
+        drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
+        drainUnlockedQueuedAgentRuns: vi.fn().mockResolvedValue(undefined),
+      }));
+      vi.doMock('./lib/pipeline/recovery-drain', () => ({
+        drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
+        drainUnlockedQueuedAgentRuns: vi.fn().mockResolvedValue(undefined),
+      }));
+      vi.doMock('@/lib/jobs/job-storage', () => ({
+        listJobs: () => [],
+        getJob: vi.fn().mockReturnValue(null),
+        markDone: vi.fn().mockResolvedValue(undefined),
+        probeJobStatus: vi.fn(),
+        reconcileStaleRelease: vi.fn(),
+        PIPELINE_STEP_KINDS: new Set(),
+      }));
+      vi.doMock('./lib/jobs/job-storage', () => ({
+        listJobs: () => [],
+        getJob: vi.fn().mockReturnValue(null),
+        markDone: vi.fn().mockResolvedValue(undefined),
+        probeJobStatus: vi.fn(),
+        reconcileStaleRelease: vi.fn(),
+        PIPELINE_STEP_KINDS: new Set(),
+      }));
 
       const { register } = await import('@/instrumentation');
       const returned = register();
@@ -94,7 +133,7 @@ describe('instrumentation', () => {
       // we used to use was too short. Poll until the scheduler is armed.
       await vi.waitFor(
         () => expect(startInternalSchedulerMock).toHaveBeenCalledTimes(1),
-        { timeout: 2000 }
+        { timeout: 2000, interval: 1 }
       );
     });
   });
@@ -155,7 +194,7 @@ describe('instrumentation', () => {
 
       await vi.waitFor(() => {
         expect(resumePrWaitMock).toHaveBeenCalledWith('pr-wait-1');
-      }, { timeout: 2000 });
+      }, { timeout: 2000, interval: 1 });
       expect(markDoneMock).not.toHaveBeenCalled();
     });
 
@@ -198,7 +237,7 @@ describe('instrumentation', () => {
         expect(resumePrWaitMock).toHaveBeenCalledWith('pr-wait-bad');
         expect(markDoneMock).toHaveBeenCalledWith(orphanedPrWait, -1);
         expect(markDoneMock).toHaveBeenCalledWith(orphanedMarkDod, -1);
-      }, { timeout: 2000 });
+      }, { timeout: 2000, interval: 1 });
     });
   });
 

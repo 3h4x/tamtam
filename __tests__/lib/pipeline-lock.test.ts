@@ -1,7 +1,45 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
+
+// Shared mock bag — populated in `beforeAll` once PGlite is up, then reused
+// for every test. Hoisted so module-level `vi.mock` factories below capture
+// stable references.
+const mocks = vi.hoisted(() => {
+  return {
+    dbRef: { current: null as unknown as TestDbHandle['db'] },
+    drainProjectRecoveryWork: vi.fn().mockResolvedValue(undefined),
+    drainNextAgentRun: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
+vi.mock('@/lib/db', () => ({
+  get db() {
+    return mocks.dbRef.current;
+  },
+  schema,
+}));
+
+vi.mock('@/lib/pipeline/recovery-drain', () => ({
+  drainProjectRecoveryWork: mocks.drainProjectRecoveryWork,
+}));
+
+vi.mock('@/lib/agents/pending-agent-run', () => ({
+  drainNextAgentRun: mocks.drainNextAgentRun,
+}));
+
+// Import the subject and the modules it touches once at top-scope. They will
+// all see the mocked `@/lib/db` (and friends).
+import {
+  acquireLock,
+  releaseLock,
+  getLock,
+  isLockOwnedByActiveRelease,
+  reassignLock,
+} from '@/lib/pipeline/pipeline-lock';
+import { setPendingRelease, getPendingRelease } from '@/lib/pipeline/pending-release';
+import { jobsCache } from '@/lib/jobs/storage';
 
 async function applyDdl(handle: TestDbHandle): Promise<void> {
   // PGlite rejects multi-statement prepared queries, so issue each DDL
@@ -70,20 +108,14 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
 
 describe('pipeline-lock', () => {
   let handle: TestDbHandle;
-  let acquireLock: typeof import('@/lib/pipeline/pipeline-lock').acquireLock;
-  let releaseLock: typeof import('@/lib/pipeline/pipeline-lock').releaseLock;
-  let getLock: typeof import('@/lib/pipeline/pipeline-lock').getLock;
-  let isLockOwnedByActiveRelease: typeof import('@/lib/pipeline/pipeline-lock').isLockOwnedByActiveRelease;
-  let reassignLock: typeof import('@/lib/pipeline/pipeline-lock').reassignLock;
 
   beforeAll(async () => {
     handle = await createTestPgDbEmpty();
     await applyDdl(handle);
+    mocks.dbRef.current = handle.db;
   });
 
   afterAll(async () => {
-    // Let any straggling fire-and-forget queries settle before closing.
-    await new Promise((r) => setTimeout(r, 30));
     try {
       await handle[Symbol.asyncDispose]();
     } catch {
@@ -92,32 +124,12 @@ describe('pipeline-lock', () => {
   });
 
   beforeEach(async () => {
-    vi.resetModules();
-    vi.doUnmock('@/lib/pipeline/pending-release');
-    vi.doUnmock('@/lib/pipeline/recovery-drain');
-    vi.doUnmock('@/lib/agents/pending-agent-run');
     await handle.db.execute(sql.raw(
       'TRUNCATE pipeline_locks, jobs, settings, projects',
     ));
-    vi.doMock('@/lib/db', () => ({
-      db: handle.db,
-      schema,
-    }));
-
-    const mod = await import('@/lib/pipeline/pipeline-lock');
-    acquireLock = mod.acquireLock;
-    releaseLock = mod.releaseLock;
-    getLock = mod.getLock;
-    isLockOwnedByActiveRelease = mod.isLockOwnedByActiveRelease;
-    reassignLock = mod.reassignLock;
-  });
-
-  afterEach(async () => {
-    // Short settle: lets fire-and-forget releaseLockAsync DELETEs land before
-    // the next test truncates and inserts. 10ms is plenty for PGlite (in-proc).
-    await new Promise((r) => setTimeout(r, 10));
-    vi.resetModules();
-    vi.clearAllMocks();
+    jobsCache.clear();
+    mocks.drainProjectRecoveryWork.mockReset().mockResolvedValue(undefined);
+    mocks.drainNextAgentRun.mockReset().mockResolvedValue(undefined);
   });
 
   async function insertJob(
@@ -132,10 +144,8 @@ describe('pipeline-lock', () => {
       `INSERT INTO jobs (id, project, kind, pid, started_at, finished_at) VALUES ('${id}', '${project}', '${kind}', ${pid}, ${startedAt}, ${finishedAt === null ? 'NULL' : finishedAt})`,
     ));
     // pipeline-lock self-heal reads from the in-memory jobsCache, not the DB.
-    // Populate the cache of the currently-loaded storage module so getJob()
-    // can find the row.
-    const storage = await import('@/lib/jobs/storage');
-    storage.jobsCache.set(id, {
+    // Populate the cache so getJob() can find the row.
+    jobsCache.set(id, {
       id,
       project,
       kind,
@@ -181,66 +191,36 @@ describe('pipeline-lock', () => {
     });
 
     it('self-heal keeps a pending release queued when the drain is pause-blocked', async () => {
-      vi.resetModules();
-      const drainProjectRecoveryWorkMock = vi.fn().mockResolvedValue(undefined);
-      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
-        drainProjectRecoveryWork: drainProjectRecoveryWorkMock,
-      }));
-      vi.doMock('@/lib/agents/pending-agent-run', () => ({
-        drainNextAgentRun: vi.fn().mockResolvedValue(undefined),
-      }));
-
-      const pendingMod = await import('@/lib/pipeline/pending-release');
-      const mod2 = await import('@/lib/pipeline/pipeline-lock');
+      mocks.drainProjectRecoveryWork.mockResolvedValue(undefined);
 
       await insertLock('proj', 'old-release', Date.now() / 1000 - 5);
       await insertJob('old-release', 'proj', 'release', Date.now() / 1000 - 200, Date.now() / 1000 - 10);
-      pendingMod.setPendingRelease('proj');
+      setPendingRelease('proj');
 
-      expect((await mod2.getLock('proj'))).toBeNull();
-      await vi.waitFor(async () => expect(await pendingMod.getPendingRelease("proj")).toBe(true));
+      expect((await getLock('proj'))).toBeNull();
+      await vi.waitFor(async () => expect(await getPendingRelease('proj')).toBe(true), { interval: 1 });
     });
 
     it('self-heal keeps a pending release queued when the drain throws', async () => {
-      vi.resetModules();
-      const drainProjectRecoveryWorkMock = vi.fn().mockRejectedValue(new Error('pm2 start failed'));
-      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
-        drainProjectRecoveryWork: drainProjectRecoveryWorkMock,
-      }));
-      vi.doMock('@/lib/agents/pending-agent-run', () => ({
-        drainNextAgentRun: vi.fn().mockResolvedValue(undefined),
-      }));
-
-      const pendingMod = await import('@/lib/pipeline/pending-release');
-      const mod2 = await import('@/lib/pipeline/pipeline-lock');
+      mocks.drainProjectRecoveryWork.mockRejectedValue(new Error('pm2 start failed'));
 
       await insertLock('proj', 'old-release', Date.now() / 1000 - 5);
       await insertJob('old-release', 'proj', 'release', Date.now() / 1000 - 200, Date.now() / 1000 - 10);
-      pendingMod.setPendingRelease('proj');
+      setPendingRelease('proj');
 
-      expect((await mod2.getLock('proj'))).toBeNull();
-      await vi.waitFor(async () => expect(await pendingMod.getPendingRelease("proj")).toBe(true));
+      expect((await getLock('proj'))).toBeNull();
+      await vi.waitFor(async () => expect(await getPendingRelease('proj')).toBe(true), { interval: 1 });
     });
 
     it('self-heal keeps a pending release queued on retryable startup failure', async () => {
-      vi.resetModules();
-      const drainProjectRecoveryWorkMock = vi.fn().mockResolvedValue(undefined);
-      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
-        drainProjectRecoveryWork: drainProjectRecoveryWorkMock,
-      }));
-      vi.doMock('@/lib/agents/pending-agent-run', () => ({
-        drainNextAgentRun: vi.fn().mockResolvedValue(undefined),
-      }));
-
-      const pendingMod = await import('@/lib/pipeline/pending-release');
-      const mod2 = await import('@/lib/pipeline/pipeline-lock');
+      mocks.drainProjectRecoveryWork.mockResolvedValue(undefined);
 
       await insertLock('proj', 'old-release', Date.now() / 1000 - 5);
       await insertJob('old-release', 'proj', 'release', Date.now() / 1000 - 200, Date.now() / 1000 - 10);
-      pendingMod.setPendingRelease('proj');
+      setPendingRelease('proj');
 
-      expect((await mod2.getLock('proj'))).toBeNull();
-      await vi.waitFor(async () => expect(await pendingMod.getPendingRelease("proj")).toBe(true));
+      expect((await getLock('proj'))).toBeNull();
+      await vi.waitFor(async () => expect(await getPendingRelease('proj')).toBe(true), { interval: 1 });
     });
 
     it('self-heals: still returns the lock while the holder is running', async () => {
@@ -335,7 +315,7 @@ describe('pipeline-lock', () => {
       await acquireLock('proj', 'job-1');
       await releaseLock('proj', 'job-1');
       // releaseLock fires the delete asynchronously
-      await vi.waitFor(async () => expect(await getLock('proj')).toBeNull());
+      await vi.waitFor(async () => expect(await getLock('proj')).toBeNull(), { interval: 1 });
     });
 
     it('does nothing when a different job tries to release', async () => {
@@ -354,33 +334,25 @@ describe('pipeline-lock', () => {
       await acquireLock('proj-a', 'job-a');
       await acquireLock('proj-b', 'job-b');
       await releaseLock('proj-a', 'job-a');
-      await vi.waitFor(async () => expect(await getLock('proj-a')).toBeNull());
+      await vi.waitFor(async () => expect(await getLock('proj-a')).toBeNull(), { interval: 1 });
       expect((await getLock('proj-b'))).not.toBeNull();
     });
 
     it('calls the ordered recovery drain for the project when the lock is released', async () => {
-      const drainMock = vi.fn().mockResolvedValue(undefined);
-      vi.resetModules();
-      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
-        drainProjectRecoveryWork: drainMock,
-      }));
-      const mod2 = await import('@/lib/pipeline/pipeline-lock');
-      await mod2.acquireLock('proj', 'job-drain');
-      await mod2.releaseLock('proj', 'job-drain');
-      await vi.waitFor(() => expect(drainMock).toHaveBeenCalledWith('proj', '[pipeline-lock]'));
+      await acquireLock('proj', 'job-drain');
+      await releaseLock('proj', 'job-drain');
+      await vi.waitFor(
+        () => expect(mocks.drainProjectRecoveryWork).toHaveBeenCalledWith('proj', '[pipeline-lock]'),
+        { interval: 1 },
+      );
     });
 
     it('does not call the recovery drain when the wrong job tries to release', async () => {
-      const drainMock = vi.fn().mockResolvedValue(undefined);
-      vi.resetModules();
-      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
-        drainProjectRecoveryWork: drainMock,
-      }));
-      const mod2 = await import('@/lib/pipeline/pipeline-lock');
-      await mod2.acquireLock('proj', 'job-owner');
-      await mod2.releaseLock('proj', 'job-other');
-      await new Promise<void>((r) => setTimeout(r, 30));
-      expect(drainMock).not.toHaveBeenCalled();
+      await acquireLock('proj', 'job-owner');
+      await releaseLock('proj', 'job-other');
+      // Brief tick to let any (incorrect) fire-and-forget drain settle.
+      await new Promise<void>((r) => setImmediate(r));
+      expect(mocks.drainProjectRecoveryWork).not.toHaveBeenCalled();
     });
   });
 
@@ -427,7 +399,7 @@ describe('pipeline-lock', () => {
         expect(lock).not.toBeNull();
         expect(lock!.lockedByJobId).toBe('new-job');
         expect(lock!.project).toBe('proj');
-      });
+      }, { interval: 1 });
     });
 
     it('overwrites an existing lock regardless of current holder', async () => {
@@ -437,7 +409,7 @@ describe('pipeline-lock', () => {
       await vi.waitFor(async () => {
         const lock = await getLock('proj');
         expect(lock!.lockedByJobId).toBe('real-job-id');
-      });
+      }, { interval: 1 });
     });
 
     it('updates acquiredAt to current time', async () => {
@@ -447,7 +419,7 @@ describe('pipeline-lock', () => {
         const lock = await getLock('proj');
         expect(lock).not.toBeNull();
         expect(lock!.acquiredAt).toBeGreaterThanOrEqual(before);
-      });
+      }, { interval: 1 });
       const after = Date.now() / 1000;
       const lock = await getLock('proj');
       expect(lock!.acquiredAt).toBeLessThanOrEqual(after + 1);
@@ -461,7 +433,7 @@ describe('pipeline-lock', () => {
         const b = await getLock('proj-b');
         expect(b).not.toBeNull();
         expect(b!.lockedByJobId).toBe('job-b');
-      });
+      }, { interval: 1 });
       expect((await getLock('proj-a'))!.lockedByJobId).toBe('job-a');
     });
 
@@ -473,7 +445,7 @@ describe('pipeline-lock', () => {
       await vi.waitFor(async () => {
         const lock = await getLock('proj');
         expect(lock!.lockedByJobId).toBe('real-release-id');
-      });
+      }, { interval: 1 });
     });
   });
 });
