@@ -20,6 +20,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 ## Projects
 
 - `/api/projects` — All projects list (GET)
+- `/api/projects/runtime` — Per-project runtime snapshot for the projects table (GET). Returns `{ projects }`, keyed by project name. Each value contains running-state flags (`hasRunningReview`, `hasRunningTest`, `hasRunningRelease`, `hasRunningPipelineChild`), `runningCount`, distinct `runningKinds`, `runningAgentNames`, the latest finished review verdict (`latestVerdict`, `latestVerdictAt`), `lastActivityAt`, and a compact `lastJob` object with camelCase fields (`id`, `kind`, `status`, `exitCode`, `startedAt`, `finishedAt`, `verdict`). The route is intentionally summary-only; use `/api/jobs` for paged run rows and `/api/jobs/counts` for aggregate totals.
 - `/api/projects/personas` — File-based skills from `skills/docs/skills/` (GET)
 - `/api/projects/[schedId]/priority` — Set project scheduling priority (PATCH)
 - `/api/projects/[schedId]/pause` — Pause project scheduling (POST)
@@ -64,7 +65,8 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 
 ## Jobs / Runs
 
-- `/api/jobs` — All runs across projects (GET). Returns `{ jobs, total, pendingReleaseProjects }`; `total` is counted after the optional `project` filter and before any `limit` slice.
+- `/api/jobs` — Paged runs across projects (GET). Query params: `project=<name>` filters by project, `kind=<kind>` filters by exact job kind, `status=running|done|aborted` filters by lifecycle status, `limit=<n>` controls page size, and `offset=<n>` skips rows after filtering and newest-first sorting. `limit` defaults to 30, `limit=0` is capped to 200 for legacy callers, and all explicit limits are capped at 200. Returns `{ jobs, total, offset, limit, nextOffset, pendingReleaseProjects }`; `total` is counted after filters and before the page slice.
+- `/api/jobs/counts` — Aggregate run totals without row payloads (GET). Accepts optional `project=<name>`. Returns `{ total, byKind, byStatus, tokens, cost }`, where `byStatus.failed` uses the same review-verdict attention rules as the runs UI and `cost.monthToDate` is scoped to the current calendar month.
 - `/api/jobs/[jobId]` — Job detail (GET, DELETE). `GET` returns a display-oriented `log`: `release` jobs return the raw aggregated log verbatim, while other jobs return parsed Claude output with any non-NDJSON passthrough lines (for example agent prerequisite output) preserved ahead of the parsed stream. `DELETE` cooperatively cancels inline `commit`/`push` jobs; if they do not stop cleanly within 20s it returns `409 { detail }` instead of force-killing the server PID.
 - `/api/jobs/[jobId]/logs` — Job log content (GET)
 - `/api/jobs/[jobId]/board-sync` — Manually sync a finished root job to the GitHub project board (POST); rejects running jobs, requires board sync configured, surfaces GitHub failures instead of swallowing them

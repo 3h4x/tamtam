@@ -20,12 +20,16 @@ export async function GET(request: NextRequest) {
   const project = sp.get('project');
   const kind = sp.get('kind');
   const status = sp.get('status'); // 'running' | 'done' | 'aborted'
+  const sessionId = sp.get('session_id');
+  const hasSession = sp.get('has_session') === '1';
   const offset = Math.max(0, parseInt(sp.get('offset') ?? '0', 10) || 0);
   const limit = parseLimit(sp.get('limit'));
 
   let jobs = listJobs();
   if (project) jobs = jobs.filter((j) => j.project === project);
   if (kind) jobs = jobs.filter((j) => j.kind === kind);
+  if (sessionId) jobs = jobs.filter((j) => j.sessionId === sessionId);
+  if (hasSession) jobs = jobs.filter((j) => !!j.sessionId);
   if (status === 'running') {
     jobs = jobs.filter((j) => j.finishedAt === null && j.abortedAt == null);
   } else if (status === 'done') {

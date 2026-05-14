@@ -61,6 +61,8 @@ vi.mock('@/lib/jobs/claude-stream-parser', () => ({
 
 // Import route handlers once at top-level — no per-test re-imports.
 import { GET as jobsGET } from '@/app/api/jobs/route';
+import { GET as jobCountsGET } from '@/app/api/jobs/counts/route';
+import { GET as projectRuntimeGET } from '@/app/api/projects/runtime/route';
 import { GET as jobGET, DELETE as jobDELETE } from '@/app/api/jobs/[jobId]/route';
 import { POST as jobSeenPOST } from '@/app/api/jobs/[jobId]/seen/route';
 import { GET as notificationsGET } from '@/app/api/jobs/notifications/route';
@@ -233,6 +235,154 @@ describe('GET /api/jobs', () => {
     const data = await res.json();
     expect(data.total).toBe(5);
     expect(mocks.probeJobStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns offset pages after sorting newest-first', async () => {
+    const jobs = Array.from({ length: 5 }, (_, i) =>
+      makeJob({ id: `job-${i}`, startedAt: i })
+    );
+    mocks.listJobs.mockReturnValue(jobs);
+
+    const req = new NextRequest('http://localhost/api/jobs?limit=2&offset=2');
+    const res = await jobsGET(req);
+    const data = await res.json();
+    expect(data.jobs.map((j: any) => j.id)).toEqual(['job-2', 'job-1']);
+    expect(data.total).toBe(5);
+    expect(data.nextOffset).toBe(4);
+    expect(mocks.probeJobStatus).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('GET /api/jobs/counts', () => {
+  beforeEach(() => {
+    resetDefaults();
+  });
+
+  it('classifies review attention verdicts as failed counts', async () => {
+    mocks.listJobs.mockReturnValue([
+      makeJob({ id: 'review-lgtm', kind: 'review', finishedAt: 100, exitCode: 0, verdict: 'LGTM' }),
+      makeJob({ id: 'review-attn', kind: 'review', finishedAt: 100, exitCode: 0, verdict: 'NEEDS ATTENTION' }),
+      makeJob({ id: 'review-dns', kind: 'review', finishedAt: 100, exitCode: 0, verdict: 'DO NOT SHIP' }),
+      makeJob({ id: 'review-missing', kind: 'review', finishedAt: 100, exitCode: 0, verdict: null }),
+      makeJob({ id: 'test-failed', kind: 'test', finishedAt: 100, exitCode: 1 }),
+      makeJob({ id: 'aborted', kind: 'run', finishedAt: 100, exitCode: -3, abortedAt: 100 }),
+    ]);
+
+    const req = new NextRequest('http://localhost/api/jobs/counts');
+    const res = await jobCountsGET(req);
+    const data = await res.json();
+
+    expect(data.total).toBe(6);
+    expect(data.byStatus).toMatchObject({
+      running: 0,
+      done: 1,
+      failed: 4,
+      aborted: 1,
+    });
+  });
+});
+
+describe('GET /api/projects/runtime', () => {
+  beforeEach(() => {
+    resetDefaults();
+  });
+
+  it('returns per-project running state, latest verdict, and last job snapshot', async () => {
+    mocks.listJobs.mockReturnValue([
+      makeJob({
+        id: 'alpha-old-review',
+        project: 'alpha',
+        kind: 'review',
+        startedAt: 100,
+        finishedAt: 120,
+        exitCode: 0,
+        verdict: 'LGTM',
+      }),
+      makeJob({
+        id: 'alpha-latest-review',
+        project: 'alpha',
+        kind: 'review',
+        startedAt: 200,
+        finishedAt: 240,
+        exitCode: 0,
+        verdict: 'NEEDS ATTENTION',
+      }),
+      makeJob({
+        id: 'alpha-running-agent',
+        project: 'alpha',
+        kind: 'agent:reviewer',
+        startedAt: 300,
+        finishedAt: null,
+        exitCode: null,
+      }),
+      makeJob({
+        id: 'alpha-running-test',
+        project: 'alpha',
+        kind: 'test',
+        startedAt: 310,
+        finishedAt: null,
+        exitCode: null,
+      }),
+      makeJob({
+        id: 'beta-running-release',
+        project: 'beta',
+        kind: 'release',
+        startedAt: 400,
+        finishedAt: null,
+        exitCode: null,
+      }),
+      makeJob({
+        id: 'beta-aborted-run',
+        project: 'beta',
+        kind: 'run',
+        startedAt: 390,
+        finishedAt: 405,
+        exitCode: -3,
+        verdict: null,
+        abortedAt: 405,
+      }),
+    ]);
+
+    const res = await projectRuntimeGET();
+    const data = await res.json();
+
+    expect(data.projects.alpha).toMatchObject({
+      hasRunningReview: false,
+      hasRunningTest: true,
+      hasRunningRelease: false,
+      hasRunningPipelineChild: true,
+      runningCount: 2,
+      runningKinds: ['agent:reviewer', 'test'],
+      runningAgentNames: ['reviewer'],
+      latestVerdict: 'NEEDS ATTENTION',
+      latestVerdictAt: 240,
+      lastActivityAt: 310,
+      lastJob: {
+        id: 'alpha-running-test',
+        kind: 'test',
+        status: 'running',
+        exitCode: null,
+        startedAt: 310,
+        finishedAt: null,
+        verdict: null,
+      },
+    });
+    expect(data.projects.beta).toMatchObject({
+      hasRunningRelease: true,
+      runningCount: 1,
+      runningKinds: ['release'],
+      runningAgentNames: [],
+      lastActivityAt: 405,
+      lastJob: {
+        id: 'beta-aborted-run',
+        kind: 'run',
+        status: 'aborted',
+        exitCode: -3,
+        startedAt: 390,
+        finishedAt: 405,
+        verdict: null,
+      },
+    });
   });
 });
 

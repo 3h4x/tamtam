@@ -18,8 +18,9 @@ import {
   KIND_LABEL,
   entryIsRunning,
   entryNeedsAttention,
+  parseJobCountsResponse,
 } from '@/components/project-runs/utils'
-import type { Entry, KindBucket } from '@/components/project-runs/utils'
+import type { Entry, JobCountsResponse, KindBucket } from '@/components/project-runs/utils'
 import { RunRow } from '@/components/project-runs/RunRow'
 
 const RUNS_PAGE_LIMIT = 200
@@ -70,6 +71,7 @@ export function JobsPage() {
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [boardUrl, setBoardUrl] = useState<string>('')
+  const [summary, setSummary] = useState<JobCountsResponse | null>(null)
 
   useEffect(() => {
     let active = true
@@ -101,6 +103,9 @@ export function JobsPage() {
         const sorted = data.jobs.sort((a, b) => b.started_at - a.started_at)
         setJobs(sorted)
         setTotalRuns(data.total ?? sorted.length)
+        // Prefer the dedicated counts endpoint for the header total once it
+        // has answered; the list endpoint's `total` is filter-aware and won't
+        // include statuses outside the current page.
         setLoading(false)
       } catch {
         if (active) setLoading(false)
@@ -111,10 +116,30 @@ export function JobsPage() {
     return () => { active = false; clearInterval(interval) }
   }, [projectFilter])
 
+  // Aggregate counts come from /api/jobs/counts for header text. Filter chips
+  // stay tied to loaded rows so clicking a chip can actually show its rows.
+  useEffect(() => {
+    let active = true
+    const loadSummary = async () => {
+      try {
+        const url = projectFilter
+          ? `/api/jobs/counts?project=${encodeURIComponent(projectFilter)}`
+          : '/api/jobs/counts'
+        const res = await fetch(url)
+        if (!res.ok) return
+        const data = parseJobCountsResponse(await res.json())
+        if (active) setSummary(data)
+      } catch {}
+    }
+    loadSummary()
+    const interval = setInterval(loadSummary, 15000)
+    return () => { active = false; clearInterval(interval) }
+  }, [projectFilter])
+
   const entries = useMemo(() => buildEntries(jobs), [jobs])
   const groupedEntries = useMemo(() => groupReleaseChildren(entries), [entries])
 
-  const counts = useMemo(() => {
+  const loadedCounts = useMemo(() => {
     const c = {
       all: entries.length, running: 0, done: 0, failed: 0,
       run: 0, release: 0, review: 0, test: 0, fix: 0, 'fix-ci': 0, 'fix-push': 0,
@@ -197,10 +222,12 @@ export function JobsPage() {
         <div>
           <h2 className="text-xl font-semibold text-text-primary">Runs</h2>
           <div className="mt-1 text-xs text-text-tertiary font-mono">
-            {totalRuns} total run{totalRuns === 1 ? '' : 's'} · {loadedSummary}
-            {totals.running > 0 && <> · <span className="text-status-info">{totals.running} running</span></>}
-            {totals.tokens > 0 && <> · {formatTokens(totals.tokens)} tok</>}
-            {totals.costUsd > 0 && <> · <span className="text-accent">{formatCost(totals.costUsd)}</span></>}
+            {(summary?.total ?? totalRuns)} total run{(summary?.total ?? totalRuns) === 1 ? '' : 's'} · {loadedSummary}
+            {(summary?.byStatus.running ?? totals.running) > 0 && (
+              <> · <span className="text-status-info">{summary?.byStatus.running ?? totals.running} running</span></>
+            )}
+            {(summary?.tokens.total ?? totals.tokens) > 0 && <> · {formatTokens(summary?.tokens.total ?? totals.tokens)} tok</>}
+            {(summary?.cost.total ?? totals.costUsd) > 0 && <> · <span className="text-accent">{formatCost(summary?.cost.total ?? totals.costUsd)}</span></>}
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -243,7 +270,7 @@ export function JobsPage() {
           { f: { kind: 'failed' } as Filter, label: 'failed', tone: 'error' },
           { f: { kind: 'done' } as Filter, label: 'done', tone: 'success' },
         ] as const).map(({ f, label, tone }) => {
-          const count = counts[f.kind] ?? 0
+          const count = loadedCounts[f.kind] ?? 0
           if ((f.kind === 'running' || f.kind === 'failed') && count === 0 && filterKey(filter) !== filterKey(f)) return null
           const active = filterKey(filter) === filterKey(f)
           const toneCls =
@@ -263,7 +290,7 @@ export function JobsPage() {
         })}
         <span className="shrink-0 h-5 w-px bg-border mx-1" aria-hidden />
         {(['run', 'release', 'review', 'test', 'fix', 'fix-ci', 'fix-push', 'commit', 'push', 'mark-dod', 'pr-wait', 'agent', 'other'] as const).map((b) => {
-          const count = counts[b] ?? 0
+          const count = loadedCounts[b] ?? 0
           const active = filter.kind === 'bucket' && filter.bucket === b
           if (count === 0 && !active) return null
           return (
