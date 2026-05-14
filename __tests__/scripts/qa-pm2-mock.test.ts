@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -32,76 +32,93 @@ async function waitForState(
   throw new Error(`Timed out waiting for ${name} in ${statePath}`);
 }
 
+function createTempState() {
+  const dir = mkdtempSync(join(tmpdir(), 'qa-pm2-mock-'));
+  return {
+    dir,
+    statePath: join(dir, 'state.json'),
+    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+  };
+}
+
 describe('scripts/qa-mocks/pm2', () => {
-  let dir: string;
-  let statePath: string;
-
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'qa-pm2-mock-'));
-    statePath = join(dir, 'state.json');
-  });
-
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it('runs Node scripts through --interpreter node and records their exit code', async () => {
+  it.concurrent('runs Node scripts through --interpreter node and records their exit code', async () => {
+    const { dir, statePath, cleanup } = createTempState();
     const marker = join(dir, 'node-ran.txt');
     const script = join(dir, 'runner.js');
-    writeFileSync(script, `require('fs').writeFileSync(${JSON.stringify(marker)}, process.argv.slice(2).join(','));\n`);
+    try {
+      writeFileSync(script, `require('fs').writeFileSync(${JSON.stringify(marker)}, process.argv.slice(2).join(','));\n`);
 
-    const started = runPm2(['start', script, '--name', 'node-job', '--interpreter', 'node', '--', 'a', 'b'], statePath, dir);
+      const started = runPm2(['start', script, '--name', 'node-job', '--interpreter', 'node', '--', 'a', 'b'], statePath, dir);
 
-    expect(started.status).toBe(0);
-    expect(started.stdout).toContain('[qa-pm2] started node-job');
-    const entry = await waitForState(statePath, 'node-job', (state) => state?.status === 'stopped');
-    expect(entry.exit_code).toBe(0);
-    expect(readFileSync(marker, 'utf-8')).toBe('a,b');
+      expect(started.status).toBe(0);
+      expect(started.stdout).toContain('[qa-pm2] started node-job');
+      const entry = await waitForState(statePath, 'node-job', (state) => state?.status === 'stopped');
+      expect(entry.exit_code).toBe(0);
+      expect(readFileSync(marker, 'utf-8')).toBe('a,b');
+    } finally {
+      cleanup();
+    }
   });
 
-  it('executes shebang scripts directly when no interpreter is specified', async () => {
+  it.concurrent('executes shebang scripts directly when no interpreter is specified', async () => {
+    const { dir, statePath, cleanup } = createTempState();
     const marker = join(dir, 'shell-ran.txt');
     const script = join(dir, 'release-monitor.sh');
-    writeFileSync(script, `#!/bin/sh\nprintf 'ok\\n' > ${JSON.stringify(marker)}\n`);
-    chmodSync(script, 0o755);
+    try {
+      writeFileSync(script, `#!/bin/sh\nprintf 'ok\\n' > ${JSON.stringify(marker)}\n`);
+      chmodSync(script, 0o755);
 
-    const started = runPm2(['start', script, '--name', 'release-monitor', '--no-autorestart'], statePath, dir);
+      const started = runPm2(['start', script, '--name', 'release-monitor', '--no-autorestart'], statePath, dir);
 
-    expect(started.status).toBe(0);
-    expect(started.stdout).toContain('[qa-pm2] started release-monitor');
-    const entry = await waitForState(statePath, 'release-monitor', (state) => state?.status === 'stopped');
-    expect(entry.exit_code).toBe(0);
-    expect(readFileSync(marker, 'utf-8').trim()).toBe('ok');
+      expect(started.status).toBe(0);
+      expect(started.stdout).toContain('[qa-pm2] started release-monitor');
+      const entry = await waitForState(statePath, 'release-monitor', (state) => state?.status === 'stopped');
+      expect(entry.exit_code).toBe(0);
+      expect(readFileSync(marker, 'utf-8').trim()).toBe('ok');
+    } finally {
+      cleanup();
+    }
   });
 
-  it('returns from start while a direct executable is still running', async () => {
+  it.concurrent('returns from start while a direct executable is still running', async () => {
+    const { dir, statePath, cleanup } = createTempState();
     const script = join(dir, 'long-monitor.sh');
-    writeFileSync(script, "#!/usr/bin/env node\nsetInterval(() => {}, 1000);\n");
-    chmodSync(script, 0o755);
+    try {
+      writeFileSync(script, "#!/usr/bin/env node\nsetInterval(() => {}, 1000);\n");
+      chmodSync(script, 0o755);
 
-    const startedAt = Date.now();
-    const started = runPm2(['start', script, '--name', 'long-release-monitor'], statePath, dir);
+      const startedAt = Date.now();
+      const started = runPm2(['start', script, '--name', 'long-release-monitor'], statePath, dir);
 
-    expect(started.status).toBe(0);
-    expect(Date.now() - startedAt).toBeLessThan(500);
-    const jlist = runPm2(['jlist'], statePath, dir);
-    expect(jlist.status).toBe(0);
-    expect(JSON.parse(jlist.stdout)[0]).toMatchObject({
-      name: 'long-release-monitor',
-      pm2_env: { status: 'online', exit_code: null },
-    });
-    runPm2(['delete', 'long-release-monitor'], statePath, dir);
+      expect(started.status).toBe(0);
+      expect(Date.now() - startedAt).toBeLessThan(500);
+      const jlist = runPm2(['jlist'], statePath, dir);
+      expect(jlist.status).toBe(0);
+      expect(JSON.parse(jlist.stdout)[0]).toMatchObject({
+        name: 'long-release-monitor',
+        pm2_env: { status: 'online', exit_code: null },
+      });
+      runPm2(['delete', 'long-release-monitor'], statePath, dir);
+    } finally {
+      cleanup();
+    }
   });
 
   it('detects state written after waiting begins', async () => {
+    const { statePath, cleanup } = createTempState();
     const waiter = waitForState(statePath, 'late-job', (state) => state?.status === 'stopped');
 
-    setTimeout(() => {
-      writeFileSync(statePath, JSON.stringify({
-        'late-job': { status: 'stopped', exit_code: 0 },
-      }));
-    }, 20);
+    try {
+      setTimeout(() => {
+        writeFileSync(statePath, JSON.stringify({
+          'late-job': { status: 'stopped', exit_code: 0 },
+        }));
+      }, 20);
 
-    await expect(waiter).resolves.toMatchObject({ status: 'stopped', exit_code: 0 });
+      await expect(waiter).resolves.toMatchObject({ status: 'stopped', exit_code: 0 });
+    } finally {
+      cleanup();
+    }
   });
 });
