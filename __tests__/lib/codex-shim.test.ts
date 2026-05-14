@@ -1,7 +1,8 @@
 import { createRequire } from 'module';
+import { watch } from 'fs';
 import { mkdtemp, writeFile, chmod, rm, readFile } from 'fs/promises';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { basename, dirname, join } from 'path';
 import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
 import { beforeAll, afterAll, describe, it, expect } from 'vitest';
@@ -32,15 +33,55 @@ function runNode(args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number
 }
 
 async function waitForFile(path: string, timeoutMs = 1000): Promise<string> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
+  const readIfReady = async (): Promise<string | null> => {
     try {
       return await readFile(path, 'utf8');
     } catch {
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      return null;
     }
+  };
+
+  const initial = await readIfReady();
+  if (initial !== null) {
+    return initial;
   }
-  throw new Error(`timed out waiting for ${path}`);
+
+  return await new Promise((resolve, reject) => {
+    const targetDir = dirname(path);
+    const targetBase = basename(path);
+    let settled = false;
+
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`timed out waiting for ${path}`));
+    }, timeoutMs);
+
+    const cleanup = () => {
+      settled = true;
+      clearTimeout(timeout);
+      watcher.close();
+    };
+
+    const resolveIfReady = async (filename?: string | null) => {
+      if (settled) {
+        return;
+      }
+      if (filename && filename !== targetBase) {
+        return;
+      }
+      const contents = await readIfReady();
+      if (contents !== null) {
+        cleanup();
+        resolve(contents);
+      }
+    };
+
+    const watcher = watch(targetDir, (_eventType, filename) => {
+      void resolveIfReady(filename?.toString());
+    });
+
+    void resolveIfReady();
+  });
 }
 
 async function withTempDir<T>(run: (dir: string) => Promise<T>): Promise<T> {
