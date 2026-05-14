@@ -198,7 +198,7 @@ describe('POST /api/agents/{agentId}/run readOnly', () => {
       // Invoke the workflow function with its args so downstream mocks (startJob) get exercised.
       start: vi.fn().mockImplementation(async (fn: any, args: any[]) => {
         const { startJob } = await import('@/lib/jobs/pm2-jobs');
-        await startJob(args?.[0]?.jobId ?? 'started-job', {} as any);
+        await startJob(args?.[0]?.jobId ?? 'started-job', 'noop', '', '/tmp');
         return fn(...(args ?? []));
       }),
     }));

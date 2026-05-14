@@ -4,6 +4,67 @@ import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
+// Hoisted holders shared across module-scoped mocks. `dbHolder` is filled in
+// `beforeAll` once PGlite boots; mock factories close over the holder rather
+// than a value, so they see the live db when the route handlers call them.
+const dbHolder = vi.hoisted(() => ({ db: null as TestDbHandle['db'] | null }));
+
+const mocks = vi.hoisted(() => ({
+  installAgentSchedule: vi.fn().mockResolvedValue(undefined),
+  uninstallAgentSchedule: vi.fn().mockResolvedValue(undefined),
+  resolveProjectPath: vi.fn().mockReturnValue(null as string | null),
+  clearProjectDataCache: vi.fn(),
+  getEnabledProjects: vi.fn().mockReturnValue({}),
+  scanFileAgents: vi.fn().mockReturnValue([]),
+  renameFileAgent: vi.fn().mockReturnValue(null),
+  loadFileAgent: vi.fn().mockReturnValue(null),
+  parseFileAgentId: vi.fn().mockReturnValue(null),
+  writeFileAgent: vi.fn().mockReturnValue(null),
+  deleteFileAgent: vi.fn(),
+  getFileAgentOverride: vi.fn().mockReturnValue(null),
+  setFileAgentOverride: vi.fn().mockImplementation((_p: string, _n: string, patch) => patch),
+  deleteFileAgentOverride: vi.fn(),
+}));
+
+vi.mock('@/lib/db', () => ({
+  get db() { return dbHolder.db!; },
+  schema,
+}));
+
+vi.mock('@/lib/scheduling/agent-scheduler', () => ({
+  installAgentSchedule: mocks.installAgentSchedule,
+  uninstallAgentSchedule: mocks.uninstallAgentSchedule,
+}));
+
+vi.mock('@/lib/shared/project-data', () => ({
+  resolveProjectPath: mocks.resolveProjectPath,
+  clearProjectDataCache: mocks.clearProjectDataCache,
+  getEnabledProjects: mocks.getEnabledProjects,
+}));
+
+vi.mock('@/lib/agents/tamtam-file-agents', () => ({
+  scanFileAgents: mocks.scanFileAgents,
+  renameFileAgent: mocks.renameFileAgent,
+  loadFileAgent: mocks.loadFileAgent,
+  parseFileAgentId: mocks.parseFileAgentId,
+  writeFileAgent: mocks.writeFileAgent,
+  deleteFileAgent: mocks.deleteFileAgent,
+}));
+
+vi.mock('@/lib/agents/file-agent-overrides', () => ({
+  getFileAgentOverride: mocks.getFileAgentOverride,
+  setFileAgentOverride: mocks.setFileAgentOverride,
+  deleteFileAgentOverride: mocks.deleteFileAgentOverride,
+}));
+
+// Import route handlers once at top scope. They resolve their mocked deps via
+// the module-scoped `vi.mock` calls above.
+import { GET, POST } from '@/app/api/agents/route';
+import { GET as agentGET, PATCH, DELETE } from '@/app/api/agents/[agentId]/route';
+import { PATCH as PATCH_BY_NAME } from '@/app/api/agents/by-name/route';
+import { clearAgentsCache, getAllAgentsCachedAsync } from '@/lib/agents/agents-cache';
+import { clearProjectsCache, refreshProjectsCacheSync } from '@/lib/shared/enabled-projects';
+
 async function applyDdl(handle: TestDbHandle): Promise<void> {
   // PGlite rejects multi-statement prepared queries, so issue each DDL
   // separately.
@@ -59,29 +120,24 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
 describe('agents API', () => {
   let sharedHandle: TestDbHandle;
   const testDb = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
-  let GET: any;
-  let POST: any;
-  let PATCH: any;
-  let PATCH_BY_NAME: any;
-  let DELETE: any;
-  let installAgentScheduleMock: ReturnType<typeof vi.fn>;
-  let uninstallAgentScheduleMock: ReturnType<typeof vi.fn>;
-  let scanFileAgentsMock: ReturnType<typeof vi.fn>;
-  let renameFileAgentMock: ReturnType<typeof vi.fn>;
-  let parseFileAgentIdMock: ReturnType<typeof vi.fn>;
-  let loadFileAgentMock: ReturnType<typeof vi.fn>;
-  let writeFileAgentMock: ReturnType<typeof vi.fn>;
-  let deleteFileAgentMock: ReturnType<typeof vi.fn>;
-  let setFileAgentOverrideMock: ReturnType<typeof vi.fn>;
-  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
+  const installAgentScheduleMock = mocks.installAgentSchedule;
+  const uninstallAgentScheduleMock = mocks.uninstallAgentSchedule;
+  const scanFileAgentsMock = mocks.scanFileAgents;
+  const renameFileAgentMock = mocks.renameFileAgent;
+  const parseFileAgentIdMock = mocks.parseFileAgentId;
+  const loadFileAgentMock = mocks.loadFileAgent;
+  const writeFileAgentMock = mocks.writeFileAgent;
+  const deleteFileAgentMock = mocks.deleteFileAgent;
+  const setFileAgentOverrideMock = mocks.setFileAgentOverride;
+  const resolveProjectPathMock = mocks.resolveProjectPath;
 
   beforeAll(async () => {
     sharedHandle = await createTestPgDbEmpty();
     await applyDdl(sharedHandle);
+    dbHolder.db = sharedHandle.db;
   });
 
   afterAll(async () => {
-    await new Promise((r) => setTimeout(r, 30));
     try {
       await sharedHandle[Symbol.asyncDispose]();
     } catch {
@@ -89,68 +145,42 @@ describe('agents API', () => {
     }
   });
 
+  // Monotonic clock advanced 60s per test so the route's internal 10s
+  // file-agent cache (`_allFileAgentsCache`) expires between tests. The
+  // route module is imported once now, so the cache survives across tests
+  // unless we move wall-clock time forward. Forward-only Date.now keeps the
+  // existing `updatedAt`-comparing assertions valid because both the route
+  // and the test read the same mocked clock.
+  let clockBase = Date.now();
   beforeEach(async () => {
-    await sharedHandle.db.execute(sql.raw(
-      'TRUNCATE agents, projects',
-    ));
-    vi.resetModules();
+    await sharedHandle.db.execute(sql.raw('TRUNCATE agents, projects'));
+    clockBase += 60_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => clockBase);
 
-    installAgentScheduleMock = vi.fn().mockResolvedValue(undefined);
-    uninstallAgentScheduleMock = vi.fn().mockResolvedValue(undefined);
+    // Reset call state on every mock but reinstall default return values so
+    // individual tests can override with mockReturnValueOnce / mockImplementation.
+    for (const fn of Object.values(mocks)) (fn as ReturnType<typeof vi.fn>).mockReset();
+    mocks.installAgentSchedule.mockResolvedValue(undefined);
+    mocks.uninstallAgentSchedule.mockResolvedValue(undefined);
+    mocks.resolveProjectPath.mockReturnValue(null);
+    mocks.getEnabledProjects.mockReturnValue({});
+    mocks.scanFileAgents.mockReturnValue([]);
+    mocks.renameFileAgent.mockReturnValue(null);
+    mocks.loadFileAgent.mockReturnValue(null);
+    mocks.parseFileAgentId.mockReturnValue(null);
+    mocks.writeFileAgent.mockReturnValue(null);
+    mocks.getFileAgentOverride.mockReturnValue(null);
+    mocks.setFileAgentOverride.mockImplementation((_p: string, _n: string, patch) => patch);
 
-    vi.doMock('@/lib/db', () => ({
-      db: sharedHandle.db,
-      schema,
-    }));
+    // Module-level caches must be cleared between tests since the route module
+    // is imported once and persists state across runs.
+    clearAgentsCache();
+    clearProjectsCache();
+  });
 
-    vi.doMock('@/lib/scheduling/agent-scheduler', () => ({
-      installAgentSchedule: installAgentScheduleMock,
-      uninstallAgentSchedule: uninstallAgentScheduleMock,
-    }));
-
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue(null),
-      clearProjectDataCache: vi.fn(),
-      getEnabledProjects: vi.fn().mockReturnValue({}),
-    }));
-
-    vi.doMock('@/lib/agents/tamtam-file-agents', () => ({
-      scanFileAgents: vi.fn().mockReturnValue([]),
-      renameFileAgent: vi.fn().mockReturnValue(null),
-      loadFileAgent: vi.fn().mockReturnValue(null),
-      parseFileAgentId: vi.fn().mockReturnValue(null),
-      writeFileAgent: vi.fn().mockReturnValue(null),
-      deleteFileAgent: vi.fn(),
-    }));
-    vi.doMock('@/lib/agents/file-agent-overrides', () => ({
-      getFileAgentOverride: vi.fn().mockReturnValue(null),
-      setFileAgentOverride: vi.fn().mockImplementation((_p: string, _n: string, patch) => patch),
-      deleteFileAgentOverride: vi.fn(),
-    }));
-
-    // Capture mock function references so individual tests can override return values
-    const fileAgentsMod = await import('@/lib/agents/tamtam-file-agents');
-    scanFileAgentsMock = fileAgentsMod.scanFileAgents as ReturnType<typeof vi.fn>;
-    renameFileAgentMock = fileAgentsMod.renameFileAgent as ReturnType<typeof vi.fn>;
-    parseFileAgentIdMock = fileAgentsMod.parseFileAgentId as ReturnType<typeof vi.fn>;
-    loadFileAgentMock = fileAgentsMod.loadFileAgent as ReturnType<typeof vi.fn>;
-    writeFileAgentMock = fileAgentsMod.writeFileAgent as ReturnType<typeof vi.fn>;
-    deleteFileAgentMock = fileAgentsMod.deleteFileAgent as ReturnType<typeof vi.fn>;
-    const fileAgentOverridesMod = await import('@/lib/agents/file-agent-overrides');
-    setFileAgentOverrideMock = fileAgentOverridesMod.setFileAgentOverride as ReturnType<typeof vi.fn>;
-    const projectDataMod = await import('@/lib/shared/project-data');
-    resolveProjectPathMock = projectDataMod.resolveProjectPath as ReturnType<typeof vi.fn>;
-
-    const agentsRoute = await import('@/app/api/agents/route');
-    GET = agentsRoute.GET;
-    POST = agentsRoute.POST;
-
-    const agentDetailRoute = await import('@/app/api/agents/[agentId]/route');
-    PATCH = agentDetailRoute.PATCH;
-    DELETE = agentDetailRoute.DELETE;
-
-    const byNameRoute = await import('@/app/api/agents/by-name/route');
-    PATCH_BY_NAME = byNameRoute.PATCH;
+  afterEach(() => {
+    // Restore Date.now spy; do not touch hoisted module mocks.
+    vi.mocked(Date.now).mockRestore?.();
   });
 
   // GET routes call getAllAgentsCached (sync) which returns [] while the
@@ -159,18 +189,11 @@ describe('agents API', () => {
   // freshly inserted rows. The route also reads enabled projects through a
   // sibling cache that needs the same treatment for unfiltered GETs.
   async function warmAgentsCache() {
-    const agentsMod = await import('@/lib/agents/agents-cache');
-    agentsMod.clearAgentsCache();
-    await agentsMod.getAllAgentsCachedAsync();
-    const projectsMod = await import('@/lib/shared/enabled-projects');
-    projectsMod.clearProjectsCache();
-    await projectsMod.refreshProjectsCacheSync();
+    clearAgentsCache();
+    await getAllAgentsCachedAsync();
+    clearProjectsCache();
+    await refreshProjectsCacheSync();
   }
-
-  afterEach(() => {
-    vi.resetModules();
-    vi.clearAllMocks();
-  });
 
   describe('GET /agents', () => {
     it('returns empty list of agents initially', async () => {
@@ -296,9 +319,7 @@ describe('agents API', () => {
       await db.insert(schema.projects).values({ name: 'proj2', path: '/p2', enabled: true });
       await db.insert(schema.projects).values({ name: 'projDisabled', path: '/pd', enabled: false });
 
-      const fileAgentsMod = await import('@/lib/agents/tamtam-file-agents');
-      const scanMock = fileAgentsMod.scanFileAgents as ReturnType<typeof vi.fn>;
-      scanMock.mockImplementation((path: string, project: string) => {
+      scanFileAgentsMock.mockImplementation((path: string, project: string) => {
         if (project === 'proj1') {
           return [{
             id: 'file:proj1:fa1', name: 'fa1', project: 'proj1',
@@ -325,7 +346,7 @@ describe('agents API', () => {
       const ids = data.agents.map((a: { id: string }) => a.id).sort();
       expect(ids).toEqual(['file:proj1:fa1', 'file:proj2:fa2']);
       // Disabled project must not be scanned
-      const calledProjects = scanMock.mock.calls.map(c => c[1]);
+      const calledProjects = scanFileAgentsMock.mock.calls.map(c => c[1]);
       expect(calledProjects).not.toContain('projDisabled');
     });
 
@@ -339,9 +360,7 @@ describe('agents API', () => {
         createdAt: now, updatedAt: now,
       });
 
-      const fileAgentsMod = await import('@/lib/agents/tamtam-file-agents');
-      const scanMock = fileAgentsMod.scanFileAgents as ReturnType<typeof vi.fn>;
-      scanMock.mockReturnValue([{
+      scanFileAgentsMock.mockReturnValue([{
         id: 'file:proj1:shared', name: 'shared', project: 'proj1',
         skillIds: [], docPaths: [], model: 'sonnet', prompt: 'file version', schedule: null,
         runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
@@ -703,9 +722,6 @@ describe('agents API', () => {
 
   describe('GET /agents/{agentId}', () => {
     it('returns 404 for nonexistent agent', async () => {
-      const agentDetailRoute = await import('@/app/api/agents/[agentId]/route');
-      const agentGET = agentDetailRoute.GET;
-
       const response = await agentGET(
         new NextRequest('http://localhost/api/agents/nonexistent'),
         { params: Promise.resolve({ agentId: 'nonexistent' }) }
@@ -717,8 +733,6 @@ describe('agents API', () => {
     });
 
     it('returns agent by ID', async () => {
-      const agentDetailRoute = await import('@/app/api/agents/[agentId]/route');
-      const agentGET = agentDetailRoute.GET;
       const db = testDb.db;
       const now = Date.now() / 1000;
       await db.insert(schema.agents)
@@ -748,8 +762,6 @@ describe('agents API', () => {
     });
 
     it('returns the effective issue-cruncher prerequisite when the stored row is blank', async () => {
-      const agentDetailRoute = await import('@/app/api/agents/[agentId]/route');
-      const agentGET = agentDetailRoute.GET;
       const now = Date.now() / 1000;
       await testDb.db.insert(schema.agents).values({
         id: 'agent-issue',
@@ -778,8 +790,6 @@ describe('agents API', () => {
     });
 
     it('keeps an explicitly cleared issue-cruncher prerequisite blank in GET responses', async () => {
-      const agentDetailRoute = await import('@/app/api/agents/[agentId]/route');
-      const agentGET = agentDetailRoute.GET;
       const now = Date.now() / 1000;
       await testDb.db.insert(schema.agents).values({
         id: 'agent-issue-cleared',
@@ -1592,8 +1602,6 @@ describe('agents API', () => {
     });
 
     it('agent is gone after delete', async () => {
-      const agentDetailRoute = await import('@/app/api/agents/[agentId]/route');
-      const agentGET = agentDetailRoute.GET;
       const db = testDb.db;
       const now = Date.now() / 1000;
       await db.insert(schema.agents)
@@ -2504,8 +2512,6 @@ describe('agents API', () => {
     });
 
     it('persists enabled field change in database', async () => {
-      const agentDetailRoute = await import('@/app/api/agents/[agentId]/route');
-      const agentGET = agentDetailRoute.GET;
       const db = testDb.db;
       const now = Date.now() / 1000;
       await db.insert(schema.agents)

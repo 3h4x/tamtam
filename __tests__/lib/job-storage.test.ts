@@ -1891,17 +1891,22 @@ describe('runCompletionHooks – fix→review auto-trigger', () => {
 });
 
 describe('runCompletionHooks – auto-push pipeline', () => {
-  let startProjectTestMock: ReturnType<typeof vi.fn>;
-  let startProjectPushMock: ReturnType<typeof vi.fn>;
-  let startProjectCommitMock: ReturnType<typeof vi.fn>;
-  let startProjectReviewMock: ReturnType<typeof vi.fn>;
-  let startFixFromJobMock: ReturnType<typeof vi.fn>;
-  let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
+  // Hoist mocks + module imports to `beforeAll`; reset stable mock refs in
+  // `beforeEach` to avoid the per-test `vi.resetModules() + await import(...)`
+  // re-execution cost across 42 tests.
+  const startProjectTestMock = vi.fn();
+  const startProjectPushMock = vi.fn();
+  const startProjectCommitMock = vi.fn();
+  const startProjectReviewMock = vi.fn();
+  const startFixFromJobMock = vi.fn();
+  const getProjectTestConfigMock = vi.fn();
+  const execMock = vi.fn();
+  const resolveProjectPathMock = vi.fn();
+  const isReviewedMock = vi.fn();
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
+  let storageCache: Map<string, JobData>;
+  let resetVerdictCache: () => void;
   let tempDir: string;
-  let execMock: ReturnType<typeof vi.fn>;
-  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
-  let isReviewedMock: ReturnType<typeof vi.fn>;
 
   function makeJob(kind: string, logPath: string | null, overrides: Partial<JobData> = {}): JobData {
     return {
@@ -1925,62 +1930,66 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     };
   }
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     vi.resetModules();
-    await truncateAll();
-    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-autopush-test-'));
-
-    startProjectTestMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'test-auto', pid: 999, logPath: '/tmp/t.log', testCmd: 'pnpm test' });
-    startProjectPushMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abcd123', message: 'pushed' });
-    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abcd123', message: 'committed' });
-    getProjectTestConfigMock = vi.fn().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoPushEnabled: true });
-    execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
-    resolveProjectPathMock = vi.fn().mockReturnValue('/proj');
-    isReviewedMock = vi.fn().mockResolvedValue(false);
-
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: execMock,
-    }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/git/git-utils', () => ({
       markReviewed: vi.fn().mockResolvedValue(undefined),
       isReviewed: isReviewedMock,
     }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: resolveProjectPathMock,
-    }));
-    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-auto', pid: 1, logPath: '' });
-    startFixFromJobMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-auto', pid: 2 });
-    vi.doMock('@/lib/pipeline/start-review', () => ({
-      startProjectReview: startProjectReviewMock,
-    }));
-    vi.doMock('@/lib/pipeline/start-test', () => ({
-      startProjectTest: startProjectTestMock,
-    }));
-    vi.doMock('@/lib/pipeline/start-push', () => ({
-      startProjectPush: startProjectPushMock,
-    }));
-    vi.doMock('@/lib/pipeline/start-commit', () => ({
-      startProjectCommit: startProjectCommitMock,
-    }));
-    vi.doMock('@/lib/pipeline/start-fix', () => ({
-      startFixFromJob: startFixFromJobMock,
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: getProjectTestConfigMock,
-    }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/pipeline/start-test', () => ({ startProjectTest: startProjectTestMock }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
+    vi.doMock('@/lib/pipeline/start-fix', () => ({ startFixFromJob: startFixFromJobMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getProjectTestConfig: getProjectTestConfigMock }));
 
     const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+    // Module-level verdict cache survives across tests when the module is not
+    // reloaded per-test; clear it in beforeEach so stale review entries
+    // (e.g. 'review-job' → 'LGTM' from a prior test) don't poison getVerdict.
+    resetVerdictCache = (await import('@/lib/jobs/verdict'))._resetVerdictCache;
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-autopush-test-'));
   });
 
-  afterEach(() => {
-    vi.resetModules();
+  beforeEach(async () => {
+    storageCache.clear();
+    resetVerdictCache();
+    await truncateAll();
+
+    startProjectTestMock.mockReset().mockResolvedValue({ ok: true, jobId: 'test-auto', pid: 999, logPath: '/tmp/t.log', testCmd: 'pnpm test' });
+    startProjectPushMock.mockReset().mockResolvedValue({ ok: true, commitSha: 'abcd123', message: 'pushed' });
+    startProjectCommitMock.mockReset().mockResolvedValue({ ok: true, commitSha: 'abcd123', message: 'committed' });
+    startProjectReviewMock.mockReset().mockResolvedValue({ ok: true, jobId: 'rev-auto', pid: 1, logPath: '' });
+    startFixFromJobMock.mockReset().mockResolvedValue({ ok: true, jobId: 'fix-auto', pid: 2 });
+    getProjectTestConfigMock.mockReset().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoPushEnabled: true });
+    execMock.mockReset().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+    resolveProjectPathMock.mockReset().mockReturnValue('/proj');
+    isReviewedMock.mockReset().mockResolvedValue(false);
+  });
+
+  afterAll(() => {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/shell');
+    vi.doUnmock('@/lib/git/git-utils');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.doUnmock('@/lib/pipeline/start-review');
+    vi.doUnmock('@/lib/pipeline/start-test');
+    vi.doUnmock('@/lib/pipeline/start-push');
+    vi.doUnmock('@/lib/pipeline/start-commit');
+    vi.doUnmock('@/lib/pipeline/start-fix');
+    vi.doUnmock('@/lib/scheduling/scheduling');
+    vi.resetModules();
   });
 
   it('finalizes active release job with exit 0 when push succeeds', async () => {
@@ -2703,6 +2712,8 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
 describe('markDone – isClaudeKind exit-code override for new kinds', () => {
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
+  let storageCache: Map<string, JobData>;
+  let resetVerdictCache: () => void;
   let tempDir: string;
 
   function makeJob(kind: string, logPath: string | null): JobData {
@@ -2728,11 +2739,8 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
 
   const resultLine = '{"type":"result","subtype":"success","is_error":false,"duration_ms":500,"total_cost_usd":0,"session_id":"s1","result":"ok"}';
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     vi.resetModules();
-    await truncateAll();
-    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-isclaudekind-'));
-
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
@@ -2764,11 +2772,29 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
 
     const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+    resetVerdictCache = (await import('@/lib/jobs/verdict'))._resetVerdictCache;
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-isclaudekind-'));
   });
 
-  afterEach(() => {
-    vi.resetModules();
+  beforeEach(async () => {
+    storageCache.clear();
+    resetVerdictCache();
+    await truncateAll();
+  });
+
+  afterAll(() => {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/shell');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.doUnmock('@/lib/scheduling/scheduling');
+    vi.doUnmock('@/lib/git/git-utils');
+    vi.doUnmock('@/lib/pipeline/start-review');
+    vi.doUnmock('@/lib/pipeline/start-push');
+    vi.doUnmock('@/lib/pipeline/start-fix-push');
+    vi.resetModules();
   });
 
   it.each(['fix', 'fix-ci', 'fix-push', 'agent:my-agent'])(
@@ -2855,17 +2881,20 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
 });
 
 describe('runCompletionHooks – fix-push auto-fix chain', () => {
-  let startFixPushMock: ReturnType<typeof vi.fn>;
-  let startProjectPushMock: ReturnType<typeof vi.fn>;
-  let startProjectCommitMock: ReturnType<typeof vi.fn>;
-  let startProjectReviewMock: ReturnType<typeof vi.fn>;
-  let isHookRejectionMock: ReturnType<typeof vi.fn>;
-  let isTestFailureRejectionMock: ReturnType<typeof vi.fn>;
-  let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
+  // Hoist mocks + module imports to `beforeAll`; reset stable refs in `beforeEach`.
+  const startFixPushMock = vi.fn();
+  const startProjectPushMock = vi.fn();
+  const startProjectCommitMock = vi.fn();
+  const startProjectReviewMock = vi.fn();
+  const isHookRejectionMock = vi.fn();
+  const isTestFailureRejectionMock = vi.fn();
+  const getProjectTestConfigMock = vi.fn();
+  const execMock = vi.fn();
+  const resolveProjectPathMock = vi.fn();
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
+  let storageCache: Map<string, JobData>;
+  let resetVerdictCache: () => void;
   let tempDir: string;
-  let execMock: ReturnType<typeof vi.fn>;
-  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
 
   function makeJob(kind: string, logPath: string | null, overrides: Partial<JobData> = {}): JobData {
     return {
@@ -2914,35 +2943,16 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
     await syncCacheFromDb();
   }
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     vi.resetModules();
-    await truncateAll();
-    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-fixpush-chain-'));
-
-    startFixPushMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-push-1', pid: 999, logPath: '/tmp/fp.log' });
-    startProjectPushMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'pushed' });
-    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'committed' });
-    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-1', pid: 888, logPath: '/tmp/rev.log' });
-    isHookRejectionMock = vi.fn().mockReturnValue(false);
-    isTestFailureRejectionMock = vi.fn().mockReturnValue(false);
-    getProjectTestConfigMock = vi.fn().mockReturnValue({ autoPushEnabled: false });
-    execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
-    resolveProjectPathMock = vi.fn().mockReturnValue('/proj');
-
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: execMock,
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: resolveProjectPathMock,
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: getProjectTestConfigMock,
-    }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getProjectTestConfig: getProjectTestConfigMock }));
     vi.doMock('@/lib/git/git-utils', () => ({
       markReviewed: vi.fn().mockResolvedValue(undefined),
     }));
@@ -2957,11 +2967,40 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
 
     const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+    resetVerdictCache = (await import('@/lib/jobs/verdict'))._resetVerdictCache;
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-fixpush-chain-'));
   });
 
-  afterEach(() => {
-    vi.resetModules();
+  beforeEach(async () => {
+    storageCache.clear();
+    resetVerdictCache();
+    await truncateAll();
+
+    startFixPushMock.mockReset().mockResolvedValue({ ok: true, jobId: 'fix-push-1', pid: 999, logPath: '/tmp/fp.log' });
+    startProjectPushMock.mockReset().mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'pushed' });
+    startProjectCommitMock.mockReset().mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'committed' });
+    startProjectReviewMock.mockReset().mockResolvedValue({ ok: true, jobId: 'rev-1', pid: 888, logPath: '/tmp/rev.log' });
+    isHookRejectionMock.mockReset().mockReturnValue(false);
+    isTestFailureRejectionMock.mockReset().mockReturnValue(false);
+    getProjectTestConfigMock.mockReset().mockReturnValue({ autoPushEnabled: false });
+    execMock.mockReset().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+    resolveProjectPathMock.mockReset().mockReturnValue('/proj');
+  });
+
+  afterAll(() => {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/shell');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.doUnmock('@/lib/scheduling/scheduling');
+    vi.doUnmock('@/lib/git/git-utils');
+    vi.doUnmock('@/lib/pipeline/start-review');
+    vi.doUnmock('@/lib/pipeline/start-push');
+    vi.doUnmock('@/lib/pipeline/start-commit');
+    vi.doUnmock('@/lib/pipeline/start-fix-push');
+    vi.resetModules();
   });
 
   it('spawns fix-push when push fails with a hook rejection', async () => {
@@ -3147,11 +3186,21 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
 });
 
 describe('runCompletionHooks – release-after-run', () => {
-  let startReleaseMock: ReturnType<typeof vi.fn>;
-  let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
-  let setPendingReleaseMock: ReturnType<typeof vi.fn>;
-  let shouldKeepPendingReleaseMock: ReturnType<typeof vi.fn>;
+  // Hoist mocks + module import once. Stable refs let beforeEach mockReset()
+  // without paying for a per-test module reload. The 2 outlier tests
+  // (`releaseAfterRun: null`, `schedulingModuleThrows: true`) opt into a
+  // reload via `loadMarkDone(...)`; everything else uses the fast path.
+  const startReleaseMock = vi.fn();
+  const getProjectTestConfigMock = vi.fn();
+  const setPendingReleaseMock = vi.fn();
+  const shouldKeepPendingReleaseMock = vi.fn();
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
+  let storageCache: Map<string, JobData>;
+  let resetVerdictCache: () => void;
+  // Outlier tests that call `loadMarkDone(...)` swap in a non-default module
+  // factory (e.g. scheduling throws on import). Subsequent default tests must
+  // reload to get back to a clean import graph; we cheap-track that here.
+  let dirty = false;
 
   function makeJob(kind: string, overrides: Partial<JobData> = {}): JobData {
     return {
@@ -3175,6 +3224,20 @@ describe('runCompletionHooks – release-after-run', () => {
     };
   }
 
+  function resetMocksToDefaults(releaseAfterRun: boolean | null = true): void {
+    startReleaseMock.mockReset().mockResolvedValue({ ok: true, step: 'review', jobId: 'rel-1', releaseJobId: 'rel-job-1', message: 'Running review' });
+    getProjectTestConfigMock.mockReset().mockReturnValue(
+      releaseAfterRun === null
+        ? null
+        : { autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun }
+    );
+    setPendingReleaseMock.mockReset();
+    shouldKeepPendingReleaseMock.mockReset().mockReturnValue(false);
+  }
+
+  // Slow path: only the 2 tests that exercise a different module-load shape
+  // (no scheduling config row, or scheduling module throws on import) need
+  // this — they reload the job-storage module with a different mock factory.
   async function loadMarkDone({
     releaseAfterRun = true,
     schedulingModuleThrows = false,
@@ -3182,16 +3245,13 @@ describe('runCompletionHooks – release-after-run', () => {
     releaseAfterRun?: boolean | null;
     schedulingModuleThrows?: boolean;
   } = {}) {
+    // Mark dirty whenever a non-default factory shape is requested so the
+    // next default `beforeEach` knows it must reload the module rather than
+    // just mockReset()-ing.
+    dirty = releaseAfterRun !== true || schedulingModuleThrows;
     vi.resetModules();
     await truncateAll();
-    startReleaseMock = vi.fn().mockResolvedValue({ ok: true, step: 'review', jobId: 'rel-1', releaseJobId: 'rel-job-1', message: 'Running review' });
-    getProjectTestConfigMock = vi.fn().mockReturnValue(
-      releaseAfterRun === null
-        ? null
-        : { autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun }
-    );
-    setPendingReleaseMock = vi.fn();
-    shouldKeepPendingReleaseMock = vi.fn().mockReturnValue(false);
+    resetMocksToDefaults(releaseAfterRun);
 
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
@@ -3237,13 +3297,39 @@ describe('runCompletionHooks – release-after-run', () => {
 
     const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+    resetVerdictCache = (await import('@/lib/jobs/verdict'))._resetVerdictCache;
   }
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     await loadMarkDone();
+    dirty = false;
   });
 
-  afterEach(() => {
+  beforeEach(async () => {
+    if (dirty) {
+      await loadMarkDone();
+      dirty = false;
+      return;
+    }
+    storageCache.clear();
+    resetVerdictCache();
+    await truncateAll();
+    resetMocksToDefaults();
+  });
+
+  afterAll(() => {
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/shell');
+    vi.doUnmock('@/lib/git/git-utils');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.doUnmock('@/lib/scheduling/scheduling');
+    vi.doUnmock('@/lib/pipeline/start-release');
+    vi.doUnmock('@/lib/pipeline/pending-release');
+    vi.doUnmock('@/lib/pipeline/start-review');
+    vi.doUnmock('@/lib/pipeline/start-push');
+    vi.doUnmock('@/lib/pipeline/start-fix-push');
     vi.resetModules();
   });
 
@@ -3548,19 +3634,16 @@ describe('markDone – metadata extraction skipped for release kind', () => {
     const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
     storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-meta-'));
   });
 
   beforeEach(async () => {
     storageCache.clear();
     await truncateAll();
-    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-meta-'));
-  });
-
-  afterEach(() => {
-    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   });
 
   afterAll(() => {
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     vi.doUnmock('@/lib/db');
     vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/shell');
@@ -3658,12 +3741,15 @@ describe('markDone – metadata extraction skipped for release kind', () => {
 });
 
 describe('runCompletionHooks – linked release scoping', () => {
+  // Hoist mocks + module load to beforeAll; stable refs reset in beforeEach.
+  const startProjectReviewMock = vi.fn();
+  const startProjectPushMock = vi.fn();
+  const startProjectCommitMock = vi.fn();
+  const startFixFromJobMock = vi.fn();
+  const getProjectTestConfigMock = vi.fn();
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
-  let startProjectReviewMock: ReturnType<typeof vi.fn>;
-  let startProjectPushMock: ReturnType<typeof vi.fn>;
-  let startProjectCommitMock: ReturnType<typeof vi.fn>;
-  let startFixFromJobMock: ReturnType<typeof vi.fn>;
-  let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
+  let storageCache: Map<string, JobData>;
+  let resetVerdictCache: () => void;
   let tempDir: string;
 
   function makeJob(kind: string, logPath: string | null, overrides: Partial<JobData> = {}): JobData {
@@ -3688,22 +3774,8 @@ describe('runCompletionHooks – linked release scoping', () => {
     };
   }
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     vi.resetModules();
-    await truncateAll();
-    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-linked-release-test-'));
-
-    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-auto', pid: 1, logPath: '' });
-    startProjectPushMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abcd123', message: 'pushed' });
-    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abcd123', message: 'committed' });
-    startFixFromJobMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-auto', pid: 2 });
-    getProjectTestConfigMock = vi.fn().mockReturnValue({
-      autoPushEnabled: false,
-      autoCommitEnabled: false,
-      autoPrMergeEnabled: false,
-      prWorkflowEnabled: false,
-    });
-
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
@@ -3719,35 +3791,53 @@ describe('runCompletionHooks – linked release scoping', () => {
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/proj'),
     }));
-    vi.doMock('@/lib/pipeline/start-review', () => ({
-      startProjectReview: startProjectReviewMock,
-    }));
-    vi.doMock('@/lib/pipeline/start-test', () => ({
-      startProjectTest: vi.fn(),
-    }));
-    vi.doMock('@/lib/pipeline/start-push', () => ({
-      startProjectPush: startProjectPushMock,
-    }));
-    vi.doMock('@/lib/pipeline/start-commit', () => ({
-      startProjectCommit: startProjectCommitMock,
-    }));
-    vi.doMock('@/lib/pipeline/start-fix', () => ({
-      startFixFromJob: startFixFromJobMock,
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: getProjectTestConfigMock,
-    }));
-    vi.doMock('@/lib/shared/notifications', () => ({
-      notify: vi.fn().mockResolvedValue(undefined),
-    }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/pipeline/start-test', () => ({ startProjectTest: vi.fn() }));
+    vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
+    vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
+    vi.doMock('@/lib/pipeline/start-fix', () => ({ startFixFromJob: startFixFromJobMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getProjectTestConfig: getProjectTestConfigMock }));
+    vi.doMock('@/lib/shared/notifications', () => ({ notify: vi.fn().mockResolvedValue(undefined) }));
 
     const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+    resetVerdictCache = (await import('@/lib/jobs/verdict'))._resetVerdictCache;
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-linked-release-test-'));
   });
 
-  afterEach(() => {
-    vi.resetModules();
+  beforeEach(async () => {
+    storageCache.clear();
+    resetVerdictCache();
+    await truncateAll();
+
+    startProjectReviewMock.mockReset().mockResolvedValue({ ok: true, jobId: 'rev-auto', pid: 1, logPath: '' });
+    startProjectPushMock.mockReset().mockResolvedValue({ ok: true, commitSha: 'abcd123', message: 'pushed' });
+    startProjectCommitMock.mockReset().mockResolvedValue({ ok: true, commitSha: 'abcd123', message: 'committed' });
+    startFixFromJobMock.mockReset().mockResolvedValue({ ok: true, jobId: 'fix-auto', pid: 2 });
+    getProjectTestConfigMock.mockReset().mockReturnValue({
+      autoPushEnabled: false,
+      autoCommitEnabled: false,
+      autoPrMergeEnabled: false,
+      prWorkflowEnabled: false,
+    });
+  });
+
+  afterAll(() => {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/shell');
+    vi.doUnmock('@/lib/git/git-utils');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.doUnmock('@/lib/pipeline/start-review');
+    vi.doUnmock('@/lib/pipeline/start-test');
+    vi.doUnmock('@/lib/pipeline/start-push');
+    vi.doUnmock('@/lib/pipeline/start-commit');
+    vi.doUnmock('@/lib/pipeline/start-fix');
+    vi.doUnmock('@/lib/scheduling/scheduling');
+    vi.doUnmock('@/lib/shared/notifications');
+    vi.resetModules();
   });
 
   it('does not append or auto-chain a standalone pipeline job just because another release is active', async () => {
@@ -3880,12 +3970,12 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
     const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
     storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-push-dod-test-'));
   });
 
   beforeEach(async () => {
     storageCache.clear();
     await truncateAll();
-    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-push-dod-test-'));
     startMarkDodMock.mockReset().mockResolvedValue({ ok: true, verified: 2, total: 2, changed: true, issueNumber: 55 });
     getProjectTestConfigMock.mockReset().mockReturnValue({
       prWorkflowEnabled: true,
@@ -3895,11 +3985,8 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
     launchPrWaitMock.mockReset().mockReturnValue({ jobId: 'prwait-1' });
   });
 
-  afterEach(() => {
-    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
-  });
-
   afterAll(() => {
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     vi.doUnmock('@/lib/db');
     vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/shell');
@@ -4036,21 +4123,18 @@ describe('markDone – DB-level idempotency guard', () => {
     const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
     storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-db-guard-'));
   });
 
   beforeEach(async () => {
     storageCache.clear();
     await truncateAll();
-    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-db-guard-'));
     startProjectReviewMock.mockReset().mockResolvedValue({ ok: false, detail: 'guard' });
     startProjectPushMock.mockReset().mockResolvedValue({ ok: false, detail: 'guard' });
   });
 
-  afterEach(() => {
-    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
-  });
-
   afterAll(() => {
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     vi.doUnmock('@/lib/db');
     vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/shell');
@@ -4155,12 +4239,15 @@ describe('markDone – DB-level idempotency guard', () => {
 });
 
 describe('runCompletionHooks – abort short-circuit', () => {
+  // Hoist mocks + module load to beforeAll; stable refs reset in beforeEach.
+  const startProjectReviewMock = vi.fn();
+  const startProjectPushMock = vi.fn();
+  const startProjectCommitMock = vi.fn();
+  const startFixFromJobMock = vi.fn();
+  const getProjectTestConfigMock = vi.fn();
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
-  let startProjectReviewMock: ReturnType<typeof vi.fn>;
-  let startProjectPushMock: ReturnType<typeof vi.fn>;
-  let startProjectCommitMock: ReturnType<typeof vi.fn>;
-  let startFixFromJobMock: ReturnType<typeof vi.fn>;
-  let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
+  let storageCache: Map<string, JobData>;
+  let resetVerdictCache: () => void;
 
   function makeJob(kind: string, id?: string, overrides: Partial<JobData> = {}): JobData {
     return {
@@ -4184,16 +4271,8 @@ describe('runCompletionHooks – abort short-circuit', () => {
     };
   }
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     vi.resetModules();
-    await truncateAll();
-
-    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-1' });
-    startProjectPushMock = vi.fn().mockResolvedValue({ ok: true });
-    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc' });
-    startFixFromJobMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-1' });
-    getProjectTestConfigMock = vi.fn().mockReturnValue({ autoPushEnabled: true });
-
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
@@ -4212,15 +4291,36 @@ describe('runCompletionHooks – abort short-circuit', () => {
     vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
     vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
     vi.doMock('@/lib/pipeline/start-fix', () => ({ startFixFromJob: startFixFromJobMock }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: getProjectTestConfigMock,
-    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getProjectTestConfig: getProjectTestConfigMock }));
 
     const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+    resetVerdictCache = (await import('@/lib/jobs/verdict'))._resetVerdictCache;
   });
 
-  afterEach(() => {
+  beforeEach(async () => {
+    storageCache.clear();
+    resetVerdictCache();
+    await truncateAll();
+    startProjectReviewMock.mockReset().mockResolvedValue({ ok: true, jobId: 'rev-1' });
+    startProjectPushMock.mockReset().mockResolvedValue({ ok: true });
+    startProjectCommitMock.mockReset().mockResolvedValue({ ok: true, commitSha: 'abc' });
+    startFixFromJobMock.mockReset().mockResolvedValue({ ok: true, jobId: 'fix-1' });
+    getProjectTestConfigMock.mockReset().mockReturnValue({ autoPushEnabled: true });
+  });
+
+  afterAll(() => {
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/shell');
+    vi.doUnmock('@/lib/git/git-utils');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.doUnmock('@/lib/pipeline/start-review');
+    vi.doUnmock('@/lib/pipeline/start-push');
+    vi.doUnmock('@/lib/pipeline/start-commit');
+    vi.doUnmock('@/lib/pipeline/start-fix');
+    vi.doUnmock('@/lib/scheduling/scheduling');
     vi.resetModules();
   });
 

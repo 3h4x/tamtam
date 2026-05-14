@@ -31,7 +31,7 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
   let updateJobMock: ReturnType<typeof vi.fn>;
   let startJobMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
-  let dbGetMock: ReturnType<typeof vi.fn>;
+  let dbGetMock: ReturnType<typeof vi.fn<() => unknown>>;
   let checkCliStartGateMock: ReturnType<typeof vi.fn>;
   let findBlockingRunningJobMock: ReturnType<typeof vi.fn>;
 
