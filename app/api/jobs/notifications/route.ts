@@ -1,15 +1,25 @@
 import { NextResponse } from 'next/server';
-import { unseenFinished, listJobs, jobToDict, probeJobStatus } from '@/lib/jobs/job-storage';
+import { unseenFinished, listJobs, probeJobStatus } from '@/lib/jobs/job-storage';
 import type { JobData } from '@/lib/jobs/job-storage';
 
 const MAX_NOTIFICATION_JOBS = 50;
+const MAX_RUNNING_JOBS = 50;
 
+// The notification dropdown renders id, kind, project, status, started/finished
+// at, exit_code, verdict, session_id. Everything else (prompt, context_meta,
+// log_path, modified_files, work_summary, tokens, cost…) is dead weight on a
+// 5-second poll. Ship only what's read.
 function notificationJob(job: JobData) {
-  const data = jobToDict(job);
   return {
-    ...data,
-    // Notification polling should stay small and fast. The dropdown only
-    // needs identity/status metadata, not full prompts or context payloads.
+    id: job.id,
+    kind: job.kind,
+    project: job.project,
+    status: job.abortedAt != null ? 'aborted' : job.finishedAt != null ? 'done' : 'running',
+    started_at: job.startedAt,
+    finished_at: job.finishedAt ?? null,
+    exit_code: job.exitCode ?? null,
+    verdict: job.verdict ?? null,
+    session_id: job.sessionId ?? null,
     prompt: null,
     user_prompt: null,
     context_meta: null,
@@ -71,6 +81,6 @@ export async function GET() {
     count: jobs.length,
     jobs: jobs.slice(0, MAX_NOTIFICATION_JOBS).map(notificationJob),
     runningCount: running.length,
-    runningJobs: running.map(notificationJob),
+    runningJobs: running.slice(0, MAX_RUNNING_JOBS).map(notificationJob),
   });
 }

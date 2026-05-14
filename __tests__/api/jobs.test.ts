@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   getJob: vi.fn(),
   probeJobStatus: vi.fn(),
   jobToDict: vi.fn(),
+  jobToListDict: vi.fn(),
   readDisplayLog: vi.fn(),
   readLog: vi.fn(),
   markSeen: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock('@/lib/jobs/job-storage', () => ({
   getJob: mocks.getJob,
   probeJobStatus: mocks.probeJobStatus,
   jobToDict: mocks.jobToDict,
+  jobToListDict: mocks.jobToListDict,
   readDisplayLog: mocks.readDisplayLog,
   readLog: mocks.readLog,
   markSeen: mocks.markSeen,
@@ -91,6 +93,12 @@ function resetDefaults() {
   mocks.getJob.mockReset().mockReturnValue(null);
   mocks.probeJobStatus.mockReset().mockResolvedValue('done');
   mocks.jobToDict.mockReset().mockImplementation((j: JobData) => ({
+    id: j.id,
+    project: j.project,
+    kind: j.kind,
+    status: j.finishedAt ? 'done' : 'running',
+  }));
+  mocks.jobToListDict.mockReset().mockImplementation((j: JobData) => ({
     id: j.id,
     project: j.project,
     kind: j.kind,

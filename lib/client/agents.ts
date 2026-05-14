@@ -4,8 +4,24 @@ export type RunAgentResult =
   | { status: 'started'; job_id: string; pid: number; agent?: string }
   | { status: 'queued'; detail?: string; agent?: string; blockingJobId?: string; code?: string }
 
-export async function fetchAgents(project?: string): Promise<{ agents: Agent[] }> {
-  const url = project ? `/api/agents?project=${encodeURIComponent(project)}` : '/api/agents'
+export interface FetchAgentsOptions {
+  /**
+   * `summary` returns only the fields a list view renders (id, name, project,
+   * schedule, enabled, model, runner, provider, source). Drops prompt /
+   * prerequisiteCommand / skillIds / docPaths so polling stays cheap.
+   */
+  fields?: 'summary'
+}
+
+export async function fetchAgents(
+  project?: string,
+  opts: FetchAgentsOptions = {},
+): Promise<{ agents: Agent[] }> {
+  const params = new URLSearchParams()
+  if (project) params.set('project', project)
+  if (opts.fields === 'summary') params.set('fields', 'summary')
+  const qs = params.toString()
+  const url = qs ? `/api/agents?${qs}` : '/api/agents'
   const response = await fetch(url)
   if (!response.ok) return { agents: [] }
   const data = await response.json()

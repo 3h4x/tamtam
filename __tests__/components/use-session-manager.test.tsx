@@ -294,6 +294,108 @@ describe('useSessionManager', () => {
     unmount()
   })
 
+  it('hydrates preview prompts before restoring terminal history', async () => {
+    const fullCompletedPrompt = `completed ${'p'.repeat(260)}`
+    const fullRunningPrompt = `running ${'q'.repeat(260)}`
+    const completedPreview = `${fullCompletedPrompt.slice(0, 199)}…`
+    const runningPreview = `${fullRunningPrompt.slice(0, 199)}…`
+
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/jobs?project=proj')) {
+        return {
+          json: async () => ({
+            jobs: [
+              {
+                id: 'long-done',
+                kind: 'run',
+                status: 'done',
+                session_id: 'sess-long',
+                started_at: 100,
+                finished_at: 120,
+                exit_code: 0,
+                user_prompt: completedPreview,
+                prompt: null,
+                context_meta: null,
+              },
+              {
+                id: 'long-live',
+                kind: 'run',
+                status: 'running',
+                session_id: 'sess-long',
+                started_at: 200,
+                finished_at: null,
+                exit_code: null,
+                user_prompt: runningPreview,
+                prompt: null,
+                context_meta: null,
+              },
+            ],
+          }),
+        }
+      }
+      if (url === '/api/jobs/long-done') {
+        return {
+          json: async () => ({
+            user_prompt: fullCompletedPrompt,
+            prompt: null,
+            log: 'assistant reply',
+            log_pruned: false,
+          }),
+        }
+      }
+      if (url === '/api/jobs/long-live') {
+        return {
+          json: async () => ({
+            user_prompt: fullRunningPrompt,
+            prompt: null,
+            log_pruned: false,
+          }),
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+
+    let controls:
+      | {
+        loadSessions: () => Promise<void>
+        restoreSession: (session: SessionItem) => Promise<void>
+        getSessions: () => SessionItem[]
+        isLoading: () => boolean
+      }
+      | undefined
+
+    const { unmount } = renderElement(
+      <SessionManagerHarness onReady={(value) => { controls = value }} />,
+    )
+
+    await vi.waitFor(() => {
+      expect(controls).toBeTruthy()
+    })
+
+    if (!controls) throw new Error('manager not ready')
+    await controls.restoreSession({
+      id: 'long-live',
+      prompt: runningPreview,
+      startedAt: 200,
+      finishedAt: null,
+      sessionId: 'sess-long',
+      exitCode: null,
+    })
+
+    await vi.waitFor(() => {
+      expect(startStreamMock).toHaveBeenCalledWith('proj', 'long-live', false, false)
+    })
+
+    expect(terminalStore.get('proj').history).toEqual<TermEntry[]>([
+      { role: 'user', text: fullCompletedPrompt },
+      { role: 'assistant', text: 'assistant reply' },
+      { role: 'user', text: fullRunningPrompt },
+    ])
+
+    unmount()
+  })
+
   it('enables passthrough when restoring a still-running single job fallback', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)

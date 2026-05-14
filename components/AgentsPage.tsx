@@ -60,7 +60,7 @@ export function AgentsPage() {
     const poll = async () => {
       try {
         const [{ agents: allAgents }, health] = await Promise.all([
-          fetchAgents(),
+          fetchAgents(undefined, { fields: 'summary' }),
           fetch('/api/agents/scheduler-health').then(r => r.ok ? r.json() : null).catch(() => null),
         ])
         if (active) {

@@ -270,6 +270,28 @@ export function updateJob(job: JobData): void {
   saveToDb(job);
 }
 
+const LIST_PROMPT_PREVIEW_BYTES = 200;
+
+function truncatePromptForList(text: string | null | undefined): string | null {
+  if (!text) return text ?? null;
+  if (text.length <= LIST_PROMPT_PREVIEW_BYTES) return text;
+  // Encoded as a normal string suffix so existing UI truncation logic stays
+  // happy. The detail endpoint still ships the full prompt.
+  return text.slice(0, LIST_PROMPT_PREVIEW_BYTES - 1) + '…';
+}
+
+// Slim variant for the list endpoint. Drops fields no list consumer reads
+// (log_path, full prompts) and trims preview text to the first 200 bytes.
+// `/api/jobs/[jobId]` continues to serve the full payload for terminal
+// restore and detail views.
+export function jobToListDict(job: JobData): Record<string, unknown> {
+  const d = jobToDict(job);
+  d.prompt = truncatePromptForList(job.prompt);
+  d.user_prompt = truncatePromptForList(job.userPrompt);
+  delete d.log_path;
+  return d;
+}
+
 export function jobToDict(job: JobData): Record<string, unknown> {
   const d: Record<string, unknown> = {
     id: job.id,

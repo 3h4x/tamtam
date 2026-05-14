@@ -30,7 +30,10 @@ describe('client agents helpers', () => {
       agents: [{ id: 'agent-1', name: 'Docs' }],
     });
 
-    expect((fetchMock.mock.calls[0] as [string])[0]).toBe('/api/agents?project=owner%2Frepo%20name');
+    // URLSearchParams encodes spaces as `+`; both encodings are valid in a
+    // query string. The server's nextUrl.searchParams decodes either back to
+    // 'owner/repo name'.
+    expect((fetchMock.mock.calls[0] as [string])[0]).toBe('/api/agents?project=owner%2Frepo+name');
   });
 
   it('fetchAgents falls back to an empty list on non-ok responses', async () => {
