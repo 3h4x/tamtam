@@ -156,6 +156,25 @@ export async function fetchIssuesAndPRs(projectName: string, forceRefresh = fals
   return response.json()
 }
 
+export interface IssuesSummaryResponse {
+  repo: string
+  prCount: number
+  issueCount: number
+  openPrBranches: { branch: string; number: number }[]
+  error: string | null
+  cached: boolean
+  cachedAt: number
+}
+
+export async function fetchIssuesSummary(projectName: string): Promise<IssuesSummaryResponse> {
+  const url = `${API_BASE}/by-project/${projectName}/issues?summary=1`
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw new Error(`Failed to fetch issues summary: ${response.statusText}`)
+  }
+  return response.json()
+}
+
 export async function mergePR(
   projectName: string,
   prNumber: number,

@@ -44,6 +44,7 @@ export {
   releaseProject,
   testProject,
   fetchIssuesAndPRs,
+  fetchIssuesSummary,
   mergePR,
   approvePR,
   reviewPR,
