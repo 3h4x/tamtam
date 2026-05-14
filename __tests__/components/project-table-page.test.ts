@@ -66,6 +66,10 @@ function renderProjectTablePage(props: React.ComponentProps<typeof ProjectTableP
   }
 }
 
+async function waitForFast(cb: () => void | Promise<void>) {
+  await vi.waitFor(cb, { timeout: 5000, interval: 1 })
+}
+
 describe('ProjectTablePage', () => {
   beforeEach(() => {
     push.mockReset()
@@ -129,7 +133,7 @@ describe('ProjectTablePage', () => {
       })
       unmount = rendered.unmount
 
-      await vi.waitFor(() => {
+      await waitForFast(() => {
         expect(rendered.container.textContent).toContain('acme/widgets')
       })
     } finally {
@@ -192,7 +196,7 @@ describe('ProjectTablePage', () => {
       loading: true,
     })
 
-    await vi.waitFor(() => {
+    await waitForFast(() => {
       expect(container.textContent).toContain('acme/widgets')
       expect(container.querySelectorAll('.skeleton').length).toBeGreaterThan(0)
       expect(container.querySelector('[aria-busy="true"]')).not.toBeNull()
@@ -204,7 +208,7 @@ describe('ProjectTablePage', () => {
       loading: false,
     })
 
-    await vi.waitFor(() => {
+    await waitForFast(() => {
       expect(container.textContent).toContain('acme/widgets')
       expect(container.querySelectorAll('.skeleton')).toHaveLength(0)
       expect(container.querySelector('[aria-busy="true"]')).toBeNull()
@@ -282,7 +286,7 @@ describe('ProjectTablePage', () => {
       loading: false,
     })
 
-    await vi.waitFor(() => {
+    await waitForFast(() => {
       expect(container.textContent).toContain('acme/widgets')
       expect(container.textContent).toContain('scheduled paused')
       expect(container.textContent).not.toContain('now')
@@ -356,7 +360,7 @@ describe('ProjectTablePage', () => {
       loading: false,
     })
 
-    await vi.waitFor(() => {
+    await waitForFast(() => {
       expect(container.textContent).toContain('acme/widgets')
       expect(container.textContent).toContain('now')
       expect(container.textContent).not.toContain('scheduled paused')
@@ -435,7 +439,7 @@ describe('ProjectTablePage', () => {
       loading: false,
     })
 
-    await vi.waitFor(() => {
+    await waitForFast(() => {
       expect(container.textContent).toContain('acme/widgets')
       expect(container.textContent).toContain('now')
       expect(container.textContent).not.toContain('scheduled paused')
@@ -444,7 +448,7 @@ describe('ProjectTablePage', () => {
     budgetGateEnabled = true
     dispatchSettingsChanged({ budget_block_runs_enabled: 'true' })
 
-    await vi.waitFor(() => {
+    await waitForFast(() => {
       expect(container.textContent).toContain('scheduled paused')
       expect(container.textContent).not.toContain('⏸ paused')
     })
@@ -521,13 +525,13 @@ describe('ProjectTablePage', () => {
       loading: false,
     })
 
-    await vi.waitFor(() => {
+    await waitForFast(() => {
       expect(container.textContent).toContain('scheduled paused')
     })
 
     dispatchSettingsChanged({ jobs_paused: 'true' })
 
-    await vi.waitFor(() => {
+    await waitForFast(() => {
       expect(container.textContent).toContain('scheduled paused')
       expect(container.textContent).not.toContain('⏸ paused')
     })
@@ -621,7 +625,7 @@ describe('ProjectTablePage', () => {
       loading: false,
     })
 
-    await vi.waitFor(() => {
+    await waitForFast(() => {
       expect(container.textContent).toContain('filmpick')
       expect(container.textContent).toContain('running')
       expect(container.textContent).toContain('scheduled paused')
