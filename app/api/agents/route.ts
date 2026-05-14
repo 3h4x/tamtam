@@ -47,6 +47,11 @@ function getAllFileAgentsCached(): FileAgent[] {
 export async function GET(request: NextRequest) {
   const project = request.nextUrl.searchParams.get('project');
   const name = request.nextUrl.searchParams.get('name');
+  // `?fields=summary` strips the heaviest fields (prompt, prerequisiteCommand,
+  // docPaths, skillIds JSON) so list-view callers don't pull KBs of edit-only
+  // data on every poll. Detail views (AgentsTab, edit modals) ask without it
+  // to receive the full agent shape. Fetching a specific name implies edit.
+  const summaryOnly = request.nextUrl.searchParams.get('fields') === 'summary' && !name;
   const agents = getAllAgentsCached();
   let result = project ? agents.filter(a => a.project === project) : agents;
   if (name) result = result.filter(a => a.name === name);
@@ -72,6 +77,21 @@ export async function GET(request: NextRequest) {
       if (name && fa.name !== name) continue;
       if (!dbKeys.has(`${fa.project}:${canonicalAgentNameKey(fa.name)}`)) normalized.push(withEffectivePrerequisite(fa));
     }
+  }
+
+  if (summaryOnly) {
+    const summaryAgents = normalized.map(a => ({
+      id: a.id,
+      name: a.name,
+      project: a.project,
+      schedule: a.schedule ?? null,
+      enabled: a.enabled,
+      model: a.model,
+      runner: a.runner,
+      provider: a.provider ?? null,
+      source: 'source' in a ? a.source : 'db',
+    }));
+    return NextResponse.json({ agents: summaryAgents });
   }
 
   return NextResponse.json({ agents: normalized });

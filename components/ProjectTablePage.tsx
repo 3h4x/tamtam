@@ -388,7 +388,7 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
     let active = true
     const load = async () => {
       try {
-        const data = await fetchAgents()
+        const data = await fetchAgents(undefined, { fields: 'summary' })
         if (!active) return
         const grouped: Record<string, Agent[]> = {}
         for (const agent of data.agents) {

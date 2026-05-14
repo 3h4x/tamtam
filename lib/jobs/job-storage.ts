@@ -18,6 +18,7 @@ export {
   markSeen,
   updateJob,
   jobToDict,
+  jobToListDict,
   persistVerdict,
 } from './storage';
 

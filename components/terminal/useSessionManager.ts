@@ -15,6 +15,7 @@ import {
   contextItemsFromMeta,
   fetchSessionJobs,
   isRestorableSessionKind,
+  restoredPrompt,
 } from './session-restore'
 
 interface JobDict {
@@ -35,6 +36,8 @@ interface JobDetail {
   session_id?: string | null
   context_meta?: string | null
   provider?: string | null
+  prompt?: string | null
+  user_prompt?: string | null
 }
 
 export function useSessionManager(projectName: string) {
@@ -65,7 +68,7 @@ export function useSessionManager(projectName: string) {
         const latest = sameSession[0]
         grouped.push({
           id: latest.id,
-          prompt: earliest.user_prompt || earliest.prompt,
+          prompt: restoredPrompt(earliest),
           startedAt: latest.started_at,
           finishedAt: latest.finished_at,
           sessionId: latest.session_id,
@@ -98,7 +101,7 @@ export function useSessionManager(projectName: string) {
           const entries = await buildEntriesForCompletedJobs(completedMatches)
           router.replace(`/project/${projectName}/terminal/${session.sessionId}`)
           if (lastIsRunning) {
-            const prompt = lastMatch.user_prompt || lastMatch.prompt
+            const prompt = restoredPrompt(lastMatch)
             if (prompt) entries.push({ role: 'user', text: prompt })
             terminalStore.update(projectName, () => ({
               history: entries,
@@ -137,28 +140,31 @@ export function useSessionManager(projectName: string) {
       let passthrough = false
       let liveSessionId = session.sessionId
       let sessionProvider: string | null = null
+      let prompt = session.prompt
       try {
         const res = await fetch(`/api/jobs/${encodeURIComponent(session.id)}`)
         const data = await res.json() as JobDetail
         passthrough = hasPrerequisiteContext(data.context_meta)
         liveSessionId = data.session_id ?? liveSessionId
         sessionProvider = data.provider ?? null
+        prompt = data.user_prompt || data.prompt || prompt
       } catch {}
       terminalStore.reset(projectName)
       terminalStore.update(projectName, () => ({
         claudeSessionId: liveSessionId,
         sessionKey: liveSessionId || 'new',
         sessionProvider,
-        history: session.prompt ? [{ role: 'user', text: session.prompt }] : [],
+        history: prompt ? [{ role: 'user', text: prompt }] : [],
       }))
       terminalStore.startStream(projectName, session.id, false, passthrough)
       return
     }
     try {
       const res = await fetch(`/api/jobs/${encodeURIComponent(session.id)}`)
-      const data = await res.json()
+      const data = await res.json() as JobDetail & { exit_code?: number | null; log?: string | null; log_pruned?: boolean }
       const entries: TermEntry[] = []
-      if (session.prompt) entries.push({ role: 'user', text: session.prompt })
+      const prompt = data.user_prompt || data.prompt || session.prompt
+      if (prompt) entries.push({ role: 'user', text: prompt })
       const exitCode = typeof data.exit_code === 'number' ? data.exit_code : session.exitCode
       const exitEntry = exitCode !== null && exitCode !== undefined
         ? terminalExitEntry(exitCode)

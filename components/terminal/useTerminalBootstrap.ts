@@ -13,6 +13,7 @@ import {
   countSessionJobs,
   fetchSessionJobs,
   isRestorableSessionKind,
+  restoredPrompt,
 } from './session-restore'
 
 interface JobDict {
@@ -160,7 +161,7 @@ export function useTerminalBootstrap({
 
         const sessionProvider = matches.find(m => m.provider)?.provider ?? null
         if (lastIsRunning) {
-          const prompt = lastMatch.user_prompt || lastMatch.prompt
+          const prompt = restoredPrompt(lastMatch)
           if (prompt) entries.push({ role: 'user', text: prompt })
           terminalStore.update(projectName, () => ({
             history: entries,

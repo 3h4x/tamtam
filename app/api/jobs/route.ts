@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listJobs, jobToDict, probeJobStatus } from '@/lib/jobs/job-storage';
+import { listJobs, jobToListDict, probeJobStatus } from '@/lib/jobs/job-storage';
 import { listPendingReleaseProjects } from '@/lib/pipeline/pending-release';
 
 const DEFAULT_LIMIT = 30;
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
   const pendingProjects = await listPendingReleaseProjects();
 
   return NextResponse.json({
-    jobs: page.map(jobToDict),
+    jobs: page.map(jobToListDict),
     total,
     offset,
     limit,
