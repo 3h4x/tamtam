@@ -95,10 +95,10 @@ export async function runProbeSweep(): Promise<void> {
   } catch (err) {
     console.error('[probe-sweep] error:', err);
   }
-  // Release meta-jobs have no PM2 process (pid=0) so probeJobStatus would
-  // incorrectly mark them exit -1. Instead, find any finished pipeline step
-  // for the project and let reconcileStaleRelease walk the chain — if all
-  // steps are done it finalizes the release, otherwise it's a no-op.
+  // Reconcile stale release meta-jobs before timeout aborts. A release can
+  // have every child step finished yet still have `finishedAt === null` until
+  // the handoff reconciler finalizes the meta-job. Timeout logic must not
+  // abort that already-complete chain.
   try {
     const jobStorage = await import('./lib/jobs/job-storage');
     const pipelineStepKinds = 'PIPELINE_STEP_KINDS' in jobStorage && jobStorage.PIPELINE_STEP_KINDS instanceof Set
@@ -119,6 +119,30 @@ export async function runProbeSweep(): Promise<void> {
     }
   } catch (err) {
     console.error('[probe-sweep] release reconcile error:', err);
+  }
+  try {
+    const jobStorage = await import('./lib/jobs/job-storage');
+    const { abortActiveRelease } = await import('./lib/pipeline/release-abort');
+    const now = Date.now();
+    const expiredReleases = jobStorage.listJobs().filter(j =>
+      j.kind === 'release'
+      && j.finishedAt === null
+      && typeof j.releaseDeadlineAt === 'number'
+      && j.releaseDeadlineAt > 0
+      && j.releaseDeadlineAt < now
+    );
+    for (const release of expiredReleases) {
+      try {
+        await abortActiveRelease(release.project, {
+          reason: 'wall_clock_timeout',
+          targetReleaseId: release.id,
+        });
+      } catch (err) {
+        console.error(`[probe-sweep] release timeout abort failed for ${release.id}:`, err);
+      }
+    }
+  } catch (err) {
+    console.error('[probe-sweep] release timeout sweep error:', err);
   }
 }
 

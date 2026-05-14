@@ -381,6 +381,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "release_deadline_at": {
+          "name": "release_deadline_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "prompt_bytes": {
           "name": "prompt_bytes",
           "type": "integer",

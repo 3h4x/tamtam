@@ -21,6 +21,7 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 | **Scheduling** | Built-in interval scheduler — daily reviews, nightly audits, whatever you need, running unattended |
 | **Release pipeline** | Quality-gated, branch-context-driven flow: test → review → fix loop → commit → push → DoD → merge. Default-branch releases push directly; non-default branches open or reuse a PR |
 | **Cross-project recommendations** | Open agent and scheduler suggestions across every project in `/recommendations` |
+| **Semantic retrieval** | Optional local context injection from project docs, DB-backed skills, and completed agent run reports via `sqlite-vec` + Ollama |
 | **Pipeline health** | Live release pipeline metrics in `/pipeline` |
 | **Custom actions** | Per-project bash commands (deploy, migrate, seed) as colored buttons |
 | **Notifications** | Unseen run alerts with bell badge; outbound webhooks (Slack, Discord, ntfy, generic) for release success/fail/aborted, fix-loop-exhausted, review-do-not-ship, agent-run-fail, and budget-blocked events |
@@ -32,11 +33,15 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 - **Tailwind CSS v4**
 - **PM2** — process management for the production server and one-shot agent jobs
 - **SSE** — real-time log streaming without WebSocket overhead
+- **sqlite-vec + Ollama** — optional local semantic retrieval for project docs, skills, and agent run reports
 - **vitest + Playwright** — unit and e2e tests
 
 ## Getting started
 
+TamTam requires Node.js 24.x. The repo pins that version in [`.nvmrc`](.nvmrc) and enforces the same major via `package.json` `engines`.
+
 ```bash
+nvm use               # or install Node.js 24.x with your preferred version manager
 pnpm install
 pnpm run rebuild   # build + PM2-managed start/restart on :1337 (canonical after edits)
 ```
@@ -134,5 +139,6 @@ API routes are covered by vitest tests in `__tests__/api/`, often with combined 
 - `lib/shared/project-data.ts` assembles project state with a 10s TTL cache
 - `instrumentation-node.ts` handles boot-time recovery, the 30s probe sweep, the 30s queued-agent recovery sweep, the 30s recovery reconcile sweep, the 5m auto-resume sweep, the 60s budget-recovery drain ticker, and nightly retention cleanup after startup
 - Project detail tabs live at `/project/[name]` and `/project/[name]/[tab]` (`overview`, `config`, `history`, `terminal`, `changes`, `issues`, `docs`, `agents`)
+- Project release traces and task detail pages live at `/project/[name]/release/[releaseId]` and `/project/[name]/task/[task]`
 - Streaming uses the selected provider's `stream-json` output → PM2 log file → `fs.watch` → NDJSON parser → SSE
 - See `docs/STREAMING.md` for the full terminal streaming architecture

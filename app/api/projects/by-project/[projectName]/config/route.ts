@@ -23,6 +23,26 @@ function readOptionalTrimmedString(
   return value || null;
 }
 
+function readOptionalPositiveInteger(
+  body: Record<string, unknown>,
+  field: string,
+): number | null | Response {
+  const raw = body[field];
+  if (typeof raw !== 'string' && typeof raw !== 'number') {
+    return badRequest(`${field} must be a positive integer`);
+  }
+  const value = typeof raw === 'number' ? String(raw) : raw.trim();
+  if (!value) return null;
+  if (!/^\d+$/.test(value)) {
+    return badRequest(`${field} must be a positive integer`);
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return badRequest(`${field} must be a positive integer`);
+  }
+  return parsed;
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ projectName: string }> }
@@ -44,12 +64,13 @@ export async function GET(
 
   return NextResponse.json({
     project: projectName,
-    // test_command is the only value the file is allowed to override on read;
+    // File-backed team-contract pipeline values override the DB on read;
     // the remaining pipeline toggles are DB-only so each developer can opt in
     // independently of teammates' .tamtam/config.yml. Legacy
     // `pr_workflow_enabled` is gone; branch-derived push/PR behavior now
     // decides that at runtime.
     test_command: fileConfig?.test_command ?? testCfg?.testCommand ?? '',
+    release_timeout_minutes: fileConfig?.release_timeout_minutes ?? null,
     detected_test_command: detectedTestCmd ?? '',
     effective_test_command: fileConfig?.test_command ?? testCfg?.testCommand ?? detectedTestCmd ?? '',
     test_cron_enabled: testCfg?.testCronEnabled ?? false,
@@ -71,8 +92,7 @@ export async function GET(
     commit_style: fileConfig?.commit_style ?? '',
     last_push_error: pushResult?.lastPushError ?? null,
     last_push_at: pushResult?.lastPushAt ?? null,
-    // Keys whose values currently come from .tamtam/config.yml — limited to the
-    // team-contract surface (test_command, custom_actions, safe_users).
+    // Keys whose values currently come from .tamtam/config.yml.
     file_config: fileConfig ? Object.keys(fileConfig) : [],
     // Branch the file config was read from (may differ from working tree on PRs)
     file_config_branch: branchCtx.isDefaultBranch ? branchCtx.currentBranch : branchCtx.defaultBranch,
@@ -108,6 +128,13 @@ export async function PATCH(
     touched = true;
     dbUpdates.push({ field: 'test_command', value });
     fileUpdates.test_command = value;
+  }
+
+  if (body.release_timeout_minutes !== undefined) {
+    const value = readOptionalPositiveInteger(body, 'release_timeout_minutes');
+    if (value instanceof Response) return value;
+    touched = true;
+    fileUpdates.release_timeout_minutes = value;
   }
 
   // commit_style is file-only (team contract). No DB column — every read goes

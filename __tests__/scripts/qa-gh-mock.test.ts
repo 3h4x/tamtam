@@ -7,18 +7,23 @@ import { join, resolve } from 'path';
 const GH_MOCK = resolve(__dirname, '..', '..', 'scripts', 'qa-mocks', 'gh');
 
 function runGh(args: string[], cwd?: string): Promise<{ status: number | null; stdout: string; stderr: string }> {
-  return new Promise((resolvePromise) => {
-    const child = spawn(GH_MOCK, args, { cwd, env: process.env });
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(GH_MOCK, args, {
+      cwd,
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (chunk) => {
-      stdout += chunk.toString('utf-8');
+    child.stdout!.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
     });
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString('utf-8');
+    child.stderr!.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
     });
-    child.on('close', (code) => {
-      resolvePromise({ status: code, stdout, stderr });
+    child.on('error', reject);
+    child.on('close', (status) => {
+      resolvePromise({ status, stdout, stderr });
     });
   });
 }

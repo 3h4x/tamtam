@@ -64,6 +64,7 @@ CREATE TABLE "jobs" (
 	"model" text,
 	"release_id" text,
 	"aborted_at" double precision,
+	"release_deadline_at" integer,
 	"prompt_bytes" integer,
 	"work_summary" text,
 	"modified_files" text,

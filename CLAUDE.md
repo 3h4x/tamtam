@@ -15,6 +15,7 @@ Steps are pluggable per project. The **🚀 Release** button triggers the pipeli
 - **Agents** — composed from skills + project docs + model + prompt + optional interval schedule + runner; agents can also pin a provider and prerequisite command. `pm2` is the default runner; `launchctl` is deprecated.
 - **Runs** — individual executions of an agent; the legacy `/jobs` URL redirects to `/runs`
 - **Custom Actions** — per-project bash commands (e.g. deploy) with configurable button color
+- **Retrieval** — optional local semantic context built from committed project docs, DB-backed skills, and completed agent run reports; controlled by `retrieval_enabled` and reindexed via `/api/projects/[schedId]/retrieval/reindex`
 - **Release Pipeline** — see Vision above
 
 ## Tech Stack
@@ -124,7 +125,7 @@ See `docs/API.md` for the full route reference. New routes must be documented th
 - Do NOT claim frontend work complete without the Playwright screenshot step
 
 ## Key Patterns
-- Runtime config/state is stored in DB (`settings`, `projects`, `jobs`, `skills`, `agents`, `recommendations`, `ghStatus`, `ghIssuesCache`, `pipelineLocks`, `queuedAgentRuns`, `notificationThrottle`, `maintenanceStatus`); shared per-project config and file-agent prompts can also live in committed `.tamtam/` files.
+- Runtime config/state is stored in DB (`settings`, `projects`, `jobs`, `skills`, `agents`, `recommendations`, `ghStatus`, `ghIssuesCache`, `pipelineLocks`, `queuedAgentRuns`, `notificationThrottle`, `maintenanceStatus`, `retrievalRecords`, `retrievalChunks`, `ollamaUsage`); shared per-project config and file-agent prompts can also live in committed `.tamtam/` files.
 - Workspace path configured in Settings UI; projects discovered by scanning for git repos.
 - Application/runtime DB access should import `db` / `schema` from `@/lib/db`. Do not open ad-hoc `pg.Pool`/`pg.Client` connections in `app/`, `components/`, or `lib/`; reserve direct pg connections for explicit maintenance scripts that run outside the Next.js process.
 - Most CLI calls (git, gh, launchctl, pm2) go through `lib/shared/shell.ts`. `lib/shared/project-data.ts` assembles project data with 10s TTL cache.

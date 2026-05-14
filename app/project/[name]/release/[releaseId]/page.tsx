@@ -1,4 +1,3 @@
-// tamtam
 import { ReleaseTraceView } from '@/components/ReleaseTraceView'
 
 interface Props {

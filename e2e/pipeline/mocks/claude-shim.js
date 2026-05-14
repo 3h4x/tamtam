@@ -131,7 +131,7 @@ if (step.sleep_ms && step.sleep_ms > 0) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, step.sleep_ms);
 }
 
-// TamTam treats the terminal result event as the completion boundary for
+// The harness treats the terminal result event as the completion boundary for
 // claude-backed jobs, so scenario side effects must land before we emit it.
 applyFileWrites(step.write_files);
 

@@ -19,6 +19,7 @@ vi.mock('@/lib/git/git-branch', () => ({
   getCurrentBranchSync: vi.fn(() => 'main'),
 }));
 
+import * as gitBranch from '@/lib/git/git-branch';
 import { loadFileConfig, writeFileConfig } from '@/lib/skills/tamtam-file-config';
 
 let rootTmpDir: string;
@@ -52,7 +53,16 @@ afterAll(() => {
 describe('loadFileConfig', () => {
   let tmpDir: string;
 
-  beforeEach(() => { tmpDir = makeTmpDir(); });
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    vi.resetAllMocks();
+    vi.mocked(gitBranch.getBranchContext).mockReturnValue({
+      currentBranch: 'main',
+      defaultBranch: 'main',
+      isDefaultBranch: true,
+    });
+    vi.mocked(gitBranch.gitShowSync).mockReturnValue(null);
+  });
   afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('returns null when config.yml does not exist', () => {
@@ -88,6 +98,13 @@ test_command: npm test
   test_command: pnpm lint && pnpm test
 `);
     expect(loadFileConfig(tmpDir)?.test_command).toBe('pnpm lint && pnpm test');
+  });
+
+  it('parses release_timeout_minutes under pipeline', () => {
+    writeConfig(tmpDir, `pipeline:
+  release_timeout_minutes: 45
+`);
+    expect(loadFileConfig(tmpDir)?.release_timeout_minutes).toBe(45);
   });
 
   it('ignores legacy workflow flags on read (DB is authoritative)', () => {
@@ -193,7 +210,16 @@ gates:
 describe('writeFileConfig', () => {
   let tmpDir: string;
 
-  beforeEach(() => { tmpDir = makeTmpDir(); });
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    vi.resetAllMocks();
+    vi.mocked(gitBranch.getBranchContext).mockReturnValue({
+      currentBranch: 'main',
+      defaultBranch: 'main',
+      isDefaultBranch: true,
+    });
+    vi.mocked(gitBranch.gitShowSync).mockReturnValue(null);
+  });
   afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('creates .tamtam/config.yml when it does not exist', () => {
@@ -218,6 +244,20 @@ describe('writeFileConfig', () => {
     writeConfig(tmpDir, 'test_command: npm test\n');
     writeFileConfig(tmpDir, { test_command: null });
     expect(loadFileConfig(tmpDir)?.test_command).toBeUndefined();
+  });
+
+  it('writes release_timeout_minutes under pipeline and round-trips', () => {
+    writeFileConfig(tmpDir, { release_timeout_minutes: 45 });
+    const content = readFileSync(join(tmpDir, '.tamtam', 'config.yml'), 'utf-8');
+    expect(content).toContain('pipeline:');
+    expect(content).toContain('release_timeout_minutes: 45');
+    expect(loadFileConfig(tmpDir)?.release_timeout_minutes).toBe(45);
+  });
+
+  it('removes release_timeout_minutes when set to null', () => {
+    writeConfig(tmpDir, 'pipeline:\n  release_timeout_minutes: 45\n');
+    writeFileConfig(tmpDir, { release_timeout_minutes: null });
+    expect(loadFileConfig(tmpDir)?.release_timeout_minutes).toBeUndefined();
   });
 
   it('writes safe_users under security section', () => {

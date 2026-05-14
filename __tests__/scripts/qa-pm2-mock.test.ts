@@ -19,13 +19,15 @@ async function waitForState(
   name: string,
   predicate: (entry: { status?: string; exit_code?: number | null } | undefined) => boolean,
 ) {
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + 2000;
   while (Date.now() < deadline) {
     if (existsSync(statePath)) {
       const state = JSON.parse(readFileSync(statePath, 'utf-8'));
-      if (predicate(state[name])) return state[name];
+      if (predicate(state[name])) {
+        return state[name];
+      }
     }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    await new Promise((resolveWait) => setTimeout(resolveWait, 5));
   }
   throw new Error(`Timed out waiting for ${name} in ${statePath}`);
 }
@@ -60,7 +62,7 @@ describe.concurrent('scripts/qa-mocks/pm2', () => {
     try {
       const marker = join(dir, 'shell-ran.txt');
       const script = join(dir, 'release-monitor.sh');
-      writeFileSync(script, `#!/bin/bash\necho ok > ${JSON.stringify(marker)}\nexit 0\n`);
+      writeFileSync(script, `#!/bin/sh\nprintf 'ok\\n' > ${JSON.stringify(marker)}\n`);
       chmodSync(script, 0o755);
 
       const started = runPm2(['start', script, '--name', 'release-monitor', '--no-autorestart'], statePath, dir);
@@ -79,14 +81,14 @@ describe.concurrent('scripts/qa-mocks/pm2', () => {
     const { dir, statePath } = makeDir();
     try {
       const script = join(dir, 'long-monitor.sh');
-      writeFileSync(script, '#!/bin/bash\nsleep 2\nexit 0\n');
+      writeFileSync(script, "#!/usr/bin/env node\nsetInterval(() => {}, 1000);\n");
       chmodSync(script, 0o755);
 
       const startedAt = Date.now();
       const started = runPm2(['start', script, '--name', 'long-release-monitor'], statePath, dir);
 
       expect(started.status).toBe(0);
-      expect(Date.now() - startedAt).toBeLessThan(1000);
+      expect(Date.now() - startedAt).toBeLessThan(500);
       const jlist = runPm2(['jlist'], statePath, dir);
       expect(jlist.status).toBe(0);
       expect(JSON.parse(jlist.stdout)[0]).toMatchObject({
@@ -94,6 +96,23 @@ describe.concurrent('scripts/qa-mocks/pm2', () => {
         pm2_env: { status: 'online', exit_code: null },
       });
       runPm2(['delete', 'long-release-monitor'], statePath, dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('detects state written after waiting begins', async () => {
+    const { dir, statePath } = makeDir();
+    const waiter = waitForState(statePath, 'late-job', (state) => state?.status === 'stopped');
+
+    try {
+      setTimeout(() => {
+        writeFileSync(statePath, JSON.stringify({
+          'late-job': { status: 'stopped', exit_code: 0 },
+        }));
+      }, 20);
+
+      await expect(waiter).resolves.toMatchObject({ status: 'stopped', exit_code: 0 });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
