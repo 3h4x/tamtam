@@ -406,9 +406,6 @@ describe('startRelease — release pipeline entry decision tree', () => {
     execMock = vi.fn()
       .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
       .mockImplementationOnce(() => gitAhead('0'))
-      .mockImplementationOnce(() => Promise.resolve({ exitCode: 0, stdout: 'fix/issue-42-fix-login-bug\n', stderr: '' }))
-      .mockImplementationOnce(() => Promise.resolve({ exitCode: 0, stdout: 'refs/remotes/origin/main\n', stderr: '' }))
-      .mockImplementationOnce(() => Promise.resolve({ exitCode: 0, stdout: '{"state":"OPEN"}', stderr: '' }))
       .mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'pm2' && args[0] === 'start') return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
         if (cmd === 'pm2' && args[0] === 'jlist') return Promise.resolve({ exitCode: 0, stdout: JSON.stringify([{ name: 'proj-release-rel-id', pid: 1234 }]), stderr: '' });
