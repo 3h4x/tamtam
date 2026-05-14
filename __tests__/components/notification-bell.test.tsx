@@ -78,6 +78,10 @@ function notificationRow(container: HTMLElement, project: string): HTMLButtonEle
   return row
 }
 
+function waitForUi(assertion: () => void | Promise<void>) {
+  return vi.waitFor(assertion, { interval: 1, timeout: 1000 })
+}
+
 describe('NotificationBell', () => {
   beforeEach(() => {
     fetchNotificationsMock.mockResolvedValue({
@@ -108,14 +112,14 @@ describe('NotificationBell', () => {
 
     const { container, unmount } = renderBell()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchNotificationsMock).toHaveBeenCalled()
       expect(bellButton(container).textContent).toContain('1')
     })
 
     bellButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.textContent).toContain('needs attention')
       expect(container.querySelector('svg[aria-label="attention"]')).not.toBeNull()
       expect(container.querySelector('svg[aria-label="success"]')).toBeNull()
@@ -134,13 +138,13 @@ describe('NotificationBell', () => {
 
     const { container, unmount } = renderBell()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchNotificationsMock).toHaveBeenCalled()
     })
 
     bellButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.textContent).toContain('do not ship')
       expect(container.querySelector('svg[aria-label="attention"]')).not.toBeNull()
       expect(container.querySelector('svg[aria-label="success"]')).toBeNull()
@@ -159,13 +163,13 @@ describe('NotificationBell', () => {
 
     const { container, unmount } = renderBell()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchNotificationsMock).toHaveBeenCalled()
     })
 
     bellButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.textContent).toContain('review verdict missing')
       expect(container.textContent).not.toContain('exit 0')
       expect(container.querySelector('svg[aria-label="attention"]')).not.toBeNull()
@@ -184,13 +188,13 @@ describe('NotificationBell', () => {
 
     const { container, unmount } = renderBell()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchNotificationsMock).toHaveBeenCalled()
     })
 
     bellButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.textContent).toContain('LGTM')
       expect(container.querySelector('svg[aria-label="success"]')).not.toBeNull()
       expect(container.querySelector('svg[aria-label="attention"]')).toBeNull()
@@ -209,19 +213,19 @@ describe('NotificationBell', () => {
 
     const { container, unmount } = renderBell()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchNotificationsMock).toHaveBeenCalled()
     })
 
     bellButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(notificationRow(container, 'abort-proj')).toBeInstanceOf(HTMLButtonElement)
     })
 
     notificationRow(container, 'abort-proj').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(markJobSeenMock).toHaveBeenCalledWith('aborted-job')
       expect(pushMock).toHaveBeenCalledWith('/project/abort-proj/terminal?job=aborted-job')
     })
@@ -258,14 +262,14 @@ describe('NotificationBell', () => {
 
     const { container, unmount } = renderBell()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchNotificationsMock).toHaveBeenCalled()
       expect(bellButton(container).textContent).toContain('1')
     })
 
     bellButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.textContent).toContain('test')
       expect(container.textContent).toContain('exit 1')
       expect(container.textContent).not.toContain(successId)
@@ -273,7 +277,7 @@ describe('NotificationBell', () => {
 
     notificationRow(container, 'alpha').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(markJobSeenMock).toHaveBeenCalledWith('test-fail')
       expect(pushMock).toHaveBeenCalledWith('/project/alpha/terminal?job=test-fail')
     })
@@ -310,7 +314,7 @@ describe('NotificationBell', () => {
 
     const { container, unmount } = renderBell()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchNotificationsMock).toHaveBeenCalled()
       // Collapsed to one entry despite two jobs from same project
       expect(bellButton(container).textContent).toContain('1')
@@ -318,7 +322,7 @@ describe('NotificationBell', () => {
 
     bellButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       // Attention job content is shown
       expect(container.querySelector('svg[aria-label="attention"]')).not.toBeNull()
       expect(container.textContent).toContain('needs attention')
@@ -356,14 +360,14 @@ describe('NotificationBell', () => {
 
     const { container, unmount } = renderBell()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchNotificationsMock).toHaveBeenCalled()
       expect(bellButton(container).textContent).toContain('1')
     })
 
     bellButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.textContent).toContain('needs attention')
       expect(container.textContent).not.toContain('dod-ok')
       expect(container.querySelector('svg[aria-label="attention"]')).not.toBeNull()

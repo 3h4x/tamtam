@@ -377,20 +377,25 @@ describe('GET /api/streaming/[jobId]', () => {
 
     vi.useFakeTimers();
     try {
+      const realSetInterval = globalThis.setInterval;
+      vi.stubGlobal('setInterval', ((handler: TimerHandler, _timeout?: number, ...args: unknown[]) => (
+        realSetInterval(handler, 10, ...args)
+      )) as typeof setInterval);
       const ac = new AbortController();
       const request = new NextRequest('http://localhost/api/streaming/job-poll?raw=1', { signal: ac.signal });
       const response = await GET(request, { params: Promise.resolve({ jobId: 'job-poll' }) });
 
       // Flip the job to finished AFTER the stream has already started and replayed initial content.
-      setTimeout(() => { finished = true; }, 50);
+      setTimeout(() => { finished = true; }, 5);
 
-      const eventsPromise = collectSSEStream(response, ac, 2000);
-      await vi.advanceTimersByTimeAsync(1100);
+      const eventsPromise = collectSSEStream(response, ac, 100);
+      await vi.advanceTimersByTimeAsync(20);
       const events = await eventsPromise;
       const combined = events.join('');
       expect(combined).toContain('event: done');
       expect(combined).toContain('"exitCode":0');
     } finally {
+      vi.unstubAllGlobals();
       vi.useRealTimers();
     }
   });
