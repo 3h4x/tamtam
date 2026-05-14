@@ -42,7 +42,6 @@ interface SettingsMap {
   frequency: string
   daytime: string
   weekends: string
-  launchagent_prefix: string
   base_prompt: string
   default_model: string
   permission_mode: string

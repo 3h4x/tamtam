@@ -9,7 +9,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     project: 'proj',
     job: null,
     priority: null,
-    launchctl: 'running',
+    paused: false,
     path: '/tmp/proj',
     fires_at: '',
     sync: null,

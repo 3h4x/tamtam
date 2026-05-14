@@ -196,7 +196,7 @@ function buildTask(overrides: Partial<Task> = {}): Task {
     project: 'acme/widgets',
     job: null,
     priority: null,
-    launchctl: 'running',
+    paused: false,
     path: '/tmp/acme-widgets',
     fires_at: '',
     sync: true,

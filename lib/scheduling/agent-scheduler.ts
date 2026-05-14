@@ -1,12 +1,9 @@
-import { writeFileSync, unlinkSync, existsSync, mkdirSync, chmodSync } from 'fs';
+import { writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { exec } from '@/lib/shared/shell';
-import { getSettings } from '@/lib/shared/config';
 import { getImproveConfig } from './scheduling';
 import { normalizeAgentScheduleOrThrow } from './agent-schedule';
-
-const LAUNCH_AGENTS_DIR = join(homedir(), 'Library', 'LaunchAgents');
 
 function getLogDir(): string {
   try { return getImproveConfig().logDir; } catch { return join(/*turbopackIgnore: true*/ homedir(), 'logs'); }
@@ -15,90 +12,22 @@ function getScriptsDir(): string {
   return join(getLogDir(), 'agent-scripts');
 }
 
-function parseScheduleToSeconds(schedule: string): number {
-  const s = normalizeAgentScheduleOrThrow(schedule);
-  if (s.endsWith('d')) return parseInt(s.slice(0, -1), 10) * 86400;
-  if (s.endsWith('h')) return parseInt(s.slice(0, -1), 10) * 3600;
-  if (s.endsWith('m')) return parseInt(s.slice(0, -1), 10) * 60;
-  return parseInt(s, 10);
-}
-
-function agentLabel(agentId: string): string {
-  const settings = getSettings();
-  const prefix = settings.launchagent_prefix || 'com.tamtam';
-  return `${prefix}.agent.${agentId}`;
-}
-
 function pm2Name(agentId: string, project?: string, agentName?: string): string {
   if (project && agentName) return `tamtam-${project}-agent-${agentName}`;
   return `tamtam-agent-${agentId}`;
-}
-
-function agentPlistPath(agentId: string): string {
-  return join(LAUNCH_AGENTS_DIR, `${agentLabel(agentId)}.plist`);
-}
-
-function agentScriptPath(agentId: string): string {
-  return join(getScriptsDir(), `${agentId}.sh`);
 }
 
 function agentPromptPath(agentId: string): string {
   return join(getScriptsDir(), `${agentId}.prompt.json`);
 }
 
-function buildLaunchctlScript(agentId: string): string {
-  const port = process.env.PORT || '1337';
-  const url = `http://localhost:${port}/api/agents/${agentId}/run`;
-  const promptFile = agentPromptPath(agentId);
-
-  return `#!/bin/bash
-/usr/bin/curl -s -X POST -H "Content-Type: application/json" -H "X-Tamtam-Trigger: schedule" -d @"${promptFile}" "${url}"
-`;
-}
-
-function buildPlist(agentId: string, schedule: string): string {
-  const label = agentLabel(agentId);
-  const intervalSec = parseScheduleToSeconds(schedule);
-  const scriptPath = agentScriptPath(agentId);
-  const logDir = join(/*turbopackIgnore: true*/ homedir(), 'logs');
-  const logPath = join(logDir, `agent-scheduler-${agentId}.log`);
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${label}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>${scriptPath}</string>
-  </array>
-  <key>StartInterval</key>
-  <integer>${intervalSec}</integer>
-  <key>StandardOutPath</key>
-  <string>${logPath}</string>
-  <key>StandardErrorPath</key>
-  <string>${logPath}</string>
-</dict>
-</plist>`;
-}
-
-function ensureDirs(): void {
-  mkdirSync(getScriptsDir(), { recursive: true });
-  mkdirSync(join(/*turbopackIgnore: true*/ homedir(), 'logs'), { recursive: true });
-}
-
-function writeScriptAndPrompt(agentId: string, prompt: string): void {
-  writeFileSync(agentPromptPath(agentId), JSON.stringify({ prompt }));
-  writeFileSync(agentScriptPath(agentId), buildLaunchctlScript(agentId));
-  chmodSync(agentScriptPath(agentId), 0o755);
-}
-
 function cleanupFiles(agentId: string): void {
-  const script = agentScriptPath(agentId);
-  if (existsSync(script)) unlinkSync(script);
-  const promptFile = agentPromptPath(agentId);
-  if (existsSync(promptFile)) unlinkSync(promptFile);
+  // Older builds wrote a per-agent shell script next to the prompt; clean up
+  // either artifact if present so nothing lingers after an agent is removed.
+  for (const ext of ['sh', 'prompt.json']) {
+    const p = join(getScriptsDir(), `${agentId}.${ext}`);
+    if (existsSync(/*turbopackIgnore: true*/ p)) unlinkSync(/*turbopackIgnore: true*/ p);
+  }
 }
 
 // --- PM2 scheduling (legacy cleanup only) ---
@@ -118,39 +47,6 @@ async function uninstallPm2Schedule(agentId: string, project?: string, agentName
 async function isPm2ScheduleLoaded(agentId: string, project?: string, agentName?: string): Promise<boolean> {
   const name = pm2Name(agentId, project, agentName);
   const result = await exec('pm2', ['describe', name]);
-  return result.exitCode === 0;
-}
-
-// --- Launchctl scheduling ---
-
-async function installLaunchctlSchedule(agentId: string, schedule: string, prompt: string): Promise<void> {
-  mkdirSync(LAUNCH_AGENTS_DIR, { recursive: true });
-  ensureDirs();
-
-  // Unload existing if present
-  const plist = agentPlistPath(agentId);
-  if (existsSync(plist)) {
-    await exec('launchctl', ['unload', plist]);
-  }
-
-  writeScriptAndPrompt(agentId, prompt);
-
-  writeFileSync(plist, buildPlist(agentId, schedule));
-  await exec('launchctl', ['load', plist]);
-}
-
-async function uninstallLaunchctlSchedule(agentId: string): Promise<void> {
-  const plist = agentPlistPath(agentId);
-  if (existsSync(plist)) {
-    await exec('launchctl', ['unload', plist]);
-    unlinkSync(plist);
-  }
-  cleanupFiles(agentId);
-}
-
-async function isLaunchctlScheduleLoaded(agentId: string): Promise<boolean> {
-  const label = agentLabel(agentId);
-  const result = await exec('launchctl', ['list', label]);
   return result.exitCode === 0;
 }
 
@@ -183,7 +79,7 @@ export async function reconcilePm2Schedules(
 
   const expectedNames = new Set<string>();
   for (const agent of agents) {
-    if (agent.runner !== 'pm2' || !agent.schedule || !agent.enabled) continue;
+    if (!agent.schedule || !agent.enabled) continue;
     expectedNames.add(pm2Name(agent.id, agent.project, agent.name));
   }
 
@@ -202,33 +98,24 @@ export async function reconcilePm2Schedules(
 
 // --- Public API ---
 
-/**
- * @deprecated The launchctl runner is no longer supported. New agents should
- * use `runner: 'pm2'` (which now means in-process scheduling via
- * `lib/internal-scheduler.ts`). The launchctl branches below remain for
- * backwards compatibility with any pre-existing DB rows but emit a warning.
- */
-function warnLaunchctlDeprecated(where: string): void {
-  console.warn(`[agent-scheduler] launchctl runner is deprecated (${where}); migrate to runner='pm2'`);
+function ensureDirs(): void {
+  mkdirSync(/*turbopackIgnore: true*/ getScriptsDir(), { recursive: true });
 }
 
 export async function installAgentSchedule(
   agentId: string,
   schedule: string,
   prompt: string,
-  runner: string = 'pm2',
+  _runner: string = 'pm2',
   project?: string,
-  agentName?: string
+  agentName?: string,
 ): Promise<void> {
   const normalizedSchedule = normalizeAgentScheduleOrThrow(schedule);
-  if (runner === 'launchctl') {
-    warnLaunchctlDeprecated('install');
-    await installLaunchctlSchedule(agentId, normalizedSchedule, prompt);
-    return;
-  }
-  // PM2 cron with --no-autostart silently no-op'd; agents registered that way
-  // never fired. Real scheduling is now handled in-process by lib/internal-scheduler.
-  // We still sweep any legacy PM2 cron entry so it doesn't show up as an orphan.
+  ensureDirs();
+  // Persist prompt next to the runtime artifacts so out-of-band reruns can
+  // recover it.
+  writeFileSync(/*turbopackIgnore: true*/ agentPromptPath(agentId), JSON.stringify({ prompt }));
+
   const { upsertAgentSchedule } = await import('./internal-scheduler');
   upsertAgentSchedule({
     id: agentId,
@@ -241,22 +128,23 @@ export async function installAgentSchedule(
   await uninstallPm2Schedule(agentId, project, agentName);
 }
 
-export async function uninstallAgentSchedule(agentId: string, runner: string = 'pm2', project?: string, agentName?: string): Promise<void> {
-  if (runner === 'launchctl') {
-    warnLaunchctlDeprecated('uninstall');
-    await uninstallLaunchctlSchedule(agentId);
-    return;
-  }
+export async function uninstallAgentSchedule(
+  agentId: string,
+  _runner: string = 'pm2',
+  project?: string,
+  agentName?: string,
+): Promise<void> {
   const { removeAgentSchedule } = await import('./internal-scheduler');
   removeAgentSchedule(agentId);
   await uninstallPm2Schedule(agentId, project, agentName);
 }
 
-export async function isAgentScheduleLoaded(agentId: string, runner: string = 'pm2', project?: string, agentName?: string): Promise<boolean> {
-  if (runner === 'launchctl') {
-    warnLaunchctlDeprecated('isLoaded');
-    return isLaunchctlScheduleLoaded(agentId);
-  }
+export async function isAgentScheduleLoaded(
+  agentId: string,
+  _runner: string = 'pm2',
+  project?: string,
+  agentName?: string,
+): Promise<boolean> {
   return isPm2ScheduleLoaded(agentId, project, agentName);
 }
 
@@ -274,84 +162,52 @@ export type SchedulerExpected = {
 export type SchedulerHealth = {
   ok: boolean;
   expected: SchedulerExpected[];
-  actual: { pm2: string[]; launchctl: string[] };
+  actual: { pm2: string[] };
   missing: SchedulerExpected[];
-  orphans: { pm2: string[]; launchctl: string[] };
+  orphans: { pm2: string[] };
   errors: string[];
 };
 
-async function listLaunchctlAgentLabels(): Promise<{ labels: string[]; error?: string }> {
-  const settings = getSettings();
-  const prefix = `${settings.launchagent_prefix || 'com.tamtam'}.agent.`;
-  try {
-    const r = await exec('launchctl', ['list']);
-    if (r.exitCode !== 0) return { labels: [], error: r.stderr.trim() || `launchctl list exit ${r.exitCode}` };
-    const labels: string[] = [];
-    // Output format: PID\tStatus\tLabel
-    for (const line of r.stdout.split('\n')) {
-      const cols = line.split('\t');
-      const label = cols[2]?.trim();
-      if (label && label.startsWith(prefix)) labels.push(label);
-    }
-    return { labels };
-  } catch (err) {
-    return { labels: [], error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
 export async function getSchedulerHealth(
-  agents: Array<{ id: string; project: string; name: string; runner: string; schedule: string | null; enabled: boolean }>
+  agents: Array<{ id: string; project: string; name: string; runner: string; schedule: string | null; enabled: boolean }>,
 ): Promise<SchedulerHealth> {
   const expected: SchedulerExpected[] = [];
   for (const a of agents) {
     if (!a.enabled || !a.schedule) continue;
-    const expectedName = a.runner === 'launchctl' ? agentLabel(a.id) : pm2Name(a.id, a.project, a.name);
-    expected.push({ id: a.id, project: a.project, name: a.name, runner: a.runner, schedule: a.schedule, expectedName });
+    expected.push({
+      id: a.id,
+      project: a.project,
+      name: a.name,
+      runner: a.runner,
+      schedule: a.schedule,
+      expectedName: pm2Name(a.id, a.project, a.name),
+    });
   }
 
   const errors: string[] = [];
 
-  // Internal scheduler covers all PM2-runner agents. Launchctl runner is
-  // independent (real OS scheduler).
   const { dumpInternalScheduler } = await import('./internal-scheduler');
   const internal = dumpInternalScheduler();
-  const internalIds = new Set(internal.entries.map(e => e.agentId));
-
-  const lcRes = await listLaunchctlAgentLabels();
-  if (lcRes.error) errors.push(`launchctl: ${lcRes.error}`);
-  const lcSet = new Set(lcRes.labels);
+  const internalIds = new Set(internal.entries.map((e) => e.agentId));
 
   const missing: SchedulerExpected[] = [];
-  const expectedLc = new Set<string>();
   for (const e of expected) {
-    if (e.runner === 'launchctl') {
-      expectedLc.add(e.expectedName);
-      if (!lcSet.has(e.expectedName)) missing.push(e);
-    } else {
-      if (!internalIds.has(e.id)) missing.push(e);
-    }
+    if (!internalIds.has(e.id)) missing.push(e);
   }
 
-  // Internal scheduler entries with no matching enabled DB agent = orphans.
-  const expectedInternalIds = new Set(
-    expected.filter(e => e.runner !== 'launchctl').map(e => e.id)
-  );
+  const expectedInternalIds = new Set(expected.map((e) => e.id));
   const internalOrphans = internal.entries
-    .filter(e => !expectedInternalIds.has(e.agentId))
-    .map(e => `${e.project}/${e.name}`);
+    .filter((e) => !expectedInternalIds.has(e.agentId))
+    .map((e) => `${e.project}/${e.name}`);
 
-  const orphans = {
-    pm2: internalOrphans,
-    launchctl: lcRes.labels.filter(l => !expectedLc.has(l)),
-  };
+  const orphans = { pm2: internalOrphans };
+  const internalNames = internal.entries.map((e) => `${e.project}/${e.name}`);
 
-  const internalNames = internal.entries.map(e => `${e.project}/${e.name}`);
-
-  const ok = errors.length === 0 && missing.length === 0 && orphans.pm2.length === 0 && orphans.launchctl.length === 0;
+  const ok = errors.length === 0 && missing.length === 0 && orphans.pm2.length === 0;
   return {
     ok,
     expected,
-    actual: { pm2: internalNames, launchctl: lcRes.labels },
+    actual: { pm2: internalNames },
     missing,
     orphans,
     errors,

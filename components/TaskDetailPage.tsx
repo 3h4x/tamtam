@@ -57,8 +57,8 @@ export function TaskDetailPage({
         </h2>
         {task && (
           <div className="flex items-center gap-3">
-            <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${task.launchctl === 'running' || task.launchctl === 'loaded' ? 'bg-status-success/15 text-status-success' : task.launchctl === 'paused' ? 'bg-status-warning/15 text-status-warning' : 'bg-bg-tertiary text-text-secondary'}`}>
-              {task.launchctl}
+            <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${task.paused ? 'bg-status-warning/15 text-status-warning' : 'bg-status-success/15 text-status-success'}`}>
+              {task.paused ? 'paused' : 'active'}
             </span>
             {task.fires_at && <span className="text-text-secondary text-sm">{task.fires_at}</span>}
             {task.priority && (
@@ -89,9 +89,9 @@ export function TaskDetailPage({
             {task.ci === 'in_progress' && <span className="text-status-warning">CI ⋯</span>}
             <button
               className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
-              onClick={() => task.launchctl === 'paused' ? onResume(task.id) : onPause(task.id)}
+              onClick={() => task.paused ? onResume(task.id) : onPause(task.id)}
             >
-              {task.launchctl === 'paused' ? '▶ Resume' : '⏸ Pause'}
+              {task.paused ? '▶ Resume' : '⏸ Pause'}
             </button>
           </div>
         )}

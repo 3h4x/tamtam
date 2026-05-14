@@ -174,11 +174,6 @@ describe('fetchProjectData — unpushed field', () => {
       gitChanges: vi.fn().mockResolvedValue(0),
       isReviewed: vi.fn().mockResolvedValue(null),
     }));
-    vi.doMock('@/lib/scheduling/launchagent', () => ({
-      launchctlInfo: vi.fn().mockResolvedValue({ loaded: false, pid: null, plistMinute: null, wrapperPhase: null, wrapperCycle: null }),
-      plistPath: vi.fn().mockReturnValue('/tmp/plist'),
-      pausedPlistPath: vi.fn().mockReturnValue('/tmp/plist.paused'),
-    }));
     vi.doMock('@/lib/shared/gh-status', () => ({
       ghStatusLookup: vi.fn().mockResolvedValue({}),
     }));
@@ -318,8 +313,6 @@ describe('fetchProjectData — unpushed field', () => {
 describe('fetchProjectData — project selection and metadata', () => {
   const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
   let execMock: ReturnType<typeof vi.fn>;
-  let existsSyncMock: ReturnType<typeof vi.fn>;
-  let launchctlInfoMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     await truncateTables();
@@ -339,20 +332,12 @@ describe('fetchProjectData — project selection and metadata', () => {
     ]);
 
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
-    existsSyncMock = vi.fn().mockReturnValue(false);
-    launchctlInfoMock = vi.fn().mockResolvedValue({ loaded: false, pid: null, plistMinute: null, wrapperPhase: null, wrapperCycle: null });
 
-    vi.doMock('fs', () => ({ existsSync: existsSyncMock }));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/git/git-utils', () => ({
       gitChanges: vi.fn().mockResolvedValue(0),
       isReviewed: vi.fn().mockResolvedValue(null),
-    }));
-    vi.doMock('@/lib/scheduling/launchagent', () => ({
-      launchctlInfo: launchctlInfoMock,
-      plistPath: vi.fn().mockImplementation((schedId: string) => `/tmp/${schedId}.plist`),
-      pausedPlistPath: vi.fn().mockImplementation((schedId: string) => `/tmp/${schedId}.plist.paused`),
     }));
     vi.doMock('@/lib/shared/gh-status', () => ({
       ghStatusLookup: vi.fn().mockResolvedValue({}),
@@ -426,58 +411,25 @@ describe('fetchProjectData — project selection and metadata', () => {
     expect(execMock.mock.calls.some(([, args]) => Array.isArray(args) && args.includes('remote') && args.includes('get-url'))).toBe(false);
   });
 
-  it('reports paused launchctl state when the paused plist exists', async () => {
-    existsSyncMock.mockImplementation((path: string) => path.endsWith('.plist.paused'));
+  it('reports paused=true when the project row is paused', async () => {
+    await handle.db.execute(sql.raw(
+      `UPDATE projects SET paused = true WHERE name = 'enabled-proj'`,
+    ));
+    const { clearProjectsCache } = await import('@/lib/shared/enabled-projects');
+    clearProjectsCache();
+    await primeEnabledProjectsCache();
 
     const { fetchProjectData } = await import('@/lib/shared/project-data');
     const result = await fetchProjectData();
 
-    expect(result.projects['enabled-proj']?.[0]?.launchctl).toBe('paused');
+    expect(result.projects['enabled-proj']?.[0]?.paused).toBe(true);
   });
 
-  it('reports installed launchctl state when only the plist exists', async () => {
-    existsSyncMock.mockImplementation((path: string) => path.endsWith('.plist'));
-
+  it('reports paused=false when the project row is not paused', async () => {
     const { fetchProjectData } = await import('@/lib/shared/project-data');
     const result = await fetchProjectData();
 
-    expect(result.projects['enabled-proj']?.[0]?.launchctl).toBe('installed');
-  });
-
-  it('reports running launchctl state when daemon is loaded with a pid', async () => {
-    launchctlInfoMock.mockResolvedValue({ loaded: true, pid: 12345, plistMinute: null, wrapperPhase: null, wrapperCycle: null });
-
-    const { fetchProjectData } = await import('@/lib/shared/project-data');
-    const result = await fetchProjectData();
-
-    expect(result.projects['enabled-proj']?.[0]?.launchctl).toBe('running');
-  });
-
-  it('reports loaded launchctl state when daemon is loaded but has no pid', async () => {
-    launchctlInfoMock.mockResolvedValue({ loaded: true, pid: null, plistMinute: null, wrapperPhase: null, wrapperCycle: null });
-
-    const { fetchProjectData } = await import('@/lib/shared/project-data');
-    const result = await fetchProjectData();
-
-    expect(result.projects['enabled-proj']?.[0]?.launchctl).toBe('loaded');
-  });
-
-  it('reports running state when pid is 0 (falsy but not null)', async () => {
-    launchctlInfoMock.mockResolvedValue({ loaded: true, pid: 0, plistMinute: null, wrapperPhase: null, wrapperCycle: null });
-
-    const { fetchProjectData } = await import('@/lib/shared/project-data');
-    const result = await fetchProjectData();
-
-    expect(result.projects['enabled-proj']?.[0]?.launchctl).toBe('running');
-  });
-
-  it('reports missing launchctl state when daemon is not loaded and no plist files exist', async () => {
-    existsSyncMock.mockReturnValue(false);
-
-    const { fetchProjectData } = await import('@/lib/shared/project-data');
-    const result = await fetchProjectData();
-
-    expect(result.projects['enabled-proj']?.[0]?.launchctl).toBe('missing');
+    expect(result.projects['enabled-proj']?.[0]?.paused).toBe(false);
   });
 });
 

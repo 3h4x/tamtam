@@ -235,24 +235,6 @@ describe('GET /api/agents/scheduler-health', () => {
     expect(body.ok).toBe(true);
   });
 
-  it('detects launchctl orphans by configured prefix', async () => {
-    dumpInternalSchedulerMock.mockReturnValue({ started: true, entries: [] });
-    execMock.mockImplementation(async (cmd: string, args: string[]) => {
-      if (cmd === 'launchctl' && args[0] === 'list') {
-        return {
-          exitCode: 0,
-          stdout: '-\t0\tcom.tamtam.agent.zombie\n-\t0\tcom.apple.something\n',
-          stderr: '',
-        };
-      }
-      return { exitCode: 0, stdout: '', stderr: '' };
-    });
-
-    const res = await GET();
-    const body = await res.json();
-    expect(body.orphans.launchctl).toEqual(['com.tamtam.agent.zombie']);
-  });
-
   it('POST installs missing schedules and re-runs the check', async () => {
     await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', runner: 'pm2', schedule: '1h' });
 

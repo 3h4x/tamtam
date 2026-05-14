@@ -33,7 +33,6 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     frequency: '1h',
     daytime: false,
     weekends: false,
-    launchagent_prefix: 'com.tamtam',
     base_prompt: '',
     default_model: 'fast',
     permission_mode: 'bypassPermissions',

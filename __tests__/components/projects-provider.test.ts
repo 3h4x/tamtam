@@ -39,7 +39,7 @@ function buildProjectsResponse(projectName = 'acme/widgets'): ProjectsResponse {
       project: projectName,
       job: 'nightly',
       priority: 'medium',
-      launchctl: 'running',
+      paused: false,
       path: `/tmp/${projectName}`,
       fires_at: '* * * * *',
       sync: true,

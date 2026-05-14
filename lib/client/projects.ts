@@ -38,24 +38,24 @@ export async function setPriority(
   return response.json()
 }
 
-export async function pauseProject(taskId: string): Promise<{ status: string }> {
-  const response = await fetch(`${API_BASE}/${taskId}/pause`, {
-    method: 'POST',
+async function setProjectPaused(projectName: string, paused: boolean): Promise<{ status: string }> {
+  const response = await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paused }),
   })
   if (!response.ok) {
-    throw new Error(`Failed to pause: ${response.statusText}`)
+    throw new Error(`Failed to ${paused ? 'pause' : 'resume'}: ${response.statusText}`)
   }
-  return response.json()
+  return { status: 'ok' }
 }
 
-export async function resumeProject(taskId: string): Promise<{ status: string }> {
-  const response = await fetch(`${API_BASE}/${taskId}/resume`, {
-    method: 'POST',
-  })
-  if (!response.ok) {
-    throw new Error(`Failed to resume: ${response.statusText}`)
-  }
-  return response.json()
+export function pauseProject(projectName: string): Promise<{ status: string }> {
+  return setProjectPaused(projectName, true)
+}
+
+export function resumeProject(projectName: string): Promise<{ status: string }> {
+  return setProjectPaused(projectName, false)
 }
 
 export async function fetchTaskDetail(taskId: string): Promise<TaskDetail> {

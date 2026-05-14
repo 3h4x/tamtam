@@ -7,7 +7,7 @@ export interface Task {
   project: string
   job: string | null
   priority: 'critical' | 'high' | 'medium' | 'low' | null
-  launchctl: 'running' | 'loaded' | 'installed' | 'paused' | 'missing'
+  paused: boolean
   path: string
   fires_at: string
   sync: boolean | null

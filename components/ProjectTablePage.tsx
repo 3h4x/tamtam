@@ -548,7 +548,7 @@ const isReviewRunning = (projectName: string) =>
             const showWarning = project.status === 'warning' && !hasUnreviewed
 
             const scheduledCount = (schedulerByProject[project.project] ?? []).filter(e => e.enabled).length
-            const projectPaused = project.tasks.some(th => th.task.launchctl === 'paused')
+            const projectPaused = project.tasks.some(th => th.task.paused)
             const outOfSync = project.tasks.some(th => th.task.sync === false)
             const nextFire = getNextFire(project.project)
             const schedulesPaused = schedulerPaused || scheduledThrottlePaused

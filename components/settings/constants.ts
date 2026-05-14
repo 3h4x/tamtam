@@ -1,4 +1,4 @@
-export type SettingsFieldKey = 'workspace_path' | 'github_owner' | 'trusted_github_users' | 'claude_provider' | 'claude_bin' | 'lmstudio_model' | 'log_dir' | 'frequency' | 'daytime' | 'weekends' | 'launchagent_prefix' | 'base_prompt' | 'default_model' | 'permission_mode' | 'commit_style' | 'review_verdict_rules' | 'review_fix_max_iterations' | 'release_wall_clock_timeout_minutes' |'agent_templates' | 'log_retention_count' | 'log_retention_days' | 'job_row_retention_days' | 'backup_retention_count' | 'backup_retention_weekly_count' | 'notification_webhook_url' | 'notification_webhook_secret' | 'notification_on_release_success' | 'notification_on_release_fail' | 'notification_on_release_aborted' | 'notification_on_fix_loop_exhausted' | 'notification_on_review_do_not_ship' | 'notification_on_agent_run_fail' | 'notification_throttle_window_seconds' | 'notification_throttle_overrides' | 'pipeline_model_review' | 'pipeline_model_fix' | 'pipeline_model_dod' | 'pipeline_model_commit' | 'dirty_worktree_block_threshold' | 'incremental_review_enabled'
+export type SettingsFieldKey = 'workspace_path' | 'github_owner' | 'trusted_github_users' | 'claude_provider' | 'claude_bin' | 'lmstudio_model' | 'log_dir' | 'frequency' | 'daytime' | 'weekends' | 'base_prompt' | 'default_model' | 'permission_mode' | 'commit_style' | 'review_verdict_rules' | 'review_fix_max_iterations' | 'release_wall_clock_timeout_minutes' |'agent_templates' | 'log_retention_count' | 'log_retention_days' | 'job_row_retention_days' | 'backup_retention_count' | 'backup_retention_weekly_count' | 'notification_webhook_url' | 'notification_webhook_secret' | 'notification_on_release_success' | 'notification_on_release_fail' | 'notification_on_release_aborted' | 'notification_on_fix_loop_exhausted' | 'notification_on_review_do_not_ship' | 'notification_on_agent_run_fail' | 'notification_throttle_window_seconds' | 'notification_throttle_overrides' | 'pipeline_model_review' | 'pipeline_model_fix' | 'pipeline_model_dod' | 'pipeline_model_commit' | 'dirty_worktree_block_threshold' | 'incremental_review_enabled'
 
 export interface FieldDef {
   label: string
@@ -78,13 +78,6 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
   log_dir: {
     label: 'Log Directory',
     help: 'Directory where job logs are stored',
-    group: 'general',
-    advanced: true,
-    span: 1,
-  },
-  launchagent_prefix: {
-    label: 'LaunchAgent Prefix',
-    help: 'Prefix for macOS LaunchAgent plist labels',
     group: 'general',
     advanced: true,
     span: 1,
@@ -264,7 +257,6 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   frequency: '1h',
   daytime: 'false',
   weekends: 'off',
-  launchagent_prefix: 'com.tamtam',
   base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
   default_model: 'fast',
   permission_mode: 'acceptEdits',

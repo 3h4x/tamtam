@@ -116,7 +116,6 @@ describe('config', () => {
         frequency: '1h',
         daytime: false,
         weekends: false,
-        launchagent_prefix: 'com.tamtam',
         base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
         default_model: 'fast',
         permission_mode: 'acceptEdits',
@@ -358,15 +357,6 @@ describe('config', () => {
       const config = getSettings();
 
       expect(config.weekends).toBe(false);
-    });
-
-    it('returns config with overridden launchagent_prefix', async () => {
-      await setSetting('launchagent_prefix', 'org.example');
-      await refresh();
-
-      const config = getSettings();
-
-      expect(config.launchagent_prefix).toBe('org.example');
     });
 
     it('returns jobs_paused=true when stored in settings', async () => {

@@ -134,7 +134,6 @@ const SETTING_KEYS = [
   'frequency',
   'daytime',
   'weekends',
-  'launchagent_prefix',
   'workspace_path',
   'base_prompt',
   'default_model',

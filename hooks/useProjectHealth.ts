@@ -57,13 +57,9 @@ function getTaskHealth(task: Task): TaskHealth {
   }
   // Warning conditions (only if not already error)
   if (status !== 'error') {
-    if (task.launchctl === 'paused') {
+    if (task.paused) {
       status = 'warning'
       parts.push('paused')
-    }
-    if (task.sync === false) {
-      status = 'warning'
-      parts.push('out of sync')
     }
     if (task.changes > 0 && !task.reviewed) {
       status = 'warning'
@@ -87,8 +83,8 @@ function getTaskHealth(task: Task): TaskHealth {
     if (task.last_run_ago) {
       parts.push(`${task.last_run_ago} ago`)
     }
-    if (task.launchctl) {
-      parts.push(task.launchctl)
+    if (task.paused) {
+      parts.push('paused')
     }
   }
 

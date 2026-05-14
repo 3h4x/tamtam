@@ -1,17 +1,14 @@
-import { existsSync } from 'fs';
 import { listEnabledProjects } from '@/lib/shared/enabled-projects';
 import {
   getImproveConfig,
   getPriorityMultipliers,
   effectiveFreqMin,
   computeSchedule,
-  parseCronTime,
   cronFiresStr,
   PRIORITY_ORDER,
   type ProjectConfig,
 } from '@/lib/scheduling/scheduling';
 import { fireTimesStr } from '@/lib/scheduling/fire-times';
-import { launchctlInfo, plistPath, pausedPlistPath, type LaunchctlInfo } from '@/lib/scheduling/launchagent';
 import { ghStatusLookup, type GhStatusEntry } from './gh-status';
 import { lastRunLookup, type RunEntry } from '@/lib/jobs/run-history';
 import { gitChanges, isReviewed } from '@/lib/git/git-utils';
@@ -47,27 +44,6 @@ export function resolveProjectPath(projectName: string): string | null {
   return null;
 }
 
-function launchctlState(info: LaunchctlInfo, schedId: string): string {
-  if (info.loaded && info.pid !== null) return 'running';
-  if (info.loaded) return 'loaded';
-  if (existsSync(pausedPlistPath(schedId))) return 'paused';
-  if (existsSync(plistPath(schedId))) return 'installed';
-  return 'missing';
-}
-
-function syncOk(
-  info: LaunchctlInfo,
-  minute: number,
-  cycleHours: number,
-  hourPhase: number
-): boolean | null {
-  if (info.plistMinute === null) return null;
-  const minOk = info.plistMinute === minute;
-  const phaseOk = info.wrapperPhase !== null ? info.wrapperPhase === hourPhase : true;
-  const cycleOk = info.wrapperCycle !== null ? info.wrapperCycle === cycleHours : true;
-  return minOk && phaseOk && cycleOk;
-}
-
 function formatTimeAgo(isoDate: string): string {
   const d = (Date.now() - new Date(isoDate).getTime()) / 1000;
   if (d < 60) return '<1m';
@@ -85,32 +61,23 @@ async function assembleProject(
   lastRuns: Record<string, RunEntry>,
   ghStatus: Record<string, GhStatusEntry>,
   changesMap: Record<string, number>,
-  infoMap: Record<string, LaunchctlInfo>
+  pausedMap: Record<string, boolean>
 ): Promise<Task> {
   const priority = cfg.priority;
   const effFreq = priority
     ? effectiveFreqMin(priority, multipliers, baseFreqMin)
     : baseFreqMin;
 
-  let minute: number, cycleHours: number, hourPhase: number, firesAt: string;
+  let firesAt: string;
   const staticCron = (cfg as ProjectConfig & { cron?: string }).cron;
   if (staticCron) {
-    const parsed = parseCronTime(staticCron);
-    minute = parsed.minute;
-    cycleHours = parsed.step || 1;
-    hourPhase = parsed.start;
     firesAt = cronFiresStr(staticCron);
   } else {
     const schedule = computeSchedule(tierIdx, baseFreqMin, effFreq);
-    minute = schedule.minute;
-    cycleHours = schedule.cycleHours;
-    hourPhase = schedule.hourPhase;
-    firesAt = fireTimesStr(hourPhase, cycleHours, minute);
+    firesAt = fireTimesStr(schedule.hourPhase, schedule.cycleHours, schedule.minute);
   }
 
-  const info = infoMap[schedId] ?? (await launchctlInfo(schedId));
-  const launchctl = launchctlState(info, schedId);
-  const sync = syncOk(info, minute, cycleHours, hourPhase);
+  const paused = pausedMap[schedId] ?? false;
 
   let changes = changesMap[schedId] ?? (await gitChanges(cfg.path)) ?? 0;
   const projName = cfg.project;
@@ -209,9 +176,9 @@ async function assembleProject(
     path: cfg.path,
     github: githubUrl,
     priority: priority as Task['priority'],
-    launchctl: launchctl as Task['launchctl'],
+    paused,
     fires_at: firesAt,
-    sync,
+    sync: null,
     changes,
     unpushed,
     reviewed,
@@ -254,32 +221,28 @@ export async function fetchProjectData(): Promise<{
   const lastRuns = lastRunLookup();
   const schedIds = Object.keys(projects);
 
-  // Parallel fetch: changes, launchctl info, gh status
-  const [changesResults, infoResults, ghStatus] = await Promise.all([
+  // Parallel fetch: changes + gh status. Paused state is read from the
+  // enabled-projects cache and joined locally (no extra DB round-trip).
+  const [changesResults, ghStatus] = await Promise.all([
     Promise.all(
       schedIds.map(async (sid) => {
         const c = await gitChanges(projects[sid].path);
         return [sid, c ?? 0] as const;
       })
     ),
-    Promise.all(
-      schedIds.map(async (sid) => {
-        const info = await launchctlInfo(sid);
-        return [sid, info] as const;
-      })
-    ),
     ghStatusLookup(projects).catch(() => ({} as Record<string, GhStatusEntry>)),
   ]);
 
   const changesMap = Object.fromEntries(changesResults) as Record<string, number>;
-  const infoMap = Object.fromEntries(infoResults) as Record<string, LaunchctlInfo>;
+  const pausedMap: Record<string, boolean> = {};
+  for (const p of listEnabledProjects()) pausedMap[p.name] = !!p.paused;
 
   // Group by project name
   const projectTasks: Record<string, Task[]> = {};
   for (const [sid, cfg] of Object.entries(projects)) {
     const task = await assembleProject(
       sid, cfg, tierIdxMap[sid], baseFreqMin, multipliers,
-      lastRuns, ghStatus, changesMap, infoMap
+      lastRuns, ghStatus, changesMap, pausedMap
     );
     const projName = cfg.project;
     if (!projectTasks[projName]) projectTasks[projName] = [];
