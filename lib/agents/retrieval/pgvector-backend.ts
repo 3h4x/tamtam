@@ -1,4 +1,4 @@
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import type { RetrievalBackend, RetrievalChunk, RetrievalResult, SourceKind } from './backend';
 
@@ -84,11 +84,14 @@ export class PgvectorBackend implements RetrievalBackend {
       return parseInt(rows.rows[0]?.count ?? '0', 10);
     }
 
-    const rows = await db.execute<{ count: string }>(sql`
-      SELECT count(*)::text AS count FROM retrieval_chunks
-      WHERE project = ${project} AND source_kind = ANY(${sourceKinds})
-    `);
-    return parseInt(rows.rows[0]?.count ?? '0', 10);
+    const rows = await db
+      .select({ count: sql<string>`count(*)::text` })
+      .from(schema.retrievalChunks)
+      .where(and(
+        eq(schema.retrievalChunks.project, project),
+        inArray(schema.retrievalChunks.sourceKind, sourceKinds),
+      ));
+    return parseInt(rows[0]?.count ?? '0', 10);
   }
 
   async deleteSource(project: string, sourceKind: SourceKind, sourceId: string): Promise<void> {
