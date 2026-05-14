@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -44,54 +44,8 @@ describe('startRelease — release pipeline entry decision tree', () => {
   let releaseLockMock: ReturnType<typeof vi.fn>;
   let reassignLockMock: ReturnType<typeof vi.fn>;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     vi.resetModules();
-    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
-    listJobsMock = vi.fn().mockReturnValue([]);
-    probeJobStatusMock = vi.fn();
-    getVerdictMock = vi.fn().mockReturnValue(null);
-    startProjectTestMock = vi.fn();
-    detectTestCommandMock = vi.fn();
-    startProjectReviewMock = vi.fn();
-    startProjectPushMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'pushed' });
-    createJobMock = vi.fn().mockImplementation((project: string, kind: string) => ({
-      id: `${project}-${kind}-rel-id`, project, kind, pid: 0, logPath: '',
-      prompt: null, startedAt: 0, finishedAt: null, exitCode: null, seen: false,
-      durationMs: null, inputTokens: null, outputTokens: null,
-      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
-      contextMeta: null, userPrompt: null,
-    }));
-    updateJobMock = vi.fn();
-    markDoneMock = vi.fn();
-    getJobMock = vi.fn().mockReturnValue(null);
-    checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
-    setPendingReleaseMock = vi.fn();
-    isReviewedMock = vi.fn().mockResolvedValue(false);
-    isIssueContextCompatibleWithCurrentBranchMock = vi.fn().mockResolvedValue(true);
-    getProjectTestConfigMock = vi.fn().mockReturnValue(null);
-    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' });
-    detectMainBranchMock = vi.fn().mockResolvedValue('main');
-    findIssueContextMock = vi.fn().mockResolvedValue(null);
-    acquireLockMock = vi.fn().mockResolvedValue({
-      acquired: true,
-      lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 },
-    });
-    releaseLockMock = vi.fn();
-    reassignLockMock = vi.fn();
-
-    // Default exec mock: PM2 calls succeed; git calls must be set per-test via
-    // mockImplementationOnce (they take priority over this default).
-    execMock = vi.fn().mockImplementation((cmd: string, args: string[]) => {
-      if (cmd === 'pm2' && args[0] === 'start') {
-        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-      }
-      if (cmd === 'pm2' && args[0] === 'jlist') {
-        // Return a valid process so the pid-retry loop breaks on first attempt (avoids 5×200ms wait)
-        return Promise.resolve({ exitCode: 0, stdout: JSON.stringify([{ name: 'proj-release-rel-id', pid: 1234 }]), stderr: '' });
-      }
-      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-    });
-
     vi.doMock('@/lib/shared/shell', () => ({ exec: (...args: unknown[]) => invokeMock(execMock, ...args) }));
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: (...args: unknown[]) => invokeMock(resolveProjectPathMock, ...args),
@@ -154,7 +108,59 @@ describe('startRelease — release pipeline entry decision tree', () => {
     ({ startRelease } = await import('@/lib/pipeline/start-release'));
   });
 
-  afterEach(() => { vi.resetModules(); });
+  afterAll(() => {
+    vi.resetModules();
+  });
+
+  beforeEach(() => {
+    isProjectArchivedMock.mockReset().mockReturnValue(false);
+    isProjectPausedMock.mockReset().mockReturnValue(false);
+    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
+    listJobsMock = vi.fn().mockReturnValue([]);
+    probeJobStatusMock = vi.fn();
+    getVerdictMock = vi.fn().mockReturnValue(null);
+    startProjectTestMock = vi.fn();
+    detectTestCommandMock = vi.fn();
+    startProjectReviewMock = vi.fn();
+    startProjectPushMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'pushed' });
+    createJobMock = vi.fn().mockImplementation((project: string, kind: string) => ({
+      id: `${project}-${kind}-rel-id`, project, kind, pid: 0, logPath: '',
+      prompt: null, startedAt: 0, finishedAt: null, exitCode: null, seen: false,
+      durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+      contextMeta: null, userPrompt: null,
+    }));
+    updateJobMock = vi.fn();
+    markDoneMock = vi.fn();
+    getJobMock = vi.fn().mockReturnValue(null);
+    checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
+    setPendingReleaseMock = vi.fn();
+    isReviewedMock = vi.fn().mockResolvedValue(false);
+    isIssueContextCompatibleWithCurrentBranchMock = vi.fn().mockResolvedValue(true);
+    getProjectTestConfigMock = vi.fn().mockReturnValue(null);
+    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' });
+    detectMainBranchMock = vi.fn().mockResolvedValue('main');
+    findIssueContextMock = vi.fn().mockResolvedValue(null);
+    acquireLockMock = vi.fn().mockResolvedValue({
+      acquired: true,
+      lock: { project: 'proj', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 },
+    });
+    releaseLockMock = vi.fn();
+    reassignLockMock = vi.fn();
+
+    // Default exec mock: PM2 calls succeed; git calls must be set per-test via
+    // mockImplementationOnce (they take priority over this default).
+    execMock = vi.fn().mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'pm2' && args[0] === 'start') {
+        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+      }
+      if (cmd === 'pm2' && args[0] === 'jlist') {
+        // Return a valid process so the pid-retry loop breaks on first attempt (avoids 5×200ms wait)
+        return Promise.resolve({ exitCode: 0, stdout: JSON.stringify([{ name: 'proj-release-rel-id', pid: 1234 }]), stderr: '' });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    });
+  });
 
   function gitStatus(porcelain: string) {
     return Promise.resolve({ exitCode: 0, stdout: porcelain, stderr: '' });
