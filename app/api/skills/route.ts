@@ -4,7 +4,7 @@ import { seedDefaultSkills } from '@/lib/agents/default-agent-skills';
 
 export async function GET() {
   seedDefaultSkills();
-  const skills = db.select().from(schema.skills).all();
+  const skills = await db.select().from(schema.skills);
   return NextResponse.json({ skills });
 }
 
@@ -27,6 +27,6 @@ export async function POST(request: NextRequest) {
     updatedAt: now,
   };
 
-  db.insert(schema.skills).values(skill).run();
+  await db.insert(schema.skills).values(skill);
   return NextResponse.json({ skill }, { status: 201 });
 }

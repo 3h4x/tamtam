@@ -1,45 +1,34 @@
-import { existsSync, mkdtempSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
-import Database from 'better-sqlite3';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('__tests__/global-setup.ts', () => {
-  const originalDbPath = process.env.TAMTAM_DB_PATH;
+  const originalDatabaseUrl = process.env.DATABASE_URL;
 
-  afterEach(() => {
-    if (originalDbPath === undefined) delete process.env.TAMTAM_DB_PATH;
-    else process.env.TAMTAM_DB_PATH = originalDbPath;
+  beforeEach(() => {
     vi.resetModules();
   });
 
-  it('creates a dedicated temporary db path when no ambient path is set', async () => {
-    delete process.env.TAMTAM_DB_PATH;
+  afterEach(() => {
+    if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = originalDatabaseUrl;
+    vi.resetModules();
+  });
+
+  it('sets a fallback DATABASE_URL when none is present', async () => {
+    delete process.env.DATABASE_URL;
 
     const { default: globalSetup } = await import('@/__tests__/global-setup');
     globalSetup();
 
-    const dbPath = process.env.TAMTAM_DB_PATH;
-    expect(dbPath).toBeTruthy();
-    expect(dbPath).toContain(`${tmpdir()}/tamtam-vitest-db-`);
-    if (!dbPath) throw new Error('Expected TAMTAM_DB_PATH to be set by globalSetup');
-    expect(existsSync(dbPath)).toBe(true);
-
-    const sqlite = new Database(dbPath, { readonly: true, fileMustExist: true });
-    try {
-      const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'").all();
-      expect(tables).toEqual([{ name: 'settings' }]);
-    } finally {
-      sqlite.close();
-    }
+    expect(process.env.DATABASE_URL).toBeTruthy();
+    expect(process.env.DATABASE_URL).toMatch(/tamtam_test/);
   });
 
-  it('fails fast instead of trusting an ambient TAMTAM_DB_PATH', async () => {
-    const ambientDir = mkdtempSync(join(tmpdir(), 'tamtam-ambient-db-'));
-    process.env.TAMTAM_DB_PATH = join(ambientDir, 'tamtam.db');
+  it('preserves an ambient DATABASE_URL if already set', async () => {
+    process.env.DATABASE_URL = 'postgres://example:password@localhost:5432/already_set';
 
     const { default: globalSetup } = await import('@/__tests__/global-setup');
+    globalSetup();
 
-    expect(() => globalSetup()).toThrow(/Refusing to run Vitest with ambient TAMTAM_DB_PATH=/);
+    expect(process.env.DATABASE_URL).toBe('postgres://example:password@localhost:5432/already_set');
   });
 });

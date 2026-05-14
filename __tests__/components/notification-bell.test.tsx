@@ -65,6 +65,8 @@ function renderBell() {
   }
 }
 
+const FAST_WAIT = { interval: 1, timeout: 1000 } as const
+
 function bellButton(container: HTMLElement): HTMLButtonElement {
   const button = container.querySelector('button')
   if (!(button instanceof HTMLButtonElement)) throw new Error('bell button not found')
@@ -78,7 +80,7 @@ function notificationRow(container: HTMLElement, project: string): HTMLButtonEle
   return row
 }
 
-function waitForUi(assertion: () => void | Promise<void>) {
+function waitForUi(assertion: () => void | Promise<void>, _options?: { interval?: number; timeout?: number }) {
   return vi.waitFor(assertion, { interval: 1, timeout: 1000 })
 }
 
@@ -115,7 +117,7 @@ describe('NotificationBell', () => {
     await waitForUi(() => {
       expect(fetchNotificationsMock).toHaveBeenCalled()
       expect(bellButton(container).textContent).toContain('1')
-    })
+    }, FAST_WAIT)
 
     bellButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
@@ -123,7 +125,7 @@ describe('NotificationBell', () => {
       expect(container.textContent).toContain('needs attention')
       expect(container.querySelector('svg[aria-label="attention"]')).not.toBeNull()
       expect(container.querySelector('svg[aria-label="success"]')).toBeNull()
-    })
+    }, FAST_WAIT)
 
     unmount()
   })
@@ -140,7 +142,7 @@ describe('NotificationBell', () => {
 
     await waitForUi(() => {
       expect(fetchNotificationsMock).toHaveBeenCalled()
-    })
+    }, FAST_WAIT)
 
     bellButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
@@ -148,7 +150,7 @@ describe('NotificationBell', () => {
       expect(container.textContent).toContain('do not ship')
       expect(container.querySelector('svg[aria-label="attention"]')).not.toBeNull()
       expect(container.querySelector('svg[aria-label="success"]')).toBeNull()
-    })
+    }, FAST_WAIT)
 
     unmount()
   })
@@ -165,7 +167,7 @@ describe('NotificationBell', () => {
 
     await waitForUi(() => {
       expect(fetchNotificationsMock).toHaveBeenCalled()
-    })
+    }, FAST_WAIT)
 
     bellButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
@@ -173,7 +175,7 @@ describe('NotificationBell', () => {
       expect(container.textContent).toContain('review verdict missing')
       expect(container.textContent).not.toContain('exit 0')
       expect(container.querySelector('svg[aria-label="attention"]')).not.toBeNull()
-    })
+    }, FAST_WAIT)
 
     unmount()
   })
@@ -190,7 +192,7 @@ describe('NotificationBell', () => {
 
     await waitForUi(() => {
       expect(fetchNotificationsMock).toHaveBeenCalled()
-    })
+    }, FAST_WAIT)
 
     bellButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
@@ -198,7 +200,7 @@ describe('NotificationBell', () => {
       expect(container.textContent).toContain('LGTM')
       expect(container.querySelector('svg[aria-label="success"]')).not.toBeNull()
       expect(container.querySelector('svg[aria-label="attention"]')).toBeNull()
-    })
+    }, FAST_WAIT)
 
     unmount()
   })
@@ -215,20 +217,20 @@ describe('NotificationBell', () => {
 
     await waitForUi(() => {
       expect(fetchNotificationsMock).toHaveBeenCalled()
-    })
+    }, FAST_WAIT)
 
     bellButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     await waitForUi(() => {
       expect(notificationRow(container, 'abort-proj')).toBeInstanceOf(HTMLButtonElement)
-    })
+    }, FAST_WAIT)
 
     notificationRow(container, 'abort-proj').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     await waitForUi(() => {
       expect(markJobSeenMock).toHaveBeenCalledWith('aborted-job')
       expect(pushMock).toHaveBeenCalledWith('/project/abort-proj/terminal?job=aborted-job')
-    })
+    }, FAST_WAIT)
 
     unmount()
   })
@@ -265,7 +267,7 @@ describe('NotificationBell', () => {
     await waitForUi(() => {
       expect(fetchNotificationsMock).toHaveBeenCalled()
       expect(bellButton(container).textContent).toContain('1')
-    })
+    }, FAST_WAIT)
 
     bellButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
@@ -273,14 +275,14 @@ describe('NotificationBell', () => {
       expect(container.textContent).toContain('test')
       expect(container.textContent).toContain('exit 1')
       expect(container.textContent).not.toContain(successId)
-    })
+    }, FAST_WAIT)
 
     notificationRow(container, 'alpha').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     await waitForUi(() => {
       expect(markJobSeenMock).toHaveBeenCalledWith('test-fail')
       expect(pushMock).toHaveBeenCalledWith('/project/alpha/terminal?job=test-fail')
-    })
+    }, FAST_WAIT)
 
     unmount()
   })
@@ -318,7 +320,7 @@ describe('NotificationBell', () => {
       expect(fetchNotificationsMock).toHaveBeenCalled()
       // Collapsed to one entry despite two jobs from same project
       expect(bellButton(container).textContent).toContain('1')
-    })
+    }, FAST_WAIT)
 
     bellButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
@@ -329,7 +331,7 @@ describe('NotificationBell', () => {
       // LGTM job is not shown
       expect(container.querySelector('svg[aria-label="success"]')).toBeNull()
       expect(container.textContent).not.toContain('review-lgtm')
-    })
+    }, FAST_WAIT)
 
     unmount()
   })
@@ -363,7 +365,7 @@ describe('NotificationBell', () => {
     await waitForUi(() => {
       expect(fetchNotificationsMock).toHaveBeenCalled()
       expect(bellButton(container).textContent).toContain('1')
-    })
+    }, FAST_WAIT)
 
     bellButton(container).dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
@@ -371,7 +373,7 @@ describe('NotificationBell', () => {
       expect(container.textContent).toContain('needs attention')
       expect(container.textContent).not.toContain('dod-ok')
       expect(container.querySelector('svg[aria-label="attention"]')).not.toBeNull()
-    })
+    }, FAST_WAIT)
 
     unmount()
   })

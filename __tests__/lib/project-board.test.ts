@@ -71,7 +71,8 @@ describe('project board integration', () => {
   const listJobsMock = vi.fn(() => [] as unknown[]);
   const resolveProjectPathMock = vi.fn();
   const dbRunMock = vi.fn();
-  const dbOnConflictMock = vi.fn(() => ({ run: dbRunMock }));
+  const dbExecuteMock = vi.fn(() => Promise.resolve());
+  const dbOnConflictMock = vi.fn(() => ({ run: dbRunMock, execute: dbExecuteMock }));
   const dbValuesMock = vi.fn(() => ({ onConflictDoUpdate: dbOnConflictMock }));
   const dbInsertMock = vi.fn(() => ({ values: dbValuesMock }));
   const reloadConfigMock = vi.fn();
@@ -90,6 +91,8 @@ describe('project board integration', () => {
     listJobsMock.mockReturnValue([]);
     resolveProjectPathMock.mockReset();
     dbRunMock.mockReset();
+    dbExecuteMock.mockReset();
+    dbExecuteMock.mockImplementation(() => Promise.resolve());
     dbOnConflictMock.mockClear();
     dbValuesMock.mockClear();
     dbInsertMock.mockClear();

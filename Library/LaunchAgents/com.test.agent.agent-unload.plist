@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.test.agent.agent-unload</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/var/folders/8s/ws0pt38n46n3f8rknp7vb8_r0000gn/T/tamtam-scheduler-test-WLZKnE/logs/agent-scripts/agent-unload.sh</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>3600</integer>
+  <key>StandardOutPath</key>
+  <string>/var/folders/8s/ws0pt38n46n3f8rknp7vb8_r0000gn/T/tamtam-scheduler-test-WLZKnE/logs/agent-scheduler-agent-unload.log</string>
+  <key>StandardErrorPath</key>
+  <string>/var/folders/8s/ws0pt38n46n3f8rknp7vb8_r0000gn/T/tamtam-scheduler-test-WLZKnE/logs/agent-scheduler-agent-unload.log</string>
+</dict>
+</plist>

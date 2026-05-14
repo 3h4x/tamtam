@@ -51,13 +51,16 @@ export async function GET(
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
 
-  const detectedTestCmd = detectTestCommand(projPath);
-  const testCfg = getProjectTestConfig(projectName);
-  const pushResult = getProjectPushResult(projectName);
+  const [detectedTestCmd, testCfg, pushResult, pipelinePrompts] = await Promise.all([
+    detectTestCommand(projPath),
+    getProjectTestConfig(projectName),
+    getProjectPushResult(projectName),
+    getProjectPipelinePrompts(projectName),
+  ]);
   const fileConfig = loadFileConfig(projPath);
   const branchCtx = getBranchContext(projPath);
-  const pipelinePrompts = getProjectPipelinePrompts(projectName);
-  const projectRow = db.select().from(schema.projects).where(eq(schema.projects.name, projectName)).get();
+  const projectRows = await db.select().from(schema.projects).where(eq(schema.projects.name, projectName)).limit(1);
+  const projectRow = projectRows[0] ?? null;
 
   return NextResponse.json({
     project: projectName,
@@ -232,12 +235,12 @@ export async function PATCH(
   }
 
   for (const update of dbUpdates) {
-    if (!writeProjectFieldYaml(projectName, update.field, update.value)) return notFound();
+    if (!(await writeProjectFieldYaml(projectName, update.field, update.value))) return notFound();
   }
 
   // If any cron field changed, reconcile the PM2 cron entry.
   if (body.test_cron_schedule !== undefined || body.test_cron_enabled !== undefined) {
-    const cfg = getProjectTestConfig(projectName);
+    const cfg = await getProjectTestConfig(projectName);
     if (cfg && cfg.testCronEnabled && cfg.testCronSchedule) {
       try {
         await installTestSchedule(projectName, cfg.testCronSchedule);

@@ -102,9 +102,8 @@ export async function GET(request: Request) {
 
   const downServices = prometheus.services.filter(s => s.value?.[1] === '0')
   const settings = getSettings()
-  const throttledNotifications = db.select()
+  const throttledNotifications = await db.select()
     .from(schema.notificationThrottle)
-    .all()
   const suppressedTotal = throttledNotifications.reduce((sum, row) => sum + row.suppressedCount, 0)
   const topThrottledNotifications = throttledNotifications
     .filter((row) => row.suppressedCount > 0)
@@ -116,19 +115,22 @@ export async function GET(request: Request) {
     suppressedTotal,
     entries: topThrottledNotifications,
   }
+  const [lastProjectLogCleanup, lastNightlyCleanup] = await Promise.all([
+    getLatestProjectLogRetentionSummary(),
+    getLatestNightlyRetentionSummary(),
+  ]);
   const retention = {
     policy: {
       logRetentionCount: settings.log_retention_count,
       logRetentionDays: settings.log_retention_days,
       jobRowRetentionDays: settings.job_row_retention_days,
     },
-    lastProjectLogCleanup: getLatestProjectLogRetentionSummary(),
-    lastNightlyCleanup: getLatestNightlyRetentionSummary(),
+    lastProjectLogCleanup,
+    lastNightlyCleanup,
   }
   const retentionHasIssues =
-    retention.lastNightlyCleanup?.status === 'failed' ||
-    retention.lastNightlyCleanup?.sqliteMaintenance.status === 'failed' ||
-    retention.lastProjectLogCleanup?.status === 'failed'
+    lastNightlyCleanup?.status === 'failed' ||
+    lastProjectLogCleanup?.status === 'failed'
   const hasIssues =
     (prometheus.status === 'ok' && (prometheus.alerts.length > 0 || downServices.length > 0)) ||
     (loki.status === 'ok' && loki.errors.length > 0) ||

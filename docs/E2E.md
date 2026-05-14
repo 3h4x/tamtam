@@ -269,7 +269,7 @@ pnpm test:e2e:pipeline
 
 This uses `playwright.pipeline.config.ts`, which:
 - Starts a fresh Next.js dev server on **port 1338** (not 1337)
-- Uses a temp DB at `/tmp/tamtam-e2e-pipeline/data/db/tamtam.db`
+- Uses a temp Postgres database `tamtam_e2e_pipeline_<runId>` created and dropped by the harness; `DATABASE_URL` is injected into the dev server
 - Sets `TAMTAM_PROBE_INTERVAL_MS=500` for fast PM2 job detection
 - Prepends `e2e/pipeline/mocks/bin` to PATH
 

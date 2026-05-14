@@ -1,6 +1,7 @@
-import Database from 'better-sqlite3';
-import { dirname, join } from 'path';
+import { join } from 'path';
 import { readdirSync, rmSync, statSync } from 'fs';
+// exec wraps child_process.execFile safely (args are an array, no shell injection risk)
+import { exec } from '@/lib/shared/shell';
 
 export interface BackupFileEntry {
   name: string;
@@ -13,36 +14,39 @@ export interface BackupRetentionOptions {
   protectedNames?: string[];
 }
 
-const BACKUP_FILE_RE = /^tamtam-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})\.db$/;
+const BACKUP_FILE_RE = /^tamtam-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})\.pgdump$/;
 
-export function getTamTamDbPath(): string {
-  return process.env.TAMTAM_DB_PATH ?? join(process.cwd(), 'data', 'db', 'tamtam.db');
-}
-
-export function getBackupDirectory(dbPath = getTamTamDbPath()): string {
-  return dirname(dbPath);
+export function getBackupDirectory(): string {
+  const envBackupDir = process.env.TAMTAM_BACKUP_DIR;
+  if (envBackupDir) return envBackupDir;
+  return join(process.cwd(), 'data', 'db');
 }
 
 export function createBackupFilename(now = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `tamtam-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}.db`;
+  return `tamtam-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}.pgdump`;
 }
 
-export function verifySqliteDatabase(dbPath: string): void {
-  const sqlite = new Database(dbPath, { readonly: true, fileMustExist: true });
-  try {
-    const integrityRows = sqlite.pragma('integrity_check') as Array<Record<string, string>>;
-    const integrity = integrityRows.map((row) => Object.values(row)[0]).filter(Boolean);
-    if (integrity.length !== 1 || integrity[0] !== 'ok') {
-      throw new Error(`integrity_check failed: ${integrity.join('; ') || 'no result'}`);
-    }
+export async function createDatabaseBackup(destPath: string): Promise<void> {
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) throw new Error('[backup] DATABASE_URL not set');
 
-    const foreignKeyRows = sqlite.pragma('foreign_key_check') as Array<Record<string, unknown>>;
-    if (foreignKeyRows.length > 0) {
-      throw new Error(`foreign_key_check failed: ${foreignKeyRows.length} violation(s)`);
-    }
-  } finally {
-    sqlite.close();
+  const url = new URL(dbUrl);
+  const args = [
+    '--format=custom',
+    `--dbname=${url.pathname.slice(1)}`,
+    `--file=${destPath}`,
+  ];
+  if (url.hostname && url.hostname !== 'localhost' && url.hostname !== '') {
+    args.push(`--host=${url.hostname}`);
+  }
+  if (url.port) args.push(`--port=${url.port}`);
+  if (url.username) args.push(`--username=${url.username}`);
+
+  // pg_dump args are an array — no shell injection risk
+  const result = await exec('pg_dump', args, { timeout: 120_000 });
+  if (result.exitCode !== 0) {
+    throw new Error(`pg_dump failed (exit ${result.exitCode}): ${result.stderr}`);
   }
 }
 
@@ -67,9 +71,7 @@ export function selectBackupsToPrune(
   const weeklyKeys = new Set<string>();
 
   for (const entry of sorted.slice(keepRecent)) {
-    if (protectedNames.has(entry.name)) {
-      continue;
-    }
+    if (protectedNames.has(entry.name)) continue;
     const weekKey = getBackupWeekKey(entry.name, entry.mtimeMs);
     if (weeklyKeys.size < keepWeekly && !weeklyKeys.has(weekKey)) {
       weeklyKeys.add(weekKey);
@@ -88,15 +90,9 @@ export function pruneBackupFiles(
 ): string[] {
   const pruned = selectBackupsToPrune(listBackupFiles(backupDir), options);
   for (const name of pruned) {
-    removeBackupFileSet(join(backupDir, name));
+    rmSync(/*turbopackIgnore: true*/ join(backupDir, name), { force: true });
   }
   return pruned;
-}
-
-export function removeBackupFileSet(basePath: string): void {
-  for (const path of getBackupFileSetPaths(basePath)) {
-    rmSync(/*turbopackIgnore: true*/ path, { force: true });
-  }
 }
 
 function getBackupWeekKey(name: string, mtimeMs: number): string {
@@ -110,8 +106,4 @@ function getBackupWeekKey(name: string, mtimeMs: number): string {
   const yearStart = new Date(date.getFullYear(), 0, 1);
   const week = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
   return `${date.getFullYear()}-${String(week).padStart(2, '0')}`;
-}
-
-function getBackupFileSetPaths(basePath: string): string[] {
-  return [basePath, `${basePath}-wal`, `${basePath}-shm`];
 }

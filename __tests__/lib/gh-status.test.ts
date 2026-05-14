@@ -1,34 +1,62 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
 import { homedir } from 'os';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS gh_status (
-      project TEXT PRIMARY KEY,
-      release_tag TEXT,
-      ci TEXT,
-      ci_failed_url TEXT,
-      head_sha TEXT,
-      local_head_sha TEXT,
-      fetched_at TEXT NOT NULL
+      project text PRIMARY KEY,
+      release_tag text,
+      ci text,
+      ci_failed_url text,
+      head_sha text,
+      local_head_sha text,
+      fetched_at text NOT NULL
     );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+  `));
+}
+
+// Shared PGlite handle for every describe block — was previously booted per
+// test (19 tests × ~500ms boot ≈ 10s overhead).
+let sharedHandle: TestDbHandle;
+
+async function truncateGhStatus(): Promise<void> {
+  await sharedHandle.db.execute(sql.raw('TRUNCATE gh_status'));
+}
+
+beforeAll(async () => {
+  sharedHandle = await createTestPgDbEmpty();
+  await applyDdl(sharedHandle);
+});
+
+afterAll(async () => {
+  try {
+    await sharedHandle[Symbol.asyncDispose]();
+  } catch {
+    // ignore
+  }
+});
+
+async function waitForGhStatus(handle: { db: TestDbHandle['db'] }, project?: string): Promise<void> {
+  // invalidateProject is fire-and-forget; setEntry runs an async write.
+  // Poll briefly until the expected row is materialized.
+  for (let i = 0; i < 50; i++) {
+    const rows = await handle.db.select().from(schema.ghStatus);
+    if (project ? rows.some((r) => r.project === project) : rows.length > 0) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
 }
 
 describe('gh-status invalidateProject', () => {
-  let testDb: ReturnType<typeof createTestDb>;
+  const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
   let invalidateProject: typeof import('@/lib/shared/gh-status').invalidateProject;
 
   beforeEach(async () => {
+    await truncateGhStatus();
     vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 1, stdout: '', stderr: '' }) }));
 
     const mod = await import('@/lib/shared/gh-status');
@@ -39,13 +67,12 @@ describe('gh-status invalidateProject', () => {
     vi.resetModules();
   });
 
-  it('creates a new entry with ci=in_progress when project has no existing entry', () => {
+  it('creates a new entry with ci=in_progress when project has no existing entry', async () => {
     invalidateProject('new-project');
+    await waitForGhStatus(handle, 'new-project');
 
-    const row = testDb.db
-      .select()
-      .from(schema.ghStatus)
-      .get();
+    const rows = await handle.db.select().from(schema.ghStatus);
+    const row = rows[0];
 
     expect(row).toBeTruthy();
     expect(row!.project).toBe('new-project');
@@ -54,8 +81,8 @@ describe('gh-status invalidateProject', () => {
     expect(row!.fetchedAt).toBe('1970-01-01T00:00:00Z');
   });
 
-  it('updates existing entry to ci=in_progress and clears ciFailedUrl', () => {
-    testDb.db.insert(schema.ghStatus).values({
+  it('updates existing entry to ci=in_progress and clears ciFailedUrl', async () => {
+    await handle.db.insert(schema.ghStatus).values({
       project: 'my-project',
       releaseTag: 'v1.0.0',
       ci: 'failure',
@@ -63,18 +90,25 @@ describe('gh-status invalidateProject', () => {
       headSha: 'abc123',
       localHeadSha: 'abc123',
       fetchedAt: '2024-01-01T00:00:00Z',
-    }).run();
+    });
 
     invalidateProject('my-project');
+    // Wait for ci to transition to in_progress
+    for (let i = 0; i < 50; i++) {
+      const rows = await handle.db.select().from(schema.ghStatus);
+      if (rows[0]?.ci === 'in_progress') break;
+      await new Promise((r) => setTimeout(r, 10));
+    }
 
-    const row = testDb.db.select().from(schema.ghStatus).get();
+    const rows = await handle.db.select().from(schema.ghStatus);
+    const row = rows[0];
     expect(row!.ci).toBe('in_progress');
     expect(row!.ciFailedUrl).toBeNull();
     expect(row!.fetchedAt).toBe('1970-01-01T00:00:00Z');
   });
 
-  it('preserves release tag when invalidating', () => {
-    testDb.db.insert(schema.ghStatus).values({
+  it('preserves release tag when invalidating', async () => {
+    await handle.db.insert(schema.ghStatus).values({
       project: 'my-project',
       releaseTag: 'v2.5.0',
       ci: 'success',
@@ -82,39 +116,51 @@ describe('gh-status invalidateProject', () => {
       headSha: 'def456',
       localHeadSha: 'def456',
       fetchedAt: '2024-06-01T00:00:00Z',
-    }).run();
+    });
 
     invalidateProject('my-project');
+    for (let i = 0; i < 50; i++) {
+      const rows = await handle.db.select().from(schema.ghStatus);
+      if (rows[0]?.ci === 'in_progress') break;
+      await new Promise((r) => setTimeout(r, 10));
+    }
 
-    const row = testDb.db.select().from(schema.ghStatus).get();
+    const rows = await handle.db.select().from(schema.ghStatus);
+    const row = rows[0];
     expect(row!.releaseTag).toBe('v2.5.0');
   });
 
-  it('can invalidate multiple different projects', () => {
+  it('can invalidate multiple different projects', async () => {
     invalidateProject('project-a');
     invalidateProject('project-b');
+    for (let i = 0; i < 100; i++) {
+      const rows = await handle.db.select().from(schema.ghStatus);
+      if (rows.length >= 2) break;
+      await new Promise((r) => setTimeout(r, 10));
+    }
 
-    const rows = testDb.db.select().from(schema.ghStatus).all();
+    const rows = await handle.db.select().from(schema.ghStatus);
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => r.project).sort()).toEqual(['project-a', 'project-b']);
     expect(rows.every((r) => r.ci === 'in_progress')).toBe(true);
   });
 
-  it('sets fetchedAt to epoch to force refresh', () => {
+  it('sets fetchedAt to epoch to force refresh', async () => {
     invalidateProject('proj');
-    const row = testDb.db.select().from(schema.ghStatus).get();
+    await waitForGhStatus(handle, 'proj');
+    const rows = await handle.db.select().from(schema.ghStatus);
+    const row = rows[0];
     expect(row!.fetchedAt).toBe('1970-01-01T00:00:00Z');
   });
 });
 
 describe('gh-status cache TTL per CI status', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let execMock: ReturnType<typeof vi.fn>;
   let ghStatusLookup: typeof import('@/lib/shared/gh-status').ghStatusLookup;
 
-  function insertStatus(project: string, ci: string, fetchedSecondsAgo: number) {
+  async function insertStatus(project: string, ci: string, fetchedSecondsAgo: number) {
     const fetchedAt = new Date(Date.now() - fetchedSecondsAgo * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
-    testDb.db.insert(schema.ghStatus).values({
+    await sharedHandle.db.insert(schema.ghStatus).values({
       project,
       releaseTag: null,
       ci,
@@ -122,15 +168,15 @@ describe('gh-status cache TTL per CI status', () => {
       headSha: 'abc123',
       localHeadSha: 'abc123',
       fetchedAt,
-    }).run();
+    });
   }
 
   beforeEach(async () => {
+    await truncateGhStatus();
     vi.resetModules();
-    testDb = createTestDb();
     execMock = vi.fn().mockResolvedValue({ exitCode: 1, stdout: '', stderr: '' });
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
 
     const mod = await import('@/lib/shared/gh-status');
@@ -142,7 +188,7 @@ describe('gh-status cache TTL per CI status', () => {
   });
 
   it('considers failure stale after 300s and re-fetches', async () => {
-    insertStatus('proj', 'failure', 301);
+    await insertStatus('proj', 'failure', 301);
 
     execMock.mockImplementation(async (cmd: string, args: string[]) => {
       if (cmd === 'git' && args.includes('rev-parse')) return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
@@ -162,7 +208,7 @@ describe('gh-status cache TTL per CI status', () => {
   });
 
   it('does not re-fetch failure within 300s', async () => {
-    insertStatus('proj', 'failure', 299);
+    await insertStatus('proj', 'failure', 299);
 
     execMock.mockImplementation(async (cmd: string, args: string[]) => {
       if (cmd === 'git' && args.includes('rev-parse')) return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
@@ -179,7 +225,7 @@ describe('gh-status cache TTL per CI status', () => {
   });
 
   it('considers success stale only after 3600s', async () => {
-    insertStatus('proj', 'success', 301);
+    await insertStatus('proj', 'success', 301);
 
     execMock.mockImplementation(async (cmd: string, args: string[]) => {
       if (cmd === 'git' && args.includes('rev-parse')) return { exitCode: 0, stdout: 'abc123\n', stderr: '' };
@@ -197,18 +243,17 @@ describe('gh-status cache TTL per CI status', () => {
 });
 
 describe('gh-status ghRepo auto-detection via git remote', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let execMock: ReturnType<typeof vi.fn>;
   let ghStatusLookup: typeof import('@/lib/shared/gh-status').ghStatusLookup;
   let mockGetSettings: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
+    await truncateGhStatus();
     vi.resetModules();
-    testDb = createTestDb();
     execMock = vi.fn();
     mockGetSettings = vi.fn().mockReturnValue({ github_owner: '' });
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/shared/config', () => ({ getSettings: mockGetSettings }));
 
@@ -333,19 +378,18 @@ describe('gh-status ghRepo auto-detection via git remote', () => {
 });
 
 describe('gh-status repo helpers', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let execMock: ReturnType<typeof vi.fn>;
   let mockGetSettings: ReturnType<typeof vi.fn>;
   let extractGithubRepoFromUrl: typeof import('@/lib/shared/gh-status').extractGithubRepoFromUrl;
   let resolveGithubRepo: typeof import('@/lib/shared/gh-status').resolveGithubRepo;
 
   beforeEach(async () => {
+    await truncateGhStatus();
     vi.resetModules();
-    testDb = createTestDb();
     execMock = vi.fn();
     mockGetSettings = vi.fn().mockReturnValue({ github_owner: '' });
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/shared/config', () => ({ getSettings: mockGetSettings }));
 

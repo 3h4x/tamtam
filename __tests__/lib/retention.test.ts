@@ -1,59 +1,76 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import * as schema from '@/lib/db/schema';
 import { writeFileSync, mkdtempSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { RetentionConfig } from '@/lib/jobs/retention';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries, so issue each DDL
+  // separately.
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS jobs (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      prompt TEXT,
-      pid INTEGER NOT NULL,
-      log_path TEXT,
-      started_at REAL NOT NULL,
-      finished_at REAL,
-      exit_code INTEGER,
-      seen INTEGER DEFAULT 0,
-      duration_ms INTEGER,
-      input_tokens INTEGER,
-      output_tokens INTEGER,
-      cache_read_tokens INTEGER,
-      cache_create_tokens INTEGER,
-      session_id TEXT,
-      user_prompt TEXT,
-      context_meta TEXT,
-      parent_job_id TEXT,
-      gh_issue_number INTEGER,
-      gh_issue_repo TEXT,
-      gh_issue_title TEXT,
-      log_pruned INTEGER DEFAULT 0,
-      verdict TEXT,
-      cost_usd REAL,
-      model TEXT,
-      release_id TEXT,
-      aborted_at REAL,
-      release_deadline_at INTEGER,
-      prompt_bytes INTEGER,
-      work_summary TEXT,
-      modified_files TEXT,
-      provider TEXT
-    );
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      kind text NOT NULL,
+      prompt text,
+      pid integer NOT NULL,
+      log_path text,
+      started_at double precision NOT NULL,
+      finished_at double precision,
+      exit_code integer,
+      seen boolean DEFAULT false,
+      duration_ms integer,
+      input_tokens integer,
+      output_tokens integer,
+      cache_read_tokens integer,
+      cache_create_tokens integer,
+      session_id text,
+      user_prompt text,
+      context_meta text,
+      parent_job_id text,
+      gh_issue_number integer,
+      gh_issue_repo text,
+      gh_issue_title text,
+      log_pruned boolean DEFAULT false,
+      verdict text,
+      cost_usd double precision,
+      model text,
+      release_id text,
+      aborted_at double precision,
+      release_deadline_at integer,
+      prompt_bytes integer,
+      work_summary text,
+      modified_files text,
+      provider text
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS maintenance_status (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      updated_at REAL NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      key text PRIMARY KEY,
+      value text NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
 }
+
+let sharedHandle: TestDbHandle;
+
+beforeAll(async () => {
+  sharedHandle = await createTestPgDbEmpty();
+  await applyDdl(sharedHandle);
+});
+
+afterAll(async () => {
+  await new Promise((r) => setTimeout(r, 30));
+  try {
+    await sharedHandle[Symbol.asyncDispose]();
+  } catch {
+    // ignore
+  }
+});
 
 function makeJob(
   id: string,
@@ -77,8 +94,8 @@ function makeJob(
 }
 
 describe('pruneProjectLogs', () => {
+  const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
   let tempDir: string;
-  let testDb: ReturnType<typeof createTestDb>;
   let pruneProjectLogs: typeof import('@/lib/jobs/retention').pruneProjectLogs;
   let getLatestProjectLogRetentionSummary: typeof import('@/lib/jobs/retention').getLatestProjectLogRetentionSummary;
   let getLatestNightlyRetentionSummary: typeof import('@/lib/jobs/retention').getLatestNightlyRetentionSummary;
@@ -86,21 +103,22 @@ describe('pruneProjectLogs', () => {
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-retention-'));
     vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    await sharedHandle.db.execute(sql.raw('TRUNCATE jobs, maintenance_status'));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     const mod = await import('@/lib/jobs/retention');
     pruneProjectLogs = mod.pruneProjectLogs;
     getLatestProjectLogRetentionSummary = mod.getLatestProjectLogRetentionSummary;
     getLatestNightlyRetentionSummary = mod.getLatestNightlyRetentionSummary;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.resetModules();
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  function insertJob(id: string, project: string, startedAt: number, finishedAt: number | null, logPath: string | null) {
-    testDb.db.insert(schema.jobs).values(makeJob(id, project, startedAt, finishedAt, logPath)).run();
+  async function insertJob(id: string, project: string, startedAt: number, finishedAt: number | null, logPath: string | null) {
+    const job = makeJob(id, project, startedAt, finishedAt, logPath);
+    await handle.db.insert(schema.jobs).values(job);
   }
 
   const cfg: RetentionConfig = {
@@ -109,17 +127,17 @@ describe('pruneProjectLogs', () => {
     job_row_retention_days: 180,
   };
 
-  it('deletes log files beyond retention count', () => {
+  it('deletes log files beyond retention count', async () => {
     const now = Date.now() / 1000;
     const logPaths: string[] = [];
     for (let i = 0; i < 5; i++) {
       const p = join(tempDir, `log-${i}.ndjson`);
       writeFileSync(p, 'data');
       logPaths.push(p);
-      insertJob(`proj-job-${i}`, 'proj', now - (5 - i) * 100, now - (5 - i) * 50, p);
+      await insertJob(`proj-job-${i}`, 'proj', now - (5 - i) * 100, now - (5 - i) * 50, p);
     }
 
-    const summary = pruneProjectLogs('proj', cfg);
+    const summary = await pruneProjectLogs('proj', cfg);
 
     // Newest 3 (indices 2, 3, 4) should survive; oldest 2 (0, 1) pruned.
     expect(existsSync(logPaths[0])).toBe(false);
@@ -138,76 +156,78 @@ describe('pruneProjectLogs', () => {
       bytesReclaimed: 8,
       errorCount: 0,
     });
-    expect(getLatestProjectLogRetentionSummary()).toMatchObject({ type: 'project_logs', rowsUpdated: 2 });
-    expect(getLatestNightlyRetentionSummary()).toBeNull();
+    expect(await getLatestProjectLogRetentionSummary()).toMatchObject({ type: 'project_logs', rowsUpdated: 2 });
+    expect(await getLatestNightlyRetentionSummary()).toBeNull();
   });
 
-  it('sets log_pruned=true on pruned rows', () => {
+  it('sets log_pruned=true on pruned rows', async () => {
     const now = Date.now() / 1000;
     for (let i = 0; i < 5; i++) {
       const p = join(tempDir, `log-${i}.ndjson`);
       writeFileSync(p, 'data');
-      insertJob(`proj-job-${i}`, 'proj', now - (5 - i) * 100, now - (5 - i) * 50, p);
+      await insertJob(`proj-job-${i}`, 'proj', now - (5 - i) * 100, now - (5 - i) * 50, p);
     }
 
-    pruneProjectLogs('proj', cfg);
+    await pruneProjectLogs('proj', cfg);
 
-    const rows = testDb.db.select({ id: schema.jobs.id, logPruned: schema.jobs.logPruned }).from(schema.jobs).all();
-    const pruned = rows.filter(r => r.logPruned).map(r => r.id).sort();
+    const rows = await handle.db.select({ id: schema.jobs.id, logPruned: schema.jobs.logPruned }).from(schema.jobs);
+    const pruned = rows.filter((r) => r.logPruned).map((r) => r.id).sort();
     expect(pruned).toEqual(['proj-job-0', 'proj-job-1']);
   });
 
-  it('deletes log files older than retention days', () => {
+  it('deletes log files older than retention days', async () => {
     vi.useFakeTimers();
-    const now = Date.now() / 1000;
-    const oldPath = join(tempDir, 'old.ndjson');
-    const newPath = join(tempDir, 'new.ndjson');
-    writeFileSync(oldPath, 'data');
-    writeFileSync(newPath, 'data');
+    try {
+      const now = Date.now() / 1000;
+      const oldPath = join(tempDir, 'old.ndjson');
+      const newPath = join(tempDir, 'new.ndjson');
+      writeFileSync(oldPath, 'data');
+      writeFileSync(newPath, 'data');
 
-    const oldCfg: RetentionConfig = { log_retention_count: 1000, log_retention_days: 10, job_row_retention_days: 180 };
+      const oldCfg: RetentionConfig = { log_retention_count: 1000, log_retention_days: 10, job_row_retention_days: 180 };
 
-    // Old job: 20 days ago; new job: today.
-    insertJob('proj-old', 'proj', now - 20 * 86400, now - 20 * 86400 + 60, oldPath);
-    insertJob('proj-new', 'proj', now - 1, now, newPath);
+      // Old job: 20 days ago; new job: today.
+      await insertJob('proj-old', 'proj', now - 20 * 86400, now - 20 * 86400 + 60, oldPath);
+      await insertJob('proj-new', 'proj', now - 1, now, newPath);
 
-    pruneProjectLogs('proj', oldCfg);
+      await pruneProjectLogs('proj', oldCfg);
 
-    expect(existsSync(oldPath)).toBe(false);
-    expect(existsSync(newPath)).toBe(true);
-
-    vi.useRealTimers();
+      expect(existsSync(oldPath)).toBe(false);
+      expect(existsSync(newPath)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('does not prune running (unfinished) jobs', () => {
+  it('does not prune running (unfinished) jobs', async () => {
     const now = Date.now() / 1000;
     const runningPath = join(tempDir, 'running.ndjson');
     writeFileSync(runningPath, 'data');
-    insertJob('proj-running', 'proj', now - 1000, null, runningPath);
+    await insertJob('proj-running', 'proj', now - 1000, null, runningPath);
     // No other finished jobs, so retention count not exceeded anyway.
     // Insert enough finished jobs to trigger count pruning but not this one.
     for (let i = 0; i < 5; i++) {
       const p = join(tempDir, `fin-${i}.ndjson`);
       writeFileSync(p, 'data');
-      insertJob(`proj-fin-${i}`, 'proj', now - (5 - i) * 100, now - (5 - i) * 50, p);
+      await insertJob(`proj-fin-${i}`, 'proj', now - (5 - i) * 100, now - (5 - i) * 50, p);
     }
 
-    pruneProjectLogs('proj', cfg);
+    await pruneProjectLogs('proj', cfg);
 
     // Running job's log must not be touched.
     expect(existsSync(runningPath)).toBe(true);
   });
 
-  it('handles missing log files gracefully', () => {
+  it('handles missing log files gracefully', async () => {
     const now = Date.now() / 1000;
     for (let i = 0; i < 5; i++) {
-      insertJob(`proj-job-${i}`, 'proj', now - (5 - i) * 100, now - (5 - i) * 50, join(tempDir, `missing-${i}.ndjson`));
+      await insertJob(`proj-job-${i}`, 'proj', now - (5 - i) * 100, now - (5 - i) * 50, join(tempDir, `missing-${i}.ndjson`));
     }
     // Should not throw even though files don't exist.
-    expect(() => pruneProjectLogs('proj', cfg)).not.toThrow();
+    await expect(pruneProjectLogs('proj', cfg)).resolves.toBeDefined();
   });
 
-  it('treats log_retention_days=0 as disabled (does not prune by age)', () => {
+  it('treats log_retention_days=0 as disabled (does not prune by age)', async () => {
     const now = Date.now() / 1000;
     const ageOnlyCfg: RetentionConfig = { log_retention_count: 0, log_retention_days: 0, job_row_retention_days: 180 };
     const paths: string[] = [];
@@ -216,18 +236,18 @@ describe('pruneProjectLogs', () => {
       writeFileSync(p, 'data');
       paths.push(p);
       // All jobs are old enough that a literal `now - 0*86400 = now` cutoff would mark them as over-age.
-      insertJob(`proj-job-${i}`, 'proj', now - (i + 1) * 100, now - (i + 1) * 50, p);
+      await insertJob(`proj-job-${i}`, 'proj', now - (i + 1) * 100, now - (i + 1) * 50, p);
     }
 
-    const summary = pruneProjectLogs('proj', ageOnlyCfg);
+    const summary = await pruneProjectLogs('proj', ageOnlyCfg);
 
     for (const p of paths) expect(existsSync(p)).toBe(true);
-    const rows = testDb.db.select({ id: schema.jobs.id, logPruned: schema.jobs.logPruned }).from(schema.jobs).all();
-    expect(rows.every(r => !r.logPruned)).toBe(true);
+    const rows = await handle.db.select({ id: schema.jobs.id, logPruned: schema.jobs.logPruned }).from(schema.jobs);
+    expect(rows.every((r) => !r.logPruned)).toBe(true);
     expect(summary.status).toBe('disabled');
   });
 
-  it('only prunes logs for the given project', () => {
+  it('only prunes logs for the given project', async () => {
     const now = Date.now() / 1000;
     const paths: Record<string, string[]> = { projA: [], projB: [] };
     for (const proj of ['projA', 'projB'] as const) {
@@ -235,11 +255,11 @@ describe('pruneProjectLogs', () => {
         const p = join(tempDir, `${proj}-${i}.ndjson`);
         writeFileSync(p, 'data');
         paths[proj].push(p);
-        insertJob(`${proj}-job-${i}`, proj, now - (5 - i) * 100, now - (5 - i) * 50, p);
+        await insertJob(`${proj}-job-${i}`, proj, now - (5 - i) * 100, now - (5 - i) * 50, p);
       }
     }
 
-    pruneProjectLogs('projA', cfg);
+    await pruneProjectLogs('projA', cfg);
 
     // projB logs should be untouched.
     for (const p of paths['projB']) {
@@ -249,27 +269,28 @@ describe('pruneProjectLogs', () => {
 });
 
 describe('runNightlyCleanup', () => {
-  let testDb: ReturnType<typeof createTestDb>;
+  const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
   let runNightlyCleanup: typeof import('@/lib/jobs/retention').runNightlyCleanup;
   let getLatestProjectLogRetentionSummary: typeof import('@/lib/jobs/retention').getLatestProjectLogRetentionSummary;
   let getLatestNightlyRetentionSummary: typeof import('@/lib/jobs/retention').getLatestNightlyRetentionSummary;
 
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    await sharedHandle.db.execute(sql.raw('TRUNCATE jobs, maintenance_status'));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     const mod = await import('@/lib/jobs/retention');
     runNightlyCleanup = mod.runNightlyCleanup;
     getLatestProjectLogRetentionSummary = mod.getLatestProjectLogRetentionSummary;
     getLatestNightlyRetentionSummary = mod.getLatestNightlyRetentionSummary;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.resetModules();
   });
 
-  function insertJob(id: string, project: string, startedAt: number, finishedAt: number | null) {
-    testDb.db.insert(schema.jobs).values(makeJob(id, project, startedAt, finishedAt, null)).run();
+  async function insertJob(id: string, project: string, startedAt: number, finishedAt: number | null) {
+    const job = makeJob(id, project, startedAt, finishedAt, null);
+    await handle.db.insert(schema.jobs).values(job);
   }
 
   const cfg: RetentionConfig = {
@@ -278,15 +299,15 @@ describe('runNightlyCleanup', () => {
     job_row_retention_days: 90,
   };
 
-  it('deletes finished rows older than job_row_retention_days', () => {
+  it('deletes finished rows older than job_row_retention_days', async () => {
     const now = Date.now() / 1000;
-    insertJob('old-job', 'proj', now - 100 * 86400, now - 100 * 86400 + 60);
-    insertJob('new-job', 'proj', now - 10, now);
+    await insertJob('old-job', 'proj', now - 100 * 86400, now - 100 * 86400 + 60);
+    await insertJob('new-job', 'proj', now - 10, now);
 
-    const summary = runNightlyCleanup(cfg);
+    const summary = await runNightlyCleanup(cfg);
 
-    const rows = testDb.db.select({ id: schema.jobs.id }).from(schema.jobs).all();
-    expect(rows.map(r => r.id)).toEqual(['new-job']);
+    const rows = await handle.db.select({ id: schema.jobs.id }).from(schema.jobs);
+    expect(rows.map((r) => r.id)).toEqual(['new-job']);
     expect(summary).toMatchObject({
       type: 'nightly',
       status: 'completed',
@@ -294,56 +315,43 @@ describe('runNightlyCleanup', () => {
       rowsDeleted: 1,
       skippedRunningRows: 0,
       errorCount: 0,
-      sqliteMaintenance: {
-        status: 'completed',
-        checkpointRan: true,
-        vacuumRan: true,
-      },
     });
-    expect(getLatestNightlyRetentionSummary()).toMatchObject({ type: 'nightly', rowsDeleted: 1 });
-    expect(getLatestProjectLogRetentionSummary()).toBeNull();
+    expect(await getLatestNightlyRetentionSummary()).toMatchObject({ type: 'nightly', rowsDeleted: 1 });
+    expect(await getLatestProjectLogRetentionSummary()).toBeNull();
   });
 
-  it('does not delete running jobs even if started long ago', () => {
+  it('does not delete running jobs even if started long ago', async () => {
     const now = Date.now() / 1000;
-    insertJob('long-running', 'proj', now - 200 * 86400, null);
-    insertJob('old-job', 'proj', now - 100 * 86400, now - 100 * 86400 + 60);
+    await insertJob('long-running', 'proj', now - 200 * 86400, null);
+    await insertJob('old-job', 'proj', now - 100 * 86400, now - 100 * 86400 + 60);
 
-    const summary = runNightlyCleanup(cfg);
+    const summary = await runNightlyCleanup(cfg);
 
-    const rows = testDb.db.select({ id: schema.jobs.id }).from(schema.jobs).all();
-    expect(rows.map(r => r.id)).toEqual(['long-running']);
+    const rows = await handle.db.select({ id: schema.jobs.id }).from(schema.jobs);
+    expect(rows.map((r) => r.id)).toEqual(['long-running']);
     expect(summary.skippedRunningRows).toBe(1);
-    expect(summary.sqliteMaintenance).toMatchObject({
-      status: 'skipped',
-      reason: 'active_jobs',
-      activeJobs: 1,
-      checkpointRan: false,
-      vacuumRan: false,
-    });
   });
 
-  it('treats job_row_retention_days=0 as disabled (does not delete anything)', () => {
+  it('treats job_row_retention_days=0 as disabled (does not delete anything)', async () => {
     const now = Date.now() / 1000;
-    insertJob('very-old', 'proj', now - 1000 * 86400, now - 1000 * 86400 + 60);
-    insertJob('old', 'proj', now - 100 * 86400, now - 100 * 86400 + 60);
+    await insertJob('very-old', 'proj', now - 1000 * 86400, now - 1000 * 86400 + 60);
+    await insertJob('old', 'proj', now - 100 * 86400, now - 100 * 86400 + 60);
 
-    const summary = runNightlyCleanup({ log_retention_count: 200, log_retention_days: 30, job_row_retention_days: 0 });
+    const summary = await runNightlyCleanup({ log_retention_count: 200, log_retention_days: 30, job_row_retention_days: 0 });
 
-    const rows = testDb.db.select({ id: schema.jobs.id }).from(schema.jobs).all();
-    expect(rows.map(r => r.id).sort()).toEqual(['old', 'very-old']);
+    const rows = await handle.db.select({ id: schema.jobs.id }).from(schema.jobs);
+    expect(rows.map((r) => r.id).sort()).toEqual(['old', 'very-old']);
     expect(summary.status).toBe('disabled');
-    expect(summary.sqliteMaintenance).toMatchObject({ status: 'skipped', reason: 'no_deleted_rows' });
   });
 
-  it('does not delete rows within retention window', () => {
+  it('does not delete rows within retention window', async () => {
     const now = Date.now() / 1000;
-    insertJob('recent-job', 'proj', now - 5 * 86400, now - 5 * 86400 + 60);
+    await insertJob('recent-job', 'proj', now - 5 * 86400, now - 5 * 86400 + 60);
 
-    runNightlyCleanup(cfg);
+    await runNightlyCleanup(cfg);
 
-    const rows = testDb.db.select({ id: schema.jobs.id }).from(schema.jobs).all();
-    expect(rows.map(r => r.id)).toEqual(['recent-job']);
+    const rows = await handle.db.select({ id: schema.jobs.id }).from(schema.jobs);
+    expect(rows.map((r) => r.id)).toEqual(['recent-job']);
   });
 
   it('keeps nightly and project log summaries in separate maintenance records', async () => {
@@ -355,19 +363,19 @@ describe('runNightlyCleanup', () => {
     writeFileSync(newLogPath, 'data');
 
     try {
-      testDb.db.insert(schema.jobs).values(makeJob('proj-old-log', 'proj', now - 120, now - 60, oldLogPath)).run();
-      testDb.db.insert(schema.jobs).values(makeJob('proj-new-log', 'proj', now - 10, now, newLogPath)).run();
-      insertJob('old-row', 'proj', now - 100 * 86400, now - 100 * 86400 + 60);
+      await handle.db.insert(schema.jobs).values(makeJob('proj-old-log', 'proj', now - 120, now - 60, oldLogPath));
+      await handle.db.insert(schema.jobs).values(makeJob('proj-new-log', 'proj', now - 10, now, newLogPath));
+      await insertJob('old-row', 'proj', now - 100 * 86400, now - 100 * 86400 + 60);
 
       const mod = await import('@/lib/jobs/retention');
-      mod.runNightlyCleanup(cfg);
-      mod.pruneProjectLogs('proj', { ...cfg, log_retention_count: 1, log_retention_days: 30 });
+      await mod.runNightlyCleanup(cfg);
+      await mod.pruneProjectLogs('proj', { ...cfg, log_retention_count: 1, log_retention_days: 30 });
 
-      expect(mod.getLatestNightlyRetentionSummary()).toMatchObject({
+      expect(await mod.getLatestNightlyRetentionSummary()).toMatchObject({
         type: 'nightly',
         rowsDeleted: 1,
       });
-      expect(mod.getLatestProjectLogRetentionSummary()).toMatchObject({
+      expect(await mod.getLatestProjectLogRetentionSummary()).toMatchObject({
         type: 'project_logs',
         rowsUpdated: 1,
       });

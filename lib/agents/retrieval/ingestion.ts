@@ -71,9 +71,9 @@ export async function ingestSourceText(
       }))
     );
     if (opts.existingHash !== null) {
-      opts.backend.deleteSource(opts.project, opts.sourceKind, opts.sourceId);
+      await opts.backend.deleteSource(opts.project, opts.sourceKind, opts.sourceId);
     }
-    opts.backend.upsertChunks(embeddedChunks);
+    await opts.backend.upsertChunks(embeddedChunks);
     return { contentHash, chunkCount: chunks.length, skipped: false, stored: true };
   } catch (err) {
     console.warn(`[retrieval] ingestSourceText failed for ${opts.sourceKind}:${opts.sourceId}:`, err);

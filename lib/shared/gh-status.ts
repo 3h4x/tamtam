@@ -21,12 +21,13 @@ function nowUtc(): string {
   return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
-function getEntry(project: string): GhStatusEntry | null {
-  const row = db
+async function getEntry(project: string): Promise<GhStatusEntry | null> {
+  const rows = await db
     .select()
     .from(schema.ghStatus)
     .where(eq(schema.ghStatus.project, project))
-    .get();
+    .limit(1);
+  const row = rows[0] ?? null;
   if (!row) return null;
   return {
     release: row.releaseTag,
@@ -39,7 +40,7 @@ function getEntry(project: string): GhStatusEntry | null {
 }
 
 function setEntry(project: string, data: GhStatusEntry): void {
-  db.insert(schema.ghStatus)
+  void db.insert(schema.ghStatus)
     .values({
       project,
       releaseTag: data.release,
@@ -60,11 +61,12 @@ function setEntry(project: string, data: GhStatusEntry): void {
         fetchedAt: data.fetchedAt || nowUtc(),
       },
     })
-    .run();
+    .execute()
+    .catch((e) => console.error('[gh-status] setEntry failed:', e));
 }
 
-function getAllEntries(): Record<string, GhStatusEntry> {
-  const rows = db.select().from(schema.ghStatus).all();
+async function getAllEntries(): Promise<Record<string, GhStatusEntry>> {
+  const rows = await db.select().from(schema.ghStatus);
   const result: Record<string, GhStatusEntry> = {};
   for (const row of rows) {
     result[row.project] = {
@@ -80,18 +82,20 @@ function getAllEntries(): Record<string, GhStatusEntry> {
 }
 
 export function invalidateProject(project: string): void {
-  const entry = getEntry(project) || {
-    release: null,
-    ci: null,
-    ciFailedUrl: null,
-    headSha: null,
-    localHeadSha: null,
-    fetchedAt: nowUtc(),
-  };
-  entry.ci = 'in_progress';
-  entry.ciFailedUrl = null;
-  entry.fetchedAt = '1970-01-01T00:00:00Z';
-  setEntry(project, entry);
+  void getEntry(project).then((existing) => {
+    const entry = existing || {
+      release: null,
+      ci: null,
+      ciFailedUrl: null,
+      headSha: null,
+      localHeadSha: null,
+      fetchedAt: nowUtc(),
+    };
+    entry.ci = 'in_progress';
+    entry.ciFailedUrl = null;
+    entry.fetchedAt = '1970-01-01T00:00:00Z';
+    setEntry(project, entry);
+  }).catch((e) => console.error('[gh-status] invalidateProject failed:', e));
 }
 
 export function extractGithubRepoFromUrl(url: string): string | null {
@@ -291,7 +295,7 @@ export async function ghStatusLookup(
   const now = Date.now();
   const cache: Record<string, GhStatusEntry> = {};
 
-  for (const [proj, entry] of Object.entries(getAllEntries())) {
+  for (const [proj, entry] of Object.entries(await getAllEntries())) {
     cache[proj] = entry;
   }
 

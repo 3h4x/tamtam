@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync, cpSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
@@ -15,21 +15,42 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim();
 }
 
+// Build a template repo once and clone it per test via fast filesystem copy.
+// Cuts ~5 git invocations per test down to 1 (the post-copy nothing) and avoids
+// re-running init/config/add/commit for every case.
+const templateRepo = mkdtempSync(join(tmpdir(), 'tamtam-incremental-review-tmpl-'));
+git(templateRepo, 'init', '-q', '-b', 'main');
+writeFileSync(join(templateRepo, 'a.txt'), 'a');
+execFileSync(
+  'git',
+  ['-c', 'user.email=t@t.test', '-c', 'user.name=tester', 'add', '.'],
+  { cwd: templateRepo, encoding: 'utf-8' },
+);
+execFileSync(
+  'git',
+  ['-c', 'user.email=t@t.test', '-c', 'user.name=tester', 'commit', '-q', '-m', 'initial'],
+  { cwd: templateRepo, encoding: 'utf-8' },
+);
+// Persist identity in repo config so subsequent commits in tests succeed.
+git(templateRepo, 'config', 'user.email', 't@t.test');
+git(templateRepo, 'config', 'user.name', 'tester');
+// HEAD sha is identical across cloned repos; cache it to skip per-test rev-parse.
+const templateHead = git(templateRepo, 'rev-parse', 'HEAD');
+
 describe('incremental review git ref helpers', () => {
   let repo: string;
 
   beforeEach(() => {
     repo = mkdtempSync(join(tmpdir(), 'tamtam-incremental-review-'));
-    git(repo, 'init', '-q', '-b', 'main');
-    git(repo, 'config', 'user.email', 't@t.test');
-    git(repo, 'config', 'user.name', 'tester');
-    writeFileSync(join(repo, 'a.txt'), 'a');
-    git(repo, 'add', '.');
-    git(repo, 'commit', '-q', '-m', 'initial');
+    cpSync(templateRepo, repo, { recursive: true });
   });
 
   afterEach(() => {
     rmSync(repo, { recursive: true, force: true });
+  });
+
+  afterAll(() => {
+    rmSync(templateRepo, { recursive: true, force: true });
   });
 
   it('reads the current branch', async () => {
@@ -37,14 +58,14 @@ describe('incremental review git ref helpers', () => {
   });
 
   it('round-trips set/get on the reviewed ref', async () => {
-    const head = git(repo, 'rev-parse', 'HEAD');
+    const head = templateHead;
     expect(await getReviewedRefSha(repo, 'main')).toBeNull();
     await setReviewedRef(repo, 'main');
     expect(await getReviewedRefSha(repo, 'main')).toBe(head);
   });
 
   it('isAncestor is true when ref is an ancestor of HEAD, false after rewind', async () => {
-    const initial = git(repo, 'rev-parse', 'HEAD');
+    const initial = templateHead;
     await setReviewedRef(repo, 'main');
     writeFileSync(join(repo, 'b.txt'), 'b');
     git(repo, 'add', '.');
@@ -76,7 +97,6 @@ describe('incremental review git ref helpers', () => {
     git(repo, 'checkout', '-q', '-b', 'feature/x');
     expect(await getCurrentBranch(repo)).toBe('feature/x');
     await setReviewedRef(repo, 'feature/x');
-    const head = git(repo, 'rev-parse', 'HEAD');
-    expect(await getReviewedRefSha(repo, 'feature/x')).toBe(head);
+    expect(await getReviewedRefSha(repo, 'feature/x')).toBe(templateHead);
   });
 });

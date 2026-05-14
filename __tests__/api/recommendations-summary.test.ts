@@ -1,33 +1,32 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
+let sharedHandle: TestDbHandle;
+
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS recommendations (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      source_kind TEXT NOT NULL,
-      source_id TEXT,
-      agent_id TEXT,
-      agent_name TEXT,
-      type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      detail TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open',
-      payload TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      source_kind text NOT NULL,
+      source_id text,
+      agent_id text,
+      agent_name text,
+      type text NOT NULL,
+      title text NOT NULL,
+      detail text NOT NULL,
+      status text NOT NULL DEFAULT 'open',
+      payload text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
 }
 
-function seed(testDb: ReturnType<typeof createTestDb>, project: string, status: string, idSuffix = '') {
-  testDb.db.insert(schema.recommendations).values({
+async function seed(project: string, status: string, idSuffix = ''): Promise<void> {
+  await sharedHandle.db.insert(schema.recommendations).values({
     id: `${project}:rec${idSuffix}`,
     project,
     sourceKind: 'agent:tests',
@@ -41,17 +40,30 @@ function seed(testDb: ReturnType<typeof createTestDb>, project: string, status: 
     payload: JSON.stringify({ recommendedSchedule: '8h' }),
     createdAt: 100,
     updatedAt: 200,
-  }).run();
+  });
 }
 
+beforeAll(async () => {
+  sharedHandle = await createTestPgDbEmpty();
+  await applyDdl(sharedHandle);
+});
+
+afterAll(async () => {
+  await new Promise((r) => setTimeout(r, 30));
+  try {
+    await sharedHandle[Symbol.asyncDispose]();
+  } catch {
+    // ignore
+  }
+});
+
 describe('GET /api/recommendations/summary', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let GET: typeof import('@/app/api/recommendations/summary/route').GET;
 
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    await sharedHandle.db.execute(sql.raw('TRUNCATE recommendations'));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     ({ GET } = await import('@/app/api/recommendations/summary/route'));
   });
 
@@ -62,11 +74,11 @@ describe('GET /api/recommendations/summary', () => {
   });
 
   it('counts only `open` rows, ignoring dismissed and applied', async () => {
-    seed(testDb, 'portal', 'open', 'a');
-    seed(testDb, 'portal', 'open', 'b');
-    seed(testDb, 'portal', 'dismissed', 'c');
-    seed(testDb, 'portal', 'applied', 'd');
-    seed(testDb, 'tamtam', 'open', 'e');
+    await seed('portal', 'open', 'a');
+    await seed('portal', 'open', 'b');
+    await seed('portal', 'dismissed', 'c');
+    await seed('portal', 'applied', 'd');
+    await seed('tamtam', 'open', 'e');
 
     const res = await GET();
     const data = await res.json();
@@ -76,20 +88,19 @@ describe('GET /api/recommendations/summary', () => {
 });
 
 describe('GET /api/recommendations (cross-project list)', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let GET: typeof import('@/app/api/recommendations/route').GET;
 
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    await sharedHandle.db.execute(sql.raw('TRUNCATE recommendations'));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     ({ GET } = await import('@/app/api/recommendations/route'));
   });
 
   it('returns only open recommendations, with parsed payload', async () => {
-    seed(testDb, 'portal', 'open', 'a');
-    seed(testDb, 'portal', 'dismissed', 'b');
-    seed(testDb, 'tamtam', 'open', 'c');
+    await seed('portal', 'open', 'a');
+    await seed('portal', 'dismissed', 'b');
+    await seed('tamtam', 'open', 'c');
 
     const res = await GET();
     const data = await res.json();

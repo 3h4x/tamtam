@@ -1,6 +1,6 @@
 # Database — Schema Reference
 
-SQLite with WAL mode. Drizzle ORM. DB at `data/db/tamtam.db` (gitignored). Schema in `lib/db/`.
+Postgres 16 (with the `vector` extension) accessed via `pg.Pool` and Drizzle ORM. Connection string lives in `DATABASE_URL` (required). Schema in `lib/db/`.
 
 ## When to read this
 
@@ -266,19 +266,22 @@ db.select().from(schema.jobs).where(eq(schema.jobs.project, name)).all()
 ### Backup and inspect
 
 ```bash
-# Hot backup via API (safe while running)
+# Hot backup via API (safe while running) — produces a pg_dump custom-format
+# file under data/db/ (or $TAMTAM_BACKUP_DIR).
 curl -X POST http://localhost:1337/api/settings/backup
 
-# Verify or restore a backup
-pnpm db:verify data/db/tamtam.db
-pnpm db:restore data/db/tamtam-YYYYMMDD-HHMM.db  # run from the repo root
+# Verify the live DB (checks pgvector extension + table count)
+pnpm db:verify
 
-# Inspect directly with sqlite3
-sqlite3 data/db/tamtam.db ".tables"
-sqlite3 data/db/tamtam.db "SELECT project, kind, exit_code FROM jobs ORDER BY started_at DESC LIMIT 20;"
+# Restore a .pgdump (stops PM2, pg_restore --clean --if-exists, restart)
+pnpm db:restore data/db/tamtam-YYYYMMDD-HHMM.pgdump
+
+# Inspect directly with psql
+psql "$DATABASE_URL" -c "\\dt"
+psql "$DATABASE_URL" -c "SELECT project, kind, exit_code FROM jobs ORDER BY started_at DESC LIMIT 20;"
 
 # Check cache freshness
-sqlite3 data/db/tamtam.db "SELECT project, datetime(fetched_at, 'unixepoch') FROM gh_issues_cache;"
+psql "$DATABASE_URL" -c "SELECT project, to_timestamp(fetched_at) FROM gh_issues_cache;"
 ```
 
 ### Schema files
@@ -286,15 +289,13 @@ sqlite3 data/db/tamtam.db "SELECT project, datetime(fetched_at, 'unixepoch') FRO
 | File | Role |
 |------|------|
 | `lib/db/schema.ts` | Drizzle table definitions |
-| `lib/db/index.ts` | DB connection + WAL mode init |
-| `lib/job-storage.ts` | Job CRUD, memory cache, `markDone`, completion hooks |
-| `lib/config.ts` | Settings read/write with 5s TTL cache |
+| `lib/db/index.ts` | DB connection (`pg.Pool` + drizzle/node-postgres) |
+| `lib/jobs/storage.ts` | Job CRUD, memory cache, `markDone`, completion hooks |
+| `lib/shared/config.ts` | Settings read/write with 5s TTL cache |
 
 ### Summary maintenance scripts
 
-TamTam stores concise agent and issue-run summaries in `jobs.work_summary`. If older rows are missing that field, use the maintenance scripts below against the intended SQLite database.
-
-Set `TAMTAM_DB_PATH=/abs/path/to/tamtam.db` to target a non-default database. If unset, the scripts use `data/db/tamtam.db` under the repo root.
+TamTam stores concise agent and issue-run summaries in `jobs.work_summary`. If older rows are missing that field, use the maintenance scripts below; they connect to the database referenced by `DATABASE_URL`.
 
 | Command | Behavior |
 |------|------|
@@ -313,3 +314,26 @@ Set `TAMTAM_DB_PATH=/abs/path/to/tamtam.db` to target a non-default database. If
 | Issues/PRs show stale data | `ghIssuesCache` TTL not expired (5 min) | Force refresh via the Refresh button or `POST /api/projects/by-project/[name]/issues?refresh=1` |
 | Projects list empty after adding a repo | `projects` table not updated | Use Settings → workspace scan or `GET /api/config/projects` |
 | Deleted project still appears in job history | No FK cascade — jobs retain the project name string | Expected behavior; filter by project name in the Runs page |
+
+---
+
+## One-time SQLite to Postgres migration
+
+Use `scripts/migrate-sqlite-to-pg.mjs` to copy data from the legacy SQLite database at `data/db/tamtam.db` (or `$TAMTAM_DB_PATH`) into the Postgres database referenced by `DATABASE_URL`. The script is committed for one full release cycle and removed afterward.
+
+```bash
+# Dry-run: report row counts without writing
+DATABASE_URL=postgres://user@localhost:5432/tamtam \
+  node scripts/migrate-sqlite-to-pg.mjs --dry-run
+
+# Apply: truncate each target table first, then copy
+DATABASE_URL=postgres://user@localhost:5432/tamtam \
+  node scripts/migrate-sqlite-to-pg.mjs --truncate
+
+# Migrate select tables only
+node scripts/migrate-sqlite-to-pg.mjs --only settings,projects
+```
+
+Without `--truncate`, the script uses `INSERT ... ON CONFLICT (<pk>) DO NOTHING` so re-runs are idempotent. The retrieval tables (`retrieval_records`, `retrieval_chunks`, `ollama_usage`) are not copied — they are recreated lazily as agents run with retrieval enabled.
+
+The source SQLite file is opened read-only. The target Postgres schema must already exist (run `pnpm db:migrate` first).

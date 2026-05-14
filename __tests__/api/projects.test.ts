@@ -1,58 +1,84 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createArchiveTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
-    CREATE TABLE projects (
-      name TEXT PRIMARY KEY,
-      path TEXT NOT NULL,
-      enabled INTEGER DEFAULT 0,
-      github TEXT,
-      priority TEXT,
-      custom_actions TEXT,
-      test_command TEXT,
-      tests_disabled INTEGER DEFAULT 0,
-      review_disabled INTEGER DEFAULT 0,
-      test_cron_enabled INTEGER DEFAULT 0,
-      test_cron_schedule TEXT,
-      auto_commit_enabled INTEGER DEFAULT 0,
-      auto_push_enabled INTEGER DEFAULT 0,
-      auto_pr_merge_enabled INTEGER DEFAULT 0,
-      release_after_run INTEGER DEFAULT 0,
-      issue_auto_branch INTEGER DEFAULT 1,
-      last_push_error TEXT,
-      last_push_at REAL,
-      review_prompt_addendum TEXT,
-      fix_prompt_addendum TEXT,
-      website TEXT,
-      qa_url TEXT,
-      archived INTEGER NOT NULL DEFAULT 0,
-      paused INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE agents (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      name TEXT NOT NULL,
-      model TEXT,
-      prompt TEXT,
-      schedule TEXT,
-      enabled INTEGER DEFAULT 0,
-      runner TEXT,
-      skill_ids TEXT,
-      provider TEXT,
-      prerequisite_command TEXT,
-      timeout_seconds INTEGER,
-      template_id TEXT,
-      created_at REAL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+let sharedHandle: TestDbHandle;
+
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries, so issue each DDL
+  // separately.
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS projects (
+      name text PRIMARY KEY,
+      path text NOT NULL,
+      enabled boolean DEFAULT false,
+      github text,
+      priority text,
+      custom_actions text,
+      test_command text,
+      tests_disabled boolean DEFAULT false,
+      review_disabled boolean DEFAULT false,
+      test_cron_enabled boolean DEFAULT false,
+      test_cron_schedule text,
+      auto_commit_enabled boolean DEFAULT false,
+      auto_push_enabled boolean DEFAULT false,
+      auto_pr_merge_enabled boolean DEFAULT false,
+      release_after_run boolean DEFAULT false,
+      issue_auto_branch boolean DEFAULT true,
+      last_push_error text,
+      last_push_at double precision,
+      review_prompt_addendum text,
+      fix_prompt_addendum text,
+      website text,
+      qa_url text,
+      archived boolean NOT NULL DEFAULT false,
+      paused boolean NOT NULL DEFAULT false
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS agents (
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      name text NOT NULL,
+      model text,
+      prompt text,
+      schedule text,
+      enabled boolean DEFAULT false,
+      runner text,
+      skill_ids text,
+      provider text,
+      prerequisite_command text,
+      timeout_seconds integer,
+      template_id text,
+      created_at double precision
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS gh_issues_cache (
+      project text PRIMARY KEY,
+      repo text NOT NULL,
+      prs text NOT NULL DEFAULT '[]',
+      issues text NOT NULL DEFAULT '[]',
+      fetched_at double precision NOT NULL
+    )
+  `));
 }
+
+beforeAll(async () => {
+  sharedHandle = await createTestPgDbEmpty();
+  await applyDdl(sharedHandle);
+});
+
+afterAll(async () => {
+  await new Promise((r) => setTimeout(r, 30));
+  try {
+    await sharedHandle[Symbol.asyncDispose]();
+  } catch {
+    // ignore
+  }
+});
 
 // ─── GET /api/projects ────────────────────────────────────────────────────────
 
@@ -68,6 +94,9 @@ describe('GET /api/projects', () => {
       priorities: [],
     });
 
+    await sharedHandle.db.execute(sql.raw('TRUNCATE projects, agents, gh_issues_cache'));
+
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/project-data', () => ({
       fetchProjectData: fetchProjectDataMock,
     }));
@@ -379,15 +408,15 @@ describe('GET /api/projects/[schedId]/detail', () => {
 
 describe('PATCH /api/projects/by-project/[projectName]', () => {
   let PATCH: any;
-  let testDb: ReturnType<typeof createArchiveTestDb>;
   const clearProjectDataCacheMock = vi.fn();
   const removeAgentScheduleMock = vi.fn();
 
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createArchiveTestDb();
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    await sharedHandle.db.execute(sql.raw('TRUNCATE projects, agents, gh_issues_cache'));
+
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/project-data', () => ({
       clearProjectDataCache: clearProjectDataCacheMock,
     }));
@@ -406,21 +435,22 @@ describe('PATCH /api/projects/by-project/[projectName]', () => {
     vi.resetModules();
   });
 
-  function seedProject(name: string, archived = false) {
-    testDb.sqlite
-      .prepare('INSERT INTO projects (name, path, enabled, archived) VALUES (?, ?, 1, ?)')
-      .run(name, `/tmp/${name}`, archived ? 1 : 0);
+  async function seedProject(name: string, archived = false) {
+    await sharedHandle.db.execute(sql.raw(
+      `INSERT INTO projects (name, path, enabled, archived) VALUES ('${name}', '/tmp/${name}', true, ${archived ? 'true' : 'false'})`,
+    ));
   }
 
-  function archivedFlag(name: string): number {
-    const row = testDb.sqlite
-      .prepare('SELECT archived FROM projects WHERE name = ?')
-      .get(name) as { archived: number } | undefined;
-    return row?.archived ?? 0;
+  async function archivedFlag(name: string): Promise<boolean> {
+    const result = await sharedHandle.db.execute(sql.raw(
+      `SELECT archived FROM projects WHERE name = '${name}'`,
+    ));
+    const row = (result.rows ?? [])[0] as { archived: boolean } | undefined;
+    return row?.archived ?? false;
   }
 
   it('returns 400 when archived is not a boolean', async () => {
-    seedProject('proj1');
+    await seedProject('proj1');
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1', {
       method: 'PATCH',
       body: JSON.stringify({ archived: 'yes' }),
@@ -439,13 +469,13 @@ describe('PATCH /api/projects/by-project/[projectName]', () => {
   });
 
   it('archives an existing project, clears cache, and unschedules its agents', async () => {
-    seedProject('proj1');
-    testDb.sqlite
-      .prepare('INSERT INTO agents (id, project, name, enabled) VALUES (?, ?, ?, 1)')
-      .run('a1', 'proj1', 'qa');
-    testDb.sqlite
-      .prepare('INSERT INTO agents (id, project, name, enabled) VALUES (?, ?, ?, 1)')
-      .run('a2', 'proj1', 'review');
+    await seedProject('proj1');
+    await sharedHandle.db.execute(sql.raw(
+      `INSERT INTO agents (id, project, name, enabled) VALUES ('a1', 'proj1', 'qa', true)`,
+    ));
+    await sharedHandle.db.execute(sql.raw(
+      `INSERT INTO agents (id, project, name, enabled) VALUES ('a2', 'proj1', 'review', true)`,
+    ));
 
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1', {
       method: 'PATCH',
@@ -455,14 +485,14 @@ describe('PATCH /api/projects/by-project/[projectName]', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data).toEqual({ project: 'proj1', archived: true, paused: false });
-    expect(archivedFlag('proj1')).toBe(1);
+    expect(await archivedFlag('proj1')).toBe(true);
     expect(clearProjectDataCacheMock).toHaveBeenCalled();
     expect(removeAgentScheduleMock).toHaveBeenCalledWith('a1');
     expect(removeAgentScheduleMock).toHaveBeenCalledWith('a2');
   });
 
   it('unarchives a project without touching scheduled agents', async () => {
-    seedProject('proj1', true);
+    await seedProject('proj1', true);
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1', {
       method: 'PATCH',
       body: JSON.stringify({ archived: false }),
@@ -471,7 +501,7 @@ describe('PATCH /api/projects/by-project/[projectName]', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data).toEqual({ project: 'proj1', archived: false, paused: false });
-    expect(archivedFlag('proj1')).toBe(0);
+    expect(await archivedFlag('proj1')).toBe(false);
     expect(clearProjectDataCacheMock).toHaveBeenCalled();
     expect(removeAgentScheduleMock).not.toHaveBeenCalled();
   });

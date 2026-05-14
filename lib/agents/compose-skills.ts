@@ -34,11 +34,11 @@ export interface ComposedSkills {
  * - `skillIds` may contain DB skill UUIDs and `persona:<path>` references.
  * - `docPaths` are project-relative; reads are guarded against path traversal.
  */
-export function composeAgentSkills(
+export async function composeAgentSkills(
   projPath: string,
   skillIds: string[],
   docPaths: string[],
-): ComposedSkills {
+): Promise<ComposedSkills> {
   const dbSkillIds = skillIds.filter((id) => !id.startsWith('persona:'))
   const personaPaths = skillIds
     .filter((id) => id.startsWith('persona:'))
@@ -61,7 +61,7 @@ export function composeAgentSkills(
   const parts: string[] = []
   const metaSkills: ComposedSkillMeta[] = []
   if (dbSkillIds.length > 0) {
-    const rows = db.select().from(schema.skills).where(inArray(schema.skills.id, dbSkillIds)).all()
+    const rows = await db.select().from(schema.skills).where(inArray(schema.skills.id, dbSkillIds))
     for (const s of rows) {
       parts.push(`## ${s.name}\n${s.content}`)
       metaSkills.push({ id: s.id, name: s.name, description: s.description ?? '', content: s.content, source: 'db' })

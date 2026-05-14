@@ -1,14 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getSettings } from '@/lib/shared/config';
 import { resolveProjectPath } from '@/lib/shared/project-data';
-import { db, schema, sqlite } from '@/lib/db';
+import { db, schema } from '@/lib/db';
 import { eq, and, inArray } from 'drizzle-orm';
-import { SqliteVecBackend } from '@/lib/agents/retrieval/sqlite-vec-backend';
+import { PgvectorBackend } from '@/lib/agents/retrieval/pgvector-backend';
 import { hashContent, ingestSourceText } from '@/lib/agents/retrieval/ingestion';
-import { getSqliteVecUnavailableDetail, isSqliteVecAvailable } from '@/lib/db/sqlite-vec';
 import { collectProjectRetrievalSources } from '@/lib/agents/retrieval/project-corpus';
 
-function upsertRetrievalRecord(opts: {
+async function upsertRetrievalRecord(opts: {
   id: string;
   project: string;
   sourceKind: string;
@@ -16,8 +15,8 @@ function upsertRetrievalRecord(opts: {
   chunkCount: number;
   contentHash: string;
   indexedAt: number;
-}): void {
-  db.insert(schema.retrievalRecords)
+}): Promise<void> {
+  await db.insert(schema.retrievalRecords)
     .values(opts)
     .onConflictDoUpdate({
       target: schema.retrievalRecords.id,
@@ -27,7 +26,7 @@ function upsertRetrievalRecord(opts: {
         chunkCount: opts.chunkCount,
       },
     })
-    .run();
+    .execute();
 }
 
 export async function POST(
@@ -40,32 +39,25 @@ export async function POST(
   if (!cfg.retrieval_enabled) {
     return NextResponse.json({ error: 'Retrieval is disabled' }, { status: 400 });
   }
-  if (!isSqliteVecAvailable()) {
-    return NextResponse.json(
-      { error: getSqliteVecUnavailableDetail(), code: 'sqlite_vec_unavailable' },
-      { status: 503 }
-    );
-  }
 
   const projectPath = resolveProjectPath(schedId);
   if (!projectPath) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 });
   }
 
-  const backend = new SqliteVecBackend(sqlite);
+  const backend = new PgvectorBackend();
   let totalChunks = 0;
 
   try {
-    const sources = collectProjectRetrievalSources(schedId, projectPath);
+    const sources = await collectProjectRetrievalSources(schedId, projectPath);
     const sourceKinds = ['project_doc', 'skill', 'project_config'] as const;
     const currentIds = new Set(sources.map((source) => source.recordId));
-    const existingRecords = db.select()
+    const existingRecords = await db.select()
       .from(schema.retrievalRecords)
       .where(and(
         eq(schema.retrievalRecords.project, schedId),
         inArray(schema.retrievalRecords.sourceKind, [...sourceKinds])
-      ))
-      .all();
+      ));
     const existingById = new Map(existingRecords.map((record) => [record.id, record]));
 
     let missingCount = 0;
@@ -99,7 +91,7 @@ export async function POST(
       if (skipped) {
         skippedCount += 1;
         if (timestampStale && existing) {
-          upsertRetrievalRecord({
+          await upsertRetrievalRecord({
             id: source.recordId,
             project: schedId,
             sourceKind: source.sourceKind,
@@ -117,7 +109,7 @@ export async function POST(
       indexedCount += 1;
       totalChunks += chunkCount;
 
-      upsertRetrievalRecord({
+      await upsertRetrievalRecord({
         id: source.recordId,
         project: schedId,
         sourceKind: source.sourceKind,
@@ -130,8 +122,8 @@ export async function POST(
 
     for (const record of existingRecords) {
       if (currentIds.has(record.id)) continue;
-      backend.deleteSource(schedId, record.sourceKind as 'project_doc' | 'skill' | 'project_config', record.sourceId);
-      db.delete(schema.retrievalRecords).where(eq(schema.retrievalRecords.id, record.id)).run();
+      await backend.deleteSource(schedId, record.sourceKind as 'project_doc' | 'skill' | 'project_config', record.sourceId);
+      await db.delete(schema.retrievalRecords).where(eq(schema.retrievalRecords.id, record.id)).execute();
       staleCount += 1;
     }
 

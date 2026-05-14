@@ -6,5 +6,5 @@ import { summarizeOpenRecommendations } from '@/lib/recommendations/recommendati
 // applied recs do not contribute. Cheap to call (single GROUP BY) and safe
 // to poll on a 60s interval from the client.
 export async function GET() {
-  return NextResponse.json(summarizeOpenRecommendations());
+  return NextResponse.json(await summarizeOpenRecommendations());
 }

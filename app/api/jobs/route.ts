@@ -25,11 +25,11 @@ export async function GET(request: NextRequest) {
 
   // Surface the pending-release queue so the runs view can render a
   // "release queued" pill on agent rows whose project has a flag set.
-  const pendingProjects = listPendingReleaseProjects();
+  const pendingProjects = await listPendingReleaseProjects();
 
   return NextResponse.json({
     jobs: jobs.map(jobToDict),
     total,
-    pendingReleaseProjects: project ? pendingProjects.filter(p => p === project) : pendingProjects,
+    pendingReleaseProjects: project ? pendingProjects.filter((p) => p === project) : pendingProjects,
   });
 }

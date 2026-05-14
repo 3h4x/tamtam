@@ -19,9 +19,8 @@ function formatBytes(bytes: number): string {
 function formatNightlyCleanupLine(data: MonitoringData['retention']['lastNightlyCleanup']): string {
   if (!data) return 'No nightly cleanup recorded'
   const base = `${data.status} · ${data.rowsDeleted} rows`
-  const sqlite = `SQLite ${data.sqliteMaintenance.status}`
-  const error = data.lastError ? ` · ${data.lastError}` : data.sqliteMaintenance.error ? ` · ${data.sqliteMaintenance.error}` : ''
-  return `${base}, ${sqlite}${error}`
+  const error = data.lastError ? ` · ${data.lastError}` : ''
+  return `${base}${error}`
 }
 
 function formatProjectLogCleanupLine(data: MonitoringData['retention']['lastProjectLogCleanup']): string {
@@ -36,7 +35,6 @@ function getRetentionStatus(retention: MonitoringData['retention']): 'ok' | 'iss
 
   if (!nightlyCleanup && !projectLogCleanup) return 'unavailable'
   if (nightlyCleanup?.status === 'failed') return 'issue'
-  if (nightlyCleanup?.sqliteMaintenance.status === 'failed') return 'issue'
   if (projectLogCleanup?.status === 'failed') return 'issue'
   return 'ok'
 }

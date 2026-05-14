@@ -20,7 +20,7 @@ export async function POST(
   // Refuse to switch branches while a pipeline is actively running. A mid-pipeline
   // checkout would leave the working copy in an inconsistent state (e.g. a test
   // job finishing on a different branch than it started on).
-  const activeLock = getLock(projectName);
+  const activeLock = await getLock(projectName);
   if (activeLock) {
     const holder = listJobs().find(j => j.id === activeLock.lockedByJobId);
     if (holder && holder.finishedAt === null) {
@@ -34,7 +34,7 @@ export async function POST(
   // Project-level kill switch: when the user unchecks "Create feature branch"
   // in the Work-on config, this endpoint is a no-op — Claude works on whatever
   // branch is currently checked out.
-  const cfg = getProjectTestConfig(projectName);
+  const cfg = await getProjectTestConfig(projectName);
   if (cfg && cfg.issueAutoBranch === false) {
     return NextResponse.json({ status: 'skipped', reason: 'issue_auto_branch is disabled for this project' });
   }

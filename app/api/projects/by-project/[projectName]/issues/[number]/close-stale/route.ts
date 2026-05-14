@@ -77,9 +77,9 @@ export async function POST(
   }
 
   try {
-    db.delete(schema.ghIssuesCache)
+    await db.delete(schema.ghIssuesCache)
       .where(eq(schema.ghIssuesCache.project, projectName))
-      .run();
+      .execute();
   } catch (e) {
     console.error('[close-stale] failed to invalidate ghIssuesCache:', e);
   }

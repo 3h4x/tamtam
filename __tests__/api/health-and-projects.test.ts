@@ -1,20 +1,30 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
+import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
+
+const mocks = vi.hoisted(() => ({
+  fetchProjectData: vi.fn(),
+  dbRef: { current: null as unknown },
+}));
+
+vi.mock('@/lib/shared/project-data', () => ({
+  fetchProjectData: mocks.fetchProjectData,
+}));
+
+vi.mock('@/lib/db', () => ({
+  get db() {
+    return mocks.dbRef.current;
+  },
+  schema,
+}));
+
+const { GET: HealthGET } = await import('@/app/api/health/route');
+const { GET: ProjectsGET } = await import('@/app/api/projects/route');
 
 describe('GET /api/health', () => {
-  let GET: any;
-
-  beforeEach(async () => {
-    vi.resetModules();
-    const mod = await import('@/app/api/health/route');
-    GET = mod.GET;
-  });
-
-  afterEach(() => {
-    vi.resetModules();
-  });
-
   it('returns status ok', async () => {
-    const res = await GET();
+    const res = await HealthGET();
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('ok');
@@ -22,31 +32,37 @@ describe('GET /api/health', () => {
 });
 
 describe('GET /api/projects', () => {
-  let GET: any;
-  let fetchProjectDataMock: ReturnType<typeof vi.fn>;
+  let sharedHandle: TestDbHandle;
+
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await sharedHandle.db.execute(sql.raw(`
+      CREATE TABLE IF NOT EXISTS gh_issues_cache (
+        project text PRIMARY KEY,
+        repo text NOT NULL,
+        prs text NOT NULL DEFAULT '[]',
+        issues text NOT NULL DEFAULT '[]',
+        fetched_at double precision NOT NULL
+      )
+    `));
+    mocks.dbRef.current = sharedHandle.db;
+  });
+
+  afterAll(async () => {
+    await sharedHandle[Symbol.asyncDispose]();
+  });
 
   beforeEach(async () => {
-    vi.resetModules();
-
-    fetchProjectDataMock = vi.fn().mockResolvedValue({
+    await sharedHandle.db.execute(sql.raw('DELETE FROM gh_issues_cache'));
+    mocks.fetchProjectData.mockReset();
+    mocks.fetchProjectData.mockResolvedValue({
       projects: {},
       priorities: {},
     });
-
-    vi.doMock('@/lib/shared/project-data', () => ({
-      fetchProjectData: fetchProjectDataMock,
-    }));
-
-    const mod = await import('@/app/api/projects/route');
-    GET = mod.GET;
-  });
-
-  afterEach(() => {
-    vi.resetModules();
   });
 
   it('returns empty tasks and priorities when no projects', async () => {
-    const res = await GET();
+    const res = await ProjectsGET();
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.tasks).toEqual([]);
@@ -54,7 +70,7 @@ describe('GET /api/projects', () => {
   });
 
   it('returns tasks flattened from all projects', async () => {
-    fetchProjectDataMock.mockResolvedValue({
+    mocks.fetchProjectData.mockResolvedValue({
       projects: {
         'proj-a': [
           { id: 'task-1', name: 'Task 1' },
@@ -65,27 +81,27 @@ describe('GET /api/projects', () => {
       priorities: { 'proj-a': 'high', 'proj-b': 'low' },
     });
 
-    const res = await GET();
+    const res = await ProjectsGET();
     const data = await res.json();
     expect(data.tasks).toHaveLength(3);
     expect(data.priorities['proj-a']).toBe('high');
   });
 
   it('injects project name into each task', async () => {
-    fetchProjectDataMock.mockResolvedValue({
+    mocks.fetchProjectData.mockResolvedValue({
       projects: {
         'my-proj': [{ id: 'task-1', kind: 'review' }],
       },
       priorities: {},
     });
 
-    const res = await GET();
+    const res = await ProjectsGET();
     const data = await res.json();
     expect(data.tasks[0].project).toBe('my-proj');
   });
 
   it('handles multiple tasks per project', async () => {
-    fetchProjectDataMock.mockResolvedValue({
+    mocks.fetchProjectData.mockResolvedValue({
       projects: {
         'proj-x': [
           { id: 't1', kind: 'run' },
@@ -96,14 +112,14 @@ describe('GET /api/projects', () => {
       priorities: {},
     });
 
-    const res = await GET();
+    const res = await ProjectsGET();
     const data = await res.json();
     expect(data.tasks).toHaveLength(3);
     expect(data.tasks.every((t: any) => t.project === 'proj-x')).toBe(true);
   });
 
   it('calls fetchProjectData', async () => {
-    await GET();
-    expect(fetchProjectDataMock).toHaveBeenCalledOnce();
+    await ProjectsGET();
+    expect(mocks.fetchProjectData).toHaveBeenCalledOnce();
   });
 });

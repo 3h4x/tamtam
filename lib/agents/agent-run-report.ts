@@ -1,15 +1,15 @@
 import { resolveProjectPath } from '@/lib/shared/project-data';
+// exec wraps child_process.execFile safely — args are arrays, no shell injection risk
 import { exec } from '@/lib/shared/shell';
 import { upsertRecommendation } from '@/lib/recommendations/recommendations';
 import { isAgentJobKind } from '@/lib/jobs/kinds';
 import type { JobData } from '@/lib/jobs/types';
 import { extractAssistantTextFromRawLog, extractWorkSummary } from '@/lib/agents/work-summary-extractor.mjs';
 import { getSettings } from '@/lib/shared/config';
-import { db, schema, sqlite } from '@/lib/db';
+import { db, schema } from '@/lib/db';
 import { eq } from 'drizzle-orm';
-import { SqliteVecBackend } from '@/lib/agents/retrieval/sqlite-vec-backend';
+import { PgvectorBackend } from '@/lib/agents/retrieval/pgvector-backend';
 import { ingestAgentRun } from '@/lib/agents/retrieval/ingestion';
-import { isSqliteVecAvailable } from '@/lib/db/sqlite-vec';
 
 interface AgentContextMeta {
   agent?: { id?: string; name?: string; schedule?: string | null; triggeredBy?: string };
@@ -155,16 +155,17 @@ export async function finalizeAgentRunReport(job: JobData, rawLog: string): Prom
   void (async () => {
     try {
       const cfg = getSettings();
-      if (!cfg.retrieval_enabled || !job.workSummary || !isSqliteVecAvailable()) return;
+      if (!cfg.retrieval_enabled || !job.workSummary) return;
 
       const recordId = `${job.project}:agent_run:${job.id}`;
-      const existing = db.select()
+      const existingRows = await db.select()
         .from(schema.retrievalRecords)
         .where(eq(schema.retrievalRecords.id, recordId))
-        .get();
+        .limit(1);
+      const existing = existingRows[0];
 
-      const backend = new SqliteVecBackend(sqlite);
-      const files: string[] = job.modifiedFiles
+      const backend = new PgvectorBackend();
+      const modFiles: string[] = job.modifiedFiles
         ? (JSON.parse(job.modifiedFiles) as { path: string }[]).map((f) => f.path)
         : [];
 
@@ -175,7 +176,7 @@ export async function finalizeAgentRunReport(job: JobData, rawLog: string): Prom
         agentId: ctx.agent?.id ?? job.id,
         agentName: ctx.agent?.name ?? job.kind.replace(/^agent:/, ''),
         workSummary: job.workSummary,
-        modifiedFiles: files,
+        modifiedFiles: modFiles,
         exitCode: job.exitCode ?? -1,
         completedAt: job.finishedAt ?? Date.now() / 1000,
         ollamaUrl: cfg.retrieval_ollama_url,
@@ -184,7 +185,7 @@ export async function finalizeAgentRunReport(job: JobData, rawLog: string): Prom
       });
 
       if (!skipped && stored) {
-        db.insert(schema.retrievalRecords)
+        void db.insert(schema.retrievalRecords)
           .values({
             id: recordId,
             project: job.project,
@@ -198,7 +199,8 @@ export async function finalizeAgentRunReport(job: JobData, rawLog: string): Prom
             target: schema.retrievalRecords.id,
             set: { contentHash, indexedAt: Date.now() / 1000, chunkCount: 1 },
           })
-          .run();
+          .execute()
+          .catch((e) => console.warn('[retrieval] failed to upsert retrieval record:', e));
       }
     } catch (err) {
       console.warn('[retrieval] agent run ingestion failed:', err);

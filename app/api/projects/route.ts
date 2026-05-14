@@ -13,7 +13,7 @@ export async function GET() {
     }
   }
 
-  const cached = db.select().from(schema.ghIssuesCache).all();
+  const cached = await db.select().from(schema.ghIssuesCache);
   const issueCounts: Record<string, { prs: number; issues: number }> = {};
   for (const row of cached) {
     try {

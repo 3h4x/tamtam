@@ -1,38 +1,50 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import * as schema from '@/lib/db/schema';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-
-  sqlite.exec(`
+async function applyDdl(h: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries: each CREATE TABLE must be
+  // its own db.execute call.
+  await h.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS skills (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT NOT NULL DEFAULT '',
-      content TEXT NOT NULL DEFAULT '',
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
-  `);
-
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      description text NOT NULL DEFAULT '',
+      content text NOT NULL DEFAULT '',
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
 }
 
 describe('composeAgentSkills', () => {
+  let sharedHandle: TestDbHandle;
+  // Back-compat shim so existing test bodies referencing `handle.db` work.
+  const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
   let tempDir: string;
   let skillsDir: string;
   let dataSkillsDir: string;
-  let testDb: ReturnType<typeof createTestDb>;
   let composeAgentSkills: typeof import('@/lib/agents/compose-skills').composeAgentSkills;
 
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
   beforeEach(async () => {
-    vi.resetModules();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-compose-skills-'));
     skillsDir = join(tempDir, 'skills');
     dataSkillsDir = join(tempDir, 'data-skills');
@@ -40,8 +52,10 @@ describe('composeAgentSkills', () => {
     mkdirSync(join(dataSkillsDir, 'custom'), { recursive: true });
     mkdirSync(join(tempDir, 'project', 'docs'), { recursive: true });
 
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    await sharedHandle.db.execute(sql.raw('TRUNCATE skills'));
+
+    vi.resetModules();
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/skills/skills', () => ({
       SKILLS_DIR: skillsDir,
       DATA_SKILLS_DIR: dataSkillsDir,
@@ -50,16 +64,21 @@ describe('composeAgentSkills', () => {
     ({ composeAgentSkills } = await import('@/lib/agents/compose-skills'));
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.resetModules();
-    testDb.sqlite.close();
+    vi.clearAllMocks();
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('composes requested docs, DB skills, and persona files in the expected order', () => {
-    testDb.sqlite
-      .prepare('INSERT INTO skills (id, name, description, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run('db-skill-1', 'DB Skill', 'database description', 'Use the real db skill.', 1, 1);
+  it('composes requested docs, DB skills, and persona files in the expected order', async () => {
+    await handle.db.insert(schema.skills).values({
+      id: 'db-skill-1',
+      name: 'DB Skill',
+      description: 'database description',
+      content: 'Use the real db skill.',
+      createdAt: 1,
+      updatedAt: 1,
+    });
 
     writeFileSync(join(tempDir, 'project', 'docs', 'plan.md'), 'Follow the release checklist.');
     writeFileSync(
@@ -74,7 +93,7 @@ Review recent changes carefully.`,
       '# Team Writer\n\nProduce concise docs updates.',
     );
 
-    const composed = composeAgentSkills(
+    const composed = await composeAgentSkills(
       join(tempDir, 'project'),
       ['db-skill-1', 'persona:engineering/reviewer', 'persona:custom/writer'],
       ['docs/plan.md'],
@@ -117,10 +136,10 @@ Review recent changes carefully.`,
     ]);
   });
 
-  it('ignores doc paths outside the project root', () => {
+  it('ignores doc paths outside the project root', async () => {
     writeFileSync(join(tempDir, 'outside.md'), 'should stay out');
 
-    const composed = composeAgentSkills(
+    const composed = await composeAgentSkills(
       join(tempDir, 'project'),
       [],
       ['../outside.md', 'docs/missing.md'],
@@ -130,8 +149,8 @@ Review recent changes carefully.`,
     expect(composed.metaDocs).toEqual([]);
   });
 
-  it('keeps fallback metadata for missing persona files without adding prompt content', () => {
-    const composed = composeAgentSkills(
+  it('keeps fallback metadata for missing persona files without adding prompt content', async () => {
+    const composed = await composeAgentSkills(
       join(tempDir, 'project'),
       ['persona:engineering/missing-skill'],
       [],

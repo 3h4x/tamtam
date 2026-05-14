@@ -31,8 +31,8 @@ describe('finalizeAgentRunReport', () => {
   let upsertRecommendationMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let ingestAgentRunMock: ReturnType<typeof vi.fn>;
-  let isSqliteVecAvailableMock: ReturnType<typeof vi.fn>;
-  let insertRunMock: ReturnType<typeof vi.fn>;
+  let insertExecuteMock: ReturnType<typeof vi.fn>;
+  let pgvectorBackendCtorMock: (...args: unknown[]) => void;
   let settingsMock: {
     retrieval_enabled: boolean;
     retrieval_ollama_url: string;
@@ -45,8 +45,8 @@ describe('finalizeAgentRunReport', () => {
     upsertRecommendationMock = vi.fn();
     resolveProjectPathMock = vi.fn().mockReturnValue('/repo');
     ingestAgentRunMock = vi.fn().mockResolvedValue({ contentHash: 'hash-1', skipped: false, stored: true });
-    isSqliteVecAvailableMock = vi.fn().mockReturnValue(true);
-    insertRunMock = vi.fn();
+    insertExecuteMock = vi.fn().mockResolvedValue(undefined);
+    pgvectorBackendCtorMock = vi.fn();
     settingsMock = {
       retrieval_enabled: false,
       retrieval_ollama_url: 'http://localhost:11434',
@@ -56,19 +56,24 @@ describe('finalizeAgentRunReport', () => {
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/recommendations/recommendations', () => ({ upsertRecommendation: upsertRecommendationMock }));
     vi.doMock('@/lib/shared/config', () => ({ getSettings: () => settingsMock }));
-    vi.doMock('@/lib/db/sqlite-vec', () => ({ isSqliteVecAvailable: isSqliteVecAvailableMock }));
+    vi.doMock('@/lib/agents/retrieval/pgvector-backend', () => ({
+      PgvectorBackend: class {
+        constructor(...args: unknown[]) {
+          pgvectorBackendCtorMock(...args);
+        }
+      },
+    }));
     vi.doMock('@/lib/agents/retrieval/ingestion', () => ({ ingestAgentRun: ingestAgentRunMock }));
     vi.doMock('@/lib/db', () => ({
-      sqlite: {},
       db: {
         select: vi.fn().mockReturnValue({
           from: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({ get: vi.fn().mockReturnValue(null) }),
+            where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }),
           }),
         }),
         insert: vi.fn().mockReturnValue({
           values: vi.fn().mockReturnValue({
-            onConflictDoUpdate: vi.fn().mockReturnValue({ run: insertRunMock }),
+            onConflictDoUpdate: vi.fn().mockReturnValue({ execute: insertExecuteMock }),
           }),
         }),
       },
@@ -315,21 +320,6 @@ describe('finalizeAgentRunReport', () => {
     expect(upsertRecommendationMock).not.toHaveBeenCalled();
   });
 
-  it('skips retrieval ingestion entirely when sqlite-vec is unavailable', async () => {
-    settingsMock.retrieval_enabled = true;
-    isSqliteVecAvailableMock.mockReturnValue(false);
-    execMock
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
-    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
-    const job = makeJob();
-
-    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: No coverage gaps found.\nFiles changed: none\nActionable work: no\n'));
-
-    expect(ingestAgentRunMock).not.toHaveBeenCalled();
-    expect(insertRunMock).not.toHaveBeenCalled();
-  });
-
   it('does not write retrieval records when vector storage fails', async () => {
     settingsMock.retrieval_enabled = true;
     ingestAgentRunMock.mockResolvedValueOnce({ contentHash: 'hash-2', skipped: false, stored: false });
@@ -342,7 +332,8 @@ describe('finalizeAgentRunReport', () => {
     await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: No coverage gaps found.\nFiles changed: none\nActionable work: no\n'));
 
     await Promise.resolve();
+    await Promise.resolve();
     expect(ingestAgentRunMock).toHaveBeenCalledOnce();
-    expect(insertRunMock).not.toHaveBeenCalled();
+    expect(insertExecuteMock).not.toHaveBeenCalled();
   });
 });

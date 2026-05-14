@@ -7,7 +7,8 @@ export async function GET(
   { params }: { params: Promise<{ skillId: string }> }
 ) {
   const { skillId } = await params;
-  const skill = db.select().from(schema.skills).where(eq(schema.skills.id, skillId)).get();
+  const rows = await db.select().from(schema.skills).where(eq(schema.skills.id, skillId)).limit(1);
+  const skill = rows[0] ?? null;
   if (!skill) return NextResponse.json({ detail: 'not found' }, { status: 404 });
   return NextResponse.json({ skill });
 }
@@ -22,7 +23,8 @@ export async function PATCH(
     return NextResponse.json({ detail: 'default skills are read-only' }, { status: 403 });
   }
 
-  const existing = db.select().from(schema.skills).where(eq(schema.skills.id, skillId)).get();
+  const existingRows = await db.select().from(schema.skills).where(eq(schema.skills.id, skillId)).limit(1);
+  const existing = existingRows[0] ?? null;
   if (!existing) return NextResponse.json({ detail: 'not found' }, { status: 404 });
 
   const body = await request.json();
@@ -31,8 +33,9 @@ export async function PATCH(
   if (body.description !== undefined) updates.description = body.description.trim();
   if (body.content !== undefined) updates.content = body.content;
 
-  db.update(schema.skills).set(updates).where(eq(schema.skills.id, skillId)).run();
-  const skill = db.select().from(schema.skills).where(eq(schema.skills.id, skillId)).get();
+  await db.update(schema.skills).set(updates).where(eq(schema.skills.id, skillId));
+  const skillRows = await db.select().from(schema.skills).where(eq(schema.skills.id, skillId)).limit(1);
+  const skill = skillRows[0] ?? null;
   return NextResponse.json({ skill });
 }
 
@@ -44,6 +47,6 @@ export async function DELETE(
   if (isDefaultSkillId(skillId)) {
     return NextResponse.json({ detail: 'default skills are read-only' }, { status: 403 });
   }
-  db.delete(schema.skills).where(eq(schema.skills.id, skillId)).run();
+  await db.delete(schema.skills).where(eq(schema.skills.id, skillId));
   return NextResponse.json({ status: 'deleted' });
 }

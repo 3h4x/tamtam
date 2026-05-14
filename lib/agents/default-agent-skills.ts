@@ -361,8 +361,8 @@ function isUnmodifiedDefault(id: string, existingContent: string): boolean {
   return known.includes(h);
 }
 
-export function backfillIssueCruncherPrerequisites(): void {
-  const agents = db.select().from(schema.agents).all();
+export async function backfillIssueCruncherPrerequisites(): Promise<void> {
+  const agents = await db.select().from(schema.agents);
   for (const agent of agents) {
     if (normalizeStoredPrerequisiteCommand(agent.prerequisiteCommand) !== null) continue;
     let skillIds: string[] = [];
@@ -372,13 +372,14 @@ export function backfillIssueCruncherPrerequisites(): void {
       continue;
     }
     if (!hasIssueCruncherSkill(skillIds)) continue;
-    db.update(schema.agents)
+    void db.update(schema.agents)
       .set({
         prerequisiteCommand: buildIssueCruncherPrerequisiteCommand(agent.project),
         updatedAt: Date.now() / 1000,
       })
       .where(eq(schema.agents.id, agent.id))
-      .run();
+      .execute()
+      .catch((e) => console.error('[default-agent-skills] backfill update failed:', e));
   }
 }
 
@@ -389,27 +390,30 @@ export function seedDefaultSkills(): void {
   seeded = true;
   const now = Date.now() / 1000;
   for (const skill of DEFAULT_AGENT_SKILLS) {
-    const existing = db.select().from(schema.skills).where(eq(schema.skills.id, skill.id)).get();
-    if (!existing) {
-      db.insert(schema.skills).values({
-        id: skill.id,
-        name: skill.name,
-        description: skill.description,
-        content: skill.content,
-        createdAt: now,
-        updatedAt: now,
-      }).run();
-    } else {
-      // Default skills are not user-editable via /skills (see
-      // /api/skills/[skillId] PATCH/DELETE guards). Always overwrite content
-      // and description on boot so improvements roll out everywhere.
-      db.update(schema.skills)
-        .set({ content: skill.content, description: skill.description, updatedAt: now })
-        .where(eq(schema.skills.id, skill.id))
-        .run();
-    }
+    void db.select().from(schema.skills).where(eq(schema.skills.id, skill.id)).limit(1).then((rows) => {
+      const existing = rows[0] ?? null;
+      if (!existing) {
+        return db.insert(schema.skills).values({
+          id: skill.id,
+          name: skill.name,
+          description: skill.description,
+          content: skill.content,
+          createdAt: now,
+          updatedAt: now,
+        }).execute();
+      } else {
+        // Default skills are not user-editable via /skills (see
+        // /api/skills/[skillId] PATCH/DELETE guards). Always overwrite content
+        // and description on boot so improvements roll out everywhere.
+        return db.update(schema.skills)
+          .set({ content: skill.content, description: skill.description, updatedAt: now })
+          .where(eq(schema.skills.id, skill.id))
+          .execute();
+      }
+    }).catch((e) => console.error('[default-agent-skills] seed failed for', skill.id, e));
   }
-  backfillIssueCruncherPrerequisites();
+  void backfillIssueCruncherPrerequisites()
+    .catch((e) => console.error('[default-agent-skills] backfill failed:', e));
 }
 
 const DEFAULT_SKILL_ID_SET: ReadonlySet<string> = new Set(

@@ -12,6 +12,26 @@ vi.mock('@/lib/shared/enabled-projects', () => ({
   isProjectPaused: (...args: unknown[]) => isProjectPausedMock(...args),
 }));
 
+// The scheduler's initial arm now anchors on the DB-recorded last-fire time
+// via `lookupLastFireMs`, which performs an async `db.select(...).limit(1)`.
+// Without mocking `@/lib/db`, that call hits the real Postgres pool and
+// never resolves under fake timers — so the entry never arms and `fetchMock`
+// is never invoked. Stub to "no last run" so the initial arm uses `now` and
+// arms a single timer at +1m.
+vi.mock('@/lib/db', () => ({
+  db: {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          orderBy: () => ({ limit: () => Promise.resolve([]) }),
+          limit: () => Promise.resolve([]),
+        }),
+      }),
+    }),
+  },
+  schema: { jobs: { project: 'project', kind: 'kind', finishedAt: 'finished_at', id: 'id' } },
+}));
+
 import {
   computeNextFire,
   startInternalScheduler,
@@ -202,15 +222,16 @@ describe('internal-scheduler', () => {
       // slot lands in the past and the timer is clamped to ~1s.
       vi.resetModules();
       const ninetyMinAgoSec = (Date.now() - 90 * 60_000) / 1000;
-      const getMock = vi.fn().mockReturnValue({ finishedAt: ninetyMinAgoSec });
-      const limitMock = vi.fn().mockReturnValue({ get: getMock });
+      // The scheduler now awaits `.limit(1)` directly (async drizzle) and
+      // reads `rows[0]`. Resolve the chain to a single-row array.
+      const limitMock = vi.fn().mockResolvedValue([{ finishedAt: ninetyMinAgoSec }]);
       const orderByMock = vi.fn().mockReturnValue({ limit: limitMock });
-      const whereMock = vi.fn().mockReturnValue({ orderBy: orderByMock });
+      const whereMock = vi.fn().mockReturnValue({ orderBy: orderByMock, limit: limitMock });
       const fromMock = vi.fn().mockReturnValue({ where: whereMock });
       const selectMock = vi.fn().mockReturnValue({ from: fromMock });
       vi.doMock('@/lib/db', () => ({
         db: { select: selectMock },
-        schema: { jobs: { project: 'project', kind: 'kind', finishedAt: 'finished_at' } },
+        schema: { jobs: { project: 'project', kind: 'kind', finishedAt: 'finished_at', id: 'id' } },
       }));
 
       const mod = await import('@/lib/scheduling/internal-scheduler');
@@ -220,8 +241,11 @@ describe('internal-scheduler', () => {
 
       mod.upsertAgentSchedule({ id: 'a-overdue', project: 'p', name: 'n', schedule: '30m', prompt: 'go', enabled: true });
 
+      // Yield once so the async DB lookup resolves and `armNextSync` runs.
+      for (let _i = 0; _i < 5; _i++) await Promise.resolve();
+
       // The lookup must have happened (the fix's whole point).
-      expect(getMock).toHaveBeenCalled();
+      expect(limitMock).toHaveBeenCalled();
 
       // Overdue: nextFireMs is in the future but bounded by the spread
       // window (≤ 30s + 5min). It is NOT in the past — that would be a
@@ -246,15 +270,15 @@ describe('internal-scheduler', () => {
     it('still fires at next-period when the agent is fresh (last run within the period)', async () => {
       vi.resetModules();
       const oneMinAgoSec = (Date.now() - 60_000) / 1000;
-      const getMock = vi.fn().mockReturnValue({ finishedAt: oneMinAgoSec });
-      const limitMock = vi.fn().mockReturnValue({ get: getMock });
+      // Async drizzle: `.limit(1)` resolves to the row array directly.
+      const limitMock = vi.fn().mockResolvedValue([{ finishedAt: oneMinAgoSec }]);
       const orderByMock = vi.fn().mockReturnValue({ limit: limitMock });
-      const whereMock = vi.fn().mockReturnValue({ orderBy: orderByMock });
+      const whereMock = vi.fn().mockReturnValue({ orderBy: orderByMock, limit: limitMock });
       const fromMock = vi.fn().mockReturnValue({ where: whereMock });
       const selectMock = vi.fn().mockReturnValue({ from: fromMock });
       vi.doMock('@/lib/db', () => ({
         db: { select: selectMock },
-        schema: { jobs: { project: 'project', kind: 'kind', finishedAt: 'finished_at' } },
+        schema: { jobs: { project: 'project', kind: 'kind', finishedAt: 'finished_at', id: 'id' } },
       }));
 
       const mod = await import('@/lib/scheduling/internal-scheduler');
@@ -263,6 +287,10 @@ describe('internal-scheduler', () => {
       mod.setSchedulerBaseUrl('http://test');
 
       mod.upsertAgentSchedule({ id: 'a-fresh', project: 'p', name: 'n', schedule: '30m', prompt: 'go', enabled: true });
+
+      // Drain microtasks so the async `lookupLastFireMs` resolves and
+      // `armNextSync` updates `entry.nextFireMs` before we inspect the dump.
+      for (let _i = 0; _i < 5; _i++) await Promise.resolve();
 
       const dump = mod.dumpInternalScheduler();
       const entry = dump.entries.find(e => e.agentId === 'a-fresh')!;
@@ -401,10 +429,11 @@ describe('internal-scheduler — issue-branch skip', () => {
     // fire time. Without mocking @/lib/db here, the test would hit the real
     // production DB and a stale `agent:tests` row would back-date nextFireMs
     // into the past, causing the timer to fire ~60 times during the 60s
-    // vi.advanceTimersByTimeAsync window. Stub to "no last run".
+    // vi.advanceTimersByTimeAsync window. Stub to "no last run" — async
+    // drizzle: `.limit(1)` resolves to `[]`.
     vi.doMock('@/lib/db', () => ({
-      db: { select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ limit: () => ({ get: () => undefined }) }) }) }) }) },
-      schema: { jobs: { project: 'project', kind: 'kind', finishedAt: 'finished_at' } },
+      db: { select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ limit: () => Promise.resolve([]) }), limit: () => Promise.resolve([]) }) }) }) },
+      schema: { jobs: { project: 'project', kind: 'kind', finishedAt: 'finished_at', id: 'id' } },
     }));
 
     const mod = await import('@/lib/scheduling/internal-scheduler');
@@ -521,10 +550,11 @@ describe('internal-scheduler — budget skip', () => {
     // Stub the DB lookup so the new "anchored on last run" arming uses
     // "now" (no last run) and arms a single timer at +1m, not a flood of
     // 1s retries against a stale production row. See the issue-branch
-    // skip describe for the same workaround.
+    // skip describe for the same workaround. Async drizzle: `.limit(1)`
+    // resolves to `[]`.
     vi.doMock('@/lib/db', () => ({
-      db: { select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ limit: () => ({ get: () => undefined }) }) }) }) }) },
-      schema: { jobs: { project: 'project', kind: 'kind', finishedAt: 'finished_at' } },
+      db: { select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ limit: () => Promise.resolve([]) }), limit: () => Promise.resolve([]) }) }) }) },
+      schema: { jobs: { project: 'project', kind: 'kind', finishedAt: 'finished_at', id: 'id' } },
     }));
 
     const mod = await import('@/lib/scheduling/internal-scheduler');

@@ -1,12 +1,33 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
-describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
-  let POST: (req: NextRequest, ctx: { params: Promise<{ projectName: string }> }) => Promise<Response>;
-  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
-  let execMock: ReturnType<typeof vi.fn>;
-  let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
+const mocks = vi.hoisted(() => ({
+  resolveProjectPath: vi.fn(),
+  clearProjectDataCache: vi.fn(),
+  exec: vi.fn(),
+  getProjectTestConfig: vi.fn(),
+  getLock: vi.fn(),
+  listJobs: vi.fn(),
+  clearIssueBranchLockCache: vi.fn(),
+}));
 
+vi.mock('@/lib/shared/project-data', () => ({
+  resolveProjectPath: mocks.resolveProjectPath,
+  clearProjectDataCache: mocks.clearProjectDataCache,
+}));
+vi.mock('@/lib/shared/shell', () => ({ exec: mocks.exec }));
+vi.mock('@/lib/scheduling/scheduling', () => ({
+  getProjectTestConfig: mocks.getProjectTestConfig,
+}));
+vi.mock('@/lib/pipeline/pipeline-lock', () => ({ getLock: mocks.getLock }));
+vi.mock('@/lib/jobs/job-storage', () => ({ listJobs: mocks.listJobs }));
+vi.mock('@/lib/shared/project-branch-lock', () => ({
+  clearIssueBranchLockCache: mocks.clearIssueBranchLockCache,
+}));
+
+import { POST } from '@/app/api/projects/by-project/[projectName]/issue-branch/route';
+
+describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
   function makeExecResult(overrides: { exitCode?: number; stdout?: string; stderr?: string } = {}) {
     return { exitCode: 0, stdout: '', stderr: '', ...overrides };
   }
@@ -19,33 +40,19 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
     });
   }
 
-  beforeEach(async () => {
-    vi.resetModules();
-
-    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/project');
-    execMock = vi.fn().mockResolvedValue(makeExecResult());
+  beforeEach(() => {
+    mocks.resolveProjectPath.mockReset().mockReturnValue('/path/to/project');
+    mocks.clearProjectDataCache.mockReset();
+    mocks.exec.mockReset().mockResolvedValue(makeExecResult());
     // Default: no per-project row → issueAutoBranch defaults to ON (legacy).
-    getProjectTestConfigMock = vi.fn().mockReturnValue(null);
-
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: resolveProjectPathMock,
-      clearProjectDataCache: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: getProjectTestConfigMock,
-    }));
-
-    const mod = await import('@/app/api/projects/by-project/[projectName]/issue-branch/route');
-    POST = mod.POST;
-  });
-
-  afterEach(() => {
-    vi.resetModules();
+    mocks.getProjectTestConfig.mockReset().mockReturnValue(null);
+    mocks.getLock.mockReset().mockResolvedValue(null);
+    mocks.listJobs.mockReset().mockReturnValue([]);
+    mocks.clearIssueBranchLockCache.mockReset();
   });
 
   it('returns 404 when project not found', async () => {
-    resolveProjectPathMock.mockReturnValue(null);
+    mocks.resolveProjectPath.mockReturnValue(null);
     const res = await POST(makeRequest({ issue_number: 1 }), {
       params: Promise.resolve({ projectName: 'unknown' }),
     });
@@ -90,7 +97,7 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
   });
 
   it('returns already-on-branch when already on correct branch', async () => {
-    execMock.mockResolvedValue(makeExecResult({ stdout: 'fix/issue-7-my-bug\n' }));
+    mocks.exec.mockResolvedValue(makeExecResult({ stdout: 'fix/issue-7-my-bug\n' }));
     const res = await POST(makeRequest({ issue_number: 7, issue_title: 'My Bug' }), {
       params: Promise.resolve({ projectName: 'myproj' }),
     });
@@ -101,7 +108,7 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
   });
 
   it('returns created when checkout -b succeeds', async () => {
-    execMock
+    mocks.exec
       .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));
     const res = await POST(makeRequest({ issue_number: 42, issue_title: 'Add feature' }), {
@@ -114,7 +121,7 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
   });
 
   it('returns reused when checkout -b fails but checkout succeeds', async () => {
-    execMock
+    mocks.exec
       .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))                       // branch --show-current
       .mockResolvedValueOnce(makeExecResult({ stdout: 'refs/remotes/origin/master\n' }))   // symbolic-ref
       .mockResolvedValueOnce(makeExecResult({ stdout: '  master\n  other\n' }))            // branch --merged (no match)
@@ -130,7 +137,7 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
   });
 
   it('returns 500 when both checkouts fail', async () => {
-    execMock
+    mocks.exec
       .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))
       .mockResolvedValueOnce(makeExecResult({ stdout: 'refs/remotes/origin/master\n' }))
       .mockResolvedValueOnce(makeExecResult({ stdout: '  master\n' }))
@@ -145,7 +152,7 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
   });
 
   it('skips checkout when branch is already merged into default', async () => {
-    execMock
+    mocks.exec
       .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))                                  // branch --show-current
       .mockResolvedValueOnce(makeExecResult({ stdout: 'refs/remotes/origin/master\n' }))              // symbolic-ref
       .mockResolvedValueOnce(makeExecResult({ stdout: '  master\n  fix/issue-9-already-merged\n' })); // branch --merged
@@ -158,14 +165,14 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
     expect(data.status).toBe('skipped');
     expect(data.reason).toContain('already merged');
     // The checkout must not have been attempted.
-    const checkoutCall = execMock.mock.calls.find(
+    const checkoutCall = mocks.exec.mock.calls.find(
       (c) => c[0] === 'git' && Array.isArray(c[1]) && c[1].includes('checkout'),
     );
     expect(checkoutCall).toBeUndefined();
   });
 
   it('slugifies the title correctly', async () => {
-    execMock
+    mocks.exec
       .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));
     const res = await POST(
@@ -178,7 +185,7 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
   });
 
   it('uses branch without slug when title is empty', async () => {
-    execMock
+    mocks.exec
       .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));
     const res = await POST(makeRequest({ issue_number: 99 }), {
@@ -194,7 +201,7 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
     // The endpoint must short-circuit without touching the working tree so the
     // terminal flow falls through to prompt auto-submit on whatever branch the
     // user is currently on.
-    getProjectTestConfigMock.mockReturnValue({
+    mocks.getProjectTestConfig.mockReturnValue({
       testCommand: null, testCronEnabled: false, testCronSchedule: null,
       autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false,
       autoPrMergeEnabled: false, issueAutoBranch: false,
@@ -205,16 +212,16 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('skipped');
-    expect(execMock).not.toHaveBeenCalled();
+    expect(mocks.exec).not.toHaveBeenCalled();
   });
 
   it('still creates the branch when issue_auto_branch is true', async () => {
-    getProjectTestConfigMock.mockReturnValue({
+    mocks.getProjectTestConfig.mockReturnValue({
       testCommand: null, testCronEnabled: false, testCronSchedule: null,
       autoCommitEnabled: false, autoPushEnabled: false, releaseAfterRun: false,
       autoPrMergeEnabled: false, issueAutoBranch: true,
     });
-    execMock
+    mocks.exec
       .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));
     const res = await POST(makeRequest({ issue_number: 11, issue_title: 'Something' }), {
@@ -224,6 +231,6 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
     const data = await res.json();
     expect(data.status).toBe('created');
     expect(data.branch).toBe('fix/issue-11-something');
-    expect(execMock).toHaveBeenCalled();
+    expect(mocks.exec).toHaveBeenCalled();
   });
 });

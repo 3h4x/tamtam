@@ -1,46 +1,55 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
-    CREATE TABLE ollama_usage (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      ts REAL NOT NULL,
-      model TEXT NOT NULL,
-      project TEXT,
-      source_kind TEXT,
-      input_tokens INTEGER NOT NULL DEFAULT 0,
-      duration_ms INTEGER NOT NULL DEFAULT 0
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+let sharedHandle: TestDbHandle;
+
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS ollama_usage (
+      id serial PRIMARY KEY,
+      ts double precision NOT NULL,
+      model text NOT NULL,
+      project text,
+      source_kind text,
+      input_tokens integer NOT NULL DEFAULT 0,
+      duration_ms integer NOT NULL DEFAULT 0
+    )
+  `));
 }
 
-const testDb = createTestDb();
+beforeAll(async () => {
+  sharedHandle = await createTestPgDbEmpty();
+  await applyDdl(sharedHandle);
+});
 
-vi.mock('@/lib/db', () => ({ db: testDb.db, schema, sqlite: testDb.sqlite }));
+afterAll(async () => {
+  await new Promise((r) => setTimeout(r, 30));
+  try {
+    await sharedHandle[Symbol.asyncDispose]();
+  } catch {
+    // ignore
+  }
+});
 
-const seed = (rows: { ts: number; model: string; project?: string | null; sourceKind?: string | null; inputTokens: number; durationMs: number }[]) => {
+async function seed(rows: { ts: number; model: string; project?: string | null; sourceKind?: string | null; inputTokens: number; durationMs: number }[]) {
   for (const r of rows) {
-    testDb.db.insert(schema.ollamaUsage).values({
+    await sharedHandle.db.insert(schema.ollamaUsage).values({
       ts: r.ts,
       model: r.model,
       project: r.project ?? null,
       sourceKind: r.sourceKind ?? null,
       inputTokens: r.inputTokens,
       durationMs: r.durationMs,
-    }).run();
+    });
   }
-};
+}
 
-beforeEach(() => {
-  testDb.sqlite.exec('DELETE FROM ollama_usage');
+beforeEach(async () => {
+  await sharedHandle.db.execute(sql.raw('TRUNCATE ollama_usage'));
   vi.resetModules();
-  vi.doMock('@/lib/db', () => ({ db: testDb.db, schema, sqlite: testDb.sqlite }));
+  vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
 });
 
 afterEach(() => {
@@ -63,7 +72,7 @@ describe('GET /api/stats/ollama', () => {
 
   it('aggregates totals and groups by model, source, and project', async () => {
     const now = Date.now() / 1000;
-    seed([
+    await seed([
       { ts: now - 60, model: 'nomic-embed-text', project: 'a', sourceKind: 'project_doc', inputTokens: 100, durationMs: 50 },
       { ts: now - 120, model: 'nomic-embed-text', project: 'a', sourceKind: 'query', inputTokens: 10, durationMs: 5 },
       { ts: now - 180, model: 'nomic-embed-text', project: 'b', sourceKind: 'project_doc', inputTokens: 200, durationMs: 100 },
@@ -91,7 +100,7 @@ describe('GET /api/stats/ollama', () => {
 
   it('filters out rows outside the requested window', async () => {
     const now = Date.now() / 1000;
-    seed([
+    await seed([
       { ts: now - 60, model: 'm', inputTokens: 1, durationMs: 1 },
       { ts: now - 48 * 60 * 60, model: 'm', inputTokens: 999, durationMs: 999 },
     ]);

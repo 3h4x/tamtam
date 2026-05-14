@@ -1,14 +1,22 @@
-import Database from 'better-sqlite3';
+import pg from 'pg';
 import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
-import { extractAssistantTextFromRawLog, extractWorkSummary } from '../lib/agents/work-summary-extractor.mjs';
+import {
+  extractAssistantTextFromRawLog,
+  extractWorkSummary,
+} from '../lib/agents/work-summary-extractor.mjs';
 
-export function resolveDbPath() {
-  return process.env.TAMTAM_DB_PATH || join(process.cwd(), 'data', 'db', 'tamtam.db');
+const { Pool } = pg;
+
+export function resolveDatabaseUrl() {
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error('[issue-run-summary] DATABASE_URL not set');
+  }
+  return url;
 }
 
 export function openDb() {
-  return new Database(resolveDbPath(), { readonly: false });
+  return new Pool({ connectionString: resolveDatabaseUrl(), max: 2 });
 }
 
 export function loadSummaryFromLog(logPath) {

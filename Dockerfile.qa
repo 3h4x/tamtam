@@ -6,7 +6,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=1338
 ENV HOSTNAME=0.0.0.0
 ENV TAMTAM_ROOT=/app
-ENV TAMTAM_DB_PATH=/qa/data/tamtam-qa.db
+ENV DATABASE_URL=postgres://tamtam:tamtam@postgres:5432/tamtam_qa
 ENV TAMTAM_BASE_URL=http://localhost:1338
 ENV PATH=/app/scripts/qa-mocks:/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
@@ -17,4 +17,4 @@ RUN pnpm install --frozen-lockfile --prod=false
 
 EXPOSE 1338
 
-CMD ["sh", "-c", "pnpm install --frozen-lockfile --prod=false --config.confirm-modules-purge=false && node scripts/qa-seed.mjs && next dev --port 1338 --hostname 0.0.0.0"]
+CMD ["sh", "-c", "pnpm install --frozen-lockfile --prod=false --config.confirm-modules-purge=false && pnpm db:migrate && node scripts/qa-seed.mjs && next dev --port 1338 --hostname 0.0.0.0"]

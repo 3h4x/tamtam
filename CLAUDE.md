@@ -20,7 +20,7 @@ Steps are pluggable per project. The **🚀 Release** button triggers the pipeli
 
 ## Tech Stack
 - **Framework**: Next.js 16 (App Router) — both frontend and backend
-- **Database**: Drizzle ORM + better-sqlite3, WAL mode, default DB at `data/db/tamtam.db` (gitignored; override with `TAMTAM_DB_PATH`)
+- **Database**: Drizzle ORM + node-postgres (`pg.Pool`), Postgres 16 with the `vector` extension. Connection string in `DATABASE_URL` (required).
 - **Streaming**: SSE via route handlers for real-time run output
 - **Styling**: Tailwind CSS v4
 - **Agent providers**: Claude-compatible CLI shims for Claude, Gemini, LM Studio, Codex, and custom providers
@@ -40,7 +40,7 @@ Steps are pluggable per project. The **🚀 Release** button triggers the pipeli
 - `pnpm build` — production build.
 - `pnpm test` / `pnpm test:watch` — vitest unit tests
 - `pnpm test:e2e` — Playwright e2e (requires dev server on port 1337)
-- `pnpm test:e2e:pipeline` — pipeline e2e (`e2e/pipeline/`); spins up an isolated Next.js dev server on port 1338 with a temp DB at `/tmp/tamtam-e2e-pipeline/`. See `docs/E2E.md`.
+- `pnpm test:e2e:pipeline` — pipeline e2e (`e2e/pipeline/`); spins up an isolated Next.js dev server on port 1338 against a temp Postgres database; harness creates and drops the DB per run. See `docs/E2E.md`.
 - `pnpm lint` / `pnpm type-check` / `pnpm check` — ESLint / `tsc --noEmit` / lint+type-check+test
 - `pnpm db:generate` / `pnpm db:migrate` — Drizzle migrations
 - `pnpm dev:profile` / `pnpm dev:flamegraph` — Turbopack tracing / V8 CPU profiling. See `docs/PROFILING.md`.
@@ -102,13 +102,13 @@ See `docs/API.md` for the full route reference. New routes must be documented th
 
 ## Testing Requirements
 - **All new API routes must have vitest tests** in `__tests__/api/`; lib logic tests go in `__tests__/lib/` or alongside the file.
-- **Do not mock the database** — use an in-memory `better-sqlite3` instance with the real Drizzle schema. Mock only external side-effects: `lib/shared/shell.ts` `exec`, PM2, CLI spawning.
+- **Do not mock the database** — use the PGlite helper at `__tests__/helpers/test-db.ts` (`createTestPgDb()` for full production schema or `createTestPgDbEmpty()` for raw per-test DDL) with the real Drizzle schema. Mock only external side-effects: `lib/shared/shell.ts` `exec`, PM2, CLI spawning.
 - Run `pnpm test` after every non-trivial code change. All tests must pass before committing.
-- **Use the package scripts, not raw Vitest**: run `pnpm test` / `pnpm test:watch` instead of `vitest` directly so `scripts/ensure-better-sqlite3.js` runs first and verifies the native SQLite binding before the suite starts.
+- **Use the package scripts, not raw Vitest**: run `pnpm test` / `pnpm test:watch` instead of `vitest` directly so global setup runs (`__tests__/global-setup.ts`) and the test `DATABASE_URL` guard is installed.
 - Test naming: `__tests__/api/<route-name>.test.ts` mirroring `app/api/<route-name>/route.ts`.
-- **`createTestDb()` pattern**: each test file defines its own local `createTestDb()` opening `new Database(':memory:')` with `pragma journal_mode = WAL` and creates only the tables that test needs via raw SQL. No shared helper — copy from the nearest similar test. Never import the real DB connection in tests.
+- **PGlite test-db pattern**: each test calls `await createTestPgDbEmpty()` (or `createTestPgDb()`) from `__tests__/helpers/test-db.ts`. For the empty variant, create only the tables the test needs via `await db.execute(sql.raw('CREATE TABLE ...'))` in Postgres dialect (`text`/`integer`/`boolean`/`double precision`). Dispose with `await handle[Symbol.asyncDispose]()` in `afterEach`. Never import the real DB connection in tests.
 - **Match the nearby test style**: this repo already mixes one-route-per-file tests with broader coverage files for closely related endpoints/components. Extend the nearest existing test when it already owns that behavior; do not introduce a new shared test utility layer just to avoid a little duplication.
-- **Test DB scope**: unit and API tests should build the smallest in-memory schema that exercises the behavior under test. Do not import `@/lib/db` before mocks are installed, run production migrations, or touch `data/db/tamtam.db` just to satisfy a test.
+- **Test DB scope**: unit and API tests should build the smallest in-process Postgres schema (via `createTestPgDbEmpty()` + raw DDL) that exercises the behavior under test. Do not import `@/lib/db` before mocks are installed, run production migrations needlessly, or touch the live Postgres referenced by `DATABASE_URL` just to satisfy a test.
 - **E2e vs unit**: three kinds of Playwright tests — (1) browser tests in `e2e/` for UI rendering; (2) pipeline e2e in `e2e/pipeline/` for full pipeline chains where completion hooks and PM2 lifecycle must be exercised; (3) API integration tests via `request` fixture. Write a pipeline e2e when you need to verify cross-step hook chaining or probe-sweep-driven follow-ons. See `docs/E2E.md`.
 - **What must be tested**: new API route handlers (happy + error), new lib functions with branching logic or state mutations. Skip trivial passthroughs.
 - **Pipeline e2e isolation**: `pnpm test:e2e:pipeline` uses port 1338, temp DB at `/tmp/tamtam-e2e-pipeline/`, intercepts `git`/`gh` via shims in `e2e/pipeline/mocks/bin/`. Sequential workers. Never run pipeline e2e against production server or DB.
@@ -127,7 +127,7 @@ See `docs/API.md` for the full route reference. New routes must be documented th
 ## Key Patterns
 - Runtime config/state is stored in DB (`settings`, `projects`, `jobs`, `skills`, `agents`, `recommendations`, `ghStatus`, `ghIssuesCache`, `pipelineLocks`, `queuedAgentRuns`, `notificationThrottle`, `maintenanceStatus`, `retrievalRecords`, `retrievalChunks`, `ollamaUsage`); shared per-project config and file-agent prompts can also live in committed `.tamtam/` files.
 - Workspace path configured in Settings UI; projects discovered by scanning for git repos.
-- Application/runtime DB access should import `db` / `schema` from `@/lib/db`. Do not open ad-hoc `better-sqlite3` connections in `app/`, `components/`, or `lib/`; reserve direct SQLite construction for tests and explicit bootstrap/maintenance scripts.
+- Application/runtime DB access should import `db` / `schema` from `@/lib/db`. Do not open ad-hoc `pg.Pool`/`pg.Client` connections in `app/`, `components/`, or `lib/`; reserve direct pg connections for explicit maintenance scripts that run outside the Next.js process.
 - Most CLI calls (git, gh, launchctl, pm2) go through `lib/shared/shell.ts`. `lib/shared/project-data.ts` assembles project data with 10s TTL cache.
 - Client-side API helpers live under `lib/client/` and are surfaced through `lib/client-api.ts`. When a fetch pattern is reused across components, add or extend a helper there instead of duplicating request/response handling in the component.
 - Direct `child_process` usage is the exception, not the default: keep ordinary shelling in `lib/shared/shell.ts`; only use raw spawn/process control in the runner/shim/streaming paths that already need it, and keep the reason obvious in code.
@@ -220,7 +220,7 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 | `docs/DATABASE.md` | Drizzle schema reference — all tables, columns, indices | Adding/changing DB tables, writing migrations, or working with `lib/db/` |
 | `docs/BACKUP.md` | SQLite backup, verification, restore, and retention runbook | Changing backup/restore behavior or operating database recovery |
 | `docs/SETTINGS.md` | All `settings` table keys, their types, and defaults | Adding a new setting, reading config in a new place, or changing defaults |
-| `docs/AGENT.md` | Agent concepts: skills composition, scheduling, runner lifecycle | Working on agents, the internal scheduler, or skill composition |
+| `docs/AGENT.md` | Agent concepts: skills composition, scheduling, runner lifecycle, durable intake workflow | Working on agents, the internal scheduler, skill composition, or the Postgres-backed durable workflow path |
 | `docs/CACHING.md` | Layered TTL cache strategy (in-memory + SQLite) | Adding a new cache layer, changing TTLs, or debugging stale data |
 | `docs/PROFILING.md` | Server/client/Turbopack profiling guide | Investigating perf regressions or high CPU/memory |
 | `docs/SECURITY.md` | Security model: file-agent trust, untrusted input handling, threat surface | Any security-sensitive change: auth, file-agent parsing, untrusted content |
@@ -271,7 +271,7 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 ## Scope & Safety Rules
 - **Destructive git**: do not run `git reset --hard`, `git clean`, force pushes, branch deletion, or history rewrites unless explicitly requested.
 - **Dirty worktrees are normal**: before editing, check whether the target file already has local changes. Preserve unrelated edits, work around them when possible, and never revert someone else's in-progress work just to get a clean diff.
-- **Production data**: do not delete or rewrite `data/db/tamtam.db`, run destructive SQL, or remove project log directories without explicit approval.
+- **Production data**: do not drop tables, run destructive SQL against the Postgres database referenced by `DATABASE_URL`, or remove project log directories without explicit approval.
 - **Schema safety**: migrations must be additive or carefully backfilled; document any irreversible data loss before applying.
 - **External side effects**: treat `git push`, GitHub issue/PR actions, webhook sends, and PM2 process changes as real side effects. Run only when required by the task and the target is clear.
 - **Profiling scripts are disruptive**: `pnpm dev:profile` and `pnpm dev:flamegraph` explicitly tear down the current TamTam process and clear port `1337` before starting an instrumented dev server. Use them only for intentional profiling work, not as a routine restart/debug command.

@@ -9,8 +9,8 @@ export type IssueRunSummaryBackfillCandidate = {
 
 // Backfills are intentionally narrow: only finished issue-linked terminal runs
 // that produced a log and still have no stored summary are eligible.
-export function listIssueRunSummaryBackfillCandidates(): IssueRunSummaryBackfillCandidate[] {
-  return db
+export async function listIssueRunSummaryBackfillCandidates(): Promise<IssueRunSummaryBackfillCandidate[]> {
+  const rows = await db
     .select({
       id: schema.jobs.id,
       logPath: schema.jobs.logPath,
@@ -25,7 +25,6 @@ export function listIssueRunSummaryBackfillCandidates(): IssueRunSummaryBackfill
         isNull(schema.jobs.workSummary),
         eq(schema.jobs.workSummary, ''),
       ),
-    ))
-    .all()
-    .filter((row): row is IssueRunSummaryBackfillCandidate => typeof row.logPath === 'string' && row.logPath.length > 0);
+    ));
+  return rows.filter((row): row is IssueRunSummaryBackfillCandidate => typeof row.logPath === 'string' && row.logPath.length > 0);
 }

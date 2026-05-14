@@ -43,7 +43,7 @@ PM2 exit handler
 `app/api/streaming/[jobId]/route.ts`
 
 - On connect: reads full log file, sends existing content, records byte offset
-- `fs.watch` on the log file pushes new bytes as they arrive; 1s poll as fallback
+- `fs.watch` on the log file pushes new bytes as they arrive; 1s poll as fallback (override with `TAMTAM_STREAM_POLL_MS` env var — read once at module load; tests use a small value to exercise the poll path without the 1s wait)
 - When `job.finishedAt` is set: flushes remaining content, emits `done`, closes
 - **`?raw=1`**: forwards raw NDJSON lines unparsed (used by agent runs and `start-fix-push.ts`)
 - **Default (parsed)**: runs content through `parseStreamLines()`, emits typed SSE events

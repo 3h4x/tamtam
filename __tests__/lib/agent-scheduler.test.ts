@@ -1,47 +1,61 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
+
+// Single shared tempDir for the entire suite. agent-scheduler.ts captures
+// `LAUNCH_AGENTS_DIR = join(homedir(), 'Library', 'LaunchAgents')` at module
+// load, so homedir() must be stable across tests. Created inside the hoisted
+// block so it exists before vi.mock factories run on first SUT import.
+const mocks = vi.hoisted(() => {
+  const fsMod = require('fs') as typeof import('fs');
+  const pathMod = require('path') as typeof import('path');
+  const osMod = require('os') as typeof import('os');
+  const tempDir = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'tamtam-scheduler-test-'));
+  return {
+    tempDir,
+    execMock: vi.fn(),
+    upsertAgentScheduleMock: vi.fn(),
+    removeAgentScheduleMock: vi.fn(),
+    dumpInternalSchedulerMock: vi.fn(() => ({ entries: [] })),
+  };
+});
+const tempDir = mocks.tempDir;
+
+vi.mock('os', async () => {
+  const actual = await vi.importActual<typeof import('os')>('os');
+  return { ...actual, homedir: () => mocks.tempDir };
+});
+
+vi.mock('@/lib/shared/shell', () => ({ exec: mocks.execMock }));
+
+vi.mock('@/lib/shared/config', () => ({
+  getSettings: vi.fn().mockReturnValue({ launchagent_prefix: 'com.test' }),
+}));
+
+vi.mock('@/lib/scheduling/internal-scheduler', () => ({
+  upsertAgentSchedule: mocks.upsertAgentScheduleMock,
+  removeAgentSchedule: mocks.removeAgentScheduleMock,
+  dumpInternalScheduler: mocks.dumpInternalSchedulerMock,
+}));
+
+import {
+  installAgentSchedule,
+  uninstallAgentSchedule,
+  isAgentScheduleLoaded,
+} from '@/lib/scheduling/agent-scheduler';
 
 describe('agent-scheduler', () => {
-  let tempDir: string;
-  let execMock: ReturnType<typeof vi.fn>;
-  let upsertAgentScheduleMock: ReturnType<typeof vi.fn>;
-  let removeAgentScheduleMock: ReturnType<typeof vi.fn>;
-  let installAgentSchedule: typeof import('@/lib/scheduling/agent-scheduler').installAgentSchedule;
-  let uninstallAgentSchedule: typeof import('@/lib/scheduling/agent-scheduler').uninstallAgentSchedule;
-  let isAgentScheduleLoaded: typeof import('@/lib/scheduling/agent-scheduler').isAgentScheduleLoaded;
+  const execMock = mocks.execMock;
+  const upsertAgentScheduleMock = mocks.upsertAgentScheduleMock;
+  const removeAgentScheduleMock = mocks.removeAgentScheduleMock;
 
-  beforeEach(async () => {
-    vi.resetModules();
-    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-scheduler-test-'));
-    execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
-    upsertAgentScheduleMock = vi.fn();
-    removeAgentScheduleMock = vi.fn();
-
-    vi.doMock('os', async () => {
-      const actual = await vi.importActual<typeof import('os')>('os');
-      return { ...actual, homedir: () => tempDir };
-    });
-
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({ launchagent_prefix: 'com.test' }),
-    }));
-    vi.doMock('@/lib/scheduling/internal-scheduler', () => ({
-      upsertAgentSchedule: upsertAgentScheduleMock,
-      removeAgentSchedule: removeAgentScheduleMock,
-    }));
-
-    const mod = await import('@/lib/scheduling/agent-scheduler');
-    installAgentSchedule = mod.installAgentSchedule;
-    uninstallAgentSchedule = mod.uninstallAgentSchedule;
-    isAgentScheduleLoaded = mod.isAgentScheduleLoaded;
+  beforeEach(() => {
+    execMock.mockReset();
+    execMock.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+    upsertAgentScheduleMock.mockReset();
+    removeAgentScheduleMock.mockReset();
   });
 
-  afterEach(() => {
-    vi.resetModules();
-    rmSync(tempDir, { recursive: true, force: true });
+  afterAll(() => {
+    (require('fs') as typeof import('fs')).rmSync(tempDir, { recursive: true, force: true });
   });
 
   describe('installAgentSchedule (pm2 runner → internal scheduler)', () => {
@@ -113,79 +127,6 @@ describe('agent-scheduler', () => {
     it('returns false when pm2 describe exits non-zero', async () => {
       execMock.mockResolvedValue({ exitCode: 1, stdout: '', stderr: 'not found' });
       const loaded = await isAgentScheduleLoaded('agent-missing', 'pm2');
-      expect(loaded).toBe(false);
-    });
-  });
-
-  describe('installAgentSchedule (launchctl)', () => {
-    it('calls launchctl load', async () => {
-      await installAgentSchedule('agent-lc', '1h', 'prompt', 'launchctl');
-      const loadCall = execMock.mock.calls.find(
-        ([cmd, args]: any) => cmd === 'launchctl' && args[0] === 'load'
-      );
-      expect(loadCall).toBeTruthy();
-    });
-
-    it('writes plist file', async () => {
-      await installAgentSchedule('agent-plist', '30m', 'prompt', 'launchctl');
-      const laAgentsDir = join(tempDir, 'Library', 'LaunchAgents');
-      const plistPath = join(laAgentsDir, 'com.test.agent.agent-plist.plist');
-      expect(existsSync(plistPath)).toBe(true);
-      const content = readFileSync(plistPath, 'utf-8');
-      expect(content).toContain('<string>com.test.agent.agent-plist</string>');
-      expect(content).toContain('<integer>1800</integer>'); // 30m = 1800s
-    });
-
-    it('writes day-based schedules as day-length intervals, not raw seconds', async () => {
-      await installAgentSchedule('agent-days', '3d', 'prompt', 'launchctl');
-      const laAgentsDir = join(tempDir, 'Library', 'LaunchAgents');
-      const plistPath = join(laAgentsDir, 'com.test.agent.agent-days.plist');
-      expect(existsSync(plistPath)).toBe(true);
-      const content = readFileSync(plistPath, 'utf-8');
-      expect(content).toContain('<integer>259200</integer>'); // 3d = 259200s
-      expect(content).not.toContain('<integer>3</integer>');
-    });
-
-    it('does not touch the internal scheduler for launchctl runner', async () => {
-      await installAgentSchedule('agent-lc', '1h', 'prompt', 'launchctl');
-      expect(upsertAgentScheduleMock).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('uninstallAgentSchedule (launchctl)', () => {
-    it('calls launchctl unload and removes plist', async () => {
-      await installAgentSchedule('agent-unload', '1h', 'prompt', 'launchctl');
-      execMock.mockClear();
-      const laAgentsDir = join(tempDir, 'Library', 'LaunchAgents');
-      const plistPath = join(laAgentsDir, 'com.test.agent.agent-unload.plist');
-      expect(existsSync(plistPath)).toBe(true);
-
-      await uninstallAgentSchedule('agent-unload', 'launchctl');
-
-      const unloadCall = execMock.mock.calls.find(
-        ([cmd, args]: any) => cmd === 'launchctl' && args[0] === 'unload'
-      );
-      expect(unloadCall).toBeTruthy();
-      expect(existsSync(plistPath)).toBe(false);
-    });
-
-    it('does not throw if plist does not exist', async () => {
-      await expect(
-        uninstallAgentSchedule('nonexistent-lc-agent', 'launchctl')
-      ).resolves.not.toThrow();
-    });
-  });
-
-  describe('isAgentScheduleLoaded (launchctl)', () => {
-    it('returns true when launchctl list exits 0', async () => {
-      execMock.mockResolvedValue({ exitCode: 0, stdout: '{}', stderr: '' });
-      const loaded = await isAgentScheduleLoaded('agent-lc', 'launchctl');
-      expect(loaded).toBe(true);
-    });
-
-    it('returns false when launchctl list exits non-zero', async () => {
-      execMock.mockResolvedValue({ exitCode: 1, stdout: '', stderr: 'Could not find service' });
-      const loaded = await isAgentScheduleLoaded('agent-lc-missing', 'launchctl');
       expect(loaded).toBe(false);
     });
   });

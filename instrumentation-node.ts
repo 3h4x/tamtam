@@ -10,7 +10,7 @@ export async function reinstallAgents(): Promise<void> {
   type AgentInput = Parameters<typeof startInternalScheduler>[0][number];
   const { reconcilePm2Schedules } = await import('./lib/scheduling/agent-scheduler');
 
-  const allAgents = db.select().from(schema.agents).all();
+  const allAgents = await db.select().from(schema.agents);
   const dbEnabled: AgentInput[] = allAgents
     .filter(a => a.enabled && a.schedule)
     .map(a => ({
@@ -168,21 +168,22 @@ async function migrateLegacyFileWorkflowFlags(): Promise<void> {
     if (!schema.projects || !schema.settings?.key) return;
 
     const markerFor = (name: string) => `legacy_file_flags_migrated:${name}`;
-    const isMigrated = (name: string): boolean => {
-      const row = db.select().from(schema.settings).where(eq(schema.settings.key, markerFor(name))).get();
-      return row?.value === '1';
+    const isMigrated = async (name: string): Promise<boolean> => {
+      const rows = await db.select().from(schema.settings).where(eq(schema.settings.key, markerFor(name))).limit(1);
+      return rows[0]?.value === '1';
     };
     const markMigrated = (name: string) => {
-      db.insert(schema.settings)
+      void db.insert(schema.settings)
         .values({ key: markerFor(name), value: '1' })
         .onConflictDoUpdate({ target: schema.settings.key, set: { value: '1' } })
-        .run();
+        .execute()
+        .catch((e) => console.error('[migration] markMigrated failed:', e));
     };
 
-    const projects = db.select().from(schema.projects).all();
+    const projects = await db.select().from(schema.projects);
     let migrated = 0;
     for (const proj of projects) {
-      if (isMigrated(proj.name)) continue;
+      if (await isMigrated(proj.name)) continue;
       if (!proj.path) continue;
       const legacy = readLegacyWorkflowFlags(proj.path);
       if (Object.keys(legacy).length === 0) continue;
@@ -221,7 +222,7 @@ async function migrateLegacyFileWorkflowFlags(): Promise<void> {
       }
 
       if (Object.keys(updates).length > 0) {
-        db.update(schema.projects).set(updates).where(eq(schema.projects.name, proj.name)).run();
+        void db.update(schema.projects).set(updates).where(eq(schema.projects.name, proj.name)).execute().catch((e) => console.error('[migration] project update failed:', e));
         migrated++;
       }
       // Mark migrated even when no DB updates were needed (file said all flags
@@ -323,7 +324,8 @@ export async function reapOrphanReleases(): Promise<void> {
       // this release, or stuck on the `${project}-release-pending`
       // placeholder. Any other owner means a different release legitimately
       // owns the project now.
-      const lockRow = db.select().from(schema.pipelineLocks).where(eq(schema.pipelineLocks.project, job.project)).get();
+      const lockRows = await db.select().from(schema.pipelineLocks).where(eq(schema.pipelineLocks.project, job.project)).limit(1);
+      const lockRow = lockRows[0] ?? null;
       const placeholderId = `${job.project}-release-pending`;
       const lockedByThisRelease = !!lockRow && lockRow.lockedByJobId === job.id;
       const lockedByPlaceholder = !!lockRow && lockRow.lockedByJobId === placeholderId;
@@ -361,7 +363,7 @@ export async function reapOrphanReleases(): Promise<void> {
       // Release the lock if this orphan owns it (or it's stuck on the
       // unfinished placeholder).
       if (lockedByThisRelease || lockedByPlaceholder) {
-        try { db.delete(schema.pipelineLocks).where(eq(schema.pipelineLocks.project, job.project)).run(); } catch {}
+        try { await db.delete(schema.pipelineLocks).where(eq(schema.pipelineLocks.project, job.project)).execute(); } catch {}
       }
 
       try {
@@ -412,11 +414,11 @@ export async function drainStalePendingReleases(): Promise<void> {
   try {
     const { listPendingReleaseProjects, drainPendingRelease } = await import('@/lib/pipeline/pending-release');
     const { getLock } = await import('@/lib/pipeline/pipeline-lock');
-    const projects = listPendingReleaseProjects();
+    const projects = await listPendingReleaseProjects();
     for (const p of projects) {
       // Skip if an active pipeline lock still exists — the drain will fire
       // naturally when that lock is released.
-      if (getLock(p)) continue;
+      if (await getLock(p)) continue;
       try { await drainPendingRelease(p); } catch (e) { console.error('[boot] pending-release drain failed for', p, e); }
     }
   } catch (err) {
@@ -461,7 +463,7 @@ export async function registerNode(): Promise<void> {
   await migrateLegacyFileWorkflowFlags();
   try {
     const { backfillIssueCruncherPrerequisites } = await import('./lib/agents/default-agent-skills');
-    backfillIssueCruncherPrerequisites();
+    await backfillIssueCruncherPrerequisites();
   } catch (err) {
     console.error('[boot] issue-cruncher prerequisite backfill failed:', err);
   }
@@ -495,6 +497,20 @@ export async function registerNode(): Promise<void> {
   }
 
   if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
+
+  // Start workflow world (Postgres-backed durable orchestration). The world
+  // is required for the only agent intake path; if WORKFLOW_TARGET_WORLD is
+  // unset or the world fails to start, agent runs will fail when the route
+  // tries to enqueue them.
+  if (process.env.WORKFLOW_TARGET_WORLD) {
+    try {
+      const { getWorld } = await import('workflow/runtime');
+      await getWorld().start?.();
+      console.log('[workflow] Postgres world started');
+    } catch (err) {
+      console.warn('[workflow] world failed to start:', err);
+    }
+  }
 
   // Nightly DB cleanup: delete job rows older than job_row_retention_days.
   // Run once at startup (catches drift from long downtimes) then every 24 h.

@@ -41,11 +41,10 @@ export async function GET(request: NextRequest) {
   if (!project) return NextResponse.json({ detail: 'project query param is required' }, { status: 400 });
 
   try {
-    const agentJobs = db
+    const agentJobs = await db
       .select()
       .from(schema.jobs)
-      .where(and(eq(schema.jobs.project, project), like(schema.jobs.kind, 'agent:%')))
-      .all();
+      .where(and(eq(schema.jobs.project, project), like(schema.jobs.kind, 'agent:%')));
 
     // Group by agent name (kind = `agent:<name>`)
     const byAgent = new Map<string, typeof agentJobs>();
@@ -64,11 +63,10 @@ export async function GET(request: NextRequest) {
     }
     const fixesByRelease = new Map<string, number>();
     if (reviewReleaseIds.size > 0) {
-      const fixJobs = db
+      const fixJobs = await db
         .select({ releaseId: schema.jobs.releaseId })
         .from(schema.jobs)
-        .where(and(eq(schema.jobs.project, project), eq(schema.jobs.kind, 'fix'), isNotNull(schema.jobs.releaseId)))
-        .all();
+        .where(and(eq(schema.jobs.project, project), eq(schema.jobs.kind, 'fix'), isNotNull(schema.jobs.releaseId)));
       for (const f of fixJobs) {
         if (!f.releaseId || !reviewReleaseIds.has(f.releaseId)) continue;
         fixesByRelease.set(f.releaseId, (fixesByRelease.get(f.releaseId) ?? 0) + 1);
