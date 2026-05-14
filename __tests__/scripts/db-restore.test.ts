@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { spawn } from 'child_process';
+import { spawnSync } from 'child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { delimiter, join } from 'path';
@@ -97,26 +97,18 @@ function runRestore(
   backupPath: string,
   env: NodeJS.ProcessEnv,
   cwd: string
-): Promise<{ status: number | null; stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [restoreScriptPath, backupPath], {
-      cwd,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-    proc.on('error', reject);
-    proc.on('close', (status) => resolve({ status, stdout, stderr }));
+) {
+  return spawnSync(process.execPath, [restoreScriptPath, backupPath], {
+    cwd,
+    env,
+    encoding: 'utf8',
   });
 }
 
-async function withRestoreFixture(run: (dir: string) => Promise<void>): Promise<void> {
+function withRestoreFixture(run: (dir: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), 'tamtam-db-restore-'));
   try {
-    await run(dir);
+    run(dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -168,12 +160,12 @@ describe('scripts/db-restore.js', () => {
     }
   });
 
-  it.concurrent('restores the backup via a staged swap on success', () => withRestoreFixture(async (dir) => {
+  it.concurrent('restores the backup via a staged swap on success', () => withRestoreFixture((dir) => {
       const layout = createFixtureLayout(dir);
       createDb(layout.dbPath, 'old');
       createDb(layout.backupPath, 'new');
 
-      const result = await runRestore(layout.backupPath, buildRestoreEnv(layout), dir);
+      const result = runRestore(layout.backupPath, buildRestoreEnv(layout), dir);
 
       expect(result.status).toBe(0);
       expect(readMarker(layout.dbPath)).toBe('new');
@@ -190,12 +182,12 @@ describe('scripts/db-restore.js', () => {
       ]);
     }));
 
-  it.concurrent('rolls back the old database and restarts TamTam if the post-swap start fails', () => withRestoreFixture(async (dir) => {
+  it.concurrent('rolls back the old database and restarts TamTam if the post-swap start fails', () => withRestoreFixture((dir) => {
       const layout = createFixtureLayout(dir);
       createDb(layout.dbPath, 'old');
       createDb(layout.backupPath, 'new');
 
-      const result = await runRestore(
+      const result = runRestore(
         layout.backupPath,
         buildRestoreEnv(layout, { PNPM_FAIL_FIRST_START: '1' }),
         dir
@@ -213,12 +205,12 @@ describe('scripts/db-restore.js', () => {
       expect(result.stderr).toContain('Database restore failed');
     }));
 
-  it.concurrent('aborts before swapping the live database when pnpm stop fails', () => withRestoreFixture(async (dir) => {
+  it.concurrent('aborts before swapping the live database when pnpm stop fails', () => withRestoreFixture((dir) => {
       const layout = createFixtureLayout(dir);
       createDb(layout.dbPath, 'old');
       createDb(layout.backupPath, 'new');
 
-      const result = await runRestore(
+      const result = runRestore(
         layout.backupPath,
         buildRestoreEnv(layout, { PNPM_FAIL_STOP: '1' }),
         dir
@@ -234,7 +226,7 @@ describe('scripts/db-restore.js', () => {
       expect(result.stderr).toContain('aborting restore before swapping the live database');
     }));
 
-  it.concurrent('restores backup data that lives in the backup WAL sidecar', () => withRestoreFixture(async (dir) => {
+  it.concurrent('restores backup data that lives in the backup WAL sidecar', () => withRestoreFixture((dir) => {
       const layout = createFixtureLayout(dir);
       createDb(layout.dbPath, 'old');
       const releaseWalFixture = createWalBackedDb(layout.backupPath, 'new-from-wal');
@@ -242,7 +234,7 @@ describe('scripts/db-restore.js', () => {
       try {
         expect(existsSync(`${layout.backupPath}-wal`)).toBe(true);
 
-        const result = await runRestore(layout.backupPath, buildRestoreEnv(layout), dir);
+        const result = runRestore(layout.backupPath, buildRestoreEnv(layout), dir);
 
         expect(result.status).toBe(0);
         expect(readMarker(layout.dbPath)).toBe('new-from-wal');
@@ -252,12 +244,12 @@ describe('scripts/db-restore.js', () => {
       }
     }));
 
-  it.concurrent('rejects malformed backups with the real verifier before any restore commands run', () => withRestoreFixture(async (dir) => {
+  it.concurrent('rejects malformed backups with the real verifier before any restore commands run', () => withRestoreFixture((dir) => {
       const layout = createFixtureLayout(dir);
       createDb(layout.dbPath, 'old');
       writeFileSync(layout.backupPath, 'not-a-sqlite-database');
 
-      const result = await runRestore(layout.backupPath, buildRestoreEnv(layout), dir);
+      const result = runRestore(layout.backupPath, buildRestoreEnv(layout), dir);
 
       expect(result.status).toBe(1);
       expect(readMarker(layout.dbPath)).toBe('old');
