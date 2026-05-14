@@ -50,6 +50,10 @@ describe('startFixFromJob', () => {
     }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       startJob: startJobMock,
+      splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
+    }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({
+      startJobInProcess: startJobMock,
     }));
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
@@ -251,7 +255,8 @@ describe('startFixFromJob', () => {
       probeJobStatus: vi.fn().mockResolvedValue('done'),
       updateJob: vi.fn(),
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock, splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue('/path') }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp/logs' }),

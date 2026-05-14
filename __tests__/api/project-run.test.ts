@@ -63,6 +63,10 @@ vi.mock('@/lib/jobs/project-active-job', () => ({
 }));
 vi.mock('@/lib/jobs/pm2-jobs', () => ({
   startJob: (...args: unknown[]) => state.fns.startJob(...args),
+  splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
+}));
+vi.mock('@/lib/jobs/spawn-claude-detached', () => ({
+  startJobInProcess: (...args: unknown[]) => state.fns.startJob(...args),
 }));
 vi.mock('@/lib/skills/skills', () => ({
   get SKILLS_DIR() { return state.skillsDir; },

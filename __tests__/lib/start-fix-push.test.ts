@@ -126,7 +126,8 @@ describe('startFixPush', () => {
       getImproveConfig: () => ({ logDir: '/tmp/tamtam-test', claudeBin: 'claude', projects: {} }),
     }));
     vi.doMock('@/lib/jobs/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock, listJobs: vi.fn().mockReturnValue([]) }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/config', () => ({ getPermissionModeFlag: vi.fn().mockReturnValue('--dangerously-skip-permissions'), getSettings: vi.fn().mockReturnValue({ default_model: 'sonnet' }) }));
 
     ({ startFixPush } = await import('@/lib/pipeline/start-fix-push'));
@@ -139,7 +140,8 @@ describe('startFixPush', () => {
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir: '/tmp', claudeBin: 'claude', projects: {} }) }));
     vi.doMock('@/lib/jobs/job-storage', () => ({ createJob: createJobMock, updateJob: updateJobMock, listJobs: vi.fn().mockReturnValue([]) }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/config', () => ({ getPermissionModeFlag: vi.fn().mockReturnValue(''), getSettings: vi.fn().mockReturnValue({ default_model: 'sonnet' }) }));
     const { startFixPush: fn } = await import('@/lib/pipeline/start-fix-push');
 

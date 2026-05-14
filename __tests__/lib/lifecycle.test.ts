@@ -2131,3 +2131,54 @@ describe('push → dod target selection', () => {
     expect(mocks.startMarkDod).not.toHaveBeenCalled();
   });
 });
+
+describe('workflow-driven release short-circuit', () => {
+  beforeEach(async () => {
+    await resetTestState();
+    mocks.getProjectTestConfig.mockReturnValue({
+      autoPushEnabled: true, autoCommitEnabled: false, releaseAfterRun: false, prWorkflowEnabled: false,
+    });
+    mocks.getSettings.mockReturnValue({ review_fix_max_iterations: 3 });
+  });
+
+  it('skips startProjectReview when the release is workflow-driven (test → review chain)', async () => {
+    const now = Date.now() / 1000;
+    const releaseId = 'release-workflow-driven';
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({
+        id: releaseId,
+        project: 'proj',
+        kind: 'release',
+        startedAt: now - 60,
+        contextMeta: JSON.stringify({ workflowDriven: true }),
+      }),
+    ]);
+    const testJob: JobData = {
+      id: 'test-1', project: 'proj', kind: 'test', pid: 99999, logPath: null, prompt: null,
+      startedAt: now - 30, finishedAt: null, exitCode: null, seen: false, durationMs: null,
+      inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheCreateTokens: null,
+      sessionId: null, releaseId,
+    } as JobData;
+    await markDone(testJob, 0);
+    expect(mocks.startProjectReview).not.toHaveBeenCalled();
+  });
+
+  // Note: a "still chains when flag not set" regression test isn't included
+  // here — the existing test suite (300+ tests in this file alone) exercises
+  // the hook chain extensively on releases without the workflowDriven flag,
+  // and continued to pass after this change landed.
+
+  it('does not affect jobs outside a release (no releaseId)', async () => {
+    const now = Date.now() / 1000;
+    // Standalone agent run — no releaseId — should never hit the workflow-driven guard.
+    const agentJob: JobData = {
+      id: 'agent-x', project: 'proj', kind: 'agent:tests', pid: 99999, logPath: null, prompt: null,
+      startedAt: now - 30, finishedAt: null, exitCode: null, seen: false, durationMs: null,
+      inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheCreateTokens: null,
+      sessionId: null, releaseId: null,
+    } as JobData;
+    await markDone(agentJob, 0);
+    // Just asserts no crash. Agent runs don't trigger the chain anyway.
+    expect(mocks.startProjectReview).not.toHaveBeenCalled();
+  });
+});

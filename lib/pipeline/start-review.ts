@@ -6,7 +6,7 @@ import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { currentParent } from '@/lib/jobs/parent-context';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { createJob, listJobs, probeJobStatus, readParsedLog, updateJob } from '@/lib/jobs/job-storage';
-import { startJob } from '@/lib/jobs/pm2-jobs';
+import { startJobInProcess } from '@/lib/jobs/spawn-claude-detached';
 import { exec } from '@/lib/shared/shell';
 import { getCurrentBranch, getReviewedRefSha, isAncestor, clearReviewedRef } from '@/lib/git/git-utils';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
@@ -328,7 +328,7 @@ export async function startProjectReview(
   job.logPath = logPath;
 
   try {
-    const pid = await startJob(
+    const pid = await startJobInProcess(
       job.id,
       `${claudeBin} --print --output-format stream-json --verbose --include-partial-messages --model ${reviewModel} ${getPermissionModeFlag()}`,
       prompt,

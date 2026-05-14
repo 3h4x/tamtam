@@ -533,3 +533,114 @@ The `configSnapshot` section reflects the same shared recovery-budget helper use
 | `DO NOT SHIP` verdict loops forever | Fix cap reached | Inspect fix logs; may need manual code changes |
 | DoD step skipped | No linked GitHub issue and no PR context from the push | DoD only runs when the release is issue-linked or the push produced a PR |
 | PR not created after push | The working copy is already on the default branch | Re-run from a non-default branch if you want PR flow |
+
+## Vercel Workflow orchestrator
+
+The pipeline can optionally route through a Vercel Workflow (`@workflow/world-postgres`) state machine. Two env flags gate it:
+
+| Flag | Effect |
+|------|--------|
+| `TAMTAM_RELEASE_WORKFLOW=1` | The release route wraps `startRelease` in a workflow run — every release gets a `workflow_runs` row for observability. **Observation-only**: the completion-hook chain still drives the state machine. |
+| `TAMTAM_RELEASE_WORKFLOW=1` AND `TAMTAM_RELEASE_WORKFLOW_DRIVE=1` | The workflow becomes the **driver**. The release meta-job is stamped with `contextMeta.workflowDriven=true`, completion hooks short-circuit for that release, and `releaseOrchestratorWorkflow` chains the next phase by dispatching the matching `release*PhaseWorkflow` child. |
+
+Both flags default to off — the production pipeline is unchanged unless explicitly enabled in `.env.local`.
+
+### Drive-mode dataflow
+
+```
+HTTP POST /api/projects/by-project/<name>/release
+  ↓
+releaseWorkflow         (lib/workflows/release.ts)
+  ├── kickoffReleaseStep            — calls startRelease, gets first sub-step jobId
+  ├── readDriveModeStep             — reads TAMTAM_RELEASE_WORKFLOW_DRIVE (inside a step for replay determinism)
+  ├── dispatchOrchestratorStep      — stamps release.workflowDriven, dispatches:
+  │     ↓
+  │   releaseOrchestratorWorkflow(firstStepJobId, { projectName, parentJobId })
+  │     ├── waitStep                — waitForJobCompletion(jobId)
+  │     ├── decideStep              — decideNextPhase({ kind, exitCode, verdict })
+  │     └── dispatchStep            — dispatchPhase(decision, { ...ctx, prevJobId })
+  │           ↓
+  │         release<Phase>PhaseWorkflow(...)  ←─ one of the 8 phase workflows
+  │           ├── spawn<Phase>Step  — calls startProject<Phase> helper
+  │           └── await<Phase>Step  — waitForJobCompletion(spawned jobId)
+  │           ↓ (when sub-step finishes, completion hook fires markDone, which sees
+  │           ↓  workflowDriven=true and short-circuits — but the orchestrator already
+  │           ↓  observed the same finishedAt via waitForJobCompletion)
+  │         [phase workflow returns; orchestrator returns]
+  ↓
+HTTP response with release.jobId
+```
+
+### The 8 phase workflows
+
+Each follows the same kickoff/await/return shape (with minor variations: push/commit are inline so they have no await step; review has an extra verdict-read step; pr-wait has a 60-min wait ceiling). All under `lib/workflows/phases/`:
+
+| Phase | File | Result shape |
+|-------|------|--------------|
+| `test` | `test-phase.ts` | `TestPhaseResult` — `{ jobId, finished, reason, exitCode, testCmd }` |
+| `review` | `review-phase.ts` | `ReviewPhaseResult` — `{ jobId, finished, reason, exitCode, verdict }` |
+| `fix` | `fix-phase.ts` | `FixPhaseResult` — `{ jobId, sourceJobId, finished, reason, exitCode }` |
+| `push` | `push-phase.ts` | `PushPhaseResult` — `{ commitSha, message, prUrl?, prNumber?, prRepo? }` |
+| `commit` | `commit-phase.ts` | `CommitPhaseResult` — `{ commitSha, message, jobId? }` |
+| `fix-push` | `fix-push-phase.ts` | `FixPushPhaseResult` — `{ jobId, finished, reason, exitCode }` |
+| `mark-dod` | `mark-dod-phase.ts` | `MarkDodPhaseResult` — `{ jobId, issueNumber, verified, total, changed }` |
+| `pr-wait` | `pr-wait-phase.ts` | `PrWaitPhaseResult` — `{ jobId, finished, merged, reason, exitCode }` |
+
+All eight return discriminated unions with `ok: true | false` and a `reason` for the failure branch (`start_failed` / `launch_failed` / `mark_dod_failed`). Each has a focused unit test file with directive-source guards.
+
+### Decision logic
+
+`lib/workflows/decide-next-phase.ts` exports the pure function:
+
+```ts
+decideNextPhase({ kind, exitCode, verdict }) → NextPhase
+```
+
+Mirrors the rules in `runCompletionHooks` (test pass → review, review LGTM → push, push fail → fix-push, etc.) but as pure data → data. Shared by the orchestrator and reusable elsewhere if completion hooks ever need to call into it for parity checks. 20 dedicated tests.
+
+### Dispatch logic
+
+`lib/workflows/dispatch-phase.ts` exports:
+
+```ts
+dispatchPhase(decision: NextPhase, ctx: DispatchContext) → DispatchPhaseOutcome
+```
+
+Picks the right `release*PhaseWorkflow` and calls `start()`. Validates required context **before** invoking the runtime (e.g. `fix` needs `prevJobId`, `fix-push` needs `hookError`). Surfaces structured outcomes: `dispatched` / `terminal` / `missing_context` / `dispatch_failed`. 14 tests.
+
+### workflowDriven flag
+
+`lib/workflows/workflow-driven-flag.ts`:
+- `markReleaseWorkflowDriven(release)` — stamps the release meta-job's `contextMeta` with `workflowDriven: true`. Idempotent. Preserves other fields.
+- `isWorkflowDriven(job, lookupRelease)` — reads the flag. For release-kind jobs reads their own meta; for sub-step jobs follows `releaseId` to the parent.
+
+`runCompletionHooksInner` calls `isWorkflowDriven` and short-circuits the chain when the flag is set, leaving abort cleanup + release-log streaming untouched.
+
+### Observation-only mode (TAMTAM_RELEASE_WORKFLOW=1, DRIVE unset)
+
+The original scaffold path. `releaseObservationWorkflow` waits for a sub-step, decides what phase WOULD be next, then polls `findNextSubStepJob` for the actual sibling that completion hooks spawned. Recursively dispatches itself for the next jobId. Useful for safe pre-flight observability without changing pipeline behavior.
+
+### Determinism note
+
+Any `Date.now()`, `Math.random()`, settings read, env read, or branch-state read MUST live inside a `'use step'` body, not in the workflow body itself. The workflow body is replayed across restarts to short-circuit completed steps; non-deterministic reads outside steps corrupt replay. Example: `releaseWorkflow` reads `process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE` inside `readDriveModeStep`, not in the workflow body.
+
+### Visibility
+
+- **API**: `GET /api/workflow-runs` (list, supports `?limit=`) and `GET /api/workflow-runs/[runId]` (run + steps). Both decode the runtime's CBOR + devalue payload format via `lib/workflows/decode-workflow-payload.ts`.
+- **UI**: `/workflow-runs` lists recent runs with name/args/status/duration/completed/runId columns + name + status filters; row click → `/workflow-runs/[runId]` shows the run with all its steps, including input/output JSON.
+- **Nav**: "Workflows" link in `components/Header.tsx`.
+
+### Building blocks summary
+
+| File | Purpose |
+|------|---------|
+| `lib/workflows/release.ts` | Entry workflow + observation workflow + drive-mode branching |
+| `lib/workflows/release-orchestrator.ts` | The 3-step orchestrator: wait → decide → dispatch |
+| `lib/workflows/wait-for-job.ts` | Bounded polling helper for sub-step completion |
+| `lib/workflows/decide-next-phase.ts` | Pure NextPhase decision logic |
+| `lib/workflows/dispatch-phase.ts` | NextPhase → start(matching phase workflow) |
+| `lib/workflows/workflow-driven-flag.ts` | Mark/check the contextMeta flag |
+| `lib/workflows/find-next-substep.ts` | Sibling-job matcher for observation-only mode |
+| `lib/workflows/decode-workflow-payload.ts` | CBOR + devalue payload decoder for the API |
+| `lib/workflows/phases/*.ts` | 8 per-phase driver workflows |
+| `__tests__/lib/workflows/*.test.ts` | ~140 unit tests with directive guards |

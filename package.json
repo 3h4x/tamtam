@@ -44,6 +44,8 @@
   "dependencies": {
     "@workflow/next": "4.0.5",
     "@workflow/world-postgres": "4.1.1",
+    "cbor-x": "^1.6.4",
+    "devalue": "^5.8.1",
     "drizzle-orm": "^0.45.2",
     "glob": "^13.0.6",
     "next": "^16.2.4",

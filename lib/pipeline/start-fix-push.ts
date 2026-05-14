@@ -2,7 +2,7 @@ import { join } from 'path';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { createJob, updateJob } from '@/lib/jobs/job-storage';
-import { startJob } from '@/lib/jobs/pm2-jobs';
+import { startJobInProcess } from '@/lib/jobs/spawn-claude-detached';
 import { getPermissionModeFlag, getSettings } from '@/lib/shared/config';
 import { errMsg } from '@/lib/shared/types';
 import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
@@ -55,7 +55,7 @@ Please:
   job.logPath = logPath;
 
   try {
-    const pid = await startJob(
+    const pid = await startJobInProcess(
       job.id,
       `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${defaultModel} ${getPermissionModeFlag()}`,
       prompt,

@@ -5,7 +5,7 @@ import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getJob, createJob, readParsedLog, probeJobStatus, updateJob } from '@/lib/jobs/job-storage';
-import { startJob } from '@/lib/jobs/pm2-jobs';
+import { startJobInProcess } from '@/lib/jobs/spawn-claude-detached';
 import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { FIX_OUTPUT_CONTRACT, stripFinalVerdict } from './review-contract';
 
@@ -87,7 +87,7 @@ Do not commit — just make the code changes.${fixAddendum}
   job.promptBytes = Buffer.byteLength(prompt, 'utf8');
 
   try {
-    const pid = await startJob(
+    const pid = await startJobInProcess(
       job.id,
       `${cliBin} --print --output-format stream-json --include-partial-messages --verbose --model ${getPipelineModel('fix')} ${getPermissionModeFlag()}${resumeSessionId ? ` --resume ${resumeSessionId}` : ''}`,
       prompt,

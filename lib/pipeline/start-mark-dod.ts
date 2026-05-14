@@ -10,7 +10,8 @@ import { exec } from '@/lib/shared/shell';
 import { getPermissionModeFlag, getPipelineModel, getSettings } from '@/lib/shared/config';
 import { createJob, findActiveReleaseJob, markDone, updateJob } from '@/lib/jobs/job-storage';
 import { wrapIfUntrusted, withUntrustedPreamble } from '@/lib/shared/untrusted';
-import { startJob, getJobStatus, deleteJob } from '@/lib/jobs/pm2-jobs';
+import { splitCommand } from '@/lib/jobs/pm2-jobs';
+import { runSubprocess } from '@/lib/jobs/spawn-cli';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { ensureBranchForCtx } from './mark-dod-branch';
 import {
@@ -218,24 +219,37 @@ JSON schema:
     let claudeExitCode = 1;
     let timedOut = false;
     try {
-      await startJob(claudeJobId, claudeCommand, fullPrompt, projPath, { env: cliEnv });
-      const deadline = Date.now() + 300000;
-      while (Date.now() < deadline) {
-        if (_pollIntervalMs > 0) await new Promise(r => setTimeout(r, _pollIntervalMs));
-        const status = await getJobStatus(claudeJobId);
-        if (status.status !== 'running') {
-          claudeExitCode = status.exitCode ?? 1;
-          break;
-        }
+      mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
+      const claudePromptPath = join(/*turbopackIgnore: true*/ logDir, `${claudeJobId}.prompt`);
+      writeFileSync(/*turbopackIgnore: true*/ claudePromptPath, fullPrompt);
+      const argv = splitCommand(claudeCommand);
+      if (argv.length === 0) throw new Error(`empty claude command for ${claudeJobId}`);
+      const [bin, ...args] = argv;
+
+      // 5-minute hard timeout for the verification step. AbortSignal propagates
+      // to the child via SIGTERM in runSubprocess.
+      const ac = new AbortController();
+      const timeoutTimer = setTimeout(() => { timedOut = true; ac.abort(); }, 300_000);
+      try {
+        const result = await runSubprocess({
+          jobId: claudeJobId,
+          cmd: bin,
+          cmdArgs: args,
+          promptPath: claudePromptPath,
+          logPath: claudeLogPath,
+          env: cliEnv,
+          cwd: projPath,
+          abortSignal: ac.signal,
+        });
+        claudeExitCode = result.exitCode;
+      } finally {
+        clearTimeout(timeoutTimer);
       }
-      if (Date.now() >= deadline) timedOut = true;
       if (existsSync(claudeLogPath)) {
         claudeOutput = readFileSync(claudeLogPath, 'utf-8');
       }
     } catch (e) {
-      log(`# failed to start claude PM2 job: ${e instanceof Error ? e.message : String(e)}\n`);
-    } finally {
-      await deleteJob(claudeJobId).catch(() => {});
+      log(`# failed to start claude verification: ${e instanceof Error ? e.message : String(e)}\n`);
     }
 
     // Strip PM2 wrapper lines before checking whether Claude produced real output.

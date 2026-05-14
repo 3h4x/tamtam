@@ -156,7 +156,8 @@ describe('POST /api/agents/{agentId}/run readOnly', () => {
       probeJobStatus: probeJobStatusMock,
       markDone: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/inline-agent', () => ({ startInProcessAgentJob: startJobMock }));
     vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
     }));
@@ -195,10 +196,11 @@ describe('POST /api/agents/{agentId}/run readOnly', () => {
       runAgentIntakeWorkflow: vi.fn().mockResolvedValue(undefined),
     }));
     vi.doMock('workflow/api', () => ({
-      // Invoke the workflow function with its args so downstream mocks (startJob) get exercised.
+      // Invoke the workflow function with its args so downstream mocks
+      // (startInProcessAgentJob) get exercised.
       start: vi.fn().mockImplementation(async (fn: any, args: any[]) => {
-        const { startJob } = await import('@/lib/jobs/pm2-jobs');
-        await startJob(args?.[0]?.jobId ?? 'started-job', 'noop', '', '/tmp');
+        const { startInProcessAgentJob } = await import('@/lib/jobs/inline-agent');
+        await startInProcessAgentJob(args?.[0]?.jobId ?? 'started-job', 'noop', '', '/tmp');
         return fn(...(args ?? []));
       }),
     }));

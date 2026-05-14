@@ -168,9 +168,22 @@ vi.mock('@/lib/pipeline/mark-dod-branch', () => ({
   ensureBranchForCtx: mocks.ensureBranchForCtxMock,
 }));
 vi.mock('@/lib/jobs/pm2-jobs', () => ({
-  startJob: mocks.startJobMock,
-  getJobStatus: mocks.getJobStatusMock,
-  deleteJob: mocks.deleteJobMock,
+  splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
+}));
+// start-mark-dod now spawns Claude via runSubprocess (awaiting variant).
+// The mock simulates "exited with code N + log file already on disk" and
+// preserves the old startJob call shape (jobId, command, prompt, cwd) so
+// existing assertions on startJobMock.mock.calls keep working.
+vi.mock('@/lib/jobs/spawn-cli', () => ({
+  runSubprocess: vi.fn().mockImplementation(async (opts: { jobId: string; cmd: string; cmdArgs: string[]; promptPath: string; cwd?: string }) => {
+    const command = [opts.cmd, ...(opts.cmdArgs ?? [])].join(' ');
+    const writes = mocks.writeFileSyncMock.mock.calls;
+    const promptWrite = writes.find((c: unknown[]) => c[0] === opts.promptPath);
+    const prompt = (promptWrite?.[1] as string | undefined) ?? '';
+    const status = await mocks.getJobStatusMock();
+    await mocks.startJobMock(opts.jobId, command, prompt, opts.cwd);
+    return { exitCode: status?.exitCode ?? 0, signal: null, pid: 12345 };
+  }),
 }));
 vi.mock('fs', () => ({
   appendFileSync: mocks.appendFileSyncMock,
@@ -504,8 +517,13 @@ describe('startMarkDod', () => {
       .mockResolvedValueOnce(resp(0, ISSUE_JSON))
       .mockResolvedValueOnce(resp(0, ''));
     await startMarkDod('myproj', undefined, 0);
-    expect(writeFileSyncMock).toHaveBeenCalledOnce();
-    const writtenContent: string = writeFileSyncMock.mock.calls[0][1];
+    // Two writes now: (1) the Claude prompt file, (2) the gh issue edit body.
+    // The edit body contains rendered checkboxes; the prompt does not.
+    const ghEditWrite = writeFileSyncMock.mock.calls.find(
+      (c: unknown[]) => typeof c[1] === 'string' && (c[1] as string).includes('[x] First criterion'),
+    );
+    expect(ghEditWrite).toBeDefined();
+    const writtenContent: string = ghEditWrite![1];
     expect(writtenContent).toContain('[x] First criterion');
     expect(writtenContent).toContain('[ ] Second criterion');
   });

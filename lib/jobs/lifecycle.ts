@@ -602,6 +602,20 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     }
   }
 
+  // Workflow-driven release short-circuit: when the release meta-job is
+  // marked as workflow-driven, the orchestrator workflow (see
+  // lib/workflows/release-orchestrator.ts) is responsible for chaining
+  // downstream steps. Skip the hook-driven chain to avoid double-dispatch.
+  // The abort + release-log-streaming paths above still run because they
+  // are observability/cleanup, not orchestration.
+  if (['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'mark-dod'].includes(job.kind) && job.releaseId) {
+    const { isWorkflowDriven } = await import('@/lib/workflows/workflow-driven-flag');
+    if (isWorkflowDriven(job, (id) => getJob(id))) {
+      console.log(`[release] job ${job.id} (${job.kind}) is workflow-driven — skipping hook chain`);
+      return;
+    }
+  }
+
   // Auto-chain gate: the current step's results are already persisted; if a
   // hard gate is closed (pause, 5h quota, credits), don't kick off the next one.
   if (['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'mark-dod'].includes(job.kind)) {
