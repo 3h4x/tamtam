@@ -161,10 +161,10 @@ All three are read live on each job (not cached), so changing them takes effect 
 | `log_retention_count` | number | `200` | Keep log files for the last N finished runs per project. On each run completion, the oldest log files beyond this count are deleted and the DB row is flagged `log_pruned`. Set to `0` to disable count-based pruning. |
 | `log_retention_days` | number | `30` | Delete log files older than this many days (per project, evaluated on each run completion). Set to `0` to disable age-based pruning. |
 | `job_row_retention_days` | number | `180` | Nightly cleanup: delete finished `jobs` DB rows older than this many days. Set to `0` to disable. Run rows older than this threshold are permanently removed. |
-| `backup_retention_count` | number | `14` | Keep this many newest SQLite `tamtam-*.db` backup files after each successful backup. Set to `0` to prune all older backups after each run while still keeping the newly created backup. |
-| `backup_retention_weekly_count` | number | `8` | Keep one additional older SQLite backup per week for this many weeks after the newest backups. The just-created backup is preserved separately and does not consume one of these weekly slots. Set to `0` to disable weekly retention. |
+| `backup_retention_count` | number | `14` | Keep this many newest Postgres `tamtam-*.pgdump` backup files after each successful backup. Set to `0` to prune all older backups after each run while still keeping the newly created backup. |
+| `backup_retention_weekly_count` | number | `8` | Keep one additional older Postgres backup per week for this many weeks after the newest backups. The just-created backup is preserved separately and does not consume one of these weekly slots. Set to `0` to disable weekly retention. |
 
-Retention writes separate latest-summary records to `maintenance_status`: `retention:project-logs:last` for per-project log pruning and `retention:nightly:last` for nightly row cleanup. The nightly record includes row counts, errors, and SQLite checkpoint/vacuum status, so the monitoring API can still report the most recent database maintenance result even after later run completions trigger log pruning. Nightly SQLite maintenance runs `wal_checkpoint(TRUNCATE)` and `VACUUM` after expired rows are deleted, but records a skipped status instead when any job is still active.
+Retention writes separate latest-summary records to `maintenance_status`: `retention:project-logs:last` for per-project log pruning and `retention:nightly:last` for nightly row cleanup. The nightly record includes row counts and errors from the `jobs` row purge so the monitoring API can still report the most recent database maintenance result even after later run completions trigger log pruning.
 
 ### System
 

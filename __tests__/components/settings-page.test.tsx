@@ -200,6 +200,117 @@ describe('SettingsPage', () => {
     unmount()
   })
 
+  it('does not render the removed durable workflow setting', async () => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input === '/api/settings' && !init) {
+        return makeResponse({
+          settings: {
+            claude_provider: 'claude',
+            cli_enabled_providers: 'claude',
+            durable_agent_workflows_enabled: 'true',
+          },
+        })
+      }
+      if (input === '/api/config/projects') {
+        return makeResponse({ projects: [] })
+      }
+      throw new Error(`Unexpected fetch: ${input}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container, unmount } = renderSettingsPage('general')
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Retrieval (Embeddings)')
+    })
+
+    expect(container.textContent).not.toContain('Durable Agent Workflows')
+    expect(container.textContent).not.toContain('durable_agent_workflows_enabled')
+    expect(container.textContent).not.toContain('WORKFLOW_POSTGRES_URL')
+
+    unmount()
+  })
+
+  it('round-trips retrieval settings without falling back to defaults', async () => {
+    let savedBody: Record<string, string> | null = null
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input === '/api/settings' && !init) {
+        return makeResponse({
+          settings: {
+            claude_provider: 'claude',
+            cli_enabled_providers: 'claude',
+            retrieval_enabled: 'false',
+            retrieval_ollama_url: 'http://ollama.local:11434',
+            retrieval_embedding_model: 'custom-embed',
+            retrieval_context_limit: '8',
+            retrieval_score_threshold: '0.65',
+            retrieval_manage_ollama: 'false',
+          },
+        })
+      }
+      if (input === '/api/settings' && init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body)) as Record<string, string>
+        savedBody = body
+        return makeResponse({
+          status: 'ok',
+          settings: {
+            claude_provider: 'claude',
+            cli_enabled_providers: 'claude',
+            ...body,
+          },
+        })
+      }
+      if (input === '/api/config/projects') {
+        return makeResponse({ projects: [] })
+      }
+      throw new Error(`Unexpected fetch: ${input}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container, unmount } = renderSettingsPage('general')
+
+    await vi.waitFor(() => {
+      expect(findInputByLabel(container, 'Ollama URL').value).toBe('http://ollama.local:11434')
+      expect(findInputByLabel(container, 'Embedding Model').value).toBe('custom-embed')
+      expect(findInputByLabel(container, 'Context Limit').value).toBe('8')
+      expect(findInputByLabel(container, 'Score Threshold').value).toBe('0.65')
+      expect(findInputByLabel(container, 'Enabled').checked).toBe(false)
+      expect(getSaveButton(container).disabled).toBe(true)
+    })
+
+    flushSync(() => {
+      setInputValue(findInputByLabel(container, 'Ollama URL'), 'http://ollama.internal:11434')
+    })
+
+    await vi.waitFor(() => {
+      expect(getSaveButton(container).disabled).toBe(false)
+    })
+
+    getSaveButton(container).click()
+
+    await vi.waitFor(() => {
+      expect(savedBody).toMatchObject({
+        retrieval_enabled: 'false',
+        retrieval_ollama_url: 'http://ollama.internal:11434',
+        retrieval_embedding_model: 'custom-embed',
+        retrieval_context_limit: '8',
+        retrieval_score_threshold: '0.65',
+        retrieval_manage_ollama: 'false',
+      })
+    })
+
+    await vi.waitFor(() => {
+      expect(findInputByLabel(container, 'Ollama URL').value).toBe('http://ollama.internal:11434')
+      expect(findInputByLabel(container, 'Embedding Model').value).toBe('custom-embed')
+      expect(findInputByLabel(container, 'Context Limit').value).toBe('8')
+      expect(findInputByLabel(container, 'Score Threshold').value).toBe('0.65')
+      expect(findInputByLabel(container, 'Enabled').checked).toBe(false)
+      expect(getSaveButton(container).disabled).toBe(true)
+    })
+
+    unmount()
+  })
+
   it('dispatches settings-changed with canonical settings after a successful save', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {

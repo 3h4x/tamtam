@@ -57,10 +57,40 @@ function parseNonNegativeIntegerSetting(
   return { value: String(parsed), error: null };
 }
 
+function parseBooleanSetting(
+  value: unknown,
+  label: string,
+): { value: string | null; error: string | null } {
+  if (typeof value === 'boolean') {
+    return { value: value ? 'true' : 'false', error: null };
+  }
+  const raw = String(value).trim().toLowerCase();
+  if (raw === 'true' || raw === 'false') {
+    return { value: raw, error: null };
+  }
+  return { value: null, error: `${label} must be true or false.` };
+}
+
+function parseUnitFloatSetting(
+  value: unknown,
+  label: string,
+): { value: string | null; error: string | null } {
+  const raw = String(value).trim();
+  if (!raw) {
+    return { value: null, error: `${label} must be a number between 0 and 1.` };
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    return { value: null, error: `${label} must be a number between 0 and 1.` };
+  }
+  return { value: String(parsed), error: null };
+}
+
 async function buildSettingsResponse(): Promise<Record<string, string>> {
   const rows = await db.select().from(schema.settings);
   const settings: Record<string, string> = {};
   for (const row of rows) {
+    if (!SETTING_KEYS.includes(row.key as (typeof SETTING_KEYS)[number])) continue;
     settings[row.key] = serializeSettingValue(row.key, row.value);
   }
 
@@ -141,6 +171,12 @@ const SETTING_KEYS = [
   'pipeline_model_commit',
   'dirty_worktree_block_threshold',
   'incremental_review_enabled',
+  'retrieval_enabled',
+  'retrieval_ollama_url',
+  'retrieval_embedding_model',
+  'retrieval_context_limit',
+  'retrieval_score_threshold',
+  'retrieval_manage_ollama',
 ] as const;
 
 function serializeSettingValue(key: string, value: unknown): string {
@@ -240,6 +276,18 @@ function validateAndSerializeSettingValue(
 
   if (key === 'review_fix_max_iterations' || key === 'release_wall_clock_timeout_minutes') {
     return parsePositiveIntegerSetting(value, key);
+  }
+
+  if (key === 'retrieval_context_limit') {
+    return parsePositiveIntegerSetting(value, key);
+  }
+
+  if (key === 'retrieval_score_threshold') {
+    return parseUnitFloatSetting(value, key);
+  }
+
+  if (key === 'retrieval_enabled' || key === 'retrieval_manage_ollama') {
+    return parseBooleanSetting(value, key);
   }
 
   if (key === 'notification_throttle_window_seconds') {

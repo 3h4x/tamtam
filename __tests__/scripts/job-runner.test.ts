@@ -12,7 +12,7 @@ const RUNNER = resolve(__dirname, '..', '..', 'scripts', 'job-runner.js');
 // can't connect to it; the runner reads DATABASE_URL via `pg.Client`. The
 // admin URL (used to CREATE/DROP throwaway DBs) defaults to the local
 // Postgres on 5432.
-const ADMIN_DB_URL = process.env.TEST_PG_ADMIN_URL || 'postgres://localhost:5432/postgres';
+const ADMIN_DB_URL = process.env.TEST_PG_ADMIN_URL || 'postgres://tamtam:tamtam@localhost:5432/postgres';
 
 function runnerEnv(env: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   const inherited = { ...process.env };
@@ -20,7 +20,6 @@ function runnerEnv(env: Record<string, string | undefined> = {}): NodeJS.Process
   // subprocess can reach a pause-check DB. Tests opt-in by passing their own
   // DATABASE_URL value.
   delete inherited.DATABASE_URL;
-  delete inherited.TAMTAM_DB_PATH;
   return { ...inherited, ...env };
 }
 

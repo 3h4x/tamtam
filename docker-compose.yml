@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: tamtam-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tamtam
+      POSTGRES_PASSWORD: tamtam
+      POSTGRES_DB: tamtam
+    ports:
+      - "5432:5432"
+    volumes:
+      - tamtam-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tamtam -d tamtam"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  tamtam-postgres-data:

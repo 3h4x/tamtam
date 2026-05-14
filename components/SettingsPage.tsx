@@ -78,7 +78,6 @@ interface SettingsMap {
   pipeline_model_commit: string
   dirty_worktree_block_threshold: string
   incremental_review_enabled: string
-  durable_agent_workflows_enabled: string
   retrieval_enabled: string
   retrieval_ollama_url: string
   retrieval_embedding_model: string
@@ -112,7 +111,6 @@ const SETTINGS_DEFAULTS: SettingsMap = {
   budget_subscription_providers: 'claude,codex',
   budget_block_at_pct: '95',
   budget_warn_at_pct: '80',
-  durable_agent_workflows_enabled: 'false',
   retrieval_enabled: 'true',
   retrieval_ollama_url: 'http://localhost:11434',
   retrieval_embedding_model: 'nomic-embed-text',
@@ -438,28 +436,6 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                         onChange={(value) => handleChange('trusted_github_users', value)}
                         onValidityChange={setTrustedGithubUsersError}
                       />
-                    </div>
-                  )}
-
-                  {group.id === 'general' && (
-                    <div className="mt-4 rounded-xl border border-border bg-bg-primary/50 p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <h4 className="text-sm font-semibold text-text-primary">Durable Agent Workflows <span className="ml-1.5 text-xs font-normal text-text-tertiary">experimental</span></h4>
-                          <p className="mt-1 text-xs text-text-tertiary">
-                            Read-only agent runs with no prerequisite command go through a Postgres-backed two-step workflow so prompt composition and spawn are retried on failure. Requires <code className="font-mono">WORKFLOW_TARGET_WORLD</code> and <code className="font-mono">WORKFLOW_POSTGRES_URL</code> in <code className="font-mono">.env.local</code>.
-                          </p>
-                        </div>
-                        <label className="inline-flex items-center gap-2 text-sm text-text-primary shrink-0">
-                          <input
-                            type="checkbox"
-                            checked={settings.durable_agent_workflows_enabled === 'true'}
-                            onChange={(e) => handleChange('durable_agent_workflows_enabled', e.target.checked ? 'true' : 'false')}
-                            className="h-4 w-4 rounded border-border bg-bg-primary text-accent focus:ring-accent/30"
-                          />
-                          Enabled
-                        </label>
-                      </div>
                     </div>
                   )}
 
@@ -832,7 +808,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
           <section className="bg-bg-secondary rounded-lg border border-border">
             <div className="px-5 py-3 border-b border-border flex items-baseline gap-3">
               <h3 className="text-sm font-semibold text-text-primary">Database Backup</h3>
-              <p className="text-xs text-text-tertiary">Create a manual backup of the SQLite database</p>
+              <p className="text-xs text-text-tertiary">Create a manual backup of the Postgres database</p>
             </div>
             <div className="px-5 py-4 flex items-center gap-3">
               <button

@@ -58,7 +58,7 @@ TamTam runs in **production mode** (`next start`) under PM2 — no HMR. After an
 - `lib/` — Business logic and client helpers, organised into domain folders: `pipeline/`, `scheduling/`, `git/`, `jobs/` (`job-storage` compatibility barrel), `terminal/`, `agents/`, `skills/`, `recommendations/`, `shared/`, `usage/`, `db/` (`index.ts` domain barrel), `github/`, `client/`. `lib/client-api.ts` is the only top-level barrel.
 - `scripts/` — server startup, job runners, CLI shims (`pm2-start.sh`, `job-runner.js`, `claude-shim.js`, `gemini-shim.js`, `lmstudio-shim.js`, `codex-shim.js`, `shim-utils.js`)
 - `skills/` — vendored file-based skill library (curated, hand-picked from upstream `claude-skills` then trimmed); not a submodule
-- `data/` — SQLite database (gitignored)
+- `data/` — runtime artifacts (logs, Postgres `pg_dump` backups; gitignored). The active database is Postgres via `DATABASE_URL`.
 - `__tests__/` — vitest unit tests
 - `e2e/` — Playwright integration tests
 - `docs/` — architecture docs (see **Docs Reference** below)
@@ -218,10 +218,10 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 | `docs/STREAMING.md` | Job lifecycle + SSE streaming infrastructure | Touching terminal runs, log tailing, SSE endpoints, or NDJSON parsing |
 | `docs/PIPELINE.md` | Release pipeline state machine (test→review→fix→commit→push→dod→merge) | Modifying any pipeline step, completion hooks, or pipeline orchestration |
 | `docs/DATABASE.md` | Drizzle schema reference — all tables, columns, indices | Adding/changing DB tables, writing migrations, or working with `lib/db/` |
-| `docs/BACKUP.md` | SQLite backup, verification, restore, and retention runbook | Changing backup/restore behavior or operating database recovery |
+| `docs/BACKUP.md` | Postgres backup, verification, restore, and retention runbook | Changing backup/restore behavior or operating database recovery |
 | `docs/SETTINGS.md` | All `settings` table keys, their types, and defaults | Adding a new setting, reading config in a new place, or changing defaults |
 | `docs/AGENT.md` | Agent concepts: skills composition, scheduling, runner lifecycle, durable intake workflow | Working on agents, the internal scheduler, skill composition, or the Postgres-backed durable workflow path |
-| `docs/CACHING.md` | Layered TTL cache strategy (in-memory + SQLite) | Adding a new cache layer, changing TTLs, or debugging stale data |
+| `docs/CACHING.md` | Layered TTL cache strategy (in-memory + Postgres) | Adding a new cache layer, changing TTLs, or debugging stale data |
 | `docs/PROFILING.md` | Server/client/Turbopack profiling guide | Investigating perf regressions or high CPU/memory |
 | `docs/SECURITY.md` | Security model: file-agent trust, untrusted input handling, threat surface | Any security-sensitive change: auth, file-agent parsing, untrusted content |
 | `docs/SHIM.md` | CLI shim compatibility layer (Claude, Gemini, Codex, LM Studio) | Touching `scripts/claude-shim.js`, `gemini-shim.js`, `codex-shim.js`, `lmstudio-shim.js`, or shim configuration |
@@ -229,9 +229,9 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 | `docs/PROMPT-SIZE.md` | Prompt size & cache-read cost analysis | Changing skill/prompt composition, adding skills, or investigating token cost |
 | `docs/E2E.md` | Playwright pipeline e2e harness: mocks, scenarios, helpers | Writing or debugging pipeline e2e tests in `e2e/pipeline/` |
 | `docs/superpowers/plans/2026-04-16-docs-picker.md` | Implementation plan for the Experimental tab docs picker | Continuing or auditing the `+docs` picker work in the Experimental tab or its project-docs API route |
-| `docs/superpowers/plans/2026-05-13-agent-retrieval.md` | Implementation plan for agent retrieval with sqlite-vec + Ollama | Continuing or auditing the retrieval ingestion/reindex/retriever work for agent prompts |
+| `docs/superpowers/plans/2026-05-13-agent-retrieval.md` | Implementation plan for agent retrieval with pgvector + Ollama | Continuing or auditing the retrieval ingestion/reindex/retriever work for agent prompts |
 | `docs/superpowers/specs/2026-04-16-docs-picker-design.md` | Approved design spec for the Experimental tab docs picker | Verifying intended behavior for project-doc selection and first-message docs injection in the Experimental tab |
-| `docs/superpowers/specs/2026-05-13-agent-retrieval-design.md` | Approved design spec for agent retrieval | Verifying the intended retrieval architecture, Ollama/sqlite-vec choices, or prompt-time context injection |
+| `docs/superpowers/specs/2026-05-13-agent-retrieval-design.md` | Approved design spec for agent retrieval | Verifying the intended retrieval architecture, Ollama/pgvector choices, or prompt-time context injection |
 
 ## Coding Conventions
 - **Stay project-generic in source**: TamTam is shared infrastructure across many projects. Do NOT reference any specific project slug, GitHub owner/repo, PR number, or issue number in code, comments, log strings, variable names, or commit messages within source files. Describe the symptom or behavior generically — say what triggers the bug, not which ticket reported it. Discovery context belongs in chat / PR descriptions, not in source. Such references rot fast (the ticket closes, projects get renamed) and leak operational context to anyone pulling the repo.
@@ -253,7 +253,7 @@ Detailed architecture documentation lives in `docs/`. Read the relevant file bef
 ## Dependency & Supply-Chain Security
 - **Lock file**: always commit `pnpm-lock.yaml`. Never bypass `--frozen-lockfile` or use `--no-lockfile`.
 - **Install scripts**: inspect `postinstall`, `prepare`, `preinstall`, `install` scripts before adding/updating any dependency. Treat them as arbitrary code execution.
-- **Allowed build scripts**: `package.json` pins `pnpm.onlyBuiltDependencies` to `[better-sqlite3, esbuild, sharp, unrs-resolver]`. Do not add to this list without explicit user approval.
+- **Allowed build scripts**: `package.json` pins `pnpm.onlyBuiltDependencies` to `[esbuild, sharp, unrs-resolver]`. Do not add to this list without explicit user approval.
 - **No silent additions**: never add a new dependency without explicit user approval. Justify every new dep in the commit message.
 - **Verify before adding**: prefer packages with >1 M weekly downloads and >1 year of history.
 - **Audit after changes**: run `pnpm audit` after any `pnpm add`/`pnpm remove`; fix or document high-severity findings before committing.

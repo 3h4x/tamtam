@@ -1,8 +1,9 @@
 # E2E Pipeline Testing
 
 This document covers the Playwright-based end-to-end harness for the release
-pipeline. These tests exercise the **real Next.js API handlers** and the **real
-SQLite database** with only the external processes mocked (Claude CLI, git, gh).
+pipeline. These tests exercise the **real Next.js API handlers** against an
+**isolated Postgres database** with only the external processes mocked (Claude
+CLI, git, gh).
 
 Related: [PIPELINE.md](PIPELINE.md) — pipeline state machine.
 
@@ -55,7 +56,7 @@ e2e/pipeline/
 | Component | Status |
 |---|---|
 | Next.js API handlers | **Real** |
-| SQLite database | **Real** (temp path at `/tmp/tamtam-e2e-pipeline/`) |
+| Postgres database | **Real** (isolated DB via `E2E_DATABASE_URL`, default `tamtam_e2e_pipeline` on the local Postgres; recreated by the harness) |
 | Probe sweep / completion hooks | **Real** (sped up via `TAMTAM_PROBE_INTERVAL_MS=500`) |
 | PM2 job lifecycle | **Real** (uses the local PM2 daemon) |
 | Claude CLI | **Mocked** (`e2e/pipeline/mocks/claude-shim.js`) |
@@ -269,7 +270,7 @@ pnpm test:e2e:pipeline
 
 This uses `playwright.pipeline.config.ts`, which:
 - Starts a fresh Next.js dev server on **port 1338** (not 1337)
-- Uses a temp Postgres database `tamtam_e2e_pipeline_<runId>` created and dropped by the harness; `DATABASE_URL` is injected into the dev server
+- Uses a Postgres database created, migrated, and dropped by the harness; `DATABASE_URL` is injected into the dev server
 - Sets `TAMTAM_PROBE_INTERVAL_MS=500` for fast PM2 job detection
 - Prepends `e2e/pipeline/mocks/bin` to PATH
 

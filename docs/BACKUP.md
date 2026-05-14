@@ -10,7 +10,7 @@ Use the hot backup API while TamTam is running:
 curl -X POST http://localhost:1337/api/settings/backup
 ```
 
-The route shells out to `pg_dump --format=custom --file=<dir>/tamtam-YYYYMMDD-HHMM.pgdump` against the active `DATABASE_URL`. Any non-zero `pg_dump` exit returns `500`.
+The route shells out to `pg_dump --format=custom --file=<dir>/tamtam-YYYYMMDD-HHMM.pgdump` against the active `DATABASE_URL`. Connection details are passed through libpq environment variables so passworded TCP URLs such as the local Docker default work without prompting. Any non-zero `pg_dump` exit returns `500`.
 
 After a successful backup, TamTam prunes old backup files in the same directory:
 
@@ -26,6 +26,12 @@ pnpm db:verify postgres://user@host:5432/dbname
 
 The script connects with `pg.Client`, checks that the `vector` extension is present, and counts public tables. Exits non-zero on any error.
 
+To verify a backup file without touching the live database:
+
+```bash
+node scripts/db-verify.js --backup /abs/path/to/tamtam-YYYYMMDD-HHMM.pgdump
+```
+
 ## Restore a Backup
 
 ```bash
@@ -35,8 +41,8 @@ DATABASE_URL=postgres://user@host:5432/tamtam pnpm db:restore /abs/path/to/tamta
 The restore script:
 
 1. Stops the PM2-managed TamTam server (best-effort).
-2. Runs `pg_restore --clean --if-exists --dbname="$DATABASE_URL" <backup>`.
-3. Re-verifies the live database.
+2. Runs `pg_restore --clean --if-exists <backup>` using the connection details from `DATABASE_URL`.
+3. Re-verifies the live database with `pnpm db:verify`.
 4. Restarts TamTam with `pnpm start`.
 
 `pg_restore --clean --if-exists` drops and recreates objects before reloading, so the target database does not need to be empty.

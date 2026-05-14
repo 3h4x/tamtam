@@ -8,7 +8,7 @@ Your goal is to improve TamTam's UI by writing and running Playwright tests that
 ## Context
 
 TamTam already has a mocked test harness in `e2e/pipeline/`:
-- `playwright.pipeline.config.ts` — spins up Next.js on **port 1338** with `TAMTAM_DB_PATH` pointing to a temp SQLite DB
+- `playwright.pipeline.config.ts` — spins up Next.js on **port 1338** with `DATABASE_URL` pointing to an isolated Postgres database (`tamtam_e2e_pipeline` by default; override via `E2E_DATABASE_URL`)
 - `e2e/pipeline/global-setup.ts` — seeds fake git repos, installs shim binaries (claude, git, gh) that intercept real calls
 - `e2e/pipeline/helpers.ts` — `writeScenario()` scripts Claude output; `readShimCalls()` asserts git/gh calls
 - `e2e/pipeline/mocks/` — shim binaries for claude, git, gh

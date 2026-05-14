@@ -1,0 +1,1 @@
+ALTER TABLE "jobs" ALTER COLUMN "release_deadline_at" SET DATA TYPE bigint;

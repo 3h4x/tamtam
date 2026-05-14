@@ -13,6 +13,7 @@ export default defineConfig({
   // Run specs sequentially so state files don't collide.
   workers: 1,
   globalSetup: './e2e/pipeline/global-setup.ts',
+  globalTeardown: './e2e/pipeline/global-teardown.ts',
   use: {
     baseURL: 'http://localhost:1338',
   },
@@ -20,14 +21,16 @@ export default defineConfig({
   webServer: {
     // Start a dedicated Next.js dev server on port 1338 so pipeline tests run
     // against a clean DB and don't interfere with the production server on 1337.
-    command: 'pnpm exec next dev --port 1338 --hostname 127.0.0.1',
+    command: 'node e2e/pipeline/db-admin.mjs prepare && pnpm exec next dev --port 1338 --hostname 127.0.0.1',
     url: 'http://localhost:1338/api/health',
     // Allow up to 3 minutes for Next.js compilation on first start.
     timeout: 180_000,
     reuseExistingServer: false,
     env: {
-      // Point DB at a temp path so tests never touch the production database.
-      TAMTAM_DB_PATH: `${E2E_BASE}/data/db/tamtam.db`,
+      // Pipeline e2e expects an isolated Postgres database, created by the
+      // webServer prepare step and dropped by globalTeardown. Override via
+      // E2E_DATABASE_URL when your local Postgres lives elsewhere.
+      DATABASE_URL: process.env.E2E_DATABASE_URL ?? 'postgres://tamtam:tamtam@localhost:5432/tamtam_e2e_pipeline',
       // Run the probe sweep every 500 ms so PM2 job completion is picked up quickly.
       TAMTAM_PROBE_INTERVAL_MS: '500',
       TAMTAM_PR_WAIT_POLL_MS: '250',
