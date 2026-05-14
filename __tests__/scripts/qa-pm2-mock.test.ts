@@ -73,9 +73,8 @@ describe('scripts/qa-mocks/pm2', () => {
   });
 
   it('returns from start while a direct executable is still running', async () => {
-    const marker = join(dir, 'long-monitor-done.txt');
     const script = join(dir, 'long-monitor.sh');
-    writeFileSync(script, `#!/bin/bash\nsleep 1\necho done > ${JSON.stringify(marker)}\nexit 0\n`);
+    writeFileSync(script, '#!/bin/bash\ntail -f /dev/null\n');
     chmodSync(script, 0o755);
 
     const startedAt = Date.now();
@@ -83,7 +82,6 @@ describe('scripts/qa-mocks/pm2', () => {
 
     expect(started.status).toBe(0);
     expect(Date.now() - startedAt).toBeLessThan(500);
-    expect(existsSync(marker)).toBe(false);
     const jlist = runPm2(['jlist'], statePath, dir);
     expect(jlist.status).toBe(0);
     expect(JSON.parse(jlist.stdout)[0]).toMatchObject({
