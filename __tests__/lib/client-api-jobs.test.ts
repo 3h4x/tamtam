@@ -29,13 +29,13 @@ describe('client jobs helpers', () => {
     });
     const { fetchJobs } = await getClientJobs();
 
-    await expect(fetchJobs('owner/repo name', { limit: 25 })).resolves.toEqual({
+    await expect(fetchJobs('owner/repo name', { limit: 25, offset: 50, kind: 'run' })).resolves.toEqual({
       jobs: [{ id: 'job-1' }],
       pendingReleaseProjects: ['proj-a'],
     });
 
     expect((fetchMock.mock.calls[0] as [string])[0]).toBe(
-      '/api/jobs?project=owner%2Frepo+name&limit=25',
+      '/api/jobs?project=owner%2Frepo+name&limit=25&offset=50&kind=run',
     );
   });
 

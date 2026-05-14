@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useState, useEffect, useMemo } from 'react'
+import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { fetchJobs, releaseProject, pushProject, syncJobBoard } from '@/lib/client-api'
@@ -20,8 +20,9 @@ import {
   entryNeedsAttention,
   latestReleaseKey,
   PIPELINE_CHILD_KINDS,
+  parseJobCountsResponse,
 } from '@/components/project-runs/utils'
-import type { Entry, KindBucket } from '@/components/project-runs/utils'
+import type { Entry, JobCountsResponse, KindBucket } from '@/components/project-runs/utils'
 import { RunRow } from '@/components/project-runs/RunRow'
 
 interface ProjectRunsTabProps {
@@ -78,11 +79,26 @@ function renderChain(
   )
 }
 
+const PAGE_SIZE = 50
+const MAX_REFRESH_PAGE_SIZE = 200
+
+function mergeJobs(newer: JobInfo[], older: JobInfo[], maxRows: number): JobInfo[] {
+  const byId = new Map<string, JobInfo>()
+  for (const job of older) byId.set(job.id, job)
+  for (const job of newer) byId.set(job.id, job)
+  return Array.from(byId.values())
+    .sort((a, b) => b.started_at - a.started_at)
+    .slice(0, maxRows)
+}
+
 export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsTabProps) {
   const router = useRouter()
   const [jobs, setJobs] = useState<JobInfo[]>([])
   const [pendingReleaseQueued, setPendingReleaseQueued] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [totalJobs, setTotalJobs] = useState(0)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [summary, setSummary] = useState<JobCountsResponse | null>(null)
   const [filter, setFilter] = useState<Filter>({ kind: 'all' })
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -136,13 +152,22 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     })
   }
 
+  // Track the current window size in a ref so the polling closure can read
+  // it without forcing a re-mounted interval on every state change.
+  const windowSizeRef = useRef<number>(PAGE_SIZE)
+  windowSizeRef.current = Math.max(PAGE_SIZE, jobs.length)
+
   useEffect(() => {
     let active = true
     const poll = async () => {
       try {
-        const data = await fetchJobs(projectName, { limit: 0 })
+        // Refresh only the rows already on screen so 5s polling doesn't
+        // re-download the full history each tick.
+        const windowSize = windowSizeRef.current
+        const data = await fetchJobs(projectName, { limit: Math.min(windowSize, MAX_REFRESH_PAGE_SIZE) })
         if (active) {
-          setJobs(data.jobs)
+          setJobs((prev) => mergeJobs(data.jobs, prev, windowSize))
+          setTotalJobs(data.total ?? data.jobs.length)
           setPendingReleaseQueued(!!data.pendingReleaseProjects?.includes(projectName))
           setLoading(false)
         }
@@ -153,6 +178,34 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     return () => { active = false; clearInterval(interval) }
   }, [projectName])
 
+  useEffect(() => {
+    let active = true
+    const loadCounts = async () => {
+      try {
+        const res = await fetch(`/api/jobs/counts?project=${encodeURIComponent(projectName)}`)
+        if (!res.ok) return
+        const data = parseJobCountsResponse(await res.json())
+        if (active) setSummary(data)
+      } catch {}
+    }
+    loadCounts()
+    const interval = setInterval(loadCounts, 15000)
+    return () => { active = false; clearInterval(interval) }
+  }, [projectName])
+
+  const hasMore = totalJobs > jobs.length
+  const loadMore = async () => {
+    if (loadingMore || !hasMore) return
+    setLoadingMore(true)
+    try {
+      const data = await fetchJobs(projectName, { limit: PAGE_SIZE, offset: jobs.length })
+      setJobs((prev) => mergeJobs(data.jobs, prev, prev.length + data.jobs.length))
+      setTotalJobs(data.total ?? jobs.length + data.jobs.length)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
   const entries = useMemo(() => buildEntries(jobs), [jobs])
   const groupedEntries = useMemo(() => groupReleaseChildren(entries), [entries])
   // Latest release per project — used to gate the "Continue release" /
@@ -161,8 +214,10 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   // misleading: the project state has moved on.
   const latestTopLevelReleaseKey = useMemo(() => latestReleaseKey(groupedEntries), [groupedEntries])
   const loadJobs = async () => {
-    const data = await fetchJobs(projectName, { limit: 0 })
-    setJobs(data.jobs)
+    const windowSize = Math.max(PAGE_SIZE, jobs.length)
+    const data = await fetchJobs(projectName, { limit: Math.min(windowSize, MAX_REFRESH_PAGE_SIZE) })
+    setJobs((prev) => mergeJobs(data.jobs, prev, windowSize))
+    setTotalJobs(data.total ?? data.jobs.length)
     setPendingReleaseQueued(!!data.pendingReleaseProjects?.includes(projectName))
     setLoading(false)
     return data
@@ -223,22 +278,26 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     return Array.from(m.values()).sort((a, b) => b.ts - a.ts)
   }, [filtered])
 
-  const totals = useMemo(() => {
-    let tokens = 0, running = 0, durationMs = 0, costUsd = 0
+  const loadedTotals = useMemo(() => {
+    let tokens = 0, running = 0, costUsd = 0
     for (const e of filtered) {
       tokens += e.inputTokens + e.outputTokens
-      durationMs += e.durationMs ?? 0
       costUsd += e.costUsd
       if (entryIsRunning(e)) running += 1
     }
-    return { tokens, running, durationMs, costUsd }
+    return { tokens, running, costUsd }
   }, [filtered])
 
-  const thisMonthCost = useMemo(() => {
+  // Cost-to-date headers come from the lightweight counts endpoint, not from
+  // walking the (now paginated) jobs list — otherwise totals would only
+  // reflect the rows currently in memory. Fall back to loaded rows when the
+  // counts response is missing or malformed.
+  const loadedMonthCost = useMemo(() => {
     const now = new Date()
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime() / 1000
     return entries.reduce((sum, e) => sum + (e.startedAt >= monthStart ? e.costUsd : 0), 0)
   }, [entries])
+  const thisMonthCost = summary?.cost.monthToDate ?? loadedMonthCost
 
   const navigate = (e: Entry) => {
     if (e.bucket === 'run' && e.navSessionId && e.kind !== 'release') {
@@ -427,12 +486,21 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
         </div>
         <div className="text-xs text-text-tertiary font-mono whitespace-nowrap flex items-center gap-2 flex-wrap">
           <span>
-            {filtered.length} {filtered.length === 1 ? 'entry' : 'entries'}
-            {totals.running > 0 && (
-              <> · <span className="text-status-info">{totals.running} running</span></>
+            {summary ? (
+              <>
+                {summary.total} {summary.total === 1 ? 'entry' : 'entries'}
+                {jobs.length < summary.total && (
+                  <span className="text-text-tertiary/60"> · showing {filtered.length}</span>
+                )}
+              </>
+            ) : (
+              <>{filtered.length} {filtered.length === 1 ? 'entry' : 'entries'}</>
             )}
-            {totals.tokens > 0 && <> · {formatTokens(totals.tokens)} tok</>}
-            {totals.costUsd > 0 && <> · <span className="text-accent">{formatCost(totals.costUsd)}</span></>}
+            {(summary?.byStatus.running ?? loadedTotals.running) > 0 && (
+              <> · <span className="text-status-info">{summary?.byStatus.running ?? loadedTotals.running} running</span></>
+            )}
+            {(summary?.tokens.total ?? loadedTotals.tokens) > 0 && <> · {formatTokens(summary?.tokens.total ?? loadedTotals.tokens)} tok</>}
+            {(summary?.cost.total ?? loadedTotals.costUsd) > 0 && <> · <span className="text-accent">{formatCost(summary?.cost.total ?? loadedTotals.costUsd)}</span></>}
           </span>
           {thisMonthCost > 0 && (
             <span className="text-text-tertiary/60" title="Total cost for all runs this calendar month">
@@ -617,6 +685,17 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
               </div>
             </div>
           ))}
+          {hasMore && (
+            <div className="flex justify-center py-3">
+              <button
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-secondary hover:text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+              >
+                {loadingMore ? 'Loading…' : `Load older (${totalJobs - jobs.length} remaining)`}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

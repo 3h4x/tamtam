@@ -39,6 +39,60 @@ export function formatCost(usd: number): string {
   return `$${usd.toFixed(2)}`
 }
 
+export interface JobCountsResponse {
+  total: number
+  byKind: Record<string, number>
+  byStatus: { running: number; done: number; aborted: number; failed: number }
+  tokens: { input: number; output: number; cacheRead: number; cacheCreate: number; total: number }
+  cost: { total: number; monthToDate: number }
+}
+
+const finiteNumber = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null
+
+const numberProp = (value: unknown, key: string): number => {
+  if (!value || typeof value !== 'object') return 0
+  return finiteNumber((value as Record<string, unknown>)[key]) ?? 0
+}
+
+export function parseJobCountsResponse(value: unknown): JobCountsResponse | null {
+  if (!value || typeof value !== 'object') return null
+  const raw = value as Record<string, unknown>
+  const total = finiteNumber(raw.total)
+  if (total == null) return null
+
+  const rawByKind = raw.byKind && typeof raw.byKind === 'object'
+    ? raw.byKind as Record<string, unknown>
+    : {}
+  const byKind: Record<string, number> = {}
+  for (const [kind, count] of Object.entries(rawByKind)) {
+    const n = finiteNumber(count)
+    if (n != null) byKind[kind] = n
+  }
+
+  return {
+    total,
+    byKind,
+    byStatus: {
+      running: numberProp(raw.byStatus, 'running'),
+      done: numberProp(raw.byStatus, 'done'),
+      aborted: numberProp(raw.byStatus, 'aborted'),
+      failed: numberProp(raw.byStatus, 'failed'),
+    },
+    tokens: {
+      input: numberProp(raw.tokens, 'input'),
+      output: numberProp(raw.tokens, 'output'),
+      cacheRead: numberProp(raw.tokens, 'cacheRead'),
+      cacheCreate: numberProp(raw.tokens, 'cacheCreate'),
+      total: numberProp(raw.tokens, 'total'),
+    },
+    cost: {
+      total: numberProp(raw.cost, 'total'),
+      monthToDate: numberProp(raw.cost, 'monthToDate'),
+    },
+  }
+}
+
 export function jobCost(j: JobInfo): number {
   if (j.cost_usd != null) return j.cost_usd
   return computeCost({

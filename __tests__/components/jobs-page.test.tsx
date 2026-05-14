@@ -208,6 +208,57 @@ describe('JobsPage', () => {
     unmount()
   })
 
+  it('does not advertise summary-only failed rows in clickable filter chips', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/jobs/counts') {
+        return {
+          ok: true,
+          json: async () => ({
+            total: 3,
+            byKind: { test: 3 },
+            byStatus: { running: 0, done: 1, failed: 1, aborted: 1 },
+            tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
+            cost: { total: 0, monthToDate: 0 },
+          }),
+        }
+      }
+      return {
+        ok: true,
+        json: async () => ({ settings: { github_board_sync_enabled: 'false' } }),
+      }
+    }))
+    fetchJobsMock.mockResolvedValue({
+      jobs: [{
+        id: 'job-done',
+        project: 'acme/widgets',
+        kind: 'test',
+        prompt: null,
+        pid: 1,
+        log_path: '/tmp/job-done.log',
+        status: 'done',
+        exit_code: 0,
+        started_at: 100,
+        finished_at: 120,
+        seen: true,
+      }],
+      total: 3,
+      pendingReleaseProjects: [],
+    })
+
+    const { container, unmount } = renderJobsPage()
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('3 total runs')
+      expect(container.textContent).toContain('done 1')
+      expect(container.textContent).not.toContain('failed 2')
+    })
+    const failedButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('failed'))
+    expect(failedButton).toBeUndefined()
+
+    unmount()
+  })
+
   it('does not render the board link when board sync is enabled but both URLs are blank', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,

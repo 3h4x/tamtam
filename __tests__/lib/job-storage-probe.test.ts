@@ -115,6 +115,12 @@ const testDb = {
   },
 } as { db: TestDbHandle['db'] };
 
+function makeMissingProcessError(): NodeJS.ErrnoException {
+  const error = new Error('ESRCH') as NodeJS.ErrnoException;
+  error.code = 'ESRCH';
+  return error;
+}
+
 // `getJob`/`listJobs` are cache-only since commit 1cc1db25 — tests that seed
 // rows via direct DB inserts must populate the in-memory cache too, or
 // lifecycle hooks (which call `getJob`/`findActiveReleaseJob`/`listJobs`)
@@ -249,13 +255,16 @@ describe('probeJobStatus with pm2', () => {
 
   it('marks done via process.kill when pid no longer exists', async () => {
     getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw makeMissingProcessError();
+    });
 
     const job: JobData = {
       id: 'job-dead-pid',
       project: 'proj',
       kind: 'run',
       prompt: null,
-      pid: 2147483647, // extremely unlikely to exist
+      pid: 99999,
       logPath: null,
       startedAt: Date.now() / 1000,
       finishedAt: null,
@@ -263,9 +272,12 @@ describe('probeJobStatus with pm2', () => {
       seen: false,
     };
 
-    const status = await probeJobStatusFn(job);
-    // Either running (if signal succeeds by chance) or done (pid dead) — both valid
-    expect(['running', 'done']).toContain(status);
+    try {
+      const status = await probeJobStatusFn(job);
+      expect(status).toBe('done');
+    } finally {
+      killSpy.mockRestore();
+    }
   });
 
   it('overrides exit code to 0 when log has a clean result (is_error:false) and pm2 reports non-zero', async () => {
@@ -560,13 +572,13 @@ describe('probeJobStatus – test/action kind liveness via process.kill', () => 
   });
 
   it('test kind with live pid returns running (does not hit pm2)', async () => {
-    const livePid = process.pid;
+    const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as ReturnType<typeof process.kill>);
     const job: JobData = {
       id: 'job-test-live',
       project: 'proj',
       kind: 'test',
       prompt: null,
-      pid: livePid,
+      pid: 99999,
       logPath: null,
       startedAt: Date.now() / 1000,
       finishedAt: null,
@@ -574,17 +586,22 @@ describe('probeJobStatus – test/action kind liveness via process.kill', () => 
       seen: false,
     };
 
-    const status = await probeJobStatusFn(job);
-    expect(status).toBe('running');
+    try {
+      const status = await probeJobStatusFn(job);
+      expect(status).toBe('running');
+    } finally {
+      killSpy.mockRestore();
+    }
   });
 
   it('action kind with live pid returns running', async () => {
+    const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as ReturnType<typeof process.kill>);
     const job: JobData = {
       id: 'job-action-live',
       project: 'proj',
       kind: 'action',
       prompt: null,
-      pid: process.pid,
+      pid: 99999,
       logPath: null,
       startedAt: Date.now() / 1000,
       finishedAt: null,
@@ -592,17 +609,24 @@ describe('probeJobStatus – test/action kind liveness via process.kill', () => 
       seen: false,
     };
 
-    const status = await probeJobStatusFn(job);
-    expect(status).toBe('running');
+    try {
+      const status = await probeJobStatusFn(job);
+      expect(status).toBe('running');
+    } finally {
+      killSpy.mockRestore();
+    }
   });
 
   it('test kind with dead pid returns done', async () => {
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw makeMissingProcessError();
+    });
     const job: JobData = {
       id: 'job-test-dead',
       project: 'proj',
       kind: 'test',
       prompt: null,
-      pid: 2147483647,
+      pid: 99999,
       logPath: null,
       startedAt: Date.now() / 1000,
       finishedAt: null,
@@ -610,8 +634,12 @@ describe('probeJobStatus – test/action kind liveness via process.kill', () => 
       seen: false,
     };
 
-    const status = await probeJobStatusFn(job);
-    expect(['running', 'done']).toContain(status);
+    try {
+      const status = await probeJobStatusFn(job);
+      expect(status).toBe('done');
+    } finally {
+      killSpy.mockRestore();
+    }
   });
 });
 describe('markDone – ghIssuesCache invalidation', () => {

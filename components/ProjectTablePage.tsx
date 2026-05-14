@@ -2,8 +2,30 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { reviewProject, fetchJobs, fetchAgents } from '@/lib/client-api'
-import type { JobInfo, Agent } from '@/lib/client-api'
+import { reviewProject, fetchAgents } from '@/lib/client-api'
+import type { Agent } from '@/lib/client-api'
+
+interface ProjectRuntimeEntry {
+  hasRunningReview: boolean
+  hasRunningTest: boolean
+  hasRunningRelease: boolean
+  hasRunningPipelineChild: boolean
+  runningCount: number
+  runningKinds: string[]
+  runningAgentNames: string[]
+  latestVerdict: string | null
+  latestVerdictAt: number | null
+  lastActivityAt: number | null
+  lastJob: {
+    id: string
+    kind: string
+    status: 'running' | 'done' | 'aborted'
+    exitCode: number | null
+    startedAt: number
+    finishedAt: number | null
+    verdict: string | null
+  } | null
+}
 import type { FleetHealth } from '@/hooks/useProjectHealth'
 import { formatAgo } from '@/lib/shared/format'
 import { getAggregateCi, getCiFailedUrl } from '@/lib/shared/statusConstants'
@@ -222,7 +244,7 @@ const ciOrder: Record<string, number> = { failure: 0, in_progress: 1, success: 2
 export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: ProjectTablePageProps) {
   const router = useRouter()
   const { toast } = useToast()
-  const [allJobs, setAllJobs] = useState<JobInfo[]>([])
+  const [runtime, setRuntime] = useState<Record<string, ProjectRuntimeEntry>>({})
   const [agentsByProject, setAgentsByProject] = useState<Record<string, Agent[]>>({})
   const [schedulerByProject, setSchedulerByProject] = useState<Record<string, SchedulerEntry[]>>({})
   const [schedulerPaused, setSchedulerPaused] = useState(false)
@@ -348,14 +370,16 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
     let active = true
     const poll = async () => {
       try {
-        const data = await fetchJobs()
-        if (active) setAllJobs(data.jobs)
+        const res = await fetch('/api/projects/runtime')
+        if (!res.ok) return
+        const data = await res.json() as { projects: Record<string, ProjectRuntimeEntry> }
+        if (active) setRuntime(data.projects ?? {})
       } catch { /* ignore */ }
     }
     poll()
-    // Poll jobs every 30s (was 5s). Reduced frequency to cut server load; job status
-    // (running → done) may be stale for up to 30s. This is acceptable for the
-    // dashboard since detailed job status is visible in the Terminal/Release views.
+    // Poll runtime snapshot every 30s — fast enough for "is anything running"
+    // indicators and slow enough to be cheap. The endpoint ships one row per
+    // project, not a job dump.
     const interval = setInterval(poll, 30000)
     return () => { active = false; clearInterval(interval) }
   }, [])
@@ -382,30 +406,14 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
     return () => { active = false; clearInterval(interval) }
   }, [])
 
-const isReviewRunning = (projectName: string) =>
-    allJobs.some(j => j.project === projectName && j.kind === 'review' && j.status === 'running')
+const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunningReview
 
-  const getLatestVerdict = (projectName: string) =>
-    allJobs
-      .filter(j => j.project === projectName && j.kind === 'review' && j.status === 'done' && j.verdict)
-      .sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))[0]?.verdict
+  const getLatestVerdict = (projectName: string) => runtime[projectName]?.latestVerdict ?? undefined
 
   const getRunningAgentNames = (projectName: string): Set<string> =>
-    new Set(
-      allJobs
-        .filter(j => j.project === projectName && j.status === 'running' && j.kind.startsWith('agent:'))
-        .map(j => j.kind.slice('agent:'.length))
-    )
+    new Set(runtime[projectName]?.runningAgentNames ?? [])
 
-  const getRecentTs = (name: string) => {
-    let max = 0
-    for (const j of allJobs) {
-      if (j.project !== name) continue
-      const t = Math.max(j.started_at || 0, j.finished_at || 0)
-      if (t > max) max = t
-    }
-    return max
-  }
+  const getRecentTs = (name: string) => runtime[name]?.lastActivityAt ?? 0
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -536,10 +544,10 @@ const isReviewRunning = (projectName: string) =>
             const reviewing = isReviewRunning(project.project)
             const verdict = getLatestVerdict(project.project)
 
-            const projectJobs = allJobs.filter(j => j.project === project.project)
-            const runningJobs = projectJobs.filter(j => j.status === 'running')
-            const jobTime = (j: typeof projectJobs[number]) => j.finished_at ?? j.started_at ?? 0
-            const lastJob = projectJobs.slice().sort((a, b) => jobTime(b) - jobTime(a))[0]
+            const projectRuntime = runtime[project.project]
+            const runningCount = projectRuntime?.runningCount ?? 0
+            const runningKinds = projectRuntime?.runningKinds ?? []
+            const lastJob = projectRuntime?.lastJob ?? null
 
             const agents = agentsByProject[project.project] || []
             const runningAgentNames = getRunningAgentNames(project.project)
@@ -598,10 +606,10 @@ const isReviewRunning = (projectName: string) =>
                 {/* Status */}
                 <td className="px-4 py-2">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {runningJobs.length > 0 && (
-                      <span title={runningJobs.map(j => j.kind).join(', ')} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-accent/15 text-accent border border-accent/30">
+                    {runningCount > 0 && (
+                      <span title={runningKinds.join(', ')} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-accent/15 text-accent border border-accent/30">
                         <SpinnerIcon />
-                        {runningJobs.length > 1 ? `${runningJobs.length} running` : 'running'}
+                        {runningCount > 1 ? `${runningCount} running` : 'running'}
                       </span>
                     )}
                     {project.status === 'error' && (
@@ -643,13 +651,13 @@ const isReviewRunning = (projectName: string) =>
                         {scheduledCount} scheduled
                       </span>
                     )}
-                    {runningJobs.length === 0 && project.status !== 'error' && !showWarning && scheduledCount === 0 && lastJob && (
+                    {runningCount === 0 && project.status !== 'error' && !showWarning && scheduledCount === 0 && lastJob && (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium text-text-tertiary">
                         <StatusDot ok={true} />
                         idle
                       </span>
                     )}
-                    {runningJobs.length === 0 && project.status !== 'error' && !showWarning && scheduledCount === 0 && !lastJob && (
+                    {runningCount === 0 && project.status !== 'error' && !showWarning && scheduledCount === 0 && !lastJob && (
                       <span className="text-text-tertiary text-xs">—</span>
                     )}
                   </div>
@@ -696,13 +704,13 @@ const isReviewRunning = (projectName: string) =>
                       {lastJob.status === 'running' ? (
                         <SpinnerIcon />
                       ) : (
-                        <StatusDot ok={lastJob.exit_code === 0} />
+                        <StatusDot ok={lastJob.exitCode === 0} />
                       )}
                       <span className="text-xs text-text-secondary font-medium">{lastJob.kind.startsWith('agent:') ? lastJob.kind.slice(6) : lastJob.kind}</span>
                       <span className="text-xs text-text-tertiary">
                         {lastJob.status === 'running'
-                          ? `running · started ${formatAgo(lastJob.started_at)}`
-                          : formatAgo(lastJob.finished_at ?? lastJob.started_at)}
+                          ? `running · started ${formatAgo(lastJob.startedAt)}`
+                          : formatAgo(lastJob.finishedAt ?? lastJob.startedAt)}
                       </span>
                       {lastJob.verdict && lastJob.status !== 'running' && (
                         <span className={`text-[10px] px-1 py-0.5 rounded font-mono font-medium ${

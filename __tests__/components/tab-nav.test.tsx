@@ -60,11 +60,12 @@ describe('TabNav', () => {
   })
 
   it('routes directly to the latest terminal session when one exists', async () => {
+    // TabNav now filters at the API level (kind=run, small limit) instead of
+    // pulling the full project history. Server returns rows newest-first.
     fetchJobsMock.mockResolvedValue({
       jobs: [
-        { kind: 'test', session_id: 'ignore', started_at: 300 },
-        { kind: 'run', session_id: 'older', started_at: 100 },
         { kind: 'run', session_id: 'latest', started_at: 200 },
+        { kind: 'run', session_id: 'older', started_at: 100 },
       ],
     })
 
@@ -73,7 +74,7 @@ describe('TabNav', () => {
     terminalButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await Promise.resolve()
 
-    expect(fetchJobsMock).toHaveBeenCalledWith('owner/repo name')
+    expect(fetchJobsMock).toHaveBeenCalledWith('owner/repo name', expect.objectContaining({ kind: 'run' }))
     expect(pushMock).toHaveBeenCalledWith('/project/owner%2Frepo%20name/terminal/latest')
     expect(onSetTab).not.toHaveBeenCalled()
 

@@ -536,23 +536,48 @@ describe('ProjectTablePage', () => {
   })
 
   it('labels legacy per-project paused schedules as scheduled paused even when jobs are currently running', async () => {
-    fetchJobs.mockResolvedValue({
-      jobs: [
-        {
-          id: 'job-1',
-          project: 'filmpick',
-          kind: 'review',
-          prompt: null,
-          pid: 123,
-          log_path: '/tmp/job-1.log',
-          status: 'running',
-          exit_code: null,
-          started_at: 100,
-          finished_at: null,
-          seen: false,
-        },
-      ],
-    })
+    // The home dashboard reads per-project running state from
+    // /api/projects/runtime now, not from a full fetchJobs() dump.
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/projects/runtime') {
+        return {
+          ok: true,
+          json: async () => ({
+            projects: {
+              filmpick: {
+                hasRunningReview: true,
+                hasRunningTest: false,
+                hasRunningRelease: false,
+                hasRunningPipelineChild: true,
+                runningCount: 1,
+                runningKinds: ['review'],
+                runningAgentNames: [],
+                latestVerdict: null,
+                latestVerdictAt: null,
+                lastActivityAt: 100,
+                lastJob: {
+                  id: 'job-1',
+                  kind: 'review',
+                  status: 'running',
+                  exitCode: null,
+                  startedAt: 100,
+                  finishedAt: null,
+                  verdict: null,
+                },
+              },
+            },
+          }),
+        }
+      }
+      if (url === '/api/settings') {
+        return { ok: true, json: async () => ({ settings: { budget_block_runs_enabled: 'false' } }) }
+      }
+      if (url === '/api/agents/scheduler-health') {
+        return { ok: true, json: async () => ({ internal: { entries: [], paused: false } }) }
+      }
+      return { ok: false, json: async () => ({}) }
+    }))
 
     const fleet = createFleetHealth([
       {

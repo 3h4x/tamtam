@@ -135,7 +135,7 @@ describe('ProjectRunsTab release actions', () => {
     const { container, unmount } = renderTab()
 
     await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
       expect(container.textContent).toContain('Pipeline steps')
     })
 
@@ -178,7 +178,7 @@ describe('ProjectRunsTab release actions', () => {
     const { container, unmount } = renderTab()
 
     await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
       expect(container.textContent).toContain('1 running')
     })
 
@@ -194,12 +194,55 @@ describe('ProjectRunsTab release actions', () => {
     unmount()
   })
 
+  it('loads older project history with offset pagination', async () => {
+    const firstPage = Array.from({ length: 50 }, (_, i) =>
+      makeJob({ id: `new-${i}`, kind: 'run', started_at: 1000 - i }),
+    )
+    const secondPage = Array.from({ length: 50 }, (_, i) =>
+      makeJob({ id: `old-${i}`, kind: 'run', started_at: 500 - i }),
+    )
+    fetchJobsMock
+      .mockResolvedValueOnce({
+        jobs: firstPage,
+        total: 125,
+        pendingReleaseProjects: [],
+      })
+      .mockResolvedValueOnce({
+        jobs: secondPage,
+        total: 125,
+        pendingReleaseProjects: [],
+      })
+    vi.stubGlobal('fetch', vi.fn(async () => makeResponse({
+      total: 125,
+      byKind: { run: 125 },
+      byStatus: { running: 0, done: 125, aborted: 0, failed: 0 },
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
+      cost: { total: 0, monthToDate: 0 },
+    })))
+
+    const { container, unmount } = renderTab()
+
+    await waitFor(() => {
+      expect(buttonByText(container, 'Load older')).toBeInstanceOf(HTMLButtonElement)
+      expect(container.textContent).toContain('Load older (75 remaining)')
+    })
+
+    buttonByText(container, 'Load older').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 50, offset: 50 })
+      expect(container.textContent).toContain('Load older (25 remaining)')
+    })
+
+    unmount()
+  })
+
   it('keeps Sync board available even if an unrelated global fetch fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('settings offline')))
     const { container, unmount } = renderTab()
 
     await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
       expect(buttonByText(container, 'Sync board')).toBeInstanceOf(HTMLButtonElement)
     })
 
@@ -226,7 +269,7 @@ describe('ProjectRunsTab release actions', () => {
     const { container, unmount } = renderTab()
 
     await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
       expect(container.textContent).toContain('cancelled after review')
     })
 
@@ -248,7 +291,7 @@ describe('ProjectRunsTab release actions', () => {
     const { container, unmount } = renderTab()
 
     await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
       expect(container.textContent).toContain('Release pipeline')
     })
 
@@ -281,7 +324,7 @@ describe('ProjectRunsTab release actions', () => {
     const { container, unmount } = renderTab()
 
     await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
       expect(buttonByText(container, 'Retry commit')).toBeInstanceOf(HTMLButtonElement)
     })
 
@@ -310,7 +353,7 @@ describe('ProjectRunsTab release actions', () => {
     const { container, unmount } = renderTab()
 
     await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
       expect(buttonByText(container, 'Sync board')).toBeInstanceOf(HTMLButtonElement)
     })
 
@@ -338,7 +381,7 @@ describe('ProjectRunsTab release actions', () => {
     const { container, unmount } = renderTab()
 
     await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
       expect(buttonByText(container, 'Stop')).toBeInstanceOf(HTMLButtonElement)
     })
 
@@ -371,7 +414,7 @@ describe('ProjectRunsTab release actions', () => {
     const { container, unmount } = renderTab()
 
     await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
       expect(buttonByText(container, 'Stop')).toBeInstanceOf(HTMLButtonElement)
     })
 
@@ -401,7 +444,7 @@ describe('ProjectRunsTab release actions', () => {
     const { container, unmount } = renderTab()
 
     await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
       expect(buttonByText(container, 'test')).toBeInstanceOf(HTMLButtonElement)
     })
 
@@ -435,7 +478,7 @@ describe('ProjectRunsTab release actions', () => {
     const { container, unmount } = renderTab()
 
     await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
       expect(buttonByText(container, 'Stop')).toBeInstanceOf(HTMLButtonElement)
     })
 
@@ -464,7 +507,7 @@ describe('ProjectRunsTab release actions', () => {
     const { container, unmount } = renderTab()
 
     await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
       expect(buttonByText(container, 'Stop')).toBeInstanceOf(HTMLButtonElement)
     })
 
@@ -493,7 +536,7 @@ describe('ProjectRunsTab release actions', () => {
     const { container, unmount } = renderTab()
 
     await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
       expect(container.textContent).toContain('Release pipeline')
       expect(container.textContent).toContain('ship')
     })
@@ -536,7 +579,7 @@ describe('ProjectRunsTab release actions', () => {
     const { container, unmount } = renderTab()
 
     await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
       expect(container.textContent).toContain('Pipeline steps')
     })
 
@@ -561,7 +604,7 @@ describe('ProjectRunsTab release actions', () => {
     const { container, rerender, unmount } = renderTab({ jobsPaused: true })
 
     await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
       expect(buttonByText(container, 'Continue release').disabled).toBe(true)
       expect(buttonByText(container, 'Continue release').title).toContain('Jobs are paused globally')
     })
@@ -588,7 +631,7 @@ describe('ProjectRunsTab release actions', () => {
     const { container, unmount } = renderTab()
 
     await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', { limit: 0 })
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
       expect(container.textContent).toContain('Release queued')
     })
 

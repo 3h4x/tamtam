@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listJobs } from '@/lib/jobs/job-storage';
+import { jobNeedsAttention } from '@/lib/jobs/status';
 
 // Lightweight aggregation endpoint. The list endpoint used to serve double
 // duty as the source of badge counts ("21,537 entries · 25.3M tok · $385.18"
@@ -35,7 +36,7 @@ export async function GET(request: NextRequest) {
     byKind[j.kind] = (byKind[j.kind] ?? 0) + 1;
     if (j.abortedAt != null) byStatus.aborted += 1;
     else if (j.finishedAt === null) byStatus.running += 1;
-    else if (j.exitCode != null && j.exitCode !== 0) byStatus.failed += 1;
+    else if (jobNeedsAttention(j)) byStatus.failed += 1;
     else byStatus.done += 1;
     inputTokens += j.inputTokens ?? 0;
     outputTokens += j.outputTokens ?? 0;

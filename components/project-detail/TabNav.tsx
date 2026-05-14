@@ -28,10 +28,11 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, runni
 
   const handleTerminalClick = async () => {
     try {
-      const data = await fetchJobs(projectName)
-      const lastSession = data.jobs
-        .filter(j => j.kind === 'run' && j.session_id)
-        .sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0))[0]
+      // Filter at the API level: we want the single most recent `run`-kind
+      // job that has a session_id. Previously this pulled the whole project
+      // jobs list and filtered client-side — costly on large histories.
+      const data = await fetchJobs(projectName, { kind: 'run', limit: 5 })
+      const lastSession = data.jobs.find(j => j.session_id)
       if (lastSession?.session_id) {
         router.push(buildProjectTerminalPath(projectName, { sessionId: lastSession.session_id }))
         return

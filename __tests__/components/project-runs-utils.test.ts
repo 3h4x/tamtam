@@ -12,8 +12,31 @@ import {
   groupReleaseChildren,
   flattenReleaseChildren,
   flattenPipelineSteps,
+  parseJobCountsResponse,
 } from '@/components/project-runs/utils';
 import type { Entry } from '@/components/project-runs/utils';
+
+// ---------------------------------------------------------------------------
+// parseJobCountsResponse
+// ---------------------------------------------------------------------------
+describe('parseJobCountsResponse', () => {
+  it('rejects non-count JSON from unrelated endpoints', () => {
+    expect(parseJobCountsResponse({ settings: { github_board_sync_enabled: 'false' } })).toBeNull();
+  });
+
+  it('defaults missing nested counters for partial count responses', () => {
+    expect(parseJobCountsResponse({
+      total: 12,
+      byKind: { review: 2, bad: 'nope' },
+    })).toEqual({
+      total: 12,
+      byKind: { review: 2 },
+      byStatus: { running: 0, done: 0, aborted: 0, failed: 0 },
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
+      cost: { total: 0, monthToDate: 0 },
+    });
+  });
+});
 
 // ---------------------------------------------------------------------------
 // formatDuration
