@@ -23,7 +23,9 @@ async function waitForState(
   while (Date.now() < deadline) {
     if (existsSync(statePath)) {
       const state = JSON.parse(readFileSync(statePath, 'utf-8'));
-      if (predicate(state[name])) return state[name];
+      if (predicate(state[name])) {
+        return state[name];
+      }
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 5));
   }
@@ -60,7 +62,7 @@ describe('scripts/qa-mocks/pm2', () => {
   it('executes shebang scripts directly when no interpreter is specified', async () => {
     const marker = join(dir, 'shell-ran.txt');
     const script = join(dir, 'release-monitor.sh');
-    writeFileSync(script, `#!/bin/bash\necho ok > ${JSON.stringify(marker)}\nexit 0\n`);
+    writeFileSync(script, `#!/bin/sh\nprintf 'ok\\n' > ${JSON.stringify(marker)}\n`);
     chmodSync(script, 0o755);
 
     const started = runPm2(['start', script, '--name', 'release-monitor', '--no-autorestart'], statePath, dir);
@@ -74,7 +76,7 @@ describe('scripts/qa-mocks/pm2', () => {
 
   it('returns from start while a direct executable is still running', async () => {
     const script = join(dir, 'long-monitor.sh');
-    writeFileSync(script, '#!/bin/bash\ntail -f /dev/null\n');
+    writeFileSync(script, "#!/usr/bin/env node\nsetInterval(() => {}, 1000);\n");
     chmodSync(script, 0o755);
 
     const startedAt = Date.now();
@@ -89,5 +91,17 @@ describe('scripts/qa-mocks/pm2', () => {
       pm2_env: { status: 'online', exit_code: null },
     });
     runPm2(['delete', 'long-release-monitor'], statePath, dir);
+  });
+
+  it('detects state written after waiting begins', async () => {
+    const waiter = waitForState(statePath, 'late-job', (state) => state?.status === 'stopped');
+
+    setTimeout(() => {
+      writeFileSync(statePath, JSON.stringify({
+        'late-job': { status: 'stopped', exit_code: 0 },
+      }));
+    }, 20);
+
+    await expect(waiter).resolves.toMatchObject({ status: 'stopped', exit_code: 0 });
   });
 });

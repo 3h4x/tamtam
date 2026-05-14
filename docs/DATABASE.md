@@ -271,7 +271,7 @@ curl -X POST http://localhost:1337/api/settings/backup
 
 # Verify or restore a backup
 pnpm db:verify data/db/tamtam.db
-pnpm db:restore data/db/tamtam-YYYYMMDD-HHMM.db
+pnpm db:restore data/db/tamtam-YYYYMMDD-HHMM.db  # run from the repo root
 
 # Inspect directly with sqlite3
 sqlite3 data/db/tamtam.db ".tables"
