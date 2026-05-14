@@ -65,6 +65,9 @@ export async function GET(
   const forceRefresh = request.nextUrl.searchParams.get('refresh') === '1';
   const trustedOnly = request.nextUrl.searchParams.get('trusted_only') === '1';
   const slim = request.nextUrl.searchParams.get('full') !== '1';
+  // `?summary=1` returns just counts and open-PR branch metadata for parent
+  // pollers (Project header) that don't render the lists themselves.
+  const summary = request.nextUrl.searchParams.get('summary') === '1';
 
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
@@ -81,6 +84,20 @@ export async function GET(
       const cachedIssues = JSON.parse(cached.issues);
       const cachedPRs = JSON.parse(cached.prs);
       const filteredIssues = trustedOnly ? filterTrustedIssues(cachedIssues, projPath) : cachedIssues;
+      if (summary) {
+        return NextResponse.json({
+          repo: cached.repo,
+          prCount: cachedPRs.length,
+          issueCount: filteredIssues.length,
+          openPrBranches: cachedPRs.map((pr: unknown) => {
+            const p = pr as Record<string, unknown>;
+            return { branch: p.headRefName ?? '', number: p.number ?? 0 };
+          }),
+          error: null,
+          cached: true,
+          cachedAt: cached.fetchedAt,
+        });
+      }
       return NextResponse.json({
         repo: cached.repo,
         prs: slim ? cachedPRs.map(slimPR) : cachedPRs,
@@ -135,6 +152,20 @@ export async function GET(
   }
 
   const filteredIssues = trustedOnly ? filterTrustedIssues(issues, projPath) : issues;
+  if (summary) {
+    return NextResponse.json({
+      repo,
+      prCount: prs.length,
+      issueCount: filteredIssues.length,
+      openPrBranches: prs.map((pr: unknown) => {
+        const p = pr as Record<string, unknown>;
+        return { branch: p.headRefName ?? '', number: p.number ?? 0 };
+      }),
+      error: ghError,
+      cached: false,
+      cachedAt: fetchedAt,
+    });
+  }
   return NextResponse.json({
     repo,
     prs: slim ? prs.map(slimPR) : prs,

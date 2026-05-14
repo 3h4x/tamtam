@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { unseenFinished, listJobs, probeJobStatus } from '@/lib/jobs/job-storage';
+import { unseenFinished, listJobs } from '@/lib/jobs/job-storage';
 import type { JobData } from '@/lib/jobs/job-storage';
 
 const MAX_NOTIFICATION_JOBS = 50;
@@ -27,9 +27,12 @@ function notificationJob(job: JobData) {
 }
 
 export async function GET() {
-  const runningCandidates = listJobs().filter(j => j.finishedAt === null);
-  await Promise.all(runningCandidates.map(j => probeJobStatus(j)));
-
+  // The 30 s background probe sweep (`runProbeSweep` in
+  // instrumentation-node.ts) keeps `finishedAt` fresh on every running row,
+  // so we no longer fork PM2 from this 5 s-polled endpoint. Before this, the
+  // bell route was the slowest call on the dashboard (300+ ms) — one PM2
+  // jlist per running job times five polls per project page.
+  //
   // Per-project superseding: if a project's most recent finished job
   // succeeded in a terminal way, hide older unseen failures for that project
   // — they no longer describe the project's current state and just clutter
@@ -49,7 +52,6 @@ export async function GET() {
   // like a passing test or LGTM review: those are step-local successes, not a
   // terminal signal that the overall pipeline is healthy again.
   const GLOBAL_TERMINAL_SUCCESS_KINDS = new Set(['release', 'push', 'pr-wait']);
-  const finishedPipelineJobs = listJobs().filter(j => j.finishedAt != null && PIPELINE_LIKE.has(j.kind));
 
   const isTerminalSuccess = (j: JobData): boolean => {
     if (j.finishedAt == null || j.exitCode !== 0) return false;
@@ -58,16 +60,24 @@ export async function GET() {
     return true;
   };
 
-  const terminalSuccessSupersedes = (newer: JobData, older: JobData): boolean => {
-    if (newer.project !== older.project) return false;
-    if ((newer.finishedAt ?? 0) <= (older.finishedAt ?? 0)) return false;
-    if (!isTerminalSuccess(newer)) return false;
-    return GLOBAL_TERMINAL_SUCCESS_KINDS.has(newer.kind);
+  // Pre-compute the most recent terminal-success finish time per project so
+  // the supersede check is O(1) per candidate instead of scanning every
+  // finished pipeline row each time.
+  const latestTerminalSuccessAt: Record<string, number> = {};
+  for (const j of listJobs()) {
+    if (!GLOBAL_TERMINAL_SUCCESS_KINDS.has(j.kind)) continue;
+    if (!isTerminalSuccess(j)) continue;
+    const finishedAt = j.finishedAt ?? 0;
+    if (finishedAt > (latestTerminalSuccessAt[j.project] ?? 0)) {
+      latestTerminalSuccessAt[j.project] = finishedAt;
+    }
   }
 
   const supersededByGreenSuccess = (j: JobData): boolean => {
     if (!PIPELINE_LIKE.has(j.kind)) return false;
-    return finishedPipelineJobs.some(candidate => terminalSuccessSupersedes(candidate, j));
+    const cutoff = latestTerminalSuccessAt[j.project];
+    if (cutoff == null) return false;
+    return (j.finishedAt ?? 0) < cutoff;
   };
 
   const jobs = unseenFinished()

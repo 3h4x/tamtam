@@ -112,7 +112,9 @@ describe('GET /api/jobs/notifications', () => {
     const data = await res.json();
     expect(data.runningCount).toBe(1);
     expect(data.runningJobs[0].id).toBe('r1');
-    expect(probeJobStatusMock).toHaveBeenCalledWith(running);
+    // Notification route no longer probes — the 30 s background probe sweep
+    // owns that work now.
+    expect(probeJobStatusMock).not.toHaveBeenCalled();
   });
 
   it('excludes finished jobs from runningJobs', async () => {

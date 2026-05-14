@@ -106,6 +106,40 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
     expect(mocks.exec).not.toHaveBeenCalled();
   });
 
+  it('returns cached summary data with trusted issue filtering', async () => {
+    mocks.getSettings.mockReturnValue({ trusted_github_users: ['trusted-user'], github_owner: '' });
+    const now = Date.now() / 1000;
+    await sharedHandle.db.insert(schema.ghIssuesCache).values({
+      project: 'myproj',
+      repo: 'owner/myproj',
+      prs: JSON.stringify([
+        { number: 11, title: 'Visible PR', headRefName: 'feat/open-pr' },
+      ]),
+      issues: JSON.stringify([
+        { number: 1, title: 'Keep', author: { login: 'trusted-user' }, labels: [], assignees: [] },
+        { number: 2, title: 'Drop', author: { login: 'outsider' }, labels: [], assignees: [] },
+      ]),
+      fetchedAt: now - 10,
+    });
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?summary=1&trusted_only=1');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data).toMatchObject({
+      repo: 'owner/myproj',
+      prCount: 1,
+      issueCount: 1,
+      openPrBranches: [{ branch: 'feat/open-pr', number: 11 }],
+      error: null,
+      cached: true,
+    });
+    expect(data.cachedAt).toBe(now - 10);
+    expect(data.prs).toBeUndefined();
+    expect(data.issues).toBeUndefined();
+    expect(mocks.exec).not.toHaveBeenCalled();
+  });
+
   it('fetches from gh when cache is stale', async () => {
     const staleTime = Date.now() / 1000 - 400;
     await sharedHandle.db.insert(schema.ghIssuesCache).values({
@@ -128,6 +162,35 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
     expect(data.cached).toBe(false);
     expect(data.prs[0].title).toBe('Fresh PR');
     expect(data.issues[0].title).toBe('Fresh Issue');
+  });
+
+  it('returns live summary data with trusted issue filtering', async () => {
+    mocks.getSettings.mockReturnValue({ trusted_github_users: ['trusted-user'], github_owner: '' });
+    mocks.exec
+      .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
+      .mockImplementationOnce(() => resp(0, JSON.stringify([
+        { number: 7, title: 'Fresh PR', headRefName: 'feat/live-pr' },
+      ])))
+      .mockImplementationOnce(() => resp(0, JSON.stringify([
+        { number: 3, title: 'Fresh Issue', author: { login: 'trusted-user' }, labels: [], assignees: [] },
+        { number: 4, title: 'Untrusted Issue', author: { login: 'outsider' }, labels: [], assignees: [] },
+      ])));
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?summary=1&trusted_only=1');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data).toMatchObject({
+      repo: 'owner/myproj',
+      prCount: 1,
+      issueCount: 1,
+      openPrBranches: [{ branch: 'feat/live-pr', number: 7 }],
+      error: null,
+      cached: false,
+    });
+    expect(typeof data.cachedAt).toBe('number');
+    expect(data.prs).toBeUndefined();
+    expect(data.issues).toBeUndefined();
   });
 
   it('bypasses cache when refresh=1', async () => {

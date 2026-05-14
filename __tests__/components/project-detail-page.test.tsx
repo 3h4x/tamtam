@@ -23,6 +23,7 @@ const {
   pullProjectMock,
   fetchBehindMock,
   fetchIssuesAndPRsMock,
+  fetchIssuesSummaryMock,
   fetchBranchMock,
   tabNavPropsMock,
   terminalTabPropsMock,
@@ -47,6 +48,7 @@ const {
   pullProjectMock: vi.fn(),
   fetchBehindMock: vi.fn(),
   fetchIssuesAndPRsMock: vi.fn(),
+  fetchIssuesSummaryMock: vi.fn(),
   fetchBranchMock: vi.fn(),
   tabNavPropsMock: vi.fn(),
   terminalTabPropsMock: vi.fn(),
@@ -79,6 +81,7 @@ vi.mock('@/lib/client-api', () => ({
   PullDivergedError: class PullDivergedError extends Error {},
   testProject: vi.fn(),
   fetchIssuesAndPRs: fetchIssuesAndPRsMock,
+  fetchIssuesSummary: fetchIssuesSummaryMock,
   pushProject: vi.fn(),
   fetchBranch: fetchBranchMock,
   createProjectPR: vi.fn(),
@@ -294,6 +297,7 @@ describe('ProjectDetailPage', () => {
     pullProjectMock.mockReset()
     fetchBehindMock.mockReset()
     fetchIssuesAndPRsMock.mockReset()
+    fetchIssuesSummaryMock.mockReset()
     fetchBranchMock.mockReset()
     tabNavPropsMock.mockReset()
     terminalTabPropsMock.mockReset()
@@ -309,6 +313,7 @@ describe('ProjectDetailPage', () => {
     runCustomActionMock.mockResolvedValue({ job_id: 'job-123' })
     fetchBehindMock.mockResolvedValue({ behind: 0 })
     fetchIssuesAndPRsMock.mockResolvedValue({ prs: [], issues: [] })
+    fetchIssuesSummaryMock.mockResolvedValue({ prCount: 0, issueCount: 0, openPrBranches: [], repo: 'owner/repo', error: null, cached: true, cachedAt: 0 })
     fetchBranchMock.mockResolvedValue({ branch: 'master', defaultBranch: 'master', commitsAhead: 0 })
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -370,6 +375,7 @@ describe('ProjectDetailPage', () => {
     expect(fetchProjectConfigMock).not.toHaveBeenCalled()
     expect(fetchBehindMock).not.toHaveBeenCalled()
     expect(fetchIssuesAndPRsMock).not.toHaveBeenCalled()
+    expect(fetchIssuesSummaryMock).not.toHaveBeenCalled()
     expect(fetchBranchMock).not.toHaveBeenCalled()
 
     unmount()

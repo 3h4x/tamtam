@@ -255,7 +255,7 @@ async function _doSettingsRefresh(): Promise<void> {
   const rows = await db.select().from(schema.settings);
   const map: Record<string, string> = {};
   for (const row of rows) map[row.key] = row.value;
-  const config = _buildConfig(map);
+  const config = buildConfigFromSettingsMap(map);
   _cache = { config, time: Date.now() / 1000 };
   if (config.lmstudio_model) {
     process.env.LMSTUDIO_MODEL = config.lmstudio_model;
@@ -264,7 +264,7 @@ async function _doSettingsRefresh(): Promise<void> {
   }
 }
 
-function _buildConfig(map: Record<string, string>): TamTamConfig {
+export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamConfig {
   const provider = VALID_CLAUDE_PROVIDERS.has(map.claude_provider)
     ? map.claude_provider
     : inferClaudeProvider(map.claude_bin);

@@ -237,14 +237,21 @@ export async function fetchProjectData(): Promise<{
   const pausedMap: Record<string, boolean> = {};
   for (const p of listEnabledProjects()) pausedMap[p.name] = !!p.paused;
 
-  // Group by project name
+  // Each `assembleProject` runs 4-6 `git` shell-outs (rev-list, rev-parse,
+  // symbolic-ref, remote get-url). With 25 projects, doing this serially is
+  // the dominant cost of a cold `/api/projects` (~500 ms total). Running
+  // them concurrently brings it under 100 ms and lets the cache amortize.
   const projectTasks: Record<string, Task[]> = {};
-  for (const [sid, cfg] of Object.entries(projects)) {
-    const task = await assembleProject(
-      sid, cfg, tierIdxMap[sid], baseFreqMin, multipliers,
-      lastRuns, ghStatus, changesMap, pausedMap
-    );
-    const projName = cfg.project;
+  const assembled = await Promise.all(
+    Object.entries(projects).map(async ([sid, cfg]) => {
+      const task = await assembleProject(
+        sid, cfg, tierIdxMap[sid], baseFreqMin, multipliers,
+        lastRuns, ghStatus, changesMap, pausedMap,
+      );
+      return { projName: cfg.project, task };
+    }),
+  );
+  for (const { projName, task } of assembled) {
     if (!projectTasks[projName]) projectTasks[projName] = [];
     projectTasks[projName].push(task);
   }
