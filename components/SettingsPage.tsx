@@ -288,6 +288,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
         throw new Error(body.detail || res.statusText)
       }
       setProjects((prev) => prev.map((p) => (p.name === name ? { ...p, archived } : p)))
+      dispatchSettingsChanged({ project_config_changed_at: String(Date.now()) })
     } catch (e: unknown) {
       setError(`Failed to ${archived ? 'archive' : 'unarchive'} ${name}: ${errMsg(e)}`)
     }
@@ -304,6 +305,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
       })
       if (!res.ok) throw new Error('Failed to save')
       setProjectsSaved(true)
+      dispatchSettingsChanged({ project_config_changed_at: String(Date.now()) })
       setTimeout(() => setProjectsSaved(false), 2500)
     } catch (e: unknown) {
       setError(`Failed to save projects: ${errMsg(e)}`)
