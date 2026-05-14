@@ -7,6 +7,8 @@ import { tmpdir } from 'os';
 describe('GET /api/projects/by-project/{projectName}/config', () => {
   let GET: any;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
+  let getBranchContextMock: ReturnType<typeof vi.fn>;
+  let gitShowSyncMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
   let projectRow: { website?: string | null; qaUrl?: string | null } | undefined;
   let getImproveConfigValue: { projects: Record<string, unknown>; claudeBin: string; logDir: string };
@@ -17,10 +19,23 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     vi.resetModules();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-config-test-'));
     resolveProjectPathMock = vi.fn().mockReturnValue(tempDir);
+    getBranchContextMock = vi.fn().mockReturnValue({
+      currentBranch: 'main',
+      defaultBranch: 'main',
+      isDefaultBranch: true,
+    });
+    gitShowSyncMock = vi.fn().mockReturnValue(null);
 
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: vi.fn(),
+    }));
+    vi.doMock('@/lib/git/git-branch', () => ({
+      getBranchContext: getBranchContextMock,
+      gitShowSync: gitShowSyncMock,
+      gitLsTreeSync: vi.fn(),
+      getDefaultBranchSync: vi.fn(),
+      getCurrentBranchSync: vi.fn(),
     }));
     vi.doMock('@/lib/db', () => ({
       db: {
@@ -64,6 +79,14 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     mkdirSync(tempDir, { recursive: true });
     resolveProjectPathMock.mockReset();
     resolveProjectPathMock.mockReturnValue(tempDir);
+    getBranchContextMock.mockReset();
+    getBranchContextMock.mockReturnValue({
+      currentBranch: 'main',
+      defaultBranch: 'main',
+      isDefaultBranch: true,
+    });
+    gitShowSyncMock.mockReset();
+    gitShowSyncMock.mockReturnValue(null);
     projectRow = undefined;
     getImproveConfigValue = { projects: {}, claudeBin: 'claude', logDir: '/tmp/logs' };
     getProjectTestConfigValue = {
