@@ -79,6 +79,12 @@ interface SettingsMap {
   dirty_worktree_block_threshold: string
   incremental_review_enabled: string
   durable_agent_workflows_enabled: string
+  retrieval_enabled: string
+  retrieval_ollama_url: string
+  retrieval_embedding_model: string
+  retrieval_context_limit: string
+  retrieval_score_threshold: string
+  retrieval_manage_ollama: string
 }
 
 const SETTINGS_DEFAULTS: SettingsMap = {
@@ -107,6 +113,12 @@ const SETTINGS_DEFAULTS: SettingsMap = {
   budget_block_at_pct: '95',
   budget_warn_at_pct: '80',
   durable_agent_workflows_enabled: 'false',
+  retrieval_enabled: 'true',
+  retrieval_ollama_url: 'http://localhost:11434',
+  retrieval_embedding_model: 'nomic-embed-text',
+  retrieval_context_limit: '5',
+  retrieval_score_threshold: '0.8',
+  retrieval_manage_ollama: 'true',
 }
 
 type TabId = 'general' | 'cli' | 'pipeline' | 'projects' | 'database' | 'templates' | 'notifications'
@@ -448,6 +460,81 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                           Enabled
                         </label>
                       </div>
+                    </div>
+                  )}
+
+                  {group.id === 'general' && (
+                    <div className="mt-4 rounded-xl border border-border bg-bg-primary/50 p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <h4 className="text-sm font-semibold text-text-primary">Retrieval (Embeddings)</h4>
+                          <p className="mt-1 text-xs text-text-tertiary">
+                            Index project docs, skills, and config into pgvector via local Ollama embeddings, and inject the top-matching chunks into agent prompts. Reindex per project from the project&apos;s Config tab.
+                          </p>
+                        </div>
+                        <label className="inline-flex items-center gap-2 text-sm text-text-primary shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={settings.retrieval_enabled === 'true'}
+                            onChange={(e) => handleChange('retrieval_enabled', e.target.checked ? 'true' : 'false')}
+                            className="h-4 w-4 rounded border-border bg-bg-primary text-accent focus:ring-accent/30"
+                          />
+                          Enabled
+                        </label>
+                      </div>
+                      <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-text-secondary">Ollama URL</label>
+                          <input
+                            value={settings.retrieval_ollama_url}
+                            onChange={(e) => handleChange('retrieval_ollama_url', e.target.value)}
+                            placeholder="http://localhost:11434"
+                            className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-text-secondary">Embedding Model</label>
+                          <input
+                            value={settings.retrieval_embedding_model}
+                            onChange={(e) => handleChange('retrieval_embedding_model', e.target.value)}
+                            placeholder="nomic-embed-text"
+                            className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-text-secondary">Context Limit</label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={settings.retrieval_context_limit}
+                            onChange={(e) => handleChange('retrieval_context_limit', e.target.value)}
+                            className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+                          />
+                          <p className="mt-1 text-xs text-text-tertiary">Top-K chunks injected per prompt.</p>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-text-secondary">Score Threshold</label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={1}
+                            step={0.05}
+                            value={settings.retrieval_score_threshold}
+                            onChange={(e) => handleChange('retrieval_score_threshold', e.target.value)}
+                            className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+                          />
+                          <p className="mt-1 text-xs text-text-tertiary">0–1 cosine similarity cutoff.</p>
+                        </div>
+                      </div>
+                      <label className="mt-4 inline-flex items-center gap-2 text-sm text-text-primary">
+                        <input
+                          type="checkbox"
+                          checked={settings.retrieval_manage_ollama === 'true'}
+                          onChange={(e) => handleChange('retrieval_manage_ollama', e.target.checked ? 'true' : 'false')}
+                          className="h-4 w-4 rounded border-border bg-bg-primary text-accent focus:ring-accent/30"
+                        />
+                        Auto-start Ollama if not running
+                      </label>
                     </div>
                   )}
 

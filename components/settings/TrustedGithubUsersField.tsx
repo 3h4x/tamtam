@@ -32,7 +32,14 @@ export function TrustedGithubUsersField({
   }
 
   useEffect(() => {
-    setUsers(parseTrustedGithubUsers(value))
+    setUsers((prev) => {
+      // Only reseed local rows from `value` when the parent's canonical
+      // representation actually diverged from what we already have. Otherwise
+      // a strict-mode double-invoke of this effect would drop in-flight edits
+      // (e.g. a freshly-added empty input that hasn't been propagated yet).
+      if (serializeTrustedGithubUsers(prev) === value) return prev
+      return parseTrustedGithubUsers(value)
+    })
   }, [value])
 
   useEffect(() => {

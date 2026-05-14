@@ -160,7 +160,7 @@ const DEFAULTS: TamTamConfig = {
   notification_on_budget_blocked: false,
   dirty_worktree_block_threshold: 20,
   incremental_review_enabled: true,
-  retrieval_enabled: false,
+  retrieval_enabled: true,
   retrieval_ollama_url: 'http://localhost:11434',
   retrieval_embedding_model: 'nomic-embed-text',
   retrieval_context_limit: 5,

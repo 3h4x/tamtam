@@ -192,11 +192,11 @@ Outbound webhook fired when the release pipeline reaches a terminal state. Suppo
 
 ### Retrieval
 
-Semantic retrieval layer — embeds agent run reports plus project-scoped knowledge into the `retrieval_chunks` table (a pgvector-backed column on the same Postgres database TamTam uses for everything else) and injects relevant context into agent prompts at run time. The corpus includes committed project docs, DB-backed skills referenced by that project's agents, and synthesized project config guidance. Embeddings are generated locally via Ollama (`nomic-embed-text`). Everything is off by default (`retrieval_enabled = false`).
+Semantic retrieval layer — embeds agent run reports plus project-scoped knowledge into the `retrieval_chunks` table (a pgvector-backed column on the same Postgres database TamTam uses for everything else) and injects relevant context into agent prompts at run time. The corpus includes committed project docs, DB-backed skills referenced by that project's agents, and synthesized project config guidance. Embeddings are generated locally via Ollama (`nomic-embed-text`). Enabled by default; toggle and tune from Settings → General → "Retrieval (Embeddings)". Trigger a per-project corpus rebuild from the project's Config tab → "Reindex now"; current chunk/record counts are surfaced via `GET /api/projects/[schedId]/retrieval/stats`.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `retrieval_enabled` | bool | `false` | Master gate — nothing runs if off |
+| `retrieval_enabled` | bool | `true` | Master gate — nothing runs if off |
 | `retrieval_ollama_url` | string | `http://localhost:11434` | Ollama base URL |
 | `retrieval_embedding_model` | string | `nomic-embed-text` | Ollama embedding model name |
 | `retrieval_context_limit` | int | `5` | Max snippets injected per agent prompt |

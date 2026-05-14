@@ -62,7 +62,7 @@ async function runSeed(env: { workspace: string; logDir: string }) {
 describe('scripts/qa-seed.mjs', () => {
   beforeAll(async () => {
     sharedHandle = await createTestPgDb();
-  });
+  }, 30000);
 
   afterAll(async () => {
     await new Promise((r) => setTimeout(r, 30));

@@ -15,6 +15,7 @@ import { useToast } from '@/components/Toast'
 import { isPipelineBusy } from '@/lib/pipeline/pipeline-status'
 import { subscribeToJobsPausedChanged } from '@/lib/shared/jobs-paused-events'
 import { ConfigTab } from '@/components/project-detail/ConfigTab'
+import { RetrievalReindexPanel } from '@/components/project-detail/RetrievalReindexPanel'
 import { PipelineStrip } from '@/components/project-detail/PipelineStrip'
 import { ProjectActions } from '@/components/project-detail/ProjectActions'
 import { TabNav } from '@/components/project-detail/TabNav'
@@ -767,6 +768,11 @@ export function ProjectDetailPage({
             allSaved={allSaved}
             onSaveAll={handleSaveAll}
           />
+          {name && (
+            <div className="mt-6">
+              <RetrievalReindexPanel projectName={name} />
+            </div>
+          )}
         </div>
       )}
 
