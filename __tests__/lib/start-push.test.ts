@@ -4,6 +4,20 @@ function invokeMock<T>(mock: unknown, ...args: unknown[]): T {
   return (mock as (...innerArgs: unknown[]) => T)(...args);
 }
 
+async function flushBackgroundWork(assertReady: () => void, maxTurns = 20) {
+  for (let turn = 0; turn < maxTurns; turn += 1) {
+    try {
+      assertReady();
+      return;
+    } catch (error) {
+      if (turn === maxTurns - 1) {
+        throw error;
+      }
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  }
+}
+
 let execMock: ReturnType<typeof vi.fn>;
 let resolveProjectPathMock: ReturnType<typeof vi.fn>;
 let clearProjectDataCacheMock: ReturnType<typeof vi.fn>;
@@ -148,7 +162,7 @@ describe('startProjectPush — push result tracking', () => {
     const result = launchProjectPush('proj', { parentJobId: 'release-123' });
 
     expect(result).toEqual({ jobId: 'proj-push-test-id' });
-    await vi.waitFor(() => {
+    await flushBackgroundWork(() => {
       expect(checkCliStartGateMock).toHaveBeenCalledWith('start a push', { parentJobId: 'release-123' });
       expect(acquireLockMock).not.toHaveBeenCalled();
       expect(markDoneMock).toHaveBeenCalledWith(createJobMock.mock.results[0].value, 0);
@@ -179,7 +193,7 @@ describe('startProjectPush — push result tracking', () => {
     const result = launchProjectPush('proj', { parentJobId: 'release-123' });
 
     expect(result).toEqual({ jobId: 'proj-push-test-id' });
-    await vi.waitFor(() => {
+    await flushBackgroundWork(() => {
       expect(checkCliStartGateMock).toHaveBeenCalledWith('start a push', { parentJobId: 'release-123' });
       expect(markDoneMock).toHaveBeenCalledWith(createJobMock.mock.results[0].value, 0);
     });
